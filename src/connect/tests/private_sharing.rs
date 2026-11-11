@@ -149,6 +149,25 @@ fn enabling_sharing_the_other_person_disabled_asks_before_sending_the_request() 
 }
 
 #[test]
+fn a_refused_request_leaves_the_box_open() {
+    let mut f = protected_chat();
+    f.1.enable_private_sharing(CHAT).unwrap().unwrap();
+    let ask = last_request(&f);
+    answer_properties(&mut f, &ask["@extra"], true);
+    f.1.send_sharing_request().unwrap().unwrap();
+    // The same toggle is still out: a second Send is refused, and the box
+    // that asked stays for another try.
+    f.1.session.groups.private_sharing.enable =
+        Some(crate::state::EnableSharing::AskToRequest(CHAT));
+    assert_eq!(f.1.send_sharing_request().unwrap(), None);
+    assert_eq!(
+        f.1.session.groups.private_sharing.request_box_chat(),
+        Some(CHAT)
+    );
+    cleanup(f);
+}
+
+#[test]
 fn closing_the_request_box_sends_nothing() {
     let mut f = protected_chat();
     f.1.enable_private_sharing(CHAT).unwrap().unwrap();

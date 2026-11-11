@@ -205,7 +205,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// `leaveChat` for a channel. Own membership updates arrive via
     /// `updateChatMember`; the `ok` response flips status optimistically.
-    pub fn leave_channel(&mut self, chat_id: ChatId) -> Result<(), ConnectSendError> {
+    pub fn leave_channel(&mut self, chat_id: ChatId) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -216,7 +216,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        Ok(())
+        Ok(extra)
     }
 
     /// Phase B4: `setChatMessageAutoDeleteTime` (TDLib 1.8.67,

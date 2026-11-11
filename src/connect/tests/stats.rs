@@ -407,7 +407,9 @@ fn the_open_panel_downloads_recent_post_thumbnails() {
     };
     session.groups.chat_statistics.insert(
         -100,
-        ChatStatisticsFetch::Loaded(Box::new(ChatStatistics::Channel(Box::new(stats)))),
+        ChatStatisticsFetch::Loaded(std::sync::Arc::new(ChatStatistics::Channel(Box::new(
+            stats,
+        )))),
     );
     session.groups.stats.posts.insert(
         (-100, 9 << 20),

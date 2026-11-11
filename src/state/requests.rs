@@ -526,6 +526,8 @@ pub struct RequestRegistry {
     /// In-flight `DownloadFile` requests per file id, so the
     /// already-downloading check does not scan `pending`.
     downloads: HashMap<i32, u32>,
+    /// The last requests TDLib refused (`Submit` reads them).
+    pub(super) failures: super::submit::Failures,
 }
 
 impl RequestRegistry {

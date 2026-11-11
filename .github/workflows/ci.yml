@@ -41,6 +41,9 @@ jobs:
       # docs/decisions/account-scoped-ui-state.md: the account's UI is OnScreen.
       - name: screen state
         run: python3 scripts/check-screen-state.py
+      # A box holding a `Submit` must be settled (src/ui/box_submits.rs).
+      - name: submit settle
+        run: python3 scripts/check-submit-settle.py
       - name: screen state check tests
         run: |
           python3 -m unittest discover -s scripts -p 'test_lock_surfaces.py'

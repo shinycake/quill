@@ -17,6 +17,8 @@ pub struct UsernameDialog {
     pub(crate) chat_id: ChatId,
     pub(crate) kind: TextPromptKind,
     pub(crate) input: Entity<TextareaState>,
+    /// The last Save: the box closes on its answer, stays on its error.
+    pub(crate) submit: quill::state::Submit,
 }
 
 impl UsernameDialog {
@@ -50,6 +52,7 @@ impl UsernameDialog {
             chat_id,
             kind,
             input,
+            submit: Default::default(),
         }
     }
 }

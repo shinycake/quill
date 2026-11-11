@@ -48,6 +48,7 @@ pub(crate) mod battery_watch;
 mod bidi_line;
 mod bot_about;
 mod bottom_action;
+mod box_submits;
 mod bubble_theme;
 mod calls_state;
 mod chat_appearance_dialog;

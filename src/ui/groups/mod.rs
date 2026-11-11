@@ -590,47 +590,81 @@ impl QuillApp {
     /// driver (`create_community` refuses empty names and unknown chats
     /// client-side); the new community arrives via `updateCommunity`.
     pub(super) fn submit_create_community_dialog(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.admin.community.create_dialog.take() else {
+        let requests = self.session().map(|session| &session.requests);
+        let Some(dialog) = self.admin.community.create_dialog.as_ref() else {
             return;
         };
+        if dialog.submit.is_sending(requests) {
+            return;
+        }
         let name = dialog.name_input.read(cx).value().trim().to_string();
         let hide_chat = dialog.hide_chat;
         if name.is_empty() {
-            // box-host: put back after a failed submit; it stays where it shows
-            self.admin.community.create_dialog = Some(dialog);
             self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_NAME_CANNOT_BE_EMPTY)));
             cx.notify();
             return;
         }
         let Some(chat_id) = dialog.chat_id else {
-            // box-host: put back after a failed submit; it stays where it shows
-            self.admin.community.create_dialog = Some(dialog);
             self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_PICK_A_CHAT_FOR_THE)));
             cx.notify();
             return;
         };
-        let note = match self.live.as_mut() {
+        let sent = match self.live.as_mut() {
             Some(live) => {
                 match live
                     .driver
                     .create_community(ChatId(chat_id), &name, hide_chat)
                 {
-                    Ok(Some(_)) => StatusNote::silent(tr(keys::Q_PEOPLE_COMMUNITY_CREATED)),
-                    _ => {
-                        // box-host: put back after a failed submit; it stays where it shows
-                        self.admin.community.create_dialog = Some(dialog);
-                        StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_CREATE_COMMUNITY))
-                    }
+                    Ok(Some(id)) => Ok(id),
+                    _ => Err(StatusNote::error(tr(
+                        keys::Q_PEOPLE_COULD_NOT_CREATE_COMMUNITY,
+                    ))),
                 }
             }
-            None => {
-                // box-host: put back after a failed submit; it stays where it shows
-                self.admin.community.create_dialog = Some(dialog);
-                StatusNote::info(tr(keys::Q_PEOPLE_CREATING_COMMUNITIES_NEEDS_A_LIVE))
-            }
+            None => Err(StatusNote::info(tr(
+                keys::Q_PEOPLE_CREATING_COMMUNITIES_NEEDS_A_LIVE,
+            ))),
         };
-        self.set_note(note);
+        match sent {
+            Ok(id) => {
+                if let Some(dialog) = self.admin.community.create_dialog.as_mut() {
+                    dialog.submit = quill::state::Submit::sent(vec![id]);
+                }
+            }
+            Err(note) => self.set_note(note),
+        }
         cx.notify();
+    }
+
+    /// The New community box leaves its Sending stage on TDLib's answer:
+    /// it closes with its note, or stays, with the reason, and what was typed.
+    pub(super) fn settle_create_community_dialog(&mut self, cx: &mut Context<Self>) {
+        use quill::state::SubmitView;
+        let requests = self.session().map(|session| &session.requests);
+        let Some(view) = self
+            .admin
+            .community
+            .create_dialog
+            .as_ref()
+            .map(|dialog| dialog.submit.view(requests))
+        else {
+            return;
+        };
+        match view {
+            SubmitView::Done => {
+                self.admin.community.create_dialog = None;
+                self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_COMMUNITY_CREATED)));
+                cx.notify();
+            }
+            SubmitView::Failed(reason) => {
+                if let Some(dialog) = self.admin.community.create_dialog.as_mut()
+                    && dialog.submit.keep_failure(reason)
+                {
+                    cx.notify();
+                }
+            }
+            SubmitView::Editing | SubmitView::Sending => {}
+        }
     }
 
     /// Slice G10: community name edit prompt (`setCommunityName`,

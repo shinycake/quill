@@ -261,6 +261,8 @@ impl QuillApp {
             session.users_state.open_info_panel = None;
         }
         self.common_groups.close();
+        // The members block belongs to the panel that closed.
+        self.inline_members.reset(None);
         cx.notify();
     }
 

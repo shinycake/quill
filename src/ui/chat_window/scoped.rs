@@ -292,7 +292,7 @@ impl QuillApp {
 
     /// The handle for work that belongs to the account on screen now, in
     /// the main window.
-    fn screen_app(&self, cx: &Context<Self>) -> ScopedApp {
+    pub(in crate::ui) fn screen_app(&self, cx: &Context<Self>) -> ScopedApp {
         ScopedApp {
             app: cx.weak_entity(),
             screen: Some(self.screen_epoch()),

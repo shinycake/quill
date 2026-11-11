@@ -24,10 +24,19 @@ use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::moderation::{MIN_RESTRICT_SECS, RestrictUntil, UntilError, validate_restrict_until};
 use quill::moderation_exceptions::initial_until;
-use quill::state::{AdminListFetch, AdminRightsFetch, MemberListFilter, SupergroupMembersFetch};
+use quill::state::{
+    AdminListFetch, AdminRightsFetch, MemberListFilter, SubmitView, SupergroupMembersFetch,
+};
 use quill::telegram::envelope::{ChatAdminRights, ChatPermissions, MessageSender};
 use std::cell::RefCell;
 use std::rc::Rc;
+/// What the admin dialog's Submit sends.
+enum AdminAction {
+    Promote(i64, ChatAdminRights),
+    EditRights(i64, ChatAdminRights),
+    Demote(i64),
+}
+
 impl QuillApp {
     /// Phase D3b: open the promote member picker for a chat. Fetches the
     /// first page of supergroup members; the rights checkboxes start
@@ -68,11 +77,16 @@ impl QuillApp {
             } else {
                 MemberListFilter::Search
             };
-            if live
+            let query = query.trim();
+            let sent = live
                 .driver
-                .refresh_supergroup_members(chat_id, filter, query.trim())
-                .is_err()
-            {
+                .refresh_supergroup_members(chat_id, filter, query);
+            // The page shown is the one asked with this query: `searched`
+            // follows what the session recorded as asked, so a search the
+            // driver refused leaves the old page under the old text.
+            let asked = sent.is_ok()
+                && live.driver.session.groups.member_query((chat_id.0, filter)) == query;
+            if !asked {
                 self.set_note(StatusNote::error(tr(
                     keys::Q_PEOPLE_COULD_NOT_SEARCH_MEMBERS,
                 )));
@@ -86,7 +100,7 @@ impl QuillApp {
                 .as_mut()
                 .map(|dialog| &mut dialog.kind)
             {
-                query.trim().clone_into(searched);
+                query.clone_into(searched);
                 // The new page may not show the ticked member: Promote would
                 // act on someone the user can no longer see.
                 *selected_user = None;
@@ -147,48 +161,36 @@ impl QuillApp {
     }
 
     /// Phase D3b: submit the admin dialog — promote / edit-rights /
-    /// demote. In-flight duplicates are deduped by the driver; the
-    /// dialog closes on submit and the lists refresh from the server
-    /// responses (`updateChatMember` + `ok`).
+    /// demote. In-flight duplicates are deduped by the driver. The dialog
+    /// stays, sending, until TDLib answers; it closes on the answer and
+    /// stays with the reason on an error (`settle_moderation_submits`).
     pub(super) fn submit_admin_dialog(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.admin.admin_dialog.take() else {
+        let requests = self.session().map(|session| &session.requests);
+        let Some(dialog) = self.admin.admin_dialog.as_ref() else {
             return;
         };
-        // (keep_dialog, note): validation errors keep the dialog open so
-        // the user's selection and checkbox state are not lost.
-        let (keep_dialog, note) = match &dialog.kind {
+        if dialog.submit.is_sending(requests) {
+            return;
+        }
+        let chat_id = dialog.chat_id;
+        // What to send, or why not: a validation line keeps the dialog
+        // open so the selection and the checkboxes are not lost.
+        let action = match &dialog.kind {
             AdminDialogKind::Promote {
                 rights,
                 selected_user: Some(user_id),
                 ..
-            } => match self.live.as_mut() {
-                Some(live) => {
-                    match live
-                        .driver
-                        .promote_chat_member(dialog.chat_id, *user_id, rights)
-                    {
-                        Ok(_) => (false, tr(keys::Q_PEOPLE_MEMBER_PROMOTED).to_string()),
-                        Err(_) => (
-                            true,
-                            tr(keys::Q_PEOPLE_COULD_NOT_PROMOTE_MEMBER).to_string(),
-                        ),
-                    }
-                }
-                None => (
-                    true,
-                    tr(keys::Q_PEOPLE_ADMIN_ACTIONS_NEED_A_LIVE).to_string(),
-                ),
-            },
+            } => Ok(AdminAction::Promote(*user_id, *rights)),
             AdminDialogKind::Promote {
                 selected_user: None,
                 ..
-            } => (true, tr(keys::Q_PEOPLE_SELECT_A_MEMBER_FIRST).to_string()),
+            } => Err(StatusNote::info(tr(keys::Q_PEOPLE_SELECT_A_MEMBER_FIRST))),
             AdminDialogKind::EditRights { user_id, rights } => {
                 let fetch = self.session().and_then(|session| {
                     session
                         .groups
                         .admin_rights
-                        .get(&(dialog.chat_id.0, *user_id))
+                        .get(&(chat_id.0, *user_id))
                         .cloned()
                 });
                 // Untouched checkboxes save the rights the lookup brought
@@ -197,51 +199,56 @@ impl QuillApp {
                     Some(AdminRightsFetch::Loaded(rights)) => Some(*rights),
                     _ => None,
                 };
-                let Some(rights) = (*rights).or(fetched) else {
-                    let failed = matches!(fetch, Some(AdminRightsFetch::Failed(_)));
-                    self.admin.admin_dialog = Some(dialog);
-                    self.set_note(StatusNote::silent(tr(if failed {
-                        keys::Q_PEOPLE_COULD_NOT_LOAD_ADMIN_RIGHTS
-                    } else {
-                        keys::Q_PEOPLE_RIGHTS_ARE_STILL_LOADING
-                    })));
-                    cx.notify();
-                    return;
-                };
-                match self.live.as_mut() {
-                    Some(live) => {
-                        match live
-                            .driver
-                            .edit_admin_rights(dialog.chat_id, *user_id, &rights)
-                        {
-                            Ok(_) => (false, tr(keys::Q_PEOPLE_ADMIN_RIGHTS_UPDATED).to_string()),
-                            Err(_) => (
-                                true,
-                                tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_ADMIN_RIGHTS).to_string(),
-                            ),
-                        }
+                match (*rights).or(fetched) {
+                    Some(rights) => Ok(AdminAction::EditRights(*user_id, rights)),
+                    None => {
+                        let failed = matches!(fetch, Some(AdminRightsFetch::Failed(_)));
+                        Err(StatusNote::silent(tr(if failed {
+                            keys::Q_PEOPLE_COULD_NOT_LOAD_ADMIN_RIGHTS
+                        } else {
+                            keys::Q_PEOPLE_RIGHTS_ARE_STILL_LOADING
+                        })))
                     }
-                    None => (
-                        true,
-                        tr(keys::Q_PEOPLE_ADMIN_ACTIONS_NEED_A_LIVE).to_string(),
-                    ),
                 }
             }
-            AdminDialogKind::DemoteConfirm { user_id } => match self.live.as_mut() {
-                Some(live) => match live.driver.demote_chat_member(dialog.chat_id, *user_id) {
-                    Ok(_) => (false, tr(keys::Q_PEOPLE_ADMIN_DEMOTED).to_string()),
-                    Err(_) => (true, tr(keys::Q_PEOPLE_COULD_NOT_DEMOTE_ADMIN).to_string()),
-                },
-                None => (
-                    true,
-                    tr(keys::Q_PEOPLE_ADMIN_ACTIONS_NEED_A_LIVE).to_string(),
-                ),
-            },
+            AdminDialogKind::DemoteConfirm { user_id } => Ok(AdminAction::Demote(*user_id)),
         };
-        if keep_dialog {
-            self.admin.admin_dialog = Some(dialog);
+        let sent = match (action, self.live.as_mut()) {
+            (Err(note), _) => Err(note),
+            (Ok(_), None) => Err(StatusNote::info(tr(
+                keys::Q_PEOPLE_ADMIN_ACTIONS_NEED_A_LIVE,
+            ))),
+            (Ok(action), Some(live)) => {
+                let (result, refused) = match action {
+                    AdminAction::Promote(user_id, rights) => (
+                        live.driver.promote_chat_member(chat_id, user_id, &rights),
+                        keys::Q_PEOPLE_COULD_NOT_PROMOTE_MEMBER,
+                    ),
+                    AdminAction::EditRights(user_id, rights) => (
+                        live.driver.edit_admin_rights(chat_id, user_id, &rights),
+                        keys::Q_PEOPLE_COULD_NOT_UPDATE_ADMIN_RIGHTS,
+                    ),
+                    AdminAction::Demote(user_id) => (
+                        live.driver.demote_chat_member(chat_id, user_id),
+                        keys::Q_PEOPLE_COULD_NOT_DEMOTE_ADMIN,
+                    ),
+                };
+                // `Ok(None)` is the driver refusing to send (no right, or
+                // the same request still out): not a success.
+                match result {
+                    Ok(Some(id)) => Ok(id),
+                    Ok(None) | Err(_) => Err(StatusNote::error(tr(refused))),
+                }
+            }
+        };
+        match sent {
+            Ok(id) => {
+                if let Some(dialog) = self.admin.admin_dialog.as_mut() {
+                    dialog.submit = quill::state::Submit::sent(vec![id]);
+                }
+            }
+            Err(note) => self.set_note(note),
         }
-        self.set_note(StatusNote::info(note));
         cx.notify();
     }
 
@@ -307,9 +314,13 @@ impl QuillApp {
     /// Slice G1: submit restrict/ban (`setChatMemberStatus`, schema
     /// 1.8.67 line 13592). Duration is now + days; 0 = forever.
     pub(super) fn submit_restrict_dialog(&mut self, cx: &mut Context<Self>) {
-        let Some(mut dialog) = self.admin.restrict_dialog.take() else {
+        let requests = self.session().map(|session| &session.requests);
+        let Some(dialog) = self.admin.restrict_dialog.as_ref() else {
             return;
         };
+        if dialog.submit.is_sending(requests) {
+            return;
+        }
         // A custom time is read from the picker and bounded like
         // tdesktop's `ChooseDateTimeBox` (30 seconds to 366 days ahead);
         // a bad pick keeps the dialog open with the reason.
@@ -321,56 +332,106 @@ impl QuillApp {
             {
                 Ok(unix) => RestrictUntil::Custom(unix).until_date(now),
                 Err(err) => {
-                    dialog.error = Some(err.message());
-                    // box-host: put back after a failed submit; it stays where it shows
-                    self.admin.restrict_dialog = Some(dialog);
+                    if let Some(dialog) = self.admin.restrict_dialog.as_mut() {
+                        dialog.error = Some(err.message());
+                    }
                     cx.notify();
                     return;
                 }
             },
             preset => preset.until_date(now),
         };
-        let note = match self.live.as_mut() {
+        let (chat_id, user_id, ban) = (dialog.chat_id, dialog.user_id, dialog.ban);
+        let permissions = dialog.permissions;
+        let sent = match self.live.as_mut() {
             Some(live) => {
-                let result = if dialog.ban {
-                    live.driver
-                        .ban_chat_member(dialog.chat_id, dialog.user_id, until_date)
+                let result = if ban {
+                    live.driver.ban_chat_member(chat_id, user_id, until_date)
                 } else {
-                    live.driver.restrict_chat_member(
-                        dialog.chat_id,
-                        dialog.user_id,
-                        until_date,
-                        &dialog.permissions,
-                    )
+                    live.driver
+                        .restrict_chat_member(chat_id, user_id, until_date, &permissions)
                 };
                 match result {
-                    // Slice G1 fix-up: `Ok(None)` means the driver
-                    // refused to send (no rights, or restrict in a
-                    // channel) — not success. Keep the dialog open and
-                    // say so instead of claiming it happened.
-                    Ok(Some(_)) => {
-                        self.admin.add_special = None;
-                        if dialog.ban {
-                            StatusNote::silent(tr(keys::Q_PEOPLE_MEMBER_BANNED))
-                        } else {
-                            StatusNote::silent(tr(keys::Q_PEOPLE_MEMBER_RESTRICTED))
-                        }
-                    }
-                    Ok(None) | Err(_) => {
-                        // box-host: put back after a failed submit; it stays where it shows
-                        self.admin.restrict_dialog = Some(dialog);
-                        StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_MEMBER_STATUS))
-                    }
+                    // `Ok(None)` means the driver refused to send (no
+                    // rights, or restrict in a channel): not success.
+                    Ok(Some(id)) => Ok(id),
+                    Ok(None) | Err(_) => Err(StatusNote::error(tr(
+                        keys::Q_PEOPLE_COULD_NOT_UPDATE_MEMBER_STATUS,
+                    ))),
                 }
             }
-            None => {
-                // box-host: put back after a failed submit; it stays where it shows
-                self.admin.restrict_dialog = Some(dialog);
-                StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE))
-            }
+            None => Err(StatusNote::info(tr(
+                keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE,
+            ))),
         };
-        self.set_note(note);
+        match sent {
+            Ok(id) => {
+                if let Some(dialog) = self.admin.restrict_dialog.as_mut() {
+                    dialog.error = None;
+                    dialog.submit = quill::state::Submit::sent(vec![id]);
+                }
+            }
+            Err(note) => self.set_note(note),
+        }
         cx.notify();
+    }
+
+    /// The moderation boxes that sent a request leave their Sending stage
+    /// on its answer: the box closes with its note, or stays with the
+    /// reason TDLib gave. Called from `poll_live`.
+    pub(in crate::ui) fn settle_moderation_submits(&mut self, cx: &mut Context<Self>) {
+        let requests = self.session().map(|session| &session.requests);
+        let admin = self
+            .admin
+            .admin_dialog
+            .as_ref()
+            .map(|dialog| dialog.submit.view(requests));
+        let restrict = self
+            .admin
+            .restrict_dialog
+            .as_ref()
+            .map(|dialog| dialog.submit.view(requests));
+        match admin {
+            Some(SubmitView::Done) => {
+                let key = match self.admin.admin_dialog.take().map(|dialog| dialog.kind) {
+                    Some(AdminDialogKind::Promote { .. }) => keys::Q_PEOPLE_MEMBER_PROMOTED,
+                    Some(AdminDialogKind::EditRights { .. }) => keys::Q_PEOPLE_ADMIN_RIGHTS_UPDATED,
+                    _ => keys::Q_PEOPLE_ADMIN_DEMOTED,
+                };
+                self.set_note(StatusNote::info(tr(key)));
+                cx.notify();
+            }
+            Some(SubmitView::Failed(reason)) => {
+                if let Some(dialog) = self.admin.admin_dialog.as_mut()
+                    && dialog.submit != quill::state::Submit::Failed(reason.clone())
+                {
+                    dialog.submit = quill::state::Submit::Failed(reason);
+                    cx.notify();
+                }
+            }
+            _ => {}
+        }
+        match restrict {
+            Some(SubmitView::Done) => {
+                let ban = self.admin.restrict_dialog.take().is_some_and(|d| d.ban);
+                self.admin.add_special = None;
+                self.set_note(StatusNote::silent(tr(if ban {
+                    keys::Q_PEOPLE_MEMBER_BANNED
+                } else {
+                    keys::Q_PEOPLE_MEMBER_RESTRICTED
+                })));
+                cx.notify();
+            }
+            Some(SubmitView::Failed(reason)) => {
+                if let Some(dialog) = self.admin.restrict_dialog.as_mut()
+                    && dialog.submit != quill::state::Submit::Failed(reason.clone())
+                {
+                    dialog.submit = quill::state::Submit::Failed(reason);
+                    cx.notify();
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Slice G1: lift a restriction or ban (`setChatMemberStatus` →
@@ -506,6 +567,21 @@ impl QuillApp {
                         .child(error),
                 );
             }
+            if let quill::state::Submit::Failed(reason) = &dialog_state.submit {
+                body = body.child(
+                    div()
+                        .id("g1-restrict-refused")
+                        .text_xs()
+                        .text_color(cx.theme().danger)
+                        .child(tr_with(
+                            keys::Q_PEOPLE_COULDNT_SAVE_REASON,
+                            &[("reason", reason)],
+                        )),
+                );
+            }
+            let sending = dialog_state
+                .submit
+                .is_sending(this.session().map(|session| &session.requests));
             let footer = div()
                 .flex()
                 .justify_end()
@@ -526,6 +602,8 @@ impl QuillApp {
                         } else {
                             tr(keys::Q_PEOPLE_RESTRICT)
                         })
+                        .loading(sending)
+                        .disabled(sending)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.submit_restrict_dialog(cx);
                             this.close_kit_dialog_if_done(DialogKind::Restrict, window, cx);
@@ -699,3 +777,6 @@ mod stops_slider;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod stops_slider_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod submit_tests;

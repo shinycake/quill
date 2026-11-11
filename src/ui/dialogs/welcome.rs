@@ -14,6 +14,11 @@ pub struct WelcomeDialog {
     pub(crate) new_input: Entity<TextareaState>,
     pub(crate) editing: Option<i32>,
     pub(crate) edit_input: Entity<TextareaState>,
+    /// The last Add: the typed text goes on its answer, stays on its error.
+    pub(crate) add: quill::state::Submit,
+    /// The last Save of the row being edited: the row closes on its
+    /// answer, stays open on its error.
+    pub(crate) save: quill::state::Submit,
 }
 
 impl WelcomeDialog {
@@ -35,6 +40,8 @@ impl WelcomeDialog {
             new_input,
             editing: None,
             edit_input,
+            add: Default::default(),
+            save: Default::default(),
         }
     }
 }

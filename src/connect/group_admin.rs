@@ -481,7 +481,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             AdminFollowup::PermissionsAfterUpgrade { old, save } => {
                 match self.session.upgraded_chat_for(old) {
-                    Some(new) => self.send_permissions_save(new, save),
+                    Some(new) => self.send_permissions_save(new, save).map(|sent| {
+                        matches!(sent, crate::permissions_box::PermissionsSent::Sent(_))
+                    }),
                     None => Ok(false),
                 }
             }

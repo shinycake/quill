@@ -4,7 +4,7 @@ use super::super::*;
 use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::ChatId;
-use crate::permissions_box::{Permission, PermissionsSave, toggle};
+use crate::permissions_box::{Permission, PermissionsSave, PermissionsSent, toggle};
 use crate::platform::MemorySecretStore;
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::ChatPermissions;
@@ -90,7 +90,7 @@ fn an_unchanged_box_sends_nothing() {
     let save = PermissionsSave::new(current(&rig), 0, 0);
     assert!(matches!(
         rig.driver.save_permissions_box(ChatId(13), save),
-        Ok(false)
+        Ok(PermissionsSent::Unchanged)
     ));
     assert!(rig.sent("setChatPermissions").is_empty());
     assert!(rig.sent("setChatSlowModeDelay").is_empty());
@@ -107,7 +107,7 @@ fn a_save_sends_each_changed_setting_once() {
     let save = PermissionsSave::new(permissions, 30, 2);
     assert!(matches!(
         rig.driver.save_permissions_box(ChatId(13), save),
-        Ok(true)
+        Ok(PermissionsSent::Sent(_))
     ));
     let sent = rig.sent("setChatPermissions");
     let [request] = sent.as_slice() else {
@@ -143,7 +143,7 @@ fn a_basic_group_is_upgraded_before_slow_mode() {
     let save = PermissionsSave::new(ChatPermissions::all(), 60, 0);
     assert!(matches!(
         rig.driver.save_permissions_box(ChatId(30), save),
-        Ok(true)
+        Ok(PermissionsSent::Sent(_))
     ));
     let upgrades = rig.sent("upgradeBasicGroupChatToSupergroupChat");
     assert_eq!(upgrades.len(), 1);

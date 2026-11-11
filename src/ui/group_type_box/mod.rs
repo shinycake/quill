@@ -171,6 +171,10 @@ impl QuillApp {
             }
         })
         .detach();
+        // A refusal of an earlier visit does not show in this one.
+        if let Some(session) = self.session_mut() {
+            session.groups.group_type.toggle_error = None;
+        }
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_chat_invite_links(chat_id);
             if supergroup {
@@ -189,6 +193,9 @@ impl QuillApp {
     pub(in crate::ui) fn close_group_type_box(&mut self, cx: &mut Context<Self>) {
         if let Some(edit) = self.group_edit_box_mut() {
             edit.type_box = None;
+        }
+        if let Some(session) = self.session_mut() {
+            session.groups.group_type.toggle_error = None;
         }
         cx.notify();
     }

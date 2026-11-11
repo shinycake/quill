@@ -4839,3 +4839,85 @@ Links, mini apps, location, and TDLib state and connection.
   a test says so), 05-184 (tdesktop's `loadMoreRows` has no failure handler
   either, as the code comment says), 05-196 (the payload's own setters
   overwrite those fields right after the rebuild, so nothing is lost).
+
+### Sweep fixes (s3-groups--2)
+
+Second half of the groups, channels and business sweep. One shape ran
+through most of it: a box sent its request and closed (or cleared what was
+typed) when the driver queued it, so a refusal from TDLib had nowhere to
+land and the typed form was gone.
+
+- **`Submit`** (`src/state/submit.rs`) is one value for a box's Save:
+  `Editing`, `Sending(ids)`, `Failed(reason)`. The request registry keeps
+  the last 64 refused requests with their reason (`RequestRegistry::failure`,
+  recorded in `apply_error`), so a box reads its outcome from the ids it
+  sent: `Sending` leaves on the answer (the box closes, with its note) or on
+  the error (the box stays with the typed form and the reason, Save is
+  enabled again). Cancel leaves it too. One pump, `settle_box_submits`
+  (`src/ui/box_submits.rs`, from `poll_live`), settles every box; the
+  welcome box needs its window to clear a field and settles in the
+  per-window upkeep. `scripts/check-submit-settle.py` fails when a file sets
+  `Submit::sent` and none of its `settle_*` functions is called from those
+  pumps. Boxes on it: promote, edit rights and demote (10-062, 10-063),
+  restrict and ban (10-063), permissions (10-064), custom title and
+  community name (10-089), New community (10-092), topic editor (10-069),
+  welcome add and edit (10-074, 10-075), invite link box (10-149), Edit
+  profile (12-032).
+- **Edit box** (10-053, 10-054, 10-056, 10-088). Its `saving` is the enum
+  `SaveStage` (`Editing`, `Saving(ids)`, `Refused(reason)`): a send the
+  driver refused (a second Save while the first failed, a partial send) sets
+  `Refused` instead of leaving the old ids to be read as "saved". A request
+  no field names (protected content, join switches, username reorder,
+  Delete and Leave) now fails the box through the registry; a link that
+  needs Premium or an unknown username problem records a Username error
+  too. A refused photo has no box to show it (it uploads after the box
+  closes, as in tdesktop): it is the action error toast, worded with a lang
+  key and the normal error reason. Delete and Leave keep the Edit box open
+  until TDLib answers (`track_chat_exit`, `SaveStage::Exiting`): an earlier
+  refused Save no longer decides their outcome (10-088), and a refusal is
+  copied into `SaveStage::Refused` by `settle_group_edit_box` so the
+  registry forgetting it cannot close the box as saved. Leaving a group says
+  "Leaving group…", a channel "Leaving channel…". The demote box shows its
+  button busy while the request is out; the welcome box's two refusal
+  lines have distinct ids.
+- **Promote search** (10-079): `searched` follows the query the session
+  recorded as asked, and the page is drawn only when its recorded query is
+  the one in `searched`.
+- **Permissions Save** (10-064): `save_permissions_box` returns
+  `PermissionsSent` (`Unchanged`, `Refused`, `Sent(ids)`); only `Unchanged`
+  closes silently.
+- **Stops slider** (10-080): both callers only stage the stop, so the
+  failure it describes could not happen there; the widget itself now puts
+  the thumb back on the caller's value after a release the caller did not
+  take.
+- **Info panel** (10-093, 10-124): the members block restarts every time a
+  panel opens and when it closes (`InlineMembersUi::reset`); the event-log
+  search box shows the chat's own stored query (`sync_event_log_search`).
+- **Members paging** (10-123): `Paging` (`Idle`, `Asked`, `Failed`)
+  replaces `failed_offset` and `retry_at_scroll`; a page whose send failed
+  is `Failed` and the next scroll asks again.
+- **Type box** (10-085): the usernames refusal is cleared on open and close.
+- **Invite links** (10-142, 10-145, 10-146): the details of a link open once
+  the members request is out; the Delete-all alerts hold the screen they
+  were opened on (`screen_app`: nothing happens after an account switch) and
+  the admin they were opened for (`delete_all_revoked_admin_links` takes it).
+- **New Group/Channel** (11-p5-002): Cancel, Escape and the close button
+  always close the box (tdesktop `GroupInfoBox` keeps Cancel live; TDLib
+  holds the create while offline, so a box that waited would trap the
+  person). A create still out is detached (`detach_new_chat`): its answer
+  opens the new chat, a channel too. A second create while one is out is
+  refused with a note ("The chat is still being created.").
+- **Sharing request** (12-045): the box is cleared only when the request was
+  sent; a refused send keeps it and does not open the chat.
+- **Statistics** (13-023, 13-026, 13-028, 13-029): the loaded statistics are
+  an `Arc`, so a redraw shares the graphs' JSON and the parsed-chart cache
+  hits; a graph that failed to load is a section with its reason and Retry;
+  a story page opens once its request was accepted and has Retry; a refused
+  retry says so.
+- **Topic icons** (10-070): downloaded when the editor opens and when the
+  icon list lands (`ingest`), not on every build of the dialog.
+- Not tdesktop-visible: most of tdesktop's boxes close on send and show an
+  error toast later; Quill keeps them open until the answer, which is the
+  smallest way to meet the register's "a refusal must be shown in the box"
+  without a new look. The exception is the admin-rights box, which tdesktop
+  also keeps open until the answer, so Quill matches it there.

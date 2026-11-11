@@ -86,11 +86,14 @@ impl QuillApp {
     fn confirm_delete_admin_revoked(
         &mut self,
         chat_id: ChatId,
+        admin: i64,
         name: String,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let app = cx.entity().downgrade();
+        // The alert acts for the account and the admin it was opened for:
+        // after a switch (the screen is gone) pressing Delete does nothing.
+        let app = self.screen_app(cx);
         window.open_alert_dialog(cx, move |alert, _, _| {
             let app = app.clone();
             alert
@@ -108,7 +111,8 @@ impl QuillApp {
                             &this.screen.windows,
                             match this.live.as_mut() {
                                 Some(live) => {
-                                    match live.driver.delete_all_revoked_admin_links(chat_id) {
+                                    match live.driver.delete_all_revoked_admin_links(chat_id, admin)
+                                    {
                                         Ok(_) => {
                                             StatusNote::info(tr(keys::Q_OPS_DELETING_REVOKED_LINKS))
                                         }
@@ -266,7 +270,9 @@ impl QuillApp {
                                 .small()
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     let name = this.contact_display_name(admin);
-                                    this.confirm_delete_admin_revoked(chat_id, name, window, cx);
+                                    this.confirm_delete_admin_revoked(
+                                        chat_id, admin, name, window, cx,
+                                    );
                                 })),
                         ),
                 )

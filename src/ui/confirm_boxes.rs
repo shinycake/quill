@@ -5,6 +5,7 @@
 
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
+use gpui_base::Disableable;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::*;
@@ -31,7 +32,23 @@ pub(super) fn confirm_box(
     dialog: Dialog,
     kind: DialogKind,
     ask: Ask,
+    steps: (Step, Step),
+    cx: &mut App,
+) -> Dialog {
+    confirm_box_sending(app, shell, dialog, kind, ask, steps, false, cx)
+}
+
+/// [`confirm_box`] with the confirmed request out: the red button shows
+/// its spinner and waits for the answer; Cancel stays live.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn confirm_box_sending(
+    app: &Entity<QuillApp>,
+    shell: &Entity<QuillShell>,
+    dialog: Dialog,
+    kind: DialogKind,
+    ask: Ask,
     (cancel, confirm): (Step, Step),
+    sending: bool,
     cx: &mut App,
 ) -> Dialog {
     let on_close = QuillShell::on_close_kind(app, shell, kind, move |this, _, cx| cancel(this, cx));
@@ -50,6 +67,8 @@ pub(super) fn confirm_box(
                 Button::new("confirm-box-ok")
                     .label(ask.confirm)
                     .danger()
+                    .loading(sending)
+                    .disabled(sending)
                     .on_click(cx.listener(move |this, _, _, cx| confirm(this, cx))),
             )
     });
