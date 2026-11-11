@@ -1045,3 +1045,35 @@ fn a_forced_reply_waits_for_its_chat(cx: &mut TestAppContext) {
     });
     assert_eq!(reply, Some((KEYBOARD_BOT, MessageId(88))));
 }
+
+/// Sweep 09-108: a forced reply that arrives while the composer already
+/// has a reply is not lost: it waits, and arms once that reply is gone.
+#[gpui_kit::test]
+fn a_forced_reply_waits_while_the_composer_replies(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat(&app, vcx, KEYBOARD_BOT);
+    app.update(vcx, |app, _| {
+        app.chat_ui
+            .set_reply(Some(ComposerReplyTo::new(KEYBOARD_BOT, MessageId(5))));
+        apply_json(
+            app,
+            r#"{"@type":"updateNewMessage","message":{"id":88,"chat_id":71,"sender_id":{"@type":"messageSenderUser","user_id":71},"is_outgoing":false,"date":1700000088,"reply_markup":{"@type":"replyMarkupForceReply","input_field_placeholder":"Name?"},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"What is your name?","entities":[]}}}}"#,
+        );
+    });
+    let waiting = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.session()
+                .is_some_and(|s| s.bots.pending_force_replies.contains_key(&KEYBOARD_BOT))
+        })
+    };
+    vcx.update(|window, cx| app.update(cx, |app, cx| app.arm_force_reply_here(window, cx)));
+    assert!(waiting(&app, vcx), "refused while a reply exists: kept");
+    app.update(vcx, |app, _| app.chat_ui.set_reply(None));
+    vcx.update(|window, cx| app.update(cx, |app, cx| app.arm_force_reply_here(window, cx)));
+    assert!(!waiting(&app, vcx), "armed once the reply is gone");
+    let reply = app.read_with(vcx, |app, _| {
+        app.chat_ui.reply().map(|r| (r.chat_id, r.message_id))
+    });
+    assert_eq!(reply, Some((KEYBOARD_BOT, MessageId(88))));
+}
