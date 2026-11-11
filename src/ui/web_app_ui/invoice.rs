@@ -15,6 +15,7 @@
 //! brings that window in front of the mini app's.
 
 use super::*;
+use quill::ids::RequestId;
 use quill::payment_invoice::invoice_link_invoice;
 use quill::state::PaymentVerdict;
 
@@ -31,8 +32,8 @@ pub(super) struct InvoiceWatch {
 pub(super) enum PayStage {
     /// No payment sent since the checkout opened.
     Untouched,
-    /// `sendPaymentForm` is out.
-    Sending,
+    /// `sendPaymentForm` is out as this request.
+    Sending(RequestId),
     Settled(PaymentVerdict),
 }
 
@@ -60,9 +61,10 @@ impl InvoiceWatch {
             // A payment still being sent when the checkout closed (Esc, or
             // the 3-D Secure page taking over) may still go through: that
             // is pending, never cancelled.
-            (false, PayStage::Settled(PaymentVerdict::Verifying) | PayStage::Sending) => {
-                Some("pending")
-            }
+            (
+                false,
+                PayStage::Settled(PaymentVerdict::NeedsVerification) | PayStage::Sending(_),
+            ) => Some("pending"),
             (false, PayStage::Untouched) => Some("cancelled"),
         }
     }
@@ -119,10 +121,12 @@ impl QuillApp {
         };
         let payments = self.session().map(|s| &s.payments);
         let stage = match payments {
-            Some(p) if p.is_paying(&invoice) => PayStage::Sending,
-            Some(p) => p
-                .outcome_of(&invoice)
-                .map_or(PayStage::Untouched, PayStage::Settled),
+            Some(p) => match p.paying_request(&invoice) {
+                Some(request) => PayStage::Sending(request),
+                None => p
+                    .outcome_of(&invoice)
+                    .map_or(PayStage::Untouched, PayStage::Settled),
+            },
             None => PayStage::Untouched,
         };
         let view = CheckoutView {
@@ -152,6 +156,7 @@ impl QuillApp {
 mod tests {
     // No `super::*`: the kit's glob brings its own `test` attribute.
     use super::{CheckoutView, InvoiceWatch, PayStage};
+    use quill::ids::RequestId;
     use quill::state::PaymentVerdict;
 
     fn look(dialog_open: bool, stage: PayStage) -> Option<&'static str> {
@@ -180,15 +185,18 @@ mod tests {
 
     #[test]
     fn a_payment_sent_off_to_verify_is_pending() {
-        let verifying = PayStage::Settled(PaymentVerdict::Verifying);
+        let verifying = PayStage::Settled(PaymentVerdict::NeedsVerification);
         assert_eq!(look(true, verifying), None);
         assert_eq!(look(false, verifying), Some("pending"));
     }
 
     #[test]
     fn a_checkout_closed_while_the_payment_is_sent_is_pending() {
-        assert_eq!(look(true, PayStage::Sending), None);
-        assert_eq!(look(false, PayStage::Sending), Some("pending"));
+        assert_eq!(look(true, PayStage::Sending(RequestId(1))), None);
+        assert_eq!(
+            look(false, PayStage::Sending(RequestId(1))),
+            Some("pending")
+        );
     }
 }
 

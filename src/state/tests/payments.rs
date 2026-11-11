@@ -151,7 +151,7 @@ fn payment_result_notes_and_verification_url() {
     );
     assert_eq!(
         session.payments.outcome_of(&shop),
-        Some(PaymentVerdict::Verifying)
+        Some(PaymentVerdict::NeedsVerification)
     );
     let extra = session.request(RequestPurpose::SendPaymentForm, Some(ChatId(51)));
     session.payment_sent(extra);

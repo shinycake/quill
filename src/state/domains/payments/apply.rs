@@ -76,7 +76,7 @@ impl Session {
                         if result.success {
                             PaymentVerdict::Paid
                         } else if !result.verification_url.is_empty() {
-                            PaymentVerdict::Verifying
+                            PaymentVerdict::NeedsVerification
                         } else {
                             PaymentVerdict::Refused
                         },

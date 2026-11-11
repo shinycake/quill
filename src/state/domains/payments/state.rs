@@ -187,7 +187,7 @@ pub enum PaymentVerdict {
     /// The payment was refused (an error, or a failed result).
     Refused,
     /// The answer asked for a verification step outside the checkout.
-    Verifying,
+    NeedsVerification,
 }
 
 /// The verdict of the last finished payment of `invoice`.
@@ -353,6 +353,17 @@ impl PaymentsState {
         self.request
             .as_ref()
             .is_some_and(|request| self.is_paying(&request.invoice))
+    }
+
+    /// The `sendPaymentForm` in flight for `invoice`.
+    pub fn paying_request(
+        &self,
+        invoice: &crate::payment_invoice::InputInvoice,
+    ) -> Option<RequestId> {
+        self.paying
+            .iter()
+            .find(|paying| &paying.invoice == invoice)
+            .map(|paying| paying.request_id)
     }
 
     /// `invoice` has a `sendPaymentForm` in flight.
