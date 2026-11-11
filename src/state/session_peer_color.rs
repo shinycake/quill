@@ -4,8 +4,13 @@ use super::*;
 impl Session {
     /// `getDefaultProfilePhotoCustomEmojiStickers` answered: keep the custom
     /// emoji the avatar builder offers.
-    pub(crate) fn accept_profile_photo_emoji_icons(&mut self, stickers: Vec<StickerItem>) {
-        self.users_state.profile_photo_emoji_icons.succeed(
+    pub(crate) fn accept_profile_photo_emoji_icons(
+        &mut self,
+        request: Option<RequestId>,
+        stickers: Vec<StickerItem>,
+    ) {
+        self.users_state.profile_photo_emoji_icons.answered(
+            request,
             stickers
                 .into_iter()
                 .filter(|sticker| sticker.custom_emoji_id.is_some_and(|id| id > 0))
@@ -15,8 +20,13 @@ impl Session {
 
     /// `getDefaultChatPhotoCustomEmojiStickers` answered: the same, for a
     /// group or channel photo.
-    pub(crate) fn accept_chat_photo_emoji_icons(&mut self, stickers: Vec<StickerItem>) {
-        self.users_state.chat_photo_emoji_icons.succeed(
+    pub(crate) fn accept_chat_photo_emoji_icons(
+        &mut self,
+        request: Option<RequestId>,
+        stickers: Vec<StickerItem>,
+    ) {
+        self.users_state.chat_photo_emoji_icons.answered(
+            request,
             stickers
                 .into_iter()
                 .filter(|sticker| sticker.custom_emoji_id.is_some_and(|id| id > 0))
@@ -26,8 +36,13 @@ impl Session {
 
     /// `getDefaultBackgroundCustomEmojiStickers` answered: keep the custom
     /// emoji stickers the editor offers as reply and profile icons.
-    pub(crate) fn accept_background_emoji_icons(&mut self, stickers: Vec<StickerItem>) {
-        self.users_state.background_emoji_icons.succeed(
+    pub(crate) fn accept_background_emoji_icons(
+        &mut self,
+        request: Option<RequestId>,
+        stickers: Vec<StickerItem>,
+    ) {
+        self.users_state.background_emoji_icons.answered(
+            request,
             stickers
                 .into_iter()
                 .filter(|sticker| sticker.custom_emoji_id.is_some_and(|id| id > 0))

@@ -109,7 +109,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = get_default_chat_photo_custom_emoji_stickers(extra);
         let sent = self.send_json_request(extra, &json).map(Some);
         if sent.is_ok() {
-            self.session.users_state.chat_photo_emoji_icons.begin();
+            let icons = &mut self.session.users_state.chat_photo_emoji_icons;
+            icons.begin();
+            icons.sent(extra);
         }
         sent
     }

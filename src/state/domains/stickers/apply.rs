@@ -12,11 +12,12 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
-        // An answer ends its list's fetch; an update carries no request.
+        // An answer ends its list's fetch, when it is the request the list
+        // waits for; an update carries no request.
         if let Some(pending) = pending
             && let Some(list) = self.stickers.stickers.lists.for_purpose(pending.purpose)
         {
-            list.succeed(());
+            list.answered(Some(pending.id), ());
         }
         match payload {
             StickersPayload::UpdateActiveEmojiReactions { emojis } => {
@@ -162,7 +163,10 @@ impl Session {
                 } else if purpose == Some(RequestPurpose::GetPremiumStickerExamples) {
                     self.payments.hub.premium_stickers.succeed(stickers);
                 } else if purpose == Some(RequestPurpose::GetGreetingStickers) {
-                    self.stickers.stickers.greeting.succeed(stickers);
+                    self.stickers
+                        .stickers
+                        .greeting
+                        .answered(pending.map(|p| p.id), stickers);
                 } else if purpose == Some(RequestPurpose::GetCustomEmojiStickers) {
                     // Slice S10: bare `stickers` land in the emoji panel (see emoji.rs).
                     self.accept_custom_emoji_stickers(stickers);
@@ -172,11 +176,11 @@ impl Session {
                 } else if purpose == Some(RequestPurpose::GetForumTopicDefaultIcons) {
                     self.accept_topic_default_icons(stickers);
                 } else if purpose == Some(RequestPurpose::GetBackgroundEmojiIcons) {
-                    self.accept_background_emoji_icons(stickers);
+                    self.accept_background_emoji_icons(pending.map(|p| p.id), stickers);
                 } else if purpose == Some(RequestPurpose::GetProfilePhotoEmojiIcons) {
-                    self.accept_profile_photo_emoji_icons(stickers);
+                    self.accept_profile_photo_emoji_icons(pending.map(|p| p.id), stickers);
                 } else if purpose == Some(RequestPurpose::GetChatPhotoEmojiIcons) {
-                    self.accept_chat_photo_emoji_icons(stickers);
+                    self.accept_chat_photo_emoji_icons(pending.map(|p| p.id), stickers);
                 } else if purpose == Some(RequestPurpose::GetStoryCustomEmojiStickers) {
                     // Phase 9.2+: story reaction picker visuals — keyed by
                     // sticker id (= custom emoji id).

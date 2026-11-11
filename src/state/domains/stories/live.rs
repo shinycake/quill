@@ -178,10 +178,19 @@ impl LiveStoryState {
     /// before it was asked: an older snapshot leaves a newer batch in the
     /// total.
     pub(crate) fn set_donors(&mut self, donors: LiveStoryDonors, asked: Option<RequestId>) {
-        self.donors.succeed(donors);
         match asked {
-            None => self.committed.clear(),
-            Some(asked) => self.committed.retain(|batch| batch.commit.0 > asked.0),
+            None => {
+                self.donors.succeed(donors);
+                self.committed.clear();
+            }
+            Some(asked) => {
+                // An answer of a request the stage no longer waits for is
+                // dropped, batches and all.
+                if !self.donors.answered(Some(asked), donors) {
+                    return;
+                }
+                self.committed.retain(|batch| batch.commit.0 > asked.0);
+            }
         }
     }
 
@@ -367,7 +376,8 @@ impl Session {
                 if let Some(LiveStoryPurpose::GetStreamer { group_call_id }) = asked
                     && let Some(live) = self.live_story_mut(group_call_id)
                 {
-                    live.streamer.succeed(participant);
+                    live.streamer
+                        .answered(pending.map(|p| p.id), participant);
                 }
             }
         }
@@ -377,10 +387,11 @@ impl Session {
     pub(crate) fn set_live_story_senders(
         &mut self,
         group_call_id: i32,
+        request: Option<RequestId>,
         senders: Vec<AvailableMessageSender>,
     ) {
         if let Some(live) = self.live_story_mut(group_call_id) {
-            live.message_senders.succeed(senders);
+            live.message_senders.answered(request, senders);
         }
     }
 
@@ -485,15 +496,19 @@ impl Session {
             // next Join (`retry_extras`), and the streamer's, which leaves
             // no picture, is said.
             LiveStoryPurpose::GetStreamer { .. } => {
-                live.streamer.fail(reason.to_string());
+                if !live.streamer.failed(failed, reason.to_string(), false) {
+                    return;
+                }
                 live.note = Some(crate::lang::tr_with(
                     crate::lang::keys::Q_OPS_COULD_NOT_LOAD_THE_STREAM,
                     &[("reason", &reason)],
                 ));
             }
-            LiveStoryPurpose::GetTopDonors { .. } => live.donors.fail(reason.to_string()),
+            LiveStoryPurpose::GetTopDonors { .. } => {
+                live.donors.failed(failed, reason.to_string(), false);
+            }
             LiveStoryPurpose::GetMessageSenders { .. } => {
-                live.message_senders.fail(reason.to_string());
+                live.message_senders.failed(failed, reason.to_string(), false);
             }
             LiveStoryPurpose::GetBursts => {}
             LiveStoryPurpose::AddPendingReaction { stars, .. } => {

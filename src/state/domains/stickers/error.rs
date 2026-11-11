@@ -25,15 +25,16 @@ impl Session {
                     ));
             }
             Some(RequestPurpose::GetGreetingStickers) => {
-                self.stickers
-                    .stickers
-                    .greeting
-                    .fail(call_request_error_line(
+                self.stickers.stickers.greeting.failed(
+                    pending.map(|p| p.id),
+                    call_request_error_line(
                         err,
                         crate::lang::tr(
                             crate::lang::keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN,
                         ),
-                    ));
+                    ),
+                    false,
+                );
             }
             Some(RequestPurpose::SearchEmojis) => {
                 if let Some(pending) = pending {
@@ -162,7 +163,9 @@ impl Session {
                     crate::lang::tr(crate::lang::keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN)
                         .to_string();
                 match self.stickers.stickers.lists.for_purpose(pending.purpose) {
-                    Some(list) => list.fail(line),
+                    Some(list) => {
+                        list.failed(Some(pending.id), line, false);
+                    }
                     None if self.stickers.manager.note_commit_failure(pending.id) => {}
                     None => self.stickers.creator_notes.push_back(line),
                 }

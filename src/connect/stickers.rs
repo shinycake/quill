@@ -106,7 +106,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         // The answer or the error leaves `Loading`; a request that never
         // went out leaves it here.
         match sent {
-            Ok(Some(_)) => self.session.stickers.stickers.greeting.begin(),
+            Ok(Some(request)) => {
+                let greeting = &mut self.session.stickers.stickers.greeting;
+                greeting.begin();
+                greeting.sent(request);
+            }
             _ => self
                 .session
                 .stickers
@@ -160,7 +164,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::GetInstalledStickerSets, None);
         match self.sender.send_json(&get_installed_sticker_sets(extra)) {
             Ok(()) => {
-                self.session.stickers.stickers.lists.installed.begin();
+                let installed = &mut self.session.stickers.stickers.lists.installed;
+                installed.begin();
+                installed.sent(extra);
                 Ok(Some(extra))
             }
             Err(err) => {
@@ -208,6 +214,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if let Some(list) = self.session.stickers.stickers.lists.for_purpose(purpose) {
             list.begin();
+            list.sent(extra);
         }
         Ok(Some(extra))
     }

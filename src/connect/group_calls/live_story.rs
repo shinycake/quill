@@ -41,8 +41,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_json_request(extra, &json)
     }
 
-    /// A request did not go out: its stage goes back, so the next ingest
-    /// asks again.
+    /// Change the call's live story state after a send: a request that did
+    /// not go out puts its stage back, so the next ingest asks again; one
+    /// that did is recorded as the request its stage waits for.
     fn live_story_unsent(
         &mut self,
         group_call_id: i32,
@@ -91,9 +92,14 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .live_story_request(LiveStoryPurpose::GetStreamer { group_call_id }, |extra| {
                     get_live_story_streamer(extra, group_call_id)
                 });
-            if let Err(err) = sent {
-                self.live_story_unsent(group_call_id, |live| live.streamer.cancel());
-                return Err(err);
+            match sent {
+                Ok(request) => {
+                    self.live_story_unsent(group_call_id, |live| live.streamer.sent(request));
+                }
+                Err(err) => {
+                    self.live_story_unsent(group_call_id, |live| live.streamer.cancel());
+                    return Err(err);
+                }
             }
         }
         if want.1 {
@@ -104,9 +110,14 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .live_story_request(LiveStoryPurpose::GetTopDonors { group_call_id }, |extra| {
                     get_live_story_top_donors(extra, group_call_id)
                 });
-            if let Err(err) = sent {
-                self.live_story_unsent(group_call_id, |live| live.donors.cancel());
-                return Err(err);
+            match sent {
+                Ok(request) => {
+                    self.live_story_unsent(group_call_id, |live| live.donors.sent(request));
+                }
+                Err(err) => {
+                    self.live_story_unsent(group_call_id, |live| live.donors.cancel());
+                    return Err(err);
+                }
             }
         }
         if want.2 {
@@ -117,9 +128,16 @@ impl<S: JsonSender> ConnectDriver<S> {
                 LiveStoryPurpose::GetMessageSenders { group_call_id },
                 |extra| get_live_story_available_message_senders(extra, group_call_id),
             );
-            if let Err(err) = sent {
-                self.live_story_unsent(group_call_id, |live| live.message_senders.cancel());
-                return Err(err);
+            match sent {
+                Ok(request) => {
+                    self.live_story_unsent(group_call_id, |live| {
+                        live.message_senders.sent(request);
+                    });
+                }
+                Err(err) => {
+                    self.live_story_unsent(group_call_id, |live| live.message_senders.cancel());
+                    return Err(err);
+                }
             }
         }
         self.maybe_fetch_live_bursts()
