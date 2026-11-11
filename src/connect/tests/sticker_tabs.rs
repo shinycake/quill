@@ -191,8 +191,14 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
     assert_eq!(driver.session.stickers.stickers.found_sets[0].id, 77);
     // The sets answered; the stickers half is still out, so the tab keeps
     // loading instead of reading "No stickers found".
-    let search_loading =
-        |driver: &ConnectDriver<_>| driver.session.stickers.stickers.lists.tab_loading(StickerTab::Search);
+    let search_loading = |driver: &ConnectDriver<_>| {
+        driver
+            .session
+            .stickers
+            .stickers
+            .lists
+            .tab_loading(StickerTab::Search)
+    };
     assert!(search_loading(&driver));
     let first = sent_request(&recorder, "searchStickers")["@extra"].clone();
     let sticker = |id| json!({"@type":"sticker","id":id,"set_id":"77","emoji":"😀","format":{"@type":"stickerFormatWebp"},"sticker":{"@type":"file","id":id,"local":{"@type":"localFile","can_be_downloaded":false},"remote":{"@type":"remoteFile"}}});

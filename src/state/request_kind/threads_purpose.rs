@@ -37,9 +37,7 @@ impl ThreadsPurpose {
             | Self::SetDirectMessagesChatTopicMarkedAsUnread { .. }
             | Self::ReadDirectMessagesChatTopic { .. }
             | Self::ToggleDirectMessagesChatTopicCanSendUnpaidMessages { .. }
-            | Self::StartBotThread => {
-                RequestKind::UserAction
-            }
+            | Self::StartBotThread => RequestKind::UserAction,
         }
     }
 }

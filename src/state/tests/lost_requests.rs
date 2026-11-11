@@ -142,7 +142,10 @@ fn account_loss_resets_the_loading_flags_of_pending_lookups() {
 #[test]
 fn logout_does_not_leave_failure_notes_of_dropped_user_actions() {
     let mut session = ready_session();
-    session.messages.message_action_note.push("earlier note".into());
+    session
+        .messages
+        .message_action_note
+        .push("earlier note".into());
     session.request(RequestPurpose::SetChatMessageSender, Some(ChatId(5)));
     session.request(RequestPurpose::SendMessage, Some(ChatId(5)));
 

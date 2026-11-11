@@ -508,19 +508,17 @@ impl Session {
             ChatsPayload::UpdateDefaultBackground {
                 for_dark_theme,
                 background,
-            } => {
-                match background {
-                    Some(background) => {
-                        self.upsert_background_files(&background);
-                        self.chats_state
-                            .default_backgrounds
-                            .insert(for_dark_theme, background);
-                    }
-                    None => {
-                        self.chats_state.default_backgrounds.remove(&for_dark_theme);
-                    }
+            } => match background {
+                Some(background) => {
+                    self.upsert_background_files(&background);
+                    self.chats_state
+                        .default_backgrounds
+                        .insert(for_dark_theme, background);
                 }
-            }
+                None => {
+                    self.chats_state.default_backgrounds.remove(&for_dark_theme);
+                }
+            },
             ChatsPayload::ChatPhotos {
                 total_count,
                 photos,

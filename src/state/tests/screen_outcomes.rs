@@ -27,7 +27,10 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
 
     session.payments.receipt_error = Some("receipt".into());
     session.payments.unlocked_notice = Some("unlocked".into());
-    session.messages.send_permission_error.push("no rights".into());
+    session
+        .messages
+        .send_permission_error
+        .push("no rights".into());
     session.messages.flood_notice.push("slow down".into());
     session.bots.last_callback_answer = Some(CallbackAnswer {
         answer: CallbackQueryAnswer {

@@ -34,10 +34,10 @@ impl Session {
             [
                 self.chats_state.chat_action_error.clone(),
                 self.payments.note.clone(),
-            self.users_state.contacts_notice.clone(),
-            self.groups.invite_link_error.clone(),
-            self.calls.group_call_error.clone(),
-            self.calls.error.clone(),
+                self.users_state.contacts_notice.clone(),
+                self.groups.invite_link_error.clone(),
+                self.calls.group_call_error.clone(),
+                self.calls.error.clone(),
                 self.settings.account_error.clone(),
             ],
             [

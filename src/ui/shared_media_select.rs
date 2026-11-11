@@ -54,7 +54,12 @@ impl QuillApp {
 
     /// Ask what a hovered row allows, so its menu and a tick know before
     /// they are used. The answer lands in the session a moment later.
-    fn shared_media_hover(&mut self, message_id: MessageId, hovered: bool, _cx: &mut Context<Self>) {
+    fn shared_media_hover(
+        &mut self,
+        message_id: MessageId,
+        hovered: bool,
+        _cx: &mut Context<Self>,
+    ) {
         if !hovered || self.shared_media_actions(message_id).is_some() {
             return;
         }

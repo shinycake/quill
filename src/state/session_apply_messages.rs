@@ -490,7 +490,10 @@ impl Session {
         // Inline buttons ride the message and leave the chat's keyboard alone
         // (tdesktop `definesReplyKeyboard()` is false for them).
         let has_markup = message.reply_markup.as_ref().is_some_and(|markup| {
-            !matches!(markup, crate::telegram::envelope::ReplyMarkup::InlineKeyboard(_))
+            !matches!(
+                markup,
+                crate::telegram::envelope::ReplyMarkup::InlineKeyboard(_)
+            )
         });
         let is_outgoing_msg = message.is_outgoing;
         if self.route_new_message_into_window(&message) {
