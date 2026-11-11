@@ -6,6 +6,7 @@
 //! editor's Masks tab and a two-tab manage box (Masks, Archived). This is
 //! the same split: a `MasksPanel` that never shares a slot with the regular
 //! sticker panel.
+use crate::state::fetch::Fetch;
 use crate::state::{PendingRequest, RequestPurpose, Session, StickersPurpose};
 use crate::telegram::envelope::{StickerItem, StickerSetInfo};
 use std::collections::HashMap;
@@ -27,13 +28,13 @@ pub struct MasksPanel {
     pub tab: MasksTab,
     /// Installed mask sets, in TDLib's order.
     pub installed: Vec<StickerSetInfo>,
-    pub installed_loaded: bool,
+    /// The installed list's request: idle, loading, answered or failed
+    /// (a failed change shows on the tab on screen).
+    pub installed_fetch: Fetch<()>,
     pub archived: Vec<StickerSetInfo>,
-    pub archived_loaded: bool,
+    pub archived_fetch: Fetch<()>,
     pub archived_has_more: bool,
     pub archived_next_offset: i64,
-    /// A list request or change failed; the dialog offers a retry.
-    pub failed: bool,
     /// Stickers of each loaded mask set (`getStickerSet`), by set id.
     pub set_stickers: HashMap<i64, Vec<StickerItem>>,
     /// Set ids whose `getStickerSet` is in flight or failed, so the editor
@@ -45,12 +46,45 @@ pub struct MasksPanel {
     pub confirm_remove: Option<i64>,
 }
 
+impl MasksPanel {
+    /// The request behind `tab`'s list.
+    pub fn fetch(&self, tab: MasksTab) -> &Fetch<()> {
+        match tab {
+            MasksTab::Installed => &self.installed_fetch,
+            MasksTab::Archived => &self.archived_fetch,
+        }
+    }
+
+    pub(crate) fn fetch_mut(&mut self, tab: MasksTab) -> &mut Fetch<()> {
+        match tab {
+            MasksTab::Installed => &mut self.installed_fetch,
+            MasksTab::Archived => &mut self.archived_fetch,
+        }
+    }
+
+    /// A request for `tab`'s list never went out.
+    pub(crate) fn fail_fetch(&mut self, tab: MasksTab) {
+        self.fetch_mut(tab).fail(crate::lang::tr(
+            crate::lang::keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN,
+        ));
+    }
+
+    /// Whether `tab`'s list was answered once (a refetch keeps it).
+    pub fn loaded(&self, tab: MasksTab) -> bool {
+        self.fetch(tab).data().is_some()
+    }
+
+    /// Whether the dialog offers a retry for `tab`.
+    pub fn failed(&self, tab: MasksTab) -> bool {
+        self.fetch(tab).error().is_some()
+    }
+}
+
 impl Session {
     pub fn accept_installed_mask_sets(&mut self, sets: Vec<StickerSetInfo>) {
         let masks = &mut self.stickers.masks;
         masks.installed = sets;
-        masks.installed_loaded = true;
-        masks.failed = false;
+        masks.installed_fetch.succeed(());
     }
 
     pub fn accept_archived_mask_sets(&mut self, sets: Vec<StickerSetInfo>, first_page: bool) {
@@ -67,8 +101,7 @@ impl Session {
         masks
             .archived
             .extend(sets.into_iter().filter(|set| seen.insert(set.id)));
-        masks.archived_loaded = true;
-        masks.failed = false;
+        masks.archived_fetch.succeed(());
     }
 
     pub(crate) fn accept_mask_set(&mut self, set_id: i64, stickers: Vec<StickerItem>) {
@@ -134,11 +167,10 @@ impl Session {
                 while self.requests.take_purpose(purpose.into()).is_some() {}
             }
             let masks = &mut self.stickers.masks;
-            masks.installed_loaded = false;
-            masks.archived_loaded = false;
+            masks.installed_fetch = Fetch::Idle;
+            masks.archived_fetch = Fetch::Idle;
             masks.archived_has_more = false;
             masks.archived_next_offset = 0;
-            masks.failed = false;
             masks.confirm_remove = None;
             masks.set_requested.clear();
             masks.set_stickers.clear();
@@ -156,7 +188,20 @@ impl Session {
             | StickersPurpose::ReorderInstalledMaskSets,
         )) = purpose
         {
-            self.stickers.masks.failed = true;
+            let line =
+                crate::lang::tr(crate::lang::keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN);
+            let masks = &mut self.stickers.masks;
+            // A list fails its own fetch; a failed change shows on the tab
+            // on screen, where the dialog offers the retry.
+            match purpose {
+                Some(RequestPurpose::Stickers(StickersPurpose::GetInstalledMaskSets)) => {
+                    masks.installed_fetch.fail(line)
+                }
+                Some(RequestPurpose::Stickers(StickersPurpose::GetArchivedMaskSets { .. })) => {
+                    masks.archived_fetch.fail(line)
+                }
+                _ => masks.fetch_mut(masks.tab).fail(line),
+            }
             if let Some(pending) = pending {
                 let _ = self.stickers.manager.note_commit_failure(pending.id);
             }

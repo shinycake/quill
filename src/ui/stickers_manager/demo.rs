@@ -75,9 +75,9 @@ impl QuillApp {
         let stickers = &mut session.stickers;
         stickers.stickers.open = false;
         stickers.masks.installed = stickers.stickers.sets.iter().take(3).cloned().collect();
-        stickers.masks.installed_loaded = true;
+        stickers.masks.installed_fetch.succeed(());
         stickers.masks.archived = stickers.stickers.archived.iter().take(1).cloned().collect();
-        stickers.masks.archived_loaded = true;
+        stickers.masks.archived_fetch.succeed(());
         stickers.masks.open = true;
         self.settings
             .set_box(crate::ui::settings_state::SettingsBox::Stickers, false);
@@ -121,7 +121,7 @@ impl QuillApp {
         ];
         let stickers = &mut session.stickers.stickers;
         stickers.sets = installed;
-        stickers.installed_loaded = true;
+        stickers.lists.installed.succeed(());
         stickers.trending_total = trending.len();
         stickers.trending_next_offset = trending.len();
         stickers.trending = trending;

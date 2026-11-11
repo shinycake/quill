@@ -79,7 +79,7 @@ fn masks_dialog_requests_mask_lists_and_serializes_changes() {
             .unwrap(),
         )
         .unwrap();
-    assert!(!driver.session.stickers.masks.installed_loaded);
+    assert!(!driver.session.stickers.masks.loaded(MasksTab::Installed));
     assert_eq!(count_sent(&recorder, "getArchivedStickerSets"), 2);
 
     driver.change_mask_set(11, false, true).unwrap().unwrap();

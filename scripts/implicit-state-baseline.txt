@@ -100,11 +100,6 @@ LoginState::config_requested
 LoginState::config_requested+error
 Lookup::fade_started
 Lookup::pending
-ManagerView::failed
-ManagerView::loading
-MasksPanel::archived_loaded
-MasksPanel::failed
-MasksPanel::installed_loaded
 MediaFacts::downloading
 MediaFacts::in_saved_messages
 MediaMenuFacts::downloading
@@ -189,8 +184,6 @@ StarPacksState::loading
 StarPacksState::loading+error
 State::started
 Step::started
-StickerPanel::greeting_loaded
-StickerPanel::installed_loaded
 StickerPanel::suggest_waiting_for_sets
 StickerSetView::files_requested
 StorageScroll::pending

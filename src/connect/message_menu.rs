@@ -644,7 +644,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.stickers.stickers.installed_loaded
+        if !self.session.stickers.stickers.installed_loaded()
             && !self
                 .session
                 .requests

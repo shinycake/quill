@@ -265,9 +265,9 @@ fn masks_open_in_their_own_box_with_masks_and_archived_tabs(cx: &mut TestAppCont
         };
         if let Some(session) = app.demo_session.as_mut() {
             session.stickers.masks.installed = vec![set(501, "Party hats"), set(502, "Beards")];
-            session.stickers.masks.installed_loaded = true;
+            session.stickers.masks.installed_fetch.succeed(());
             session.stickers.masks.archived = vec![set(503, "Old masks")];
-            session.stickers.masks.archived_loaded = true;
+            session.stickers.masks.archived_fetch.succeed(());
         }
         app.open_mask_sets(cx);
     });

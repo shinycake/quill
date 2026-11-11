@@ -24,6 +24,17 @@ impl Session {
                         ),
                     ));
             }
+            Some(RequestPurpose::GetGreetingStickers) => {
+                self.stickers
+                    .stickers
+                    .greeting
+                    .fail(call_request_error_line(
+                        err,
+                        crate::lang::tr(
+                            crate::lang::keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN,
+                        ),
+                    ));
+            }
             Some(RequestPurpose::SearchEmojis) => {
                 if let Some(pending) = pending {
                     self.stickers.emoji.keyword_lookups.failed(pending.id);

@@ -28,16 +28,29 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let extra = self.session.request(purpose, None);
+        let tab = match purpose {
+            RequestPurpose::Stickers(StickersPurpose::GetInstalledMaskSets) => {
+                Some(MasksTab::Installed)
+            }
+            RequestPurpose::Stickers(StickersPurpose::GetArchivedMaskSets { .. }) => {
+                Some(MasksTab::Archived)
+            }
+            _ => None,
+        };
         if let Err(err) = self.sender.send_json(&build(extra)) {
             self.session.requests.take(extra);
-            self.session.stickers.masks.failed = true;
+            // A change that never went out shows on the tab on screen.
+            let masks = &mut self.session.stickers.masks;
+            masks.fail_fetch(tab.unwrap_or(masks.tab));
             return Err(err);
+        }
+        if let Some(tab) = tab {
+            self.session.stickers.masks.fetch_mut(tab).begin();
         }
         Ok(Some(extra))
     }
 
     fn request_installed_masks(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        self.session.stickers.masks.failed = false;
         self.mask_request(
             StickersPurpose::GetInstalledMaskSets.into(),
             get_installed_mask_sets,
@@ -53,7 +66,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let offset = if more { masks.archived_next_offset } else { 0 };
-        self.session.stickers.masks.failed = false;
         self.mask_request(
             StickersPurpose::GetArchivedMaskSets { first_page: !more }.into(),
             |id| get_archived_mask_sets(id, offset),
@@ -191,11 +203,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         let masks = &self.session.stickers.masks;
-        if (strip || tab == MasksTab::Installed) && !masks.installed_loaded && !masks.failed {
+        if (strip || tab == MasksTab::Installed) && masks.installed_fetch.is_idle() {
             self.request_installed_masks()?;
         }
         let masks = &self.session.stickers.masks;
-        if open && tab == MasksTab::Archived && !masks.archived_loaded && !masks.failed {
+        if open && tab == MasksTab::Archived && masks.archived_fetch.is_idle() {
             self.request_archived_masks(false)?;
         }
         if !strip {

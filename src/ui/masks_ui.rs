@@ -97,9 +97,9 @@ impl QuillApp {
             })
             .take(STRIP_LIMIT)
             .collect();
-        let empty_note = if panel.failed {
+        let empty_note = if panel.failed(quill::state::MasksTab::Installed) {
             Some(tr(keys::Q_MISC_COULD_NOT_LOAD_MASKS))
-        } else if panel.installed_loaded && panel.installed.is_empty() {
+        } else if panel.loaded(quill::state::MasksTab::Installed) && panel.installed.is_empty() {
             Some(tr(keys::Q_MISC_NO_MASKS_INSTALLED))
         } else {
             None
