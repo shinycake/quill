@@ -273,11 +273,9 @@ fn a_chat_windows_video_chat_start_goes_on_in_its_own_frames(cx: &mut TestAppCon
         app.windows
             .open_box_in(DialogKind::GroupCallStart, Some(OTHER));
         let session = app.demo_session.as_mut().expect("a demo session");
-        session.calls.create_join_as = Some(CreateJoinAs {
-            chat_id: OTHER.0,
-            request,
-            answer: Some(Ok(Vec::new())),
-        });
+        let mut asked = CreateJoinAs::asking(OTHER.0, request);
+        asked.accept(Some(request), Vec::new());
+        session.calls.create_join_as = Some(asked);
     });
     draw(h.main, cx);
     assert!(

@@ -59,21 +59,39 @@ pub(super) fn with_options(mut schema: Value) -> Value {
     schema
 }
 
-/// What an input tool asked for: the screenshot to take, or why none is
-/// taken although one was asked for.
-pub(super) struct Asked {
-    pub options: Option<ShotOptions>,
-    pub skipped: Option<String>,
-    /// The rate-limit slot reserved for the picture, until it is taken or
-    /// given back.
-    slot: Option<shot::Slot>,
+/// What an input tool asked for: no picture, a picture with the rate-limit
+/// slot reserved for it, or why none is taken although one was asked for.
+/// Dropping a `Reserved` gives the slot back, so every early return does.
+pub(super) enum Asked {
+    NotAsked,
+    Reserved {
+        options: ShotOptions,
+        slot: shot::Slot,
+    },
+    Skipped(String),
 }
 
 impl Asked {
-    /// No picture was taken: the slot goes back to the limiter.
-    pub fn give_back(&mut self) {
-        if let Some(slot) = self.slot.take() {
-            shot::release(slot);
+    /// The options of the picture to take with the command, if any.
+    pub fn options(&self) -> Option<ShotOptions> {
+        match self {
+            Asked::Reserved { options, .. } => Some(*options),
+            Asked::NotAsked | Asked::Skipped(_) => None,
+        }
+    }
+
+    /// The window answered: a taken picture keeps its slot, anything else
+    /// gives it back. Returns why no picture was asked for, if so.
+    pub fn settle(self, taken: bool) -> Option<String> {
+        match self {
+            Asked::Reserved { slot, .. } => {
+                if taken {
+                    slot.keep();
+                }
+                None
+            }
+            Asked::NotAsked => None,
+            Asked::Skipped(note) => Some(note),
         }
     }
 }
@@ -86,23 +104,14 @@ pub(super) fn asked(args: &Value) -> Asked {
         .and_then(Value::as_bool)
         .unwrap_or(false);
     if !wanted {
-        return Asked {
-            options: None,
-            skipped: None,
-            slot: None,
-        };
+        return Asked::NotAsked;
     }
     match shot::reserve() {
-        Ok(slot) => Asked {
-            options: Some(options(args)),
-            skipped: None,
-            slot: Some(slot),
+        Ok(slot) => Asked::Reserved {
+            options: options(args),
+            slot,
         },
-        Err(note) => Asked {
-            options: None,
-            skipped: Some(note),
-            slot: None,
-        },
+        Err(note) => Asked::Skipped(note),
     }
 }
 
@@ -194,21 +203,15 @@ pub fn take_screenshot(args: &Value) -> Result<ToolOutput, ToolError> {
     .map_err(super::ui::bridge_error);
     let (tree, shot) = match reply {
         Ok(UiReply::Shot { tree, shot }) => (tree, shot),
-        Ok(UiReply::Refused(reason)) => {
-            shot::release(slot);
-            return Err(ToolError::new(reason));
-        }
+        Ok(UiReply::Refused(reason)) => return Err(ToolError::new(reason)),
         Ok(_) => {
-            shot::release(slot);
             return Err(ToolError::new(
                 "Quill's window gave an unexpected answer. Retry.",
             ));
         }
-        Err(error) => {
-            shot::release(slot);
-            return Err(error);
-        }
+        Err(error) => return Err(error),
     };
+    slot.keep();
     let images = vec![image_block(&shot)];
     let text = format!(
         "Quill window {}x{} px (scale {}). {}",

@@ -166,10 +166,8 @@ impl Session {
                 }
             }
             Some(RequestPurpose::Calls(CallsPurpose::CreateVideoChatJoinAs { .. })) => {
-                if let Some(join_as) = self.calls.create_join_as.as_mut()
-                    && Some(join_as.request) == extra
-                {
-                    join_as.answer = Some(Err(()));
+                if let Some(join_as) = self.calls.create_join_as.as_mut() {
+                    join_as.fail(extra);
                 }
             }
             // A conference join or create: nothing is tracked yet. A failed

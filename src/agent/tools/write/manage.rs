@@ -23,6 +23,7 @@ pub fn draft_schema() -> Value {
             "text": {"type": "string", "description": "The draft the user sees in the message box. An empty string clears it."},
             "format": common::format_schema(),
             "reply_to": common::reply_schema(),
+            "replace_existing": {"type": "boolean", "default": false, "description": "The chat already holds a draft with other text, which may be the user's own. Set true only when the user asked you to replace or clear it."},
         },
         "required": ["chat", "text"],
         "additionalProperties": false,
@@ -37,6 +38,19 @@ pub fn set_draft(args: &Value) -> Result<ToolOutput, ToolError> {
         .to_string();
     let ctx = Ctx::active()?;
     let target = require(&ctx, args, Scope::ReadWrite)?;
+    let replace = args
+        .get("replace_existing")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if !replace {
+        let chat = ctx.call(json!({"@type": "getChat", "chat_id": target.chat_id}))?;
+        if let Some(existing) = draft_in_the_way(&chat, &text) {
+            return Err(ToolError::new(format!(
+                "\"{}\" already holds a draft that is not yours (\"{existing}\"), so it was left alone. Ask the user, then call set_draft again with \"replace_existing\": true to replace or clear it.",
+                target.title
+            )));
+        }
+    }
     let draft = if text.trim().is_empty() {
         Value::Null
     } else {
@@ -81,6 +95,19 @@ pub fn set_draft(args: &Value) -> Result<ToolOutput, ToolError> {
         ),
         json!({"chat": target.summary(), "draft": if cleared { Value::Null } else { Value::String(text) }}),
     ))
+}
+
+/// The text of the chat's current draft when setting `text` would destroy
+/// it: it holds something and `text` is not that.
+fn draft_in_the_way(chat: &Value, text: &str) -> Option<String> {
+    let existing = chat
+        .get("draft_message")
+        .and_then(|draft| draft.get("content"))
+        .and_then(|content| content.get("text"))
+        .and_then(|text| text.get("text"))
+        .and_then(Value::as_str)
+        .filter(|existing| !existing.trim().is_empty())?;
+    (existing.trim() != text.trim()).then(|| existing.chars().take(60).collect())
 }
 
 pub fn mark_read_schema() -> Value {
@@ -374,7 +401,7 @@ pub fn set_chat_folder(args: &Value) -> Result<ToolOutput, ToolError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{edit_membership, mark_read_requests};
+    use super::{draft_in_the_way, edit_membership, mark_read_requests};
     use serde_json::{Value, json};
 
     fn types(requests: &[Value]) -> Vec<&str> {
@@ -431,5 +458,21 @@ mod tests {
         let readded = after(3, false);
         assert_eq!(readded["excluded_chat_ids"], json!([]));
         assert_eq!(readded["included_chat_ids"], json!([2, 3]));
+    }
+
+    fn chat_with(text: &str) -> serde_json::Value {
+        json!({"draft_message": {"content": {"@type": "draftMessageContentText", "text": {"text": text}}}})
+    }
+
+    #[test]
+    fn a_users_draft_is_not_replaced_without_asking() {
+        assert_eq!(
+            draft_in_the_way(&chat_with("my words"), "other"),
+            Some("my words".to_string())
+        );
+        assert_eq!(draft_in_the_way(&chat_with("my words"), ""), Some("my words".into()));
+        assert_eq!(draft_in_the_way(&chat_with("same"), " same "), None);
+        assert_eq!(draft_in_the_way(&chat_with("  "), "new"), None);
+        assert_eq!(draft_in_the_way(&json!({"draft_message": null}), "new"), None);
     }
 }

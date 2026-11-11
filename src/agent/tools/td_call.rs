@@ -10,7 +10,7 @@
 
 use super::target::{self, Target};
 use super::td_policy::{self, Class, Shape};
-use super::td_request::{chats_named, has_type, local_paths, sanitize, spends};
+use super::td_request::{chats_named, has_type, local_paths, pin_uploads, sanitize, spends};
 use super::td_schema;
 use super::write::common::{self, ANSWER_WAIT, log_in, record, take_write_turn, write_error};
 use super::write::send::in_quill_data;
@@ -314,6 +314,7 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
             if let Some(target) = target {
                 send(&ctx, &target, &method, request)
             } else {
+                pin_uploads(&mut request)?;
                 td::call(&ctx.client, request).map_err(write_error(&ctx))
             }
         }
@@ -331,6 +332,7 @@ fn run(args: &Value) -> Result<ToolOutput, ToolError> {
             let target = grants.writable(first_chat)?;
             confirm(&ctx, &target, &request)?;
             take_write_turn(&ctx, target.chat_id)?;
+            pin_uploads(&mut request)?;
             td::call(&ctx.client, request).map_err(write_error(&ctx))
         }
         Class::Send => {

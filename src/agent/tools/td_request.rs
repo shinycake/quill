@@ -4,6 +4,7 @@
 //! types that can spend money.
 
 use super::td_redact::{SECRET_BASE, SUPERGROUP_BASE};
+use super::ToolError;
 use super::td_schema::Schema;
 use serde_json::{Map, Value};
 
@@ -159,6 +160,39 @@ pub fn local_paths(value: &Value, paths: &mut Vec<String>) {
     }
 }
 
+/// The last look before a request goes to TDLib, after every confirmation
+/// and queue wait: no upload comes from Quill's data folder, and each local
+/// path is rewritten to the file it resolves to now, so a link swapped in
+/// after the first check cannot lead somewhere else.
+pub fn pin_uploads(value: &mut Value) -> Result<(), ToolError> {
+    match value {
+        Value::Object(fields) => {
+            let key = match fields.get("@type").and_then(Value::as_str) {
+                Some("inputFileLocal") => Some("path"),
+                Some("inputFileGenerated") => Some("original_path"),
+                _ => None,
+            };
+            if let Some(key) = key
+                && let Some(Value::String(path)) = fields.get_mut(key)
+            {
+                if super::write::send::in_quill_data(std::path::Path::new(path.as_str())) {
+                    return Err(ToolError::new(format!(
+                        "{path} is inside Quill's own data folder (sign-in keys, the agent token, the message cache); agents cannot upload files from there."
+                    )));
+                }
+                if let Ok(resolved) = std::fs::canonicalize(path.as_str())
+                    && let Some(resolved) = resolved.to_str()
+                {
+                    *path = resolved.to_string();
+                }
+            }
+            fields.values_mut().try_for_each(pin_uploads)
+        }
+        Value::Array(items) => items.iter_mut().try_for_each(pin_uploads),
+        _ => Ok(()),
+    }
+}
+
 /// Whether any type below the top level is `kind`.
 pub fn has_type(value: &Value, kind: &str) -> bool {
     match value {
@@ -197,7 +231,7 @@ pub fn spends(request: &Value) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{chats_named, local_paths, sanitize, spends};
+    use super::{pin_uploads, chats_named, local_paths, sanitize, spends};
     use crate::agent::tools::td_schema;
     use serde_json::json;
 
@@ -255,5 +289,40 @@ mod tests {
         assert!(!spends(
             &json!({"@type": "sendMessage", "input_message_content": {"@type": "inputMessageText"}})
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_into_the_data_folder_is_refused_at_the_last_look() {
+        let root = crate::settings::safe_app_root().unwrap_or_default();
+        let _ = std::fs::create_dir_all(&root);
+        let secret = root.join("pin-secret.key");
+        let _ = std::fs::write(&secret, b"k");
+        let outside = std::env::temp_dir().join(format!("quill-pin-{}", std::process::id()));
+        let _ = std::fs::remove_file(&outside);
+        let _ = std::fs::write(&outside, b"ok");
+        let link = std::env::temp_dir().join(format!("quill-pin-link-{}", std::process::id()));
+        let _ = std::fs::remove_file(&link);
+        let request = |path: &std::path::Path| {
+            json!({"@type": "sendMessage", "input_message_content": {"document":
+                {"@type": "inputFileLocal", "path": path.to_string_lossy()}}})
+        };
+        // The check passed while the link pointed outside...
+        assert!(std::os::unix::fs::symlink(&outside, &link).is_ok());
+        let mut first = request(&link);
+        assert!(pin_uploads(&mut first).is_ok());
+        let pinned = first["input_message_content"]["document"]["path"].clone();
+        assert_eq!(
+            pinned.as_str().map(std::path::PathBuf::from),
+            std::fs::canonicalize(&outside).ok()
+        );
+        // ...then the link is swapped for one into the data folder.
+        let _ = std::fs::remove_file(&link);
+        assert!(std::os::unix::fs::symlink(&secret, &link).is_ok());
+        let mut swapped = request(&link);
+        assert!(pin_uploads(&mut swapped).is_err());
+        let _ = std::fs::remove_file(&link);
+        let _ = std::fs::remove_file(&outside);
+        let _ = std::fs::remove_file(&secret);
     }
 }

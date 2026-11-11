@@ -341,7 +341,7 @@ impl QuillApp {
         let orphaned = held.is_some() && held != waiting;
         let abandoned = waiting.is_some() && held != waiting;
         let answer = match (waiting, session.calls.create_join_as.as_ref()) {
-            (Some(request), Some(join_as)) if join_as.request == request => join_as.answer.clone(),
+            (Some(request), Some(join_as)) if join_as.request == request => join_as.answer(),
             _ => None,
         };
         if answer.is_some() || orphaned {

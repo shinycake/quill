@@ -4,6 +4,7 @@
 use super::CaptureError;
 use crate::thread_guard::spawn_guarded;
 use crate::wake::Signal;
+use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 
 /// Where a device on a [`DeviceThread`] is: its open is running, or it
@@ -26,8 +27,15 @@ impl<T> DeviceRun<T> {
     }
 }
 
+/// The open's answer, until it arrives and then as it came: asking again
+/// gives the same answer.
+enum Opened {
+    Waiting(Receiver<Result<(), CaptureError>>),
+    Answered(Result<(), CaptureError>),
+}
+
 pub struct DeviceThread {
-    answer: Receiver<Result<(), CaptureError>>,
+    opened: Mutex<Opened>,
     _closing: Sender<()>,
 }
 
@@ -68,20 +76,27 @@ impl DeviceThread {
             wake.poke();
         }
         Self {
-            answer,
+            opened: Mutex::new(Opened::Waiting(answer)),
             _closing: closing,
         }
     }
 
-    /// How the open went, once; `None` while it runs.
+    /// How the open went; `None` while it runs. Once it has answered, every
+    /// call returns that answer.
     pub fn opened(&self) -> Option<Result<(), CaptureError>> {
-        match self.answer.try_recv() {
-            Ok(answer) => Some(answer),
-            Err(TryRecvError::Empty) => None,
-            Err(TryRecvError::Disconnected) => Some(Err(CaptureError::Device(
-                "The capture thread stopped.".into(),
-            ))),
-        }
+        let mut opened = crate::locks::lock_or_recover(&self.opened);
+        let answer = match &*opened {
+            Opened::Answered(answer) => return Some(answer.clone()),
+            Opened::Waiting(answer) => match answer.try_recv() {
+                Ok(answer) => answer,
+                Err(TryRecvError::Empty) => return None,
+                Err(TryRecvError::Disconnected) => Err(CaptureError::Device(
+                    "The capture thread stopped.".into(),
+                )),
+            },
+        };
+        *opened = Opened::Answered(answer.clone());
+        Some(answer)
     }
 }
 
@@ -120,6 +135,14 @@ mod tests {
             }
             std::thread::yield_now();
         }
+    }
+
+    #[test]
+    fn the_answer_is_the_same_every_time_it_is_asked() {
+        let device = DeviceThread::open("test-device", &crate::wake::UPDATES, || Ok(()), |()| {});
+        assert_eq!(answer(&device), Ok(()));
+        assert_eq!(device.opened(), Some(Ok(())));
+        assert_eq!(device.opened(), Some(Ok(())));
     }
 
     #[test]
