@@ -92,8 +92,8 @@ pub(super) fn seed_gift_transfer_session(sink: Arc<MemorySink>) -> Session {
     .into_iter()
     .collect();
     hub.gifts_total = 1;
-    hub.gifts_loaded = true;
-    hub.gift_selected = Some(DEMO_GIFT.into());
+    hub.gifts_page = quill::premium_hub::page_stage::PageStage::Ready;
+    hub.gift_view.select(Some(DEMO_GIFT.into()));
     // The chat with Maya is open: her row comes first.
     if mode == "open-chat" {
         session.open_chat(quill::ids::ChatId(502));

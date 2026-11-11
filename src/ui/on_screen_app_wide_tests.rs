@@ -169,7 +169,7 @@ fn share_screen_works_after_a_switch_during_the_listing(cx: &mut TestAppContext)
     // Switched before the listing comes back.
     switch(&app, &mut vcx);
     frames(&mut vcx);
-    app.read_with(&vcx, |app, _| assert!(app.screen_share.window.is_none()));
+    app.read_with(&vcx, |app, _| assert!(app.screen_share.window().is_none()));
     app.update_in(&mut vcx, |app, _, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             session.calls.active_group_call = Some(call());
@@ -178,7 +178,7 @@ fn share_screen_works_after_a_switch_during_the_listing(cx: &mut TestAppContext)
     });
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
-        assert!(app.screen_share.window.is_some(), "the chooser opened");
+        assert!(app.screen_share.window().is_some(), "the chooser opened");
     });
 }
 

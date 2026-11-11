@@ -23,28 +23,132 @@ pub(crate) struct ChooserSource {
     pub(super) thumbnail: Option<Arc<RenderImage>>,
 }
 
-#[derive(Default)]
-pub(crate) struct ScreenShareUi {
-    /// The chooser's own window (tdesktop opens it as a separate window).
+/// The call a chooser or the privacy box was opened for, and the video
+/// chat it was (`ScreenFor::Group`): another video chat, or none, closes
+/// them (`sync_screen_share_call`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ChooserTarget {
+    pub(super) for_call: ScreenFor,
+    pub(super) group_call: Option<i32>,
+}
+
+/// The open chooser: its window, its sources and what is picked.
+pub(crate) struct OpenChooser {
+    pub(super) target: ChooserTarget,
+    /// Tells a thumbnail that arrives later whether this chooser is still
+    /// the one it was loaded for.
+    pub(super) generation: u64,
+    /// The chooser's own window (tdesktop opens it as a separate window);
+    /// `None` while the window is being made.
     pub(super) window: Option<AnyWindowHandle>,
-    /// The screen whose source listing is under way. An epoch, not a
-    /// flag: the listing's continuation is dropped when the screen
-    /// changes, so a flag it was meant to clear would stay set for the
-    /// rest of the run.
-    pub(super) opening: Option<super::on_screen::ScreenEpoch>,
-    /// The call the open chooser shares into.
-    pub(super) for_call: Option<ScreenFor>,
     pub(super) sources: Vec<ChooserSource>,
     pub(super) selected: Option<SourceId>,
     /// The chooser's "Share System Audio" box (Windows only).
     pub(super) with_audio: bool,
-    /// Bumped on every open, so a stale listing or thumbnail is dropped.
+}
+
+/// Where the screen chooser stands: one value for the listing, the open
+/// chooser and the screen access box.
+#[derive(Default)]
+pub(crate) enum Chooser {
+    #[default]
+    Closed,
+    /// The sources are being listed. Tagged with the screen it started on:
+    /// the listing's continuation is dropped when the screen changes, so a
+    /// listing from an earlier screen is no listing now.
+    Listing {
+        target: ChooserTarget,
+        epoch: super::on_screen::ScreenEpoch,
+        generation: u64,
+    },
+    Open(OpenChooser),
+    /// The screen access box shown over this call's window.
+    PrivacyBox(ChooserTarget),
+}
+
+impl Chooser {
+    /// The call a listing or an open chooser shares into.
+    pub(super) fn sharing_into(&self) -> Option<ChooserTarget> {
+        match self {
+            Self::Listing { target, .. } => Some(*target),
+            Self::Open(open) => Some(open.target),
+            Self::Closed | Self::PrivacyBox(_) => None,
+        }
+    }
+
+    /// The call the access box was opened for.
+    pub(super) fn privacy_for(&self) -> Option<ChooserTarget> {
+        match self {
+            Self::PrivacyBox(target) => Some(*target),
+            _ => None,
+        }
+    }
+
+    pub(super) fn open(&self) -> Option<&OpenChooser> {
+        match self {
+            Self::Open(open) => Some(open),
+            _ => None,
+        }
+    }
+
+    pub(super) fn open_mut(&mut self) -> Option<&mut OpenChooser> {
+        match self {
+            Self::Open(open) => Some(open),
+            _ => None,
+        }
+    }
+
+    /// The chooser's window, once it exists.
+    pub(super) fn window(&self) -> Option<AnyWindowHandle> {
+        self.open().and_then(|open| open.window)
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+impl ScreenShareUi {
+    pub(super) fn window(&self) -> Option<AnyWindowHandle> {
+        self.chooser.window()
+    }
+
+    pub(super) fn selected(&self) -> Option<SourceId> {
+        self.chooser.open().and_then(|open| open.selected.clone())
+    }
+
+    pub(super) fn with_audio(&self) -> bool {
+        self.chooser.open().is_some_and(|open| open.with_audio)
+    }
+
+    /// The video chat the open chooser was made for.
+    pub(super) fn group_call(&self) -> Option<i32> {
+        self.chooser
+            .sharing_into()
+            .and_then(|target| target.group_call)
+    }
+
+    /// Pretend the chooser was made for another video chat.
+    pub(super) fn retarget_group_call(&mut self, call: i32) {
+        if let Chooser::Open(open) = &mut self.chooser {
+            open.target.group_call = Some(call);
+        }
+    }
+}
+
+impl ScreenShareUi {
+    /// Close the access box (nothing else).
+    pub(super) fn close_privacy(&mut self) {
+        if self.chooser.privacy_for().is_some() {
+            self.chooser = Chooser::Closed;
+        }
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct ScreenShareUi {
+    pub(super) chooser: Chooser,
+    /// The next listing's number: a listing or thumbnail of an earlier
+    /// number is dropped.
     pub(super) generation: u64,
-    /// The privacy box shown over this call's window.
-    pub(super) privacy_for: Option<ScreenFor>,
-    /// The video chat a `ScreenFor::Group` chooser or box was opened for:
-    /// another video chat, or none, closes them (`sync_screen_share_call`).
-    pub(super) group_call: Option<i32>,
     /// A backend used instead of the OS one (demos, tests).
     pub(super) backend: Option<Arc<dyn ScreenBackend>>,
     /// The demo's "currently shared" source (live calls ask the driver).

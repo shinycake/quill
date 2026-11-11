@@ -121,8 +121,18 @@ impl QuillApp {
         }
         // Over a text selection, Reply quotes it and Copy copies it
         // (Telegram Desktop: "Quote & Reply", "Copy Selected Text").
-        let selection = self.message_ui.menu_selection.clone();
-        let selection_nth = self.message_ui.menu_selection_nth;
+        let selection = self
+            .message_ui
+            .menu_target
+            .selection
+            .as_ref()
+            .map(|selected| selected.text.clone());
+        let selection_nth = self
+            .message_ui
+            .menu_target
+            .selection
+            .as_ref()
+            .map_or(0, |selected| selected.nth);
         let content = effective_content(&message.content, message.ephemeral.as_ref());
         // Over a checklist task, Reply becomes "Reply to Task".
         if can_reply && !self.menu_replies_to_task(content) {
@@ -259,8 +269,10 @@ impl QuillApp {
         // only while the chat is not already shown translated).
         if let Some(selected) = self
             .message_ui
-            .menu_selection
-            .clone()
+            .menu_target
+            .selection
+            .as_ref()
+            .map(|selected| selected.text.clone())
             .filter(|selected| self.translate_menu_offered(chat_id, selected))
         {
             item!(
@@ -310,7 +322,7 @@ impl QuillApp {
         // Over a link, the menu leads with what Telegram Desktop adds for it:
         // a copy entry named for the kind of link (`copyToClipboardContextItemText`),
         // and, for web links, Open.
-        if let Some(link) = self.message_ui.menu_link.clone() {
+        if let Some(link) = self.message_ui.menu_target.link.clone() {
             let msg_key = (chat_id.0, message_id.0 as u64);
             if matches!(link, quill::text::LinkTarget::Url { .. }) {
                 let open = link.clone();

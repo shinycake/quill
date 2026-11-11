@@ -206,7 +206,7 @@ fn a_bulk_pin_over_the_limit_opens_the_limit_box_and_pins_nothing(cx: &mut TestA
         let session = app.demo_session.as_ref().expect("a demo session");
         (
             session.pinned_chat_ids(false).len(),
-            session.payments.hub.limit_box.is_some() || session.payments.hub.limit_toast.is_some(),
+            session.payments.hub.limit_notice.is_some(),
         )
     });
     assert_eq!(pinned, 0, "no free slot: nothing pinned");

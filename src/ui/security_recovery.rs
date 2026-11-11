@@ -91,7 +91,7 @@ impl QuillApp {
             flow.recovery_code_sent_to = None;
             flow.login_email_code_sent_to = None;
         }
-        self.twofa.confirm = None;
+        self.twofa.set_confirm(None);
     }
 
     /// The pending recovery email: code entry, resend, abort.
@@ -115,7 +115,7 @@ impl QuillApp {
                     .aria_label(tr(keys::Q_PREFS_RECOVERY_EMAIL_CONFIRMATION_CODE))
                     .h(px(40.)),
             )
-            .when_some(self.twofa.notice.clone(), |this, note| {
+            .when_some(self.twofa.notice().cloned(), |this, note| {
                 this.child(div().text_xs().text_color(danger()).child(note))
             })
             .child(
@@ -160,7 +160,8 @@ impl QuillApp {
     pub(super) fn submit_twofa_email_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut code = self.twofa.code.read(cx).value().trim().to_string();
         if code.is_empty() {
-            self.twofa.notice = Some(tr(keys::Q_PREFS_ENTER_THE_CODE_FROM_THE).into());
+            self.twofa
+                .set_notice(Some(tr(keys::Q_PREFS_ENTER_THE_CODE_FROM_THE).into()));
             cx.notify();
             return;
         }
@@ -169,7 +170,8 @@ impl QuillApp {
             None => true,
         };
         code.zeroize();
-        self.twofa.notice = (!sent).then(|| tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string());
+        self.twofa
+            .set_notice((!sent).then(|| tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string()));
         let _ = window;
         cx.notify();
     }
@@ -325,7 +327,7 @@ impl QuillApp {
                     cx,
                     tr(keys::Q_PREFS_LEAVE_THE_PASSWORD_EMPTY_TO),
                 ))
-                .when_some(self.twofa.notice.clone(), |this, note| {
+                .when_some(self.twofa.notice().cloned(), |this, note| {
                     this.child(div().text_xs().text_color(danger()).child(note))
                 })
                 .child(
@@ -429,7 +431,7 @@ impl QuillApp {
         no: &'static str,
         loading: bool,
     ) -> Div {
-        if self.twofa.confirm != Some(confirm) {
+        if self.twofa.confirm() != Some(confirm) {
             return div().child(
                 Button::new(format!("twofa-confirm-open-{trigger_label}"))
                     .label(trigger_label)
@@ -437,7 +439,7 @@ impl QuillApp {
                     .small()
                     .disabled(loading)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.twofa.confirm = Some(confirm);
+                        this.twofa.set_confirm(Some(confirm));
                         cx.notify();
                     })),
             );
@@ -457,7 +459,7 @@ impl QuillApp {
                             .primary()
                             .disabled(loading)
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                this.twofa.confirm = None;
+                                this.twofa.set_confirm(None);
                                 if let Some(live) = this.live.as_mut() {
                                     let _ = match confirm {
                                         TwofaConfirm::Reset { .. } => {
@@ -477,7 +479,7 @@ impl QuillApp {
                     )
                     .child(Button::new("twofa-confirm-no").label(no).ghost().on_click(
                         cx.listener(|this, _, _, cx| {
-                            this.twofa.confirm = None;
+                            this.twofa.set_confirm(None);
                             cx.notify();
                         }),
                     )),
@@ -490,7 +492,8 @@ impl QuillApp {
         let mut new = self.twofa.new_password.read(cx).value().to_string();
         let hint = self.twofa.hint.read(cx).value().to_string();
         if code.is_empty() {
-            self.twofa.notice = Some(tr(keys::Q_PREFS_ENTER_THE_CODE_FROM_THE).into());
+            self.twofa
+                .set_notice(Some(tr(keys::Q_PREFS_ENTER_THE_CODE_FROM_THE).into()));
             code.zeroize();
             new.zeroize();
             cx.notify();
@@ -508,7 +511,8 @@ impl QuillApp {
         };
         code.zeroize();
         new.zeroize();
-        self.twofa.notice = (!sent).then(|| tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string());
+        self.twofa
+            .set_notice((!sent).then(|| tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string()));
         let _ = window;
         cx.notify();
     }
@@ -564,7 +568,7 @@ impl QuillApp {
                         .aria_label(tr(keys::Q_PREFS_LOGIN_EMAIL_CONFIRMATION_CODE))
                         .h(px(40.)),
                 )
-                .when_some(self.twofa.notice.clone(), |this, note| {
+                .when_some(self.twofa.notice().cloned(), |this, note| {
                     this.child(div().text_xs().text_color(danger()).child(note))
                 })
                 .child(
@@ -602,7 +606,7 @@ impl QuillApp {
                         .aria_label(tr(keys::Q_PREFS_LOGIN_EMAIL_ADDRESS))
                         .h(px(40.)),
                 )
-                .when_some(self.twofa.notice.clone(), |this, note| {
+                .when_some(self.twofa.notice().cloned(), |this, note| {
                     this.child(div().text_xs().text_color(danger()).child(note))
                 })
                 .child(
@@ -629,7 +633,8 @@ impl QuillApp {
     fn submit_login_email(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let email = self.twofa.email.read(cx).value().trim().to_string();
         if email.is_empty() {
-            self.twofa.notice = Some(tr(keys::Q_PREFS_ENTER_THE_NEW_LOGIN_EMAIL).into());
+            self.twofa
+                .set_notice(Some(tr(keys::Q_PREFS_ENTER_THE_NEW_LOGIN_EMAIL).into()));
             cx.notify();
             return;
         }
@@ -637,7 +642,8 @@ impl QuillApp {
             Some(live) => live.driver.set_login_email(&email).is_ok(),
             None => true,
         };
-        self.twofa.notice = (!sent).then(|| tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string());
+        self.twofa
+            .set_notice((!sent).then(|| tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string()));
         let _ = window;
         cx.notify();
     }
@@ -645,7 +651,8 @@ impl QuillApp {
     fn submit_login_email_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut code = self.twofa.code.read(cx).value().trim().to_string();
         if code.is_empty() {
-            self.twofa.notice = Some(tr(keys::Q_PREFS_ENTER_THE_CODE_FROM_THE).into());
+            self.twofa
+                .set_notice(Some(tr(keys::Q_PREFS_ENTER_THE_CODE_FROM_THE).into()));
             cx.notify();
             return;
         }
@@ -654,7 +661,8 @@ impl QuillApp {
             None => true,
         };
         code.zeroize();
-        self.twofa.notice = (!sent).then(|| tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string());
+        self.twofa
+            .set_notice((!sent).then(|| tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string()));
         let _ = window;
         cx.notify();
     }
@@ -666,12 +674,17 @@ impl QuillApp {
         let finished = self
             .session()
             .is_some_and(|s| s.auth_state.twofa_flow.notice.is_some());
-        if !finished || !matches!(self.twofa.view, TwofaView::Recover | TwofaView::LoginEmail) {
+        if !finished
+            || !matches!(
+                self.twofa.view(),
+                TwofaView::Recover | TwofaView::LoginEmail
+            )
+        {
             return false;
         }
-        self.twofa.view = TwofaView::Status;
-        self.twofa.confirm = None;
-        self.twofa.notice = None;
+        self.twofa.set_view(TwofaView::Status);
+        self.twofa.set_confirm(None);
+        self.twofa.set_notice(None);
         true
     }
 }

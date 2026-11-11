@@ -142,6 +142,7 @@ mod players_state;
 mod presence;
 mod privacy;
 mod privacy_extra;
+mod privacy_layer;
 mod privacy_state;
 mod recent_hashtags_state;
 mod recording_send;
@@ -184,7 +185,7 @@ mod whats_new;
 pub(crate) use account_lifecycle::*;
 pub(crate) use accounts::*;
 pub(crate) use chat_theme::*;
-pub(crate) use privacy::{PrivacyEditorTarget, PrivacyExceptionKind, apply_ready_privacy};
+pub(crate) use privacy::apply_ready_privacy;
 
 mod dialog_focus;
 mod dialogs;
@@ -658,4 +659,5 @@ pub use app::QuillApp;
 pub use screenshot_demo::ScreenshotDemo;
 pub use shell::{DialogKind, QuillShell};
 
+mod device_layer;
 mod device_qr;

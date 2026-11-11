@@ -77,7 +77,9 @@ fn click(vcx: &mut VisualTestContext, id: &'static str) {
 
 fn open_editor(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, key: PrivacySettingKey) {
     app.update(vcx, |app, cx| {
-        app.privacy.editor = Some(PrivacyEditorTarget::Rule(key));
+        app.privacy
+            .layer
+            .open_editor(PrivacyEditorTarget::Rule(key));
         cx.notify();
     });
     frames(vcx);
@@ -100,8 +102,8 @@ fn premium_page(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<(
     app.read_with(vcx, |app, _| {
         app.session().map(|session| {
             (
-                session.payments.hub.premium_open,
-                session.payments.hub.premium_ref.clone(),
+                session.payments.hub.premium_open(),
+                session.payments.hub.premium_ref().to_string(),
             )
         })
     })
@@ -200,7 +202,9 @@ fn leaving_settings_closes_the_last_seen_warning(cx: &mut TestAppContext) {
         cx.notify();
     });
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.privacy.last_seen_warning.is_none()));
+    assert!(app.read_with(vcx, |app, _| {
+        app.privacy.layer.last_seen_warning().is_none()
+    }));
     assert_ne!(dialog(&shell, vcx), Some(DialogKind::LastSeenWarning));
     assert_eq!(rule_who(&app, vcx, key), Some(PrivacyWho::Everybody));
 }

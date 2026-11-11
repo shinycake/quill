@@ -745,7 +745,7 @@ fn a_refused_rich_send_gives_the_text_back(cx: &mut TestAppContext) {
         })
     });
     assert_eq!(field(&app, vcx), "# Title\nbody");
-    assert!(app.read_with(vcx, |app, _| app.chat_ui.rich_editor_open));
+    assert!(app.read_with(vcx, |app, _| app.chat_ui.rich.editor_open()));
     assert_eq!(
         app.read_with(vcx, |app, _| app.chat_ui.sent_text.clone()),
         SentText::None
@@ -815,7 +815,7 @@ fn a_refused_send_drops_its_draft_clear_and_gives_back_the_text(cx: &mut TestApp
         })
     });
     assert_eq!(field(&app, vcx), "@bot cats");
-    assert!(!app.read_with(vcx, |app, _| app.chat_ui.rich_editor_open));
+    assert!(!app.read_with(vcx, |app, _| app.chat_ui.rich.editor_open()));
 }
 
 /// Sweep 08-134: an AI answer replaces the draft it was asked about, not

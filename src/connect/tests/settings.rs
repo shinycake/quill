@@ -621,7 +621,7 @@ fn websites_fetch_guards() {
     );
     assert_eq!(recorder.snapshot().len(), sent_after_first);
     // Cached: no refetch.
-    driver.session.settings.connected_websites = Some(vec![]);
+    driver.session.settings.connected_websites = crate::state::fetch::Fetch::Ready(vec![]);
     assert!(
         driver
             .maybe_fetch_connected_websites()
@@ -642,20 +642,21 @@ fn websites_disconnect_guards() {
     // nothing sent.
     let sent_before = recorder.snapshot().len();
     assert_invalid(driver.disconnect_all_websites());
-    driver.session.settings.connected_websites = Some(vec![]);
+    driver.session.settings.connected_websites = crate::state::fetch::Fetch::Ready(vec![]);
     assert_invalid(driver.disconnect_all_websites());
     assert_eq!(recorder.snapshot().len(), sent_before);
-    driver.session.settings.connected_websites = Some(vec![ParsedWebsite {
-        id: 55,
-        domain_name: "example.com".into(),
-        bot_user_id: 77,
-        browser: "Chrome".into(),
-        platform: "Web".into(),
-        log_in_date: 1758900000,
-        last_active_date: 1759000000,
-        ip_address: "9.9.9.9".into(),
-        location: "Boston, United States".into(),
-    }]);
+    driver.session.settings.connected_websites =
+        crate::state::fetch::Fetch::Ready(vec![ParsedWebsite {
+            id: 55,
+            domain_name: "example.com".into(),
+            bot_user_id: 77,
+            browser: "Chrome".into(),
+            platform: "Web".into(),
+            log_in_date: 1758900000,
+            last_active_date: 1759000000,
+            ip_address: "9.9.9.9".into(),
+            location: "Boston, United States".into(),
+        }]);
     // Unknown id: refused, nothing sent.
     let sent_before = recorder.snapshot().len();
     assert_invalid(driver.disconnect_website(66));
@@ -681,17 +682,18 @@ fn websites_disconnect_guards() {
 #[test]
 fn disconnect_all_websites_ok_triggers_authoritative_refetch() {
     let (dir, mut driver, recorder, _sink, dyn_sink, seq) = sessions_driver();
-    driver.session.settings.connected_websites = Some(vec![ParsedWebsite {
-        id: 55,
-        domain_name: "example.com".into(),
-        bot_user_id: 77,
-        browser: "Chrome".into(),
-        platform: "Web".into(),
-        log_in_date: 1758900000,
-        last_active_date: 1759000000,
-        ip_address: "9.9.9.9".into(),
-        location: "Boston, United States".into(),
-    }]);
+    driver.session.settings.connected_websites =
+        crate::state::fetch::Fetch::Ready(vec![ParsedWebsite {
+            id: 55,
+            domain_name: "example.com".into(),
+            bot_user_id: 77,
+            browser: "Chrome".into(),
+            platform: "Web".into(),
+            log_in_date: 1758900000,
+            last_active_date: 1759000000,
+            ip_address: "9.9.9.9".into(),
+            location: "Boston, United States".into(),
+        }]);
     let extra = driver.disconnect_all_websites().expect("disconnect send");
     let sent = recorder.snapshot().len();
     driver
@@ -715,7 +717,7 @@ fn disconnect_all_websites_ok_triggers_authoritative_refetch() {
             .session
             .settings
             .connected_websites
-            .as_ref()
+            .data()
             .unwrap()
             .len(),
         1

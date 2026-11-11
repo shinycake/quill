@@ -86,11 +86,13 @@ fn panels() -> Vec<(&'static str, &'static str, Opener, IsOpen)> {
             "privacy editor",
             "privacy-dialog-editor",
             |app, _, _| {
-                app.privacy.editor = Some(crate::ui::privacy::PrivacyEditorTarget::Rule(
-                    quill::telegram::requests_privacy::PrivacySettingKey::ShowStatus,
-                ));
+                app.privacy
+                    .layer
+                    .open_editor(crate::ui::privacy::PrivacyEditorTarget::Rule(
+                        quill::telegram::requests_privacy::PrivacySettingKey::ShowStatus,
+                    ));
             },
-            |app| app.privacy.editor.is_some(),
+            |app| app.privacy.layer.editor().is_some(),
         ),
     ]
 }

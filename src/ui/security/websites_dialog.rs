@@ -19,18 +19,18 @@ impl QuillApp {
             let session = this.session();
             let has_websites = session
                 .as_ref()
-                .is_some_and(|s| s.settings.connected_websites.is_some());
+                .is_some_and(|s| s.settings.connected_websites.data().is_some());
             let mut websites = session
                 .as_ref()
-                .and_then(|s| s.settings.connected_websites.clone())
+                .and_then(|s| s.settings.connected_websites.data().cloned())
                 .unwrap_or_default();
             websites.sort_by_key(|a| std::cmp::Reverse(a.last_active_date));
-            let loading = session.is_some_and(|s| s.settings.connected_websites_loading);
+            let loading = session.is_some_and(|s| s.settings.connected_websites.is_loading());
             let mutating = session.is_some_and(|s| s.settings.websites_mutating);
             let stale = session.is_some_and(|s| s.settings.websites_stale);
             let error = session
                 .as_ref()
-                .and_then(|s| s.settings.websites_error.clone());
+                .and_then(|s| s.settings.connected_websites.error().map(str::to_string));
 
             let mut body = div().flex().flex_col().gap_2();
             if let Some(line) = error {
@@ -41,7 +41,7 @@ impl QuillApp {
                         .child(tr_with(keys::Q_PREFS_ERROR, &[("line", &line.to_string())])),
                 );
             }
-            if let Some(confirm) = this.privacy.websites_confirm {
+            if let Some(confirm) = this.privacy.websites.confirm() {
                 body = body.child(this.websites_confirm_banner(confirm, &websites, mutating, cx));
             }
             if websites.is_empty() {

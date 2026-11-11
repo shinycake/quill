@@ -588,14 +588,14 @@ fn a_star_history_or_gifts_first_page_that_cannot_be_sent_shows_its_error() {
             .set_star_transactions_filter(crate::premium_hub::TxFilter::Outgoing)
             .is_err()
     );
-    assert!(t.driver.session.payments.hub.tx_error.is_some());
+    assert!(t.driver.session.payments.hub.tx.error().is_some());
     assert!(
         t.driver
             .open_received_gifts(crate::telegram::envelope::MessageSender::User { user_id: ME })
             .is_err()
     );
     let hub = &t.driver.session.payments.hub;
-    assert!(hub.gifts_error.is_some() && !hub.gifts_loading);
+    assert!(hub.gifts_page.error().is_some() && !hub.gifts_page.is_loading());
 }
 
 #[test]
@@ -623,16 +623,16 @@ fn a_stale_gift_refetch_waits_for_a_page_in_flight_and_is_cleared_by_its_answer(
     t.sender.refuse(&["getReceivedGifts"]);
     assert!(t.driver.refresh_received_gifts_if_stale().is_err());
     assert!(!t.driver.session.payments.hub.gifts_stale);
-    assert!(t.driver.session.payments.hub.gifts_error.is_some());
+    assert!(t.driver.session.payments.hub.gifts_page.error().is_some());
 }
 
 #[test]
 fn reopening_the_gifts_box_keeps_the_lock_of_a_mutation_in_flight() {
     let mut t = Flaky::new();
     let owner = crate::telegram::envelope::MessageSender::User { user_id: ME };
-    t.driver.session.payments.hub.gift_mutating = true;
+    t.driver.session.payments.hub.gift_view.begin_mutation();
     t.driver.open_received_gifts(owner).unwrap();
-    assert!(t.driver.session.payments.hub.gift_mutating);
+    assert!(t.driver.session.payments.hub.gift_view.is_mutating());
 }
 
 #[test]

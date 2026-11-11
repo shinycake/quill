@@ -77,7 +77,8 @@ fn error(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Option<String> {
             .quick_replies_dialog
             .as_ref()
             .unwrap()
-            .local_error
+            .pane
+            .error
             .clone()
     })
 }

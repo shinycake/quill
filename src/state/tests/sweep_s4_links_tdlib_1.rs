@@ -15,21 +15,21 @@ fn a_superseded_username_check_failure_shows_no_profile_error() {
     let mut session = ready_session();
     let first = session.request(RequestPurpose::CheckUsername, None);
     let second = session.request(RequestPurpose::CheckUsername, None);
-    session.users_state.username_check_pending = Some((second, "newer".into()));
+    session.users_state.username_check.begin(second, "newer");
 
     let lost = session.requests.take(first).expect("registered");
     session.settle_lost_request(lost);
     assert_eq!(session.users_state.profile_edit_error, None);
     assert_eq!(
-        session.users_state.username_check_pending,
-        Some((second, "newer".into())),
+        session.users_state.username_check.pending(),
+        Some(second),
         "the current check stays pending"
     );
 
     let lost = session.requests.take(second).expect("registered");
     session.settle_lost_request(lost);
     assert!(session.users_state.profile_edit_error.is_some());
-    assert_eq!(session.users_state.username_check_pending, None);
+    assert_eq!(session.users_state.username_check.pending(), None);
 }
 
 /// Sweep 02-030: a failed count drops the chat's entry, so the next open

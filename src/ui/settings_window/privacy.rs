@@ -134,8 +134,10 @@ impl QuillApp {
             key.label(),
             Some(value.into()),
             cx.listener(move |this, _, _, cx| {
-                this.privacy.editor = Some(PrivacyEditorTarget::Rule(key));
-                this.privacy.exception_picker_open = false;
+                this.privacy
+                    .layer
+                    .open_editor(PrivacyEditorTarget::Rule(key));
+                this.privacy.layer.close_exception_picker();
                 cx.notify();
             }),
             cx,

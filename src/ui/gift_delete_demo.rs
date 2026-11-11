@@ -62,8 +62,8 @@ pub(super) fn seed_gift_delete_session(sink: Arc<MemorySink>) -> Session {
     .filter_map(parse_received_gift)
     .collect();
     hub.gifts_total = 2;
-    hub.gifts_loaded = true;
-    hub.gift_selected = Some(DELETABLE.into());
+    hub.gifts_page = quill::premium_hub::page_stage::PageStage::Ready;
+    hub.gift_view.select(Some(DELETABLE.into()));
     session
 }
 

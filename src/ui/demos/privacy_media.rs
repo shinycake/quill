@@ -144,7 +144,7 @@ impl QuillApp {
                     message_id: MessageId(sc::HIKERS_FIRST_MESSAGE),
                     position: point(px(560.), px(150.)),
                 });
-                self.message_ui.reactions_expanded = true;
+                self.message_ui.menu_target.reactions_expanded = true;
             }
             "viewer" => {
                 self.open_media_viewer(ChatId(sc::HIKERS), MessageId(sc::HIKERS_PHOTO_MESSAGE), cx);

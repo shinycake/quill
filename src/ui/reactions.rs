@@ -59,25 +59,20 @@ impl QuillApp {
             live.driver.session.messages.wanted_reactor_tab = None;
         }
         self.message_ui.menu_ui.page = super::message_menu_ui::MessageMenuPage::Main;
-        self.message_ui.menu_link = self.take_right_clicked_link(menu.position);
-        self.message_ui.menu_item = self.take_right_clicked_item(menu.position);
+        let link = self.take_right_clicked_link(menu.position);
+        let item = self.take_right_clicked_item(menu.position);
         // Over a poll option the menu shows the option's page.
-        if matches!(
-            self.message_ui.menu_item,
-            quill::composer::ReplyItem::PollOption(_)
-        ) {
+        if matches!(item, quill::composer::ReplyItem::PollOption(_)) {
             self.message_ui.menu_ui.page = super::message_menu_ui::MessageMenuPage::PollOption;
         }
         self.chat_ui.link_tooltip = None;
         // A right-click keeps the text selection; the menu then acts on it
         // (Telegram Desktop's Quote & Reply, Copy Selected Text).
-        self.message_ui.menu_selection_nth = 0;
-        self.message_ui.menu_selection = super::selectable_text::selected_message_text(window, cx)
+        let selection = super::selectable_text::selected_message_text(window, cx)
             .filter(|(key, _)| *key == (menu.chat_id.0, menu.message_id.0 as u64))
             .map(|(_, text)| {
-                self.message_ui.menu_selection_nth =
-                    super::selectable_text::selected_occurrence(window, cx, text.trim());
-                text
+                let nth = super::selectable_text::selected_occurrence(window, cx, text.trim());
+                super::message_state::MenuSelection { text, nth }
             })
             // A widget's selection lives in its runtime (`widgets_ui.rs`).
             .or_else(|| {
@@ -85,9 +80,18 @@ impl QuillApp {
                     chat_id: menu.chat_id,
                     message_id: menu.message_id,
                 };
-                self.widget_selection(key).map(str::to_owned)
+                self.widget_selection(key)
+                    .map(|text| super::message_state::MenuSelection {
+                        text: text.to_owned(),
+                        nth: 0,
+                    })
             });
-        self.message_ui.reactions_expanded = false;
+        self.message_ui.menu_target = super::message_state::MenuTarget {
+            link,
+            item,
+            selection,
+            reactions_expanded: false,
+        };
         if let Some(live) = self.live.as_mut() {
             let _ = live
                 .driver
@@ -97,7 +101,7 @@ impl QuillApp {
                 .fetch_message_menu_actions(menu.chat_id, menu.message_id);
             // A poll option has its own menu facts.
             if let quill::composer::ReplyItem::PollOption(option_id) =
-                &self.screen.message_ui.menu_item
+                &self.screen.message_ui.menu_target.item
             {
                 let _ = live.driver.fetch_poll_option_properties(
                     menu.chat_id,
@@ -573,7 +577,7 @@ impl QuillApp {
             .flex_col()
             .px_1()
             .py_1();
-        if !self.message_ui.reactions_expanded {
+        if !self.message_ui.menu_target.reactions_expanded {
             let mut row = div().flex().items_center().gap(px(2.));
             for (ix, choice) in options.top.iter().take(7).enumerate() {
                 let chosen = message.chosen_reaction(choice);
@@ -626,7 +630,7 @@ impl QuillApp {
                                     );
                                 }
                                 _ => {
-                                    this.message_ui.reactions_expanded = true;
+                                    this.message_ui.menu_target.reactions_expanded = true;
                                     cx.notify();
                                 }
                             }

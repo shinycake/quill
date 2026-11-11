@@ -11,8 +11,7 @@ pub(crate) struct TwoStepUi {
     /// status screen or one of the forms; the four textareas back the
     /// enable/change/disable/recovery-email forms. Passwords live in the
     /// inputs only and are cleared on submit/close — never on the session.
-    pub(super) open: bool,
-    pub(super) view: TwofaView,
+    pub(super) stage: TwofaStage,
     pub(super) current_password: Entity<InputState>,
     /// The Privacy page's "Your password" check card. Its own field: the
     /// 2FA box stays over that page, so the box's forms and the card are
@@ -25,17 +24,91 @@ pub(crate) struct TwoStepUi {
     pub(super) new_password: Entity<InputState>,
     pub(super) hint: Entity<TextareaState>,
     pub(super) email: Entity<TextareaState>,
-    /// Slice A2 fixup: local validation notice for the 2FA forms ("enter
-    /// your current password") — the driver rejects doomed requests
-    /// silently, so the form must speak before sending.
-    pub(super) notice: Option<String>,
     /// Batch 6: code entry (recovery email, password recovery, login
     /// email) and the inline confirmation on the recovery screen.
     pub(super) code: Entity<InputState>,
-    pub(super) confirm: Option<TwofaConfirm>,
+}
+
+/// The two-step verification box: closed, or open on one view with its
+/// local notice and inline confirmation. Closing drops all of it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) enum TwofaStage {
+    #[default]
+    Closed,
+    Open {
+        view: TwofaView,
+        /// Local validation notice for the forms ("enter your current
+        /// password"): the driver rejects doomed requests silently, so the
+        /// form must speak before sending.
+        notice: Option<String>,
+        /// The inline confirmation on the recovery screen.
+        confirm: Option<TwofaConfirm>,
+    },
 }
 
 impl crate::ui::on_screen::Farewell for TwoStepUi {}
+
+impl TwoStepUi {
+    pub(crate) fn is_open(&self) -> bool {
+        self.stage != TwofaStage::Closed
+    }
+
+    /// The view on show (the status screen while closed).
+    pub(crate) fn view(&self) -> TwofaView {
+        match &self.stage {
+            TwofaStage::Open { view, .. } => *view,
+            TwofaStage::Closed => TwofaView::Status,
+        }
+    }
+
+    pub(crate) fn notice(&self) -> Option<&String> {
+        match &self.stage {
+            TwofaStage::Open { notice, .. } => notice.as_ref(),
+            TwofaStage::Closed => None,
+        }
+    }
+
+    pub(crate) fn confirm(&self) -> Option<TwofaConfirm> {
+        match &self.stage {
+            TwofaStage::Open { confirm, .. } => *confirm,
+            TwofaStage::Closed => None,
+        }
+    }
+
+    /// Open on the status screen, with no notice and no confirmation.
+    pub(crate) fn open(&mut self) {
+        self.set_view(TwofaView::Status);
+    }
+
+    /// Close; the notice and confirmation go with it.
+    pub(crate) fn close(&mut self) {
+        self.stage = TwofaStage::Closed;
+    }
+
+    /// Switch the view; a fresh form starts with no notice and no
+    /// confirmation. Opens the box when it was closed.
+    pub(crate) fn set_view(&mut self, view: TwofaView) {
+        self.stage = TwofaStage::Open {
+            view,
+            notice: None,
+            confirm: None,
+        };
+    }
+
+    /// Set the local notice line (nothing while the box is closed).
+    pub(crate) fn set_notice(&mut self, line: Option<String>) {
+        if let TwofaStage::Open { notice, .. } = &mut self.stage {
+            *notice = line;
+        }
+    }
+
+    /// Ask (`Some`) or drop (`None`) the inline confirmation.
+    pub(crate) fn set_confirm(&mut self, ask: Option<TwofaConfirm>) {
+        if let TwofaStage::Open { confirm, .. } = &mut self.stage {
+            *confirm = ask;
+        }
+    }
+}
 
 impl TwoStepUi {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
@@ -82,17 +155,14 @@ impl TwoStepUi {
                 .submit_on_enter(false)
         });
         Self {
-            open: false,
-            view: TwofaView::Status,
+            stage: TwofaStage::Closed,
             current_password: twofa_current_password,
             check_password,
             status_check_password,
             new_password: twofa_new_password,
             hint: twofa_hint,
             email: twofa_email,
-            notice: None,
             code: twofa_code,
-            confirm: None,
         }
     }
 }

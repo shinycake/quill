@@ -38,7 +38,7 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
 fn select(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, id: &str) {
     app.update_in(vcx, |app, _, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.hub.gift_selected = Some(id.into());
+            session.payments.hub.gift_view.select(Some(id.into()));
         }
         cx.notify();
     });
@@ -83,7 +83,10 @@ fn confirming_removes_the_gift_from_the_grid_and_the_box(cx: &mut TestAppContext
     assert_eq!(ids(&app, vcx), [KEPT]);
     app.read_with(vcx, |app, _| {
         let hub = app.session().map(|s| &s.payments.hub);
-        assert_eq!(hub.and_then(|h| h.gift_selected.clone()), None);
+        assert_eq!(
+            hub.and_then(|h| h.gift_view.selected().map(str::to_string)),
+            None
+        );
         assert_eq!(hub.map(|h| h.gifts_total), Some(1));
     });
 }

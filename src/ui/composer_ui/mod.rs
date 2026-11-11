@@ -714,7 +714,7 @@ impl QuillApp {
                                         ComposerAttachment::set_send_as_files(tray, !as_files)
                                     });
                                     // Back to media: read the videos again.
-                                    this.composer_sends.reads.sound_checked.clear();
+                                    this.composer_sends.reads.sound.clear_done();
                                     this.check_tray_videos(cx);
                                     cx.notify();
                                 })),

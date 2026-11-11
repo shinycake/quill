@@ -267,7 +267,7 @@ fn a_failed_create_keeps_the_dialog_open_with_a_reason() {
     assert!(create.created.is_none());
     assert!(create.creating.is_none());
     assert!(create.error.as_deref().unwrap().contains("BotFather"));
-    assert_eq!(driver.session.payments.hub.limit_toast, None);
+    assert_eq!(driver.session.payments.hub.take_limit_toast(), None);
 }
 
 #[test]
@@ -290,7 +290,7 @@ fn the_bot_limit_shows_the_premium_toast_over_the_open_dialog() {
     assert!(create.creating.is_none());
     assert_eq!(create.error, None);
     assert_eq!(
-        driver.session.payments.hub.limit_toast,
+        driver.session.payments.hub.take_limit_toast(),
         Some(crate::premium_limits::PremiumLimitKind::OwnedBots)
     );
 }

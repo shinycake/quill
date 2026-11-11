@@ -36,7 +36,7 @@ fn pin_over_the_limit_opens_the_pins_box() {
         "Maximum number of pinned chats exceeded",
     );
     assert_eq!(
-        session.payments.hub.limit_box,
+        session.payments.hub.limit_box(),
         Some((PremiumLimitKind::Pins, 0))
     );
     assert!(session.chats_state.chat_action_error.is_empty());
@@ -52,7 +52,7 @@ fn other_pin_errors_stay_error_lines() {
         Some(ChatId(11)),
         "Chat not found",
     );
-    assert_eq!(session.payments.hub.limit_box, None);
+    assert_eq!(session.payments.hub.limit_box(), None);
     assert!(!session.chats_state.chat_action_error.is_empty());
 }
 
@@ -67,7 +67,7 @@ fn joining_too_many_communities_opens_the_channels_box() {
         "CHANNELS_TOO_MUCH",
     );
     assert_eq!(
-        session.payments.hub.limit_box,
+        session.payments.hub.limit_box(),
         Some((PremiumLimitKind::Channels, 0))
     );
 }
@@ -83,10 +83,10 @@ fn public_link_and_caption_errors_route_to_their_boxes() {
         "CHANNELS_ADMIN_PUBLIC_TOO_MUCH",
     );
     assert_eq!(
-        session.payments.hub.limit_box,
+        session.payments.hub.limit_box(),
         Some((PremiumLimitKind::PublicLinks, 0))
     );
-    session.payments.hub.limit_box = None;
+    session.payments.hub.close_limit_box();
     fail(
         &mut session,
         &sink,
@@ -95,7 +95,7 @@ fn public_link_and_caption_errors_route_to_their_boxes() {
         "MEDIA_CAPTION_TOO_LONG",
     );
     assert_eq!(
-        session.payments.hub.limit_box,
+        session.payments.hub.limit_box(),
         Some((PremiumLimitKind::Caption, 0))
     );
 }
@@ -130,7 +130,7 @@ fn invite_link_join_over_the_limit_opens_the_channels_box() {
     );
     assert_eq!(session.chats_state.deep_link, None);
     assert_eq!(
-        session.payments.hub.limit_box,
+        session.payments.hub.limit_box(),
         Some((PremiumLimitKind::Channels, 0))
     );
 }
@@ -150,7 +150,7 @@ fn a_stale_invite_link_join_opens_no_limit_box() {
         "CHANNELS_TOO_MUCH",
     );
     assert_eq!(session.chats_state.deep_link, None);
-    assert_eq!(session.payments.hub.limit_box, None);
+    assert_eq!(session.payments.hub.limit_box(), None);
 }
 
 /// 05-066: a failure of the current flow's request is shown whatever stage
@@ -201,7 +201,7 @@ fn a_saved_messages_pin_over_the_limit_opens_its_own_box() {
         "The maximum number of pinned chats exceeded",
     );
     assert_eq!(
-        session.payments.hub.limit_box,
+        session.payments.hub.limit_box(),
         Some((PremiumLimitKind::SavedPins, 0))
     );
     assert!(session.chats_state.chat_action_error.is_empty());
@@ -245,9 +245,9 @@ fn the_saved_pin_check_counts_pinned_sublists_against_the_limit() {
 fn toast_kinds_queue_a_toast_instead_of_a_box() {
     let (mut session, _sink) = session();
     session.open_premium_limit(PremiumLimitKind::FavoriteStickers, 0);
-    assert_eq!(session.payments.hub.limit_box, None);
+    assert_eq!(session.payments.hub.limit_box(), None);
     assert_eq!(
-        session.payments.hub.limit_toast,
+        session.payments.hub.take_limit_toast(),
         Some(PremiumLimitKind::FavoriteStickers)
     );
 }

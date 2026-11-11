@@ -178,7 +178,8 @@ fn a_free_account_unlocks_through_the_premium_preview(cx: &mut TestAppContext) {
     click(vcx, "story-stealth-button");
     assert!(box_open(&app, vcx), "Unlock keeps the box");
     let page = app.read_with(vcx, |app, _| {
-        app.session().map(|session| session.payments.hub.promo_page)
+        app.session()
+            .map(|session| session.payments.hub.promo_page())
     });
     assert_eq!(
         page,

@@ -77,8 +77,16 @@ enum ProxySave {
 /// The "Proxy Server — Connect Proxy" confirmation for a proxy link.
 pub(crate) struct ProxyLinkBox {
     draft: ProxyDraft,
-    /// Showing the one-time "this exposes your IP" warning.
-    warn: bool,
+    step: LinkStep,
+}
+
+/// What the link box shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LinkStep {
+    /// The proxy's details, with Check Status and Connect Proxy.
+    Review,
+    /// The one-time "this exposes your IP" warning before a check.
+    Warn,
 }
 
 /// Editor validation message (tdesktop highlights the bad field; Quill
@@ -551,7 +559,10 @@ impl QuillApp {
         };
         match parsed {
             Ok(draft) => {
-                self.settings.proxy.link = Some(ProxyLinkBox { draft, warn: false });
+                self.settings.proxy.link = Some(ProxyLinkBox {
+                    draft,
+                    step: LinkStep::Review,
+                });
                 self.open_box(crate::ui::shell::DialogKind::ProxyLink);
                 if let Some(live) = self.live.as_mut() {
                     live.driver
@@ -612,7 +623,11 @@ impl QuillApp {
         let Some(link) = self.settings.proxy.link.as_mut() else {
             return;
         };
-        link.warn = !acked;
+        link.step = if acked {
+            LinkStep::Review
+        } else {
+            LinkStep::Warn
+        };
         let draft = link.draft.clone();
         if acked {
             let _ = self.proxy_driver(|driver| driver.ping_link_proxy(&draft));

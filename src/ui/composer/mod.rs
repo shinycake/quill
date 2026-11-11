@@ -138,7 +138,7 @@ impl QuillApp {
                     return;
                 }
                 // M2: the rich editor sends blocks, not text.
-                if self.chat_ui.rich_editor_open {
+                if self.chat_ui.rich.editor_open() {
                     let blocks = quill::rich::markup_to_blocks(&text);
                     self.submit_rich_composer(blocks, window, cx);
                     return;
@@ -585,9 +585,9 @@ impl QuillApp {
                 self.note_message_leaving(&typed);
                 self.remember_sent_text(request, typed);
                 self.finish_pending_send();
-                self.chat_ui.schedule_popup_open = false;
+                self.chat_ui.hide_schedule_popup();
                 self.chat_ui.set_reply(None);
-                self.chat_ui.rich_editor_open = false;
+                self.chat_ui.rich.set_editor(false);
                 self.clear_suggest_bar_after_send(chat_id);
                 self.expect_draft_clear(DraftClear::whole_composer(chat_id));
                 self.composer

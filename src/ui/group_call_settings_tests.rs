@@ -106,8 +106,12 @@ fn open_boxes(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
             crate::ui::dialogs::group_call::GroupCallTitleDialog::new(window, cx, "x"),
         );
         app.group_call_screen.settings_open = true;
-        app.screen_share.group_call = Some(77);
-        app.screen_share.privacy_for = Some(ScreenFor::Group);
+        app.screen_share.chooser = crate::ui::screen_share_state::Chooser::PrivacyBox(
+            crate::ui::screen_share_state::ChooserTarget {
+                for_call: ScreenFor::Group,
+                group_call: Some(77),
+            },
+        );
         cx.notify();
     });
 }
@@ -115,7 +119,7 @@ fn open_boxes(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
 fn boxes(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> (bool, bool, bool) {
     app.read_with(vcx, |app, _| {
         (
-            app.screen_share.privacy_for.is_some(),
+            app.screen_share.chooser.privacy_for().is_some(),
             app.group_call_screen.settings_open,
             app.group_call_screen.title_dialog.is_some(),
         )

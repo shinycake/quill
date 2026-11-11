@@ -177,19 +177,16 @@ pub struct SettingsState {
     pub account_error: Option<String>,
     /// Slice A4: cached `getConnectedWebsites` answer (TGX
     /// `SettingsWebsitesController` style); drives the Connected Websites
-    /// overlay.
-    pub connected_websites: Option<Vec<ParsedWebsite>>,
+    /// overlay. One value for the fetch: in flight, answered, or failed
+    /// with the honest one-line error (classified from the TDLib error
+    /// code, never the native message) of the last fetch or disconnect.
+    /// The cache stays visible meanwhile.
+    pub connected_websites: Fetch<Vec<ParsedWebsite>>,
     /// The account's login passkeys (`crate::passkeys`).
     pub passkeys: crate::passkeys::PasskeysState,
-    /// Slice A4: a `getConnectedWebsites` round trip is in flight.
-    pub connected_websites_loading: bool,
     /// Slice A4: a `disconnectWebsite` / `disconnectAllWebsites` round trip
     /// is in flight — disconnect buttons stay disabled meanwhile.
     pub websites_mutating: bool,
-    /// Slice A4: honest one-line failure of the last websites fetch or
-    /// disconnect (classified from the TDLib error code, never the native
-    /// message). Cleared on the next successful fetch.
-    pub websites_error: Option<String>,
     /// Slice A4: a disconnect succeeded — the old cache stays visible and
     /// is refetched from the authoritative answer on the next ingest
     /// (the `saved_sounds_stale` pattern); never an optimistic delete.
@@ -391,11 +388,9 @@ impl SettingsState {
             account_ttl_loading: false,
             account_mutating: false,
             account_error: None,
-            connected_websites: None,
             passkeys: Default::default(),
-            connected_websites_loading: false,
+            connected_websites: Fetch::Idle,
             websites_mutating: false,
-            websites_error: None,
             websites_stale: false,
             sound_file_ids: HashMap::new(),
             pending_sound_downloads: HashSet::new(),

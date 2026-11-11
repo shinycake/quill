@@ -35,7 +35,10 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
 fn open_premium(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, purchase: PremiumPurchase) {
     app.update_in(vcx, |app, _, cx| {
         let session = app.demo_session.as_mut().expect("demo session");
-        session.payments.hub.premium_open = true;
+        session
+            .payments
+            .hub
+            .open_premium_box(PromoPage::default(), "");
         session.payments.hub.purchase = purchase;
         cx.notify();
     });
@@ -49,7 +52,7 @@ fn hub_state(
     app.read_with(vcx, |app, _| {
         let hub = &app.session().expect("session").payments.hub;
         (
-            hub.premium_open,
+            hub.premium_open(),
             hub.auto_start
                 .as_ref()
                 .map(|a| (a.username.clone(), a.start_ref.clone())),
@@ -71,7 +74,7 @@ fn the_bot_from_the_app_config_gets_the_ref_and_the_dialog_closes(cx: &mut TestA
     );
     app.update_in(vcx, |app, window, cx| {
         let session = app.demo_session.as_mut().expect("demo session");
-        session.payments.hub.promo_page = PromoPage::Limits;
+        session.payments.hub.set_promo_page(PromoPage::Limits);
         app.start_premium_payment(window, cx);
     });
     vcx.run_until_parked();

@@ -7,37 +7,27 @@ use gpui_kit::*;
 pub(crate) struct PrivacyState {
     /// B13: transient state of the privacy / security extras.
     pub(super) extra: super::privacy_extra::PrivacyUi,
-    /// Slice S3: per-rule editor overlay target (Privacy screen).
-    pub(super) editor: Option<PrivacyEditorTarget>,
-    /// Slice S3: exception list overlay — the rule and always/never kind.
-    pub(super) exceptions: Option<(PrivacyEditorTarget, PrivacyExceptionKind)>,
-    /// Slice S3: add-exception contact picker inside the exceptions overlay.
-    pub(super) exception_picker_open: bool,
-    /// Slice S3: block-user contact picker inside the Privacy overlay.
-    pub(super) block_picker_open: bool,
+    /// What the Privacy page has open over itself: the rule editor, its
+    /// exceptions list and picker, the block picker, the Unblock question
+    /// or the "Last seen" warning (one at a time).
+    pub(super) layer: super::privacy_layer::PrivacyLayer,
     /// The blocked-users rows, which page near their end (`scroll_load`).
     pub(super) blocked_scroll: ScrollHandle,
     pub(super) blocked_asked: super::scroll_load::Asked,
-    /// Slice S3: two-step Unblock confirm on the Privacy screen.
-    pub(super) unblock_confirm: Option<i64>,
-    pub(super) device_qr_scanner: Option<super::device_qr::DeviceQrScanner>,
-    pub(super) device_login_qr: Option<zeroize::Zeroizing<String>>,
+    /// The "link a device" flow: scanning, or a link waiting for consent.
+    pub(super) device_link: super::device_layer::DeviceLink,
     pub(super) device_link_notice: Option<&'static str>,
-    /// Slice A3: pending terminate confirmation on the sessions overlay
-    /// (TGX `TerminateSessionQuestion` / `TerminateIncompleteSessionQuestion`
-    /// / `AreYouSureSessions`).
-    pub(super) sessions_confirm: Option<SessionsConfirm>,
+    /// The box over the sessions list: a session's details (and its rename
+    /// form) or the terminate question (TGX `TerminateSessionQuestion` /
+    /// `TerminateIncompleteSessionQuestion` / `AreYouSureSessions`).
+    pub(super) devices: super::device_layer::DeviceLayer,
     /// Slice A4: Connected Websites overlay (TGX `SettingsWebsitesController`
-    /// / `WebSessionsTitle` "Logged In with Telegram").
-    pub(super) websites_open: bool,
-    /// Slice A4: pending disconnect confirmation on the websites overlay
-    /// (TGX `TerminateWebSessionQuestion` / `DisconnectAllWebsitesHint`).
-    pub(super) websites_confirm: Option<WebsitesConfirm>,
+    /// / `WebSessionsTitle` "Logged In with Telegram") and its pending
+    /// disconnect confirmation (TGX `TerminateWebSessionQuestion` /
+    /// `DisconnectAllWebsitesHint`).
+    pub(super) websites: super::device_layer::WebsitesScreen,
     /// Passkeys: the list, its delete confirmation and the about box.
     pub(super) passkeys: super::security::passkeys::PasskeysUi,
-    /// The last seen rule waiting on the one-time warning (tdesktop
-    /// `LastSeenPrivacyController::confirmSave`).
-    pub(super) last_seen_warning: Option<quill::privacy::PrivacyRuleDetail>,
 }
 
 /// A passkey ceremony still running with the OS is cancelled
@@ -56,21 +46,14 @@ impl PrivacyState {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         Self {
             extra: super::privacy_extra::PrivacyUi::new(window, cx),
-            editor: None,
-            exceptions: None,
-            exception_picker_open: false,
-            block_picker_open: false,
+            layer: Default::default(),
             blocked_scroll: ScrollHandle::new(),
             blocked_asked: Default::default(),
-            unblock_confirm: None,
-            device_qr_scanner: None,
-            device_login_qr: None,
+            device_link: Default::default(),
             device_link_notice: None,
-            sessions_confirm: None,
-            websites_open: false,
-            websites_confirm: None,
+            devices: Default::default(),
+            websites: Default::default(),
             passkeys: Default::default(),
-            last_seen_warning: None,
         }
     }
 }

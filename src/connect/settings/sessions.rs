@@ -350,7 +350,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if (self.session.settings.connected_websites.is_some()
+        if (self.session.settings.connected_websites.data().is_some()
             && !self.session.settings.websites_stale)
             || self
                 .session
@@ -362,13 +362,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetConnectedWebsites, None);
-        self.session.settings.connected_websites_loading = true;
-        self.session.settings.websites_error = None;
+        self.session.settings.connected_websites.begin();
         match self.sender.send_json(&get_connected_websites(extra)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.connected_websites_loading = false;
+                self.session.settings.connected_websites.cancel();
                 Err(err)
             }
         }
@@ -400,12 +399,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .settings
             .connected_websites
-            .as_ref()
+            .data()
             .is_some_and(|s| s.iter().any(|s| s.id == website_id))
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.websites_error = None;
+        self.session.settings.connected_websites.clear_error();
         let extra = self.session.request(
             RequestPurpose::Settings(SettingsPurpose::DisconnectWebsite { website_id }),
             None,
@@ -435,12 +434,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .settings
             .connected_websites
-            .as_ref()
+            .data()
             .is_some_and(|s| !s.is_empty())
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.websites_error = None;
+        self.session.settings.connected_websites.clear_error();
         let extra = self
             .session
             .request(RequestPurpose::DisconnectAllWebsites, None);

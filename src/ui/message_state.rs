@@ -7,24 +7,51 @@ use quill::ids::ChatId;
 use quill::ids::MessageId;
 use std::collections::HashSet;
 
+/// The text selected when the message menu opened, if it lies in that
+/// message (Quote & Reply, Copy Selected Text).
+#[derive(Clone, Debug, Default)]
+pub(super) struct MenuSelection {
+    pub(super) text: String,
+    /// Which occurrence of `text` in the message the selection started at
+    /// (0 for the first); where Quote & Reply points.
+    pub(super) nth: usize,
+}
+
+/// What the open message menu was opened over.
+#[derive(Clone, Debug)]
+pub(super) struct MenuTarget {
+    /// The link the menu was opened over.
+    pub(super) link: Option<quill::text::LinkTarget>,
+    /// The checklist task or poll option it was opened over (the whole
+    /// message when none).
+    pub(super) item: quill::composer::ReplyItem,
+    pub(super) selection: Option<MenuSelection>,
+    /// tdesktop hover React / Unigram ReactionButton picker (emoji only):
+    /// the menu's reaction strip is expanded to every reaction.
+    pub(super) reactions_expanded: bool,
+}
+
+impl Default for MenuTarget {
+    fn default() -> Self {
+        Self {
+            link: None,
+            item: quill::composer::ReplyItem::Message,
+            selection: None,
+            reactions_expanded: false,
+        }
+    }
+}
+
 pub(crate) struct MessageUi {
     /// M1: right-click context menu target + window position.
     pub(super) menu: Option<MessageMenuState>,
-    /// Message text selected when the message menu opened, if the
-    /// selection lies in that message (Quote & Reply, Copy Selected Text).
-    pub(super) menu_selection: Option<String>,
-    /// Which occurrence of `menu_selection` in the message the selection
-    /// started at (0 for the first); where Quote & Reply points.
-    pub(super) menu_selection_nth: usize,
+    /// What the open message menu was opened over: a link, a task or
+    /// option, a text selection. Replaced whole each time a menu opens.
+    pub(super) menu_target: MenuTarget,
     /// Page, report and sticker-set dialogs of the message menu's extras.
     pub(super) menu_ui: super::message_menu_ui::MessageMenuUi,
-    /// The link the open message menu was opened over.
-    pub(super) menu_link: Option<quill::text::LinkTarget>,
     /// The link under the latest right-press, and where it was pressed.
     pub(super) right_clicked_link: Option<(Point<Pixels>, quill::text::LinkTarget)>,
-    /// The checklist task or poll option the open message menu was opened
-    /// over (the whole message when none).
-    pub(super) menu_item: quill::composer::ReplyItem,
     /// The task or option under the latest right-press, and where.
     pub(super) right_clicked_item: Option<(Point<Pixels>, quill::composer::ReplyItem)>,
     /// The "Open this link?" box (`DialogKind::OpenLink`).
@@ -35,17 +62,12 @@ pub(crate) struct MessageUi {
     /// A left press on a row that may become a drag selection, and the
     /// range it covers once it did (`selection_drag`).
     pub(super) selection_drag: Option<super::selection_drag::DragSelect>,
-    /// The 15 ms pointer poll of a held press is running.
-    pub(super) selection_drag_loop: bool,
     /// Keyboard focus of the history while selecting: a row press or a
     /// drag moves focus here, so Space, Up and Down act on the rows and
     /// not on the composer (tdesktop focuses `HistoryInner`).
     pub(super) history_focus: FocusHandle,
     /// Screen-reader focus among the history's messages (`history_a11y`).
     pub(super) a11y: super::history_a11y::HistoryA11y,
-    /// tdesktop hover React / Unigram ReactionButton picker (emoji only).
-    /// The message menu's reaction strip is expanded to every reaction.
-    pub(super) reactions_expanded: bool,
     /// M1: swipe-to-reply press origin (chat, message, press x).
     pub(super) swipe_reply_start: Option<(ChatId, MessageId, Pixels)>,
     /// Phase 4.1: revealed text-entity spoilers, keyed by
@@ -89,20 +111,15 @@ impl MessageUi {
     pub(super) fn new(window: &mut Window, cx: &mut Context<QuillApp>) -> Self {
         Self {
             menu: None,
-            menu_selection: None,
-            menu_selection_nth: 0,
+            menu_target: MenuTarget::default(),
             menu_ui: super::message_menu_ui::MessageMenuUi::new(window, cx),
-            menu_link: None,
             right_clicked_link: None,
-            menu_item: quill::composer::ReplyItem::Message,
             right_clicked_item: None,
             open_link_confirm: None,
             pending_link: None,
             selection_drag: None,
-            selection_drag_loop: false,
             history_focus: cx.focus_handle(),
             a11y: Default::default(),
-            reactions_expanded: false,
             swipe_reply_start: None,
             spoiler_revealed: HashSet::new(),
             dismissed_keyboards: std::collections::HashSet::new(),

@@ -367,9 +367,10 @@ impl Session {
         state.revoke = PublicLinkStage::Freed;
         state.public_limit_reached = Some(false);
         state.public_chats = PublicChatsFetch::None;
-        if self.payments.hub.limit_box.map(|(kind, _)| kind) == Some(PremiumLimitKind::PublicLinks)
+        if self.payments.hub.limit_box().map(|(kind, _)| kind)
+            == Some(PremiumLimitKind::PublicLinks)
         {
-            self.payments.hub.limit_box = None;
+            self.payments.hub.close_limit_box();
         }
     }
 }

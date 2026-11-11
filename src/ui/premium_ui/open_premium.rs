@@ -47,8 +47,7 @@ impl QuillApp {
             return;
         }
         if let Some(hub) = self.hub_mut() {
-            hub.premium_open = true;
-            hub.premium_ref = start_ref.into();
+            hub.open_premium_box(PromoPage::default(), start_ref);
         }
         self.open_box(DialogKind::PremiumFeatures);
         let sent = self.live.as_mut().map(|live| {
@@ -93,8 +92,7 @@ impl QuillApp {
     pub(in crate::ui) fn close_premium(&mut self, cx: &mut Context<Self>) {
         self.premium_preview.stop();
         if let Some(hub) = self.hub_mut() {
-            hub.premium_open = false;
-            hub.premium_requested = None;
+            hub.close_premium_box();
         }
         cx.notify();
     }

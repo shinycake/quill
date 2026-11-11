@@ -97,8 +97,8 @@ fn a_free_account_unlocks_both_through_the_preview(cx: &mut TestAppContext) {
     let page = app.read_with(vcx, |app, _| {
         app.session().map(|session| {
             (
-                session.payments.hub.premium_open,
-                session.payments.hub.promo_page,
+                session.payments.hub.premium_open(),
+                session.payments.hub.promo_page(),
             )
         })
     });
@@ -127,7 +127,7 @@ fn premium_applies_for_both(cx: &mut TestAppContext) {
     assert!(!look_open(&app, vcx));
     assert_eq!(chat_wallpaper(&app, vcx, chat), Some(901));
     let premium_open = app.read_with(vcx, |app, _| {
-        app.session().is_some_and(|s| s.payments.hub.premium_open)
+        app.session().is_some_and(|s| s.payments.hub.premium_open())
     });
     assert!(!premium_open);
 }

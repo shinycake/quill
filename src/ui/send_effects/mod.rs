@@ -100,6 +100,37 @@ impl Preview {
     }
 }
 
+/// The effect list under the strip: just the strip, or every effect with
+/// its search field. The field, what it asks and its change subscription
+/// exist only while the list is expanded.
+pub(super) enum EffectList {
+    Strip,
+    Expanded {
+        search: Entity<InputState>,
+        query: String,
+        _changed: Subscription,
+    },
+}
+
+/// The send menu of the card's button.
+pub(super) struct CardMenu {
+    pub(super) position: Point<Pixels>,
+    pub(super) menu: Entity<PopupMenu>,
+    _dismiss: Subscription,
+}
+
+/// The "Send with Effect" card: none, or one shown (with the one it
+/// replaced fading out, and its button's menu).
+pub(super) enum Card {
+    None,
+    Shown {
+        preview: Preview,
+        /// The card being replaced, fading out.
+        leaving: Option<Preview>,
+        menu: Option<CardMenu>,
+    },
+}
+
 pub(super) struct SendMenu {
     pub(super) chat: ChatId,
     pub(super) position: Point<Pixels>,
@@ -108,18 +139,66 @@ pub(super) struct SendMenu {
     _dismiss: Subscription,
     /// The effect picker is offered (fixed when the menu opens).
     pub(super) effects: bool,
-    pub(super) expanded: bool,
-    pub(super) search: Option<Entity<InputState>>,
-    _search_changed: Option<Subscription>,
-    pub(super) query: String,
+    pub(super) list: EffectList,
     /// The strip cell under the pointer plays its animation.
     pub(super) hovered: Option<i64>,
-    pub(super) preview: Option<Preview>,
-    /// The card being replaced, fading out.
-    pub(super) leaving: Option<Preview>,
-    /// The send menu of the card's button.
-    pub(super) card_menu: Option<(Point<Pixels>, Entity<PopupMenu>, Subscription)>,
+    pub(super) card: Card,
     pub(super) areas: Rc<Areas>,
+}
+
+impl SendMenu {
+    pub(super) fn expanded(&self) -> bool {
+        matches!(self.list, EffectList::Expanded { .. })
+    }
+
+    /// The list's search field.
+    pub(super) fn search(&self) -> Option<&Entity<InputState>> {
+        match &self.list {
+            EffectList::Expanded { search, .. } => Some(search),
+            EffectList::Strip => None,
+        }
+    }
+
+    /// What the search field asks for (trimmed).
+    pub(super) fn query(&self) -> &str {
+        match &self.list {
+            EffectList::Expanded { query, .. } => query,
+            EffectList::Strip => "",
+        }
+    }
+
+    /// The card shown.
+    pub(super) fn preview(&self) -> Option<&Preview> {
+        match &self.card {
+            Card::Shown { preview, .. } => Some(preview),
+            Card::None => None,
+        }
+    }
+
+    /// The cards to draw: the one fading out, then the one shown.
+    pub(super) fn cards(&self) -> impl Iterator<Item = &Preview> {
+        let (leaving, shown) = match &self.card {
+            Card::Shown {
+                preview, leaving, ..
+            } => (leaving.as_ref(), Some(preview)),
+            Card::None => (None, None),
+        };
+        leaving.into_iter().chain(shown)
+    }
+
+    pub(super) fn card_menu(&self) -> Option<&CardMenu> {
+        match &self.card {
+            Card::Shown { menu, .. } => menu.as_ref(),
+            Card::None => None,
+        }
+    }
+
+    /// The card's button menu closes.
+    pub(super) fn drop_card_menu(&mut self) {
+        if let Card::Shown { menu, .. } = &mut self.card {
+            *menu = None;
+        }
+    }
 }
 
 impl QuillApp {
@@ -172,14 +251,9 @@ impl QuillApp {
             menu,
             _dismiss: dismiss,
             effects: picker_offered(private, sendable, reaction_effects),
-            expanded: false,
-            search: None,
-            _search_changed: None,
-            query: String::new(),
+            list: EffectList::Strip,
             hovered: None,
-            preview: None,
-            leaving: None,
-            card_menu: None,
+            card: Card::None,
             areas: Rc::default(),
         });
         cx.notify();
@@ -207,7 +281,7 @@ impl QuillApp {
         // the menu (Escape closes it) unless the press went to the list's
         // search field or the card.
         let on_strip = open.areas.strip.get().is_some_and(|b| b.contains(&mouse));
-        if on_strip && !open.expanded {
+        if on_strip && !open.expanded() {
             let focus = open.menu.focus_handle(cx);
             window.focus(&focus, cx);
         }
@@ -236,18 +310,22 @@ impl QuillApp {
         let Some(open) = self.composer_ui.send_menu.open.as_mut() else {
             return;
         };
-        open.expanded = true;
         open.hovered = None;
-        open.search = Some(search);
-        open._search_changed = Some(changed);
+        open.list = EffectList::Expanded {
+            search,
+            query: String::new(),
+            _changed: changed,
+        };
         window.focus(&focus, cx);
         cx.notify();
     }
 
     fn send_effects_search(&mut self, query: String, cx: &mut Context<Self>) {
         let trimmed = query.trim().to_string();
-        if let Some(open) = self.composer_ui.send_menu.open.as_mut() {
-            open.query = trimmed.clone();
+        if let Some(open) = self.composer_ui.send_menu.open.as_mut()
+            && let EffectList::Expanded { query, .. } = &mut open.list
+        {
+            *query = trimmed.clone();
         }
         // Words in other languages and synonyms (tdesktop's keyword
         // dictionaries); the catalog's names answer at once.
@@ -270,12 +348,22 @@ impl QuillApp {
             .map(|bounds| bounds.center())
             .unwrap_or(open.position);
         let now = cx.background_executor().now();
-        if let Some(mut shown) = open.preview.take() {
-            shown.hiding.get_or_insert(now);
-            open.leaving = Some(shown);
-        }
-        open.card_menu = None;
-        open.preview = Some(Preview::new(effect_id, center, now));
+        let next = Preview::new(effect_id, center, now);
+        open.card = match std::mem::replace(&mut open.card, Card::None) {
+            Card::Shown { mut preview, .. } => {
+                preview.hiding.get_or_insert(now);
+                Card::Shown {
+                    preview: next,
+                    leaving: Some(preview),
+                    menu: None,
+                }
+            }
+            Card::None => Card::Shown {
+                preview: next,
+                leaving: None,
+                menu: None,
+            },
+        };
         cx.notify();
     }
 
@@ -285,10 +373,10 @@ impl QuillApp {
             return;
         };
         let now = cx.background_executor().now();
-        if let Some(preview) = open.preview.as_mut() {
+        if let Card::Shown { preview, menu, .. } = &mut open.card {
             preview.hiding.get_or_insert(now);
+            *menu = None;
         }
-        open.card_menu = None;
         cx.notify();
     }
 
@@ -362,7 +450,7 @@ impl QuillApp {
         let dismiss = cx.subscribe_in(&menu, window, |this, _, _: &DismissEvent, window, cx| {
             this.in_window_of(window, cx, |this, _, cx| {
                 if let Some(open) = this.composer_ui.send_menu.open.as_mut() {
-                    open.card_menu = None;
+                    open.drop_card_menu();
                     open.areas.card_menu.set(None);
                 }
                 cx.notify();
@@ -370,8 +458,14 @@ impl QuillApp {
         });
         let focus = menu.focus_handle(cx);
         window.focus(&focus, cx);
-        if let Some(open) = self.composer_ui.send_menu.open.as_mut() {
-            open.card_menu = Some((position, menu, dismiss));
+        if let Some(open) = self.composer_ui.send_menu.open.as_mut()
+            && let Card::Shown { menu: slot, .. } = &mut open.card
+        {
+            *slot = Some(CardMenu {
+                position,
+                menu,
+                _dismiss: dismiss,
+            });
         }
         cx.notify();
     }
@@ -416,31 +510,32 @@ impl QuillApp {
                     .snap_to_window_with_margin(px(8.))
                     .child(column),
             );
-        if open.expanded {
+        if open.expanded() {
             layer = layer.children(self.effects_panel(open, cx));
         } else {
             areas.panel.set(None);
         }
-        for preview in [open.leaving.as_ref(), open.preview.as_ref()]
-            .into_iter()
-            .flatten()
-        {
+        for preview in open.cards() {
             layer = layer.children(self.effect_card(open, preview, cx));
         }
-        if open.preview.is_none() {
+        if open.preview().is_none() {
             areas.card.set(None);
         }
-        if let Some((position, menu, _)) = open.card_menu.as_ref() {
+        if let Some(card_menu) = open.card_menu() {
             let menu_areas = areas.clone();
-            layer =
-                layer.child(
-                    anchored()
-                        .position(*position)
-                        .snap_to_window_with_margin(px(8.))
-                        .child(div().relative().child(menu.clone()).child(tracker(
-                            move |bounds| menu_areas.card_menu.set(Some(bounds)),
-                        ))),
-                );
+            layer = layer.child(
+                anchored()
+                    .position(card_menu.position)
+                    .snap_to_window_with_margin(px(8.))
+                    .child(
+                        div()
+                            .relative()
+                            .child(card_menu.menu.clone())
+                            .child(tracker(move |bounds| {
+                                menu_areas.card_menu.set(Some(bounds))
+                            })),
+                    ),
+            );
         }
         Some(
             deferred(anchored().position(point(px(0.), px(0.))).child(layer))

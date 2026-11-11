@@ -95,7 +95,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // and never closes on Escape.
     layer!(
         "screen-privacy",
-        |app| app.screen_share.privacy_for.is_some(),
+        |app| app.screen_share.chooser.privacy_for().is_some(),
         |app, _, cx| app.close_screen_privacy(cx)
     ),
     layer!(
@@ -215,9 +215,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // then the editor), like TGX's back stack.
     layer!(
         "privacy",
-        |app| app.privacy.editor.is_some()
-            || app.privacy.exceptions.is_some()
-            || app.privacy.block_picker_open,
+        |app| app.privacy.layer.is_open(),
         |app, _, cx| app.close_privacy_top(cx)
     ),
     layer!(
@@ -588,10 +586,16 @@ mod dispatch_tests {
     /// One opener per hand-drawn overlay, with the layer name it must show.
     fn openers() -> Vec<(&'static str, Opener)> {
         vec![
-            ("privacy", |app, _, _| app.privacy.editor = Some(any_rule())),
             ("privacy", |app, _, _| {
-                app.privacy.editor = Some(any_rule());
-                app.privacy.exception_picker_open = true;
+                app.privacy.layer.open_editor(any_rule())
+            }),
+            ("privacy", |app, _, _| {
+                app.privacy
+                    .layer
+                    .open_exceptions(any_rule(), crate::ui::privacy::PrivacyExceptionKind::Always);
+                app.privacy
+                    .layer
+                    .open_exception_picker(crate::ui::privacy_layer::ExceptionPicker::Contacts);
             }),
             ("story-page", |app, window, cx| {
                 app.stories.page =
@@ -651,7 +655,12 @@ mod dispatch_tests {
                 crate::ui::dialogs::group_call::GroupCallTitleDialog::new(window, cx, "x"),
             );
             app.group_call_screen.settings_open = true;
-            app.screen_share.privacy_for = Some(crate::ui::screen_share_state::ScreenFor::Group);
+            app.screen_share.chooser = crate::ui::screen_share_state::Chooser::PrivacyBox(
+                crate::ui::screen_share_state::ChooserTarget {
+                    for_call: crate::ui::screen_share_state::ScreenFor::Group,
+                    group_call: None,
+                },
+            );
             app.stories.page = Some(crate::ui::story_page::StoryPage::new(ChatId(1), window, cx));
         });
         assert_eq!(top(&app, vcx), Some("story-page"));
@@ -660,7 +669,7 @@ mod dispatch_tests {
         app.read_with(vcx, |app, _| {
             assert!(app.group_call_screen.title_dialog.is_some());
             assert!(app.group_call_screen.settings_open);
-            assert!(app.screen_share.privacy_for.is_some());
+            assert!(app.screen_share.chooser.privacy_for().is_some());
         });
     }
 
@@ -669,7 +678,7 @@ mod dispatch_tests {
         let (app, mut vcx) = new_app(cx);
         let vcx = &mut vcx;
         app.update_in(vcx, |app, window, cx| {
-            app.privacy.editor = Some(any_rule());
+            app.privacy.layer.open_editor(any_rule());
             app.stories.page = Some(crate::ui::story_page::StoryPage::new(ChatId(1), window, cx));
             app.chat_ui.link_popup = Some(crate::ui::entity_links::LinkPopup {
                 position: point(px(10.), px(10.)),
@@ -679,7 +688,7 @@ mod dispatch_tests {
         assert_eq!(top(&app, vcx), Some("link-popup"));
         vcx.simulate_keystrokes("escape");
         assert_eq!(top(&app, vcx), Some("story-page"));
-        assert!(app.read_with(vcx, |app, _| app.privacy.editor.is_some()));
+        assert!(app.read_with(vcx, |app, _| app.privacy.layer.editor().is_some()));
         vcx.simulate_keystrokes("escape");
         assert_eq!(top(&app, vcx), Some("privacy"));
         vcx.simulate_keystrokes("escape");
@@ -691,13 +700,13 @@ mod dispatch_tests {
         let (app, mut vcx) = new_app(cx);
         let vcx = &mut vcx;
         app.update_in(vcx, |app, _, _| {
-            app.privacy.editor = Some(any_rule());
+            app.privacy.layer.open_editor(any_rule());
             app.account.passcode.force_locked(true);
         });
         vcx.simulate_keystrokes("escape");
         let (still_open, still_locked) = app.read_with(vcx, |app, _| {
             (
-                app.privacy.editor.is_some(),
+                app.privacy.layer.editor().is_some(),
                 app.account.passcode.is_locked(),
             )
         });
@@ -747,6 +756,7 @@ mod dispatch_tests {
                     a.privacy.extra.file_open = Some(crate::ui::privacy_extra::FileOpenConfirm {
                         path: std::path::PathBuf::from("setup.bin"),
                         warning: quill::file_prefs::OpenWarning::Executable,
+                        remember: false,
                     });
                 },
                 |a| a.privacy.extra.file_open.is_some(),

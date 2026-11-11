@@ -144,8 +144,8 @@ fn premium_page(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<P
     app.read_with(vcx, |app, _| {
         app.session()
             .map(|s| &s.payments.hub)
-            .filter(|hub| hub.premium_open)
-            .map(|hub| hub.promo_page)
+            .filter(|hub| hub.premium_open())
+            .map(|hub| hub.promo_page())
     })
 }
 

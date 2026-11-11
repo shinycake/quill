@@ -139,11 +139,11 @@ pub(crate) struct ChatUi {
     /// `ConversationKey`). A forum's topics share the chat id, so without
     /// it an edit opened in one topic stayed in the next topic's composer.
     topic: TopicId,
-    /// M2: the rich editor is open — the composer textarea is interpreted
-    /// as block markup (`quill::rich::markup_to_blocks`) and sends via
-    /// `inputMessageRichMessage`. Opened via the ⛶ button (visible after
-    /// 3+ lines, per the anniversary post).
-    pub(super) rich_editor_open: bool,
+    /// M2: the rich editor (opened via the ⛶ button, visible after 3+
+    /// lines, per the anniversary post) and the rich draft's "discard" or
+    /// "Remove Formatting" box over the composer: its buttons act on this
+    /// chat's draft.
+    pub(super) rich: super::rich_draft::RichComposer,
     /// The composer's "send as" identity list is open.
     pub(super) send_as_open: bool,
     /// Messages of this chat whose fact-check block is expanded (tdesktop
@@ -206,9 +206,6 @@ pub(crate) struct ChatUi {
     pub(super) date_dialog: Option<super::composer_date::ComposerDateDialog>,
     /// The "Code Language" box for the fenced block under the caret.
     pub(super) code_language: Option<super::composer_shortcuts::CodeLanguageDialog>,
-    /// The rich draft's "discard" or "Remove Formatting" box: its buttons
-    /// act on this chat's draft.
-    pub(super) rich_draft_box: super::rich_draft::RichDraftBox,
     /// Delete confirm (tdesktop `DeleteMessagesBox` / Unigram popup).
     pub(super) pending_delete: Option<DeleteConfirm>,
     /// B4: pending "Stop poll" confirm (`stopPoll`, schema 1.8.67 line
@@ -228,11 +225,11 @@ pub(crate) struct ChatUi {
     /// M1: the scheduled-messages dialog (view/delete). Here so that a
     /// chat change closes it: its rows act on the chat shown.
     pub(super) scheduled_dialog_open: bool,
-    /// M1: the schedule picker popup above the composer.
-    pub(super) schedule_popup_open: bool,
-    /// The date+time picker behind the schedule popup (created when the
-    /// popup opens, see `open_schedule_picker`). Its Reschedule target is
-    /// a message id of this chat, so the picker goes with the chat.
+    /// The date+time picker: the schedule popup above the composer shows
+    /// while it is set (created when the popup opens, see
+    /// `open_schedule_picker`; hiding the popup drops it). Its Reschedule
+    /// target is a message id of this chat, so the picker goes with the
+    /// chat.
     pub(super) schedule_picker: Option<super::scheduled::SchedulePicker>,
     /// Phase 4.2: poll creation dialog (open above the composer). Here so
     /// that a chat change closes it: Create posts to the chat shown.
@@ -264,6 +261,25 @@ pub(crate) struct ChatUi {
 }
 
 impl ChatUi {
+    /// Hide the schedule popup above the composer. The share box's schedule
+    /// step is not that popup and stays.
+    pub(super) fn hide_schedule_popup(&mut self) {
+        if self
+            .schedule_picker
+            .as_ref()
+            .is_some_and(|picker| picker.target != super::scheduled::ScheduleTarget::Share)
+        {
+            self.schedule_picker = None;
+        }
+    }
+
+    /// The popup above the composer is showing.
+    pub(super) fn schedule_popup_shown(&self) -> bool {
+        self.schedule_picker
+            .as_ref()
+            .is_some_and(|picker| picker.target != super::scheduled::ScheduleTarget::Share)
+    }
+
     /// A fresh value for `chat`.
     pub(super) fn for_chat(chat: Option<ChatId>) -> Self {
         Self {
@@ -588,7 +604,7 @@ impl QuillApp {
                 // draft. A Saved sublist or a thread inside a forum topic
                 // keeps the draft slot, so no switch path restores it.
                 let field_is_not_the_draft =
-                    self.chat_ui.is_editing() || self.chat_ui.rich_editor_open;
+                    self.chat_ui.is_editing() || self.chat_ui.rich.editor_open();
                 self.replace_chat_ui(next);
                 if field_is_not_the_draft {
                     self.request_draft_restore();

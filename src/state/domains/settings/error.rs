@@ -254,18 +254,19 @@ impl Session {
             // retry is user-driven via the Refresh button. The old
             // cache stays visible.
             Some(RequestPurpose::GetConnectedWebsites) => {
-                self.settings.connected_websites_loading = false;
                 self.settings.websites_stale = false;
-                self.settings.websites_error =
-                    Some(sessions_error_line("load the websites list", err));
+                self.settings
+                    .connected_websites
+                    .fail(sessions_error_line("load the websites list", err));
             }
             Some(
                 RequestPurpose::Settings(SettingsPurpose::DisconnectWebsite { .. })
                 | RequestPurpose::DisconnectAllWebsites,
             ) => {
                 self.settings.websites_mutating = false;
-                self.settings.websites_error =
-                    Some(sessions_error_line("disconnect the website", err));
+                self.settings
+                    .connected_websites
+                    .fail(sessions_error_line("disconnect the website", err));
             }
             _ => {}
         }

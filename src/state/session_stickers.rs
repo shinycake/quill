@@ -11,10 +11,17 @@ impl Session {
             &self.stickers.stickers.favorites,
             &self.stickers.stickers.found_stickers,
             &self.stickers.stickers.suggestions,
-            &self.payments.hub.premium_stickers,
         ]
         .into_iter()
         .flatten()
+        .chain(
+            self.payments
+                .hub
+                .premium_stickers
+                .data()
+                .into_iter()
+                .flatten(),
+        )
         .chain(self.media.media_library.set_stickers.values().flatten())
         .find(|sticker| sticker.file_id == file_id)
     }

@@ -448,8 +448,7 @@ fn websites_answer_replaces_cache_for_matching_request() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetConnectedWebsites, None);
-    session.settings.connected_websites_loading = true;
-    session.settings.websites_error = Some("stale".into());
+    session.settings.connected_websites.begin();
     apply_json(
         &mut session,
         &seq,
@@ -459,11 +458,7 @@ fn websites_answer_replaces_cache_for_matching_request() {
             extra.0,
         ),
     );
-    let websites = session
-        .settings
-        .connected_websites
-        .as_ref()
-        .expect("cached");
+    let websites = session.settings.connected_websites.data().expect("cached");
     assert_eq!(websites.len(), 1);
     let site = &websites[0];
     assert_eq!(site.id, 55);
@@ -474,8 +469,8 @@ fn websites_answer_replaces_cache_for_matching_request() {
     assert_eq!(site.log_in_date, 1758900000);
     assert_eq!(site.ip_address, "9.9.9.9");
     assert_eq!(site.location, "Boston, United States");
-    assert!(!session.settings.connected_websites_loading);
-    assert!(session.settings.websites_error.is_none());
+    assert!(!session.settings.connected_websites.is_loading());
+    assert!(session.settings.connected_websites.error().is_none());
     assert!(!session.settings.websites_stale);
 }
 
@@ -483,24 +478,21 @@ fn websites_answer_replaces_cache_for_matching_request() {
 fn websites_answer_ignored_without_matching_request() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.connected_websites = Some(Vec::new());
+    session.settings.connected_websites = crate::state::fetch::Fetch::Ready(Vec::new());
     apply_json(
         &mut session,
         &seq,
         &sink,
         r#"{"@type":"connectedWebsites","websites":[{"@type":"connectedWebsite","id":55,"domain_name":"example.com"}]}"#,
     );
-    assert_eq!(
-        session.settings.connected_websites.as_ref().unwrap().len(),
-        0
-    );
+    assert_eq!(session.settings.connected_websites.data().unwrap().len(), 0);
 }
 
 #[test]
 fn disconnect_website_ok_keeps_cache_and_marks_stale() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.connected_websites = Some(vec![ParsedWebsite {
+    session.settings.connected_websites = crate::state::fetch::Fetch::Ready(vec![ParsedWebsite {
         id: 55,
         domain_name: "example.com".into(),
         bot_user_id: 77,
@@ -524,13 +516,10 @@ fn disconnect_website_ok_keeps_cache_and_marks_stale() {
     );
     // The old cache stays visible until the authoritative refetch
     // replaces it — no optimistic deletion.
-    assert_eq!(
-        session.settings.connected_websites.as_ref().unwrap().len(),
-        1
-    );
+    assert_eq!(session.settings.connected_websites.data().unwrap().len(), 1);
     assert!(session.settings.websites_stale);
     assert!(!session.settings.websites_mutating);
-    assert!(session.settings.websites_error.is_none());
+    assert!(session.settings.connected_websites.error().is_none());
 }
 
 #[test]
@@ -550,7 +539,7 @@ fn disconnect_all_websites_error_surfaces_honestly() {
     );
     assert!(!session.settings.websites_mutating);
     assert_eq!(
-        session.settings.websites_error.as_deref(),
+        session.settings.connected_websites.error(),
         Some("Could not disconnect the website: Telegram refused the request")
     );
 }
@@ -559,7 +548,7 @@ fn disconnect_all_websites_error_surfaces_honestly() {
 fn websites_fetch_error_clears_loading() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.connected_websites_loading = true;
+    session.settings.connected_websites.begin();
     // A failed stale-refetch (e.g. after a disconnect-ok marked the
     // cache stale) must NOT leave the cache stale — otherwise the
     // next ingest retries the fetch and flood state worsens.
@@ -574,12 +563,12 @@ fn websites_fetch_error_clears_loading() {
             extra.0
         ),
     );
-    assert!(!session.settings.connected_websites_loading);
+    assert!(!session.settings.connected_websites.is_loading());
     // The failed stale-refetch clears staleness: no auto-retry on
     // the next ingest; the user retries via the Refresh button.
     assert!(!session.settings.websites_stale);
     assert_eq!(
-        session.settings.websites_error.as_deref(),
+        session.settings.connected_websites.error(),
         Some("Could not load the websites list: try again in 3 seconds")
     );
 }

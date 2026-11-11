@@ -229,7 +229,7 @@ impl QuillApp {
                     .on_close(on_close);
             };
             let draft = link.draft.clone();
-            let warn = link.warn;
+            let warn = link.step == super::LinkStep::Warn;
             let ping = this
                 .session()
                 .and_then(|s| s.settings.proxy.pings.get(&LINK_PING_ID).copied());

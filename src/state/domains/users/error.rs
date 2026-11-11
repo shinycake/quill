@@ -14,16 +14,7 @@ impl Session {
         // The failed check is over: its text no longer reads "Checking…".
         // A superseded check (the person typed on) is not the current one:
         // its failure says nothing about the text now being checked.
-        let current_check = extra.is_some()
-            && self
-                .users_state
-                .username_check_pending
-                .as_ref()
-                .map(|(id, _)| *id)
-                == extra;
-        if current_check {
-            self.users_state.username_check_pending = None;
-        }
+        let current_check = extra.is_some_and(|id| self.users_state.username_check.end(id));
         if pending.map(|p| p.purpose) == Some(RequestPurpose::CheckUsername) && !current_check {
             return;
         }

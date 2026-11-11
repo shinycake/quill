@@ -162,8 +162,7 @@ impl QuillApp {
                 let qr = self
                     .privacy
                     .passkeys
-                    .ceremony
-                    .as_ref()
+                    .ceremony()
                     .and_then(|ui| ui.qr.as_ref())
                     .map(|qr| (Arc::clone(&qr.image), qr.side))
                     .filter(|_| bluetooth);
@@ -234,8 +233,7 @@ impl QuillApp {
         if let Some(ceremony) = self
             .privacy
             .passkeys
-            .ceremony
-            .as_ref()
+            .ceremony()
             .and_then(|ui| ui.ceremony.as_ref())
         {
             ceremony.use_security_key();

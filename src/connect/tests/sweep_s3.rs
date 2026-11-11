@@ -26,8 +26,12 @@ fn a_send_error_later_in_the_ingest_keeps_the_captured_answer() {
     let result = driver.ingest(copy_and_parse(&json, &seq, &sink).expect("parse"));
     assert!(result.is_err(), "the later send really failed");
     assert_eq!(
-        driver.session.users_state.username_check,
-        Some(("quill".to_string(), UsernameCheckResult::Available)),
+        driver
+            .session
+            .users_state
+            .username_check
+            .verdict_for("quill"),
+        Some(UsernameCheckResult::Available),
         "the verdict is stashed before the failing step"
     );
 }
@@ -46,7 +50,6 @@ fn a_grams_peer_request_that_never_left_is_asked_again() {
         date: 1,
         kind: TonTxKind::SuggestedPostPayment { chat_id: 13 },
     });
-    driver.session.payments.hub.grams.peers_dirty = true;
     sender.refuse(true);
     assert!(!driver.grams_tick(false), "nothing left");
     assert!(driver.session.payments.hub.grams.asked_chats.is_empty());

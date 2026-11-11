@@ -18,11 +18,11 @@ impl QuillApp {
         };
         if !hub.stars_open
             || hub.tx_selected.is_some()
-            || (hub.tx_error.is_some() && !scrolled)
+            || (hub.tx.error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.payments.stars_scroll),
                 !hub.tx_offset.is_empty(),
-                hub.tx_loading,
+                hub.tx.is_loading(),
             )
             || !self
                 .payments
@@ -46,12 +46,12 @@ impl QuillApp {
             return;
         };
         if !hub.gifts_open
-            || hub.gift_selected.is_some()
-            || (hub.gifts_error.is_some() && !scrolled)
+            || hub.gift_view.selected().is_some()
+            || (hub.gifts_page.error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.payments.gifts_scroll),
                 !hub.gifts_offset.is_empty(),
-                hub.gifts_loading,
+                hub.gifts_page.is_loading(),
             )
             || !self.payments.gifts_asked.allow(hub.gifts.len(), scrolled)
         {
@@ -73,11 +73,11 @@ impl QuillApp {
         };
         if !grams.open
             || grams.selected.is_some()
-            || (grams.error.is_some() && !scrolled)
+            || (grams.history.error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.payments.grams_scroll),
                 grams.has_more(),
-                grams.loading,
+                grams.history.is_loading(),
             )
             || !self
                 .payments

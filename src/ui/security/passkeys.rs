@@ -30,27 +30,184 @@ const ABOUT: quill::lang::Key = keys::SETTINGS_PASSKEYS_ABOUT;
 const BUTTON_ABOUT: quill::lang::Key = keys::Q_PREFS_YOUR_PASSKEY_IS_STORED_SECURELY;
 const ICON_SIZE: f32 = 32.;
 
-/// Which passkey surfaces are open.
-#[derive(Debug, Default)]
-pub(in crate::ui) struct PasskeysUi {
+/// Which passkey surface is on top.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(in crate::ui) enum PasskeysScreen {
+    #[default]
+    Closed,
     /// The Passkeys list.
-    pub(in crate::ui) list_open: bool,
-    /// The "Protect your account" box (`PasskeysNoneBox`).
-    pub(in crate::ui) about_open: bool,
-    /// The passkey the delete confirmation asks about.
-    pub(in crate::ui) confirm: Option<String>,
-    /// The ceremony dialog over the box (`passkey_ceremony`).
-    pub(in crate::ui) ceremony: Option<super::passkey_ceremony::CeremonyUi>,
+    List,
+    /// The delete confirmation over the list, for this passkey.
+    ConfirmDelete(String),
+    /// The "Protect your account" box (`PasskeysNoneBox`), over the list
+    /// when `list_below`, alone when opened from the row.
+    About { list_below: bool },
+}
+
+/// The ceremony dialog over the box (`passkey_ceremony`) and the ticker
+/// that follows it. The ticker is held while it runs; dropping it stops
+/// it: the lock does (`close_passkey_ceremony_for_lock`), so nothing ticks
+/// a ceremony under the lock.
+#[derive(Default)]
+pub(in crate::ui) enum PasskeyRun {
+    #[default]
+    Idle,
+    /// The ticker waits for the options of a ceremony to land.
+    Waiting { ticker: gpui_kit::Task<()> },
+    /// The ceremony shows; its ticker follows it while it runs.
+    Showing {
+        ui: super::passkey_ceremony::CeremonyUi,
+        ticker: Option<gpui_kit::Task<()>>,
+    },
+}
+
+/// Which passkey surfaces are open.
+#[derive(Default)]
+pub(in crate::ui) struct PasskeysUi {
+    pub(in crate::ui) screen: PasskeysScreen,
+    pub(in crate::ui) run: PasskeyRun,
     /// The PIN field of the ceremony, kept so it is made once.
     pub(in crate::ui) pin_input: Option<Entity<gpui_kit::component::input::InputState>>,
-    /// The ceremony ticker, held while it runs. Dropping it stops it: the
-    /// lock does (`close_passkey_ceremony_for_lock`), so nothing ticks a
-    /// ceremony under the lock.
-    pub(in crate::ui) ticker: Option<gpui_kit::Task<()>>,
     /// Demos without a session: show "Log in using passkey".
     pub(in crate::ui) demo_login_link: bool,
     /// Demos without a session: the error line under the link.
     pub(in crate::ui) demo_login_error: Option<String>,
+}
+
+impl PasskeysUi {
+    pub(in crate::ui) fn list_open(&self) -> bool {
+        matches!(
+            self.screen,
+            PasskeysScreen::List
+                | PasskeysScreen::ConfirmDelete(_)
+                | PasskeysScreen::About { list_below: true }
+        )
+    }
+
+    pub(in crate::ui) fn about_open(&self) -> bool {
+        matches!(self.screen, PasskeysScreen::About { .. })
+    }
+
+    /// The passkey the delete confirmation asks about.
+    pub(in crate::ui) fn confirm(&self) -> Option<&str> {
+        match &self.screen {
+            PasskeysScreen::ConfirmDelete(id) => Some(id),
+            _ => None,
+        }
+    }
+
+    pub(in crate::ui) fn open_list(&mut self) {
+        self.screen = PasskeysScreen::List;
+    }
+
+    pub(in crate::ui) fn open_about(&mut self) {
+        self.screen = PasskeysScreen::About {
+            list_below: self.list_open(),
+        };
+    }
+
+    /// The about box closes: back to the list under it, if there was one.
+    pub(in crate::ui) fn close_about(&mut self) {
+        if let PasskeysScreen::About { list_below } = self.screen {
+            self.screen = if list_below {
+                PasskeysScreen::List
+            } else {
+                PasskeysScreen::Closed
+            };
+        }
+    }
+
+    pub(in crate::ui) fn ask_delete(&mut self, id: String) {
+        self.screen = PasskeysScreen::ConfirmDelete(id);
+    }
+
+    /// Cancel or done: back to the list.
+    pub(in crate::ui) fn dismiss_confirm(&mut self) {
+        if matches!(self.screen, PasskeysScreen::ConfirmDelete(_)) {
+            self.screen = PasskeysScreen::List;
+        }
+    }
+
+    /// Every surface closes; a ticker that still runs stays.
+    pub(in crate::ui) fn close_all(&mut self) {
+        self.screen = PasskeysScreen::Closed;
+        self.take_ceremony();
+        self.demo_login_link = false;
+        self.demo_login_error = None;
+    }
+
+    pub(in crate::ui) fn ceremony(&self) -> Option<&super::passkey_ceremony::CeremonyUi> {
+        match &self.run {
+            PasskeyRun::Showing { ui, .. } => Some(ui),
+            _ => None,
+        }
+    }
+
+    pub(in crate::ui) fn ceremony_mut(
+        &mut self,
+    ) -> Option<&mut super::passkey_ceremony::CeremonyUi> {
+        match &mut self.run {
+            PasskeyRun::Showing { ui, .. } => Some(ui),
+            _ => None,
+        }
+    }
+
+    /// Show `ui`; a ticker that runs keeps following it.
+    pub(in crate::ui) fn show_ceremony(&mut self, ui: super::passkey_ceremony::CeremonyUi) {
+        self.run = match std::mem::take(&mut self.run) {
+            PasskeyRun::Waiting { ticker } => PasskeyRun::Showing {
+                ui,
+                ticker: Some(ticker),
+            },
+            PasskeyRun::Showing { ticker, .. } => PasskeyRun::Showing { ui, ticker },
+            PasskeyRun::Idle => PasskeyRun::Showing { ui, ticker: None },
+        };
+    }
+
+    /// Take the ceremony off the screen; a ticker that runs stays.
+    pub(in crate::ui) fn take_ceremony(&mut self) -> Option<super::passkey_ceremony::CeremonyUi> {
+        match std::mem::take(&mut self.run) {
+            PasskeyRun::Showing { ui, ticker } => {
+                if let Some(ticker) = ticker {
+                    self.run = PasskeyRun::Waiting { ticker };
+                }
+                Some(ui)
+            }
+            other => {
+                self.run = other;
+                None
+            }
+        }
+    }
+
+    pub(in crate::ui) fn ticking(&self) -> bool {
+        matches!(
+            self.run,
+            PasskeyRun::Waiting { .. }
+                | PasskeyRun::Showing {
+                    ticker: Some(_),
+                    ..
+                }
+        )
+    }
+
+    pub(in crate::ui) fn set_ticker(&mut self, ticker: gpui_kit::Task<()>) {
+        self.run = match std::mem::take(&mut self.run) {
+            PasskeyRun::Showing { ui, .. } => PasskeyRun::Showing {
+                ui,
+                ticker: Some(ticker),
+            },
+            PasskeyRun::Waiting { .. } | PasskeyRun::Idle => PasskeyRun::Waiting { ticker },
+        };
+    }
+
+    /// Drop the ticker (stopping it); the ceremony shown stays.
+    pub(in crate::ui) fn stop_ticker(&mut self) {
+        self.run = match std::mem::take(&mut self.run) {
+            PasskeyRun::Showing { ui, .. } => PasskeyRun::Showing { ui, ticker: None },
+            PasskeyRun::Waiting { .. } | PasskeyRun::Idle => PasskeyRun::Idle,
+        };
+    }
 }
 
 impl QuillApp {
@@ -102,26 +259,19 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn open_passkeys(&mut self, cx: &mut Context<Self>) {
-        let ui = &mut self.privacy.passkeys;
-        ui.list_open = true;
-        ui.confirm = None;
+        self.privacy.passkeys.open_list();
         self.request_passkeys();
         cx.notify();
     }
 
     pub(in crate::ui) fn open_passkeys_about(&mut self, cx: &mut Context<Self>) {
-        self.privacy.passkeys.about_open = true;
+        self.privacy.passkeys.open_about();
         self.open_box(DialogKind::PasskeysAbout);
         cx.notify();
     }
 
     fn close_passkeys(&mut self, cx: &mut Context<Self>) {
-        let ui = &mut self.privacy.passkeys;
-        *ui = PasskeysUi {
-            pin_input: ui.pin_input.take(),
-            ticker: ui.ticker.take(),
-            ..PasskeysUi::default()
-        };
+        self.privacy.passkeys.close_all();
         cx.notify();
     }
 
@@ -129,14 +279,14 @@ impl QuillApp {
         if let Some(session) = self.live_or_demo_session_mut() {
             session.settings.passkeys.error = None;
         }
-        self.privacy.passkeys.confirm = Some(passkey_id);
+        self.privacy.passkeys.ask_delete(passkey_id);
         cx.notify();
     }
 
     /// Cancel / Esc on the confirmation: back to the list, without the
     /// failed attempt's error.
     fn dismiss_delete_passkey(&mut self, cx: &mut Context<Self>) {
-        self.privacy.passkeys.confirm = None;
+        self.privacy.passkeys.dismiss_confirm();
         if let Some(session) = self.live_or_demo_session_mut()
             && session.settings.passkeys.removing.is_none()
         {
@@ -155,7 +305,7 @@ impl QuillApp {
     /// The confirmation's Delete: `removeLoginPasskey`. The confirmation
     /// closes once the server confirmed (the passkey left the list).
     pub(in crate::ui) fn confirm_delete_passkey(&mut self, cx: &mut Context<Self>) {
-        let Some(id) = self.privacy.passkeys.confirm.clone() else {
+        let Some(id) = self.privacy.passkeys.confirm().map(str::to_string) else {
             return;
         };
         if let Some(live) = self.live.as_mut() {
@@ -317,10 +467,10 @@ impl QuillApp {
                         .child(tr(ABOUT)),
                 );
             // A confirmation whose passkey is gone (removed) is done.
-            if let Some(id) = this.privacy.passkeys.confirm.as_deref()
+            if let Some(id) = this.privacy.passkeys.confirm()
                 && state.find(id).is_none()
             {
-                this.privacy.passkeys.confirm = None;
+                this.privacy.passkeys.dismiss_confirm();
             }
             if let Some(error) = state.error.clone() {
                 body = body.child(
@@ -391,8 +541,7 @@ impl QuillApp {
             let passkey = this
                 .privacy
                 .passkeys
-                .confirm
-                .as_deref()
+                .confirm()
                 .and_then(|id| state.find(id))
                 .cloned();
             let busy = state.removing.is_some();
@@ -453,7 +602,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::PasskeysAbout, |this, _, cx| {
-                this.privacy.passkeys.about_open = false;
+                this.privacy.passkeys.close_about();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
@@ -636,7 +785,7 @@ crate::ui::shell::register_dialogs! {
     PasskeyDelete => DialogSpec::new(
         // Before the list, so it shows instead of it and closes back to it.
         610,
-        |app| app.privacy.passkeys.confirm.as_deref().is_some_and(|id| {
+        |app| app.privacy.passkeys.confirm().is_some_and(|id| {
             // Closes once the server confirmed the removal.
             app.session()
                 .is_some_and(|s| s.settings.passkeys.find(id).is_some())
@@ -648,18 +797,18 @@ crate::ui::shell::register_dialogs! {
     /// "Protect your account" (`PasskeysNoneBox`).
     PasskeysAbout => DialogSpec::new(
         620,
-        |app| app.privacy.passkeys.about_open,
+        |app| app.privacy.passkeys.about_open(),
         QuillApp::build_passkeys_about_dialog,
     )
     .close(|app, _, cx| {
-            app.privacy.passkeys.about_open = false;
+            app.privacy.passkeys.close_about();
             cx.notify();
         }),
 
     /// The Passkeys list.
     Passkeys => DialogSpec::new(
         630,
-        |app| app.privacy.passkeys.list_open,
+        |app| app.privacy.passkeys.list_open(),
         QuillApp::build_passkeys_dialog,
     )
     .close(|app, _, cx| app.close_passkeys(cx)),

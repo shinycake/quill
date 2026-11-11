@@ -128,8 +128,10 @@ fn closing_settings_closes_the_privacy_editor(cx: &mut TestAppContext) {
     frames(vcx);
     assert!(vcx.update(|window, _| !window.find_all("privacy-close-editor").is_empty()));
     app.update(vcx, |app, cx| {
-        let rule = app.privacy.editor.expect("the rule editor is open");
-        app.privacy.exceptions = Some((rule, PrivacyExceptionKind::Always));
+        let rule = app.privacy.layer.editor().expect("the rule editor is open");
+        app.privacy
+            .layer
+            .open_exceptions(rule, PrivacyExceptionKind::Always);
         cx.notify();
     });
     frames(vcx);
@@ -140,8 +142,11 @@ fn closing_settings_closes_the_privacy_editor(cx: &mut TestAppContext) {
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert!(!app.settings.open);
-        assert!(app.privacy.editor.is_none(), "the editor closed");
-        assert!(app.privacy.exceptions.is_none(), "the exceptions closed");
+        assert!(app.privacy.layer.editor().is_none(), "the editor closed");
+        assert!(
+            app.privacy.layer.exceptions().is_none(),
+            "the exceptions closed"
+        );
     });
     assert!(vcx.update(|window, _| window.find_all("privacy-close-editor").is_empty()));
     assert!(vcx.update(|window, _| window.find_all("privacy-close-exceptions").is_empty()));
@@ -315,7 +320,7 @@ fn aborting_the_recovery_email_asks_inside_the_2fa_box(cx: &mut TestAppContext) 
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert_eq!(
-            app.twofa.confirm,
+            app.twofa.confirm(),
             Some(crate::ui::dialogs::TwofaConfirm::AbortRecoveryEmail)
         );
         assert!(app.admin.group_confirm_dialog.is_none(), "no box under it");

@@ -330,9 +330,7 @@ impl Session {
                 // clears any stale error. No optimistic mutation ever
                 // happens client-side.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetConnectedWebsites) {
-                    self.settings.connected_websites = Some(websites);
-                    self.settings.connected_websites_loading = false;
-                    self.settings.websites_error = None;
+                    self.settings.connected_websites.succeed(websites);
                     self.settings.websites_stale = false;
                 }
             }

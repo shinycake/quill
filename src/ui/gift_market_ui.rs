@@ -612,7 +612,7 @@ crate::ui::shell::register_dialogs! {
         3860,
         |app| {
             !app.gift_market.stack.is_empty()
-                && !app.session().is_some_and(|s| s.payments.hub.premium_open)
+                && !app.session().is_some_and(|s| s.payments.hub.premium_open())
         },
         QuillApp::build_gift_market_dialog,
     )

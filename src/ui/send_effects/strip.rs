@@ -92,8 +92,7 @@ impl QuillApp {
         // The strip rests while a card shows; one hiding (or faded out,
         // which stays in `preview` until the menu closes) lets it play.
         let paused = open
-            .preview
-            .as_ref()
+            .preview()
             .is_some_and(|preview| preview.hiding.is_none());
         let theme = cx.theme();
         let (hover_bg, muted) = (theme.accent, theme.muted_foreground);

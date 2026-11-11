@@ -2,6 +2,7 @@
 //! waits for a separate affirmative action in the account's Sessions dialog.
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
+use super::device_layer::DeviceLink;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use std::io::Read;
@@ -70,8 +71,7 @@ impl Drop for DeviceQrScanner {
 }
 impl QuillApp {
     pub(super) fn scan_device_qr(&mut self, cx: &mut Context<Self>) {
-        if self.privacy.device_qr_scanner.is_some()
-            || self.privacy.device_login_qr.is_some()
+        if !self.privacy.device_link.is_idle()
             || !self.live.as_ref().is_some_and(|live| {
                 matches!(
                     live.driver.session.auth,
@@ -83,7 +83,7 @@ impl QuillApp {
         }
         self.privacy.device_link_notice = None;
         match DeviceQrScanner::start() {
-            Ok(scanner) => self.privacy.device_qr_scanner = Some(scanner),
+            Ok(scanner) => self.privacy.device_link = DeviceLink::Scanning(scanner),
             Err(error) => self.privacy.device_link_notice = Some(error),
         }
         cx.notify();
@@ -118,15 +118,15 @@ impl QuillApp {
         }
         let event = self
             .privacy
-            .device_qr_scanner
-            .as_mut()
+            .device_link
+            .scanner_mut()
             .and_then(DeviceQrScanner::poll);
         let Some(event) = event else {
             return;
         };
-        self.privacy.device_qr_scanner = None;
+        self.privacy.device_link = DeviceLink::Idle;
         match event {
-            ScanEvent::Login(link) => self.privacy.device_login_qr = Some(link),
+            ScanEvent::Login(link) => self.privacy.device_link = DeviceLink::Consent(link),
             ScanEvent::Cancelled => {}
             ScanEvent::Failed => {
                 self.privacy.device_link_notice =
@@ -141,7 +141,7 @@ impl QuillApp {
     /// through the same validation and explicit consent step as a scan; it
     /// is never logged.
     pub(super) fn paste_device_login_link(&mut self, cx: &mut Context<Self>) {
-        if self.privacy.device_login_qr.is_some()
+        if self.privacy.device_link.consent().is_some()
             || !self.live.as_ref().is_some_and(|live| {
                 matches!(
                     live.driver.session.auth,
@@ -158,7 +158,7 @@ impl QuillApp {
         match link {
             Some(link) if quill::auth::is_device_login_qr(&link) => {
                 self.privacy.device_link_notice = None;
-                self.privacy.device_login_qr = Some(link);
+                self.privacy.device_link = DeviceLink::Consent(link);
             }
             _ => {
                 self.privacy.device_link_notice =
@@ -168,7 +168,7 @@ impl QuillApp {
         cx.notify();
     }
     pub(super) fn confirm_scanned_device(&mut self, cx: &mut Context<Self>) {
-        let Some(link) = self.privacy.device_login_qr.take() else {
+        let Some(link) = self.privacy.device_link.take_consent() else {
             return;
         };
         let result = self
@@ -186,8 +186,7 @@ impl QuillApp {
     /// changed): the answer of a link attempt that is still out goes with
     /// it, so the next visit does not show it as news.
     pub(super) fn clear_device_qr(&mut self) {
-        self.privacy.device_qr_scanner = None;
-        self.privacy.device_login_qr = None;
+        self.privacy.device_link = DeviceLink::Idle;
         self.privacy.device_link_notice = None;
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.device_login_result = None;

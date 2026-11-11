@@ -284,7 +284,6 @@ impl QuillApp {
             send_effect: 0,
             slot,
         });
-        self.chat_ui.schedule_popup_open = true;
         cx.notify();
     }
 
@@ -294,7 +293,6 @@ impl QuillApp {
             self.chat_ui.schedule_picker.as_ref().map(|p| p.target),
             Some(ScheduleTarget::Reschedule(_) | ScheduleTarget::RescheduleSelected)
         );
-        self.chat_ui.schedule_popup_open = false;
         self.chat_ui.schedule_picker = None;
         if reopen {
             self.open_scheduled_dialog(cx);
@@ -359,7 +357,6 @@ impl QuillApp {
         } else {
             0
         };
-        self.chat_ui.schedule_popup_open = false;
         match target {
             ScheduleTarget::Composer => {
                 // The picker's own chat, which may no longer be on screen.

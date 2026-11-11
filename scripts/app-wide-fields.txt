@@ -178,17 +178,8 @@ group_call.stage_volume.slider | the popover's slider, as stage_volume.sender
 group_call.stage_volume._events | the slider's subscription, as stage_volume.sender
 group_call.stream * | the stream window's player, photo, controls and overlay; `clear` runs when the call shown is no stream; the join wait is the screen's (`group_call_screen.stream_joining`)
 group_call.live_pip * | the live picture-in-picture link; it carries its account (`account`), and enlarge closes it for any other
-screen_share.window | the share chooser window, closed by the screen's goodbye (`CallScreen`)
-screen_share.opening | the chooser's listing, tagged with the screen that asked: another screen's never blocks
-screen_share.for_call | which call the chooser shares to: one or the video chat, of the client on screen; cleared when the chooser closes
-screen_share.for_call.Private.0 | the call id of for_call, cleared with it
-screen_share.sources * | the windows and screens listed
-screen_share.selected | the source picked
-screen_share.with_audio | share sound with it
+screen_share.chooser * | the share chooser: its listing (tagged with the screen that asked: another screen's never blocks), its window (closed by the screen's goodbye, `CallScreen`), the windows and screens listed, the source picked, and the screen recording permission box; each names the call it shares into (one, or the video chat), and another call or none closes them
 screen_share.generation | which listing may land
-screen_share.privacy_for | the screen recording permission box's call; cleared by the screen's goodbye
-screen_share.privacy_for.Private.0 | the call id of privacy_for, cleared with it
-screen_share.group_call | the video chat id a Group chooser or box was opened for; another call or none closes them, and the screen's goodbye closes both
 screen_share.backend | the capture backend
 screen_share.demo_active | the screenshot demos' shared source
 screen_share.demo_active_audio | the screenshot demos' shared sound

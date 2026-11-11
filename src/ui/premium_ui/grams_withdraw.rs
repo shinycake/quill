@@ -21,7 +21,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::gift_manage::ExportError;
 use quill::lang::{keys, tr};
-use quill::premium_hub::ton::GramWithdraw;
+use quill::premium_hub::ton::{GramWithdraw, WithdrawOutcome};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -144,7 +144,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (url, too_small, showing, idle) = match self.grams_mut() {
+        let (outcome, showing, idle) = match self.grams_mut() {
             Some(grams) => {
                 let showing =
                     grams.open && matches!(grams.withdraw, Some(GramWithdraw::Password { .. }));
@@ -153,14 +153,9 @@ impl QuillApp {
                         .withdraw
                         .as_ref()
                         .is_some_and(GramWithdraw::can_submit);
-                (
-                    grams.withdraw_url.take(),
-                    std::mem::take(&mut grams.withdraw_too_small),
-                    showing,
-                    idle,
-                )
+                (grams.withdraw_outcome.take(), showing, idle)
             }
-            None => (None, false, false, false),
+            None => (None, false, false),
         };
         keep_password_field(
             &self.screen.payments.grams_withdraw_password,
@@ -170,19 +165,22 @@ impl QuillApp {
             window,
             cx,
         );
-        if let Some(url) = url {
-            self.open_fragment_url(&url, cx);
-            cx.notify();
-        }
-        if too_small {
-            // tdesktop `showToast(lng_channel_earn_out_amount_too_small)`.
-            cx.defer_in(window, |_, window, cx| {
-                window.push_notification(
-                    Notification::new().message(tr(keys::CHANNEL_EARN_OUT_AMOUNT_TOO_SMALL)),
-                    cx,
-                );
-            });
-            cx.notify();
+        match outcome {
+            Some(WithdrawOutcome::Url(url)) => {
+                self.open_fragment_url(&url, cx);
+                cx.notify();
+            }
+            Some(WithdrawOutcome::TooSmall) => {
+                // tdesktop `showToast(lng_channel_earn_out_amount_too_small)`.
+                cx.defer_in(window, |_, window, cx| {
+                    window.push_notification(
+                        Notification::new().message(tr(keys::CHANNEL_EARN_OUT_AMOUNT_TOO_SMALL)),
+                        cx,
+                    );
+                });
+                cx.notify();
+            }
+            None => {}
         }
     }
 

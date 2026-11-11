@@ -273,7 +273,7 @@ impl Session {
         ) {
             self.settings.websites_stale = true;
             self.settings.websites_mutating = false;
-            self.settings.websites_error = None;
+            self.settings.connected_websites.clear_error();
         }
         // Slice `parity:bots-payment-recurring`: an
         // `editStarSubscription` / `reuseStarSubscription` succeeded —
@@ -292,22 +292,19 @@ impl Session {
         // after a conversion, the Stars balance.
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { .. })) => {
-                self.payments.hub.gift_mutating = false;
-                self.payments.hub.gifts_error = None;
+                self.payments.hub.gift_view.end_mutation();
+                self.payments.hub.gift_notice = None;
                 self.payments.hub.gifts_stale = true;
             }
             Some(RequestPurpose::SellGift) => {
-                self.payments.hub.gift_mutating = false;
-                self.payments.hub.gifts_error = None;
+                self.payments.hub.gift_view.end_mutation();
+                self.payments.hub.gift_notice = None;
                 // The panel and the box close only when they are still the
                 // sold gift's: the user may have opened another meanwhile.
                 let sold = pending.and_then(|p| p.subject_id.as_deref());
-                if self.payments.hub.gift_selected.as_deref() == sold {
-                    self.payments.hub.gift_convert_confirm = None;
-                    self.payments.hub.gift_selected = None;
-                }
+                self.payments.hub.gift_view.close_if_selected(sold);
                 self.payments.hub.gifts_stale = true;
-                self.payments.hub.tx_loaded = false;
+                self.payments.hub.tx.invalidate();
             }
             _ => {}
         }

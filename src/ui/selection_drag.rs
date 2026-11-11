@@ -22,6 +22,17 @@ use quill::selection_drag::{
 };
 use std::time::Duration;
 
+/// The pointer poll of a held press. Dropping the drag drops the poll and
+/// stops it; the last clone dropping cancels the task.
+#[derive(Clone)]
+struct PointerPoll(#[allow(dead_code)] std::rc::Rc<Task<()>>);
+
+impl std::fmt::Debug for PointerPoll {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PointerPoll")
+    }
+}
+
 /// A left press on a history row that may become a drag selection.
 #[derive(Debug, Clone)]
 pub(crate) struct DragSelect {
@@ -39,6 +50,9 @@ pub(crate) struct DragSelect {
     forward: bool,
     /// Set once the pointer moved onto other rows.
     range: Option<DragRange>,
+    /// The 15 ms pointer poll of the held press (see
+    /// [`QuillApp::start_selection_drag_loop`]); it ends with the drag.
+    poll: Option<PointerPoll>,
 }
 
 impl DragSelect {
@@ -100,8 +114,12 @@ impl QuillApp {
             click_toggles,
             forward,
             range: None,
+            poll: None,
         });
-        self.start_selection_drag_loop(window, cx);
+        let poll = self.start_selection_drag_loop(window, cx);
+        if let Some(drag) = self.message_ui.selection_drag.as_mut() {
+            drag.poll = Some(PointerPoll(std::rc::Rc::new(poll)));
+        }
     }
 
     /// The pointer moved with the button down (`mouseActionUpdate`): start
@@ -358,13 +376,13 @@ impl QuillApp {
 
     /// While a press is held the pointer is polled every 15 ms: a pointer
     /// resting beyond the list's edge keeps scrolling and extending the
-    /// range even though no move events arrive. The loop ends with the
-    /// drag; only one runs at a time.
-    fn start_selection_drag_loop(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.message_ui.selection_drag_loop {
-            return;
-        }
-        self.message_ui.selection_drag_loop = true;
+    /// range even though no move events arrive. The drag holds the task, so
+    /// the poll ends with it; a drag is one at a time.
+    fn start_selection_drag_loop(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Task<()> {
         let handle = window.window_handle();
         self.spawn_scoped_in(window, cx, async move |this, cx| {
             loop {
@@ -412,9 +430,7 @@ impl QuillApp {
                     }
                 }
             }
-            let _ = this.update(cx, |this, _| this.message_ui.selection_drag_loop = false);
         })
-        .detach();
     }
 }
 

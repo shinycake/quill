@@ -28,7 +28,7 @@ impl QuillApp {
             guard::refuse_if_injecting("forward messages");
             return;
         }
-        if self.chat_ui.rich_editor_open {
+        if self.chat_ui.rich.editor_open() {
             guard::refuse_if_injecting("send formatted blocks");
             return;
         }

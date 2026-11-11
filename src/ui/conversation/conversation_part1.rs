@@ -270,13 +270,9 @@ impl QuillApp {
                         // Pickers open directly above the input, next to the
                         // buttons that summon them.
                         // The share box's schedule step shows inside its dialog.
-                        .when(
-                            self.chat_ui.schedule_popup_open
-                                && !self.chat_ui.schedule_picker.as_ref().is_some_and(|picker| {
-                                    picker.target == super::scheduled::ScheduleTarget::Share
-                                }),
-                            |this| this.child(self.schedule_popup(cx)),
-                        )
+                        .when(self.chat_ui.schedule_popup_shown(), |this| {
+                            this.child(self.schedule_popup(cx))
+                        })
                         .when_some(self.paid_messages_notice(cx), |this, row| this.child(row))
                         .when_some(self.composer_options_row(cx), |this, row| this.child(row))
                         // MED4: detected-URL chip (send-time preview
@@ -415,7 +411,7 @@ impl QuillApp {
                         )
                         // M2: rich editor block bar + live block preview
                         // under the textarea while the editor is open.
-                        .when(self.chat_ui.rich_editor_open, |this| {
+                        .when(self.chat_ui.rich.editor_open(), |this| {
                             this.child(self.rich_editor_bar(cx))
                         }),
                 )

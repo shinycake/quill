@@ -20,7 +20,7 @@ impl QuillApp {
         match self.promo_page() {
             PromoPage::Overview => self
                 .session()
-                .map(|s| s.payments.hub.premium_ref.clone())
+                .map(|s| s.payments.hub.premium_ref().to_string())
                 .unwrap_or_default(),
             PromoPage::Limits => "double_limits".into(),
             PromoPage::Preview { feature, .. } => feature.start_ref().unwrap_or_default().into(),
