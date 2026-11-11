@@ -208,6 +208,11 @@ pub(super) fn install(demo: bool, window: &mut Window, cx: &mut Context<QuillApp
                     // A touch on the bar of an account that left the screen
                     // is not the account on screen's.
                     if this.screen_epoch() != screen {
+                        // A dropped reorder must not leave the panel
+                        // showing an order nobody asked for.
+                        if matches!(command, Command::ReorderPinned(_)) {
+                            reorder_refused(cx);
+                        }
                         return;
                     }
                     // The press is the touch bar's window's.
@@ -346,9 +351,11 @@ fn sync(app: &mut QuillApp, window: &mut Window, cx: &mut Context<QuillApp>, sta
                     })
             })
         });
+        // Touches carry the screen the bar was last synced on, changed bar
+        // or not: a new screen with the same bar still owns its touches.
+        BAR_SCREEN.with(|screen| screen.set(app.screen_epoch()));
         if !unchanged || preview_requested() {
             host.apply(&bar, picker.as_ref(), palette);
-            BAR_SCREEN.with(|screen| screen.set(app.screen_epoch()));
             APPLIED.with(|applied| {
                 if let Ok(mut applied) = applied.try_borrow_mut() {
                     *applied = Some((bar.clone(), picker.clone(), palette));

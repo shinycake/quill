@@ -260,7 +260,11 @@ mod platform {
     /// is gone (the X server or Xwayland restarted), so the next call
     /// connects anew instead of failing for the rest of the process.
     fn forget_connection() {
-        CONNECTION.with(|slot| slot.borrow_mut().take());
+        CONNECTION.with(|slot| {
+            if let Ok(mut slot) = slot.try_borrow_mut() {
+                slot.take();
+            }
+        });
     }
 
     /// `result` of sending a request; a failure drops the connection.

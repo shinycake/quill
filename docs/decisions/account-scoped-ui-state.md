@@ -5512,6 +5512,12 @@ land and the typed form was gone.
   with its window (14-059). The update helper waits on the launch's lock on
   the claim, with no deadline while it is held, and falls back on the pid
   only where the file system has no locks (14-068).
+- **Review fixes (Touch Bar).** The bar's screen stamp (`BAR_SCREEN`) is
+  set on every sync that reaches the host, not only when the model changed,
+  so a screen change onto an identical bar keeps its touches. A pinned
+  reorder dropped as stale (screen epoch moved, lock engaged) or taken by
+  nobody ends `Order::Reordering` through `reorder_refused`.
+  `forget_connection` uses `try_borrow_mut`.
 
 ### Sweep fixes (s4-media-2)
 

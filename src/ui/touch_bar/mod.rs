@@ -258,6 +258,9 @@ impl QuillApp {
         // emptied by the next throttled sync) must not open a chat or send a
         // sticker behind the lock screen.
         if self.refused_while_locked() {
+            if matches!(command, Command::ReorderPinned(_)) {
+                mac::reorder_refused(cx);
+            }
             return;
         }
         match command {
@@ -323,6 +326,9 @@ impl QuillApp {
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.reorder_pinned_chats(false, &ids);
+        } else {
+            // Nothing took the order: the panel draws the model's again.
+            mac::reorder_refused(cx);
         }
         cx.notify();
     }

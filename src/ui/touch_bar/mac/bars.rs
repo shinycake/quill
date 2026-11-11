@@ -567,11 +567,12 @@ impl Host {
         rows
     }
 
-    /// Take the bar off the window.
+    /// A pinned-chat reorder the app dropped: draw the model's order again.
     pub(super) fn reorder_refused(&self) {
         self.pinned.reorder_refused();
     }
 
+    /// Take the bar off the window.
     pub(super) fn remove(&self) {
         self.window.setTouchBar(None);
     }
