@@ -112,9 +112,21 @@ impl ForumTopicsMap {
         request: Option<RequestId>,
         error: impl Into<String>,
     ) -> bool {
-        self.lists
-            .get_mut(&chat_id)
-            .is_some_and(|list| list.failed(request, error, false))
+        let list = self.lists.entry(chat_id).or_default();
+        // Another ask's refusal, or an outdated one's, is stale; one nobody
+        // tracked is taken.
+        let ours = match list {
+            Fetch::Loading {
+                request: Some(waiting),
+                ..
+            } => Some(*waiting) == request,
+            Fetch::Outdated(_) => false,
+            _ => true,
+        };
+        if ours {
+            list.fail(error);
+        }
+        ours
     }
 
     /// A failed ask for `chat_id` is forgotten (the held list, if any,
