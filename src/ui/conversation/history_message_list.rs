@@ -17,7 +17,7 @@ struct ThreadWindow {
     loaded_complete: bool,
 }
 
-/// The reader's scroll goal in this render (`HistoryUi::scroll_goal`).
+/// The reader's scroll goal in this render (`HistoryUi::aim`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GoalNow {
     /// None, or its rows are not in yet.
@@ -338,7 +338,9 @@ impl QuillApp {
         self.land_new_jump(jump, cx);
         match goal {
             GoalNow::Due => self.reach_scroll_goal(cx),
-            GoalNow::Stale => self.history.scroll_goal = None,
+            GoalNow::Stale => {
+                self.history.aim.take_goal();
+            }
             GoalNow::Waiting => {}
         }
         // Read by the next render's view hold and by the landing.
@@ -847,7 +849,7 @@ impl QuillApp {
     /// Where the reader's scroll goal stands with the rows this render
     /// shows.
     fn scroll_goal_now(&self, thread: Option<&ThreadWindow>) -> GoalNow {
-        match (self.history.scroll_goal, thread) {
+        match (self.history.aim.goal(), thread) {
             (None, _) => GoalNow::Waiting,
             (Some(ScrollGoal::ThreadRoot), Some(thread)) if thread.loaded_complete => GoalNow::Due,
             (Some(ScrollGoal::ThreadRoot), Some(_)) => GoalNow::Waiting,
@@ -861,7 +863,7 @@ impl QuillApp {
         if self.history.rows.is_empty() {
             return;
         }
-        let Some(goal) = self.history.scroll_goal.take() else {
+        let Some(goal) = self.history.aim.take_goal() else {
             return;
         };
         self.end_landing();

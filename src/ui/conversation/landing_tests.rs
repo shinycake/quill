@@ -104,7 +104,7 @@ fn a_long_unread_run_opens_with_the_bar_at_the_top(cx: &mut TestAppContext) {
         "bar at {bar_top:?}, view at {:?}",
         viewport.top()
     );
-    assert_eq!(app.update(vcx, |app, _| app.history.landing), None);
+    assert_eq!(app.update(vcx, |app, _| app.history.aim.landing()), None);
 }
 
 #[gpui_kit::test]

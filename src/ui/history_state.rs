@@ -18,6 +18,48 @@ pub(super) enum ScrollGoal {
     ThreadRoot,
 }
 
+/// Where the open history is being taken: nothing, a goal the reader asked
+/// for that waits for its rows, or a landing that scrolled to its target
+/// and corrects after each paint. A newer aim replaces the older; the
+/// reader taking over the view ends only a landing.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) enum ScrollAim {
+    #[default]
+    Free,
+    Goal(ScrollGoal),
+    Landing(super::conversation::landing::Landing),
+}
+
+impl ScrollAim {
+    pub(super) fn goal(&self) -> Option<ScrollGoal> {
+        match *self {
+            Self::Goal(goal) => Some(goal),
+            Self::Free | Self::Landing(_) => None,
+        }
+    }
+
+    pub(super) fn landing(&self) -> Option<super::conversation::landing::Landing> {
+        match *self {
+            Self::Landing(landing) => Some(landing),
+            Self::Free | Self::Goal(_) => None,
+        }
+    }
+
+    /// The goal is reached or gone: the aim is free (a landing stays).
+    pub(super) fn take_goal(&mut self) -> Option<ScrollGoal> {
+        let goal = self.goal()?;
+        *self = Self::Free;
+        Some(goal)
+    }
+
+    /// The reader took over the view (a goal waiting for its rows stays).
+    pub(super) fn end_landing(&mut self) {
+        if matches!(self, Self::Landing(_)) {
+            *self = Self::Free;
+        }
+    }
+}
+
 pub(crate) struct HistoryUi {
     /// kit Phase 3: message-history virtualization — scroller state with
     /// tail-following, owned by the app so prepend/append keep the anchor.
@@ -58,10 +100,10 @@ pub(crate) struct HistoryUi {
     /// the saved position, else the jump highlight, else the "Unread
     /// messages" divider, else the bottom.
     pub(super) anchor: super::history_anchor::WindowAnchor,
-    /// Where the reader asked the history to go. The history list owns it:
-    /// it reaches the goal once the rows allow, and a goal due this render
-    /// wins over the view hold (`ScrollGoal`).
-    pub(super) scroll_goal: Option<ScrollGoal>,
+    /// Where the history is being taken: a goal the reader asked for that
+    /// waits for its rows, or the landing that scrolled there and corrects
+    /// after each paint. One value, so a newer aim replaces the older.
+    pub(super) aim: ScrollAim,
     /// kit Phase 3: first/last message ids of the last-synced history, to
     /// tell appends apart from prepends without re-scanning.
     pub(super) ends: Option<(MessageId, MessageId)>,
@@ -106,9 +148,6 @@ pub(crate) struct HistoryUi {
     pub(super) scroll_view_probe: std::rc::Rc<std::cell::Cell<Option<(usize, usize)>>>,
     /// Where the "Unread messages" bar was painted in the last frame.
     pub(super) bar_probe: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
-    /// Where the open history is being brought, checked after each paint
-    /// (`landing`).
-    pub(super) landing: Option<super::conversation::landing::Landing>,
     /// Where the bar sat in its row at the last open (`BarOffsets`).
     pub(super) bar_offsets: super::conversation::landing::BarOffsets,
     /// Rows painted in the last frame with their window bounds, kept until
@@ -211,7 +250,7 @@ impl HistoryUi {
             window_active: false,
             shared: HistoryShared::default(),
             anchor: Default::default(),
-            scroll_goal: None,
+            aim: ScrollAim::Free,
             ends: None,
             scroll_memory: Default::default(),
             had_newer: false,
@@ -231,7 +270,6 @@ impl HistoryUi {
             scroll_top_probe: Default::default(),
             scroll_view_probe: Default::default(),
             bar_probe: Default::default(),
-            landing: None,
             bar_offsets: Default::default(),
             hit_rows: Default::default(),
             row_hover: Default::default(),
