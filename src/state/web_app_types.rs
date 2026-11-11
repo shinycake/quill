@@ -99,15 +99,26 @@ pub struct AttachmentToggle {
     pub result: Result<bool, String>,
 }
 
-/// `sendWebAppCustomRequest` answers, keyed by the app's `req_id`.
+/// `sendWebAppCustomRequest` answers, keyed by the app's `req_id` and the
+/// launch that asked: another app's window never takes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CustomRequestReply {
+    pub launch_id: i64,
     pub req_id: String,
     /// The JSON result, or an error word for the app.
     pub result: Result<String, String>,
 }
 
 impl WebApps {
+    /// The mini app launch `launch_id` closed: its custom requests in
+    /// flight and the answers nobody took go with it.
+    pub fn forget_custom_requests_of(&mut self, launch_id: i64) {
+        self.custom_requests
+            .retain(|_, (launch, _)| *launch != launch_id);
+        self.custom_replies
+            .retain(|reply| reply.launch_id != launch_id);
+    }
+
     /// Replace the unconsumed open answer. An `Opened` answer it pushes out
     /// was never shown, but TDLib started that app: its launch is queued
     /// for `closeWebApp`, so the bot keeps no live session.
@@ -150,8 +161,8 @@ pub struct WebApps {
     /// or a failure message, with the bot it was asked for: a second link
     /// clicked before the first answered takes only its own answer.
     pub found: Option<(i64, Result<FoundWebApp, String>)>,
-    /// `req_id`s of custom requests in flight, by `RequestId`.
-    pub custom_requests: HashMap<u64, String>,
+    /// `(launch_id, req_id)` of custom requests in flight, by `RequestId`.
+    pub custom_requests: HashMap<u64, (i64, String)>,
     /// One-shot: custom request answers.
     pub custom_replies: Vec<CustomRequestReply>,
     /// Apps tab: `getGrossingWebAppBots` bot ids. One request at a time,

@@ -299,6 +299,13 @@ impl QuillApp {
                             cx.notify();
                         }),
                     )
+                    // A press that ends outside its row is not a swipe.
+                    .on_mouse_up_out(
+                        MouseButton::Left,
+                        cx.listener(|this, _: &MouseUpEvent, _, _| {
+                            this.message_ui.swipe_reply_start = None;
+                        }),
+                    )
                     .on_mouse_up(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseUpEvent, window, cx| {

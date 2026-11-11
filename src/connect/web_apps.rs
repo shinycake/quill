@@ -369,6 +369,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn send_web_app_custom_request(
         &mut self,
         bot_user_id: i64,
+        launch_id: i64,
         req_id: &str,
         method: &str,
         parameters: &str,
@@ -378,7 +379,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .bots
             .web_apps
             .custom_requests
-            .insert(extra.0, req_id.to_string());
+            .insert(extra.0, (launch_id, req_id.to_string()));
         let json = send_web_app_custom_request(extra, bot_user_id, method, parameters);
         match self.send_json_request(extra, &json) {
             Ok(id) => Ok(id),

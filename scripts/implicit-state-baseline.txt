@@ -47,7 +47,6 @@ Lookup::pending
 
 MediaMenuFacts::downloading
 
-MiniAppWindow::closing_confirmation
 
 
 
