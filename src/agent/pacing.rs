@@ -134,10 +134,10 @@ impl State {
     }
 
     fn release(&mut self, booking: Booking) {
-        if let Some(start) = booking.new_peer {
-            if let Some(at) = self.new_peers.iter().position(|sent| *sent == start) {
-                self.new_peers.remove(at);
-            }
+        if let Some(start) = booking.new_peer
+            && let Some(at) = self.new_peers.iter().position(|sent| *sent == start)
+        {
+            self.new_peers.remove(at);
         }
         if self.next_in_chat.get(&booking.key) == Some(&booking.set) {
             match booking.previous {
@@ -258,10 +258,9 @@ mod tests {
         }
         assert!(state.new_peers.is_empty(), "no first message went out");
         assert!(!state.next_in_chat.contains_key(&(1, 7)));
-        let (_, kept) = state.reserve(now, &account, (1, 7), 1, true).unwrap();
+        state.reserve(now, &account, (1, 7), 1, true).unwrap();
         assert_eq!(state.new_peers.len(), 1, "a send that went out is kept");
         assert!(state.next_in_chat.contains_key(&(1, 7)));
-        drop(kept);
     }
 
     #[test]
