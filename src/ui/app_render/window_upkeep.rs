@@ -12,6 +12,9 @@ use quill::lang::{keys, tr};
 impl QuillApp {
     /// One window's frame upkeep, with that window's state in place.
     pub(in crate::ui) fn per_window_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The history's area is reported again by this frame's paint, if it
+        // shows one (`bubble_theme`).
+        crate::ui::bubble_theme::forget_history_area();
         // Whether a screen reader reads this window, for its history rows.
         self.slices
             .window
@@ -37,6 +40,8 @@ impl QuillApp {
         self.settle_left_sends(cx);
         self.settle_scheduled_load(cx);
         self.settle_scheduled_deletes(cx);
+        // A bot's Restart sends its /start once the unblock is answered.
+        self.pump_bot_restart(cx);
         // A forced reply for the chat this window shows arms its composer.
         self.arm_force_reply_here(window, cx);
         // The histories every window still reads stay whole.
@@ -130,6 +135,14 @@ impl QuillApp {
             .dialog_may_show_in(crate::ui::shell::DialogKind::BotEdit, self.windows.scope)
         {
             self.fill_bot_edit(window, cx);
+        }
+        // A Verify accounts box that sent its request: the answer returns
+        // it to the list, a refusal shows its reason.
+        if self
+            .windows
+            .dialog_may_show_in(crate::ui::shell::DialogKind::BotVerify, self.windows.scope)
+        {
+            self.pump_bot_verify(cx);
         }
         self.business_closed_error_upkeep();
         if self.windows.dialog_may_show_in(

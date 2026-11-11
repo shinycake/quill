@@ -87,7 +87,16 @@ fn the_box_opens_from_session_state_and_every_phase_renders(cx: &mut TestAppCont
     shell.read_with(vcx, |shell, _| {
         assert_eq!(shell.open_dialog, Some(DialogKind::BoostBox));
     });
-    set_phase(&app, vcx, BoostDecision::Boost(1));
+    app.update_in(vcx, |app, _, cx| {
+        let session = app.demo_session.as_mut().expect("demo session");
+        session.groups.boost_box.as_mut().expect("box open").phase =
+            quill::boost_box::BoostPhase::Working(quill::boost_box::BoostWork::Boosting {
+                request: quill::ids::RequestId(1),
+                reassign: None,
+            });
+        cx.notify();
+    });
+    vcx.run_until_parked();
     for notice in [
         BoostNotice::Already,
         BoostNotice::PremiumNeeded,

@@ -49,12 +49,9 @@ QuillApp::build_add_special_dialog::body.borrow_mut 1
 QuillApp::build_ai_style_preview_dialog::body.borrow_mut 1
 QuillApp::build_archive_settings_dialog::body.borrow_mut 1
 QuillApp::build_block_bar_dialog::body.borrow_mut 1
-QuillApp::build_bot_edit_dialog::content.borrow_mut 1
-QuillApp::build_bot_verify_dialog::content.borrow_mut 1
 QuillApp::build_business_dialog::content.borrow_mut 1
 QuillApp::build_call_confirm_dialog::body.borrow_mut 1
 QuillApp::build_call_swap_dialog::body.borrow_mut 1
-QuillApp::build_callback_password_dialog::body.borrow_mut 1
 QuillApp::build_cancel_edit_dialog::body.borrow_mut 1
 QuillApp::build_chat_appearance_dialog::body.borrow_mut 1
 QuillApp::build_chat_look_dialog::body.borrow_mut 1
@@ -89,7 +86,6 @@ QuillApp::build_join_requests_dialog::body.borrow_mut 1
 QuillApp::build_jump_date_dialog::body.borrow_mut 1
 QuillApp::build_live_delete_dialog::body.borrow_mut 1
 QuillApp::build_live_stars_dialog::body.borrow_mut 1
-QuillApp::build_login_url_confirm_dialog::body.borrow_mut 1
 QuillApp::build_mask_sets_dialog::body.borrow_mut 1
 QuillApp::build_message_report_dialog::body.borrow_mut 1
 QuillApp::build_new_contact_dialog::body.borrow_mut 1
@@ -225,7 +221,6 @@ anchor::seen.borrow 1
 anchor_tracker::anchors.borrow_mut 1
 apply_custom_bindings::key_bindings.borrow 1
 arm::slot.borrow_mut 1
-backdrop::cache.borrow_mut 2
 badge::app.borrow 1
 badge::badges.borrow_mut 1
 badge::replays.borrow_mut 1

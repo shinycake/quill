@@ -199,7 +199,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.bots.similar_bots.contains_key(&bot_user_id) {
+        // Asked once: an answer or a request in flight is not asked again,
+        // a refused one is.
+        if self
+            .session
+            .bots
+            .similar_bots
+            .get(&bot_user_id)
+            .is_some_and(|fetch| !fetch.can_ask())
+        {
             return Ok(None);
         }
         let purpose = RequestPurpose::GetBotSimilarBots;
@@ -213,10 +221,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // The section is loading from the moment the request is out; its
         // answer or its refusal ends the stage.
-        self.session
+        let fetch = self
+            .session
             .bots
             .similar_bots
-            .insert(bot_user_id, crate::state::SimilarBotsFetch::Loading);
+            .entry(bot_user_id)
+            .or_default();
+        fetch.begin();
+        fetch.sent(extra);
         Ok(Some(extra))
     }
 

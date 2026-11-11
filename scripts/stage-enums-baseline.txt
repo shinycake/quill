@@ -19,7 +19,6 @@ bare:CallLinkStep::Busy 1
 bare:CallPhase::Busy 1
 bare:CallRating::Sent 1
 bare:CallSound::Busy 1
-bare:CallTick::Running 1
 bare:CallUpload::Sent 1
 bare:CallWindow::Opening 2
 bare:CameraStage::Starting 1
@@ -125,7 +124,6 @@ bare:SharedMediaTabStatus::Loading 1
 bare:Sheet::Loading 1
 bare:Showing::Sending 1
 bare:ShutdownPhase::Running 1
-bare:SimilarBotsFetch::Loading 1
 bare:Slot::Loading 2
 bare:SoundResolution::Pending 1
 bare:Stage::Opening 1

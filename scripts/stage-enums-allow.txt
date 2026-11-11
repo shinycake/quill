@@ -21,3 +21,7 @@ bare:Launch::Starting src/telegram/hub.rs: TDLib is still opening its database a
 unkeyed:Launch::Asked src/telegram/hub.rs: holds the client whose first page the first frame waits for; that client's page or the wait's cap ends it. The stage is shared with the receive thread under a mutex and a condvar, so it cannot hold a Task.
 bare:RunStage::Running src/telegram/hub.rs: the receive thread's own lifecycle, shared with that thread under a mutex. The hub holds the thread's JoinHandle beside it (`Hub::thread`) and joins it on stop.
 bare:RunStage::Stopping src/telegram/hub.rs: a stop was asked of the receive thread; the loop's next check ends it and the hub joins the JoinHandle it holds beside the stage.
+bare:BottomBar::Starting src/chat_bottom_bar.rs: the bar to draw, derived each frame from the chat; the stored stage is `StartState::Starting(RequestId)`, which holds the request.
+unkeyed:CallEnd::Busy src/ui/calls_state.rs: the callee's line was busy (the call's discard reason). A summary the user leaves with Cancel or Redial; nothing is in flight.
+unkeyed:CallWindowTarget::Busy src/ui/call_window_sync.rs: what the call window shows, read from the session each frame; "busy" is the busy line's summary, not work in flight.
+unkeyed:SearchField::Opening src/ui/call_add_people.rs: the search input is built by the call window's first render of the box (it needs that window). No request or task; closing the box drops it.

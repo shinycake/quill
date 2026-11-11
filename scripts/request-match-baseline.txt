@@ -97,7 +97,6 @@ purpose:QuillApp::saved_topics_in_flight 1
 purpose:QuillApp::set_sticker_suggest_mode 1
 purpose:QuillApp::sidebar_auth 1
 purpose:QuillApp::sticker_set_action 1
-purpose:QuillApp::sync_phone_step 1
 purpose:QuillApp::topic_editor_body 1
 purpose:Session::accept_group_call_participant_update 1
 purpose:Session::apply_ok 2

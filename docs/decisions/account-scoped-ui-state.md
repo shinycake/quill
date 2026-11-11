@@ -8704,3 +8704,41 @@ listed; the rest of the bundle's files hold no other entry.
   inline results grid plays as the preview clip (only `thumbnailFormatMpeg4`
   did before). A video or GIF whose thumbnail file does not parse draws no
   tile instead of a tile with no file.
+
+### Sweep fixes (r2-23)
+
+Round 2, bundle 23: the sign-in, bot, boost and 1:1 call UI files (auth, autoscroll,
+battery watch, boost box, bot edit/permissions/stream/verify, bots, bottom action,
+bubble theme, add people, call panel, backdrop, sounds, call state).
+
+| id | Fix |
+| --- | --- |
+| 08-008 | `PhoneStep::Sending` carries its `RequestId`; `sync_phone_step` settles it from `acks.take(request)` (answered, refused, or the request gone with no answer), not from `has_auth_submit` and the shared `last_auth_error`. `PhoneStep::settled` is the one transition. (`signin_ui.rs` edited minimally for the variant.) |
+| 08-010 | `auth_submit_busy` guards every `submit_*`, `resend_code` and `request_qr_login`: a second Enter while a submit is out sends and notes nothing. |
+| 08-013 | `Active::pressed_at: Option<Instant>` becomes `Button::{Held { since }, Toggled}`; the layer root also hears the middle release, so a hold released off the history ends (a hold scrolls the pointer off it). |
+| 08-028 | The Linux battery probe rests (`PARKED`) while no window is in front (`probe_wait`); window activation pokes `wake::BATTERY` (main and chat windows). |
+| 08-017 | merged with r2-05's fix of the same box (01-022): `BoostWork::Slots { request }` and `Boosting { request, reassign }`; the slots answer, the `boostChat` answer and both errors act only when `BoostBoxState::waits_for(pending.id)`. A reopened box takes over the still-open slots read by its id. |
+| 08-019 | Readers of the bot edit box use its own stage only (`loaded = Editing`); `fill_bot_edit` is the one transition from the session's two `BotText::Ready`. The upkeep runs in the window hosting the box, so a box that is never drawn is never seen either. |
+| 08-027 | `emoji_access_shown` is added to only after a send that went out, when the switch is turned off, removed when turned on, and cleared when the info panel opens another target or closes. |
+| 08-025 | `StreamReveal::Finishing` is keyed by `ChatMessage`. |
+| 08-026 | `Appearing` is `WidthSweep`, `HeightOpen`, `Sweeps::{Fresh, First, Later}` and `Pace`: the loose tweens, targets, `fresh`, `finalizing` and `start_width` fields are gone. |
+| 08-020 | `Step::Sending { request, chat, act }` is settled by the request's ack (`pump_bot_verify`, in the hosting window's upkeep); a refusal lands in `Step::Refused` with its reason; Back and Close forget the ack. |
+| 08-021 | `similar_bots` is `HashMap<i64, Fetch<Vec<i64>>>`: `Loading` holds the request, a refusal is `Failed` with its reason (drawn, press asks again), a late first answer leaves a newer request waiting. `SimilarBotsFetch` is deleted. |
+| 08-022 | Back is disabled (and its handler returns) while the Add-bot send is out. Closing the box during the send still drops the start payload with the box (the owner went away). |
+| 08-023 | `BarFacts::bot_start_pending` becomes `StartState::{NotStartable, Offered, Starting(RequestId)}`, `Starting` read from the pending `SendBotStartMessage`; the bar shows `BottomBar::Starting` (button off). Baseline line removed. |
+| 08-024 | Unblock and Restart: `BotRestart::Unblocking { request, chat }` in `ChatUi`; the `/start` goes when the unblock's ack is `Done` (`pump_bot_restart`), nothing on a refusal; the chat leaving forgets the ack. |
+| 08-046 | `bubble_theme::forget_history_area` runs at the start of every window's upkeep, so a history area never outlives the frame that reported it. |
+| 08-043 | `SearchField::{Opening { initial }, Open(field)}` replaces `Option` plus `initial_query`. |
+| 08-044 | `end_call_add_people` is the one place that takes the box and clears the search; close, finish, stale call, lock and the `CallBoxes` Farewell all use it. |
+| 08-045 | The sessions list is asked for when the Calls page opens (`fetch_call_settings`), not from the section's render. |
+| 08-036 | `call_window_target` returns `CallWindowTarget::{None, Active, Ringing, Ended, Busy, Invite}` (the sync code moved to `call_window_sync.rs`). |
+| 08-037 | `call_status` returns `CallStatus::{Steady, Connecting}`; `CallSnap::connecting` is gone, baseline line removed. |
+| 08-038, 08-049 | `CallEnd::{Running, Lingering { call_id, _timer }, Busy, Over}`: the stage holds the timer task, so a new call or an account switch drops it; no `Instant` and no id match; tests drive it with the manual clock. |
+| 08-039 | `WindowWanted::{Open, ClosedByUser(id), OpenFailed(id)}` replaces the two `Option<i32>` slots and resets when no call shows. |
+| 08-040 | `CallPanel::devices_menu` is `Option<(call id, target)>` and is shown only for the call it was opened in, in its active phase; the render no longer resets it. |
+| 08-050 | `raised_for` moves from `CallUi` (app-wide) to `CallScreen` (per account); `calls.raised_for` is dropped from `scripts/app-wide-fields.txt`. |
+| 08-054 | The sound sync no longer clears `card_window`; `call_card_window` ignores it while the shown call is incoming. |
+| 08-055 | `CallSounds` holds one `Voice::{Idle { cue }, Looping { sound, stage }}`; a muted cue returns before cutting a ring; `play` stops the old voice itself. |
+| 08-061 | The backdrop cache evicts under a short `try_borrow_mut` and retires the picture after the borrow. |
+| new-01 | The `Rc<RefCell<Option<_>>>` one-shot body cells of the bot edit, bot verify and bots dialogs are `Cell`s (no borrow to panic). |
+| new-02 | `CallTick::{Idle, Running { _task }}` holds the call clock task instead of detaching it. |

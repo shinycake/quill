@@ -57,43 +57,60 @@ pub(super) struct CallSounds {
     /// The app's shared audio output (opened off the UI thread when a
     /// sound needs it).
     output: SharedOutput,
-    player: Option<OutputPlayer>,
-    looping: Loop,
+    voice: Voice,
     /// The "Play sounds" preference.
     enabled: bool,
 }
 
-/// The loop to keep going: none, or one sound with its output hold and
-/// where it stands between rings.
-enum Loop {
-    Off,
-    On {
+/// What the call sounds are doing: one value, so the player belongs to the
+/// stage that started it.
+enum Voice {
+    /// No loop. `cue` is the one-shot still playing, if any.
+    Idle { cue: Option<OutputPlayer> },
+    /// One sound loops, with its output hold and where it stands between
+    /// rings.
+    Looping {
         sound: CallSound,
         /// Keeps the output open between a loop's sounds.
         _hold: Hold,
-        phase: LoopPhase,
+        stage: RingStage,
     },
 }
 
 /// Where a loop is in one ring and the gap after it.
-#[derive(Clone, Copy)]
-enum LoopPhase {
-    /// The ring plays (or a cue does); the gap is scheduled once it ends.
-    Playing,
+enum RingStage {
+    /// The ring plays (or a cue does, or its device failed to open and
+    /// nothing plays); the gap is scheduled once it ends.
+    Playing(Option<OutputPlayer>),
     /// The ring may start again at this time.
     Due(Instant),
 }
 
-impl Loop {
+impl Voice {
     fn sound(&self) -> Option<CallSound> {
         match self {
-            Loop::Off => None,
-            Loop::On { sound, .. } => Some(*sound),
+            Voice::Idle { .. } => None,
+            Voice::Looping { sound, .. } => Some(*sound),
         }
     }
 
-    fn is_on(&self) -> bool {
-        matches!(self, Loop::On { .. })
+    fn is_looping(&self) -> bool {
+        matches!(self, Voice::Looping { .. })
+    }
+
+    /// Cut whatever plays and leave the stage idle.
+    fn stop(&mut self) {
+        let old = std::mem::replace(self, Voice::Idle { cue: None });
+        let player = match old {
+            Voice::Idle { cue } => cue,
+            Voice::Looping { stage, .. } => match stage {
+                RingStage::Playing(player) => player,
+                RingStage::Due(_) => None,
+            },
+        };
+        if let Some(player) = player {
+            player.stop();
+        }
     }
 }
 
@@ -101,8 +118,7 @@ impl CallSounds {
     pub(super) fn new(output: SharedOutput) -> Self {
         Self {
             output,
-            player: None,
-            looping: Loop::Off,
+            voice: Voice::Idle { cue: None },
             enabled: true,
         }
     }
@@ -111,22 +127,24 @@ impl CallSounds {
 impl CallSounds {
     /// Follow the "Play sounds" preference; turning it off cuts any sound.
     pub(super) fn set_enabled(&mut self, enabled: bool) {
-        if self.enabled && !enabled && !self.looping.is_on() {
-            self.stop_player();
+        if self.enabled && !enabled && !self.voice.is_looping() {
+            self.voice.stop();
         }
         self.enabled = enabled;
     }
 
-    fn spawn(&mut self, sound: CallSound) {
-        self.stop_player();
-        // Ringing always plays; the "Play sounds" toggle only mutes cues.
+    /// Whether `sound` is audible: ringing always plays, the "Play sounds"
+    /// toggle only mutes cues.
+    fn audible(&self, sound: CallSound) -> bool {
+        self.enabled || matches!(sound, CallSound::Incoming | CallSound::Ringback)
+    }
+
+    /// Start `sound` on a fresh player; `None` when it is muted or the
+    /// output is not there. It cuts nothing by itself: the caller decides
+    /// what the old player's stage becomes.
+    fn spawn(&mut self, sound: CallSound) -> Option<OutputPlayer> {
         let rings = matches!(sound, CallSound::Incoming | CallSound::Ringback);
-        if !self.enabled && !rings {
-            return;
-        }
-        let Some(outlet) = self.output.outlet() else {
-            return;
-        };
+        let outlet = self.output.outlet()?;
         let player = outlet.player();
         let samples = SamplesBuffer::new(
             NonZero::<u16>::MIN,
@@ -141,75 +159,90 @@ impl CallSounds {
         } else {
             player.append_alert(samples);
         }
-        self.player = Some(player);
-    }
-
-    fn stop_player(&mut self) {
-        if let Some(player) = self.player.take() {
-            player.stop();
-        }
+        Some(player)
     }
 
     /// Play once, cutting whatever plays (and any loop).
     pub(super) fn play(&mut self, sound: CallSound) {
-        self.looping = Loop::Off;
-        self.spawn(sound);
+        self.voice.stop();
+        if self.audible(sound) {
+            self.voice = Voice::Idle {
+                cue: self.spawn(sound),
+            };
+        }
     }
 
     /// Play a cue once. A ring that loops keeps looping: the cue plays on
     /// its own and the ring comes back after it, not cut by the loop's
-    /// next tick.
+    /// next tick. A cue that is muted leaves the ring as it is.
     pub(super) fn play_cue(&mut self, sound: CallSound) {
-        let Loop::On { phase, .. } = &mut self.looping else {
+        if !self.voice.is_looping() {
             self.play(sound);
             return;
-        };
-        *phase = LoopPhase::Playing;
-        self.spawn(sound);
+        }
+        if !self.audible(sound) {
+            return;
+        }
+        let player = self.spawn(sound);
+        if let Voice::Looping { stage, .. } = &mut self.voice
+            && let RingStage::Playing(Some(old)) =
+                std::mem::replace(stage, RingStage::Playing(player))
+        {
+            old.stop();
+        }
     }
 
     /// The sound kept looping, for tests.
     #[cfg(test)]
     pub(super) fn looping(&self) -> Option<CallSound> {
-        self.looping.sound()
+        self.voice.sound()
     }
 
     /// Keep `sound` looping, or stop looping with `None`. Call it often
     /// (every call tick): it restarts the loop after its gap.
     pub(super) fn keep_looping(&mut self, sound: Option<CallSound>) {
-        if self.looping.sound() != sound {
-            if self.looping.is_on() || sound.is_some() {
-                self.stop_player();
+        if self.voice.sound() != sound {
+            if self.voice.is_looping() || sound.is_some() {
+                self.voice.stop();
             }
-            self.looping = match sound {
-                Some(sound) => Loop::On {
+            if let Some(sound) = sound {
+                self.voice = Voice::Looping {
                     sound,
                     _hold: self.output.hold(),
-                    phase: LoopPhase::Due(Instant::now()),
-                },
-                None => Loop::Off,
-            };
+                    stage: RingStage::Due(Instant::now()),
+                };
+            }
         }
-        let Loop::On { sound, phase, .. } = &mut self.looping else {
+        let Voice::Looping { sound, stage, .. } = &self.voice else {
             return;
         };
         let sound = *sound;
         // A ring whose device failed to open didn't play: the loop tries
         // again after its gap, as after one that played.
-        let finished = self
-            .player
-            .as_ref()
-            .is_none_or(|player| player.empty() || player.lost());
-        if !finished {
-            return;
-        }
-        match *phase {
-            LoopPhase::Due(at) if Instant::now() >= at => {
-                *phase = LoopPhase::Playing;
-                self.spawn(sound);
+        let ring_due = match stage {
+            RingStage::Playing(player) => {
+                let finished = player
+                    .as_ref()
+                    .is_none_or(|player| player.empty() || player.lost());
+                if !finished {
+                    return;
+                }
+                false
             }
-            LoopPhase::Due(_) => {}
-            LoopPhase::Playing => *phase = LoopPhase::Due(Instant::now() + sound.gap()),
+            RingStage::Due(at) => {
+                if Instant::now() < *at {
+                    return;
+                }
+                true
+            }
+        };
+        let next = if ring_due {
+            RingStage::Playing(self.spawn(sound))
+        } else {
+            RingStage::Due(Instant::now() + sound.gap())
+        };
+        if let Voice::Looping { stage, .. } = &mut self.voice {
+            *stage = next;
         }
     }
 }
@@ -250,14 +283,6 @@ impl super::app::QuillApp {
         let second_rings = session.calls.second_call.prompt().is_some();
         let enabled = session.settings.inapp_sounds_enabled;
         let background_ring = self.background_ring_audible();
-        // A call that came in reached no chat window that pressed Call: its
-        // card is the main window's.
-        if let Some(call) = call.as_ref()
-            && !call.is_outgoing
-            && self.screen.call_screen.sound_marks.call_id != Some(call.id)
-        {
-            self.call_boxes.card_window = None;
-        }
         let marks = &mut self.screen.call_screen.sound_marks;
         let sounds = &mut self.calls.sounds;
         sounds.set_enabled(enabled);

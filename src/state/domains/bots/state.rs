@@ -1,6 +1,7 @@
 //! Bots: info, commands, games, inline queries, callback answers, login URLs, mini apps, reply keyboards: the `bots` domain's share of `Session`.
 //! Added to by features in this domain only; `Session::new` builds it
 //! with `new`.
+use crate::state::fetch::Fetch;
 use crate::state::*;
 use crate::telegram::envelope::GroupBotCommands;
 
@@ -141,7 +142,9 @@ pub struct BotsState {
     /// Slice B2: `getBotSimilarBots` results (schema 1.8.67, line 11640)
     /// for the similar-bots section of the bot profile, keyed by bot
     /// user id. The `users` ids resolve to names via `Session::users`.
-    pub similar_bots: HashMap<i64, SimilarBotsFetch>,
+    /// `Loading` holds the request, so only its answer or refusal ends it;
+    /// `Failed` keeps the reason and a press asks again.
+    pub similar_bots: HashMap<i64, Fetch<Vec<i64>>>,
     /// Slice bots-games: high-score panels, keyed by
     /// `(chat_id, message_id)`. Present = panel open; the value is its
     /// fetch: `Loading` shows a loading row, `Ready` the rows. A refused

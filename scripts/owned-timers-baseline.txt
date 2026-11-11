@@ -11,7 +11,6 @@ detached:QuillApp::close_earn_layer 1
 detached:QuillApp::close_profile_modal 1
 detached:QuillApp::custom_emoji_card_body 1
 detached:QuillApp::emoji_sets_search_typed 1
-detached:QuillApp::ensure_call_tick 1
 detached:QuillApp::ensure_self_destruct_tick 1
 detached:QuillApp::general_link_handler_section 1
 detached:QuillApp::gif_search_typed 1
@@ -31,7 +30,6 @@ detached:QuillApp::spawn_system_unlock_wait 1
 detached:QuillApp::start_connection 1
 detached:QuillApp::start_update_checks 1
 detached:QuillApp::status_toast_visible 1
-detached:QuillApp::sync_call_window 1
 detached:SyntheticChat::new 1
 detached:hide_main_window 1
 detached:request_video_frame 1

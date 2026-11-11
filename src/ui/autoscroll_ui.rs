@@ -45,12 +45,19 @@ impl AutoscrollLayer {
     where
         E: ParentElement + InteractiveElement + FluentBuilder,
     {
+        let stop_app = app.clone();
         let stop = move |_: &MouseDownEvent, _: &mut Window, cx: &mut App| {
-            let _ = app.update(cx, |app, cx| app.autoscroll_stop(cx));
+            let _ = stop_app.update(cx, |app, cx| app.autoscroll_stop(cx));
+        };
+        // A held press scrolls the pointer off the history, so its release
+        // lands elsewhere in the window: the root hears it too.
+        let release = move |_: &MouseUpEvent, _: &mut Window, cx: &mut App| {
+            let _ = app.update(cx, |app, cx| app.autoscroll_release(cx));
         };
         root.children(self.mark).when(self.active, |this| {
             this.on_mouse_down(MouseButton::Left, stop.clone())
                 .on_mouse_down(MouseButton::Right, stop)
+                .on_mouse_up(MouseButton::Middle, release)
         })
     }
 }
@@ -58,13 +65,20 @@ impl AutoscrollLayer {
 struct Active {
     anchor: Point<Pixels>,
     chat: i64,
-    /// Set while the middle button is down, for the hold-or-toggle rule.
-    pressed_at: Option<Instant>,
+    button: Button,
     last_tick: Instant,
     pull: Pull,
     /// The loop that scrolls: it ends with the mode, so a quick new press
     /// never runs beside the old loop.
     _scroller: Task<()>,
+}
+
+/// The middle button of the press that anchored the mode, for the
+/// hold-or-toggle rule: down since `since`, or released as a click.
+#[derive(Clone, Copy)]
+enum Button {
+    Held { since: Instant },
+    Toggled,
 }
 
 impl QuillApp {
@@ -111,7 +125,7 @@ impl QuillApp {
         self.history.autoscroll.active = Some(Active {
             anchor: position,
             chat: chat.0,
-            pressed_at: Some(now),
+            button: Button::Held { since: now },
             last_tick: now,
             pull: Pull::Neutral,
             _scroller: scroller,
@@ -124,10 +138,11 @@ impl QuillApp {
         let Some(active) = self.history.autoscroll.active.as_mut() else {
             return;
         };
-        let Some(pressed_at) = active.pressed_at.take() else {
+        let Button::Held { since } = active.button else {
             return;
         };
-        if release_stops(pressed_at.elapsed()) {
+        active.button = Button::Toggled;
+        if release_stops(since.elapsed()) {
             self.autoscroll_stop(cx);
         }
     }
@@ -158,7 +173,7 @@ impl QuillApp {
             return None;
         }
         let now = Instant::now();
-        let elapsed = now - active.last_tick;
+        let elapsed = now.saturating_duration_since(active.last_tick);
         active.last_tick = now;
         let delta = f32::from(pointer.y - active.anchor.y);
         let next = pull(delta);

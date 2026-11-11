@@ -41,7 +41,21 @@ impl QuillApp {
     /// one that pressed Call, while it is open. A chat window's call that
     /// fails to start says so there, not as a scrim over a main window the
     /// user may not look at for hours.
+    /// A call that came in reached no chat window that pressed Call: its
+    /// card is the main window's, whatever window pressed Call before.
     pub(super) fn call_card_window(&self) -> Option<quill::ids::ChatId> {
+        let calls = self.session().map(|session| &session.calls);
+        let incoming = calls.is_some_and(|calls| {
+            calls
+                .active_call
+                .as_ref()
+                .map(|call| !call.is_outgoing)
+                .or_else(|| calls.summary.as_ref().map(|summary| !summary.is_outgoing))
+                == Some(true)
+        });
+        if incoming {
+            return None;
+        }
         self.call_boxes
             .card_window
             .filter(|chat| self.windows.has(*chat))

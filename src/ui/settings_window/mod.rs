@@ -150,6 +150,8 @@ impl QuillApp {
                 let _ = live.driver.fetch_privacy_rules(key);
             }
             let _ = live.driver.fetch_auto_download_presets();
+            // The "Accept calls on this device" row reads the sessions.
+            let _ = live.driver.maybe_fetch_active_sessions();
         }
     }
 

@@ -32,15 +32,17 @@ impl Session {
                 );
             }
             Some(RequestPurpose::GetBotSimilarBots) => {
-                // The section goes back to its button, so it can ask again
-                // (a `Loading` left behind refused every later press).
-                if let Some(bot) = pending.and_then(|p| p.user_id)
-                    && matches!(
-                        self.bots.similar_bots.get(&bot),
-                        Some(SimilarBotsFetch::Loading)
-                    )
+                // The section shows the reason beside its button, so it can
+                // ask again; only the request it waits for fails it.
+                if let Some(pending) = pending
+                    && let Some(bot) = pending.user_id
+                    && let Some(fetch) = self.bots.similar_bots.get_mut(&bot)
                 {
-                    self.bots.similar_bots.remove(&bot);
+                    fetch.failed(
+                        Some(pending.id),
+                        crate::state::call_request_error_line(err, "Could not load similar bots"),
+                        false,
+                    );
                 }
                 self.chats_state
                     .chat_action_error

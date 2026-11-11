@@ -50,6 +50,10 @@ impl ChatWindowView {
         let observe = follow_app_unless_held(&owner, window.window_handle().window_id(), cx);
         let placed = [
             cx.observe_window_activation(window, |this, window, cx| {
+                if window.is_window_active() {
+                    // The battery probe rests while no window is in front.
+                    quill::wake::BATTERY.poke();
+                }
                 glyph_sweep::window_activation(
                     window.window_handle().window_id(),
                     window.is_window_active(),

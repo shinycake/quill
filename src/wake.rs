@@ -206,6 +206,7 @@ pub fn poke_on_activation() {
     UPDATES.poke();
     BACKGROUND_UPDATES.poke();
     PASSCODE.poke();
+    BATTERY.poke();
     crate::icon_badge::invalidate_icon_badge();
 }
 
@@ -278,6 +279,13 @@ mod tests {
         assert!(UPDATES.epoch() != updates);
         assert!(PASSCODE.epoch() != passcode);
         assert!(CHROME.epoch() != chrome);
+    }
+
+    #[test]
+    fn activation_wakes_the_battery_probe_parked_while_hidden() {
+        let battery = BATTERY.epoch();
+        poke_on_activation();
+        assert!(BATTERY.epoch() != battery);
     }
 
     struct Flag(std::sync::atomic::AtomicBool);
