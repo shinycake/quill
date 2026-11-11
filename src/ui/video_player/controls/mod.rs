@@ -70,16 +70,12 @@ pub(crate) struct VideoControlsState {
     /// The seek slider, in seconds (`0..=duration`). Created when a clip
     /// starts, cleared when it stops.
     pub(crate) seek: Option<Entity<SliderState>>,
-    /// The dragged position while the seek thumb is held.
-    pub(crate) seek_preview: Option<f64>,
     /// The volume slider, 0–100.
     pub(crate) volume: Option<Entity<SliderState>>,
-    /// The volume thumb is held.
-    pub(crate) volume_dragging: bool,
     /// The speed popover's slider (created on first use, kept).
     pub(crate) speed: Option<Entity<SliderState>>,
-    /// The speed shown while its slider is dragged.
-    pub(crate) speed_preview: Option<f64>,
+    /// The slider thumb held now, if any.
+    pub(crate) drag: SliderDrag,
     /// Screenshot demo: open the speed popover on the first frame.
     pub(crate) demo_speed_open: bool,
     /// The pointer's fraction over the scrubber while it hovers.
@@ -97,21 +93,75 @@ pub(crate) struct VideoControlsState {
     pub(crate) waiting: WaitingGate,
 }
 
+/// The slider thumb held now: one pointer holds one thumb, so a drag is
+/// one value, with the preview its slider shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) enum SliderDrag {
+    #[default]
+    None,
+    /// The seek thumb: the dragged position.
+    Seek(f64),
+    Volume,
+    /// The speed thumb: the speed shown.
+    Speed(f64),
+}
+
+impl SliderDrag {
+    pub(crate) fn seek_preview(self) -> Option<f64> {
+        match self {
+            Self::Seek(secs) => Some(secs),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn speed_preview(self) -> Option<f64> {
+        match self {
+            Self::Speed(speed) => Some(speed),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn volume(self) -> bool {
+        self == Self::Volume
+    }
+
+    pub(crate) fn is_held(self) -> bool {
+        self != Self::None
+    }
+
+    /// The seek thumb let go (a drag of another thumb is not touched).
+    pub(crate) fn end_seek(&mut self) {
+        if matches!(self, Self::Seek(_)) {
+            *self = Self::None;
+        }
+    }
+
+    pub(crate) fn end_volume(&mut self) {
+        if *self == Self::Volume {
+            *self = Self::None;
+        }
+    }
+
+    pub(crate) fn end_speed(&mut self) {
+        if matches!(self, Self::Speed(_)) {
+            *self = Self::None;
+        }
+    }
+}
+
 impl VideoControlsState {
     /// A slider is being dragged: the controls must not hide.
     pub(crate) fn dragging(&self) -> bool {
-        self.seek_preview.is_some() || self.volume_dragging || self.speed_preview.is_some()
+        self.drag.is_held()
     }
 
     /// The clip stopped: drop its sliders and any pending gesture. Returns
     /// `true` when a boost was on.
     pub(crate) fn clear_clip(&mut self) -> bool {
         self.seek = None;
-        self.seek_preview = None;
+        // A drag cut off by the clip's end never gets its Release.
+        self.drag = SliderDrag::None;
         self.volume = None;
-        self.volume_dragging = false;
-        // A speed drag cut off by the clip's end never gets its Release.
-        self.speed_preview = None;
         self.hover = None;
         self.waiting = WaitingGate::default();
         self.boost.cancel()
@@ -247,7 +297,7 @@ impl VideoController {
             row_id,
             transport: transport.clone(),
             seek: state.seek.clone(),
-            seek_preview: state.seek_preview,
+            seek_preview: state.drag.seek_preview(),
             hover: state.hover,
             volume: state.volume.clone(),
             level: transport.volume,

@@ -2,6 +2,7 @@
 //! preferences, the media-session tick, and zoom/pan.
 
 use super::*;
+use crate::ui::video_player::controls::SliderDrag;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 use std::time::Instant;
@@ -17,11 +18,11 @@ impl QuillApp {
     ) {
         match event {
             SliderEvent::Change(value) => {
-                self.viewer.controls.seek_preview = Some(f64::from(value.end()));
+                self.viewer.controls.drag = SliderDrag::Seek(f64::from(value.end()));
                 self.notify_viewer_panel(cx);
             }
             SliderEvent::Release(value) => {
-                self.viewer.controls.seek_preview = None;
+                self.viewer.controls.drag.end_seek();
                 self.seek_viewer_to(f64::from(value.end()), cx);
             }
         }
@@ -196,7 +197,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.viewer.controls.seek_preview.is_some() {
+        if self.viewer.controls.drag.seek_preview().is_some() {
             return;
         }
         let Some(transport) = self.viewer_transport() else {
@@ -231,11 +232,11 @@ impl QuillApp {
     ) {
         match event {
             SliderEvent::Change(_) => {
-                self.viewer.controls.volume_dragging = true;
+                self.viewer.controls.drag = SliderDrag::Volume;
                 self.notify_viewer_panel(cx);
             }
             SliderEvent::Release(value) => {
-                self.viewer.controls.volume_dragging = false;
+                self.viewer.controls.drag.end_volume();
                 self.set_playback_volume(f64::from(value.end()) as f32 / 100.0, cx);
             }
         }
@@ -248,7 +249,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.viewer.controls.volume_dragging {
+        if self.viewer.controls.drag.volume() {
             return;
         }
         if let Some(slider) = self.viewer.controls.volume.as_ref() {
@@ -282,7 +283,7 @@ impl QuillApp {
     pub(in crate::ui) fn set_playback_speed(&mut self, speed: f64, cx: &mut Context<Self>) {
         let next = quill::viewer_extras::clamp_speed(speed);
         self.players.speed = next;
-        self.viewer.controls.speed_preview = None;
+        self.viewer.controls.drag.end_speed();
         // A chosen speed ends a Space hold (the rate is set below).
         let _ = self.viewer.controls.boost.cancel();
         let mut restarted = false;
@@ -326,8 +327,9 @@ impl QuillApp {
         cx.subscribe(&slider, move |this, _, event, cx| {
             this.in_window_scope(scope, cx, |this, cx| match event {
                 SliderEvent::Change(value) => {
-                    this.viewer.controls.speed_preview =
-                        Some(quill::viewer_extras::snap_speed(f64::from(value.end())));
+                    this.viewer.controls.drag = SliderDrag::Speed(
+                        quill::viewer_extras::snap_speed(f64::from(value.end())),
+                    );
                     cx.notify();
                 }
                 SliderEvent::Release(value) => {
@@ -361,9 +363,9 @@ impl QuillApp {
     ) -> AnyElement {
         use crate::ui::video_player::controls::SpeedMenu;
         let slider = self.ensure_speed_slider(cx);
-        let dragging = self.viewer.controls.speed_preview.is_some();
+        let dragging = self.viewer.controls.drag.speed_preview().is_some();
         let current = self.players.speed;
-        let shown = self.viewer.controls.speed_preview.unwrap_or(current);
+        let shown = self.viewer.controls.drag.speed_preview().unwrap_or(current);
         let view = cx.entity().downgrade();
         Popover::new((id, 1usize))
             .anchor(Anchor::BottomRight)
@@ -401,7 +403,8 @@ impl QuillApp {
         let shown = self
             .viewer
             .controls
-            .speed_preview
+            .drag
+            .speed_preview()
             .unwrap_or(self.players.speed);
         Button::new((id, 0usize))
             .label(Self::speed_label(shown))

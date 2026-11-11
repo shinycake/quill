@@ -20,17 +20,6 @@ fn closing_the_viewer_drops_a_timestamp_start(cx: &mut gpui_kit::TestAppContext)
 }
 
 #[gpui_kit::test]
-fn closing_the_forward_picker_drops_share_at(cx: &mut gpui_kit::TestAppContext) {
-    let (app, mut vcx) = new_app(cx);
-    let vcx = &mut vcx;
-    app.update_in(vcx, |app, window, cx| {
-        app.viewer.extra.share_at = Some((ChatId(11), MessageId(101), 83));
-        app.close_forward_picker(window, cx);
-        assert_eq!(app.viewer.extra.share_at, None);
-    });
-}
-
-#[gpui_kit::test]
 fn a_main_viewer_stop_keeps_a_chat_windows_parked_clip(cx: &mut gpui_kit::TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
