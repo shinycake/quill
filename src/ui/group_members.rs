@@ -486,7 +486,9 @@ impl QuillApp {
                 } else {
                     tr(keys::Q_PEOPLE_MANAGE_MEMBERS)
                 }))
-                .content(crate::ui::shell::one_shot_dialog_content(body.into_any_element()))
+                .content(crate::ui::shell::one_shot_dialog_content(
+                    body.into_any_element(),
+                ))
                 .on_close(on_close)
         })
     }

@@ -59,13 +59,6 @@ fn payment_request_survives_form_and_validated_answers() {
     // Continue: `validateOrderInfo` sent, request context refreshed.
     let extra = session.request(RequestPurpose::ValidateOrderInfo, Some(ChatId(51)));
     validating(&mut session, extra, Default::default());
-    open_checkout(
-        &mut session,
-        crate::payment_invoice::InputInvoice::Message {
-            chat_id: ChatId(51),
-            message_id: MessageId(7),
-        },
-    );
     apply_json(
         &mut session,
         &seq,
