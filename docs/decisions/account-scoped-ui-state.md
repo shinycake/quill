@@ -5464,3 +5464,54 @@ land and the typed form was gone.
 - **Skipped.** 13-069: `AgentUi::pick_account` already resets the activity
   filter wherever `picked` changes, with a test
   (`picking_another_account_resets_the_activity_filter`).
+
+### Sweep fixes (s4-links-tdlib-2)
+
+Minor links, mini app, location and TDLib entries; each was proved first.
+
+- **Answers matched to what asked.** The groups-in-common list is
+  `ProfileChatsFetch::Loading(RequestId)` and its follow-up page is
+  `CommonGroupsPaging::next_page: PhotoPage::Asking(request)`: a late page
+  of a fetch that was dropped lands in neither (05-185). A story album
+  answer merges into a list that was fetched, never starts one (05-198).
+  A mini app's attachment-menu toggle goes on to its launch only for its
+  own bot, and the three waiting launches carry the window that asked
+  (`Awaited`, 14-042, 14-043). The latest launch asked is the current one
+  (`mark_web_app_pending` drops older ones, whose answers are closed,
+  14-041). Mini app render actions are a queue (14-040).
+- **Rollbacks.** Every optimistic rollback that has a shown value restores
+  only while the value still equals it (`restore_optimistic`), as the topic
+  mute already did (05-201).
+- **Stages with an exit.** The AI style preview has `Adding` and `Removing`
+  carrying the request: the button waits, the answer or an error (or a send
+  failure) leaves the stage, and `Added`/`Removed`/`Deleted` name the
+  request so another preview's answer closes nothing (07-030, 07-031).
+  The proxy editor is `ProxySave::Saving(request)` and closes on the
+  answer through the `SaveWatch` (12-057). The mini app emoji-status grant
+  is `Granting(request)` and ends when its request leaves flight (14-035).
+  The main window's close is `MainWindowState`, and a raise makes it
+  `Open` (10-162).
+- **Asked once, but freed on failure.** A video userpic's full-info ask is
+  released when the send fails (05-157; an error answer keeps it, since the
+  ask comes from drawing). The AI compose emoji lookups use the session's
+  own per-id stage (`custom_lookups.attempted`), so a failed lookup is
+  asked again up to `MAX_FAILURES` (07-032); `emoji_asked` is gone.
+- **Parsing.** `updateChatReplyMarkup` reads only the id and the markup of
+  its message (06-047); `updateChatLastMessage` says `Unreadable` instead of
+  clearing the preview (06-048); an unreadable `messageEffect` fails its
+  request (06-051). The first frame's launch wait belongs to the client that
+  asked for the page (06-063).
+- **Small UI.** The link tooltip is in `ChatUi` with a stage that owns its
+  timer (09-X046, 09-090); a right-click link note is dropped when its event
+  ends (09-092); the map drag ends at the next move without the button
+  (10-168); a map tile cache past its cap forgets one place per new one
+  (05-188); an invite Join names its window before sending (09-X010).
+  The IP-exposure warning is acknowledged per account (documented, 12-058).
+- **Skipped.** 05-186: `refresh_chat_statistics` keeps the `Loading`
+  entry while a request is out (`send_chat_statistics`), so no stale answer
+  can land. 09-014: a lookup that cannot be sent already becomes
+  `ShowText("Couldn't reach Telegram.")`; the remaining `InvalidRequest`
+  returns are a shutting-down session and a share draft. 10-167: already
+  fixed by 5ddbff65 (`Locating::drop` stops the manager). 09-X010's second
+  half (drawing the invite box from `ChatsState::deep_link`) is left: the
+  copy is only read by the box and cleared with the flow.

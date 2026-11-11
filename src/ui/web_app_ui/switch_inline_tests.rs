@@ -32,7 +32,7 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, AnyWindowHandle) {
 fn switch_inline(app: &Entity<QuillApp>, main: AnyWindowHandle, cx: &mut TestAppContext) {
     cx.update_window(main, |_, window, cx| {
         app.update(cx, |app, cx| {
-            app.mini_apps.render_action = Some(RenderAction::SwitchInline {
+            app.mini_apps.render_actions.push(RenderAction::SwitchInline {
                 query: QUERY.into(),
                 chat: Some(FROM),
             });

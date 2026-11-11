@@ -37,6 +37,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: Option<ChatId>,
         source: LaunchSource,
     ) {
+        // The latest launch asked is the current one: an older one still
+        // out is dropped, so its answer opens nothing (the app TDLib
+        // started for it is closed) and its error is nobody's.
+        self.session.bots.web_apps.pending.clear();
         self.session.bots.web_apps.pending.push(WebAppPending {
             request,
             bot_user_id,

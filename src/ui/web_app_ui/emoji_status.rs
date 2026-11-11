@@ -37,8 +37,11 @@ enum AccessStage {
     Idle,
     /// The access prompt is up.
     Asking,
-    /// "Allow" was pressed and `toggleBotCanManageEmojiStatus` is in flight.
-    Granting,
+    /// "Allow" was pressed and `toggleBotCanManageEmojiStatus` is in flight
+    /// as this request. Its answer or error ends it, and so does the
+    /// request leaving flight with neither (dropped by the stale sweep or a
+    /// reconnect).
+    Granting(quill::ids::RequestId),
 }
 
 impl EmojiStatusFlow {
@@ -161,18 +164,18 @@ impl QuillApp {
             });
             return;
         }
-        self.with_window(|window| {
-            window.emoji.access = AccessStage::Granting;
-        });
         let sent = self
             .live
             .as_mut()
             .map(|live| live.driver.set_bot_emoji_status_access(bot_id, true));
-        if !matches!(sent, Some(Ok(_))) {
-            self.with_window(|window| {
+        match sent {
+            Some(Ok(request)) => self.with_window(|window| {
+                window.emoji.access = AccessStage::Granting(request);
+            }),
+            _ => self.with_window(|window| {
                 window.emoji.access = AccessStage::Idle;
                 window.emit(BridgeReply::emoji_status_access_requested(false));
-            });
+            }),
         }
     }
 
@@ -265,7 +268,8 @@ impl QuillApp {
             .and_then(|live| live.driver.session.bots.web_apps.emoji_access.take());
         if let Some((bot_id, done)) = access {
             let waiting = self.mini_apps.window.as_ref().is_some_and(|window| {
-                window.launch.bot_user_id == bot_id && window.emoji.access == AccessStage::Granting
+                window.launch.bot_user_id == bot_id
+                    && matches!(window.emoji.access, AccessStage::Granting(_))
             });
             if waiting {
                 self.with_window(|window| {
@@ -273,6 +277,20 @@ impl QuillApp {
                     window.emit(BridgeReply::emoji_status_access_requested(done));
                 });
             }
+        }
+        // A grant whose request left flight with no answer was dropped:
+        // the app hears "no", and later requests are not turned away as busy.
+        let dropped = match self.mini_apps.window.as_ref().map(|w| w.emoji.access) {
+            Some(AccessStage::Granting(request)) => self
+                .session()
+                .is_some_and(|session| session.requests.get(request).is_none()),
+            _ => false,
+        };
+        if dropped {
+            self.with_window(|window| {
+                window.emoji.access = AccessStage::Idle;
+                window.emit(BridgeReply::emoji_status_access_requested(false));
+            });
         }
         self.resolve_suggested_emoji(cx);
     }

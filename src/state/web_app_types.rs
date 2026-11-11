@@ -107,9 +107,10 @@ pub struct WebApps {
     /// failure message, with the bot it was asked for: the flow waiting
     /// takes only its own bot's answer.
     pub attachment_menu_bot: Option<(i64, Result<AttachmentMenuBot, String>)>,
-    /// One-shot: `toggleBotIsAddedToAttachmentMenu` outcome,
-    /// `(bot_user_id, added)` or a failure message.
-    pub attachment_menu_toggled: Option<Result<(i64, bool), String>>,
+    /// One-shot: `toggleBotIsAddedToAttachmentMenu` outcome for the bot it
+    /// was asked for: `added`, or a failure message. The flow waiting takes
+    /// only its own bot's answer.
+    pub attachment_menu_toggled: Option<(i64, Result<bool, String>)>,
     /// One-shot: write-access answers, `(bot_user_id, result)`.
     pub write_access: Option<(i64, WriteAccessResult)>,
     /// One-shot: `toggleBotCanManageEmojiStatus` outcome,

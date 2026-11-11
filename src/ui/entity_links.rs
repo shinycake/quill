@@ -406,10 +406,10 @@ impl QuillApp {
     ) {
         self.chat_ui.link_tooltip = None;
         self.message_ui.right_clicked_link = Some((position, link));
-        let owner = cx.entity().downgrade();
-        cx.defer(move |cx| {
-            let _ = owner.update(cx, |this, _| this.message_ui.right_clicked_link = None);
-        });
+        self.spawn_scoped(cx, async move |this, cx| {
+            let _ = this.update(cx, |this, _| this.message_ui.right_clicked_link = None);
+        })
+        .detach();
     }
 
     /// The link under the right-click that opened a menu at `position`.

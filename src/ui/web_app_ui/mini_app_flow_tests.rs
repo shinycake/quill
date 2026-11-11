@@ -7,7 +7,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::web_app_ui::helper_pipe::HelperWriter;
 use crate::ui::web_app_ui::invoice::InvoiceWatch;
-use crate::ui::web_app_ui::{MiniAppWindow, PendingOpen, PopupPurpose, RenderAction, theme_params};
+use crate::ui::web_app_ui::{Awaited, MiniAppWindow, PendingOpen, PopupPurpose, RenderAction, theme_params};
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::web_app::bridge::WebAppEvent;
@@ -191,9 +191,12 @@ fn an_invoice_request_opens_the_checkout_at_render_time(cx: &mut TestAppContext)
         let _received = open_window(app, cx);
         app.handle_web_app_event(WebAppEvent::OpenInvoice { slug: "abc".into() }, cx);
         assert_eq!(
-            app.mini_apps.render_action,
-            Some(RenderAction::OpenInvoice { slug: "abc".into() })
+            app.mini_apps.render_actions,
+            [RenderAction::OpenInvoice { slug: "abc".into() }]
         );
+        // A second action before the render does not drop the first.
+        app.mini_apps.render_actions.push(RenderAction::OpenBotChat { bot_id: 9 });
+        assert_eq!(app.mini_apps.render_actions.len(), 2);
     });
 }
 
@@ -265,9 +268,13 @@ fn an_account_switch_closes_the_mini_app_and_what_waits(cx: &mut TestAppContext)
             chat_id: quill::ids::ChatId(11),
             bot_id: BOT,
         };
-        app.mini_apps.awaiting_attach_bot = Some(waiting.clone());
-        app.mini_apps.awaiting_search = Some(waiting.clone());
-        app.mini_apps.awaiting_toggle = Some(waiting);
+        let awaited = Awaited {
+            then: waiting,
+            window: None,
+        };
+        app.mini_apps.awaiting_attach_bot = Some(awaited.clone());
+        app.mini_apps.awaiting_search = Some(awaited.clone());
+        app.mini_apps.awaiting_toggle = Some(awaited);
         app.ensure_mini_app_poll(cx);
 
         app.switch_account(&quill::ids::AccountKey("other".into()), "", window, cx);

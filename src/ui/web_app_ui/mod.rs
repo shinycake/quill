@@ -38,6 +38,7 @@ use quill_webview_protocol::{
     BottomButton, HelperEvent, HostCommand, MenuItem, Popup, PopupButton, ShellEvent, decode,
     encode,
 };
+use awaited::Awaited;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::process::{Child, Command, Stdio};
@@ -271,12 +272,14 @@ pub(super) struct MiniApps {
     pub(super) confirm: Option<WebAppConfirm>,
     /// A launch waiting for `getAttachmentMenuBot` (deep link) before it
     /// can go on.
-    awaiting_attach_bot: Option<PendingOpen>,
+    awaiting_attach_bot: Option<Awaited>,
     /// A launch waiting for `searchWebApp` before the open box.
-    awaiting_search: Option<PendingOpen>,
+    awaiting_search: Option<Awaited>,
     /// A launch waiting for `toggleBotIsAddedToAttachmentMenu`.
-    awaiting_toggle: Option<PendingOpen>,
-    render_action: Option<RenderAction>,
+    awaiting_toggle: Option<Awaited>,
+    /// What only a render can do, in the order it was asked: two asked
+    /// before the next render both run.
+    render_actions: Vec<RenderAction>,
     /// Bots whose "Emoji Status" switch has been on screen this run, so it
     /// stays when the person turns it off (`bot_permissions`).
     pub(super) emoji_access_shown: std::collections::HashSet<quill::ids::OfAccount<i64>>,
@@ -559,11 +562,15 @@ impl QuillApp {
                     .as_mut()
                     .map(|live| live.driver.search_web_app(bot_id, short_name));
                 if matches!(sent, Some(Ok(_))) {
-                    self.mini_apps.awaiting_search = Some(PendingOpen::Link {
-                        chat_id: Some(chat_id),
-                        bot_id,
-                        short_name: short_name.clone(),
-                        start_parameter: start_parameter.clone(),
+                    let window = self.asking_window_or_last_press();
+                    self.mini_apps.awaiting_search = Some(Awaited {
+                        then: PendingOpen::Link {
+                            chat_id: Some(chat_id),
+                            bot_id,
+                            short_name: short_name.clone(),
+                            start_parameter: start_parameter.clone(),
+                        },
+                        window,
                     });
                     self.open_box(DialogKind::WebAppConfirm);
                     self.ensure_mini_app_poll(cx);
@@ -597,9 +604,13 @@ impl QuillApp {
                     .as_mut()
                     .map(|live| live.driver.fetch_attachment_menu_bot(bot_id));
                 if matches!(sent, Some(Ok(_))) {
-                    self.mini_apps.awaiting_attach_bot = Some(PendingOpen::Attach {
-                        chat_id: target,
-                        bot_id,
+                    let window = self.asking_window_or_last_press();
+                    self.mini_apps.awaiting_attach_bot = Some(Awaited {
+                        then: PendingOpen::Attach {
+                            chat_id: target,
+                            bot_id,
+                        },
+                        window,
                     });
                     self.open_box(DialogKind::WebAppConfirm);
                     self.ensure_mini_app_poll(cx);
@@ -774,7 +785,8 @@ impl QuillApp {
                     )
                 });
                 if matches!(sent, Some(Ok(_))) {
-                    self.mini_apps.awaiting_toggle = Some(then);
+                    let window = self.asking_window_or_last_press();
+                    self.mini_apps.awaiting_toggle = Some(Awaited { then, window });
                     self.ensure_mini_app_poll(cx);
                 } else {
                     self.set_status_note(
@@ -960,6 +972,7 @@ fn bottom_button(setup: quill::web_app::bridge::ButtonSetup) -> BottomButton {
     }
 }
 
+mod awaited;
 mod emoji_status;
 mod helper_pipe;
 mod inline_results_button;

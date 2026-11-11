@@ -2,6 +2,7 @@
 //! for the web view helper: what the window writes to the helper's stdin comes
 //! back on its stdout, where the test reads the popups and bridge replies.
 
+use super::AccessStage;
 use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::web_app_ui::helper_pipe::HelperWriter;
@@ -269,5 +270,25 @@ fn an_emoji_that_cannot_be_found_fails_as_invalid(cx: &mut TestAppContext) {
             cx,
         );
         assert_eq!(reply(&received).0, "emoji_status_failed");
+    });
+}
+
+/// Sweep 14-035: a grant whose request was dropped unanswered ends with a
+/// "no" and does not leave later requests answered as busy.
+#[gpui_kit::test]
+fn a_grant_whose_request_was_dropped_answers_no_and_frees_the_stage(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let received = open_window(app, false, cx);
+        app.mini_apps.window.as_mut().unwrap().emoji.access =
+            AccessStage::Granting(quill::ids::RequestId(7));
+        app.poll_emoji_status(cx);
+        let (event, data) = reply(&received);
+        assert_eq!(event, "emoji_status_access_requested");
+        assert_eq!(data["status"], "cancelled");
+        assert_eq!(
+            app.mini_apps.window.as_ref().unwrap().emoji.access,
+            AccessStage::Idle
+        );
     });
 }
