@@ -13,6 +13,18 @@ impl Session {
         self.settings.saved_sounds.owe_refetch();
     }
 
+    /// A `setAccountTtl` or `deleteAccount` is out: one write at a time. A
+    /// `getAccountTtl` in flight does not block a write.
+    pub fn account_ttl_write_pending(&self) -> bool {
+        self.requests.pending.values().any(|pending| {
+            matches!(
+                pending.purpose,
+                RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { .. })
+                    | RequestPurpose::DeleteAccount
+            )
+        })
+    }
+
     /// The saved-sound list is owed a fetch: it changed, and no request
     /// for it is out (`Fetch::Stale`).
     pub fn saved_sounds_owed(&self) -> bool {

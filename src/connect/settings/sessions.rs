@@ -139,7 +139,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         reason: &str,
         password: &str,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.account_ttl.is_loading() {
+        if !self.chats_path_active() || self.session.account_ttl_write_pending() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(RequestPurpose::DeleteAccount, None);
@@ -239,7 +239,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// mutation at a time; the confirmed days land from the
     /// authoritative `ok` (never an optimistic write).
     pub fn set_account_ttl(&mut self, days: i32) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.account_ttl.is_loading() {
+        if !self.chats_path_active() || self.session.account_ttl_write_pending() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(

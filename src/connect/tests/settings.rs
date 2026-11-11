@@ -897,3 +897,21 @@ fn default_auto_delete_fetch_and_set() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn an_account_ttl_write_goes_out_while_the_read_is_in_flight_but_not_beside_another_write() {
+    let (dir, mut driver, recorder, _sink, _dyn_sink, _seq) = sessions_driver();
+    driver.get_account_ttl().expect("send").expect("request id");
+    assert!(driver.session.settings.account_ttl.is_loading());
+    // The read does not block the write.
+    let sent = recorder.snapshot().len();
+    driver.set_account_ttl(180).expect("the write is sent");
+    let snapshot = recorder.snapshot();
+    assert_eq!(snapshot.len(), sent + 1);
+    assert!(snapshot[sent].contains("\"@type\":\"setAccountTtl\""));
+    // One write at a time.
+    assert_invalid(driver.set_account_ttl(365));
+    assert_invalid(driver.delete_account("", ""));
+    assert_eq!(recorder.snapshot().len(), sent + 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
