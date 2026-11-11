@@ -13,9 +13,11 @@ pub const MAP_THUMB_HEIGHT: i32 = 240;
 /// `getMapThumbnailFile.scale` (1..=3): 2 keeps the tile sharp on Retina.
 pub const MAP_THUMB_SCALE: i32 = 2;
 
-/// Most places remembered; past it the map restarts empty
-/// and the open chat asks again for the tiles it still shows.
-pub const MAP_THUMB_CAP: usize = 1024;
+/// Most places remembered. A chat's window holds at most
+/// `HISTORY_WINDOW_CAP` messages, so it can never show more places than
+/// fit; past the cap one answered or failed place is forgotten per new
+/// one (and asked again if it is shown), never the whole map.
+pub const MAP_THUMB_CAP: usize = 2 * crate::state::HISTORY_WINDOW_CAP;
 
 /// Where a thumbnail is for: the rounded coordinates (about 11 cm).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -80,7 +82,14 @@ impl MapThumbs {
     /// Remember that request `extra` asks for `key`'s tile.
     pub fn expect(&mut self, extra: RequestId, key: MapKey) {
         if self.tiles.len() >= MAP_THUMB_CAP && !self.tiles.contains_key(&key) {
-            self.tiles.clear();
+            let evict = self
+                .tiles
+                .iter()
+                .find_map(|(old, tile)| (!matches!(tile, Tile::Asking(_))).then_some(*old))
+                .or_else(|| self.tiles.keys().next().copied());
+            if let Some(old) = evict {
+                self.tiles.remove(&old);
+            }
         }
         self.tiles.insert(key, Tile::Asking(extra));
     }
@@ -202,6 +211,8 @@ mod cap_tests {
             assert!(thumbs.tiles.len() <= MAP_THUMB_CAP);
         }
         assert!(thumbs.has_asked(&key(MAP_THUMB_CAP as i64 * 3 - 1)));
+        // Sweep 05-188: the cap drops one place per new one, not the map.
+        assert_eq!(thumbs.tiles.len(), MAP_THUMB_CAP);
     }
 
     /// Sweep 05-187: a failed tile is not remembered as asked for the whole

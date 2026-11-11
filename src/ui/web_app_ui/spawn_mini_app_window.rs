@@ -289,33 +289,30 @@ impl QuillApp {
         // before the first one answered) is dropped: it never drives this
         // launch, and the flow keeps waiting for its own.
         if let Some((asked, result)) = attach_bot
-            && let Some(then) = self
+            && let Some(Awaited { then, window }) = self
                 .mini_apps
                 .awaiting_attach_bot
-                .take_if(|then| then.bot_id() == asked)
+                .take_if(|awaited| awaited.bot_id() == asked)
         {
-            match result {
-                Ok(bot) if bot.is_added => self.start_web_app(then, cx),
+            self.as_asked_by(window, |this| match result {
+                Ok(bot) if bot.is_added => this.start_web_app(then, cx),
                 Ok(bot) => {
                     // box-host: opened by an answer; the attach-bot deep link request named the window
-                    self.mini_apps.confirm = Some(WebAppConfirm::AddToMenu {
+                    this.mini_apps.confirm = Some(WebAppConfirm::AddToMenu {
                         bot,
                         allow_write: true,
                         then,
                     });
                     cx.notify();
                 }
-                Err(message) => self.set_status_note(StatusNote::error(&message), cx),
-            }
+                Err(message) => this.set_status_note(StatusNote::error(&message), cx),
+            });
         }
         // Each answer is for its own bot: the flow waiting for another
         // bot's toggle goes on waiting (its launch is not started by an
         // answer that is not its own).
         for toggle in toggled {
-            let waiting = self
-                .mini_apps
-                .awaiting_toggle
-                .take_if(|then| then.bot_id() == toggle.bot_user_id);
+            let toggled_bot = toggle.bot_user_id;
             match toggle.result {
                 Ok(added) => {
                     self.set_status_note(
@@ -326,48 +323,31 @@ impl QuillApp {
                         },
                         cx,
                     );
-                    if let Some(then) = waiting {
-                        self.request_web_app(then, false, cx);
+                    // Only the answer for the bot being added goes on to
+                    // its launch: another app's menu change is not it.
+                    if let Some(Awaited { then, window }) = self
+                        .mini_apps
+                        .awaiting_toggle
+                        .take_if(|awaited| awaited.bot_id() == toggled_bot)
+                    {
+                        self.as_asked_by(window, |this| this.request_web_app(then, false, cx));
                     }
                 }
-                Err(message) => self.set_status_note(StatusNote::error(&message), cx),
+                Err(message) => {
+                    self.mini_apps
+                        .awaiting_toggle
+                        .take_if(|awaited| awaited.bot_id() == toggled_bot);
+                    self.set_status_note(StatusNote::error(&message), cx);
+                }
             }
         }
         if let Some((asked, result)) = found
-            && let Some(then) = self
+            && let Some(Awaited { then, window }) = self
                 .mini_apps
                 .awaiting_search
-                .take_if(|then| then.bot_id() == asked)
+                .take_if(|awaited| awaited.bot_id() == asked)
         {
-            match result {
-                Ok(app) => {
-                    let bot_id = then.bot_id();
-                    let verified = self
-                        .session()
-                        .and_then(|session| session.users.get(&bot_id))
-                        .is_some_and(|user| user.verification.is_verified);
-                    if app.skip_confirmation
-                        || (!app.request_write_access
-                            && !trust::needs_confirmation(
-                                &self.web_app_account(),
-                                bot_id,
-                                verified,
-                                false,
-                            ))
-                    {
-                        self.request_web_app(then, false, cx);
-                    } else {
-                        // box-host: opened by an answer; the web app search request named the window
-                        self.mini_apps.confirm = Some(WebAppConfirm::OpenTerms {
-                            then,
-                            request_write: app.request_write_access,
-                            allow_write: true,
-                        });
-                        cx.notify();
-                    }
-                }
-                Err(message) => self.set_status_note(StatusNote::error(&message), cx),
-            }
+            self.as_asked_by(window, |this| this.found_web_app_answer(then, result, cx));
         }
         if let Some(result) = data_sent {
             match result {
@@ -376,6 +356,45 @@ impl QuillApp {
                 }
                 Err(message) => self.set_status_note(StatusNote::error(&message), cx),
             }
+        }
+    }
+
+    /// The `searchWebApp` answer of a named app link: the launch goes on, or
+    /// the terms box asks first.
+    fn found_web_app_answer(
+        &mut self,
+        then: PendingOpen,
+        result: Result<quill::telegram::envelope::FoundWebApp, String>,
+        cx: &mut Context<Self>,
+    ) {
+        match result {
+            Ok(app) => {
+                let bot_id = then.bot_id();
+                let verified = self
+                    .session()
+                    .and_then(|session| session.users.get(&bot_id))
+                    .is_some_and(|user| user.verification.is_verified);
+                if app.skip_confirmation
+                    || (!app.request_write_access
+                        && !trust::needs_confirmation(
+                            &self.web_app_account(),
+                            bot_id,
+                            verified,
+                            false,
+                        ))
+                {
+                    self.request_web_app(then, false, cx);
+                } else {
+                    // box-host: opened by an answer; the web app search request named the window
+                    self.mini_apps.confirm = Some(WebAppConfirm::OpenTerms {
+                        then,
+                        request_write: app.request_write_access,
+                        allow_write: true,
+                    });
+                    cx.notify();
+                }
+            }
+            Err(message) => self.set_status_note(StatusNote::error(&message), cx),
         }
     }
 
@@ -591,10 +610,12 @@ impl QuillApp {
                         .and_then(|window| window.launch.chat_id)
                         .map(ChatId);
                     if !username.is_empty() {
-                        self.mini_apps.render_action = Some(RenderAction::SwitchInline {
-                            query: format!("@{username} {query}"),
-                            chat,
-                        });
+                        self.mini_apps
+                            .render_actions
+                            .push(RenderAction::SwitchInline {
+                                query: format!("@{username} {query}"),
+                                chat,
+                            });
                         self.close_mini_app_window(cx);
                         self.raise_main_window_later(cx);
                         cx.notify();
@@ -763,7 +784,9 @@ impl QuillApp {
             ShellEvent::Back | ShellEvent::Reload | ShellEvent::FrameLoaded => {}
             ShellEvent::Menu { id } => match id.as_str() {
                 "open_bot" => {
-                    self.mini_apps.render_action = Some(RenderAction::OpenBotChat { bot_id });
+                    self.mini_apps
+                        .render_actions
+                        .push(RenderAction::OpenBotChat { bot_id });
                     self.raise_main_window_later(cx);
                     cx.notify();
                 }
@@ -846,19 +869,18 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(action) = self.mini_apps.render_action.take() else {
-            return;
-        };
-        match action {
-            RenderAction::SwitchInline { query, chat } => {
-                self.switch_inline_into(chat, query, window, cx);
+        for action in std::mem::take(&mut self.mini_apps.render_actions) {
+            match action {
+                RenderAction::SwitchInline { query, chat } => {
+                    self.switch_inline_into(chat, query, window, cx);
+                }
+                RenderAction::OpenBotChat { bot_id } => self.open_user_chat(bot_id, window, cx),
+                // The checkout opens over the main window, as the mini app
+                // does; the main frame runs this, so that window asks.
+                RenderAction::OpenInvoice { slug } => self.as_asked_by(None, |this| {
+                    this.open_mini_app_invoice(slug, window, cx);
+                }),
             }
-            RenderAction::OpenBotChat { bot_id } => self.open_user_chat(bot_id, window, cx),
-            // The checkout opens over the main window, as the mini app
-            // does; the main frame runs this, so that window asks.
-            RenderAction::OpenInvoice { slug } => self.as_asked_by(None, |this| {
-                this.open_mini_app_invoice(slug, window, cx);
-            }),
         }
     }
 

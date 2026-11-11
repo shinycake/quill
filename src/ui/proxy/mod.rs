@@ -36,7 +36,10 @@ pub(crate) struct ProxyUi {
     pub(crate) link: Option<ProxyLinkBox>,
     /// One-line result of the last list action ("Proxy List copied…").
     pub(crate) notice: Option<String>,
-    /// The "this exposes your IP" warning was confirmed for this run.
+    /// The "this exposes your IP" warning was confirmed for this run on
+    /// this account: the field lives in the account's `SettingsUi`, so
+    /// another account asks again (the warning is about the proxy this
+    /// account's connection would use).
     pub(crate) ip_warning_acked: bool,
     /// The proxy list as a box of its own (tdesktop's `ProxiesBox`), for
     /// the sign-in screen, which has no Settings window to hold it.
@@ -59,6 +62,16 @@ pub(crate) struct ProxyEditor {
     password: Entity<InputState>,
     secret: Entity<InputState>,
     error: Option<String>,
+    save: ProxySave,
+}
+
+/// Where the editor's Save stands: being edited, or sent and waiting for
+/// TDLib's answer. The box closes on that request's answer; a refusal (or
+/// an answer that never comes) puts it back to `Editing` with its error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProxySave {
+    Editing,
+    Saving(quill::ids::RequestId),
 }
 
 /// The "Proxy Server — Connect Proxy" confirmation for a proxy link.
@@ -208,6 +221,7 @@ impl QuillApp {
             ),
             secret: input(window, cx, tr(keys::PROXY_BOX_SECRET), &draft.secret, false),
             error: None,
+            save: ProxySave::Editing,
         });
         if let Some(editor) = &self.settings.proxy.editor {
             let first = if kind == ProxyKind::Web {
@@ -221,8 +235,65 @@ impl QuillApp {
     }
 
     fn close_proxy_editor(&mut self, cx: &mut Context<Self>) {
+        self.forget_proxy_saving();
         self.settings.proxy.editor = None;
         cx.notify();
+    }
+
+    /// The editor stops waiting for its request.
+    fn forget_proxy_saving(&mut self) {
+        let Some(ProxySave::Saving(request)) = self
+            .settings
+            .proxy
+            .editor
+            .as_ref()
+            .map(|editor| editor.save)
+        else {
+            return;
+        };
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.users_state.saves.forget(request);
+        }
+    }
+
+    /// Each frame of the window that hosts the editor: take the answer of
+    /// the saving request. Saved closes the box; a refusal puts it back
+    /// with its error.
+    pub(in crate::ui) fn proxy_saving_upkeep(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ProxySave::Saving(request)) = self
+            .settings
+            .proxy
+            .editor
+            .as_ref()
+            .map(|editor| editor.save)
+        else {
+            return;
+        };
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        let session = &mut live.driver.session;
+        let in_flight = session.requests.get(request).is_some();
+        let outcome = session.users_state.saves.take_outcome(request, in_flight);
+        match outcome {
+            quill::state::SaveOutcome::Saving => {}
+            quill::state::SaveOutcome::Saved => {
+                self.settings.proxy.editor = None;
+                self.close_kit_dialog_if_done(DialogKind::ProxyEdit, window, cx);
+                cx.notify();
+            }
+            quill::state::SaveOutcome::Failed(_) | quill::state::SaveOutcome::Unknown => {
+                if let Some(editor) = self.settings.proxy.editor.as_mut() {
+                    editor.save = ProxySave::Editing;
+                    editor.error = Some(tr(keys::Q_PREFS_COULDNT_SAVE_THE_PROXY_TRY).into());
+                }
+                cx.notify();
+            }
+        }
     }
 
     /// Validate the editor and send `addProxy` / `editProxy`.
@@ -230,6 +301,9 @@ impl QuillApp {
         let Some(editor) = self.settings.proxy.editor.as_ref() else {
             return;
         };
+        if editor.save != ProxySave::Editing {
+            return;
+        }
         let mut draft = if editor.kind == ProxyKind::Web {
             ProxyDraft::web(
                 editor.web_host.read(cx).value().as_ref(),
@@ -301,7 +375,16 @@ impl QuillApp {
             None => driver.add_proxy(&draft, enable_on_save, &comment),
         });
         match sent {
-            Some(Ok(_)) | None => self.settings.proxy.editor = None,
+            Some(Ok(request)) => {
+                if let Some(live) = self.live.as_mut() {
+                    live.driver.session.users_state.saves.watch(request);
+                }
+                if let Some(editor) = self.settings.proxy.editor.as_mut() {
+                    editor.error = None;
+                    editor.save = ProxySave::Saving(request);
+                }
+            }
+            None => self.settings.proxy.editor = None,
             Some(Err(_)) => fail(self, tr(keys::Q_PREFS_COULDNT_SAVE_THE_PROXY_TRY).into()),
         }
         cx.notify();

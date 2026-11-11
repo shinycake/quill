@@ -109,6 +109,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             pending.rollback = Some(RequestRollback::ChatIsTranslatable {
                 chat_id: chat_id.0,
                 previous,
+                shown: is_translatable,
             });
         }
         Ok(())
@@ -154,6 +155,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             pending.rollback = Some(RequestRollback::AutoTranslate {
                 supergroup_id,
                 previous,
+                shown: enabled,
             });
         }
         Ok(Some(extra))

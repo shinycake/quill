@@ -272,7 +272,7 @@ impl QuillApp {
                     )
                     .into_any_element(),
             ),
-            ProfileChatsFetch::Loading => None,
+            ProfileChatsFetch::Loading(_) => None,
         }
     }
 

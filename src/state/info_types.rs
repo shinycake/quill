@@ -53,15 +53,18 @@ pub const GROUPS_IN_COMMON_SEARCH_MIN: usize = 20;
 pub struct CommonGroupsPaging {
     /// The last page came back short: nothing more to load.
     pub exhausted: bool,
-    /// A follow-up page is in flight.
-    pub loading_more: bool,
+    /// The follow-up page, as the request it waits for: only that
+    /// request's answer extends the list.
+    pub next_page: PhotoPage,
 }
 
 /// B10: fetch state of one `ProfileChatsKind` list. `Loading` is the
-/// in-flight guard; `Failed` keeps the reason for a Retry row.
+/// in-flight guard and names the request whose answer it waits for (a late
+/// answer to a dropped fetch never lands); `Failed` keeps the reason for a
+/// Retry row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProfileChatsFetch {
-    Loading,
+    Loading(RequestId),
     Loaded(Vec<i64>),
     Failed(String),
 }

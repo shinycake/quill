@@ -608,14 +608,17 @@ impl QuillApp {
                         .on_click(cx.listener(|this, _, window, cx| {
                             if let Some(DeepLinkState::InvitePreview { generation, .. }) =
                                 this.links.deep_link_invite.take()
-                                && let Some(live) = this.live.as_mut()
-                                && let Ok(Some(_)) =
-                                    live.driver.confirm_deep_link_invite(generation)
                             {
                                 // Join starts its own flow, from the window
                                 // of this box: the joined chat and the
-                                // request-sent or error box go there.
-                                this.screen.links.flow_window = this.asking_window().flatten();
+                                // request-sent or error box go there, a
+                                // "Couldn't reach Telegram" too, so the
+                                // window is set whatever the send returns.
+                                let from = this.asking_window().flatten();
+                                if let Some(live) = this.live.as_mut() {
+                                    this.screen.links.flow_window = from;
+                                    let _ = live.driver.confirm_deep_link_invite(generation);
+                                }
                             }
                             cx.notify();
                             this.close_kit_dialog_if_done(DialogKind::DeepLinkInvite, window, cx);

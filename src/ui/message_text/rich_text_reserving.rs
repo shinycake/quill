@@ -280,7 +280,9 @@ pub(super) fn inline_paragraph(
     .on_secondary_press(move |ix, position, _, cx| {
         if let Some(InlineAction::Link(link)) = press_actions.get(ix) {
             let link = link.clone();
-            let _ = press_owner.update(cx, |this, _| this.note_right_clicked_link(position, link));
+            let _ = press_owner.update(cx, |this, cx| {
+                this.note_right_clicked_link(position, link, cx)
+            });
         }
     })
     .on_range_hover(move |hover, _, cx| {

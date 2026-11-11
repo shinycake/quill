@@ -129,6 +129,7 @@ fn optimistic_mutations_roll_back_on_error() {
         pending.rollback = Some(RequestRollback::JoinByRequest {
             supergroup_id: 21,
             previous: Some(true),
+            shown: false,
         });
     }
     session.groups.supergroup_join_by_request.insert(21, false);
@@ -156,6 +157,7 @@ fn optimistic_mutations_roll_back_on_error() {
         pending.rollback = Some(RequestRollback::SupergroupUsername {
             supergroup_id: 22,
             previous: Some("oldname".into()),
+            shown: "newname".into(),
         });
     }
     session

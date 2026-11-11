@@ -84,7 +84,9 @@ impl QuillApp {
     /// `web_app_open_invoice`: open the checkout at render time (it needs the
     /// window) and bring Quill in front of the mini app.
     pub(super) fn request_mini_app_invoice(&mut self, slug: String, cx: &mut Context<Self>) {
-        self.mini_apps.render_action = Some(RenderAction::OpenInvoice { slug });
+        self.mini_apps
+            .render_actions
+            .push(RenderAction::OpenInvoice { slug });
         self.raise_main_window_later(cx);
         cx.notify();
     }

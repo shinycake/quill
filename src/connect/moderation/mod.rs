@@ -309,6 +309,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             pending.rollback = Some(RequestRollback::JoinByRequest {
                 supergroup_id,
                 previous,
+                shown: join_by_request,
             });
         }
         Ok(Some(extra))
@@ -362,6 +363,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             pending.rollback = Some(RequestRollback::SupergroupUsername {
                 supergroup_id,
                 previous,
+                shown: username.to_string(),
             });
         }
         Ok(Some(extra))

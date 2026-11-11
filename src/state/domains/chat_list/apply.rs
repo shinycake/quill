@@ -1,6 +1,6 @@
 //! Applies TDLib updates and answers for the chat list: loading, folders, archive and pins.
 use crate::state::*;
-use crate::telegram::envelope::ChatListPayload;
+use crate::telegram::envelope::{ChatListPayload, LastMessageUpdate};
 
 impl Session {
     /// Applies one chat list payload; called by
@@ -82,13 +82,15 @@ impl Session {
                 last_message,
                 positions,
             } => {
-                if let Some(ref message) = last_message {
-                    self.remember_files(&message.files);
+                match &last_message {
+                    LastMessageUpdate::Message(message) => {
+                        self.remember_files(&message.files);
+                        self.set_chat_last_message(chat_id, Some(message));
+                    }
+                    LastMessageUpdate::Cleared => self.set_chat_last_message(chat_id, None),
+                    // Unreadable: the preview stays; the positions still apply.
+                    LastMessageUpdate::Unreadable => {}
                 }
-                // Slice chatlist-list-style: the preview's style inputs
-                // (media icon, formatted-text entities) and the 3-line
-                // sender name are pure functions of the same content.
-                self.set_chat_last_message(chat_id, last_message.as_ref());
                 // `positions` is the full set of lists this chat belongs to.
                 self.replace_main_list_from_positions(chat_id, &positions);
                 self.sync_chat_order();

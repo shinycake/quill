@@ -463,6 +463,7 @@ fn the_launch_chat_page_answer_ends_the_launch_wait() {
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
     let seq = AtomicU64::new(0);
     let gate = LaunchChats::new();
+    gate.claim(1);
     let see = |json: String| gate.observe(&json, &copy_and_parse(&json, &seq, &sink).unwrap());
     see(auth_state("authorizationStateWaitTdlibParameters"));
     see(auth_state("authorizationStateReady"));
@@ -481,6 +482,7 @@ fn a_signed_out_account_ends_the_launch_wait() {
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
     let seq = AtomicU64::new(0);
     let gate = LaunchChats::new();
+    gate.claim(1);
     let json = auth_state("authorizationStateWaitPhoneNumber");
     gate.observe(&json, &copy_and_parse(&json, &seq, &sink).unwrap());
     assert!(gate.is_in());
@@ -494,8 +496,21 @@ fn the_launch_waits_only_for_a_page_tdlib_was_asked_for() {
     assert_eq!(starting.wait(Duration::ZERO), LaunchWait::Skipped);
     assert!(starting.is_in());
     let asked = LaunchChats::new();
+    asked.claim(1);
     let json = auth_state("authorizationStateReady");
     asked.observe(&json, &copy_and_parse(&json, &seq, &sink).unwrap());
     assert_eq!(asked.wait(Duration::ZERO), LaunchWait::Capped);
     assert_eq!(asked.wait(Duration::ZERO), LaunchWait::Came);
+}
+
+#[test]
+fn another_accounts_states_do_not_move_the_launch_wait() {
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let seq = AtomicU64::new(0);
+    let gate = LaunchChats::new();
+    gate.claim(2);
+    // Client 1 (a background account) is ready first, and signs out later.
+    let json = auth_state("authorizationStateReady");
+    gate.observe(&json, &copy_and_parse(&json, &seq, &sink).unwrap());
+    assert_eq!(gate.wait(Duration::ZERO), LaunchWait::Skipped);
 }

@@ -3,6 +3,7 @@
 //! photo gallery, "Share contact".
 use super::*;
 use crate::ids::{ChatId, RequestId};
+use crate::state::PhotoPage;
 use crate::state::{
     GROUPS_IN_COMMON_PAGE, ProfileChatsFetch, ProfileChatsKind, ProfilePhotosFetch, RequestPurpose,
     UsersPurpose,
@@ -35,7 +36,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if matches!(
             self.session.users_state.profile_chat_lists.get(&(kind, id)),
-            Some(ProfileChatsFetch::Loading | ProfileChatsFetch::Loaded(_))
+            Some(ProfileChatsFetch::Loading(_) | ProfileChatsFetch::Loaded(_))
         ) {
             return Ok(None);
         }
@@ -61,7 +62,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session
             .users_state
             .profile_chat_lists
-            .insert((kind, id), ProfileChatsFetch::Loading);
+            .insert((kind, id), ProfileChatsFetch::Loading(extra));
         if kind == ProfileChatsKind::GroupsInCommon {
             self.session.users_state.common_groups_paging.remove(&id);
         }
@@ -137,7 +138,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         };
         let paging = self.session.common_groups_paging(user_id);
-        if paging.exhausted || paging.loading_more {
+        if paging.exhausted || paging.next_page.asking() {
             return Ok(None);
         }
         let purpose = RequestPurpose::GetProfileChats(key.0);
@@ -148,7 +149,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .common_groups_paging
             .entry(user_id)
             .or_default()
-            .loading_more = true;
+            .next_page = PhotoPage::Asking(extra);
         match self.send_json_request(extra, &json) {
             Ok(extra) => Ok(Some(extra)),
             Err(err) => {
@@ -158,7 +159,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .common_groups_paging
                     .get_mut(&user_id)
                 {
-                    paging.loading_more = false;
+                    paging.next_page = PhotoPage::Idle;
                 }
                 Err(err)
             }

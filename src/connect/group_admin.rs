@@ -79,6 +79,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 supergroup_id,
                 toggle,
                 previous,
+                shown: value,
             });
         }
         Ok(Some(extra))
@@ -252,6 +253,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             pending.rollback = Some(RequestRollback::ProtectedContent {
                 chat_id: chat_id.0,
                 previous,
+                shown: value,
                 previous_disabled_at,
             });
         }
@@ -284,11 +286,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .chats_state
             .chat_available_reactions
-            .insert(chat_id.0, setting);
+            .insert(chat_id.0, setting.clone());
         if let Some(pending) = self.session.requests.pending_mut(extra) {
             pending.rollback = Some(RequestRollback::AvailableReactions {
                 chat_id: chat_id.0,
                 previous,
+                shown: setting,
             });
         }
         Ok(Some(extra))

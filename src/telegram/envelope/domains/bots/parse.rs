@@ -1,5 +1,5 @@
 //! Parses TDLib objects for bots: inline queries, callback buttons, commands, games and login URLs.
-use crate::ids::{ChatId, UserId};
+use crate::ids::{ChatId, MessageId, UserId};
 use crate::telegram::envelope::*;
 use serde_json::Value;
 
@@ -89,14 +89,18 @@ pub(crate) fn parse_bots_payload(
             },
         ))),
         "updateChatReplyMarkup" => {
-            let message = match value.get("reply_markup_message") {
-                Some(m) if !m.is_null() => Some(parse_message(m)?),
-                _ => None,
+            // Only the id and the markup of the message matter: a message
+            // whose other fields do not parse must still replace the
+            // keyboard, not leave the old one in place.
+            let message = value.get("reply_markup_message").filter(|m| !m.is_null());
+            let message_id = match message {
+                Some(m) => Some(MessageId(int53(m.get("id"))?)),
+                None => None,
             };
             Ok(EnvelopePayload::Bots(BotsPayload::UpdateChatReplyMarkup {
                 chat_id: ChatId(int53(value.get("chat_id"))?),
-                message_id: message.as_ref().map(|m| m.id),
-                reply_markup: message.and_then(|m| m.reply_markup),
+                message_id,
+                reply_markup: message.and_then(|m| parse_reply_markup(m.get("reply_markup"))),
             }))
         }
         "botCommands" => Ok(EnvelopePayload::Bots(BotsPayload::BotCommands {
