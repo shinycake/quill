@@ -184,12 +184,11 @@ impl CallSounds {
             return;
         }
         let player = self.spawn(sound);
-        if let Voice::Looping { stage, .. } = &mut self.voice {
-            if let RingStage::Playing(Some(old)) =
+        if let Voice::Looping { stage, .. } = &mut self.voice
+            && let RingStage::Playing(Some(old)) =
                 std::mem::replace(stage, RingStage::Playing(player))
-            {
-                old.stop();
-            }
+        {
+            old.stop();
         }
     }
 

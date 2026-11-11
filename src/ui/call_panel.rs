@@ -435,9 +435,7 @@ impl Render for CallPanel {
                         .devices_menu
                         .filter(|(call, _)| Some(*call) == shown_call)
                         .map(|(_, open)| open);
-                    this.devices_menu = shown_call
-                        .zip(devices::toggled(open, target))
-                        .map(|(call, target)| (call, target));
+                    this.devices_menu = shown_call.zip(devices::toggled(open, target));
                     cx.notify();
                 },
             )
