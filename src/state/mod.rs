@@ -47,9 +47,7 @@ use crate::telegram::envelope::{
 use crate::telegram::envelope::{AvailableMessageSender, CallState, ReadyParams};
 use crate::telegram::envelope_story::ParsedStoryAlbum;
 use crate::telegram::profile_accent::ProfileAccentColor;
-use crate::telegram::requests::{
-    ArchiveChatListSettings, CallPrivacySetting, ChatEventLogFilterSet, PrivacyWho,
-};
+use crate::telegram::requests::{ArchiveChatListSettings, ChatEventLogFilterSet};
 use crate::telegram::requests_privacy::PrivacySettingKey;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;

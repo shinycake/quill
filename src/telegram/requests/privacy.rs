@@ -1,25 +1,4 @@
-use crate::ids::RequestId;
 use serde_json::{Value, json};
-
-/// Phase C2i: which call privacy setting a request targets —
-/// `userPrivacySettingAllowCalls` (who can call me, schema 1.8.67
-/// `:9006`) or `userPrivacySettingAllowPeerToPeerCalls` (P2P relay,
-/// `:9009`). Both are standard privacy settings (Telegram X lists
-/// both in its privacy screen).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CallPrivacySetting {
-    AllowCalls,
-    PeerToPeer,
-}
-
-impl CallPrivacySetting {
-    pub fn td_type(self) -> &'static str {
-        match self {
-            CallPrivacySetting::AllowCalls => "userPrivacySettingAllowCalls",
-            CallPrivacySetting::PeerToPeer => "userPrivacySettingAllowPeerToPeerCalls",
-        }
-    }
-}
 
 /// Phase C2i: Everybody / Contacts / Nobody mapping for the two call
 /// privacy settings. Telegram clients expose these as rule lists;
@@ -74,35 +53,4 @@ impl PrivacyWho {
             PrivacyWho::Nobody => "Nobody",
         }
     }
-}
-
-/// Phase C2i: `getUserPrivacySettingRules` (TDLib 1.8.67,
-/// `schema/td_api.tl:15620`): "Returns the current privacy settings".
-/// `getUserPrivacySettingRules setting:UserPrivacySetting =
-/// UserPrivacySettingRules;`
-pub fn get_user_privacy_setting_rules(extra: RequestId, setting: CallPrivacySetting) -> String {
-    json!({
-        "@type": "getUserPrivacySettingRules",
-        "@extra": extra.as_extra(),
-        "setting": {"@type": setting.td_type()},
-    })
-    .to_string()
-}
-
-/// Phase C2i: `setUserPrivacySettingRules` (TDLib 1.8.67,
-/// `schema/td_api.tl:15617`): "Changes user privacy settings".
-/// `setUserPrivacySettingRules setting:UserPrivacySetting
-/// rules:userPrivacySettingRules = Ok;`
-pub fn set_user_privacy_setting_rules(
-    extra: RequestId,
-    setting: CallPrivacySetting,
-    who: PrivacyWho,
-) -> String {
-    json!({
-        "@type": "setUserPrivacySettingRules",
-        "@extra": extra.as_extra(),
-        "setting": {"@type": setting.td_type()},
-        "rules": {"@type": "userPrivacySettingRules", "rules": who.rules()},
-    })
-    .to_string()
 }

@@ -532,14 +532,6 @@ impl Session {
         {
             summary.rating = CallRating::Sent;
         }
-        // Phase C2i: `setUserPrivacySettingRules` confirmed (the
-        // new value was applied optimistically at send time).
-        if let Some(pending) = pending
-            && let RequestPurpose::Calls(CallsPurpose::SetCallPrivacyRules { setting }) =
-                pending.purpose
-        {
-            self.calls.privacy_asks.answered(setting, pending.id);
-        }
         // Slice S3: `setReadDatePrivacySettings` confirmed — clear
         // the optimistic spinner (the value itself was set at
         // send time). `setUserPrivacySettingRules` /

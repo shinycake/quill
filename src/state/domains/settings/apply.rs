@@ -43,29 +43,10 @@ impl Session {
             SettingsPayload::UserPrivacySettingRules { rules } => {
                 if let Some(purpose) = pending.map(|p| p.purpose) {
                     match purpose {
-                        RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules { setting })
-                            if pending.is_some_and(|p| {
-                                self.calls.privacy_asks.answered(setting, p.id)
-                            }) =>
-                        {
-                            let names: Vec<String> = rules.iter().map(|r| r.name.clone()).collect();
-                            let who = PrivacyWho::from_rule_names(&names);
-                            match setting {
-                                CallPrivacySetting::AllowCalls => {
-                                    self.calls.privacy_allow_calls = who
-                                }
-                                CallPrivacySetting::PeerToPeer => self.calls.privacy_p2p = who,
-                            }
-                        }
                         RequestPurpose::Settings(SettingsPurpose::GetPrivacyRules { key }) => {
                             let detail = PrivacyRuleDetail::from_rules(&rules);
-                            if self.settings.finish_privacy_load(
-                                key,
-                                pending.map(|p| p.id),
-                                detail.clone(),
-                            ) {
-                                self.mirror_call_privacy(key, &detail);
-                            }
+                            self.settings
+                                .finish_privacy_load(key, pending.map(|p| p.id), detail);
                         }
                         _ => {}
                     }
@@ -87,7 +68,6 @@ impl Session {
                         Some(PrivacyKeyState::Saving { .. })
                     );
                     if !saving {
-                        self.mirror_call_privacy(key, &detail);
                         self.settings
                             .privacy
                             .insert(key, PrivacyKeyState::Ready(detail));

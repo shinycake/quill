@@ -100,7 +100,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.mirror_call_privacy(key, &detail);
         self.session.settings.begin_privacy_save(key, detail, extra);
         Ok(extra)
     }

@@ -1,6 +1,6 @@
 //! Connect driver: call debug logs, call history, call privacy and busy-call handling.
 use super::*;
-use crate::state::{CallUpload, PrivacyAsk, RecentCalls};
+use crate::state::{CallUpload, RecentCalls};
 
 impl<S: JsonSender> ConnectDriver<S> {
     pub(crate) fn call_debug_information(&self) -> Result<String, ConnectSendError> {
@@ -224,78 +224,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // A retry of a failed page shows as loading again.
         self.session.calls.recent_calls_stage = RecentCalls::Loading { request: extra };
-        Ok(extra)
-    }
-
-    /// Phase C2i: fetch both call privacy settings
-    /// (`userPrivacySettingAllowCalls` /
-    /// `userPrivacySettingAllowPeerToPeerCalls`, schema 1.8.67
-    /// :15620).
-    pub fn fetch_call_privacy(&mut self) -> Result<(), ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        for setting in [
-            CallPrivacySetting::AllowCalls,
-            CallPrivacySetting::PeerToPeer,
-        ] {
-            let extra = self.session.request(
-                RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules { setting }),
-                None,
-            );
-            if let Err(err) = self
-                .sender
-                .send_json(&get_user_privacy_setting_rules(extra, setting))
-            {
-                self.session.requests.take(extra);
-                self.session
-                    .calls
-                    .privacy_asks
-                    .set(setting, PrivacyAsk::Failed);
-                return Err(err);
-            }
-            self.session
-                .calls
-                .privacy_asks
-                .set(setting, PrivacyAsk::Asking(extra));
-        }
-        Ok(())
-    }
-
-    /// Phase C2i: change a call privacy setting (schema 1.8.67
-    /// :15617). Applied optimistically; the `ok` / error response
-    /// confirms or clears it.
-    pub fn set_call_privacy(
-        &mut self,
-        setting: CallPrivacySetting,
-        who: PrivacyWho,
-    ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        let extra = self.session.request(
-            RequestPurpose::Calls(CallsPurpose::SetCallPrivacyRules { setting }),
-            None,
-        );
-        if let Err(err) = self
-            .sender
-            .send_json(&set_user_privacy_setting_rules(extra, setting, who))
-        {
-            self.session.requests.take(extra);
-            self.session
-                .calls
-                .privacy_asks
-                .set(setting, PrivacyAsk::Failed);
-            return Err(err);
-        }
-        match setting {
-            CallPrivacySetting::AllowCalls => self.session.calls.privacy_allow_calls = Some(who),
-            CallPrivacySetting::PeerToPeer => self.session.calls.privacy_p2p = Some(who),
-        }
-        self.session
-            .calls
-            .privacy_asks
-            .set(setting, PrivacyAsk::Asking(extra));
         Ok(extra)
     }
 
