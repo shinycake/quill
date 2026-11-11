@@ -2,7 +2,7 @@
 use super::super::app::QuillApp;
 use quill::data_settings::{AutoDownloadNetSettings, NetworkKind};
 use quill::ids::RequestId;
-use quill::state::AutoDownloadAnswer;
+use quill::state::DialogAnswer;
 
 /// The editor's stage. `Saving` holds the draft until TDLib answers the
 /// request that carries it: `ok` closes the editor, an error reopens it with
@@ -46,24 +46,15 @@ impl StorageEditor {
         }
     }
 
-    pub(crate) fn is_saving(&self) -> bool {
-        matches!(self, Self::Saving { .. })
-    }
-
-    /// The editor after the answer `answer`: the save it waits for ended.
-    pub(crate) fn after_answer(self, answer: Option<AutoDownloadAnswer>) -> Self {
+    /// The editor after the answer to the request it waits for (taken by
+    /// that request's id, so no other request's answer reaches it): a save
+    /// that went through closes it, a refusal reopens it with its draft.
+    pub(crate) fn after_answer(self, answer: Option<DialogAnswer>) -> Self {
         match (self, answer) {
-            (
-                Self::Saving {
-                    request: asked,
-                    network,
-                    draft,
-                },
-                Some(AutoDownloadAnswer::Saved(got) | AutoDownloadAnswer::Refused(got)),
-            ) if asked == got => match answer {
-                Some(AutoDownloadAnswer::Saved(_)) => Self::Closed,
-                _ => Self::Open { network, draft },
-            },
+            (Self::Saving { network, draft, .. }, Some(DialogAnswer::Failed(_))) => {
+                Self::Open { network, draft }
+            }
+            (Self::Saving { .. }, Some(_)) => Self::Closed,
             (stage, _) => stage,
         }
     }
@@ -73,12 +64,12 @@ impl QuillApp {
     /// A save the server answered closes or reopens the editor that sent it.
     /// Returns whether the editor changed.
     pub(crate) fn drain_storage_editor(&mut self) -> bool {
-        if !self.settings.data_storage_editor.is_saving() {
+        let StorageEditor::Saving { request, .. } = self.settings.data_storage_editor else {
             return false;
-        }
+        };
         let answer = self
-            .session()
-            .and_then(|session| session.settings.auto_download_answer);
+            .session_mut()
+            .and_then(|session| session.chat_list.dialog_answers.take(request));
         let next = self.settings.data_storage_editor.after_answer(answer);
         let changed = next != self.settings.data_storage_editor;
         self.settings.data_storage_editor = next;

@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::ui::danger_dark;
-use crate::ui::dialogs::{ContactNote, ContactSave};
+use crate::ui::dialogs::{ChatStep, ContactNote, ContactSave};
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
@@ -68,14 +68,21 @@ impl QuillApp {
         }) else {
             return;
         };
-        if note.is_none()
-            && let Some(live) = self.live.as_mut()
-        {
-            // The note lands with the full info; `edit_contact_note_upkeep`
-            // fills the field then.
-            let _ = live.driver.fetch_user_full_info(user_id);
+        // The note lands with the full info; `edit_contact_note_upkeep`
+        // fills the field then, or ends the wait when the fetch failed.
+        let fetch_failed = note.is_none()
+            && self
+                .live
+                .as_mut()
+                .is_some_and(|live| live.driver.fetch_user_full_info(user_id).is_err());
+        let mut dialog =
+            EditContactDialog::new(window, cx, user_id, &first, &last, note.as_deref());
+        if fetch_failed {
+            dialog.note = ContactNote::Unavailable;
+            dialog.note_input.update(cx, |input, cx| {
+                input.set_placeholder(tr(keys::Q_OPS_NOTE_ONLY_VISIBLE_TO_YOU), window, cx);
+            });
         }
-        let dialog = EditContactDialog::new(window, cx, user_id, &first, &last, note.as_deref());
         dialog
             .first_name_input
             .update(cx, |input, cx| input.focus(window, cx));
@@ -99,11 +106,25 @@ impl QuillApp {
             return;
         }
         let user_id = dialog.user_id;
+        let waiting = dialog.note == ContactNote::Waiting;
         let Some(note) = self
             .session()
             .and_then(|s| s.user_full_info(user_id))
             .map(|i| i.extras.note.clone())
         else {
+            // The fetch answered with an error: stop saying "Loading".
+            let failed = waiting
+                && self
+                    .session()
+                    .is_some_and(|s| s.users_state.user_full_infos.failed(&user_id));
+            if failed && let Some(ProfileDialog::EditContact(dialog)) = &mut self.dialogs.profile_dialog
+            {
+                dialog.note = ContactNote::Unavailable;
+                dialog.note_input.update(cx, |input, cx| {
+                    input.set_placeholder(tr(keys::Q_OPS_NOTE_ONLY_VISIBLE_TO_YOU), window, cx);
+                });
+                cx.notify();
+            }
             return;
         };
         let Some(ProfileDialog::EditContact(dialog)) = &mut self.dialogs.profile_dialog else {
@@ -195,7 +216,7 @@ impl QuillApp {
             Ok(parts) => parts,
             Err(message) => {
                 if let Some(ProfileDialog::Birthday(dialog)) = &mut self.dialogs.profile_dialog {
-                    dialog.error = Some(message);
+                    dialog.refuse(message, cx);
                 }
                 cx.notify();
                 return false;
@@ -267,7 +288,7 @@ impl QuillApp {
     ) {
         self.open_profile_dialog(ProfileDialog::ShareContact {
             user_id,
-            target: None,
+            step: ChatStep::Pick,
         });
         cx.notify();
     }
@@ -504,7 +525,7 @@ impl QuillApp {
                                 this.close_kit_dialog_if_done(DialogKind::ProfilePanel, window, cx);
                             })),
                     );
-                if let Some(error) = dialog.error {
+                if let Some(error) = dialog.shown_error(cx) {
                     body = body.child(
                         div()
                             .id("birthday-error")
@@ -652,8 +673,8 @@ impl QuillApp {
             }
             ProfileDialog::MainTab => self.main_tab_dialog_parts(cx),
             ProfileDialog::ChangePhone => self.change_phone_dialog_parts(cx),
-            ProfileDialog::ShareContact { user_id, target } => {
-                let (user_id, target) = (*user_id, *target);
+            ProfileDialog::ShareContact { user_id, step } => {
+                let (user_id, target) = (*user_id, step.target());
                 let session = self.session()?;
                 let name = session
                     .user(user_id)
@@ -700,7 +721,7 @@ impl QuillApp {
                                     this.dialogs.profile_dialog =
                                         Some(ProfileDialog::ShareContact {
                                             user_id,
-                                            target: None,
+                                            step: ChatStep::Pick,
                                         });
                                     window.refresh();
                                     cx.notify();
@@ -747,7 +768,7 @@ impl QuillApp {
                                 // box-host: a step of the open box; it stays where it shows
                                 this.dialogs.profile_dialog = Some(ProfileDialog::ShareContact {
                                     user_id,
-                                    target: Some(id),
+                                    step: ChatStep::Confirm(id),
                                 });
                                 window.refresh();
                                 cx.notify();

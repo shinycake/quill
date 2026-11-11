@@ -194,14 +194,6 @@ impl DeviceLogin {
     }
 }
 
-/// How the last `setAutoDownloadSettings` ended, by the request that asked:
-/// the editor that sent it closes on `Saved` and reopens on `Refused`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AutoDownloadAnswer {
-    Saved(RequestId),
-    Refused(RequestId),
-}
-
 /// The local storage clear (`optimizeStorage`): one at a time. `Clearing`
 /// leaves on its answer (`Freed`) or its error (`Failed`, the line the page
 /// shows); `Freed` and `Failed` stay until the screen is reopened or the
@@ -239,8 +231,6 @@ impl StorageClear {
 }
 
 pub struct SettingsState {
-    /// See [`AutoDownloadAnswer`].
-    pub auto_download_answer: Option<AutoDownloadAnswer>,
     /// Mirror of `settings::Preferences::notify_view` (tdesktop "Name" /
     /// "Text"), loaded from `prefs.json` at connect time.
     pub notify_view: crate::notify::NotifyView,
@@ -569,7 +559,6 @@ impl SettingsState {
             storage_stats: Fetch::Idle,
             data_storage: DataStoragePrefs::default(),
             data_storage_dirty: false,
-            auto_download_answer: None,
             auto_download_presets: Fetch::Idle,
             data_storage_save: Fetch::Idle,
             storage_clear: StorageClear::Idle,

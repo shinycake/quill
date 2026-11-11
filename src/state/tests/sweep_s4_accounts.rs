@@ -85,9 +85,17 @@ fn an_auto_download_save_is_answered_by_the_request_that_asked() {
             first.0
         ),
     );
+    assert!(
+        matches!(
+            session.chat_list.dialog_answers.take(first),
+            Some(DialogAnswer::Failed(_))
+        ),
+        "the refusal is the first request's"
+    );
     assert_eq!(
-        session.settings.auto_download_answer,
-        Some(AutoDownloadAnswer::Refused(first))
+        session.chat_list.dialog_answers.take(first),
+        None,
+        "an answer is taken once"
     );
     apply_json(
         &mut session,
@@ -96,7 +104,7 @@ fn an_auto_download_save_is_answered_by_the_request_that_asked() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, second.0),
     );
     assert_eq!(
-        session.settings.auto_download_answer,
-        Some(AutoDownloadAnswer::Saved(second))
+        session.chat_list.dialog_answers.take(second),
+        Some(DialogAnswer::Done)
     );
 }

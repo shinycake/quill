@@ -400,3 +400,77 @@ fn the_copied_check_mark_goes_back_to_the_copy_icon(cx: &mut TestAppContext) {
         ));
     });
 }
+
+#[gpui_kit::test]
+fn a_second_link_delete_does_not_replace_the_one_in_flight(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, _window, cx| {
+        let first = sent(app, RequestPurpose::DeleteChatFolderInviteLink, Some(5));
+        let mut dialog = FolderShareDialog::new(5);
+        dialog.op = LinkOp::Saving(first);
+        app.folders.share = Some(dialog);
+        app.delete_folder_link("https://t.me/addlist/b", cx);
+        assert_eq!(
+            app.folders.share.as_ref().map(|d| d.op.clone()),
+            Some(LinkOp::Saving(first)),
+            "the first delete's answer is still the one waited for"
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn the_reset_statistics_stage_ends_on_the_answer_or_the_session(cx: &mut TestAppContext) {
+    use crate::ui::dialogs::data_extra::NetworkReset;
+    let (app, mut vcx) = open(cx);
+    app.update(&mut vcx, |app, cx| {
+        let request = sent(app, RequestPurpose::ResetNetworkStatistics, None);
+        app.privacy.extra.network_reset = NetworkReset::Resetting(request);
+        app.settle_network_reset(cx);
+        assert_eq!(
+            app.privacy.extra.network_reset,
+            NetworkReset::Resetting(request),
+            "still waiting for the answer"
+        );
+        answer(app, request, r#""@type":"ok""#);
+        app.settle_network_reset(cx);
+        assert_eq!(app.privacy.extra.network_reset, NetworkReset::Idle);
+        // Without a live driver the confirmed reset is local and done.
+        app.privacy.extra.network_reset = NetworkReset::Confirming;
+        app.reset_network_usage();
+        assert_eq!(app.privacy.extra.network_reset, NetworkReset::Idle);
+        // Pressing the confirm twice does not send twice.
+        app.reset_network_usage();
+        assert_eq!(app.privacy.extra.network_reset, NetworkReset::Idle);
+    });
+}
+
+#[gpui_kit::test]
+fn a_refused_limit_send_puts_the_sliders_back_on_what_tdlib_holds(cx: &mut TestAppContext) {
+    use crate::ui::index_sliders::StorageDrag;
+    let (app, mut vcx) = open(cx);
+    app.update(&mut vcx, |app, cx| {
+        app.ensure_storage_sliders(cx);
+        let account = app.session().map(|s| s.account.clone()).expect("session");
+        // The release sent limits TDLib has not reported, and the save failed.
+        app.index_sliders.storage = StorageDrag::Sent {
+            account,
+            size: Some(1),
+            keep: Some(1),
+        };
+        if let Some(session) = app.session_mut() {
+            session
+                .settings
+                .data_storage_save
+                .fail("Couldn't save the storage limits.");
+        }
+        app.settle_storage_sliders(cx);
+        assert!(matches!(app.index_sliders.storage, StorageDrag::Settled));
+        let held = app.session().map(|s| {
+            (
+                s.settings.storage_limits.size_limit(),
+                s.settings.storage_limits.keep_for(),
+            )
+        });
+        assert_eq!(held.map(|(size, keep)| (size, keep)), Some(app.storage_slider_limits(cx)));
+    });
+}

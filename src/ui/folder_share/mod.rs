@@ -315,7 +315,7 @@ impl QuillApp {
         }
     }
 
-    fn delete_folder_link(&mut self, link: &str, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn delete_folder_link(&mut self, link: &str, cx: &mut Context<Self>) {
         let Some(folder_id) = self.folders.share.as_ref().map(|d| d.folder_id) else {
             return;
         };

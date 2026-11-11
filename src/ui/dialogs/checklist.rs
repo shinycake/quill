@@ -63,6 +63,7 @@ impl ChecklistDialog {
     /// Clear the shown refusal when the user edits a field, so a corrected
     /// list is not still marked wrong.
     fn watch(input: &Entity<TextareaState>, cx: &mut Context<QuillApp>) -> Subscription {
+        // window-scope: held by the dialog in this window's chat_ui, dropped with it
         cx.subscribe(input, |app, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change)
                 && let Some(dialog) = app.chat_ui.checklist_dialog.as_mut()

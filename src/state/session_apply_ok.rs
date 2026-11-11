@@ -211,7 +211,6 @@ impl Session {
             self.settings.data_storage.seeded = crate::data_settings::Seed::Seeded;
             self.settings.data_storage_save.succeed(());
             self.settings.data_storage_dirty = true;
-            self.settings.auto_download_answer = extra.map(AutoDownloadAnswer::Saved);
         }
         // Batch 4: a `confirmSession` / `terminateSession` for the
         // new-login alert succeeded.

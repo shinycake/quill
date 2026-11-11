@@ -8043,3 +8043,33 @@ whose variants carry the data, with a way out of every stage.
 - **A refused refetch of a stale proxy list** lands in
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
+
+### Sweep fixes (r2-36)
+
+Round 2 of the re-sweep, one bundle of box files. Every entry in these files
+was fixed or proven false; the files were then read again from the top.
+
+| id | file | outcome |
+| --- | --- | --- |
+| 09-012 | `conversation/conversation_part1.rs` | The first page is still asked from the render (once per frame, and the driver sends nothing while one is in flight or failed), but a send that could not go out (`ConnectSendError::Native`) now ends the history in its failed stage (`Session::fail_history_load`), so the Retry row shows instead of an ask on every render. |
+| 09-016 | `conversation/mod.rs` | `reported_visible` is `ReportedVisible { chat, open, ids }`; `open` is the new `ViewBook::epoch()`, bumped by every `restart`, so a reopened chat reports its rows again. |
+| 09-029 | `dialogs/account_notices.rs` | `TermsStage::Terms(AgeLine)`: `Unticked` / `Ticked` / `Missing` replace the `age_ok` + `age_error` pair. |
+| 09-027, 09-028 | `dialogs/checklist.rs` | The two switches are one `OthersMay` value (baseline lines for `ChecklistDialog` dropped); the refusal clears on any edit through subscriptions the dialog holds. |
+| 09-026 | `dialogs/contacts.rs` | One `AddContactStage` (`Form`, `Importing`, `NotJoined`, `Saving`, `Failed`) replaces `stage` + `save`. `ContactSave` stays for Edit Contact. |
+| 09-032, 09-033 | `dialogs/data_extra.rs` | `NetworkReset` holds the request (`Resetting(RequestId)`) and a send failure (`Failed`); a refused send is no longer parked in `data_storage_save`. `settle_network_reset` (in `settle_box_submits`) ends the stage on the answer. |
+| 09-043, 09-044, 09-045, 09-046 | `dialogs/folder.rs` | `CopyMark::Copied` owns its timer `Task`; a second link delete is ignored while one is in flight and its Delete button is disabled; the editor's refusal is `FolderLoad::Ready { error }`; the link form's name field and ticks live in `FolderShareView::Edit { form }`. |
+| 09-038, 09-039, 09-040, 09-041 | `dialogs/group_call_create.rs` | `join_as` is read off the step (`Confirm { join_as }`, `ChooseJoinAs { selected }`); a second `createVideoChat` is not sent while the first is still in the registry (`video_chat_create_in_flight`, also used by the RTMP start); the dialog body is held in a `Cell`. 09-040 skipped: `Waiting` leaves on the answer, on the error (create as yourself), when another Start replaces the flow, and when the session no longer holds its request (`abandoned`); tdesktop's `ChooseJoinAsProcess` also draws nothing while its list loads, so a box with a Cancel would be new behaviour. |
+| 09-037 | `dialogs/local_storage.rs` | `StorageDrag::Sent` follows a release until TDLib reports the limits; a send that fails, or a refused save, puts the sliders back on the limits TDLib holds. |
+| 09-047 | `dialogs/member.rs` | `searched` is written when the request went out, not before. |
+| 09-048, 09-049, 09-050, 09-051 | `dialogs/poll.rs` | `PollDialog::options` is a list of `PollOptionRow { input, attach, correct }`; the panel's recipient is one `PollPick` (by slot id) in `PickerUi`; `Preparing` owns the read task and is answered by slot id; `PollAddOption::stage` (`Opening`, `Editing { error }`) replaces `focus_on_mount` + `error`. |
+| 09-052, 09-053, 09-054 | `dialogs/profile_panels.rs` | `ContactNote::Unavailable` ends the "Loading" wait when the full-info ask could not be sent or failed; the birthday refusal is kept with the typed fields and drawn only while they match; the chat pickers use `ChatStep` / `AddBotStep` instead of `target: Option<i64>` (the bot's rights live in the confirm step). |
+| 09-055 | `dialogs/restrict.rs` | The refused custom time is a `TimeRefusal` with the pick it refused and is drawn only while that pick is the shown one. |
+| 09-042 | `dialogs/rtmp_stream.rs` | The dialog body is held in a `Cell`, no `RefCell` borrow. |
+| 09-057 | `dialogs/storage_editor.rs` | The session's one-shot `auto_download_answer` is gone: the editor takes its answer from `dialog_answers` by the request in `Saving` (`check-dialog-answers.py` knows the purpose). |
+| new-01 | `dialogs/account_notices.rs` | The same `RefCell` body cell became a `Cell`; "No" on the new-login banner opens its box only after the request went out; a refused `deleteAccount` send from the terms box says so (`account_delete.fail`). |
+
+Guards: `scripts/check-dialog-answers.py` (new purpose), `view-state-not-chat.txt`
+(`reported_visible` entry), one `window-scope` note on the checklist's
+subscription. Behaviour that changed: with "Allow Multiple Answers" turned off,
+the quiz keeps the first marked row in row order (it kept the first marked in
+click order).
