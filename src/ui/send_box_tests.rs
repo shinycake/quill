@@ -255,16 +255,20 @@ fn a_video_read_settles_when_the_screen_moves_on_before_it_lands(cx: &mut TestAp
     }
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
-    app.update_in(vcx, |app, window, cx| {
+    // The tray holds the file under its canonical path (the temp folder is
+    // a link on macOS), and the read is kept by that path.
+    let read = app.update_in(vcx, |app, window, cx| {
         app.attach_dropped_files(std::slice::from_ref(&clip), cx);
-        assert!(app.composer_sends.reads.sound.is_reading(&clip));
+        let read = app.pending_attachments()[0].path.clone();
+        assert!(app.composer_sends.reads.sound.is_reading(&read));
         // The account changes before the probe answers.
         app.switch_account(&quill::ids::AccountKey("other".into()), "", window, cx);
+        read
     });
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
         assert!(
-            !app.composer_sends.reads.sound.is_reading(&clip),
+            app.composer_sends.reads.sound.done(&read).is_some(),
             "the read ended with its answer, not with the screen"
         );
     });

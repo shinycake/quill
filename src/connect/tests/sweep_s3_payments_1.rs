@@ -310,7 +310,7 @@ fn a_commit_that_cannot_be_sent_keeps_the_stars_stuck_and_is_not_retried() {
 }
 
 #[test]
-fn a_refused_commit_answer_tells_the_user_and_keeps_the_stars_stuck() {
+fn a_refused_commit_answer_tells_the_user_and_releases_the_stars() {
     use crate::ids::{ChatId, MessageId};
     let mut t = Flaky::new();
     t.driver
@@ -319,7 +319,9 @@ fn a_refused_commit_answer_tells_the_user_and_keeps_the_stars_stuck() {
     t.driver
         .paid_reaction_tick(crate::paid_reaction::ACCUMULATE_MS);
     t.fail("commitPendingPaidMessageReactions", "BALANCE_TOO_LOW");
-    assert_eq!(t.driver.session.payments.paid.total_pending(), 3);
+    // TDLib took the Stars out of the message with the commit and gave them
+    // back on the error: nothing is held, and nothing is sent again.
+    assert_eq!(t.driver.session.payments.paid.total_pending(), 0);
     assert!(!t.driver.session.payments.paid.in_flight());
     assert!(
         t.driver

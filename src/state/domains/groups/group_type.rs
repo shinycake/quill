@@ -271,22 +271,18 @@ impl Session {
             return;
         }
         let state = &mut self.groups.group_type;
+        // Only the check in flight is answered: an answer to an older one
+        // leaves the stage (a newer check, its verdict or failure) alone.
+        if !matches!(&state.check, UsernameCheck::Checking { request, .. } if *request == pending.id)
+        {
+            return;
+        }
         let UsernameCheck::Checking {
-            request,
-            chat_id,
-            username,
+            chat_id, username, ..
         } = std::mem::take(&mut state.check)
         else {
             return;
         };
-        if request != pending.id {
-            state.check = UsernameCheck::Checking {
-                request,
-                chat_id,
-                username,
-            };
-            return;
-        }
         match result {
             UsernameCheckResult::PublicChatsTooMany => {
                 state.public_limit_reached = Some(true);

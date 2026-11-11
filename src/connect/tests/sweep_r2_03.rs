@@ -105,7 +105,7 @@ fn closing_the_gifts_dialog_leaves_nothing_to_refetch() {
 }
 
 #[test]
-fn a_refused_link_check_leaves_the_check_in_flight_answerable() {
+fn a_refused_link_check_says_so_and_the_older_answer_is_dropped() {
     let mut t = Flaky::new();
     t.feed(json!({"@type":"updateNewChat","chat":{"id":13,"title":"C","type":{"@type":"chatTypeSupergroup","supergroup_id":113,"is_channel":false},"unread_count":0}}));
     t.feed(
@@ -121,15 +121,20 @@ fn a_refused_link_check_leaves_the_check_in_flight_answerable() {
             .check_group_username(ChatId(13), "quillchats")
             .is_err()
     );
+    // The newest text is the one that could not be checked: the box says
+    // so (Save asks again), not "Checking..." for a text no longer typed.
+    let failed = UsernameCheck::Failed {
+        chat_id: ChatId(13),
+        username: "quillchats".into(),
+    };
+    assert_eq!(t.driver.session.groups.group_type.check, failed);
     t.sender.refuse(&[]);
+    // The answer for the older text names a check nothing waits for.
     t.answer(
         "checkChatUsername",
         json!({"@type":"checkChatUsernameResultUsernameOccupied"}),
     );
-    assert!(matches!(
-        t.driver.session.groups.group_type.check,
-        UsernameCheck::Verdict(_)
-    ));
+    assert_eq!(t.driver.session.groups.group_type.check, failed);
 }
 
 #[test]
