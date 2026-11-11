@@ -10,11 +10,35 @@ use std::path::{Path, PathBuf};
 use super::send_box_options::PriceDialog;
 use super::video_editor::VideoEditorDialog;
 
+/// The tasks of one running read (its worker and its give-up timer), kept in
+/// the stage that owns them: a read that leaves `Reading` (its answer, the
+/// give-up, the file leaving the tray) drops them, which cancels the ones
+/// still pending, so no timer outlives its read.
+#[derive(Clone, Default)]
+pub(super) struct Held(Option<std::rc::Rc<dyn std::any::Any>>);
+
+impl Held {
+    pub(super) fn new<T: 'static>(tasks: T) -> Self {
+        Self(Some(std::rc::Rc::new(tasks)))
+    }
+}
+
+impl std::fmt::Debug for Held {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.0.is_some() {
+            "Held(tasks)"
+        } else {
+            "Held(none)"
+        })
+    }
+}
+
 /// Where the read of one tray file stands: running (its job number tells a
-/// stale answer from the current one) or done with what it found.
+/// stale answer from the current one, and it holds its tasks) or done with
+/// what it found.
 #[derive(Debug, Clone)]
 pub(super) enum Read<T> {
-    Reading { job: u64 },
+    Reading { job: u64, _tasks: Held },
     Done(T),
 }
 
@@ -45,9 +69,10 @@ impl<T> Reads<T> {
         }
     }
 
-    /// A read starts with job number `job` (replacing any earlier stage).
-    pub(super) fn start(&mut self, path: PathBuf, job: u64) {
-        self.0.insert(path, Read::Reading { job });
+    /// A read starts with job number `job` (replacing any earlier stage), its
+    /// `tasks` owned by the stage.
+    pub(super) fn start(&mut self, path: PathBuf, job: u64, tasks: Held) {
+        self.0.insert(path, Read::Reading { job, _tasks: tasks });
     }
 
     /// Job `job` found `found` for `path`: whether it was the current job
@@ -56,7 +81,7 @@ impl<T> Reads<T> {
         let Some(stage) = self.0.get_mut(path) else {
             return false;
         };
-        if !matches!(stage, Read::Reading { job: current } if *current == job) {
+        if !matches!(stage, Read::Reading { job: current, .. } if *current == job) {
             return false;
         }
         *stage = Read::Done(found);
@@ -164,10 +189,10 @@ mod tests {
         let mut reads: Reads<u8> = Reads::default();
         let path = PathBuf::from("a.mp4");
         assert!(reads.is_unread(&path));
-        reads.start(path.clone(), 1);
+        reads.start(path.clone(), 1, Held::default());
         assert!(reads.is_reading(&path) && reads.done(&path).is_none());
         // The file was removed and added again: job 2 supersedes job 1.
-        reads.start(path.clone(), 2);
+        reads.start(path.clone(), 2, Held::default());
         assert!(!reads.finish(&path, 1, 9), "a stale job changes nothing");
         assert!(reads.is_reading(&path));
         assert!(reads.finish(&path, 2, 7));
@@ -183,9 +208,26 @@ mod tests {
     fn clearing_the_done_reads_keeps_those_still_running() {
         let mut reads: Reads<()> = Reads::default();
         reads.set_done(PathBuf::from("done"), ());
-        reads.start(PathBuf::from("running"), 3);
+        reads.start(PathBuf::from("running"), 3, Held::default());
         reads.clear_done();
         assert!(reads.is_unread(Path::new("done")));
         assert!(reads.is_reading(Path::new("running")));
+    }
+
+    #[test]
+    fn a_read_that_leaves_reading_lets_go_of_its_tasks() {
+        let tasks = std::rc::Rc::new(());
+        let mut reads: Reads<()> = Reads::default();
+        let path = PathBuf::from("a.mp4");
+        reads.start(path.clone(), 1, Held::new(tasks.clone()));
+        assert_eq!(std::rc::Rc::strong_count(&tasks), 2, "the stage holds them");
+        assert!(reads.finish(&path, 1, ()));
+        assert_eq!(std::rc::Rc::strong_count(&tasks), 1, "answered: dropped");
+        reads.start(path.clone(), 2, Held::new(tasks.clone()));
+        reads.forget(&path);
+        assert_eq!(std::rc::Rc::strong_count(&tasks), 1, "forgotten: dropped");
+        reads.start(path.clone(), 3, Held::new(tasks.clone()));
+        reads.start(path.clone(), 4, Held::default());
+        assert_eq!(std::rc::Rc::strong_count(&tasks), 1, "superseded: dropped");
     }
 }

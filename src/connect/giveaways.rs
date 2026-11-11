@@ -132,7 +132,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .payments
             .giveaway
             .launches
-            .set(chat_id, GiveawayLaunch::Launching { request: extra.0 });
+            .set(chat_id, GiveawayLaunch::Launching { request: extra });
         let json = launch_prepaid_giveaway(
             extra,
             giveaway_id,

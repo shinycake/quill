@@ -392,8 +392,8 @@ impl QuillApp {
         }
         if let Some(form) = self.giveaway.form.as_mut() {
             form.page = page;
+            form.note = None;
         }
-        self.dismiss_giveaway_notice();
         cx.notify();
     }
 

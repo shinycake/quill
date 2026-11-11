@@ -8063,17 +8063,32 @@ whose variants carry the data, with a way out of every stage.
 | 14-001 | `check_for_updates` refuses to start over `Installed` (button and timer alike). |
 | 14-003 | `UpdateState::Installed(release, ChangelogBanner)` carries whether the banner is dismissed; `update_banner_dismissed` is deleted. |
 
-- **Skipped.** 08-108: tdesktop shows the box when the lookup answers too, and
-  TDLib always answers (a result or an error), so `Loading` ends. 10-023: no
-  signal ends `Verifying` (the provider's page is outside Quill), so keeping it
-  past the form would block that chat's giveaway for the session; unchanged.
-  10-024 and 10-025: the form's own note (a refused field) and the session's
-  per-chat launch stage have different owners and lifetimes (`Launching`
-  survives the form), drawn by one rule with the form's note first. 10-080:
-  the one-shot cell is the kit `content` bridge every dialog uses; the body is
-  rebuilt each render. 13-037: the native file dialog is modal, so the
-  composer cannot be closed and reopened while it is up. 14-002: tdesktop's
-  updater retries a failed download on its timer too. 14-004: the updater is
-  the app's own work (`spawn_app` by design), not an account's. 14-005: the
-  quit follows a successful hand-off; an exit held by an export is checked
-  before `restart_to_update`.
+Review round and file-complete pass (round 2):
+
+| id | outcome |
+| --- | --- |
+| review 1, 14-001 | `UpdateControl::ChangelogPending` (from `Installed`) is drawn as a disabled "Check for updates" and does nothing when pressed; it stays out of the title bar. `check_for_updates` asks the control, so the button, the timer and the guard agree. |
+| review 2, 12-D008 | The High quality offer sizes the picture a photo goes out as: `TrayReads::photo_sizes` is a `Reads<PhotoSize>` keyed by the photo's source path and holding the file it read (the converted JPEG once one is made). A photo with a preset JPEG is read too; a size read for another file is read again. A timed-out media check makes the photo a file, so a late size has nothing to offer. |
+| 08-108 | A tap on a collectible lookup that is still out asks again (the newer request replaces it, the older answer no longer matches), so a lost answer cannot block later taps; `request_collectible_info` returns the `RequestId`. The box opening over a later screen matches tdesktop, and closing the box clears the lookup. |
+| 08-018 | The second managed-bot press while a create is out is refused with a note (`Q_MEDIA_STILL_CREATING_A_BOT`), keeping the first create's stage and share; it no longer adopts it. Tested. |
+| 02-005, 10-071, 08-018 | Tests: a refused lookup stores nothing (connect), `WelcomeEdit::cancel`/`open` are refused while a Save is out, the second press. A Save that is out also keeps its row when the message is deleted elsewhere. Other rows' Edit is drawn disabled while a Save is out. |
+| story composer (review) | Close, Esc and the backdrop while Check, Post or Save is out say why the box stays (`Q_MEDIA_STILL_POSTING_STORY`); opening another composer over it is refused the same way. The status line still shows the upload. |
+| welcome load | `fail_welcome_load_send` stores a `Failed` pack only for a supergroup. |
+| 10-023 | `GiveawayLaunches::for_form` keeps `Verifying` as well as `Launching` (closing the form on the provider's page used to reset it at once). The form shows "Waiting for the payment" with "Start over" (`end_verification`), the user's way out, and no Start. |
+| 10-024 | One reader (`giveaway_notice`: a refused field, else the failed launch) and one dismissal (`dismiss_giveaway_notice` clears both) on every edit. |
+| 10-025 | The confirmation page is no longer reset by hand to follow the launch: it stays while the launch is out (its Start shows busy) and after a failure (the line shows, Start asks again). `page` is navigation, the per-chat stage is the session's. |
+| 05-035 | `GiveawayLaunch::Launching { request: RequestId }`; no `0` for none. |
+| 06-044, 06-045 | `StoryComposer::open` is gone (`mode`); the link URL and reaction text are read from the inputs when used (`areas_json(link, reactions)`), no mirror is kept. |
+| 10-080 | The dialog body hand-over is a `Cell` (`Cell::take` cannot panic on re-entry), in `groups_welcome`, `collectible_info_ui`, `ownership`, `send_box_options` and `bot_create_dialog`. |
+| 11-040 | Already fixed in round 1; tested now (the field keeps what was typed when nothing was sent). |
+| 12-D013, 12-D014, 02-002 | A tray read (`Read::Reading { job, _tasks: Held }`) owns its worker and give-up tasks: leaving the stage (answer, give-up, forget, supersede) drops them. Sound, media, photo-size and thumbnail reads use it, as `spawn_app` tasks (the reads are the app's). |
+| price box | `PriceDialog::too_high` is `PriceVerdict { Typing, TooHigh { text } }`: the line shows only while the field holds the refused text, so editing clears it. |
+| 13-037 | `StoryComposer::id` (never 0, new per opening); the file dialog's answer applies only to the composer that asked (`take_story_media_asked_by`). |
+| 14-002 | The timer's `recheck_for_updates` leaves `DownloadFailed` and `InstallFailed` for the button. |
+| 14-004 | `UpdateState::Checking(Job)`, `Downloading(.., Job)` and `Installing(.., Job)` own their tasks (`updater::Job`): replacing the stage cancels the check, the download wait and its redraw timer. The 4-hour loop is the app's own timer and ends with the app. |
+| 14-005 | `Installing` holds a 30 s watch: a quit that does not land ends in `InstallFailed` (`restart_did_not_land`). |
+| 14-003 | Already `Installed(release, ChangelogBanner)` from round 1. |
+
+- **Not this bundle's.** Entries in files this round touched only for one call
+  (02-092 `connect/payments.rs`, 05-034 `state/.../giveaway.rs`, 10-026 and 10-027
+  `giveaway_pick_ui.rs`, 09-056 `dialogs/welcome.rs`): see the report.

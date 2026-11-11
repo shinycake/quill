@@ -215,7 +215,12 @@ fn acquired_gifts_and_preview_failures_say_so_and_can_be_asked_again() {
 fn a_giveaway_launch_in_flight_is_never_forgotten_by_a_form() {
     use crate::state::{GiveawayLaunch, GiveawayLaunches};
     let mut launches = GiveawayLaunches::default();
-    launches.set(5, GiveawayLaunch::Launching { request: 9 });
+    launches.set(
+        5,
+        GiveawayLaunch::Launching {
+            request: RequestId(9),
+        },
+    );
     launches.for_form(5);
     assert!(launches.is_launching_for(5));
     assert!(!launches.is_launching_for(6));
@@ -257,7 +262,12 @@ fn editing_the_form_dismisses_a_failed_launch_but_not_one_in_flight() {
     launches.set(5, GiveawayLaunch::Failed { reason: "x".into() });
     launches.dismiss_failure(5);
     assert!(launches.failure_for(5).is_none());
-    launches.set(5, GiveawayLaunch::Launching { request: 3 });
+    launches.set(
+        5,
+        GiveawayLaunch::Launching {
+            request: RequestId(3),
+        },
+    );
     launches.dismiss_failure(5);
     assert!(launches.is_launching_for(5));
 }
@@ -268,12 +278,22 @@ fn editing_the_form_dismisses_a_failed_launch_but_not_one_in_flight() {
 fn two_chats_launch_at_once_and_each_answer_lands_on_its_own_chat() {
     use crate::state::{GiveawayLaunch, GiveawayLaunches};
     let mut launches = GiveawayLaunches::default();
-    launches.set(1, GiveawayLaunch::Launching { request: 10 });
-    launches.set(2, GiveawayLaunch::Launching { request: 11 });
+    launches.set(
+        1,
+        GiveawayLaunch::Launching {
+            request: RequestId(10),
+        },
+    );
+    launches.set(
+        2,
+        GiveawayLaunch::Launching {
+            request: RequestId(11),
+        },
+    );
     assert!(launches.is_launching_for(1) && launches.is_launching_for(2));
-    assert_eq!(launches.launching(10), Some(1));
-    assert_eq!(launches.launching(11), Some(2));
-    assert_eq!(launches.launching(0), None);
+    assert_eq!(launches.launching(RequestId(10)), Some(1));
+    assert_eq!(launches.launching(RequestId(11)), Some(2));
+    assert_eq!(launches.launching(RequestId(0)), None);
     launches.set(
         1,
         GiveawayLaunch::Failed {

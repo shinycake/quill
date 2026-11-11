@@ -9,6 +9,7 @@
 
 use super::app::QuillApp;
 use super::image_decode::{self, DecodeSize};
+use super::send_box_state::Held;
 use gpui_kit::*;
 use quill::composer::{
     AttachmentKind, FILE_THUMBNAIL_SIDE, FileThumbnail, file_thumbnail_upload_required,
@@ -45,12 +46,13 @@ impl QuillApp {
             let send_box = &mut self.composer_sends.reads;
             send_box.thumbnail_jobs += 1;
             let job = send_box.thumbnail_jobs;
-            send_box.thumbnails.start(path.clone(), job);
             let source = path.clone();
             let worker = cx.background_spawn(async move { write_file_thumbnail(&source) });
             let timer = cx.background_executor().timer(GIVE_UP_AFTER);
             let waited = path.clone();
-            self.spawn_scoped(cx, async move |this, cx| {
+            // screen-scope: the tray reads are the app's; the answer lands for
+            // every window and account whichever screen is on screen.
+            let give_up = Self::spawn_app(cx, async move |this, cx| {
                 timer.await;
                 let _ = this.update(cx, |this, cx| {
                     let send_box = &mut this.composer_sends.reads;
@@ -58,9 +60,10 @@ impl QuillApp {
                         cx.notify();
                     }
                 });
-            })
-            .detach();
-            self.spawn_scoped(cx, async move |this, cx| {
+            });
+            let key = path.clone();
+            // screen-scope: as the give-up above.
+            let answer = Self::spawn_app(cx, async move |this, cx| {
                 let thumbnail = worker.await;
                 let _ = this.update(cx, |this, cx| {
                     let send_box = &mut this.composer_sends.reads;
@@ -76,8 +79,12 @@ impl QuillApp {
                     }
                     cx.notify();
                 });
-            })
-            .detach();
+            });
+            // The stage owns both tasks: leaving it cancels the other.
+            self.composer_sends
+                .reads
+                .thumbnails
+                .start(key, job, Held::new((give_up, answer)));
         }
     }
 

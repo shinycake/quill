@@ -193,6 +193,13 @@ impl QuillApp {
                 self.session()
                     .and_then(|s| s.groups.welcome_messages.get(&chat_id.0))
                     .is_some_and(|messages| !messages.items().iter().any(|m| m.id == id))
+            })
+            // A Save that is out keeps its row until it answers: dropping
+            // the row now would forget the request that reports it.
+            && !self.admin.welcome_dialog.as_ref().is_some_and(|dialog| {
+                dialog
+                    .edit
+                    .is_saving(self.session().map(|session| &session.requests))
             });
         if edit_gone && let Some(dialog) = self.admin.welcome_dialog.as_mut() {
             dialog.edit = WelcomeEdit::Idle;

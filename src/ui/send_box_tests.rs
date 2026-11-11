@@ -96,8 +96,10 @@ fn paid_media_is_for_channels_that_allow_it_and_the_price_box_sets_it(cx: &mut T
             .clone();
         input.update(cx, |input, cx| input.set_value("10001", window, cx));
         assert!(!app.submit_price_dialog(cx), "over the limit stays open");
-        assert!(app.composer_ui.send_box.price.as_ref().unwrap().too_high);
+        assert!(app.price_too_high(cx));
+        // Editing the price clears the refusal of the old text.
         input.update(cx, |input, cx| input.set_value("250", window, cx));
+        assert!(!app.price_too_high(cx), "the line goes with the edit");
         assert!(app.submit_price_dialog(cx));
         assert!(app.composer_ui.send_box.price.is_none());
         assert_eq!(app.composer_media_options().paid_stars, 250);

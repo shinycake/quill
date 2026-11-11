@@ -9,7 +9,7 @@
 
 use super::app::QuillApp;
 use super::composer_sends::{SendSlot, TrayItem};
-use super::send_box_state::PhotoSize;
+use super::send_box_state::{Held, PhotoSize};
 use super::send_box_thumbnails::GIVE_UP_AFTER;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
@@ -33,13 +33,38 @@ use std::rc::Rc;
 /// The "Paid Content" box (tdesktop `EditPriceBox`).
 pub(super) struct PriceDialog {
     pub(super) input: Entity<InputState>,
-    /// The typed price is over the limit (`field->showError()`).
-    pub(super) too_high: bool,
+    /// What the last Save found (`field->showError()`).
+    pub(super) verdict: PriceVerdict,
     /// The chat the price is for: the one open when the box opened.
     pub(super) slot: SendSlot,
 }
 
+/// The verdict on the typed price. A refusal is about the text that was
+/// refused: it shows only while the field still holds that text, so editing
+/// the price clears it without anything resetting it by hand.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) enum PriceVerdict {
+    #[default]
+    Typing,
+    TooHigh {
+        text: String,
+    },
+}
+
 impl QuillApp {
+    /// The Paid Content box shows "up to N Stars": the last Save refused the
+    /// text the field holds now.
+    pub(super) fn price_too_high(&self, cx: &App) -> bool {
+        self.composer_ui
+            .send_box
+            .price
+            .as_ref()
+            .is_some_and(|dialog| {
+                matches!(&dialog.verdict, PriceVerdict::TooHigh { text }
+                if text.as_str() == dialog.input.read(cx).value().as_ref())
+            })
+    }
+
     /// The chat the tray sends to is a channel that takes paid media.
     fn open_chat_takes_paid_media(&self) -> bool {
         self.session().is_some_and(|session| {
@@ -124,13 +149,13 @@ impl QuillApp {
             let reads = &mut self.composer_sends.reads;
             reads.photo_size_jobs = reads.photo_size_jobs.wrapping_add(1);
             let job = reads.photo_size_jobs;
-            reads.photo_sizes.start(path.clone(), job);
+            let path_key = path.clone();
             let read_file = file.clone();
             let worker =
                 cx.background_spawn(async move { image::image_dimensions(&read_file).ok() });
             let timer = cx.background_executor().timer(GIVE_UP_AFTER);
             let (waited, waited_file) = (path.clone(), file.clone());
-            Self::spawn_app(cx, async move |this, cx| {
+            let give_up = Self::spawn_app(cx, async move |this, cx| {
                 timer.await;
                 let _ = this.update(cx, |this, cx| {
                     let unknown = PhotoSize {
@@ -146,9 +171,8 @@ impl QuillApp {
                         cx.notify();
                     }
                 });
-            })
-            .detach();
-            Self::spawn_app(cx, async move |this, cx| {
+            });
+            let answer = Self::spawn_app(cx, async move |this, cx| {
                 let size = worker.await;
                 let _ = this.update(cx, |this, cx| {
                     if this.composer_sends.reads.photo_sizes.finish(
@@ -159,8 +183,13 @@ impl QuillApp {
                         cx.notify();
                     }
                 });
-            })
-            .detach();
+            });
+            // The stage owns both tasks: leaving it cancels the other.
+            self.composer_sends.reads.photo_sizes.start(
+                path_key,
+                job,
+                Held::new((give_up, answer)),
+            );
         }
     }
 
@@ -194,7 +223,6 @@ impl QuillApp {
             let send_box = &mut self.composer_sends.reads;
             send_box.sound_jobs = send_box.sound_jobs.wrapping_add(1);
             let job = send_box.sound_jobs;
-            send_box.sound.start(path.clone(), job);
             let probed = path.clone();
             let worker =
                 cx.background_spawn(async move { quill::composer::without_sound_track(&probed) });
@@ -203,7 +231,7 @@ impl QuillApp {
             // drop the answer and leave the read running for good.
             let timer = cx.background_executor().timer(GIVE_UP_AFTER);
             let waited = path.clone();
-            Self::spawn_app(cx, async move |this, cx| {
+            let give_up = Self::spawn_app(cx, async move |this, cx| {
                 timer.await;
                 let _ = this.update(cx, |this, cx| {
                     // A probe that never answers must not hold Send: the
@@ -212,9 +240,9 @@ impl QuillApp {
                         cx.notify();
                     }
                 });
-            })
-            .detach();
-            Self::spawn_app(cx, async move |this, cx| {
+            });
+            let sound_key = path.clone();
+            let answer = Self::spawn_app(cx, async move |this, cx| {
                 let silent = worker.await;
                 let _ = this.update(cx, |this, cx| {
                     let send_box = &mut this.composer_sends.reads;
@@ -234,8 +262,11 @@ impl QuillApp {
                     }
                     cx.notify();
                 });
-            })
-            .detach();
+            });
+            self.composer_sends
+                .reads
+                .sound
+                .start(sound_key, job, Held::new((give_up, answer)));
         }
         self.prepare_tray_file_thumbnails(cx);
         self.check_tray_photo_sizes(cx);
@@ -475,7 +506,7 @@ impl QuillApp {
         }
         self.composer_ui.send_box.price = Some(PriceDialog {
             input,
-            too_high: false,
+            verdict: PriceVerdict::Typing,
             slot,
         });
         cx.notify();
@@ -499,7 +530,7 @@ impl QuillApp {
         };
         match parse_paid_price(&text, max) {
             PriceInput::TooHigh => {
-                dialog.too_high = true;
+                dialog.verdict = PriceVerdict::TooHigh { text };
                 cx.notify();
                 false
             }
@@ -553,7 +584,7 @@ impl QuillApp {
                         .child(tr(keys::Q_OPS_ENTER_UNLOCK_COST)),
                 )
                 .child(Input::new(&state.input).aria_label(tr(keys::Q_OPS_STARS_TO_UNLOCK_2)))
-                .when(state.too_high, |body| {
+                .when(this.price_too_high(cx), |body| {
                     body.child(div().text_sm().text_color(danger).child(tr_with(
                         keys::Q_LEFTOVERS_PRICE_UP_TO_STARS,
                         &[("count", &(this.paid_media_star_max()).to_string())],

@@ -29,6 +29,9 @@ impl QuillApp {
     /// the previous post's outcome. Phase 9.5: also fetches
     /// `getChatsToPostStories` for the "post as" picker.
     pub(super) fn open_story_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.story_composer_still_out(cx) {
+            return;
+        }
         *self.stories.composer = StoryComposer::open();
         self.stories
             .composer_caption
@@ -64,6 +67,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.story_composer_still_out(cx) {
+            return;
+        }
         *self.stories.composer = StoryComposer::open_edit(poster_chat_id, story_id);
         let (caption, link_url, reactions) = self
             .session()
@@ -97,6 +103,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.story_composer_still_out(cx) {
+            return;
+        }
         *self.stories.composer = StoryComposer::open_repost(poster_chat_id, story_id);
         self.stories
             .composer_caption
@@ -120,15 +129,25 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// A press of Post or Save is still out: another composer opening now
+    /// would replace the one whose request reports it, so it waits and says
+    /// why (the same line as Close).
+    fn story_composer_still_out(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.stories.composer.stage.in_flight() {
+            return false;
+        }
+        self.set_note(StatusNote::info(tr(keys::Q_MEDIA_STILL_POSTING_STORY)));
+        cx.notify();
+        true
+    }
+
     /// Phase 9.3: close the story composer (Escape / backdrop / Close). A
     /// press that is out keeps it open: closing would drop the request that
     /// reports a failed post or edit (`story_composer_upkeep`).
     pub(super) fn close_story_composer(&mut self, cx: &mut Context<Self>) {
-        if self.stories.composer.stage.in_flight() {
-            // Not silent: the status line says what it waits on, and the
-            // press says why the box stays.
-            self.set_note(StatusNote::info(tr(keys::Q_MEDIA_STILL_POSTING_STORY)));
-            cx.notify();
+        // Not silent: the status line says what it waits on, and the press
+        // says why the box stays.
+        if self.story_composer_still_out(cx) {
             return;
         }
         self.end_story_composer(cx);
@@ -155,23 +174,9 @@ impl QuillApp {
             return;
         }
         let media = self.stories.composer.media.clone();
-        // Phase 9.4: sync the area inputs into composer state before
-        // validating — the link URL check runs up front so a typo
-        // surfaces locally instead of failing the post.
-        self.stories.composer.link_url = self
-            .stories
-            .composer_link
-            .read(cx)
-            .value()
-            .trim()
-            .to_string();
-        self.stories.composer.reaction_emojis = self
-            .stories
-            .composer_reaction
-            .read(cx)
-            .value()
-            .trim()
-            .to_string();
+        // Phase 9.4: the link URL check runs up front so a typo surfaces
+        // locally instead of failing the post.
+        let (link_url, _) = self.story_area_text(cx);
         let is_edit = self.stories.composer.is_edit();
         let error = if !is_edit && media.is_none() {
             Some(tr(keys::Q_MEDIA_CHOOSE_A_PHOTO_OR_VIDEO))
@@ -183,7 +188,7 @@ impl QuillApp {
         } else if !is_edit && self.stories.composer.needs_users() {
             Some(tr(keys::Q_MEDIA_PICK_AT_LEAST_ONE_USER))
         } else {
-            self.stories.composer.link_url_error()
+            StoryComposer::link_url_error(&link_url)
         };
         if let Some(error) = error {
             self.stories.composer.set_error(error);
@@ -223,6 +228,24 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The link area URL and the suggested-reaction emoji as typed.
+    fn story_area_text(&self, cx: &App) -> (String, String) {
+        (
+            self.stories
+                .composer_link
+                .read(cx)
+                .value()
+                .trim()
+                .to_string(),
+            self.stories
+                .composer_reaction
+                .read(cx)
+                .value()
+                .trim()
+                .to_string(),
+        )
+    }
+
     /// Phase 9.5: the chat the current composer post targets — the
     /// "post as" channel/supergroup, or the user's own story chat.
     pub(super) fn story_composer_target_chat(&self) -> ChatId {
@@ -249,7 +272,10 @@ impl QuillApp {
         let content = media.map(|media| input_story_content(media.kind, &media.path));
         // Areas can't be edited unless the content changes — keep them
         // untouched when the media is kept.
-        let areas = content.as_ref().map(|_| self.stories.composer.areas_json());
+        let (link_url, reactions) = self.story_area_text(cx);
+        let areas = content
+            .as_ref()
+            .map(|_| StoryComposer::areas_json(&link_url, &reactions));
         let Some(live) = self.live.as_mut() else {
             self.stories
                 .composer
@@ -297,6 +323,7 @@ impl QuillApp {
                     // Phase 9.5: `target` is the chat the check was asked for,
                     // so the post goes where the eligibility was computed.
                     let from_story = self.stories.composer.repost_source();
+                    let (link_url, reactions) = self.story_area_text(cx);
                     let media = self.stories.composer.media.clone();
                     if let (Some(live), Some(media)) = (self.live.as_mut(), media) {
                         let caption = self
@@ -308,10 +335,9 @@ impl QuillApp {
                             .to_string();
                         let privacy = self.screen.stories.composer.privacy;
                         let user_ids = self.screen.stories.composer.selected_user_ids.clone();
-                        // Phase 9.4: areas + options are read from composer state
-                        // (synced in `story_composer_post`), so what lands in the
-                        // `postStory` JSON is exactly what the UI showed.
-                        let areas = self.screen.stories.composer.areas_json();
+                        // Phase 9.4: areas are read from the inputs as typed, so
+                        // what lands in the `postStory` JSON is what the UI shows.
+                        let areas = StoryComposer::areas_json(&link_url, &reactions);
                         let active_period = self.screen.stories.composer.expiry.seconds();
                         let is_posted_to_chat_page = self.screen.stories.composer.post_to_chat_page;
                         let protect_content = self.screen.stories.composer.protect_content;

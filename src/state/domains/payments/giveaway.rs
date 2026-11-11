@@ -120,7 +120,7 @@ pub enum GiveawayLaunch {
     /// it, so closing or reopening the form keeps it (see
     /// [`GiveawayLaunches::for_form`]) and the form shows the launch still
     /// in flight.
-    Launching { request: u64 },
+    Launching { request: crate::ids::RequestId },
     /// The prepaid giveaway started.
     Launched,
     /// A new giveaway was paid for. Its form is done: Start must not buy the
@@ -222,9 +222,9 @@ impl GiveawayLaunches {
     }
 
     /// The launch whose `request` is `pending`, with its chat.
-    pub fn launching(&self, request: u64) -> Option<i64> {
+    pub fn launching(&self, request: crate::ids::RequestId) -> Option<i64> {
         self.0.iter().find_map(|(chat, stage)| {
-            matches!(stage, GiveawayLaunch::Launching { request: r } if *r == request && request != 0)
+            matches!(stage, GiveawayLaunch::Launching { request: r } if *r == request)
                 .then_some(*chat)
         })
     }
@@ -317,7 +317,7 @@ impl Session {
             self.groups.chat_boost_details.remove(&chat_id.0);
         }
         let launches = &mut self.payments.giveaway.launches;
-        if let Some(chat_id) = launches.launching(pending.id.0) {
+        if let Some(chat_id) = launches.launching(pending.id) {
             launches.set(chat_id, GiveawayLaunch::Launched);
         }
     }
@@ -347,7 +347,7 @@ impl Session {
                 state.options.stars.fail_dropping_data(reason);
             }
             Some(RequestPurpose::LaunchPrepaidGiveaway) => {
-                if let Some(chat_id) = pending.and_then(|p| state.launches.launching(p.id.0)) {
+                if let Some(chat_id) = pending.and_then(|p| state.launches.launching(p.id)) {
                     state.launches.set(
                         chat_id,
                         GiveawayLaunch::Failed {
