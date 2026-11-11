@@ -44,7 +44,7 @@ fn a_share_does_not_take_the_open_chats_composer_choices(cx: &mut TestAppContext
         if !app.composer_effective_silent() {
             app.toggle_composer_silent();
         }
-        app.composer_ui.send_effect_once = 77;
+        app.composer_ui.once.effect = 77;
         app.update_pending_send(|send| send.scheduling = ComposerScheduling::SendWhenOnline);
         let composer = app.composer_send_options();
         assert!(composer.disable_notification);

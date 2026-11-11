@@ -19,7 +19,7 @@ impl QuillApp {
         let send = self.pending_send();
         SendOptions {
             disable_notification: self.composer_effective_silent()
-                || self.composer_ui.send_silent_once,
+                || self.composer_ui.once.silent,
             scheduling: send.scheduling,
             schedule_repeat_period: match send.scheduling {
                 ComposerScheduling::SendAtDate(_) => send.schedule_repeat,
@@ -31,7 +31,7 @@ impl QuillApp {
             link_preview_link: send.preview.link_index,
             // The driver overrides this for secret chats at send time.
             is_secret: false,
-            effect_id: self.composer_ui.send_effect_once,
+            effect_id: self.composer_ui.once.effect,
             ..SendOptions::default()
         }
     }

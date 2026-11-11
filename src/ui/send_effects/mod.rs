@@ -302,11 +302,11 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.close_send_menu(cx);
-        self.composer_ui.send_effect_once = effect_id;
-        self.composer_ui.send_silent_once = silent;
-        self.submit_from_send_button(window, cx);
-        self.composer_ui.send_effect_once = 0;
-        self.composer_ui.send_silent_once = false;
+        let once = super::composer_sends::SendOnce {
+            silent,
+            effect: effect_id,
+        };
+        self.with_send_once(once, |this| this.submit_from_send_button(window, cx));
     }
 
     /// The card's "Schedule": pick the time, then send with the effect.

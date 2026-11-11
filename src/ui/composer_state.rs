@@ -63,11 +63,11 @@ pub(crate) struct ComposerUi {
     pub(super) prev_text: gpui_kit::SharedString,
     /// A typed markdown replacement Backspace can still take back.
     pub(super) markdown_revert: Option<super::composer_field::MarkdownRevert>,
-    /// "Silent send" shortcut: the next send alone goes without sound.
-    pub(super) send_silent_once: bool,
-    /// "Send with Effect": the next send alone carries this effect
-    /// (`messageSendOptions.effect_id`); zero for none.
-    pub(super) send_effect_once: i64,
+    /// The one-time options of the send being made: "Silent send" and
+    /// "Send with Effect" (`messageSendOptions.effect_id`). Set only for the
+    /// duration of that send (`QuillApp::with_send_once`), never by a caller
+    /// that has to reset it.
+    pub(super) once: super::composer_sends::SendOnce,
     /// The send button's options menu and its effect picker
     /// (`send_effects`).
     pub(super) send_menu: super::send_effects::SendMenuUi,
@@ -120,8 +120,7 @@ impl ComposerUi {
             preview_timer: None,
             prev_text: gpui_kit::SharedString::default(),
             markdown_revert: None,
-            send_silent_once: false,
-            send_effect_once: 0,
+            once: Default::default(),
             send_menu: Default::default(),
             rich_draft: Default::default(),
             draft_restore_pending: false,

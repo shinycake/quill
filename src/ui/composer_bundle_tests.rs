@@ -168,14 +168,14 @@ fn silent_send_and_just_send_need_something_to_send(cx: &mut TestAppContext) {
         assert!(app.send_silently_by_key(window, cx));
         assert!(app.composer.read(cx).value().is_empty());
         // The silence was for that one send.
-        assert!(!app.composer_ui.send_silent_once);
+        assert!(!app.composer_ui.once.silent);
         assert!(!app.composer_effective_silent());
         app.composer
             .update(cx, |input, cx| input.set_value("loud", window, cx));
         assert!(app.just_send_by_key(window, cx));
         assert!(app.composer.read(cx).value().is_empty());
         // The option itself reaches the wire options.
-        app.composer_ui.send_silent_once = true;
+        app.composer_ui.once.silent = true;
         assert!(app.composer_send_options().disable_notification);
     });
 }

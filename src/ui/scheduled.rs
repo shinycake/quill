@@ -396,9 +396,11 @@ impl QuillApp {
                 });
                 cx.notify();
                 if send_after {
-                    self.composer_ui.send_effect_once = send_effect;
-                    self.send_composer_after_schedule(window, cx);
-                    self.composer_ui.send_effect_once = 0;
+                    let once = super::composer_sends::SendOnce {
+                        effect: send_effect,
+                        ..self.send_once()
+                    };
+                    self.with_send_once(once, |this| this.send_composer_after_schedule(window, cx));
                 }
             }
             ScheduleTarget::Reschedule(message_id) => {
