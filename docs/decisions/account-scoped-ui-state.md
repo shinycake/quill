@@ -8043,3 +8043,33 @@ whose variants carry the data, with a way out of every stage.
 - **A refused refetch of a stale proxy list** lands in
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
+
+### Sweep fixes (r2-01)
+
+| id | result |
+| --- | --- |
+| 07-025 | `submit_delete_account` sends first: only an accepted send clears the password and reason and leaves the armed banner. A refused send keeps both and the banner, with a "Couldn't delete the account" note. |
+| 07-026 | `submit_account_ttl` and `submit_default_auto_delete` note a refused send. |
+| 07-034, 13-066 | skipped: the one-shot body cell is the dialog builders' shared pattern (eight sites); the guard is a single short `borrow_mut().take()` with nothing called while it is held, and the builder reruns each render. |
+| 08-047, 12-C002 | `PermissionAsk::Asking` owns the wait task (dropping the stage ends it). When the asking window closed first, the task ends the stage through `main()` (same screen, matched by id) instead of leaving every later press waiting. |
+| 09-095, 09-097 | a first page of the event log that cannot be sent (path inactive, sender closed) is `ChatEventLogFetch::Failed` with the Retry the page already draws; Save filter / search failures land there too. |
+| 09-096 | skipped: a failed older page keeps the autoload mark on purpose (nothing asks again from render); scrolling to the top asks again. |
+| 09-098 | the id list borrow ends before the list is reset, spliced or remeasured. |
+| 09-099 | the poll tick does nothing while locked. |
+| 09-100, 10-040 | skipped: `shows` is the chat key the box text belongs to, not a stage; the 5 s timer only wakes and skips the send while the window is inactive. |
+| 10-012 | the Gift Premium or Stars box draws contacts Loading, and Failed with Retry (`retry_gift_recipients`). The frequent-contacts fetch stays best-effort: failing it only drops that optional section, as in tdesktop. |
+| 10-043 | `open_group_call_invite` returns while locked, like the share opener. |
+| 10-055 | the invite picker draws a failed contacts fetch with Retry and a loading line, not "No contacts to invite". |
+| 10-051 | a repeat Join press while a conference join is pending is ignored (the driver already refused it with a misleading error note). |
+| 10-052 | skipped: tdesktop closes the rename box on send too. |
+| 10-057 | a member page that cannot be sent is `SupergroupMembersFetch::Failed` (supergroups and basic groups) with Retry, not a removed entry read as Loading. |
+| 10-117, 10-118 | the driver's `send_payment_form_request` replaces the whole earlier checkout (`close_checkout`: request, form, order info, shipping, note) before sending; the UI resets nothing by hand and drops the old payment dialog when the send is refused. The five payments fields stay separate fields (a full enum is a larger rewrite of 44 sites); only the entry point is single now. |
+| 11-018, 11-019 | the game scores panel draws `Fetch::Failed` with Retry; the driver opens the panel as `Loading { request }` and the answer or error applies only for that request. |
+| 12-A011 | `confirm_unpin` takes an `UnpinOrigin`; only the selection bar's unpin clears the forward stage. |
+| 02-002, 12-D014 | the tray reads (media check, file thumbnails, sound track) and their give-up timers run as app work (`spawn_app`), so they settle `TrayReads` whichever window or screen asked; the thumbnails follow-up is a `defer_screen`. |
+| 13-019 | `install_spell_engine` and `recheck_spelling` go through the disabled gate (`sync_spellcheck`), so turning spell check on later checks the draft. |
+| 07-014 | a failed first Money page draws Retry. |
+| 14-010 | the grossing apps list is `Loading { request }` and Failed with a Retry; a refused send is Failed. |
+
+Guards: none added (the shapes are per-feature stage choices that `check-implicit-state.py` cannot see).
+Tests: refused first event-log page, refused member fetches, a newer checkout replacing the whole older one, an older game-scores answer ignored, the permission stage helpers.

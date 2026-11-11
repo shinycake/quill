@@ -37,6 +37,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         invoice: InputInvoice,
     ) -> Result<RequestId, ConnectSendError> {
+        // A new checkout replaces the one before it whole (its request,
+        // form, order info, shipping choice and note), here and nowhere in
+        // the UI, so a refused send leaves none of it behind.
+        self.session.close_checkout();
         let extra = self.payment_extra(&invoice, RequestPurpose::GetPaymentForm)?;
         let json = get_payment_form(extra, &invoice);
         let sent = self.send_json_request(extra, &json)?;

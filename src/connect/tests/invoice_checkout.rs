@@ -319,3 +319,21 @@ fn a_new_card_pays_with_the_provider_token_and_may_need_verification() {
     );
     assert!(!driver.session.payments.checkout.is_paid());
 }
+
+/// Sweep 10-117: a new checkout replaces the whole earlier one in the driver,
+/// the note, shipping choice and order info included.
+#[test]
+fn a_new_checkout_replaces_the_earlier_one_whole() {
+    let (mut driver, _recorder, _sink, _seq) = driver_parts();
+    let payments = &mut driver.session.payments;
+    payments.note = Some("old outcome".into());
+    payments.shipping_id = Some("express".into());
+    driver
+        .send_payment_form_request(InputInvoice::Name("shop_1".into()))
+        .unwrap();
+    let payments = &driver.session.payments;
+    assert!(payments.note.is_none());
+    assert!(payments.shipping_id.is_none());
+    assert!(payments.checkout.is_loading());
+    assert!(payments.request.is_some());
+}

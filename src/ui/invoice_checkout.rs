@@ -50,18 +50,16 @@ impl QuillApp {
         ) {
             return;
         }
-        let sent = self.live.as_mut().map(|live| {
-            let payments = &mut live.driver.session.payments;
-            payments.checkout = quill::state::CheckoutForm::Closed;
-            payments.order_info = quill::state::OrderInfoStage::Unvalidated;
-            payments.shipping_id = None;
-            payments.note = None;
-            live.driver.send_payment_form_request(invoice)
-        });
-        self.open_box(crate::ui::shell::DialogKind::PaymentForm);
+        let sent = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.send_payment_form_request(invoice));
         match sent {
             Some(Ok(_)) => self.open_payment_dialog(window, cx),
             _ => {
+                // Nothing was asked: the checkout that was on screen is
+                // gone (the driver replaced it), so its dialog goes too.
+                self.payments.dialog = None;
                 self.set_note(StatusNote::error(tr(
                     keys::Q_MONEY_COULD_NOT_LOAD_THE_PAYMENT,
                 )));

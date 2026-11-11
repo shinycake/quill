@@ -504,6 +504,13 @@ impl QuillApp {
         message_id: MessageId,
         cx: &mut Context<Self>,
     ) {
+        // A join already on its way: the press is a repeat, not a new ask.
+        if self
+            .session()
+            .is_some_and(|s| s.calls.pending_conference.is_some())
+        {
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
             self.screen.connection.set_note_for(
                 &self.screen.windows,
