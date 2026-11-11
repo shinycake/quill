@@ -67,9 +67,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Read the saved "box was shown" flags (in the background, once),
     /// show the box of a chat that waited for them, and save new flags.
     pub(crate) fn sync_psa_about(&mut self) {
-        self.session.chat_list.psa_about.start_load();
         self.session.poll_psa_about(std::time::Instant::now());
-        self.session.chat_list.psa_about.save_unsaved();
+        self.session.chat_list.psa_about.sync_save();
     }
 
     /// "Hide this announcement": only where tdesktop offers it, a promoted

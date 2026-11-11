@@ -8,7 +8,8 @@
 use crate::ui::app::QuillApp;
 use crate::ui::dialogs::{
     AddContactDialog, ContactSave, CopyMark, EditContactDialog, FolderDeleteConfirm,
-    FolderEditorDialog, FolderInviteDialog, FolderLoad, FolderShareDialog, InviteStage, LinkOp,
+    FolderEditorDialog, FolderInviteDialog, FolderLoad, FolderShareDialog, FolderShareView,
+    InviteStage, LinkOp,
 };
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
@@ -120,25 +121,31 @@ fn a_share_save_answer_lands_only_in_the_form_that_sent_it(cx: &mut TestAppConte
     app.update_in(&mut vcx, |app, window, cx| {
         let first = sent(app, RequestPurpose::EditChatFolderInviteLink, Some(5));
         let mut dialog = FolderShareDialog::new(window, cx, 5);
-        dialog.op = LinkOp::Saving(first);
+        dialog.view = FolderShareView::Edit {
+            link: None,
+            op: LinkOp::Saving(first),
+        };
         app.folders.share = Some(dialog);
         // Cancel (the form lets go of the request), then a new link is made.
         let second = sent(app, RequestPurpose::CreateChatFolderInviteLink, Some(5));
         if let Some(dialog) = app.folders.share.as_mut() {
-            dialog.op = LinkOp::Saving(second);
+            dialog.view = FolderShareView::Edit {
+                link: None,
+                op: LinkOp::Saving(second),
+            };
         }
         // The first save's answer lands late: not this form's.
         answer(app, first, r#""@type":"chatFolderInviteLink","invite_link":"https://t.me/addlist/a","name":"","chat_ids":[1]"#);
         assert!(!app.settle_folder_share(cx), "not its answer");
         assert_eq!(
-            app.folders.share.as_ref().map(|d| d.op.clone()),
+            app.folders.share.as_ref().map(|d| d.view.op().clone()),
             Some(LinkOp::Saving(second))
         );
         // Its own refusal ends the wait and shows the error.
         answer(app, second, REFUSED);
         assert!(app.settle_folder_share(cx));
         let dialog = app.folders.share.as_ref().expect("open");
-        assert!(matches!(dialog.op, LinkOp::Failed(_)));
+        assert!(matches!(dialog.view.op(), LinkOp::Failed(_)));
     });
 }
 
@@ -435,5 +442,33 @@ fn the_join_box_waits_for_its_answer(cx: &mut TestAppContext) {
         }
         app.folder_new_chats_upkeep(window, cx);
         assert!(app.folders.new_chats_dialog.is_none());
+    });
+}
+
+#[gpui_kit::test]
+fn a_delete_in_flight_keeps_the_list_and_takes_no_second_request(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let delete = sent(app, RequestPurpose::DeleteChatFolderInviteLink, Some(5));
+        let mut dialog = FolderShareDialog::new(window, cx, 5);
+        dialog.view.set_op(LinkOp::Saving(delete));
+        app.folders.share = Some(dialog);
+        // Edit and a second delete wait for the first answer.
+        app.start_folder_link_form(None, window, cx);
+        assert!(matches!(
+            app.folders.share.as_ref().map(|d| &d.view),
+            Some(FolderShareView::List { .. })
+        ));
+        app.delete_folder_link("https://t.me/addlist/b", cx);
+        assert_eq!(
+            app.folders.share.as_ref().map(|d| d.view.op().clone()),
+            Some(LinkOp::Saving(delete))
+        );
+        // The delete's refusal settles the list it came from.
+        answer(app, delete, REFUSED);
+        assert!(app.settle_folder_share(cx));
+        let dialog = app.folders.share.as_ref().expect("open");
+        assert!(matches!(dialog.view, FolderShareView::List { .. }));
+        assert!(matches!(dialog.view.op(), LinkOp::Failed(_)));
     });
 }

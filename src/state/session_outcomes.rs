@@ -23,9 +23,7 @@ impl Session {
         // The consent box and the raw-URL fallback of a login button
         // answered while away: its request goes with its answer. A request
         // still in flight keeps its context for the answer to come.
-        if self.bots.last_login_url_info.take().is_some() {
-            self.bots.login_url_request = None;
-        }
+        self.bots.login_url.forget_answer();
         let messages = &mut self.messages;
         messages.message_link = None;
         messages.message_link_error.clear();

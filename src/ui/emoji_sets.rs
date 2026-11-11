@@ -164,7 +164,7 @@ impl QuillApp {
             emoji.found_sets = emoji
                 .installed_sets
                 .iter()
-                .chain(&emoji.trending_sets)
+                .chain(emoji.lists.trending.sets())
                 .filter(|set| set.title.to_lowercase().contains(&needle))
                 .cloned()
                 .collect();
@@ -332,7 +332,13 @@ impl QuillApp {
         let session = self.session();
         let no_panel = quill::emoji::EmojiPanel::default();
         let panel = session.map_or(&no_panel, |s| &s.stickers.emoji);
-        let loading = panel.lists.of(panel.tab).is_loading();
+        let loading = session.is_some_and(|s| {
+            s.requests.has_purpose(match panel.tab {
+                EmojiSetTab::Installed => quill::state::RequestPurpose::GetInstalledEmojiSets,
+                EmojiSetTab::Trending => quill::state::RequestPurpose::GetTrendingEmojiSets,
+                EmojiSetTab::Search => quill::state::RequestPurpose::SearchEmojiSets,
+            })
+        });
         let owner = cx.entity().downgrade();
         let tabs = TabBar::new("emoji-sets-tabs")
             .underline()
@@ -355,7 +361,7 @@ impl QuillApp {
             });
         let sets: Vec<&StickerSetInfo> = match panel.tab {
             EmojiSetTab::Installed => session.map(|s| s.ordered_emoji_packs()).unwrap_or_default(),
-            EmojiSetTab::Trending => panel.trending_sets.iter().collect(),
+            EmojiSetTab::Trending => panel.lists.trending.sets().iter().collect(),
             EmojiSetTab::Search => panel.found_sets.iter().collect(),
         };
         let rows = sets.iter().fold(v_flex().w_full(), |rows, set| {
@@ -363,7 +369,7 @@ impl QuillApp {
         });
         let status = if loading && sets.is_empty() {
             Some(tr(keys::Q_MEDIA_LOADING_EMOJI_PACKS))
-        } else if panel.lists.of(panel.tab).error().is_some() || panel.mutation.is_failed() {
+        } else if panel.lists.error_of(panel.tab).is_some() || panel.mutation.is_failed() {
             Some(tr(keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS))
         } else if sets.is_empty() && !loading {
             Some(tr(keys::Q_MEDIA_NO_EMOJI_PACKS_FOUND))

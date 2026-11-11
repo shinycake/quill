@@ -676,8 +676,8 @@ impl QuillApp {
             InviteStage::Adding { request, .. } => Some(request),
             _ => None,
         });
-        let share = self.folders.share.as_ref().and_then(|d| match d.op {
-            LinkOp::Saving(request) => Some(request),
+        let share = self.folders.share.as_ref().and_then(|d| match d.view.op() {
+            LinkOp::Saving(request) => Some(*request),
             LinkOp::Idle | LinkOp::Failed(_) => None,
         });
         let editor = self.folders.editor.as_ref().and_then(|d| match d.load {

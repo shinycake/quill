@@ -249,7 +249,7 @@ struct Anim {
 
 impl Anim {
     fn value(&self, now: u64) -> f32 {
-        if self.duration_ms == 0 || now >= self.start_ms + self.duration_ms {
+        if self.duration_ms == 0 || now >= self.start_ms.saturating_add(self.duration_ms) {
             return self.to;
         }
         let t = (now.saturating_sub(self.start_ms)) as f32 / self.duration_ms as f32;
@@ -257,7 +257,7 @@ impl Anim {
     }
 
     fn running(&self, now: u64) -> bool {
-        self.duration_ms > 0 && now < self.start_ms + self.duration_ms
+        self.duration_ms > 0 && now < self.start_ms.saturating_add(self.duration_ms)
     }
 }
 
@@ -279,9 +279,9 @@ impl Reach {
 
 #[derive(Debug)]
 struct Gesture<K, A> {
-    key: Option<K>,
-    /// What the panel behind the row offered at the latest event.
-    action: Option<A>,
+    /// The row under the fingers and what its panel offered at the latest
+    /// event; `None` until a direction is fixed, or when no row can run it.
+    target: Option<(K, A)>,
     /// +1 when fingers moved left (the only direction that swipes a row).
     direction: f32,
     orientation: Orientation,
@@ -359,8 +359,7 @@ impl<K: Copy + PartialEq, A: Copy> SwipeMachine<K, A> {
                 // A new scroll begins: reset any lost end (`ScrollBegin`).
                 self.end(now, true);
                 self.gesture = Some(Gesture {
-                    key: None,
-                    action: None,
+                    target: None,
                     direction: 1.0,
                     orientation: Orientation::NoDirection,
                     delta: (0.0, 0.0),
@@ -399,20 +398,19 @@ impl<K: Copy + PartialEq, A: Copy> SwipeMachine<K, A> {
             if args.0 != 0.0 {
                 g.orientation = Orientation::Undecided;
                 g.direction = if args.0 < 0.0 { -1.0 } else { 1.0 };
-                g.key = key.map(|(k, _)| k);
-                g.action = key.map(|(_, a)| a);
+                g.target = key;
                 // Wrong direction (swiping right) or no row action:
                 // leave the event to the list.
-                if g.key.is_none() || g.direction < 0.0 {
+                if g.target.is_none() || g.direction < 0.0 {
                     g.orientation = Orientation::Vertical;
                 }
             }
             return Feed::default();
         }
-        if let (Some(k), Some((now_key, action))) = (g.key, key)
+        if let (Some((k, _)), Some((now_key, action))) = (g.target, key)
             && k == now_key
         {
-            g.action = Some(action);
+            g.target = Some((k, action));
         }
         match g.orientation {
             Orientation::Vertical | Orientation::NoDirection => Feed::default(),
@@ -467,7 +465,7 @@ impl<K: Copy + PartialEq, A: Copy> SwipeMachine<K, A> {
         if g.orientation != Orientation::Horizontal {
             return false;
         }
-        let (Some(key), Some(action)) = (g.key, g.action) else {
+        let Some((key, action)) = g.target else {
             return false;
         };
         let raw = (g.delta.0 * g.direction / THRESHOLD).max(0.0);
@@ -515,7 +513,7 @@ impl<K: Copy + PartialEq, A: Copy> SwipeMachine<K, A> {
     pub fn row(&self, key: K, now: u64) -> Option<RowSwipe> {
         if let Some(g) = &self.gesture
             && g.orientation == Orientation::Horizontal
-            && g.key == Some(key)
+            && g.target.is_some_and(|(k, _)| k == key)
             && g.ratio > 0.0
         {
             return Some(RowSwipe {

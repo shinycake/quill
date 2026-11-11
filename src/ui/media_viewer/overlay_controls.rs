@@ -70,7 +70,7 @@ impl QuillApp {
     /// tdesktop `showSaveMsgToast`: where the saved file went, with a
     /// link that shows it in the file manager.
     pub(super) fn viewer_saved_toast(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        self.viewer.extra.saved_toast.clone().map(|toast| {
+        self.viewer.extra.saved_toast.toast().cloned().map(|toast| {
             div()
                 .absolute()
                 .top(px(VIEWER_TOP_BAR + 12.))

@@ -42,6 +42,7 @@ mod dialog_host_tests;
 #[cfg(test)]
 mod dialog_host_window_tests;
 mod dialog_hosts;
+pub(in crate::ui) use dialog_hosts::AskWaits;
 #[cfg(test)]
 mod lock_tests;
 #[cfg(test)]

@@ -354,3 +354,31 @@ fn the_edit_row_opens_the_dialog_and_clears_the_slash(cx: &mut TestAppContext) {
     let text = app.read_with(vcx, |app, cx| app.composer.read(cx).value().to_string());
     assert!(text.is_empty());
 }
+
+#[gpui_kit::test]
+fn a_new_shortcut_nobody_reported_does_not_keep_the_poll_running(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx);
+    open(&app, vcx);
+    go(
+        &app,
+        vcx,
+        View::Shortcut {
+            name: "brand-new".into(),
+            id: None,
+        },
+    );
+    let done =
+        vcx.update(|window, cx| app.update(cx, |app, cx| app.quick_replies_pump(window, cx)));
+    assert!(done, "nothing was accepted, so there is no id to wait for");
+    let waiting = vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            if let Some(dialog) = app.dialogs.quick_replies_dialog.as_mut() {
+                dialog.pane.save = super::TextSave::Accepted;
+            }
+            app.quick_replies_pump(window, cx)
+        })
+    });
+    assert!(!waiting, "an accepted text waits for its shortcut's id");
+}

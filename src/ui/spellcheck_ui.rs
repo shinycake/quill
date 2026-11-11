@@ -212,6 +212,13 @@ impl QuillApp {
         self.spell.info = info;
         // Every window's composer is checked again with the new engine.
         self.in_every_window(cx, |this, cx| {
+            if !this.chat_prefs.spellcheck_enabled {
+                // Off: nothing is seeded or checked, so turning it on later
+                // finds an unchecked draft and checks it.
+                let text = this.composer.read(cx).value().to_string();
+                this.sync_spellcheck(&text, cx);
+                return;
+            }
             this.composer_ui.spelling.underlines.found.clear();
             this.composer_ui.spelling.underlines.text = this.composer.read(cx).value().to_string();
             this.notify_composer(cx);
@@ -336,6 +343,10 @@ impl QuillApp {
     fn recheck_spelling(&mut self, accepted: Option<&str>, cx: &mut Context<Self>) {
         self.in_every_window(cx, |this, cx| {
             let text = this.composer.read(cx).value().to_string();
+            if !this.chat_prefs.spellcheck_enabled {
+                this.sync_spellcheck(&text, cx);
+                return;
+            }
             this.composer_ui.spelling.underlines.text = text;
             if let Some(word) = accepted {
                 this.composer_ui

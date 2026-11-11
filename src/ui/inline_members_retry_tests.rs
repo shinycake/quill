@@ -153,3 +153,42 @@ fn the_block_starts_over_each_time_the_panel_opens(cx: &mut TestAppContext) {
     fresh(&app, cx);
     app.read_with(cx, |app, _| assert!(app.inline_members.chat.is_some()));
 }
+
+/// A send the app refused locally says nothing about whether the viewer may
+/// see the members: the list stays on Recent (with its Retry) and does not
+/// switch to the administrators. Only TDLib's refusal does (sweep r2-01).
+#[gpui_kit::test]
+fn a_locally_refused_send_keeps_the_recent_list(cx: &mut TestAppContext) {
+    let app = demo(cx);
+    let chat = open_group_panel(&app, cx);
+    let filter_after = |app: &Entity<QuillApp>,
+                        cx: &mut TestAppContext,
+                        fetch: quill::state::SupergroupMembersFetch| {
+        app.update(cx, |app, _| {
+            let shape = app.inline_members_current().expect("the open group");
+            if let Some(session) = app.session_mut() {
+                session
+                    .groups
+                    .supergroup_members
+                    .insert((chat, MemberListFilter::Recent), fetch);
+            }
+            app.inline_members_filter(shape)
+        })
+    };
+    assert_eq!(
+        filter_after(
+            &app,
+            cx,
+            quill::state::SupergroupMembersFetch::NotSent("offline".into())
+        ),
+        MemberListFilter::Recent
+    );
+    assert_eq!(
+        filter_after(
+            &app,
+            cx,
+            quill::state::SupergroupMembersFetch::Failed("CHANNEL_PRIVATE".into())
+        ),
+        MemberListFilter::Administrators
+    );
+}

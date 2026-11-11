@@ -189,6 +189,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         folder_id: i32,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            self.session
+                .chat_list
+                .folder_specs
+                .fail(folder_id, ConnectSendError::InvalidRequest.stage_line());
             return Err(ConnectSendError::InvalidRequest);
         }
         if self
@@ -222,6 +226,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         folder_id: i32,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            self.session
+                .chat_list
+                .folder_chats_to_leave
+                .entry(folder_id)
+                .or_default()
+                .fail(ConnectSendError::InvalidRequest.stage_line());
             return Err(ConnectSendError::InvalidRequest);
         }
         if self
@@ -270,6 +280,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            self.session
+                .chat_list
+                .chat_lists_for_add
+                .entry(chat_id.0)
+                .or_default()
+                .fail(ConnectSendError::InvalidRequest.stage_line());
             return Err(ConnectSendError::InvalidRequest);
         }
         if self

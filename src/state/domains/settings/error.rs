@@ -15,7 +15,7 @@ impl Session {
             || self.apply_business_error(err, pending.map(|p| p.purpose))
             || self.apply_business_extra_error(err, pending.map(|p| p.purpose), extra)
             || self.apply_passkeys_error(err, pending.map(|p| (p.id, p.purpose)))
-            || self.apply_tone_upload_error(err, pending.map(|p| p.purpose))
+            || self.apply_tone_upload_error(err, pending)
         {
             return;
         }
@@ -27,11 +27,18 @@ impl Session {
             // Slice S4: Data & Storage request failures surface
             // on the screen (the S3 pattern) — never as toasts.
             Some(RequestPurpose::Settings(SettingsPurpose::SetAutoDownloadSettings { .. })) => {
-                self.settings.data_storage_save.fail(format!(
-                    "Couldn't save auto-download settings: {}",
-                    error_reason(err)
-                ));
-                self.settings.auto_download_answer = extra.map(AutoDownloadAnswer::Refused);
+                self.settings.data_storage_save.fail(
+                    StorageSaveKind::AutoDownload,
+                    format!(
+                        "Couldn't save auto-download settings: {}",
+                        error_reason(err)
+                    ),
+                );
+                if let Some(request) = extra {
+                    self.settings
+                        .auto_download_answers
+                        .push(AutoDownloadAnswer::Refused(request));
+                }
             }
             Some(RequestPurpose::OptimizeStorage) => {
                 self.settings.storage_clear = StorageClear::Failed(format!(
@@ -40,10 +47,10 @@ impl Session {
                 ));
             }
             Some(RequestPurpose::SetStorageOption) => {
-                self.settings.data_storage_save.fail(format!(
-                    "Couldn't save the storage limits: {}",
-                    error_reason(err)
-                ));
+                self.settings.data_storage_save.fail(
+                    StorageSaveKind::Limits,
+                    format!("Couldn't save the storage limits: {}", error_reason(err)),
+                );
             }
             // Batch 4: `setOption("online")` is fire-and-forget; the next
             // presence check sends it again.
@@ -67,13 +74,19 @@ impl Session {
                 );
             }
             Some(RequestPurpose::GetAutoDownloadSettingsPresets) => {
-                if self.settings.data_storage.seeded.is_in_flight() {
-                    self.settings.data_storage.seeded = crate::data_settings::Seed::Unseeded;
+                // Only the fetch the prefs wait for fails them.
+                if self
+                    .settings
+                    .data_storage
+                    .seeded
+                    .waits_for(pending.map(|p| p.id))
+                {
+                    self.settings.data_storage.seeded =
+                        crate::data_settings::PresetsSeed::Failed(format!(
+                            "Couldn't load auto-download settings: {}",
+                            error_reason(err)
+                        ));
                 }
-                self.settings.auto_download_presets.fail(format!(
-                    "Couldn't load auto-download settings: {}",
-                    error_reason(err)
-                ));
             }
             // Slice S3: privacy-screen request failures surface
             // on the Privacy screen (the UI reads the state),
@@ -81,13 +94,7 @@ impl Session {
             Some(RequestPurpose::Settings(SettingsPurpose::GetPrivacyRules { key })) => {
                 // Only the key's live load fails it; a save or an update
                 // since then already settled the key.
-                let live = matches!(
-                    self.settings.privacy.get(&key),
-                    Some(PrivacyKeyState::Loading(id)) if Some(*id) == pending.map(|p| p.id)
-                );
-                if live {
-                    self.settings.privacy.insert(key, PrivacyKeyState::Failed);
-                }
+                self.settings.fail_privacy_load(key, pending.map(|p| p.id));
             }
             // A refused save puts back what the server kept (and the call
             // rules mirrored from it) and says why in the editor.
@@ -149,8 +156,12 @@ impl Session {
             // flood state worsens; retry is user-driven via the
             // Refresh button. The old cache stays visible.
             Some(RequestPurpose::ConfirmDeviceLogin) => {
-                self.settings.device_login =
-                    DeviceLogin::Done(crate::auth::DeviceLoginResult::Failed);
+                if let Some(asked) = pending {
+                    self.settings.device_login = DeviceLogin::Done {
+                        request: asked.id,
+                        result: crate::auth::DeviceLoginResult::Failed,
+                    };
+                }
                 self.settings.sessions_op.failed(pending.map(|p| p.id));
                 self.settings
                     .sessions
@@ -294,12 +305,9 @@ impl Session {
         // again by itself.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatNotificationSettingsExceptions)
             && let Some(scope) = pending.and_then(|p| p.scope)
+            && let Some(list) = self.settings.notification_exceptions.get_mut(&scope)
         {
-            self.settings
-                .notification_exceptions
-                .entry(scope)
-                .or_default()
-                .fail(error_reason(err));
+            list.failed(pending.map(|p| p.id), error_reason(err), false);
         }
     }
 }

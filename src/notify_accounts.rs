@@ -170,14 +170,22 @@ pub fn other_accounts_unread() -> AccountUnread {
 /// The app-wide badge: the account on screen plus every background one.
 pub fn total_unread(active: Option<&Session>) -> AccountUnread {
     active
-        .map(|session| ACTIVE_UNREAD.with_borrow_mut(|memo| memo.get(session)))
+        .map(|session| {
+            // The memo is out of its cell while it counts, so a count that
+            // asks again from inside starts from an empty memo; no borrow
+            // is held across the walk.
+            let mut memo = ACTIVE_UNREAD.take();
+            let unread = memo.get(session);
+            ACTIVE_UNREAD.set(memo);
+            unread
+        })
         .unwrap_or_default()
         .combine(other_accounts_unread())
 }
 
 thread_local! {
     /// The tray and the icon badge both ask on every wake of their loop.
-    static ACTIVE_UNREAD: std::cell::RefCell<UnreadMemo> = Default::default();
+    static ACTIVE_UNREAD: std::cell::Cell<UnreadMemo> = Default::default();
 }
 
 /// Memo for [`AccountUnread::of`]: the count walks every chat and forum

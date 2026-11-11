@@ -244,6 +244,68 @@ fn a_refused_microphone_shows_the_error_and_the_call_goes_on() {
 }
 
 #[test]
+fn a_refused_microphone_is_put_on_the_call_for_its_window() {
+    let (dir, mut driver, _engine, mics) = group_driver();
+    mics.fail.store(true, Ordering::SeqCst);
+    driver.session.calls.active_group_call = Some(joined_group_call(false));
+    driver.pump_call_media(Instant::now());
+    while driver.call_capture().opening() {
+        std::thread::yield_now();
+        driver.pump_call_media(Instant::now());
+    }
+    assert_eq!(
+        driver.session.calls.group_call_error.as_deref(),
+        Some("Quill can't use the microphone.")
+    );
+    // Dismissed, it stays gone until the failure changes.
+    driver.session.calls.group_call_error = None;
+    driver.pump_call_media(Instant::now());
+    assert_eq!(driver.session.calls.group_call_error, None);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+/// A 1:1 call's note follows the devices: a new failure shows even while an
+/// older one stands, and the note goes once the devices work again.
+#[test]
+fn a_private_calls_media_note_follows_the_devices() {
+    let (dir, mut driver, _engine, _mics) = group_driver();
+    driver.session.calls.active_group_call = None;
+    driver.session.calls.active_call = Some(crate::state::ActiveCall::fresh(
+        5,
+        11,
+        true,
+        false,
+        crate::telegram::envelope::CallState::Ready,
+        None,
+    ));
+    let note = |driver: &ConnectDriver<Arc<RecordingSender>>| {
+        driver
+            .session
+            .calls
+            .active_call
+            .as_ref()
+            .and_then(|call| call.media_note.clone())
+    };
+    let (mic, screen) = (Some("mic".to_string()), Some("screen".to_string()));
+    let none = [None, None, None];
+    let mic_only = [mic.clone(), None, None];
+    let both = [mic.clone(), None, screen.clone()];
+    assert!(driver.note_call_media_errors(&none, &mic_only));
+    assert_eq!(note(&driver), mic);
+    assert!(
+        !driver.note_call_media_errors(&mic_only, &mic_only),
+        "nothing changed: no redraw"
+    );
+    assert!(driver.note_call_media_errors(&mic_only, &both));
+    assert_eq!(note(&driver), screen, "the microphone's does not hide it");
+    assert!(driver.note_call_media_errors(&both, &mic_only));
+    assert_eq!(note(&driver), mic, "what still stands shows again");
+    assert!(driver.note_call_media_errors(&mic_only, &none));
+    assert_eq!(note(&driver), None, "the devices work again");
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
 fn your_level_comes_from_the_call_microphone() {
     let (dir, mut driver, _engine, _mics) = group_driver();
     driver.session.calls.active_group_call = Some(joined_group_call(false));

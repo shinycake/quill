@@ -93,7 +93,7 @@ impl QuillApp {
                 self.gift_market.recipient = self
                     .session()
                     .map(|s| &s.payments.gifts_manage.send)
-                    .filter(|send| send.open)
+                    .filter(|send| send.is_open())
                     .and_then(|send| send.recipient.clone());
             }
             self.gift_market.push(MarketBox::Resale);

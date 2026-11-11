@@ -9,7 +9,7 @@ use crate::locks::LockExt;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Side of the frames, in pixels (`kProfilePhotoSize` on desktop).
@@ -57,11 +57,65 @@ struct Latest {
     rgb: Vec<u8>,
 }
 
+/// Where a stream is, shared with its reader thread as one atomic value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum StreamStage {
+    /// The reader is taking frames.
+    Running = 0,
+    /// ffmpeg ended by itself (camera busy, unplugged, no permission).
+    Ended = 1,
+    /// The owner dropped the stream and ffmpeg is being stopped.
+    Stopping = 2,
+}
+
+struct SharedStage(AtomicU8);
+
+impl SharedStage {
+    fn new() -> Self {
+        Self(AtomicU8::new(StreamStage::Running as u8))
+    }
+
+    fn get(&self) -> StreamStage {
+        match self.0.load(Ordering::Acquire) {
+            0 => StreamStage::Running,
+            1 => StreamStage::Ended,
+            _ => StreamStage::Stopping,
+        }
+    }
+
+    /// `Running` moves to `to`; a stage that already left `Running` stays
+    /// (an owner's stop is not turned into an end by the thread exiting).
+    fn leave_running(&self, to: StreamStage) -> StreamStage {
+        match self.0.compare_exchange(
+            StreamStage::Running as u8,
+            to as u8,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => to,
+            Err(_) => self.get(),
+        }
+    }
+}
+
+/// Take frames from `reader` into `latest` until the stream ends or the
+/// owner stops it. Leaves `Running` for `Ended` when the stream ran out on
+/// its own.
+fn pump(reader: &mut impl Read, latest: &Mutex<Latest>, stage: &SharedStage) -> StreamStage {
+    let mut buf = Vec::new();
+    while stage.get() == StreamStage::Running && read_frame(reader, &mut buf, LIVE_SIDE) {
+        let mut slot = latest.lock_or_recover();
+        slot.serial = slot.serial.wrapping_add(1);
+        std::mem::swap(&mut slot.rgb, &mut buf);
+    }
+    stage.leave_running(StreamStage::Ended)
+}
+
 /// A running camera stream. Dropping it stops ffmpeg.
 pub struct CameraStream {
     latest: Arc<Mutex<Latest>>,
-    done: Arc<AtomicBool>,
-    stop: Arc<AtomicBool>,
+    stage: Arc<SharedStage>,
     child: Arc<Mutex<Option<Child>>>,
     log: PathBuf,
 }
@@ -90,20 +144,18 @@ impl CameraStream {
             .map_err(|e| e.to_string())?;
         let mut stdout = child.stdout.take().ok_or("Couldn't start the camera.")?;
         let latest = Arc::new(Mutex::new(Latest::default()));
-        let done = Arc::new(AtomicBool::new(false));
-        let stop = Arc::new(AtomicBool::new(false));
+        let stage = Arc::new(SharedStage::new());
         let child = Arc::new(Mutex::new(Some(child)));
         let spawned = {
-            let (latest, done, stop) = (latest.clone(), done.clone(), stop.clone());
+            let (latest, stage, child) = (latest.clone(), stage.clone(), child.clone());
             crate::thread_guard::spawn_guarded("quill-camera", move || {
-                let mut buf = Vec::new();
-                while !stop.load(Ordering::Relaxed) && read_frame(&mut stdout, &mut buf, LIVE_SIDE)
-                {
-                    let mut slot = latest.lock_or_recover();
-                    slot.serial += 1;
-                    std::mem::swap(&mut slot.rgb, &mut buf);
+                if pump(&mut stdout, &latest, &stage) == StreamStage::Ended {
+                    // ffmpeg is done: reap it now, not when the panel drops.
+                    let process = child.lock_or_recover().take();
+                    if let Some(process) = process {
+                        crate::child_reap::kill_and_reap(process);
+                    }
                 }
-                done.store(true, Ordering::Relaxed);
             })
         };
         if let Err(error) = spawned {
@@ -119,8 +171,7 @@ impl CameraStream {
         }
         Ok(Self {
             latest,
-            done,
-            stop,
+            stage,
             child,
             log: log.to_path_buf(),
         })
@@ -135,7 +186,7 @@ impl CameraStream {
 
     /// ffmpeg ended (camera busy, unplugged, no permission).
     pub fn finished(&self) -> bool {
-        self.done.load(Ordering::Relaxed)
+        self.stage.get() == StreamStage::Ended
     }
 
     /// Why the stream ended, for the panel.
@@ -146,7 +197,7 @@ impl CameraStream {
 
 impl Drop for CameraStream {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
+        self.stage.leave_running(StreamStage::Stopping);
         let child = self.child.lock_or_recover().take();
         if let Some(child) = child {
             crate::child_reap::kill_and_reap(child);
@@ -156,8 +207,32 @@ impl Drop for CameraStream {
 
 #[cfg(test)]
 mod tests {
-    use super::{frame_len, read_frame, stream_args};
+    use super::{
+        LIVE_SIDE, Latest, SharedStage, StreamStage, frame_len, pump, read_frame, stream_args,
+    };
     use std::io::Cursor;
+    use std::sync::Mutex;
+
+    #[test]
+    fn a_stream_that_runs_out_ends_and_a_stopped_one_stays_stopping() {
+        let frames = vec![7u8; frame_len(LIVE_SIDE) * 2];
+        let latest = Mutex::new(Latest::default());
+        let stage = SharedStage::new();
+        assert_eq!(
+            pump(&mut Cursor::new(frames.clone()), &latest, &stage),
+            StreamStage::Ended
+        );
+        assert_eq!(stage.get(), StreamStage::Ended);
+        assert_eq!(latest.lock().map(|slot| slot.serial).unwrap_or(0), 2);
+        let stopped = SharedStage::new();
+        stopped.leave_running(StreamStage::Stopping);
+        assert_eq!(
+            pump(&mut Cursor::new(frames), &latest, &stopped),
+            StreamStage::Stopping,
+            "the owner's stop is not an end"
+        );
+        assert_eq!(latest.lock().map(|slot| slot.serial).unwrap_or(0), 2);
+    }
 
     #[test]
     fn frames_are_read_whole_and_a_partial_tail_is_dropped() {

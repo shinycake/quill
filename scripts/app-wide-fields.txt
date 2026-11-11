@@ -40,7 +40,6 @@ preferences.font_picker | the font family picker entity
 preferences.accent_picker | the accent color picker entity
 preferences.translate * | the translation preferences file
 preferences.update_state | the updater's state, for the install
-preferences.update_banner_dismissed | the update banner was dismissed, for the run
 preferences.whats_new * | the What's New window and its release notes, for the install
 preferences.advanced * | Settings > Advanced: debug codes, test environment, disk-backed demo; values of the install
 preferences.emoji_style * | the emoji set and its download, an app-wide asset
@@ -127,6 +126,7 @@ background.screen_preparing | how many screen clients are being prepared
 background.generation | which background start may land
 background.poll | the background poll task; dropping it ends the loop
 background.prepare | the accounts whose database key is being read, by key, and the workers still running
+background.restarts | failures in a row and the next start of each background account, keyed by its AccountKey
 background.clicks | account clicks from the tray and notifications, each with its key
 background.pending_open | the account to open once its client is ready, by key
 background.notify_from_all | the "notify from all accounts" setting

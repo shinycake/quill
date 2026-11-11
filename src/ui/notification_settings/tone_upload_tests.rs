@@ -87,12 +87,13 @@ fn a_picked_file_adds_a_pending_row(cx: &mut TestAppContext) {
     });
     frames(&mut vcx);
     assert!(present(&mut vcx, PENDING));
-    assert_eq!(
-        upload_state(&app, &mut vcx),
-        Some(ToneUpload::Uploading {
-            name: "Glass Chime".into(),
-            target: SoundPickerTarget::Chat(ChatId(11)),
-        })
+    assert!(
+        matches!(
+            upload_state(&app, &mut vcx),
+            Some(ToneUpload::Uploading { ref name, target: SoundPickerTarget::Chat(ChatId(11)), .. })
+                if name == "Glass Chime"
+        ),
+        "the upload goes out under its own request"
     );
 }
 
@@ -115,13 +116,11 @@ fn a_file_chosen_while_locked_starts_after_the_unlock(cx: &mut TestAppContext) {
         app.unlock_answered(Ok(()), window, cx);
     });
     frames(&mut vcx);
-    assert_eq!(
+    assert!(matches!(
         upload_state(&app, &mut vcx),
-        Some(ToneUpload::Uploading {
-            name: "Late Chime".into(),
-            target: SoundPickerTarget::Chat(ChatId(11)),
-        })
-    );
+        Some(ToneUpload::Uploading { ref name, target: SoundPickerTarget::Chat(ChatId(11)), .. })
+            if name == "Late Chime"
+    ));
 }
 
 #[gpui_kit::test]

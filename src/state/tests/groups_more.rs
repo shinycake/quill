@@ -104,7 +104,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         loaded.events.iter().map(|e| e.id).collect::<Vec<_>>(),
         vec![300, 299]
     );
-    assert!(!loaded.has_more);
+    assert!(!loaded.has_more());
 
     // Older page appends; the overlapping id dedupes; a full page
     // (100 events) keeps `has_more`.
@@ -122,7 +122,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
     assert_eq!(ids.len(), 101);
     assert_eq!(ids[0], 300);
     assert_eq!(ids[100], 200);
-    assert!(loaded.has_more);
+    assert!(loaded.has_more());
 
     // A short final page clears `has_more`.
     let extra = event_log_request(
@@ -135,7 +135,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         panic!("expected loaded event log");
     };
     assert_eq!(loaded.events.len(), 102);
-    assert!(!loaded.has_more);
+    assert!(!loaded.has_more());
 
     // A first-page refetch replaces everything (refresh semantics).
     let extra = event_log_request(
@@ -212,6 +212,21 @@ fn event_log_failure_states() {
         panic!("expected loaded event log");
     };
     assert_eq!(loaded.events.len(), 1);
+    assert!(
+        matches!(loaded.older, OlderEvents::Failed(_)),
+        "the failed older page draws its Retry"
+    );
+    assert!(loaded.has_more(), "Retry may ask again");
+    session.begin_older_events(13);
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
+    else {
+        panic!("expected loaded event log");
+    };
+    assert_eq!(
+        loaded.older,
+        OlderEvents::Available,
+        "asking clears the line"
+    );
 }
 
 #[test]
@@ -747,7 +762,7 @@ fn g2_boost_slots_stashed_for_chain() {
     let extra = session.request(RequestPurpose::GetBoostSlotsForBoost, Some(ChatId(13)));
     // Kept only while the box of that chat waits for the slots.
     let mut open = crate::boost_box::BoostBoxState::new(13, false);
-    open.phase = crate::boost_box::BoostPhase::Working(crate::boost_box::BoostWork::Slots);
+    open.reading_slots(extra);
     session.groups.boost_box = Some(open);
     apply_json(
         &mut session,
@@ -962,7 +977,7 @@ fn event_log_admin_ids_dedupes_and_skips_chat_senders() {
             event(3, MessageSender::User { user_id: 9 }),
             event(4, MessageSender::User { user_id: 7 }),
         ],
-        has_more: false,
+        older: crate::state::OlderEvents::Exhausted,
     };
     assert_eq!(page.admin_user_ids(), vec![7, 9]);
 }

@@ -213,7 +213,7 @@ fn setup_builds_its_sliders_and_save_asks_to_confirm(cx: &mut TestAppContext) {
         let confirm = app
             .earn_state()
             .and_then(|e| e.setup.as_ref())
-            .and_then(|s| s.confirm);
+            .and_then(|s| s.confirm());
         assert_eq!(confirm, Some(SetupConfirm::Save));
     });
     assert_eq!(open_dialog(&shell, vcx), Some(DialogKind::EarnSetupConfirm));
@@ -222,7 +222,7 @@ fn setup_builds_its_sliders_and_save_asks_to_confirm(cx: &mut TestAppContext) {
         let confirm = app
             .earn_state()
             .and_then(|e| e.setup.as_ref())
-            .and_then(|s| s.confirm);
+            .and_then(|s| s.confirm());
         assert_eq!(confirm, None);
     });
     assert_ne!(open_dialog(&shell, vcx), Some(DialogKind::EarnSetupConfirm));

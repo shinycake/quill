@@ -63,7 +63,8 @@ pub(super) fn stage_view(app: &QuillApp, cx: &mut Context<QuillApp>) -> Option<S
     let gift = session
         .payments
         .hub
-        .gifts
+        .received
+        .rows
         .iter()
         .find(|g| g.id == picker.id);
     let name = picker.gift_name.clone();
@@ -88,7 +89,7 @@ pub(super) fn stage_view(app: &QuillApp, cx: &mut Context<QuillApp>) -> Option<S
         } => confirm_peer_view(app, session, gift, &name, *user_id, to, None, cx),
         TransferStage::Locked { hours } => locked_view(*hours, cx),
         TransferStage::ConfirmExport => confirm_export_view(&name, false, cx),
-        TransferStage::Probing => confirm_export_view(&name, true, cx),
+        TransferStage::Probing(_) => confirm_export_view(&name, true, cx),
         TransferStage::Password { send, error } => {
             let entry = match (send, error.as_ref()) {
                 (ExportSend::Out(_) | ExportSend::Unlocked, _) => PasswordView::Sending,
@@ -362,7 +363,7 @@ fn confirm_peer_view(
     let price = transfer_price(star_count);
     let balance = session.payments.hub.balance.map(|b| b.stars);
     let too_poor = star_count > 0 && balance.is_some_and(|b| b < star_count);
-    let busy = session.payments.hub.gifts_op.is_mutating();
+    let busy = session.payments.hub.received.op.is_mutating();
     let roots = app.media_display_roots();
     let collectible = gift.and_then(|g| g.gift.collectible.as_deref());
     let photo = session

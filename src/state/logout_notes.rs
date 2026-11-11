@@ -32,7 +32,7 @@ impl Session {
     pub(super) fn take_user_notes(&self) -> UserNotes {
         UserNotes(
             [
-                self.payments.note.clone(),
+                self.payments.checkout.note().map(str::to_string),
                 self.users_state.contacts_notice.clone(),
                 self.groups.invite_link_error.clone(),
                 self.calls.group_call_error.clone(),
@@ -77,7 +77,7 @@ impl Session {
         self.messages.resend_error = resend;
         self.messages.send_permission_error = send_permission;
         self.messages.flood_notice = flood;
-        self.payments.note = payments;
+        self.payments.checkout.set_note(payments);
         self.users_state.contacts_notice = contacts;
         self.groups.invite_link_error = invite_link;
         self.calls.group_call_error = group_call;

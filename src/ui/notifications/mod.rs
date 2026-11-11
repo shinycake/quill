@@ -546,12 +546,15 @@ impl QuillApp {
     /// breaks on `live.is_none()`) stops.
     pub(super) fn restart_live_connection(&mut self, cx: &mut Context<Self>) {
         self.payments.marketplace.forget();
+        let account = self.session().map(|session| session.account.clone());
         self.close_screen_client(cx);
         // D2 fix-up: the warning promises "Downloaded media will be
         // erased from this device" — TDLib destroyed its own data, but
         // Quill's decrypted media scratch is only swept at startup. Only
         // this account's: another signed-in account may be using its own.
-        quill::local_path::sweep_account_media_cache();
+        if let Some(account) = &account {
+            quill::local_path::sweep_account_media_cache(account);
+        }
         avatar_icon::forget_cached_icons();
         self.start_connection(cx);
     }

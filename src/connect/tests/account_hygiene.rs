@@ -820,12 +820,27 @@ fn limits_tdlib_never_took_are_sent_again_on_the_next_ready() {
     );
     f.2.sent.lock().unwrap().clear();
     f.1.maybe_seed_storage_limits().unwrap();
-    assert!(
-        requests_of(&f.2, "setOption").is_empty(),
-        "once per session"
+    let first = requests_of(&f.2, "setOption");
+    assert_eq!(first.len(), 4);
+    // TDLib refuses an option: nothing keeps the seed "in flight", so the
+    // next Ready sends the limits again.
+    let extra = first.first().expect("an option")["@extra"].clone();
+    ingest(
+        &mut f.1,
+        &f.4,
+        &f.3,
+        &format!(
+            r#"{{"@type":"error","code":400,"message":"Option can't be set","@extra":{extra}}}"#
+        ),
     );
-    // The process died before the echo: a new session starts unseeded.
-    f.1.session.settings.data_storage.storage_limits_seeded = crate::data_settings::Seed::Unseeded;
+    assert!(
+        !f.1.session
+            .settings
+            .data_storage
+            .storage_limits_seeded
+            .is_seeded()
+    );
+    f.2.sent.lock().unwrap().clear();
     f.1.maybe_seed_storage_limits().unwrap();
     assert_eq!(requests_of(&f.2, "setOption").len(), 4);
     cleanup(f);

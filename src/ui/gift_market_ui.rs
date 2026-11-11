@@ -206,7 +206,7 @@ impl QuillApp {
             self.gift_market.recipient = self
                 .session()
                 .map(|s| &s.payments.gifts_manage.send)
-                .filter(|send| send.open)
+                .filter(|send| send.is_open())
                 .and_then(|send| send.recipient.clone());
         }
         let from_send_box = self.gift_market.recipient.is_some();
@@ -265,7 +265,7 @@ impl QuillApp {
             });
             let send_box_open = self
                 .session()
-                .is_some_and(|s| s.payments.gifts_manage.send.open);
+                .is_some_and(|s| s.payments.gifts_manage.send.is_open());
             if from_send_box && !send_box_open {
                 // The send box the auction was asked from is closed: the
                 // box does not open over whatever the user does now.
