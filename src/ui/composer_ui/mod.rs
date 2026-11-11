@@ -230,7 +230,10 @@ impl QuillApp {
     }
 
     pub(super) fn close_sticker_panel(&mut self, cx: &mut Context<Self>) {
-        if self.settings.sticker_settings_open {
+        if self
+            .settings
+            .box_open(crate::ui::settings_state::SettingsBox::Stickers)
+        {
             self.close_stickers_manager(cx);
             return;
         }

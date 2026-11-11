@@ -48,27 +48,37 @@ pub(crate) const SLIDE: Duration = Duration::from_millis(150);
 
 #[derive(Debug, Clone)]
 pub(crate) struct ControlsFade {
-    full: bool,
+    mode: Mode,
     over_picture: bool,
     over_controls: bool,
-    /// Full screen only: the controls were asked for (a mouse move) and
-    /// hide at `hide_at`.
-    wanted: bool,
-    hide_at: Option<Instant>,
     /// The slide: from `from` to `to` starting at `started`.
     from: f32,
     to: f32,
     started: Option<Instant>,
 }
 
+/// Windowed (the pointer decides) or full screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Window,
+    /// Full screen: the controls were asked for (a mouse move) and hide at
+    /// `shown_until`; `None` once they hid.
+    Full {
+        shown_until: Option<Instant>,
+    },
+}
+
+/// The moment the full-screen timer fires, `HIDE_TIMEOUT` after `now`.
+fn timer_from(now: Instant) -> Option<Instant> {
+    Some(now.checked_add(HIDE_TIMEOUT).unwrap_or(now))
+}
+
 impl Default for ControlsFade {
     fn default() -> Self {
         Self {
-            full: false,
+            mode: Mode::Window,
             over_picture: false,
             over_controls: false,
-            wanted: false,
-            hide_at: None,
             from: 0.0,
             to: 0.0,
             started: None,
@@ -86,22 +96,21 @@ impl ControlsFade {
     /// shows the controls and starts the timer; leaving stops the timer
     /// and follows the mouse again.
     pub(crate) fn set_full(&mut self, full: bool, now: Instant) {
-        if self.full == full {
+        if self.is_full() == full {
             return;
         }
-        self.full = full;
-        if full {
-            self.wanted = true;
-            self.hide_at = now.checked_add(HIDE_TIMEOUT);
+        self.mode = if full {
+            Mode::Full {
+                shown_until: timer_from(now),
+            }
         } else {
-            self.wanted = false;
-            self.hide_at = None;
-        }
+            Mode::Window
+        };
         self.update(now);
     }
 
     pub(crate) fn is_full(&self) -> bool {
-        self.full
+        matches!(self.mode, Mode::Full { .. })
     }
 
     /// The mouse entered or left the picture. Ignored in full screen,
@@ -109,7 +118,7 @@ impl ControlsFade {
     /// with `!_rtmpFull`).
     pub(crate) fn hover_picture(&mut self, inside: bool, now: Instant) {
         self.over_picture = inside;
-        if !self.full {
+        if !self.is_full() {
             self.update(now);
         }
     }
@@ -118,11 +127,8 @@ impl ControlsFade {
     /// shows them, leaving hides them, in either mode.
     pub(crate) fn hover_controls(&mut self, inside: bool, now: Instant) {
         self.over_controls = inside;
-        if self.full {
-            self.wanted = inside;
-            if inside {
-                self.hide_at = now.checked_add(HIDE_TIMEOUT);
-            }
+        if let Mode::Full { shown_until } = &mut self.mode {
+            *shown_until = inside.then(|| timer_from(now)).flatten();
         }
         self.update(now);
     }
@@ -130,17 +136,18 @@ impl ControlsFade {
     /// The mouse moved over the picture. In full screen this shows the
     /// controls and restarts the timer.
     pub(crate) fn mouse_moved(&mut self, now: Instant) {
-        if !self.full {
-            return;
+        if let Mode::Full { shown_until } = &mut self.mode {
+            *shown_until = timer_from(now);
+            self.update(now);
         }
-        self.wanted = true;
-        self.hide_at = now.checked_add(HIDE_TIMEOUT);
-        self.update(now);
     }
 
     /// When the full-screen timer fires, if it runs.
     pub(crate) fn hide_at(&self) -> Option<Instant> {
-        self.hide_at.filter(|_| self.full && self.wanted)
+        match self.mode {
+            Mode::Full { shown_until } => shown_until,
+            Mode::Window => None,
+        }
     }
 
     /// Run the full-screen timer: hides the controls once it is due.
@@ -148,8 +155,7 @@ impl ControlsFade {
         if let Some(at) = self.hide_at()
             && now >= at
         {
-            self.wanted = false;
-            self.hide_at = None;
+            self.mode = Mode::Full { shown_until: None };
             self.update(now);
         }
     }
@@ -165,10 +171,9 @@ impl ControlsFade {
     }
 
     fn target(&self) -> f32 {
-        let shown = if self.full {
-            self.wanted
-        } else {
-            self.over_picture || self.over_controls
+        let shown = match self.mode {
+            Mode::Full { shown_until } => shown_until.is_some(),
+            Mode::Window => self.over_picture || self.over_controls,
         };
         if shown { 1.0 } else { 0.0 }
     }
@@ -202,7 +207,7 @@ impl ControlsFade {
     /// Full screen with the controls hidden: the cursor hides too
     /// (tdesktop `setCursorShown(!_rtmpFull || shown)`).
     pub(crate) fn cursor_hidden(&self) -> bool {
-        self.full && !self.shown()
+        self.is_full() && !self.shown()
     }
 
     /// Whether the slide still moves at `now`.

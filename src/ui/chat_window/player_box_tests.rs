@@ -204,20 +204,21 @@ fn a_closed_boxs_video_pick_opens_no_editor(cx: &mut TestAppContext) {
     let h = new_app(cx);
     in_window(&h, h.main, None, cx, |app, window, cx| {
         app.message_ui.menu_ui.sticker_set_open = false;
-        app.sticker_box.pending_video = Some(PendingVideo {
-            pick: PickExisting {
-                set_id: 78,
-                kind: SetKind::Stickers,
-                adapt: false,
-            },
-            file_id: quill::ids::FileId(5),
-            file: PickedFile::Video,
-            emoji: None,
-            window: None,
-        });
+        app.sticker_box.pending =
+            crate::ui::sticker_set_box::state::PickWait::Downloading(PendingVideo {
+                pick: PickExisting {
+                    set_id: 78,
+                    kind: SetKind::Stickers,
+                    adapt: false,
+                },
+                file_id: quill::ids::FileId(5),
+                file: PickedFile::Video,
+                emoji: None,
+                window: None,
+            });
         app.sticker_box_window_upkeep(window, cx);
         assert!(
-            app.sticker_box.pending_video.is_none(),
+            app.sticker_box.pending.downloading().is_none(),
             "the pick is dropped"
         );
         assert!(app.composer_ui.send_box.video_editor.is_none());
@@ -236,7 +237,9 @@ fn viewing_another_set_closes_the_other_windows_sticker_editor(cx: &mut TestAppC
     in_window(&h, chat_window, Some(OTHER), cx, |app, _, cx| {
         app.view_message_sticker_set(78, cx);
         let pixels = image::RgbaImage::from_pixel(300, 300, image::Rgba([1, 2, 3, 255]));
-        app.viewer.photo_editor = PhotoEditor::for_set(pixels, 78, SetKind::Stickers);
+        if let Some(editor) = PhotoEditor::for_set(pixels, 78, SetKind::Stickers) {
+            app.viewer.photo_editor.open(editor);
+        }
         assert!(app.viewer.photo_editor.is_some());
     });
     in_window(&h, h.main, None, cx, |app, _, cx| {
@@ -382,7 +385,7 @@ fn the_checkout_prefills_in_the_window_that_hosts_it(cx: &mut TestAppContext) {
     let chat_window = h.open_in_new_window(OTHER, cx);
     in_window(&h, chat_window, Some(OTHER), cx, |app, window, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.form = None;
+            session.payments.checkout = quill::state::CheckoutForm::Closed;
         }
         app.open_payment_dialog(window, cx);
         app.windows
@@ -390,9 +393,9 @@ fn the_checkout_prefills_in_the_window_that_hosts_it(cx: &mut TestAppContext) {
     });
     h.app.update(cx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.form = Some(crate::ui::payments::card_form_demo::stripe_checkout(
-                true, false,
-            ));
+            session.payments.checkout = quill::state::CheckoutForm::Ready(
+                crate::ui::payments::card_form_demo::stripe_checkout(true, false),
+            );
         }
     });
     let prefilled = |cx: &mut TestAppContext| {

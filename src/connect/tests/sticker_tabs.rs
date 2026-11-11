@@ -559,7 +559,7 @@ fn composer_suggestions_wait_for_installed_sets_and_keep_the_latest_emoji() {
     assert!(driver.session.stickers.stickers.suggest_waiting_for_sets);
     assert_eq!(driver.update_sticker_suggestions("🔥").unwrap(), None);
     driver.ingest(copy_and_parse(&json!({"@type":"stickerSets","@extra":fetch.as_extra(),"sets":[{"@type":"stickerSetInfo","id":"77","size":1,"is_installed":true}]}).to_string(),&seq,&sink).unwrap()).unwrap();
-    assert!(driver.session.stickers.stickers.installed_loaded);
+    assert!(driver.session.stickers.stickers.installed_loaded());
     assert_eq!(sent_request(&recorder, "searchStickers")["emojis"], "🔥");
     assert_eq!(driver.update_sticker_suggestions("🔥").unwrap(), None);
     let old = sent_request(&recorder, "searchStickers")["@extra"].clone();

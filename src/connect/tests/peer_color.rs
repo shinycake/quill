@@ -99,10 +99,51 @@ fn wearable_gifts_load_and_wearing_one_sends_its_colors() {
     let gifts = driver.session.users_state.wearable_gifts.items();
     assert_eq!(gifts.len(), 1);
     assert_eq!(gifts[0].gift.colors.as_ref().map(|c| c.id), Some(901));
-    assert!(driver.session.users_state.wearable_gifts.data().is_some());
+    assert!(matches!(
+        driver.session.users_state.wearable_gifts,
+        crate::state::fetch::Fetch::Ready(_)
+    ));
 
     assert!(driver.set_upgraded_gift_colors(0).is_err());
     driver.set_upgraded_gift_colors(901).unwrap();
     let sent = sent_request(&recorder, "setUpgradedGiftColors");
     assert_eq!(sent["upgraded_gift_colors_id"], 901);
+}
+
+#[test]
+fn a_failed_icon_request_is_asked_again_and_an_open_one_is_not() {
+    let (_dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let first = driver.load_chat_photo_emoji_icons().unwrap().unwrap();
+    assert!(
+        driver
+            .session
+            .users_state
+            .chat_photo_emoji_icons
+            .is_loading()
+    );
+    assert!(driver.load_chat_photo_emoji_icons().unwrap().is_none());
+    let error = json!({"@type":"error","@extra":first.as_extra(),"code":500,"message":"boom"});
+    driver
+        .ingest(copy_and_parse(&error.to_string(), &seq, &sink).unwrap())
+        .unwrap();
+    assert!(
+        driver
+            .session
+            .users_state
+            .chat_photo_emoji_icons
+            .error()
+            .is_some()
+    );
+    assert!(driver.load_chat_photo_emoji_icons().unwrap().is_some());
+    assert!(
+        driver
+            .session
+            .users_state
+            .chat_photo_emoji_icons
+            .is_loading()
+    );
 }

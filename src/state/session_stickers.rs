@@ -85,7 +85,7 @@ impl Session {
 
     pub fn accept_installed_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
         self.stickers.stickers.sets = sets;
-        self.stickers.stickers.installed_loaded = true;
+        self.stickers.stickers.lists.installed.succeed(());
         if self.stickers.stickers.tab != StickerTab::Installed {
             return;
         }
@@ -203,7 +203,7 @@ impl Session {
     /// cache so the panel refetches the authoritative list instead of
     /// showing a stale order.
     pub fn invalidate_installed_sticker_sets(&mut self) {
-        self.stickers.stickers.installed_loaded = false;
+        self.stickers.stickers.lists.installed = crate::state::fetch::Fetch::Idle;
         self.stickers.stickers.sets.clear();
         self.stickers.stickers.selected_set_id = None;
         self.stickers.stickers.set = StickerSetStage::Idle;
@@ -246,7 +246,7 @@ impl Session {
     }
 
     pub fn accept_saved_animations(&mut self, animations: Vec<AnimationItem>) {
-        self.stickers.gifs.saved.succeed(animations);
+        self.stickers.gifs.saved.answer(animations);
     }
 
     /// Slice S9: store a GIF-search `inlineQueryResults` page. A first page

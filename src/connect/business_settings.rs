@@ -45,16 +45,17 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `getTimeZones`, once per session unless it failed.
     pub fn ensure_time_zones(&mut self) -> Result<(), ConnectSendError> {
         let state = &mut self.session.settings.business;
-        if state.time_zones.is_some() || state.time_zones_requested {
+        if !state.time_zones.can_ask() {
             return Ok(());
         }
-        state.time_zones_requested = true;
         let sent = self.send_business_request(
             RequestPurpose::Settings(SettingsPurpose::GetTimeZones),
             bs::get_time_zones_request,
         );
-        if sent.is_err() {
-            self.session.settings.business.time_zones_requested = false;
+        let zones = &mut self.session.settings.business.time_zones;
+        match &sent {
+            Ok(()) => zones.begin(),
+            Err(_) => zones.fail("could not send"),
         }
         sent
     }

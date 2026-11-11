@@ -46,7 +46,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Only a look that went out counts: a failed send leaves the list
         // stale and the throttle open for the next try.
         let state = &mut self.session.settings.passkeys;
-        state.stage = ListStage::Asked { at: Instant::now() };
+        // A list already known stays known while it is asked again: the
+        // Privacy and Security row keeps its label and target.
+        let at = Instant::now();
+        state.stage = match state.stage {
+            ListStage::Known { .. } => ListStage::Known { at },
+            ListStage::Never | ListStage::Asked { .. } | ListStage::Stale => {
+                ListStage::Asked { at }
+            }
+        };
         state.error = None;
         Ok(Some(sent))
     }

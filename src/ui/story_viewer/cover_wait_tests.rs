@@ -23,7 +23,7 @@ fn a_cover_picker_waits_for_a_clip_that_is_not_local_yet(cx: &mut TestAppContext
     frames(vcx);
     app.update_in(vcx, |app, _, cx| app.toggle_story_cover_edit(LEO, 3, cx));
     app.read_with(vcx, |app, _| {
-        assert!(app.stories.viewer_ui().cover.is_some());
+        assert!(app.stories.viewer_ui().cover().is_some());
         assert!(app.cover_waits_for_clip(), "the clip is still downloading");
         assert!(!app.cover_clip_unreadable(), "not unreadable for good");
     });
@@ -41,6 +41,6 @@ fn a_cover_picker_waits_for_a_clip_that_is_not_local_yet(cx: &mut TestAppContext
     });
     app.read_with(vcx, |app, _| {
         assert!(!app.cover_waits_for_clip(), "its length is being read");
-        assert!(app.stories.viewer_ui().cover.is_some());
+        assert!(app.stories.viewer_ui().cover().is_some());
     });
 }

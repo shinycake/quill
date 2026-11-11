@@ -27,7 +27,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // asked for again when the panel opens next, not left blank until
         // restart.
         self.session.media.media_library.failed.clear();
-        if !self.session.stickers.stickers.installed_loaded
+        if !self.session.stickers.stickers.installed_loaded()
             && !self
                 .session
                 .requests

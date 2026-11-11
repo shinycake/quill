@@ -29,6 +29,30 @@ pub(crate) enum PlayState {
     Failed,
 }
 
+/// Where the machine is: a [`PlayState`], or, for a looping player playing
+/// or buffering, that state with the loop's seek back to the start still
+/// landing. `Landing`: the seek was sent ahead of the end and the backend
+/// still reports a position near it; it ends when the position leaves the
+/// end, and any other move of the state (sleep, pause, a failure) replaces
+/// the value, so nothing resets it by hand.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Stage {
+    At(PlayState),
+    Landing(PlayState),
+}
+
+impl Stage {
+    fn play_state(self) -> PlayState {
+        match self {
+            Self::At(state) | Self::Landing(state) => state,
+        }
+    }
+
+    fn landing(self) -> bool {
+        matches!(self, Self::Landing(_))
+    }
+}
+
 /// A paused seek or step waits this long for its picture at most.
 const AWAIT_PICTURE: Duration = Duration::from_secs(2);
 /// A player still opening asks for a frame at every vsync this long; an
@@ -190,13 +214,10 @@ const LOOP_LEAD: f64 = 0.05;
 /// The transport's state machine.
 #[derive(Clone, Debug)]
 pub(crate) struct TransportMachine {
-    state: PlayState,
+    stage: Stage,
     /// The user wants it playing (survives Opening and Buffering).
     wants_play: bool,
     looping: bool,
-    /// A loop was sent ahead of the end and the backend still reports a
-    /// position near it (its seek has not landed yet).
-    loop_sent: bool,
     position: f64,
     pulled_at: Instant,
     duration: Option<f64>,
@@ -213,10 +234,9 @@ pub(crate) struct TransportMachine {
 impl TransportMachine {
     pub(crate) fn new(fallback_duration: Option<f64>, now: Instant) -> Self {
         Self {
-            state: PlayState::Opening,
+            stage: Stage::At(PlayState::Opening),
             wants_play: false,
             looping: false,
-            loop_sent: false,
             position: 0.0,
             pulled_at: now,
             duration: None,
@@ -239,8 +259,19 @@ impl TransportMachine {
         }
     }
 
+    /// Move to `state`; a loop seek still landing carries over only while
+    /// the player stays playing or buffering.
+    fn set_state(&mut self, state: PlayState) {
+        let playing = matches!(state, PlayState::Playing | PlayState::Buffering);
+        self.stage = if playing && self.stage.landing() {
+            Stage::Landing(state)
+        } else {
+            Stage::At(state)
+        };
+    }
+
     pub(crate) fn state(&self) -> PlayState {
-        self.state
+        self.stage.play_state()
     }
 
     pub(crate) fn set_looping(&mut self, looping: bool) {
@@ -258,7 +289,7 @@ impl TransportMachine {
     /// What the backend's engine must do now.
     pub(crate) fn want(&self) -> Want {
         Want {
-            playing: self.wants_play && self.state != PlayState::Failed,
+            playing: self.wants_play && self.state() != PlayState::Failed,
             rate: self.rate,
         }
     }
@@ -272,7 +303,7 @@ impl TransportMachine {
     /// clock runs, never past the end.
     pub(crate) fn position_at(&self, now: Instant) -> f64 {
         // A live feed has no position.
-        let running = self.state == PlayState::Playing && !self.live;
+        let running = self.state() == PlayState::Playing && !self.live;
         let mut position = self.position;
         if running {
             position += now.saturating_duration_since(self.pulled_at).as_secs_f64() * self.rate;
@@ -285,7 +316,7 @@ impl TransportMachine {
 
     pub(crate) fn snapshot(&self, now: Instant) -> Transport {
         Transport {
-            state: self.state,
+            state: self.state(),
             position: self.position_at(now),
             duration: self.duration(),
             buffered: self.buffered.clone(),
@@ -304,18 +335,18 @@ impl TransportMachine {
             return PlayStart::Already;
         }
         self.wants_play = true;
-        match self.state {
+        match self.state() {
             PlayState::Opening | PlayState::Failed => PlayStart::Later,
             PlayState::Ended => {
                 self.position = 0.0;
                 self.pulled_at = now;
-                self.state = PlayState::Playing;
+                self.set_state(PlayState::Playing);
                 PlayStart::FromStart
             }
             PlayState::Playing | PlayState::Buffering => PlayStart::Already,
             PlayState::Ready | PlayState::Paused => {
                 self.pulled_at = now;
-                self.state = PlayState::Playing;
+                self.set_state(PlayState::Playing);
                 PlayStart::Now
             }
         }
@@ -326,10 +357,10 @@ impl TransportMachine {
             return;
         }
         self.wants_play = false;
-        if self.state.animates() {
+        if self.state().animates() {
             self.position = self.position_at(now);
             self.pulled_at = now;
-            self.state = PlayState::Paused;
+            self.set_state(PlayState::Paused);
         }
     }
 
@@ -338,11 +369,10 @@ impl TransportMachine {
     /// through a new machine. A failed clip stays failed.
     pub(crate) fn sleep(&mut self, now: Instant) {
         self.wants_play = false;
-        self.loop_sent = false;
-        if self.state != PlayState::Failed {
+        if self.state() != PlayState::Failed {
             self.position = self.position_at(now);
             self.pulled_at = now;
-            self.state = PlayState::Paused;
+            self.set_state(PlayState::Paused);
         }
     }
 
@@ -359,8 +389,8 @@ impl TransportMachine {
         };
         self.position = target;
         self.pulled_at = now;
-        if self.state == PlayState::Ended {
-            self.state = PlayState::Paused;
+        if self.state() == PlayState::Ended {
+            self.set_state(PlayState::Paused);
             self.wants_play = false;
         }
         target
@@ -392,16 +422,16 @@ impl TransportMachine {
 
     /// The backend failed: hold the last position.
     pub(crate) fn fail(&mut self, now: Instant) {
-        if self.state != PlayState::Failed {
+        if self.state() != PlayState::Failed {
             self.position = self.position_at(now);
             self.pulled_at = now;
-            self.state = PlayState::Failed;
+            self.set_state(PlayState::Failed);
         }
     }
 
     /// Take in what the backend reported at `now`.
     pub(crate) fn observe(&mut self, status: &BackendStatus, now: Instant) -> Option<Command> {
-        if self.state == PlayState::Failed {
+        if self.state() == PlayState::Failed {
             return None;
         }
         if status.failed {
@@ -413,17 +443,17 @@ impl TransportMachine {
         }
         self.buffered = merge_ranges(status.buffered.clone());
         self.has_sound = status.has_sound;
-        if self.state == PlayState::Opening {
+        if self.state() == PlayState::Opening {
             if !status.ready {
                 return None;
             }
             self.position = status.position.max(0.0);
             self.pulled_at = now;
-            self.state = if self.wants_play {
+            self.set_state(if self.wants_play {
                 PlayState::Playing
             } else {
                 PlayState::Ready
-            };
+            });
             return None;
         }
         // Only the backend's own duration (`self.duration`), never the
@@ -433,34 +463,33 @@ impl TransportMachine {
             && self
                 .duration
                 .is_some_and(|total| status.position >= total - LOOP_LEAD);
-        if !near_end {
-            self.loop_sent = false;
+        if !near_end && self.stage.landing() {
+            self.stage = Stage::At(self.state());
         }
         // While a loop's seek has not landed the backend still reports the
         // end: keep the position at the start (no flash of the end in the
         // remaining-time pill).
-        if status.position.is_finite() && !self.loop_sent {
+        if status.position.is_finite() && !self.stage.landing() {
             self.position = status.position.max(0.0);
             self.pulled_at = now;
         }
-        let loops_early = near_end && !self.loop_sent;
-        let ended = status.at_end && !self.loop_sent;
-        match self.state {
+        let loops_early = near_end && !self.stage.landing();
+        let ended = status.at_end && !self.stage.landing();
+        match self.state() {
             PlayState::Playing | PlayState::Buffering if ended || loops_early => {
                 if self.looping {
                     self.position = 0.0;
-                    self.state = PlayState::Playing;
-                    self.loop_sent = true;
+                    self.stage = Stage::Landing(PlayState::Playing);
                     return Some(Command::Loop);
                 }
-                self.state = PlayState::Ended;
+                self.set_state(PlayState::Ended);
                 self.wants_play = false;
                 if let Some(total) = self.duration() {
                     self.position = total;
                 }
             }
-            PlayState::Playing if status.stalled => self.state = PlayState::Buffering,
-            PlayState::Buffering if !status.stalled => self.state = PlayState::Playing,
+            PlayState::Playing if status.stalled => self.set_state(PlayState::Buffering),
+            PlayState::Buffering if !status.stalled => self.set_state(PlayState::Playing),
             _ => {}
         }
         None
@@ -474,11 +503,11 @@ impl TransportMachine {
     /// no video, Ended once the feed ended, Failed on an engine error.
     pub(crate) fn observe_live(&mut self, status: &LiveStatus, now: Instant) {
         use quill::calls::live_video::LiveState;
-        if self.state == PlayState::Failed {
+        if self.state() == PlayState::Failed {
             return;
         }
         self.pulled_at = now;
-        self.state = match (status.ended, status.sender) {
+        self.set_state(match (status.ended, status.sender) {
             (Some(true), _) => PlayState::Failed,
             (Some(false), _) => PlayState::Ended,
             (None, Some(LiveState::Paused)) => PlayState::Paused,
@@ -486,8 +515,8 @@ impl TransportMachine {
             (None, _) if !status.has_frame => PlayState::Opening,
             (None, _) if status.stalled => PlayState::Buffering,
             (None, _) => PlayState::Playing,
-        };
-        self.wants_play = !matches!(self.state, PlayState::Ended | PlayState::Failed);
+        });
+        self.wants_play = !matches!(self.state(), PlayState::Ended | PlayState::Failed);
     }
 }
 

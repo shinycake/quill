@@ -17,7 +17,7 @@ impl QuillApp {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        session.chat_list.chats_exhausted = true;
+        session.chat_list.main_paging = quill::state::ListPaging::Exhausted;
         match kind.as_str() {
             "folder" => {
                 session.chat_list.chat_folders = vec![quill::telegram::envelope::ChatFolderInfo {

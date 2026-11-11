@@ -148,11 +148,28 @@ enum IpcMessage {
     ShellReady,
 }
 
+/// The shell page's life, owned by the event loop. A top-level navigation
+/// back to the shell starts it over at `Booting`.
+enum Stage {
+    /// The shell script has not said it is ready: commands wait here.
+    Booting(Vec<HostCommand>),
+    /// Commands go straight to the shell.
+    Ready,
+    /// `--capture`: the shell is ready, and the snapshot is due at `at`.
+    Capturing { at: Instant },
+}
+
+/// Commands kept for a shell that is not ready; the rest are dropped.
+const MAX_QUEUED_COMMANDS: usize = 256;
+
 /// What wakes the event loop.
 #[derive(Debug)]
 enum Message {
     Command(Box<HostCommand>),
     ShellReady,
+    /// The top-level document is the shell page again (a reload): its
+    /// script has to say it is ready once more.
+    ShellNavigated,
     /// The shell reported its frame loaded (`--capture` waits for it).
     FrameLoaded,
 }
@@ -277,6 +294,7 @@ fn main() {
 
     let mut context = WebContext::new(options.data_dir.clone());
     let ready_proxy = event_loop.create_proxy();
+    let navigated_proxy = event_loop.create_proxy();
     let builder = {
         let nav_out = out.clone();
         let window_out = out.clone();
@@ -308,6 +326,9 @@ fn main() {
             })
             .with_navigation_handler(move |url| {
                 debug(|| format!("navigate {url}"));
+                if url == shell::INDEX_URL {
+                    let _ = navigated_proxy.send_event(Message::ShellNavigated);
+                }
                 if navigation_allowed(&url) {
                     true
                 } else {
@@ -371,32 +392,30 @@ fn main() {
     std::thread::spawn(move || read_commands(proxy));
     out.send(HelperEvent::Ready);
 
-    // Commands that arrive before the shell script runs wait here.
-    let mut shell_ready = false;
-    let mut queued: Vec<HostCommand> = Vec::new();
+    let mut stage = Stage::Booting(Vec::new());
     // `--capture`: the snapshot waits a moment after the frame loads so
     // the page has painted.
     let capture_path = options.capture.clone();
-    let mut capture_at: Option<Instant> = None;
     event_loop.run(move |event, _, control_flow| {
         // Keep the context alive as long as the web view.
         let _context = &context;
-        *control_flow = match capture_at {
-            Some(at) => ControlFlow::WaitUntil(at),
-            None => ControlFlow::Wait,
+        *control_flow = match stage {
+            Stage::Capturing { at } => ControlFlow::WaitUntil(at),
+            _ => ControlFlow::Wait,
         };
         match event {
             Event::UserEvent(Message::FrameLoaded) => {
-                if capture_path.is_some() && capture_at.is_none() {
-                    capture_at = Some(Instant::now() + Duration::from_millis(1500));
-                    *control_flow = ControlFlow::WaitUntil(capture_at.unwrap_or_else(Instant::now));
+                if capture_path.is_some() && matches!(stage, Stage::Ready) {
+                    let at = Instant::now() + Duration::from_millis(1500);
+                    stage = Stage::Capturing { at };
+                    *control_flow = ControlFlow::WaitUntil(at);
                 }
             }
             Event::NewEvents(StartCause::ResumeTimeReached { .. }) => {
-                if let (Some(path), Some(at)) = (capture_path.clone(), capture_at)
-                    && Instant::now() >= at
+                if let (Some(path), Stage::Capturing { at }) = (capture_path.clone(), &stage)
+                    && Instant::now() >= *at
                 {
-                    capture_at = None;
+                    stage = Stage::Ready;
                     *control_flow = ControlFlow::Wait;
                     let capture_out = out.clone();
                     capture::capture(&webview, path.clone(), move |ok| {
@@ -420,10 +439,14 @@ fn main() {
             {
                 *control_flow = ControlFlow::Exit
             }
+            Event::UserEvent(Message::ShellNavigated) => {
+                stage = Stage::Booting(Vec::new());
+            }
             Event::UserEvent(Message::ShellReady) => {
-                shell_ready = true;
-                for command in queued.drain(..) {
-                    let _ = webview.evaluate_script(&shell_command_script(&command));
+                if let Stage::Booting(queued) = std::mem::replace(&mut stage, Stage::Ready) {
+                    for command in queued {
+                        let _ = webview.evaluate_script(&shell_command_script(&command));
+                    }
                 }
             }
             Event::UserEvent(Message::Command(command)) => {
@@ -432,10 +455,14 @@ fn main() {
                 {
                     window.set_title(title);
                 }
-                if shell_ready {
-                    let _ = webview.evaluate_script(&shell_command_script(&command));
-                } else if queued.len() < 256 {
-                    queued.push(command);
+                match &mut stage {
+                    Stage::Booting(queued) if queued.len() < MAX_QUEUED_COMMANDS => {
+                        queued.push(command);
+                    }
+                    Stage::Booting(_) => debug(|| "shell not ready: command dropped".into()),
+                    Stage::Ready | Stage::Capturing { .. } => {
+                        let _ = webview.evaluate_script(&shell_command_script(&command));
+                    }
                 }
             }
             Event::LoopDestroyed => out.send(HelperEvent::Closed),

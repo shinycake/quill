@@ -253,20 +253,21 @@ fn a_release_drops_what_the_viewer_had_open(cx: &mut TestAppContext) {
     app.update(vcx, |app, cx| {
         assert!(app.stories.viewer.is_open());
         app.stories.with_viewer_ui(|open| {
-            open.privacy_edit = Some(crate::ui::story_albums::StoryPrivacyEdit {
-                chat_id: MAYA,
-                story_id: 5,
-                privacy: quill::story_composer::StoryPrivacy::Everyone,
-                selected_user_ids: Vec::new(),
-            });
-            open.share_open = true;
+            open.show(crate::ui::stories_state::ViewerPanel::Privacy(
+                crate::ui::story_albums::StoryPrivacyEdit {
+                    chat_id: MAYA,
+                    story_id: 5,
+                    privacy: quill::story_composer::StoryPrivacy::Everyone,
+                    selected_user_ids: Vec::new(),
+                },
+            ));
             open.notice = Some("saved".into());
         });
-        assert!(app.stories.viewer_ui().privacy_edit.is_some());
+        assert!(app.stories.viewer_ui().privacy_edit().is_some());
         app.release_story_viewer(cx);
         // Nothing opens over a closed viewer.
-        app.stories.with_viewer_ui(|open| open.reply_open = true);
-        assert!(!app.stories.viewer_ui().reply_open);
+        app.stories.with_viewer_ui(|open| open.open_reply());
+        assert!(!app.stories.viewer_ui().reply_open());
     });
     app.update(vcx, |app, cx| {
         app.open_story_viewer(ChatId(MAYA), 5, StoryOpenScope::Tray, cx);
@@ -275,8 +276,8 @@ fn a_release_drops_what_the_viewer_had_open(cx: &mut TestAppContext) {
     app.read_with(vcx, |app, _| {
         assert!(app.stories.viewer.is_open());
         let open = app.stories.viewer_ui();
-        assert!(open.privacy_edit.is_none(), "the old story's editor");
-        assert!(!open.share_open);
+        assert!(open.privacy_edit().is_none(), "the old story's editor");
+        assert!(!open.has_panel());
         assert!(open.notice.is_none());
     });
 }

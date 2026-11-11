@@ -95,7 +95,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session
                     .calls
                     .group_call(*id)
-                    .is_some_and(|call| call.transport_ready)
+                    .is_some_and(|call| call.transport.is_connected())
             })
         });
         for group_call_id in connected.into_iter().flatten() {
@@ -125,7 +125,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .calls
             .group_call(group_call_id)
-            .is_some_and(|call| call.transport_ready);
+            .is_some_and(|call| call.transport.is_connected());
         if !connected {
             let seen = self.group_seen.entry(group_call_id).or_default();
             seen.ssrc_owners = None;
@@ -138,10 +138,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .calls
             .group_call(group_call_id)
-            .filter(|call| !call.transport_ready)
+            .filter(|call| !call.transport.is_connected())
             .map(|call| {
                 (
-                    call.join_payload.clone(),
+                    call.transport.answer().to_string(),
                     call.is_my_video_enabled && !call.is_my_video_paused,
                 )
             });
@@ -176,16 +176,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             let camera_failed = matches!(result, Ok(Some(_)));
             if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
                 match result {
-                    Ok(_) => {
-                        call.transport_ready = true;
-                        call.transport_error = None;
-                    }
-                    Err(err) => {
-                        call.transport_error = Some(err.to_string());
-                        // The answer is spent: only a rejoin or the Join
-                        // button brings a new one, so no update retries it.
-                        call.join_payload.clear();
-                    }
+                    Ok(_) => call.transport.connected(),
+                    // The answer is spent: only a rejoin or the Join
+                    // button brings a new one, so no update retries it.
+                    Err(err) => call.transport.connect_failed(err.to_string()),
                 }
             }
             self.note_stream_rtmp_info(group_call_id, &answer);
@@ -200,7 +194,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .calls
             .group_call(group_call_id)
-            .is_some_and(|call| call.transport_ready);
+            .is_some_and(|call| call.transport.is_connected());
         if !transport_ready {
             return Ok(());
         }
@@ -226,10 +220,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Err(err) => {
                     // Retried on the next tick; the error is recorded once
                     // so a failing engine does not rewrite it every tick.
-                    if let Some(call) = self.session.calls.group_call_mut(group_call_id)
-                        && call.transport_error.is_none()
-                    {
-                        call.transport_error = Some(err.to_string());
+                    if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
+                        call.transport.note_error_once(err.to_string());
                     }
                 }
             }
@@ -252,16 +244,14 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Ok(()) => {
                     self.group_camera_state.insert(group_call_id, wanted_camera);
                     if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
-                        call.transport_error = None;
+                        call.transport.clear_error();
                     }
                 }
                 Err(err) => {
                     // Retried on the next tick; the error is recorded once
                     // so a failing engine does not rewrite it every tick.
-                    if let Some(call) = self.session.calls.group_call_mut(group_call_id)
-                        && call.transport_error.is_none()
-                    {
-                        call.transport_error = Some(err.to_string());
+                    if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
+                        call.transport.note_error_once(err.to_string());
                     }
                 }
             }
@@ -273,8 +263,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .calls
             .group_call(group_call_id)
-            .filter(|call| call.screen_share_pending)
-            .map(|call| call.screen_share_answer.clone());
+            .filter(|call| call.screen_share.is_starting())
+            .map(|call| call.screen_share.answer().to_string());
         if let Some(answer) = share_answer
             && !answer.is_empty()
         {
@@ -290,14 +280,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
                 match result {
                     Ok(()) => {
-                        call.screen_share_pending = false;
-                        call.screen_sharing = true;
-                        call.screen_share_answer.clear();
+                        call.screen_share.connected();
                         call.screen_share_error = None;
                     }
                     Err(err) => {
-                        call.screen_share_pending = false;
-                        call.screen_share_answer.clear();
+                        call.screen_share.stop();
                         call.screen_share_error = Some(err.to_string());
                     }
                 }
@@ -312,7 +299,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .calls
             .group_call(group_call_id)
-            .is_some_and(|call| call.screen_sharing || call.screen_share_pending);
+            .is_some_and(|call| call.screen_share.is_on());
         if !want_presentation
             && let Some(engine) = self.call_engine.as_deref_mut()
             && engine.presentation_active(group_call_id)
@@ -333,7 +320,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .calls
             .active_group_call
             .as_ref()
-            .filter(|call| call.transport_ready)
+            .filter(|call| call.transport.is_connected())
             .map(|call| call.id);
         if let Some(group_call_id) = connected {
             self.sync_incoming_video(group_call_id);
@@ -375,7 +362,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             Err(err) => {
                 if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
-                    call.transport_error = Some(err.to_string());
+                    call.transport.fail(err.to_string());
                 }
             }
         }

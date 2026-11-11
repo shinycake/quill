@@ -213,7 +213,7 @@ impl QuillApp {
                 if let Some(err) = hub.tx.error() {
                     body = body.child(div().text_sm().child(err.to_string()));
                 }
-                if hub.tx.loading() && hub.transactions().is_empty() {
+                if hub.tx.shows_loading() && hub.transactions().is_empty() {
                     body = body.child(
                         div()
                             .text_sm()
@@ -413,7 +413,7 @@ impl QuillApp {
                 if let Some(err) = hub.gifts_failure() {
                     body = body.child(div().text_sm().child(err.to_string()));
                 }
-                if hub.gifts.loading() && hub.gift_list().is_empty() {
+                if hub.gifts.shows_loading() && hub.gift_list().is_empty() {
                     body = body.child(
                         div()
                             .text_sm()
@@ -802,7 +802,7 @@ fn gift_details(
                     tr(keys::Q_MONEY_SHOW_ON_MY_PROFILE)
                 })
                 .ghost()
-                .disabled(hub.gift_mutating)
+                .disabled(hub.gift_mutation.is_busy())
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.toggle_gift(id.clone(), !saved, cx);
                 })),
@@ -830,7 +830,7 @@ fn gift_details(
                                     Button::new("gift-convert-yes")
                                         .label(tr(keys::Q_MONEY_CONVERT))
                                         .danger()
-                                        .disabled(hub.gift_mutating)
+                                        .disabled(hub.gift_mutation.is_busy())
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             this.convert_gift(id.clone(), cx);
                                         })),
@@ -854,7 +854,7 @@ fn gift_details(
                             &[("sell_star_count", &gift.sell_star_count.to_string())],
                         ))
                         .ghost()
-                        .disabled(hub.gift_mutating)
+                        .disabled(hub.gift_mutation.is_busy())
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.ask_convert_gift(Some(id.clone()), cx);
                         })),

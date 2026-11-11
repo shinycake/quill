@@ -176,12 +176,11 @@ impl Session {
                 // Phase S2: `getStorageStatistics` answer — only our own
                 // in-flight request writes the cache (matched by `@extra`).
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStorageStatistics) {
-                    self.settings.storage_stats = Some(StorageStats {
+                    self.settings.storage_stats.succeed(StorageStats {
                         total_size,
                         by_file_type,
                         by_chat,
                     });
-                    self.settings.storage_stats_loading = false;
                 }
                 // Batch 6: `optimizeStorage` answers with the statistics
                 // of the files it deleted. Drop the usage cache so the
@@ -190,8 +189,7 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::OptimizeStorage) {
                     self.settings.storage_freed = Some(total_size);
                     self.settings.storage_clearing = false;
-                    self.settings.storage_stats = None;
-                    self.settings.storage_stats_loading = false;
+                    self.settings.storage_stats = Default::default();
                     self.settings.data_storage_error = None;
                 }
             }
@@ -203,13 +201,12 @@ impl Session {
                 // the seed on the next ingest (`data_storage_dirty`).
                 if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetAutoDownloadSettingsPresets)
-                    && !self.settings.data_storage.seeded
+                    && !self.settings.data_storage.seeded.is_seeded()
                 {
                     self.settings
                         .data_storage
                         .seed_from_presets(low, medium, high);
                     self.settings.data_storage_dirty = true;
-                    self.settings.auto_download_presets_loading = false;
                     self.settings.data_storage_error = None;
                 }
             }
@@ -303,11 +300,15 @@ impl Session {
                 // clears any stale error. No optimistic mutation ever
                 // happens client-side.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetActiveSessions) {
-                    self.resolve_unconfirmed_entries(&sessions);
-                    self.settings.sessions.succeed(sessions);
-                    if inactive_session_ttl_days.is_some() {
-                        self.settings.privacy_data.inactive_session_ttl_days =
-                            inactive_session_ttl_days;
+                    // A terminate that landed while this was in flight
+                    // outdated the list: this answer predates it.
+                    if !self.settings.sessions.is_outdated() {
+                        self.resolve_unconfirmed_entries(&sessions);
+                        self.settings.sessions.succeed(sessions);
+                        if inactive_session_ttl_days.is_some() {
+                            self.settings.privacy_data.inactive_session_ttl_days =
+                                inactive_session_ttl_days;
+                        }
                     }
                 }
             }
@@ -328,8 +329,9 @@ impl Session {
                 // clears any stale error. No optimistic mutation ever
                 // happens client-side.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetConnectedWebsites) {
-                    self.settings.connected_websites.succeed(websites);
-                    self.settings.websites_change.clear_error();
+                    if self.settings.connected_websites.answer(websites) {
+                        self.settings.websites_change.clear_error();
+                    }
                 }
             }
             SettingsPayload::ScopeNotificationSettings { settings, .. } => {

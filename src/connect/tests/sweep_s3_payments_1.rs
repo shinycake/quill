@@ -449,7 +449,7 @@ fn a_refused_payment_form_send_leaves_no_checkout_behind() {
     assert!(t.driver.send_payment_form_request(invoice).is_err());
     let payments = &t.driver.session.payments;
     assert!(payments.request.is_none());
-    assert!(payments.form_request.is_none());
+    assert!(!payments.checkout.is_loading());
 }
 
 #[test]
@@ -476,7 +476,7 @@ fn a_buy_in_flight_is_not_replaced_by_another_resale_box() {
         is_channel: false,
     };
     let mut buy = crate::gift_market::ResaleBuy::new(listing, recipient, false);
-    buy.sending = true;
+    buy.phase = crate::gift_market::BuyPhase::Sending { request: 7 };
     market.buy = Some(buy);
     assert!(t.driver.open_gift_resale(5, "Pepe").is_err());
     assert!(t.driver.start_gift_resale_buy("x", None, false).is_err());
@@ -487,7 +487,7 @@ fn a_buy_in_flight_is_not_replaced_by_another_resale_box() {
             .gift_market
             .buy
             .as_ref()
-            .is_some_and(|b| b.sending),
+            .is_some_and(|b| b.sending()),
         "the purchase keeps its box"
     );
 }
@@ -647,9 +647,10 @@ fn an_outdated_gift_list_is_refetched_once_and_a_refused_refetch_is_not_retried(
 fn reopening_the_gifts_box_keeps_the_lock_of_a_mutation_in_flight() {
     let mut t = Flaky::new();
     let owner = crate::telegram::envelope::MessageSender::User { user_id: ME };
-    t.driver.session.payments.hub.gift_mutating = true;
+    t.driver.session.payments.hub.gift_mutation =
+        crate::premium_hub::GiftMutation::Busy(crate::ids::RequestId(7_000));
     t.driver.open_received_gifts(owner).unwrap();
-    assert!(t.driver.session.payments.hub.gift_mutating);
+    assert!(t.driver.session.payments.hub.gift_mutation.is_busy());
 }
 
 #[test]
@@ -810,10 +811,9 @@ fn an_outdated_subscriptions_list_refetches_once_and_a_refusal_is_not_asked_agai
     t.driver.maybe_fetch_star_subscriptions().unwrap();
     t.answer("getStarSubscriptions", subs("more"));
     t.driver.fetch_more_star_subscriptions().unwrap();
-    // A mutation lands while the appended page is out: the page asked
-    // before the change is dropped with its request, and the first page is
-    // asked for again at once.
-    t.driver.session.payments.star_subs.outdate();
+    // An edit landed while the appended page is out.
+    t.driver.session.payments.star_subscriptions.edit_done();
+    // The appended page is out: no first-page request beside it.
     assert!(
         t.driver
             .refresh_star_subscriptions_if_stale()
@@ -826,23 +826,20 @@ fn an_outdated_subscriptions_list_refetches_once_and_a_refusal_is_not_asked_agai
         "",
         "a first page"
     );
-    // Its own answer settles the list.
+    assert!(
+        t.driver.session.payments.star_subscriptions.is_loading(),
+        "the refetch is the page waited for now"
+    );
+    // The refetch is cleared by its own answer.
     t.answer("getStarSubscriptions", subs(""));
-    assert!(matches!(
-        t.driver.session.payments.star_subs.list,
-        crate::state::paged::Paged::Ready(_)
-    ));
+    let list = &t.driver.session.payments.star_subscriptions;
+    assert!(!list.is_stale() && !list.is_loading());
     // A refetch that is refused shows its error and is not asked every frame.
-    t.driver.session.payments.star_subs.outdate();
+    t.driver.session.payments.star_subscriptions.edit_done();
     t.sender.refuse(&["getStarSubscriptions"]);
     assert!(t.driver.refresh_star_subscriptions_if_stale().is_err());
-    let subs = &t.driver.session.payments.star_subs;
-    assert!(subs.error().is_some());
-    assert!(!subs.list.loading());
-    assert!(
-        t.driver
-            .refresh_star_subscriptions_if_stale()
-            .unwrap()
-            .is_none()
-    );
+    let payments = &t.driver.session.payments;
+    assert!(!payments.star_subscriptions.is_stale());
+    assert!(payments.star_subscriptions.error().is_some());
+    assert!(!payments.star_subscriptions.is_loading());
 }

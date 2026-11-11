@@ -57,9 +57,10 @@ pub struct BotsState {
     /// user id. The `users` ids resolve to names via `Session::users`.
     pub similar_bots: HashMap<i64, SimilarBotsFetch>,
     /// Slice bots-games: high-score panels, keyed by
-    /// `(chat_id, message_id)`. Present = panel open; `None` = request in
-    /// flight (the panel shows a loading row); `Some` = loaded rows.
-    pub game_scores: HashMap<(i64, i64), Option<Vec<GameHighScore>>>,
+    /// `(chat_id, message_id)`. Present = panel open; the value is its
+    /// fetch: `Loading` shows a loading row, `Ready` the rows. A refused
+    /// request closes the panel (the entry is removed).
+    pub game_scores: HashMap<(i64, i64), crate::state::fetch::Fetch<Vec<GameHighScore>>>,
     /// The `callbackQueryAnswer`s of inline keyboard callback-button
     /// presses (Phase 3.2), oldest first, each with the chat of its press.
     /// The UI takes them on the next poll and shows each answer in the

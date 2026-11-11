@@ -289,7 +289,8 @@ impl QuillApp {
                 })
                 .collect()
         };
-        if let Some(picker) = self.agent_ui.page.picker.as_ref() {
+        if let Some(built) = self.agent_ui.page.picker.as_ref() {
+            let picker = &built.select;
             let add = action_row(
                 tr(keys::Q_AGENT_PAGE_ADD_CHAT),
                 Some(tr(keys::Q_AGENT_PAGE_ADD_CHAT_HINT).into()),

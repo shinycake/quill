@@ -39,7 +39,15 @@ fn a_contact_is_asked_for_their_packs_and_the_answer_lands() {
     assert_eq!(gift.target().map(|t| t.user_id), Some(42));
     assert_eq!(gift.options()[0].star_count, 100);
     // The packs for a gift never land in the "Buy more Stars" list.
-    assert!(driver.session.payments.star_packs.options.is_empty());
+    assert!(
+        driver
+            .session
+            .payments
+            .star_packs
+            .options
+            .items()
+            .is_empty()
+    );
     driver.close_stars_gift();
     assert!(!driver.session.payments.stars_gift.is_open());
 }

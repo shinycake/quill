@@ -85,7 +85,7 @@ impl QuillApp {
         self.earn.fade = None;
         self.earn.back.clear();
         if let Some(earn) = self.earn_mut() {
-            earn.pending_join = None;
+            earn.recipients.drop_parked();
         }
         let restore = self.earn.restore.take();
         if let Some(live) = self.live.as_mut() {

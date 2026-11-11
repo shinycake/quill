@@ -177,7 +177,12 @@ impl Session {
                 // TDLib refusing the system step is not the user's error:
                 // the box does not show it, and the tick reads it here.
                 let system = pending.is_some_and(|p| proxy.system_step.answered(p.id, true));
-                let mine = pending.is_some_and(|p| proxy.mutation == ProxyMutation::InFlight(p.id));
+                // An error with no request to match still ends the change
+                // in flight: nothing else would ever answer it.
+                let mine = match pending {
+                    Some(p) => proxy.mutation == ProxyMutation::InFlight(p.id),
+                    None => matches!(proxy.mutation, ProxyMutation::InFlight(_)),
+                };
                 if system {
                     if mine {
                         proxy.mutation = ProxyMutation::Idle;

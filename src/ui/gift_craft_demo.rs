@@ -79,7 +79,7 @@ pub(super) fn seed_gift_craft_session(sink: Arc<MemorySink>) -> Session {
         craft.add(gift.clone());
     }
     craft.candidates = gifts.iter().skip(1).cloned().collect();
-    craft.candidates_loaded = true;
+    craft.candidates_load = quill::gift_market::PageLoad::Ready;
     craft.probabilities = vec![
         vec![1000],
         vec![600, 1000],
@@ -106,7 +106,7 @@ impl QuillApp {
             "forge" => {
                 // Half way through the forge, still waiting for the answer.
                 if let Some(craft) = self.craft_mut() {
-                    craft.crafting = true;
+                    craft.run = quill::gift_market::CraftRun::Crafting { request: 0 };
                 }
                 self.gift_market.forge_started =
                     Instant::now().checked_sub(Duration::from_millis(1_400));
@@ -126,7 +126,7 @@ impl QuillApp {
                     _ => CraftResult::Fail,
                 };
                 if let Some(craft) = self.craft_mut() {
-                    craft.result = Some(result);
+                    craft.run = quill::gift_market::CraftRun::Done(result);
                 }
                 self.gift_market.stack = vec![MarketBox::CraftResult];
             }

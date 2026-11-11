@@ -2,6 +2,7 @@
 use super::*;
 use crate::ids::{ChatId, RequestId};
 use crate::quick_replies as qr;
+use crate::state::fetch::Fetch;
 use crate::state::{RequestPurpose, SettingsPurpose};
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -53,15 +54,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.settings.quick_replies.shortcuts_load.is_idle() {
             return Ok(());
         }
-        self.session.settings.quick_replies.shortcuts_load.begin();
         let sent = self.send_quick_reply_request(
             RequestPurpose::Settings(SettingsPurpose::LoadQuickReplyShortcuts),
             None,
             qr::load_shortcuts_request,
         );
-        if sent.is_err() {
-            // Never left: asked again by the next look.
-            self.session.settings.quick_replies.shortcuts_load = Default::default();
+        // A send that did not leave stays unasked: the next look asks again.
+        if sent.is_ok() {
+            self.session.settings.quick_replies.shortcuts_load.begin();
         }
         sent.map(|_| ())
     }
@@ -72,23 +72,26 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         shortcut_id: i32,
     ) -> Result<(), ConnectSendError> {
-        let loads = &mut self.session.settings.quick_replies.message_loads;
-        if loads.contains_key(&shortcut_id) {
+        if self
+            .session
+            .settings
+            .quick_replies
+            .messages
+            .contains_key(&shortcut_id)
+        {
             return Ok(());
         }
-        loads.entry(shortcut_id).or_default().begin();
         let sent = self.send_quick_reply_request(
             RequestPurpose::Settings(SettingsPurpose::LoadQuickReplyMessages { shortcut_id }),
             None,
             |extra| qr::load_messages_request(extra, shortcut_id),
         );
-        if sent.is_err() {
-            // Never left: asked again by the next look.
+        if sent.is_ok() {
             self.session
                 .settings
                 .quick_replies
-                .message_loads
-                .remove(&shortcut_id);
+                .messages
+                .insert(shortcut_id, Fetch::Loading { stale: None });
         }
         sent.map(|_| ())
     }

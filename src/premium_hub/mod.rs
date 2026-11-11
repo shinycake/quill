@@ -782,7 +782,11 @@ pub struct PremiumHub {
     pub gift_selected: Option<String>,
     /// `sellGift` awaiting confirmation for this gift id.
     pub gift_convert_confirm: Option<String>,
-    pub gift_mutating: bool,
+    /// The one gift mutation in flight (pin, save, sell, upgrade, transfer,
+    /// resale price, collections, delete). Only its own answer or error
+    /// frees the list.
+    pub gift_mutation: GiftMutation,
+    pub gifts_stale: bool,
     // Premium.
     pub premium_open: bool,
     /// `premium_bot_username` / `premium_invoice_slug` from the app config.
@@ -925,6 +929,30 @@ impl PremiumHub {
             && let Some(gift) = list.gifts.iter_mut().find(|g| g.id == id)
         {
             gift.is_saved = saved;
+        }
+    }
+}
+
+/// The lock on the open gifts list while a mutation is out. One at a time:
+/// another request would pay twice.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GiftMutation {
+    #[default]
+    Idle,
+    Busy(crate::ids::RequestId),
+}
+
+impl GiftMutation {
+    pub fn is_busy(self) -> bool {
+        matches!(self, Self::Busy(_))
+    }
+
+    /// The answer or error of `request` frees the list; another request's
+    /// does not. An answer that names no request (its entry is gone) frees
+    /// it too, or the list would stay locked for good.
+    pub fn settle(&mut self, request: Option<crate::ids::RequestId>) {
+        if matches!(*self, Self::Busy(busy) if request.is_none_or(|id| id == busy)) {
+            *self = Self::Idle;
         }
     }
 }

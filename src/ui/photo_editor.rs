@@ -384,17 +384,17 @@ impl QuillApp {
             .get(index)
             .and_then(|attachment| attachment.extras.photo_render);
         if let Some(render) = render {
-            self.viewer.photo_editor_after = Some(super::viewer_state::DeferredOpen {
-                render,
-                view: self
-                    .session()
-                    .map(|s| s.view_generation)
-                    .unwrap_or_default(),
-            });
+            let view = self
+                .session()
+                .map(|s| s.view_generation)
+                .unwrap_or_default();
+            self.viewer
+                .photo_editor
+                .defer(super::viewer_state::DeferredOpen { render, view });
             cx.notify();
             return;
         }
-        self.viewer.photo_editor_after = None;
+        self.viewer.photo_editor.clear_deferred();
         self.open_photo_editor_for(item, cx);
     }
 
@@ -421,8 +421,9 @@ impl QuillApp {
                         if this.viewer.photo_editor.is_none()
                             && this.composer_sends.holds_item(&item)
                         {
-                            this.viewer.photo_editor =
-                                Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
+                            this.viewer
+                                .photo_editor
+                                .open(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
                         }
                     }
                     Err(_) => this.set_note(StatusNote::error(tr(
@@ -436,8 +437,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_photo_editor(&mut self, cx: &mut Context<Self>) {
-        self.viewer.photo_editor = None;
-        self.viewer.photo_editor_after = None;
+        self.viewer.photo_editor.close();
         cx.notify();
     }
 

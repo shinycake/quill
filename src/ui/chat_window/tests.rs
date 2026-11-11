@@ -516,12 +516,14 @@ fn a_chat_window_searches_and_forwards_with_fields_of_its_own(cx: &mut TestAppCo
         (
             slot.chat_search_input.read(cx).value().to_string(),
             app.search_ui.chat_input.read(cx).value().to_string(),
-            app.session().is_some_and(|s| s.search.chat_search.open),
+            app.session()
+                .is_some_and(|s| s.search.chat_search.is_open()),
         )
     });
     let window_open = h.app.update(cx, |app, cx| {
         app.in_window_scope(Some(OTHER), cx, |app, _| {
-            app.session().is_some_and(|s| s.search.chat_search.open)
+            app.session()
+                .is_some_and(|s| s.search.chat_search.is_open())
         })
     });
     assert_eq!(window_text, "later");
@@ -1098,8 +1100,9 @@ fn a_photo_edit_whose_chat_window_closed_still_lands_in_its_tray(cx: &mut TestAp
                 .unwrap();
                 let item = app.tray_item(0).unwrap();
                 let pixels = image::open(&path).unwrap().to_rgba8();
-                app.viewer.photo_editor =
-                    Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
+                app.viewer
+                    .photo_editor
+                    .open(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
                 app.photo_editor_mut(PhotoEditor::rotate, cx);
                 app.save_photo_editor(window, cx);
             });
@@ -1140,7 +1143,7 @@ fn a_message_photo_edit_whose_chat_window_closed_leaves_no_png(cx: &mut TestAppC
         app.update(cx, |app, cx| {
             app.in_window_of(window, cx, |app, window, cx| {
                 let pixels = image::RgbaImage::from_pixel(59, 11, image::Rgba([4, 5, 6, 255]));
-                app.viewer.photo_editor = Some(PhotoEditor::new(
+                app.viewer.photo_editor.open(PhotoEditor::new(
                     EditorPurpose::MessageEdit {
                         chat: ChatId(1),
                         message: MessageId(2),
@@ -1200,8 +1203,9 @@ fn a_held_send_whose_chat_window_closed_says_it_did_not_go(cx: &mut TestAppConte
                 .unwrap();
                 let item = app.tray_item(0).unwrap();
                 let pixels = image::open(&path).unwrap().to_rgba8();
-                app.viewer.photo_editor =
-                    Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
+                app.viewer
+                    .photo_editor
+                    .open(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
                 app.photo_editor_mut(PhotoEditor::rotate, cx);
                 app.save_photo_editor(window, cx);
                 app.submit_composer(String::new(), window, cx);
@@ -1220,7 +1224,10 @@ fn a_held_send_whose_chat_window_closed_says_it_did_not_go(cx: &mut TestAppConte
             quill::lang::tr(quill::lang::keys::Q_MISC_NOT_SENT_THE_CHAT_CLOSED_BEFORE_THE_PHOTO)
         );
         assert!(app.viewer.photo_editor.is_none(), "no editor opened");
-        assert!(app.viewer.photo_editor_after.is_none(), "the tap is gone");
+        assert!(
+            app.viewer.photo_editor.deferred().is_none(),
+            "the tap is gone"
+        );
         assert!(!app.composer_sends.holds(&original), "the edit landed");
     });
     let edits = quill::scratch::temp_work_dir("quill-edits");

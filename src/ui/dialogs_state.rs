@@ -103,7 +103,7 @@ impl crate::ui::on_screen::Farewell for DialogUi {
             live.driver.forget_new_contact();
         }
         // The appearance box's status choices are resolved while the
-        // session's `chat_status_open` is set.
+        // session's `status_picker` is `ChatAppearance`.
         app.close_chat_appearance_dialog(cx);
         if app
             .session()

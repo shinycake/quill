@@ -95,11 +95,16 @@ pub enum ExportError {
 pub enum ExportSend {
     Idle,
     Out(crate::ids::RequestId),
+    /// The temporary password arrived: the driver asks for the URL next
+    /// (`ConnectDriver::continue_gift_export`) and moves to `Out`, or back
+    /// to `Idle` when that cannot go out.
+    Unlocked,
 }
 
 impl ExportSend {
+    /// A request of the export is out (the buttons wait).
     pub fn is_out(self) -> bool {
-        matches!(self, Self::Out(_))
+        matches!(self, Self::Out(_) | Self::Unlocked)
     }
 }
 
@@ -196,7 +201,18 @@ impl TransferPicker {
         matches!(
             self.stage,
             TransferStage::Password {
-                send: ExportSend::Out(_),
+                send: ExportSend::Out(_) | ExportSend::Unlocked,
+                ..
+            }
+        )
+    }
+
+    /// The temporary password arrived and the URL is still to be asked.
+    pub fn export_unlocked(&self) -> bool {
+        matches!(
+            self.stage,
+            TransferStage::Password {
+                send: ExportSend::Unlocked,
                 ..
             }
         )

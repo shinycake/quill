@@ -266,9 +266,6 @@ fn open_prepared_client(
     // way (seeded from `getAutoDownloadSettingsPresets` on first open
     // when no file exists).
     session.settings.data_storage = load_data_storage_prefs(&prepared.paths);
-    if session.settings.data_storage.storage_limits_seeded {
-        session.settings.storage_seed = crate::storage_limits::StorageSeed::Seeded;
-    }
     // `parity:data-proxy-web`: web proxy carriers run in the web view
     // helper next to Quill's executable, with this account's web view
     // files under its own folder.

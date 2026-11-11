@@ -90,8 +90,8 @@ fn a_media_tab_on_an_empty_field_lists_that_kind_everywhere() {
     assert_eq!(search[0]["offset"], "");
     // No chat or public-chat lookups for an empty query.
     assert!(fx.requests("searchPublicChats").is_empty());
-    assert!(fx.driver.session.search.search.open);
-    assert!(!fx.driver.session.search.search.recents);
+    assert!(fx.driver.session.search.search.is_open());
+    assert!(!fx.driver.session.search.search.is_recents());
 }
 
 #[test]
@@ -129,7 +129,7 @@ fn going_back_to_chats_on_an_empty_field_asks_for_recents() {
     fx.open_tab(SearchTab::Voice);
     fx.open_tab(SearchTab::Chats);
     assert_eq!(fx.requests("searchRecentlyFoundChats").len(), before + 1);
-    assert!(fx.driver.session.search.search.recents);
+    assert!(fx.driver.session.search.search.is_recents());
 }
 
 #[test]
@@ -170,8 +170,8 @@ fn the_channels_tab_asks_for_recommendations_once() {
         r#""total_count":2,"chat_ids":[21,22]"#,
     );
     let tabs = &fx.driver.session.search.search.tabs;
-    assert_eq!(tabs.recommended.items(), [ChatId(21), ChatId(22)]);
-    assert!(!tabs.recommended.is_loading() && tabs.recommended.data().is_some());
+    assert_eq!(tabs.recommended.data(), Some(&vec![ChatId(21), ChatId(22)]));
+    assert!(!tabs.recommended.is_loading());
     fx.open_tab(SearchTab::Chats);
     fx.open_tab(SearchTab::Channels);
     assert_eq!(fx.requests("getRecommendedChats").len(), 1);
@@ -533,7 +533,7 @@ fn a_calendar_day_with_no_media_keeps_the_box_open_with_a_note() {
     fx.driver.jump_to_date(19_000).unwrap();
     let search = &fx.driver.session.search;
     assert!(search.history_calendar.is_some());
-    assert!(search.date_jump_note.is_some());
+    assert!(search.date_jump_note().is_some());
     assert!(fx.requests("searchChatMessages").is_empty());
 }
 

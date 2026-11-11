@@ -31,11 +31,22 @@ pub(in crate::ui) struct Arrival {
     target: &'static str,
     /// Where the row sits, once it has been laid out.
     row: Rc<Cell<Option<Bounds<Pixels>>>>,
-    /// When the row was first centered: the wash runs from here.
-    landed: Option<Instant>,
-    /// The row's top in the page when last centered. It moves when what
-    /// stood in for the row gives way to it, or content loads above it.
-    centered_at: Option<Pixels>,
+    stage: Stage,
+}
+
+/// Where the arrival is: looking for the row, or lit over it.
+#[derive(Clone, Copy)]
+enum Stage {
+    /// The row has not been centered yet.
+    Seeking,
+    /// The row was centered; the wash runs from `landed`.
+    Washing {
+        /// When the row was first centered.
+        landed: Instant,
+        /// The row's top in the page when last centered. It moves when what
+        /// stood in for the row gives way to it, or content loads above it.
+        centered_at: Pixels,
+    },
 }
 
 impl Arrival {
@@ -43,8 +54,7 @@ impl Arrival {
         Arrival {
             target,
             row: Rc::default(),
-            landed: None,
-            centered_at: None,
+            stage: Stage::Seeking,
         }
     }
 }
@@ -78,7 +88,10 @@ impl Arrival {
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
     pub(super) fn landed_row(&self) -> Option<Bounds<Pixels>> {
-        self.landed.and(self.row.get())
+        match self.stage {
+            Stage::Washing { .. } => self.row.get(),
+            Stage::Seeking => None,
+        }
     }
 }
 
@@ -102,10 +115,7 @@ impl QuillApp {
         let Some(arrival) = &self.settings.arrival else {
             return;
         };
-        if arrival
-            .landed
-            .is_some_and(|landed| landed.elapsed() >= TOTAL)
-        {
+        if matches!(arrival.stage, Stage::Washing { landed, .. } if landed.elapsed() >= TOTAL) {
             self.settings.arrival = None;
             return;
         }
@@ -117,13 +127,23 @@ impl QuillApp {
             let viewport = scroll.bounds();
             let offset = scroll.offset();
             let top = row.top() - viewport.top() - offset.y;
-            if arrival.centered_at != Some(top) {
+            let centered = match arrival.stage {
+                Stage::Washing { centered_at, .. } => Some(centered_at),
+                Stage::Seeking => None,
+            };
+            if centered != Some(top) {
                 let max = scroll.max_offset().y;
                 let y = centered_top(top, row.size.height, viewport.size.height, max);
                 scroll.set_offset(point(offset.x, -y));
                 if let Some(arrival) = &mut self.settings.arrival {
-                    arrival.centered_at = Some(top);
-                    arrival.landed.get_or_insert_with(Instant::now);
+                    let landed = match arrival.stage {
+                        Stage::Washing { landed, .. } => landed,
+                        Stage::Seeking => Instant::now(),
+                    };
+                    arrival.stage = Stage::Washing {
+                        landed,
+                        centered_at: top,
+                    };
                 }
                 // The offset changes on the next frame and paints nothing
                 // on its own.
@@ -149,10 +169,13 @@ impl QuillApp {
             .as_ref()
             .filter(|arrival| ids.contains(&arrival.target));
         let wash = arrival.map(|arrival| {
-            let opacity = arrival.landed.map_or(0., |landed| {
-                wash_opacity(landed.elapsed(), cx.reduce_motion())
-            });
-            (opacity, arrival.row.clone(), arrival.landed.is_none())
+            let (opacity, seeking) = match arrival.stage {
+                Stage::Washing { landed, .. } => {
+                    (wash_opacity(landed.elapsed(), cx.reduce_motion()), false)
+                }
+                Stage::Seeking => (0., true),
+            };
+            (opacity, arrival.row.clone(), seeking)
         });
         div()
             .relative()

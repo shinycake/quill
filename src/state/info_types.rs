@@ -349,7 +349,8 @@ pub enum PollStatsFetch {
 /// is outstanding.
 #[derive(Debug, Clone, PartialEq)]
 pub enum InviteLinkFetch {
-    Loading,
+    /// Asked as this request; an admin's page takes only its own answer.
+    Loading(RequestId),
     Loaded(InviteLinkList),
     Failed(String),
 }
@@ -363,12 +364,45 @@ pub struct InviteLinkList {
 }
 
 /// Phase D3a: fetch state for one chat's `getChatJoinRequests` result
-/// (schema 1.8.67, line 14174). Same Loading-guard convention.
+/// (schema 1.8.67, line 14174). Same Loading-guard convention. The search
+/// `query` and the id of the request the list waits for live in the stage,
+/// so an answer is applied only when it is the newest one asked.
 #[derive(Debug, Clone, PartialEq)]
 pub enum JoinRequestFetch {
-    Loading,
+    /// A first page for `query` is in flight as `request`.
+    Loading {
+        query: String,
+        request: RequestId,
+    },
     Loaded(JoinRequestList),
     Failed(String),
+}
+
+impl JoinRequestFetch {
+    /// Whether `request` is the newest one this list waits for.
+    pub fn expects(&self, request: RequestId) -> bool {
+        match self {
+            Self::Loading { request: held, .. } => *held == request,
+            Self::Loaded(list) => list.more == Some(request),
+            Self::Failed(_) => false,
+        }
+    }
+
+    /// The search query the list was asked with.
+    pub fn query(&self) -> &str {
+        match self {
+            Self::Loading { query, .. } => query,
+            Self::Loaded(list) => &list.query,
+            Self::Failed(_) => "",
+        }
+    }
+
+    /// A next-page request in flight is forgotten (its answer is dropped).
+    pub fn forget_page_in_flight(&mut self) {
+        if let Self::Loaded(list) = self {
+            list.more = None;
+        }
+    }
 }
 
 /// Phase D3a: one chat's join-request list (`chatJoinRequests`, schema
@@ -377,6 +411,10 @@ pub enum JoinRequestFetch {
 pub struct JoinRequestList {
     pub total_count: i32,
     pub requests: Vec<ParsedChatJoinRequest>,
+    /// The search query the list was fetched with (empty = everything).
+    pub query: String,
+    /// The next page, while it is in flight.
+    pub more: Option<RequestId>,
 }
 
 /// B8: `getChatInviteLinkCounts` fetch state (owner only), keyed by chat.
@@ -397,34 +435,21 @@ pub struct InviteLinkMembersState {
     pub invite_link: String,
     pub total_count: i32,
     pub members: Vec<crate::telegram::envelope::ParsedChatInviteLinkMember>,
-    pub stage: MembersStage,
-}
-
-/// The newest page request of an [`InviteLinkMembersState`]. Only the
-/// request it names lands; its answer, its error and a failed send each
-/// leave `Loading`, and closing the details drops the whole state.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MembersStage {
-    Idle,
-    Loading(crate::ids::RequestId),
-    Failed(String),
+    /// The newest page; a late reply for a previously opened link is
+    /// ignored.
+    pub stage: PageStage,
 }
 
 impl InviteLinkMembersState {
     pub fn loading(&self) -> bool {
-        matches!(self.stage, MembersStage::Loading(_))
+        matches!(self.stage, PageStage::Loading(_))
     }
 
     pub fn error(&self) -> Option<&str> {
         match &self.stage {
-            MembersStage::Failed(error) => Some(error),
+            PageStage::Failed(error) => Some(error),
             _ => None,
         }
-    }
-
-    /// The page this state waits for is `request`.
-    pub fn waits_for(&self, request: crate::ids::RequestId) -> bool {
-        self.stage == MembersStage::Loading(request)
     }
 }
 
@@ -463,6 +488,26 @@ pub enum SupergroupMembersFetch {
         total_count: i32,
     },
     Failed(String),
+}
+
+/// Where the next page of a member list stands.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MoreMembers {
+    #[default]
+    Idle,
+    /// A next page is out as this request.
+    Asking(RequestId),
+    /// The last next page failed; the panel asks again at its next scroll.
+    Failed,
+}
+
+/// How one member list was asked: the first-page request (`None` when the
+/// list was filled without one), the query, and the next page.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MemberAsk {
+    pub first: Option<RequestId>,
+    pub query: String,
+    pub more: MoreMembers,
 }
 
 /// B4: one `getPollVoters` page (schema 1.8.67, line 12941) backing the
@@ -541,11 +586,28 @@ pub const CHAT_EVENT_LOG_PAGE_SIZE: i32 = 100;
 /// (schema 1.8.67, line 15252). Keyed by chat id. `Loading` is the
 /// in-flight guard — the driver never sends a second request while one
 /// is outstanding.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum ChatEventLogFetch {
+    /// Never asked, or cleared by a refresh.
+    #[default]
+    Idle,
     Loading,
     Loaded(ChatEventLogPage),
     Failed(String),
+}
+
+/// One chat's recent actions: what it is asked for (kept across
+/// refreshes), where the asking stands, and the requests it waits for.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct EventLog {
+    /// The text search (`getChatEventLog.query`); empty = no search.
+    pub query: String,
+    /// The event-type filter (`chatEventLogFilters`); `None` = every type.
+    pub filter: Option<ChatEventLogFilterSet>,
+    /// The `user_ids` filter; empty = every admin.
+    pub users: Vec<i64>,
+    pub fetch: ChatEventLogFetch,
+    pub wait: EventLogWait,
 }
 
 /// The `getChatEventLog` requests one chat's log waits for
@@ -586,17 +648,6 @@ impl ChatEventLogPage {
         }
         admins
     }
-}
-
-/// Slice G2: fetch state for one chat's welcome-message pack
-/// (`loadChatWelcomeMessages`, schema 1.8.67, line 12630). `Loading` is
-/// the in-flight guard — the driver never sends a second request while
-/// one is outstanding.
-#[derive(Debug, Clone, PartialEq)]
-pub enum WelcomeMessagesFetch {
-    Loading,
-    Loaded,
-    Failed(String),
 }
 
 /// Phase D3c: relative timestamp for admin-log rows. The log only
@@ -761,8 +812,11 @@ pub enum DeepLinkState {
         is_channel: bool,
         generation: u64,
     },
-    /// `getDeepLinkInfo` in flight; `generation` drops stale answers.
-    ResolvingInfo { generation: u64 },
+    /// `getDeepLinkInfo` / `getInternalLinkType` in flight; `generation`
+    /// drops stale answers. `original` is the link text a
+    /// `getInternalLinkType` lookup resolves (the proxy hand-off and the
+    /// web fallback need it back); empty for a `getDeepLinkInfo` lookup.
+    ResolvingInfo { generation: u64, original: String },
     /// `deepLinkInfo` answer parsed. The UI consumes this once: with an
     /// action it fires the follow-up request, otherwise (or when
     /// `need_update`) it shows `text` in a dialog.
@@ -792,13 +846,24 @@ pub enum DeepLinkState {
     Unknown { link: String },
 }
 
+/// The deep-link flow in progress: its stage and who started it, one value
+/// (set when the flow starts, kept while it continues, gone with it).
+/// `from_agent`: the flow was started by a step the agent UI driver
+/// injected; the UI re-checks what an agent's flow opens
+/// (`guard::with_injecting`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeepLinkFlow {
+    pub stage: DeepLinkState,
+    pub from_agent: bool,
+}
+
 impl DeepLinkState {
     /// The flow generation of a stage that belongs to one; answers of an
     /// older flow are dropped by comparing it.
     pub fn generation(&self) -> Option<u64> {
         match self {
             Self::InvitePreview { generation, .. }
-            | Self::ResolvingInfo { generation }
+            | Self::ResolvingInfo { generation, .. }
             | Self::Info { generation, .. }
             | Self::ResolvingChat { generation, .. } => Some(*generation),
             Self::ChatReady { .. } | Self::ShowText(_) | Self::Ui(_) | Self::Unknown { .. } => None,

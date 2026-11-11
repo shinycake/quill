@@ -27,19 +27,33 @@ struct Toast {
 #[derive(Clone, Debug)]
 struct Showing {
     toast: Toast,
-    /// Time left when the timer last stopped (or the full duration).
-    remaining: Duration,
-    /// Set while the timer runs; `None` while hovered.
-    running_since: Option<Instant>,
+    timer: Timer,
+}
+
+/// The visible toast's time: running, or stopped while hovered.
+#[derive(Clone, Copy, Debug)]
+enum Timer {
+    /// Ticking since `since`, with `left` left at that moment.
+    Running { left: Duration, since: Instant },
+    /// Stopped with `left` left.
+    Paused { left: Duration },
+}
+
+/// Whether the pointer is over the toast slot.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Pointer {
+    #[default]
+    Away,
+    Over,
 }
 
 impl Showing {
     fn left(&self, now: Instant) -> Duration {
-        match self.running_since {
-            Some(since) => self
-                .remaining
-                .saturating_sub(now.saturating_duration_since(since)),
-            None => self.remaining,
+        match self.timer {
+            Timer::Running { left, since } => {
+                left.saturating_sub(now.saturating_duration_since(since))
+            }
+            Timer::Paused { left } => left,
         }
     }
 }
@@ -48,9 +62,9 @@ impl Showing {
 pub(crate) struct ToastQueue {
     showing: Option<Showing>,
     waiting: VecDeque<Toast>,
-    /// The pointer is over the toast slot: the next toast starts paused too,
+    /// The pointer over the toast slot: the next toast starts paused too,
     /// since the pointer has not left.
-    hovered: bool,
+    pointer: Pointer,
 }
 
 impl ToastQueue {
@@ -74,10 +88,14 @@ impl ToastQueue {
             return;
         };
         if showing.toast == toast {
-            showing.remaining = toast.note.toast_duration();
-            if showing.running_since.is_some() {
-                showing.running_since = Some(now);
-            }
+            let full = toast.note.toast_duration();
+            showing.timer = match showing.timer {
+                Timer::Running { .. } => Timer::Running {
+                    left: full,
+                    since: now,
+                },
+                Timer::Paused { .. } => Timer::Paused { left: full },
+            };
             return;
         }
         if self.waiting.back() == Some(&toast) {
@@ -143,7 +161,7 @@ impl ToastQueue {
         self.showing = None;
         match self.waiting.pop_front() {
             Some(next) => self.show(next, now),
-            None => self.hovered = false,
+            None => self.pointer = Pointer::Away,
         }
     }
 
@@ -155,13 +173,15 @@ impl ToastQueue {
         let Some(showing) = self.showing.as_mut() else {
             return;
         };
-        self.hovered = hovered;
-        match (hovered, showing.running_since) {
-            (true, Some(_)) => {
-                showing.remaining = showing.left(now);
-                showing.running_since = None;
-            }
-            (false, None) => showing.running_since = Some(now),
+        self.pointer = if hovered {
+            Pointer::Over
+        } else {
+            Pointer::Away
+        };
+        let left = showing.left(now);
+        match (hovered, showing.timer) {
+            (true, Timer::Running { .. }) => showing.timer = Timer::Paused { left },
+            (false, Timer::Paused { .. }) => showing.timer = Timer::Running { left, since: now },
             _ => {}
         }
     }
@@ -170,11 +190,11 @@ impl ToastQueue {
     /// none, or its window went): a hover that never ends would pause it for
     /// good and queue every later toast behind it.
     pub(crate) fn pointer_gone(&mut self, now: Instant) {
-        self.hovered = false;
+        self.pointer = Pointer::Away;
         if let Some(showing) = self.showing.as_mut()
-            && showing.running_since.is_none()
+            && let Timer::Paused { left } = showing.timer
         {
-            showing.running_since = Some(now);
+            showing.timer = Timer::Running { left, since: now };
         }
     }
 
@@ -191,7 +211,9 @@ impl ToastQueue {
     /// When the visible toast ends, or `None` while paused or empty.
     pub(crate) fn deadline(&self, now: Instant) -> Option<Instant> {
         let showing = self.showing.as_ref()?;
-        showing.running_since?;
+        let Timer::Running { .. } = showing.timer else {
+            return None;
+        };
         let left = showing.left(now);
         if left.is_zero() {
             return None;
@@ -211,9 +233,12 @@ impl ToastQueue {
     }
 
     fn show(&mut self, toast: Toast, now: Instant) {
+        let left = toast.note.toast_duration();
         self.showing = Some(Showing {
-            remaining: toast.note.toast_duration(),
-            running_since: (!self.hovered).then_some(now),
+            timer: match self.pointer {
+                Pointer::Away => Timer::Running { left, since: now },
+                Pointer::Over => Timer::Paused { left },
+            },
             toast,
         });
     }

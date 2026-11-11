@@ -224,7 +224,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
         media: Option<&StoryMedia>,
     ) {
-        let Some((poster_chat_id, story_id)) = self.stories.composer.edit_target else {
+        let Some((poster_chat_id, story_id)) = self.stories.composer.edit_target() else {
             return;
         };
         let caption = self.stories.composer_caption.read(cx).value().to_string();
@@ -276,7 +276,7 @@ impl QuillApp {
                 } else {
                     // Phase 9.5: `target` is the chat the check was asked for,
                     // so the post goes where the eligibility was computed.
-                    let from_story = self.stories.composer.repost_source;
+                    let from_story = self.stories.composer.repost_source();
                     let media = self.stories.composer.media.clone();
                     if let (Some(live), Some(media)) = (self.live.as_mut(), media) {
                         let caption = self
@@ -415,7 +415,7 @@ impl QuillApp {
         // fields); the areas are only editable when the media is being
         // replaced (schema: areas can't change unless content does).
         let is_edit = self.stories.composer.is_edit();
-        let is_repost = self.stories.composer.repost_source.is_some();
+        let is_repost = self.stories.composer.repost_source().is_some();
         let show_privacy = !is_edit && self.stories.composer.as_chat_id.is_none();
         let areas_editable = !is_edit || media.is_some();
         let title = if is_edit {

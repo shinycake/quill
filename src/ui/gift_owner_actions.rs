@@ -34,7 +34,7 @@ pub(super) fn gift_owner_actions(
 ) -> AnyElement {
     let hub = &session.payments.hub;
     let manage = &session.payments.gifts_manage;
-    let busy = hub.gift_mutating;
+    let busy = hub.gift_mutation.is_busy();
     let now = now_unix();
     let balance = hub.balance;
     let poor = |cost: i64| balance.is_some_and(|b| b.stars < cost);

@@ -138,7 +138,7 @@ fn resale_page_parses_and_sorts_counts() {
     assert_eq!(page.attributes.models[0].item.name, "B");
     assert_eq!(page.attributes.backdrops[0].item.name, "Onyx");
     let mut search = ResaleSearch::new(55, ResaleFilter::default(), true);
-    search.loading = true;
+    search.load.begin(1, false);
     search.apply(page.clone(), Some(42), false);
     // Craft mode drops the user's own listings (owner 42 here).
     assert!(search.listings.is_empty());
@@ -147,6 +147,22 @@ fn resale_page_parses_and_sorts_counts() {
     search.apply(page.clone(), Some(42), false);
     search.apply(page, Some(42), true);
     assert_eq!(search.listings.len(), 4);
+}
+
+#[test]
+fn a_failed_second_page_still_offers_show_more() {
+    let mut search = ResaleSearch::new(55, ResaleFilter::default(), false);
+    // A failed first page has no offset to ask from.
+    search.load = PageLoad::Failed("error 500".into());
+    assert!(!search.has_more());
+    search.load = PageLoad::Idle;
+    search.next_offset = "50".into();
+    search.load.begin(1, false);
+    assert!(!search.has_more(), "a page in flight is not asked again");
+    search.load = PageLoad::Ready;
+    assert!(search.has_more(), "page 1 landed");
+    search.load = PageLoad::Failed("error 500".into());
+    assert!(search.has_more(), "page 2 failed: Show more retries it");
 }
 
 fn auction(levels: Value, my: Value, top: Value) -> AuctionState {

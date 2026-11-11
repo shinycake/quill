@@ -11,6 +11,7 @@ use crate::telegram::client::copy_and_parse;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+use std::time::Instant;
 
 type Recorder = Arc<RecordingSender>;
 type Parts = (
@@ -443,4 +444,53 @@ fn a_stale_added_does_not_close_the_next_create() {
     p.0.begin_register().unwrap();
     assert!(!p.0.session.settings.passkeys.take_added());
     assert!(p.0.passkey_parameters_pending());
+}
+
+/// Asking again for a list already known keeps it known: the Privacy and
+/// Security row keeps its label and target while the answer is on its way.
+#[test]
+fn asking_again_keeps_a_known_list_known() {
+    let mut p = parts();
+    listed(&mut p);
+    let Some(old) = Instant::now().checked_sub(std::time::Duration::from_secs(10)) else {
+        return;
+    };
+    p.0.session.settings.passkeys.stage = ListStage::Known { at: old };
+    assert!(p.0.request_passkeys().unwrap().is_some());
+    let state = &p.0.session.settings.passkeys;
+    assert!(matches!(state.stage, ListStage::Known { at } if at > old));
+    assert!(state.known());
+    assert!(state.row_target().is_some());
+}
+
+/// A refetch begun from an outdated list that cannot be sent must not fall
+/// back to a plain `Ready` (the outdated mark would be lost for good): it
+/// ends in the error line, and a later look is not re-asked from ingest.
+#[test]
+fn a_failed_sessions_refetch_send_keeps_its_error() {
+    use std::sync::atomic::Ordering;
+    let (mut driver, sender) = flaky_driver();
+    driver.session.settings.sessions = crate::state::fetch::Fetch::Ready(Vec::new());
+    driver.session.settings.sessions.outdate();
+    sender.down.store(true, Ordering::SeqCst);
+    assert!(driver.refresh_active_sessions_if_stale().is_err());
+    let sessions = &driver.session.settings.sessions;
+    assert!(sessions.error().is_some());
+    assert!(!sessions.is_outdated() && !sessions.is_loading());
+    // Not asked again until the user asks.
+    sender.down.store(false, Ordering::SeqCst);
+    assert_eq!(driver.refresh_active_sessions_if_stale().unwrap(), None);
+}
+
+/// The same for the websites list.
+#[test]
+fn a_failed_websites_refetch_send_keeps_its_error() {
+    use std::sync::atomic::Ordering;
+    let (mut driver, sender) = flaky_driver();
+    driver.session.settings.connected_websites = crate::state::fetch::Fetch::Ready(Vec::new());
+    driver.session.settings.connected_websites.outdate();
+    sender.down.store(true, Ordering::SeqCst);
+    assert!(driver.refresh_connected_websites_if_stale().is_err());
+    let websites = &driver.session.settings.connected_websites;
+    assert!(websites.error().is_some() && !websites.is_outdated());
 }

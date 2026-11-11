@@ -46,6 +46,11 @@ pub(super) enum PreviewSource {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum PreviewStage {
     Editing,
+    /// `searchBackground` is out for a `bg/` link; the answer is the
+    /// session's `background_search`, matched to this request.
+    Looking {
+        request: RequestId,
+    },
     /// `getBackgroundUrl` is out for Share.
     Sharing {
         request: RequestId,
@@ -85,13 +90,22 @@ pub(super) fn offers_blur(kind: &BackgroundType) -> bool {
 
 impl QuillApp {
     pub(super) fn open_wallpaper_preview(&mut self, source: PreviewSource, cx: &mut Context<Self>) {
+        self.open_wallpaper_preview_at(source, PreviewStage::Editing, cx);
+    }
+
+    fn open_wallpaper_preview_at(
+        &mut self,
+        source: PreviewSource,
+        stage: PreviewStage,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(session) = self.wallpaper_session_mut() {
             session.chats_state.background_error = None;
         }
         self.dialogs.wallpaper_preview = Some(WallpaperPreview {
             source,
             blur: None,
-            stage: PreviewStage::Editing,
+            stage,
         });
         self.open_box(DialogKind::WallpaperPreview);
         cx.notify();
@@ -99,16 +113,20 @@ impl QuillApp {
 
     /// `bg/<name>` links: search the background and preview it.
     pub(super) fn open_background_link(&mut self, name: String, cx: &mut Context<Self>) {
+        let mut stage = PreviewStage::Editing;
         if let Some(live) = self.live.as_mut() {
             live.driver.session.chats_state.background_error = None;
-            if live.driver.search_background(&name).is_err() {
-                self.set_note(StatusNote::error(tr(
-                    keys::Q_MISC_COULD_NOT_OPEN_THE_WALLPAPER,
-                )));
-                return;
+            match live.driver.search_background(&name) {
+                Ok(request) => stage = PreviewStage::Looking { request },
+                Err(_) => {
+                    self.set_note(StatusNote::error(tr(
+                        keys::Q_MISC_COULD_NOT_OPEN_THE_WALLPAPER,
+                    )));
+                    return;
+                }
             }
         }
-        self.open_wallpaper_preview(PreviewSource::Link(name), cx);
+        self.open_wallpaper_preview_at(PreviewSource::Link(name), stage, cx);
     }
 
     /// "From file…": pick an image and preview it.
@@ -275,6 +293,40 @@ impl QuillApp {
     /// An Apply answers whether or not its box is still open. Any other
     /// answer is dropped.
     pub(super) fn drain_wallpaper_preview(&mut self, cx: &mut Context<Self>) -> bool {
+        let looked = self.drain_background_lookup(cx);
+        self.drain_wallpaper_answers(cx) || looked
+    }
+
+    /// The `bg/` link lookup the open preview waits for: found, or failed
+    /// with the reason (the session cleared its search either way).
+    fn drain_background_lookup(&mut self, cx: &mut Context<Self>) -> bool {
+        use quill::state::BackgroundSearch;
+        if !matches!(
+            self.dialogs.wallpaper_preview.as_ref().map(|p| &p.stage),
+            Some(PreviewStage::Looking { .. })
+        ) {
+            return false;
+        }
+        let Some(session) = self.wallpaper_session_mut() else {
+            return false;
+        };
+        let next = match &session.chats_state.background_search {
+            BackgroundSearch::Found(_) => PreviewStage::Editing,
+            BackgroundSearch::Idle => PreviewStage::Failed(
+                session
+                    .chats_state
+                    .background_error
+                    .take()
+                    .unwrap_or_default(),
+            ),
+            _ => return false,
+        };
+        self.set_wallpaper_stage(next);
+        cx.notify();
+        true
+    }
+
+    fn drain_wallpaper_answers(&mut self, cx: &mut Context<Self>) -> bool {
         let mut waiting = self.dialogs.wallpaper_applies.clone();
         if let Some(PreviewStage::Sharing { request }) =
             self.dialogs.wallpaper_preview.as_ref().map(|p| &p.stage)
@@ -358,9 +410,10 @@ impl QuillApp {
             if let (Some(bg), Some(live)) = (&background, this.live.as_mut()) {
                 live.driver.download_background_file(bg);
             }
-            let error = this
-                .session()
-                .and_then(|s| s.chats_state.background_error.clone());
+            let error = match &preview.stage {
+                PreviewStage::Failed(reason) => Some(reason.clone()),
+                _ => None,
+            };
             let is_file = matches!(preview.source, PreviewSource::File(_));
             let ready = is_file || background.is_some();
             let mut body = div().flex().flex_col().gap_3();

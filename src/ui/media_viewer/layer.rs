@@ -230,10 +230,10 @@ impl QuillApp {
     /// The viewer's picture as an element of its own (chat windows, which
     /// draw the viewer inline).
     pub(super) fn viewer_inline_video(&self) -> Option<AnyElement> {
-        if let Some(player) = &self.viewer.player {
+        if let Some(player) = self.viewer.clip.player() {
             return Some(video_frame(player).into_any_element());
         }
-        self.viewer.gif.clone().map(|path| {
+        self.viewer.clip.gif().cloned().map(|path| {
             img(path)
                 .size_full()
                 .object_fit(ObjectFit::Contain)
@@ -312,15 +312,15 @@ impl QuillApp {
         geometry: ViewerGeometry,
         cx: &mut Context<Self>,
     ) -> Option<Entity<ViewerVideoLayer>> {
-        let content = match (&self.viewer.player, &self.viewer.gif) {
-            _ if !item.plays_clip() || self.viewer.video != Some(item.message_id) => {
+        let content = match (self.viewer.clip.player(), self.viewer.clip.gif()) {
+            _ if !item.plays_clip() || self.viewer.clip.video() != Some(item.message_id) => {
                 LayerContent::Nothing
             }
             (Some(player), _) => LayerContent::Player(player.downgrade()),
             (None, Some(path)) => LayerContent::Gif(path.clone()),
             (None, None) => LayerContent::Nothing,
         };
-        if let Some(player) = &self.viewer.player {
+        if let Some(player) = self.viewer.clip.player() {
             player.set_orientation(self.viewer.orientation.turns, false);
         }
         let open_gen = self.viewer.open_gen;

@@ -42,7 +42,7 @@ impl QuillApp {
         if !supported() {
             return;
         }
-        let duration = editor.info.map(|info| info.duration_ms as f64 / 1000.0);
+        let duration = editor.info().map(|info| info.duration_ms as f64 / 1000.0);
         match VideoPlayer::open(
             &editor.source,
             Purpose::Inline {
@@ -60,9 +60,9 @@ impl QuillApp {
                 }
                 video.watch(cx.entity_id());
                 editor.playback_ms = Some(editor.edits.from_ms);
-                editor.player = Some(video);
+                editor.set_player(Some(video));
             }
-            Err(_) => editor.note = Some(tr(keys::Q_AV_QUILL_CANT_PLAY_THIS_VIDEO).into()),
+            Err(_) => editor.set_note(tr(keys::Q_AV_QUILL_CANT_PLAY_THIS_VIDEO).into()),
         }
         cx.notify();
     }
@@ -74,20 +74,19 @@ impl QuillApp {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
-        let held = editor.user_paused || editor.motion.grab.is_some() || editor.busy;
+        let held = editor.user_paused || editor.motion.strip.is_held() || editor.busy();
         let (from, till) = (editor.edits.from_ms, editor.edits.till_ms);
         let mut playing = false;
         // A clip that fails after opening: the player goes (the still
         // shows, as when it can't open) and the note says so.
         if editor
-            .player
-            .as_ref()
+            .player()
             .is_some_and(|video| video.state() == PlayState::Failed)
         {
-            editor.player = None;
-            editor.note = Some(tr(keys::Q_AV_QUILL_CANT_PLAY_THIS_VIDEO).into());
+            editor.set_player(None);
+            editor.set_note(tr(keys::Q_AV_QUILL_CANT_PLAY_THIS_VIDEO).into());
         }
-        if !held && let Some(video) = editor.player.as_ref() {
+        if !held && let Some(video) = editor.player().cloned() {
             match video.state() {
                 PlayState::Failed => {}
                 // Still opening: it was told where to start and to play.
@@ -125,7 +124,7 @@ impl QuillApp {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
-        let Some(video) = editor.player.as_ref() else {
+        let Some(video) = editor.player().cloned() else {
             return;
         };
         editor.user_paused = !editor.user_paused;
@@ -144,7 +143,7 @@ impl QuillApp {
 
     /// A quality the cropped clip no longer offers goes back to Original.
     fn fit_editor_quality(editor: &mut VideoEditorDialog) {
-        if let Some(info) = editor.info {
+        if let Some(info) = editor.info() {
             let (width, height) = editor.edits.edited_size(&info);
             if !quality_levels(width, height).contains(&editor.edits.quality) {
                 editor.edits.quality = 0;
@@ -158,7 +157,7 @@ impl QuillApp {
             return;
         };
         editor.edits.turns = (editor.edits.turns + 1) % 4;
-        editor.edits.crop = match (&editor.target, editor.info, editor.edits.crop) {
+        editor.edits.crop = match (&editor.target, editor.info(), editor.edits.crop) {
             (_, _, Some(crop)) => Some(crop.turned_cw()),
             // A sticker's or an avatar's crop is always a square.
             (target, Some(info), None) if target.square() => {
@@ -185,7 +184,7 @@ impl QuillApp {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
-        if let Some(video) = editor.player.as_ref() {
+        if let Some(video) = editor.player() {
             video.set_orientation(editor.edits.turns, editor.edits.flipped);
         }
         let at = editor.edits.cover_ms;
@@ -244,7 +243,7 @@ impl QuillApp {
             f32::from(picture.size.width),
             f32::from(picture.size.height),
         );
-        let square = match (&editor.target, editor.info) {
+        let square = match (&editor.target, editor.info()) {
             (target, Some(info)) if target.square() => {
                 let (width, height) = turned_size(info.width, info.height, editor.edits.turns);
                 Some(width as f32 / height.max(1) as f32)
@@ -283,19 +282,19 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let app = cx.entity().downgrade();
-        let (width, height) = editor.info.map_or((16, 9), |info| {
+        let (width, height) = editor.info().map_or((16, 9), |info| {
             turned_size(info.width, info.height, editor.edits.turns)
         });
         let picture = (width.max(1) as f32, height.max(1) as f32);
         // The player's picture, else the still (cut turned and mirrored).
-        let player = editor.player.clone();
+        let player = editor.player().cloned();
         let still = editor.still.as_deref().cloned();
         let crop = CropArea::of(editor.edits.crop);
         let picture_cell = editor.motion.picture_bounds.clone();
         let crop_cell = editor.motion.crop_bounds.clone();
         let grid = editor.motion.grid.value(Instant::now());
         let round = editor.target.round();
-        let paused = editor.user_paused && editor.player.is_some();
+        let paused = editor.user_paused && editor.player().is_some();
         let overlay = canvas(
             move |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
             move |bounds, hitbox, window, _| {
@@ -380,7 +379,7 @@ impl QuillApp {
         div()
             .relative()
             .size_full()
-            .children(editor.player.clone().map(|player| {
+            .children(editor.player().cloned().map(|player| {
                 div()
                     .absolute()
                     .top_0()

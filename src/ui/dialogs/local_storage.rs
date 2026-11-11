@@ -259,7 +259,7 @@ impl QuillApp {
             // dialog (the S3 pattern).
             live.driver.clear_storage(&types, &chats).is_ok()
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.settings.storage_stats = None;
+            demo.settings.storage_stats = Default::default();
             demo.settings.storage_freed = Some(54_525_952);
             true
         } else {

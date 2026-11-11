@@ -24,13 +24,16 @@ pub(super) fn apply_ready_forward(session: &mut Session, sink: &Arc<MemorySink>,
         session.apply(owned);
     }
     let extra = session.request(RequestPurpose::ForwardMessages, Some(ChatId(12)));
-    session.messages.in_flight_forward = Some(quill::state::ForwardFlight {
-        extra,
-        dest_chat_id: ChatId(12),
-        from_chat_id: ChatId(11),
-        from_topic: Default::default(),
-        requested: 2,
-    });
+    session
+        .messages
+        .forward_flights
+        .push(quill::state::ForwardFlight {
+            extra,
+            dest_chat_id: ChatId(12),
+            from_chat_id: ChatId(11),
+            from_topic: Default::default(),
+            requested: 2,
+        });
     let json = format!(
         r#"{{"@type":"messages","@extra":"{}","total_count":2,"messages":[{{"id":80,"chat_id":12,"is_outgoing":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}}}},"forward_info":{{"@type":"messageForwardInfo","origin":{{"@type":"messageOriginUser","sender_user_id":11}},"date":1}}}},{{"id":81,"chat_id":12,"is_outgoing":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Reply from the session reducer.","entities":[]}}}},"forward_info":{{"@type":"messageForwardInfo","origin":{{"@type":"messageOriginUser","sender_user_id":11}},"date":1}}}}]}}"#,
         extra.0
@@ -145,7 +148,6 @@ impl QuillApp {
         if !self.selection_forwardable(draft.from_chat_id) || !self.share.forward.open_picker() {
             return;
         }
-        self.share.focus_search = true;
         self.share.selection.clear();
         self.share
             .comment_input

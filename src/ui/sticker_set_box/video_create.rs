@@ -84,19 +84,19 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(pending) = self.sticker_box.pending_video.as_ref() else {
+        let Some(pending) = self.sticker_box.pending.downloading() else {
             return;
         };
         let host = pending.window;
         if host.is_some_and(|chat| !self.windows.has(chat)) {
-            self.sticker_box.pending_video = None;
+            self.sticker_box.pending = crate::ui::sticker_set_box::state::PickWait::None;
             return;
         }
         if host != self.windows.scope {
             return;
         }
         if !self.message_ui.menu_ui.sticker_set_open {
-            self.sticker_box.pending_video = None;
+            self.sticker_box.pending = crate::ui::sticker_set_box::state::PickWait::None;
             return;
         }
         let Some(path) = self.local_media_path(pending.file_id) else {
@@ -110,7 +110,7 @@ impl QuillApp {
                     .ended_without_file(ended.0, &session.media.files)
             });
             if failed {
-                self.sticker_box.pending_video = None;
+                self.sticker_box.pending = crate::ui::sticker_set_box::state::PickWait::None;
                 self.set_note(StatusNote::error(tr(
                     keys::Q_OPS_COULD_NOT_DOWNLOAD_PLEASE_TRY,
                 )));
@@ -118,7 +118,7 @@ impl QuillApp {
             }
             return;
         };
-        let Some(pending) = self.sticker_box.pending_video.take() else {
+        let Some(pending) = self.sticker_box.pending.take_downloading() else {
             return;
         };
         let super::state::PendingVideo {

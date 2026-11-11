@@ -59,10 +59,8 @@ impl Session {
             Some(RequestPurpose::DeleteAllCallMessages) => {
                 self.calls.recent_calls.clear();
                 self.calls.recent_calls_offset.clear();
-                self.calls.recent_calls_error = false;
-                self.calls.recent_calls_clearing = false;
                 // A page in flight still lists the calls just deleted.
-                self.calls.recent_calls_request = None;
+                self.calls.recent_calls_stage = RecentCalls::Idle;
             }
             Some(RequestPurpose::DeleteChatMessagesBySender) => {
                 self.messages
@@ -215,7 +213,7 @@ impl Session {
         })) = pending.map(|p| p.purpose)
         {
             *self.settings.data_storage.for_network_mut(network) = settings;
-            self.settings.data_storage.seeded = true;
+            self.settings.data_storage.seeded = crate::data_settings::Seed::Seeded;
             self.settings.data_storage_error = None;
             self.settings.data_storage_dirty = true;
             self.settings.auto_download_answer = extra.map(AutoDownloadAnswer::Saved);
@@ -278,19 +276,25 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::EditStarSubscription | RequestPurpose::ReuseStarSubscription)
         ) {
-            self.payments.star_subs.outdate();
+            self.payments.star_subscriptions.edit_done();
         }
         // `toggleGiftIsSaved` / `sellGift` succeeded: refetch the list from
         // the server (the connect driver does it on the same ingest) and,
         // after a conversion, the Stars balance.
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { .. })) => {
-                self.payments.hub.gift_mutating = false;
+                self.payments
+                    .hub
+                    .gift_mutation
+                    .settle(pending.map(|p| p.id));
                 self.payments.hub.gifts_error = None;
                 self.payments.hub.gifts.outdate();
             }
             Some(RequestPurpose::SellGift) => {
-                self.payments.hub.gift_mutating = false;
+                self.payments
+                    .hub
+                    .gift_mutation
+                    .settle(pending.map(|p| p.id));
                 self.payments.hub.gifts_error = None;
                 // The panel and the box close only when they are still the
                 // sold gift's: the user may have opened another meanwhile.
@@ -342,7 +346,7 @@ impl Session {
                 }
             }
             self.stickers.stickers.sets.clear();
-            self.stickers.stickers.installed_loaded = false;
+            self.stickers.stickers.lists.installed = crate::state::fetch::Fetch::Idle;
             self.stickers.stickers.archived.clear();
             self.stickers.stickers.archived_has_more = false;
             self.stickers.stickers.archived_next_offset = 0;
@@ -354,7 +358,7 @@ impl Session {
         }
         self.finish_mask_mutation(pending.map(|p| p.purpose));
         // Slice S10: emoji mutations invalidate emoji caches (see emoji.rs).
-        self.invalidate_emoji_caches(pending.map(|p| p.purpose));
+        self.invalidate_emoji_caches(pending.map(|p| p.purpose), pending.map(|p| p.id));
         // Slice S9: a saved-GIF mutation (`addSavedAnimation` /
         // `removeSavedAnimation`) succeeded — drop the saved list so
         // the panel refetches the server-confirmed list instead of
@@ -418,7 +422,6 @@ impl Session {
             ) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                     self.groups.welcome_messages.remove(&chat_id.0);
-                    self.groups.welcome_message_fetches.remove(&chat_id.0);
                 }
             }
             // Slice (communities backend core): a
@@ -578,8 +581,8 @@ impl Session {
         // A short OK is not exhaustion; 404 is. A page that went through
         // ends the wait after an earlier failure.
         match pending.map(|p| p.purpose) {
-            Some(RequestPurpose::LoadChats) => self.chat_list.chats_retry = None,
-            Some(RequestPurpose::LoadArchiveChats) => self.chat_list.archive_retry = None,
+            Some(RequestPurpose::LoadChats) => self.chat_list.main_paging.page_ok(),
+            Some(RequestPurpose::LoadArchiveChats) => self.chat_list.archive_paging.page_ok(),
             _ => {}
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::DeleteChatFolder)
@@ -720,8 +723,11 @@ impl Session {
                 if let Some(state) = self.groups.invite_pages.join_requests_mut(chat_id.0)
                     && link == Some(state.invite_link.as_str())
                 {
-                    if let Some(page) = state.request.take() {
+                    if let PageStage::Loading(page) =
+                        std::mem::replace(&mut state.stage, PageStage::Ready)
+                    {
                         self.requests.take(page);
+                        state.stage = PageStage::Ready;
                     }
                     state.requests.clear();
                     state.total_count = 0;
@@ -741,9 +747,10 @@ impl Session {
                     JoinRequestFetch::Loaded(JoinRequestList {
                         total_count: 0,
                         requests: Vec::new(),
+                        query: String::new(),
+                        more: None,
                     }),
                 );
-                self.groups.join_request_queries.remove(&chat_id.0);
                 self.groups.pending_join_request_counts.insert(chat_id.0, 0);
                 self.groups.pending_join_request_users.remove(&chat_id.0);
             }

@@ -58,62 +58,6 @@ pub struct SponsoredReportOutcome {
     pub result: ReportSponsoredResult,
 }
 
-/// The sponsored-message report flow, one stage at a time. Only the answer
-/// to the request `Target` waits on moves it; its error, the picker's
-/// Cancel and a failed send each leave to `Idle`, and the outcome note
-/// leaves when the user dismisses it.
-#[derive(Debug, Clone, Default)]
-pub enum SponsoredReport {
-    #[default]
-    Idle,
-    /// The ad being reported and the `reportChatSponsoredMessage` request
-    /// the flow waits on. An answer for any other request (a report the
-    /// user dismissed, or an earlier step) is dropped.
-    Target {
-        chat_id: ChatId,
-        message_id: i64,
-        /// `None` between choosing the target and the request going out.
-        request: Option<RequestId>,
-    },
-    /// The server wants an option: the picker is shown.
-    Picking(SponsoredReportFlight),
-    /// How the last report ended.
-    Outcome(SponsoredReportOutcome),
-}
-
-impl SponsoredReport {
-    /// The picker waiting on an option choice.
-    pub fn flight(&self) -> Option<&SponsoredReportFlight> {
-        match self {
-            Self::Picking(flight) => Some(flight),
-            _ => None,
-        }
-    }
-
-    /// The outcome note the user has not dismissed.
-    pub fn outcome(&self) -> Option<&SponsoredReportOutcome> {
-        match self {
-            Self::Outcome(outcome) => Some(outcome),
-            _ => None,
-        }
-    }
-
-    /// The chat of the ad being reported, from the first request until the
-    /// last answer or the picker's Cancel.
-    pub fn chat(&self) -> Option<ChatId> {
-        match self {
-            Self::Target { chat_id, .. } => Some(*chat_id),
-            Self::Picking(flight) => Some(flight.chat_id),
-            Self::Idle | Self::Outcome(_) => None,
-        }
-    }
-
-    /// `request` is the one the flow waits on.
-    pub fn waits_for(&self, request: RequestId) -> bool {
-        matches!(self, Self::Target { request: Some(asked), .. } if *asked == request)
-    }
-}
-
 /// Slice B2: fetch state of `getBotSimilarBots` for a bot profile. The
 /// `users` payload carries only ids (names resolve through
 /// `Session::users`); presence records "fetched" so the driver never

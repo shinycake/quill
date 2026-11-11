@@ -69,5 +69,5 @@ fn dropping_a_player_mid_decode_neither_errors_nor_hangs() {
     std::thread::sleep(Duration::from_millis(20));
     drop(player);
     std::thread::sleep(Duration::from_millis(50));
-    assert!(lock(&shared.state).error.is_none());
+    assert!(lock(&shared.state).decoding.error().is_none());
 }

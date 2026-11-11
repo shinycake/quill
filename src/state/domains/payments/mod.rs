@@ -12,14 +12,14 @@ mod grams;
 mod limit;
 mod paid;
 mod purpose;
-mod star_subs;
 mod state;
+mod subscriptions;
 mod suggested_posts;
 mod ton_wallet;
 
 pub use gift_code::*;
 pub use giveaway::*;
 pub use purpose::*;
-pub use star_subs::*;
+pub use subscriptions::{StarSubscriptionsList, SubsEdit, SubsLoad};
 
 pub use state::*;

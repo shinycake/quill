@@ -74,10 +74,12 @@ pub struct ChatListState {
     pub folder_new_chats_asked: HashMap<i32, std::time::Instant>,
     /// Folder limits from TDLib options and `getPremiumLimit`.
     pub folder_limits: crate::folder_limits::FolderLimits,
-    /// One-shot: a folder request failed on a limit; the UI shows the box
-    /// in the window of the box that sent the request (its id). Drained by
-    /// the UI.
-    pub folder_limit_hit: Option<(crate::folder_limits::FolderLimitKind, Option<RequestId>)>,
+    /// Folder requests that failed on a limit, oldest first, until the UI
+    /// shows each one's box in the window of the box that sent the request
+    /// (its id). Two hits between polls both show
+    /// ([`ChatListState::take_folder_limit_hit`]).
+    pub folder_limit_hits:
+        std::collections::VecDeque<(crate::folder_limits::FolderLimitKind, Option<RequestId>)>,
     /// Slice CL1: `getOption("pinned_chat_count_max")` /
     /// `getOption("pinned_archived_chat_count_max")` via `updateOption`
     /// (schema 1.8.67, line 13674). Defaults 5 / 100 are TDLib's
@@ -97,23 +99,19 @@ pub struct ChatListState {
     pub unread_revision: u64,
     /// `updateUnreadChatCount` for each chat folder (tab counters).
     pub folder_unread_chats: HashMap<i32, UnreadPair>,
-    pub chats_exhausted: bool,
-    /// `loadChats(chatListArchive)` answered 404 — the archive is fully
-    /// loaded (paging starts once the main list is exhausted).
-    pub archive_chats_exhausted: bool,
-    /// After a `loadChats` failure other than 404: no page before this
-    /// instant, and the wait before it, which doubles per failure. The
-    /// driver's tick asks again then (`ConnectDriver::chat_list_tick`).
-    pub(crate) chats_retry: Option<(std::time::Instant, std::time::Duration)>,
-    /// The same for `loadChats(chatListArchive)`.
-    pub(crate) archive_retry: Option<(std::time::Instant, std::time::Duration)>,
+    /// Where `loadChats(chatListMain)` paging stands: more pages, waiting
+    /// out a failure, or exhausted (a 404) ([`ListPaging`]).
+    pub main_paging: ListPaging,
+    /// The same for `loadChats(chatListArchive)` (paging starts once the
+    /// main list is exhausted).
+    pub archive_paging: ListPaging,
     /// Slice CL2: archive auto-settings from `getArchiveChatListSettings`
-    /// (schema 1.8.67, line 13421). `None` until the first fetch; the
+    /// (schema 1.8.67, line 13421). Idle until the first fetch; the
     /// archive-settings panel fetches on open (TGX
-    /// `SettingsArchiveChatListController` does the same).
-    pub archive_chat_list_settings: Option<ArchiveChatListSettings>,
-    /// Slice CL2: the archive-settings panel is fetching its truth.
-    pub archive_settings_loading: bool,
+    /// `SettingsArchiveChatListController` does the same). A cached copy
+    /// stays readable (`Fetch::data`) while it reloads or after a reload
+    /// fails.
+    pub archive_settings: crate::state::fetch::Fetch<ArchiveChatListSettings>,
     /// Slice CL2: the archive-settings panel is open.
     pub archive_settings_open: bool,
     /// Whether "Archive and mute" is offered (server option, seen on).
@@ -202,16 +200,35 @@ impl ChatListState {
             .extend(self.folder_specs.keys().copied());
     }
 
-    /// The wait after a chat-list page failed: one second, doubling per
-    /// failure up to five minutes.
-    pub(crate) fn next_page_retry(
-        previous: Option<(std::time::Instant, std::time::Duration)>,
-        now: std::time::Instant,
-    ) -> (std::time::Instant, std::time::Duration) {
-        const FIRST: std::time::Duration = std::time::Duration::from_secs(1);
-        const MAX: std::time::Duration = std::time::Duration::from_secs(300);
-        let wait = previous.map_or(FIRST, |(_, wait)| wait.saturating_mul(2).min(MAX));
-        (now.checked_add(wait).unwrap_or(now), wait)
+    /// The next folder request that failed on a limit, for the UI to show.
+    pub fn take_folder_limit_hit(
+        &mut self,
+    ) -> Option<(crate::folder_limits::FolderLimitKind, Option<RequestId>)> {
+        self.folder_limit_hits.pop_front()
+    }
+
+    /// The archive settings, when fetched or edited.
+    pub fn archive_chat_list_settings(&self) -> Option<ArchiveChatListSettings> {
+        self.archive_settings.data().copied()
+    }
+
+    /// The archive-settings panel is fetching its first copy.
+    pub fn archive_settings_loading(&self) -> bool {
+        self.archive_settings.is_loading()
+    }
+
+    /// An optimistic edit of the archive settings, or the rollback of one
+    /// (`None`: there was no copy). A fetch in flight keeps running.
+    pub fn edit_archive_settings(&mut self, settings: Option<ArchiveChatListSettings>) {
+        match (settings, self.archive_settings.data_mut()) {
+            (Some(settings), Some(held)) => *held = settings,
+            (Some(settings), None) => self.archive_settings.insert_data_if_missing(|| settings),
+            (None, _) => {
+                if !self.archive_settings.is_loading() {
+                    self.archive_settings = Default::default();
+                }
+            }
+        }
     }
 
     pub(crate) fn new() -> Self {
@@ -233,7 +250,7 @@ impl ChatListState {
             folder_new_chats: HashMap::new(),
             folder_new_chats_asked: HashMap::new(),
             folder_limits: crate::folder_limits::FolderLimits::default(),
-            folder_limit_hit: None,
+            folder_limit_hits: Default::default(),
             // Slice CL1: TDLib's compiled defaults for the pin limits
             // (schema 1.8.67, line 13674); `updateOption` overrides.
             pinned_chat_count_max: 5,
@@ -242,12 +259,9 @@ impl ChatListState {
             unread_totals: UnreadTotals::default(),
             unread_revision: 0,
             folder_unread_chats: HashMap::new(),
-            chats_exhausted: false,
-            archive_chats_exhausted: false,
-            chats_retry: None,
-            archive_retry: None,
-            archive_chat_list_settings: None,
-            archive_settings_loading: false,
+            main_paging: ListPaging::More,
+            archive_paging: ListPaging::More,
+            archive_settings: Default::default(),
             archive_settings_open: false,
             archive_mute: Default::default(),
             chat_preview_fetch: HashMap::new(),

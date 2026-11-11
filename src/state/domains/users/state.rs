@@ -76,7 +76,6 @@ pub struct UsersState {
     pub peer_color_error: Option<String>,
     /// `getDefaultBackgroundCustomEmojiStickers` answer: the custom emoji
     /// the color editor offers as reply and profile icons.
-    /// A failed request shows a retry hint.
     pub background_emoji_icons: crate::state::fetch::Fetch<Vec<StickerItem>>,
     /// `getDefaultProfilePhotoCustomEmojiStickers` answer: the emoji the
     /// avatar builder offers.

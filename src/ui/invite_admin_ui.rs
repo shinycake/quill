@@ -445,7 +445,7 @@ impl QuillApp {
             .and_then(|s| s.groups.revoked_invite_links.get(&chat_id.0))
             .cloned();
         match fetch {
-            None | Some(InviteLinkFetch::Loading) => {
+            None | Some(InviteLinkFetch::Loading(_)) => {
                 block = block.child(loading_row(muted));
             }
             Some(InviteLinkFetch::Failed(message)) => {

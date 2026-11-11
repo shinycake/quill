@@ -25,7 +25,8 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::gift_manage::{
-    ExportError, ExportSend, ProbeOutcome, TransferPicker, TransferStage, fragment_gift_url,
+    ExportError, ExportSend, GiftEvent, ProbeOutcome, TransferPicker, TransferStage,
+    fragment_gift_url,
 };
 use quill::lang::{keys, tr, tr_with};
 use quill::local_time::now_unix;
@@ -249,7 +250,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (url, done, in_password, idle_password) = match self.gift_manage_mut() {
+        let (events, in_password, idle_password) = match self.gift_manage_mut() {
             Some(manage) => {
                 let stage = manage.transfer().map(|p| &p.stage);
                 let in_password = matches!(stage, Some(TransferStage::Password { .. }));
@@ -260,15 +261,18 @@ impl QuillApp {
                         ..
                     })
                 );
-                (
-                    manage.export_url.take(),
-                    manage.transferred.take(),
-                    in_password,
-                    idle,
-                )
+                (manage.take_events(), in_password, idle)
             }
-            None => (None, None, false, false),
+            None => (Vec::new(), false, false),
         };
+        let (mut url, mut done, mut deleted) = (None, None, false);
+        for event in events {
+            match event {
+                GiftEvent::ExportUrl(found) => url = Some(found),
+                GiftEvent::Transferred(found) => done = Some(found),
+                GiftEvent::Deleted => deleted = true,
+            }
+        }
         keep_password_field(
             &self.screen.payments.gift_export_password,
             &mut self.screen.payments.gift_export_password_focused,
@@ -282,10 +286,7 @@ impl QuillApp {
             self.clear_transfer_inputs(window, cx);
             cx.notify();
         }
-        if self
-            .gift_manage_mut()
-            .is_some_and(|m| std::mem::take(&mut m.deleted))
-        {
+        if deleted {
             // tdesktop `DeleteStarGift`: the `lng_gift_deleted` toast.
             cx.defer_in(window, |_, window, cx| {
                 window.push_notification(Notification::new().message(tr(keys::GIFT_DELETED)), cx);

@@ -69,7 +69,8 @@ fn group_sharing(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
             .active_group_call
             .as_ref()
             .unwrap()
-            .screen_sharing
+            .screen_share
+            .is_sharing()
     })
 }
 
@@ -175,7 +176,8 @@ fn the_chooser_stops_the_shared_source_and_cancel_keeps_it(cx: &mut TestAppConte
             .active_group_call
             .as_mut()
             .unwrap()
-            .screen_sharing = true;
+            .screen_share
+            .connected();
         assert!(app.open_screen_chooser(ScreenFor::Group, cx));
     });
     vcx.run_until_parked();

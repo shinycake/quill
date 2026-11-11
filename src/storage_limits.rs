@@ -84,23 +84,6 @@ pub enum StorageOptionValue {
     Integer(i64),
 }
 
-/// Whether this account got its first cache limits (TDLib keeps every
-/// cached file until the optimizer runs, and it only runs with a limit set).
-/// One stage at a time: `Sent` is this process's own attempt, waiting for
-/// TDLib's echo of the options; only `Seeded` is saved, so a process that
-/// dies first, or an option TDLib refuses, sends them again on the next
-/// Ready.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum StorageSeed {
-    #[default]
-    Unseeded,
-    /// The limits went out; TDLib has not echoed them yet.
-    Sent,
-    /// TDLib holds limits (ours, or an earlier choice). A later "No limit"
-    /// is never overwritten.
-    Seeded,
-}
-
 /// The options that make TDLib enforce exactly `size` bytes and `keep`
 /// seconds (`None` = no limit of that kind). With neither limit the
 /// optimizer is switched off. Sent in this order so the limits are in

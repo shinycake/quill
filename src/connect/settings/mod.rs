@@ -1,6 +1,6 @@
 //! Connect driver: privacy, notifications, sessions, storage, account.
 use super::*;
-use crate::data_settings::{AutoDownloadNetSettings, NetworkKind, save_data_storage_prefs};
+use crate::data_settings::{AutoDownloadNetSettings, NetworkKind, Seed, save_data_storage_prefs};
 use crate::ids::{ChatId, RequestId};
 use crate::notify::NotificationSoundKind;
 use crate::privacy::{PrivacyKeyState, PrivacyRuleDetail};

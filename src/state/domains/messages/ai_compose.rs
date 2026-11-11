@@ -99,25 +99,56 @@ pub enum StyleError {
     Other(String),
 }
 
-/// The `addstyle/<name>` lookup; `outcome` stays `None` while it runs.
+/// A request that runs, then answers once, with a value or the error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StyleReply<T> {
+    Running,
+    Answered(Result<T, StyleError>),
+}
+
+impl<T> StyleReply<T> {
+    pub fn is_done(&self) -> bool {
+        matches!(self, Self::Answered(_))
+    }
+
+    /// The answer, once there is one.
+    pub fn done(self) -> Option<Result<T, StyleError>> {
+        match self {
+            Self::Running => None,
+            Self::Answered(outcome) => Some(outcome),
+        }
+    }
+
+    pub fn answer(&self) -> Option<&Result<T, StyleError>> {
+        match self {
+            Self::Running => None,
+            Self::Answered(outcome) => Some(outcome),
+        }
+    }
+}
+
+/// The `addstyle/<name>` lookup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StyleLookup {
     pub token: u64,
     pub name: String,
-    pub outcome: Option<Result<TextCompositionStyle, StyleError>>,
+    pub outcome: StyleReply<TextCompositionStyle>,
 }
 
-/// A style example for the preview box; `outcome` stays `None` while it
-/// runs.
+/// A style example for the preview box.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExampleAnswer {
     pub token: u64,
     pub style_name: String,
-    pub outcome: Option<Result<StyleExample, StyleError>>,
+    pub outcome: StyleReply<StyleExample>,
 }
 
+/// What a Create or Save answered, for the editor that sent `request` (the
+/// editor keeps the request it waits on; an answer to another one is not
+/// its own).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StyleEditAnswer {
+    pub request: RequestId,
     pub outcome: Result<TextCompositionStyle, StyleError>,
 }
 
@@ -146,48 +177,20 @@ pub enum StyleNotice {
 pub struct AiComposeState {
     /// The Style tabs, from `updateTextCompositionStyles`.
     pub styles: StyleList,
-    /// Whether the list arrived at all (an empty list then means none).
-    pub styles_received: bool,
     pub limits: AiComposeLimits,
     pub box_answer: Option<AiBoxAnswer>,
     pub apply_in_place: Option<ApplyInPlaceAnswer>,
     pub style_lookup: Option<StyleLookup>,
     pub example: Option<ExampleAnswer>,
+    /// The newest Create or Save answer; the UI takes it and hands it to
+    /// the editor that sent that request, if it is still open.
     pub style_edit: Option<StyleEditAnswer>,
-    /// The Create or Save the open style editor waits for. Only its answer
-    /// lands in `style_edit`: a save from an editor the user left (Back,
-    /// then another style opened) does not close the next one.
-    pub(crate) style_save: Option<RequestId>,
     pub style_notice: Option<StyleNotice>,
     /// Add, remove and delete requests that failed: the preview that waits
     /// on one leaves its in-flight stage (a delete's failure is silent).
     pub style_op_failures: Vec<RequestId>,
     /// The style named by an in-flight delete, remove or add.
     pub(crate) op_names: HashMap<RequestId, String>,
-}
-
-impl AiComposeState {
-    /// The open style editor sent Create or Save as `request`.
-    pub(crate) fn wait_for_style_save(&mut self, request: RequestId) {
-        self.style_save = Some(request);
-        self.style_edit = None;
-    }
-
-    /// A style editor opened (or closed): an earlier editor's save no
-    /// longer answers anything on screen.
-    pub fn forget_style_save(&mut self) {
-        self.style_save = None;
-        self.style_edit = None;
-    }
-
-    /// `pending` is the save the open editor waits for: settle it.
-    fn take_style_save(&mut self, pending: Option<&PendingRequest>) -> bool {
-        let ours = pending.is_some_and(|p| Some(p.id) == self.style_save);
-        if ours {
-            self.style_save = None;
-        }
-        ours
-    }
 }
 
 /// An answer carrying the token of the request it answers.
@@ -287,20 +290,22 @@ impl Session {
         match payload {
             AiComposePayload::UpdateStyles { styles } => {
                 state.styles.set_server(styles);
-                state.styles_received = true;
             }
             AiComposePayload::Style(style) => match asked {
                 Some(AiComposePurpose::SearchStyle { token }) => {
                     if let Some(lookup) = state.style_lookup.as_mut()
                         && lookup.token == token
                     {
-                        lookup.outcome = Some(Ok(style));
+                        lookup.outcome = StyleReply::Answered(Ok(style));
                     }
                 }
                 Some(AiComposePurpose::CreateStyle | AiComposePurpose::EditStyle) => {
                     state.styles.promote_front(style.clone());
-                    if state.take_style_save(pending) {
-                        state.style_edit = Some(StyleEditAnswer { outcome: Ok(style) });
+                    if let Some(request) = pending.map(|p| p.id) {
+                        state.style_edit = Some(StyleEditAnswer {
+                            request,
+                            outcome: Ok(style),
+                        });
                     }
                 }
                 _ => {}
@@ -310,7 +315,7 @@ impl Session {
                     && let Some(answer) = state.example.as_mut()
                     && answer.token == token
                 {
-                    answer.outcome = Some(Ok(example));
+                    answer.outcome = StyleReply::Answered(Ok(example));
                 }
             }
             AiComposePayload::FixedText {
@@ -440,11 +445,12 @@ impl Session {
                 );
             }
             AiComposePurpose::CreateStyle | AiComposePurpose::EditStyle => {
-                if state.take_style_save(pending) {
-                    if error == StyleError::SavedTooMany {
-                        state.style_notice = Some(notice);
-                    }
+                if error == StyleError::SavedTooMany {
+                    state.style_notice = Some(notice);
+                }
+                if let Some(request) = pending.map(|p| p.id) {
                     state.style_edit = Some(StyleEditAnswer {
+                        request,
                         outcome: Err(error),
                     });
                 }
@@ -460,14 +466,14 @@ impl Session {
                 if let Some(lookup) = state.style_lookup.as_mut()
                     && lookup.token == token
                 {
-                    lookup.outcome = Some(Err(error));
+                    lookup.outcome = StyleReply::Answered(Err(error));
                 }
             }
             AiComposePurpose::GetExample { token } => {
                 if let Some(answer) = state.example.as_mut()
                     && answer.token == token
                 {
-                    answer.outcome = Some(Err(error));
+                    answer.outcome = StyleReply::Answered(Err(error));
                 }
             }
         }

@@ -410,6 +410,7 @@ impl QuillApp {
             // A failed ask is asked again at the next profile open.
             if let Some(earn) = self.earn_mut() {
                 earn.forget_failed_balances();
+                earn.forget_failed_app_config();
             }
             return;
         };
@@ -451,7 +452,16 @@ impl QuillApp {
         if matches!(
             target,
             InfoPanelTarget::User(_) | InfoPanelTarget::Supergroup(_)
-        ) {
+        ) && live
+            .driver
+            .session
+            .payments
+            .earn
+            .limits
+            .app_config
+            .is_idle()
+        {
+            // Never a failed one: that waits for the next panel open.
             let _ = live.driver.ensure_earn_app_config();
         }
         if let Some((peer, ton, stars)) = ask

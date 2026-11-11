@@ -71,9 +71,8 @@ pub enum SearchPaging {
 /// Tab-specific state of [`SearchState`].
 #[derive(Debug, Clone, Default)]
 pub struct SearchTabsState {
-    /// `getRecommendedChats`, shown under "Recommended channels".
-    /// Asked once per session; a failed ask waits for the next search
-    /// panel opening to start over (`reset_recommended`).
+    /// `getRecommendedChats`, shown under "Recommended channels": asked
+    /// once per session; a failed one is asked again at the next visit.
     pub recommended: crate::state::fetch::Fetch<Vec<ChatId>>,
     /// `next_offset` of the newest page of the open query; empty = no more.
     pub next_offset: String,

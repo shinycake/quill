@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::premium_hub::{StarAmount, StarTx, StarTxPage, TxFilter};
+use crate::state::fetch::Fetch;
 use std::collections::HashMap;
 
 /// A fetch the page waits on.
@@ -16,6 +17,9 @@ pub enum Load<T> {
     Ready(T),
     /// The request failed; the text is shown on the page.
     Failed(String),
+    /// The server has nothing of this kind for the peer (a megagroup
+    /// without TON ads, `BROADCAST_REQUIRED`): the part is left out.
+    Unavailable,
 }
 
 impl<T> Load<T> {
@@ -37,7 +41,7 @@ impl<T> Load<T> {
 }
 
 /// Limits and switches from TDLib options and the app config.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EarnLimits {
     /// `star_withdrawal_count_min`.
     pub star_withdrawal_min: Option<i64>,
@@ -53,8 +57,9 @@ pub struct EarnLimits {
     pub starref_join_allowed: bool,
     /// App config `starref_program_allowed` (tdesktop `Setup::Allowed`).
     pub starref_setup_allowed: bool,
-    /// The app config was read at least once.
-    pub app_config_loaded: bool,
+    /// The app config for these switches: asked once, again after it
+    /// failed (the next info panel to open asks).
+    pub app_config: Fetch<()>,
 }
 
 impl EarnLimits {
@@ -221,8 +226,6 @@ pub struct EarnPage {
     pub star_filter: TxFilter,
     /// `getStarAdAccountUrl` (tdesktop's "Buy Ads").
     pub ad_account_url: Option<String>,
-    /// A megagroup without TON ads (`BROADCAST_REQUIRED`).
-    pub ton_unavailable: bool,
 }
 
 impl EarnPage {
@@ -237,7 +240,6 @@ impl EarnPage {
             stars_tab: false,
             star_filter: TxFilter::All,
             ad_account_url: None,
-            ton_unavailable: false,
         }
     }
 
@@ -309,10 +311,11 @@ pub enum WithdrawStep {
     /// The first request, without a password, is out.
     Checking,
     /// tdesktop's password box: "Two-step verification".
-    Password {
-        sending: bool,
-        error: Option<String>,
-    },
+    Password { error: Option<String> },
+    /// The password went out as this request. Its answer ends the
+    /// withdrawal; its error returns to `Password` with the line; an
+    /// answer of an earlier attempt matches neither.
+    PasswordSending(crate::ids::RequestId),
     /// tdesktop `TransferPasswordError`: no password (`later` false) or a
     /// password or session that is too fresh (`later` true).
     SecurityCheck { later: bool },
@@ -332,6 +335,17 @@ pub struct Withdraw {
 impl Withdraw {
     pub fn waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
         request.is_some() && self.request == request
+    }
+
+    /// Whether `request` is the answer the current step waits for: the
+    /// password-less try while `Checking`, the password's own request
+    /// while `PasswordSending`; no other step takes an answer.
+    pub fn takes_answer(&self, request: Option<crate::ids::RequestId>) -> bool {
+        match self.step {
+            WithdrawStep::Checking => self.waits_for(request),
+            WithdrawStep::PasswordSending(sent) => request == Some(sent) && self.waits_for(request),
+            WithdrawStep::Password { .. } | WithdrawStep::SecurityCheck { .. } => false,
+        }
     }
 }
 
@@ -516,6 +530,13 @@ pub struct RevokeBox {
     pub send: BoxSend,
 }
 
+/// A move the UI makes once, taken from `EarnState::effect`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EarnEffect {
+    /// The setup page saved or ended the program: go back from it.
+    SetupDone,
+}
+
 /// Who may receive commissions, as the two list requests settle it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum Recipients {
@@ -525,6 +546,9 @@ pub enum Recipients {
     Loading {
         waiting: Vec<crate::ids::RequestId>,
         found: Vec<EarnPeer>,
+        /// A join box that opens once the lists answer. It goes with the
+        /// stage: a failed send, a layer left or a switch drops it.
+        join: Option<JoinBox>,
     },
     Ready(Vec<EarnPeer>),
     /// A send failed. Answers of the abandoned attempt are dropped and the
@@ -535,6 +559,33 @@ pub enum Recipients {
 impl Recipients {
     pub fn is_loading(&self) -> bool {
         matches!(self, Self::Loading { .. })
+    }
+
+    /// Park `join` until the lists answer. A join box needs no parking
+    /// once they have, so it comes back to be opened at once.
+    pub fn park(&mut self, join: JoinBox) -> Option<JoinBox> {
+        match self {
+            Self::Loading { join: slot, .. } => {
+                *slot = Some(join);
+                None
+            }
+            _ => Some(join),
+        }
+    }
+
+    /// Forget the parked join box.
+    pub fn drop_parked(&mut self) {
+        if let Self::Loading { join, .. } = self {
+            *join = None;
+        }
+    }
+
+    /// The parked join box, if any.
+    pub fn parked(&self) -> Option<&JoinBox> {
+        match self {
+            Self::Loading { join, .. } => join.as_ref(),
+            _ => None,
+        }
     }
 
     /// The list, once both requests answered.
@@ -573,11 +624,10 @@ pub struct EarnState {
     /// Who may receive commissions: the user, owned public channels the
     /// user can post in, and owned bots (tdesktop `ResolveRecipients`).
     pub recipients: Recipients,
-    /// A join box that opens once the recipients arrive.
-    pub pending_join: Option<JoinBox>,
-    /// Set when the setup page saved or ended the program: the UI goes
-    /// back from it (tdesktop `showBackFromStack`).
-    pub setup_closed: bool,
+    /// Moves the UI makes once, oldest first; it drains them (the setup
+    /// page saved or ended the program: go back, tdesktop
+    /// `showBackFromStack`).
+    pub effects: Vec<EarnEffect>,
     /// One-shot notices the UI shows as toasts.
     pub notes: Vec<String>,
     /// A URL the UI opens in the browser (a Fragment withdrawal page).
@@ -614,6 +664,14 @@ impl EarnState {
     pub fn forget_failed_balances(&mut self) {
         self.balance_asks
             .retain(|_, ask| !matches!(ask, crate::state::fetch::BatchAsk::Failed));
+    }
+
+    /// A failed app-config ask is forgotten, so the next profile open asks
+    /// again (the per-frame upkeep only asks a config never asked).
+    pub fn forget_failed_app_config(&mut self) {
+        if self.limits.app_config.error().is_some() {
+            self.limits.app_config = Fetch::Idle;
+        }
     }
 
     pub fn note(&mut self, text: impl Into<String>) {

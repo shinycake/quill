@@ -55,7 +55,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.sessions.cancel();
+                // Not `cancel`: a refetch begun from an outdated list would
+                // land back in `Ready` and lose the mark. A failed send ends
+                // in the error line and is not re-asked from every ingest.
+                self.session
+                    .settings
+                    .sessions
+                    .fail("Could not load the sessions list");
                 Err(err)
             }
         }
@@ -245,6 +251,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
         );
         self.session.settings.account_change.begin();
+        // The last failed load's line is not the new change's.
+        self.session.settings.account_ttl.clear_error();
         match self.sender.send_json(&set_account_ttl(extra, days)) {
             Ok(()) => Ok(extra),
             Err(err) => {
@@ -360,7 +368,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.connected_websites.cancel();
+                self.session
+                    .settings
+                    .connected_websites
+                    .fail("Could not load the websites list");
                 Err(err)
             }
         }

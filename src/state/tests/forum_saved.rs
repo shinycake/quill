@@ -179,7 +179,7 @@ fn sublist_history_pages_and_follows_deletes_and_edits() {
     let view = session.threads.saved.sublist.as_ref().unwrap();
     assert_eq!(view.history.messages.len(), 2);
     assert_eq!(view.history.next_from_message_id, MessageId(20));
-    assert!(!view.history.loaded_complete);
+    assert!(!view.history.loaded_complete());
     // An empty page ends the history.
     let extra = session.request(purpose, None);
     ask_sublist(&mut session, extra);
@@ -200,7 +200,7 @@ fn sublist_history_pages_and_follows_deletes_and_edits() {
             .as_ref()
             .unwrap()
             .history
-            .loaded_complete
+            .loaded_complete()
     );
     // A page answered for another sublist is dropped.
     session.open_saved_sublist(5);
@@ -329,7 +329,7 @@ fn tag_search_pages_land_in_the_filter() {
     assert!(search.loaded);
     assert_eq!(search.tag, tag);
     assert_eq!(search.history.messages.len(), 2);
-    assert!(search.history.loaded_complete);
+    assert!(search.history.loaded_complete());
     session.clear_saved_tag_search();
     assert!(session.threads.saved.tag_search.is_none());
 }

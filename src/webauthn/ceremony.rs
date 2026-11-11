@@ -102,12 +102,18 @@ pub(super) type OnCancel = Arc<dyn Fn() + Send + Sync>;
 
 /// The dialog's handle on a running ceremony. Dropping it cancels.
 pub struct Ceremony {
-    events: Receiver<CeremonyEvent>,
+    state: CeremonyState,
     pins: Sender<Zeroizing<String>>,
     commands: Sender<CeremonyCommand>,
     cancel: Arc<AtomicBool>,
     on_cancel: Option<OnCancel>,
-    finished: bool,
+}
+
+/// The ceremony runs and its events are read, or it has said its last
+/// word and the channel is never read again.
+enum CeremonyState {
+    Running(Receiver<CeremonyEvent>),
+    Finished,
 }
 
 /// The worker's side of the channels.
@@ -158,12 +164,11 @@ impl Ceremony {
             )));
         }
         Self {
-            events,
+            state: CeremonyState::Running(events),
             pins,
             commands,
             cancel,
             on_cancel,
-            finished: false,
         }
     }
 
@@ -196,23 +201,25 @@ impl Ceremony {
     /// last word (a caught panic) reads as a failure, once.
     pub fn poll(&mut self) -> Vec<CeremonyEvent> {
         let mut out = Vec::new();
+        let CeremonyState::Running(events) = &self.state else {
+            return out;
+        };
+        let mut finished = false;
         loop {
-            match self.events.try_recv() {
+            match events.try_recv() {
                 Ok(event) => {
-                    if matches!(
+                    finished |= matches!(
                         event,
                         CeremonyEvent::Registered(_)
                             | CeremonyEvent::SignedIn(_)
                             | CeremonyEvent::Failed(_)
-                    ) {
-                        self.finished = true;
-                    }
+                    );
                     out.push(event);
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
-                    if !self.finished {
-                        self.finished = true;
+                    if !finished {
+                        finished = true;
                         out.push(CeremonyEvent::Failed(CeremonyError::Other(
                             "the worker stopped".into(),
                         )));
@@ -220,6 +227,9 @@ impl Ceremony {
                     break;
                 }
             }
+        }
+        if finished {
+            self.state = CeremonyState::Finished;
         }
         out
     }

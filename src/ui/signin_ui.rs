@@ -6,6 +6,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::signin_clock::{ErrorClock, StepClock, Ticker};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea};
@@ -17,8 +18,8 @@ use quill::lang::{keys, tr};
 use quill::phone::{self, Country};
 use quill::signin;
 use quill::state::AuthRequestError;
-use quill::telegram::envelope::{AuthorizationState, CodeDelivery, EmailResetState};
-use std::time::{Duration, Instant};
+use quill::telegram::envelope::{AuthorizationState, EmailResetState};
+use std::time::Duration;
 
 /// The country list under the 380 px sign-in card's button.
 const PICKER_WIDTH: f32 = 356.;
@@ -87,12 +88,10 @@ pub(super) struct SignInUi {
     pub(super) phone_step: PhoneStep,
     /// The user typed or picked a country: the IP-based default stays out.
     pub(super) touched: bool,
-    pub(super) code_clock: Option<(CodeDelivery, Instant)>,
-    pub(super) email_clock: Option<(EmailResetState, Instant)>,
-    pub(super) error_clock: Option<(AuthRequestError, Instant)>,
-    pub(super) banned_dismissed: bool,
+    pub(super) step_clock: StepClock,
+    pub(super) error_clock: ErrorClock,
     pub(super) lookups: PhoneLookups,
-    tick_armed: bool,
+    ticker: Ticker,
     /// Demo-only fixtures (no live TDLib to ask).
     pub(super) demo_countries: Vec<Country>,
     pub(super) demo_guess: Option<String>,
@@ -131,12 +130,10 @@ impl SignInUi {
             hint: None,
             phone_step: PhoneStep::Entering,
             touched: false,
-            code_clock: None,
-            email_clock: None,
-            error_clock: None,
-            banned_dismissed: false,
+            step_clock: StepClock::None,
+            error_clock: ErrorClock::None,
             lookups: PhoneLookups::Idle,
-            tick_armed: false,
+            ticker: Ticker::Idle,
             demo_countries: Vec::new(),
             demo_guess: None,
             demo_error: None,
@@ -222,22 +219,7 @@ impl QuillApp {
                 let _ = live.driver.fetch_country_code();
             }
         }
-        match &auth {
-            AuthorizationState::WaitCode { delivery, .. } => {
-                if self.auth_ui.signin.code_clock.as_ref().map(|(d, _)| d) != Some(delivery) {
-                    self.auth_ui.signin.code_clock = Some((delivery.clone(), Instant::now()));
-                }
-            }
-            _ => self.auth_ui.signin.code_clock = None,
-        }
-        match &auth {
-            AuthorizationState::WaitEmailCode { reset, .. } => {
-                if self.auth_ui.signin.email_clock.as_ref().map(|(r, _)| r) != Some(reset) {
-                    self.auth_ui.signin.email_clock = Some((*reset, Instant::now()));
-                }
-            }
-            _ => self.auth_ui.signin.email_clock = None,
-        }
+        self.auth_ui.signin.step_clock.follow(&auth);
         self.sync_phone_step(&auth);
         self.apply_login_code_link(&auth, window, cx);
         let phone_screen = matches!(auth, AuthorizationState::WaitPhoneNumber)
@@ -426,39 +408,24 @@ impl QuillApp {
             .session()
             .and_then(|session| session.auth_state.last_auth_error)
             .or(self.auth_ui.signin.demo_error);
-        let Some(err) = err else {
-            self.auth_ui.signin.error_clock = None;
-            self.auth_ui.signin.banned_dismissed = false;
-            return None;
-        };
-        match &self.auth_ui.signin.error_clock {
-            Some((seen, since)) if *seen == err => {
-                Some((err, i64::try_from(since.elapsed().as_secs()).unwrap_or(0)))
-            }
-            _ => {
-                self.auth_ui.signin.error_clock = Some((err, Instant::now()));
-                self.auth_ui.signin.banned_dismissed = false;
-                Some((err, 0))
-            }
-        }
+        self.auth_ui.signin.error_clock.observe(err)
     }
 
     /// Re-render once a second while any countdown on screen is running.
     fn arm_signin_tick(&mut self, cx: &mut Context<Self>) {
-        if self.auth_ui.signin.tick_armed {
+        if self.auth_ui.signin.ticker.is_armed() {
             return;
         }
-        self.auth_ui.signin.tick_armed = true;
-        // A tick dropped by a switch leaves nothing stuck: the new screen's
-        // flag starts clear.
-        self.spawn_screen(cx, async move |this, cx| {
+        // The task is the armed state: a tick dropped by a switch leaves
+        // nothing stuck, the new screen's ticker starts idle.
+        let tick = self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(Duration::from_secs(1)).await;
             let _ = this.update(cx, |this, cx| {
-                this.auth_ui.signin.tick_armed = false;
+                this.auth_ui.signin.ticker = Ticker::Idle;
                 cx.notify();
             });
-        })
-        .detach();
+        });
+        self.auth_ui.signin.ticker = Ticker::Armed { _task: tick };
     }
 
     /// Title/body overrides: delivery text on the code step, the phone
@@ -513,7 +480,7 @@ impl QuillApp {
             self.arm_signin_tick(cx);
         }
         if err.class == quill::telegram::envelope::ErrorClass::PhoneBanned {
-            if !self.auth_ui.signin.banned_dismissed {
+            if !self.auth_ui.signin.error_clock.banner_dismissed() {
                 out.push(self.banned_box(cx));
             }
             return (out, locked);
@@ -581,7 +548,7 @@ impl QuillApp {
                             .label(tr(keys::BOX_OK))
                             .primary()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.auth_ui.signin.banned_dismissed = true;
+                                this.auth_ui.signin.error_clock.dismiss_banner();
                                 cx.notify();
                             })),
                     ),
@@ -787,14 +754,7 @@ impl QuillApp {
         let mut ticking = false;
         match &auth {
             AuthorizationState::WaitCode { delivery, .. } => {
-                let elapsed = self
-                    .auth_ui
-                    .signin
-                    .code_clock
-                    .as_ref()
-                    .map_or(0, |(_, since)| {
-                        i64::try_from(since.elapsed().as_secs()).unwrap_or(0)
-                    });
+                let elapsed = self.auth_ui.signin.step_clock.code_elapsed();
                 if let Some(url) = signin::fragment_url(delivery) {
                     let url = url.to_string();
                     out.insert(
@@ -837,14 +797,7 @@ impl QuillApp {
                         .on_click(cx.listener(|this, _, _, cx| this.resend_code(cx)))
                         .into_any_element(),
                 );
-                let elapsed = self
-                    .auth_ui
-                    .signin
-                    .email_clock
-                    .as_ref()
-                    .map_or(0, |(_, since)| {
-                        i64::try_from(since.elapsed().as_secs()).unwrap_or(0)
-                    });
+                let elapsed = self.auth_ui.signin.step_clock.email_elapsed();
                 if let Some(label) = signin::email_reset_label(*reset, elapsed) {
                     match reset {
                         EmailResetState::Available { .. } => out.push(

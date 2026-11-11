@@ -23,13 +23,6 @@ pub enum Fetch<T> {
     Failed { error: String, stale: Option<T> },
 }
 
-impl<T> Fetch<Vec<T>> {
-    /// The newest list held; empty when there is none.
-    pub fn items(&self) -> &[T] {
-        self.data().map_or(&[], Vec::as_slice)
-    }
-}
-
 impl<T> Fetch<T> {
     pub fn is_idle(&self) -> bool {
         matches!(self, Self::Idle)
@@ -48,14 +41,18 @@ impl<T> Fetch<T> {
 
     /// A change landed: what is held stays visible and is asked for
     /// again, also when nothing was held (the change needs the answer). A
-    /// request in flight asked before the change; the owner that refetches
-    /// drops it. A first ask in flight with nothing held keeps its place:
-    /// there is no answer to be out of date yet.
+    /// request in flight asked before the change, so it is dropped with its
+    /// mark: a first ask with nothing held becomes `Outdated(None)` too,
+    /// whose answer would otherwise land without the change. The owner that
+    /// refetches asks again.
     pub fn outdate(&mut self) {
-        if matches!(self, Self::Loading { stale: None }) {
-            return;
-        }
         *self = Self::Outdated(self.take_data());
+    }
+
+    /// Something is being waited for: a request in flight, or a refetch due
+    /// with nothing held to show meanwhile. What draws a spinner.
+    pub fn shows_loading(&self) -> bool {
+        matches!(self, Self::Loading { .. } | Self::Outdated(None))
     }
 
     pub fn is_loading(&self) -> bool {
@@ -130,6 +127,27 @@ impl<T> Fetch<T> {
         *self = Self::Loading { stale };
     }
 
+    /// The request answered, unless a change outdated the list meanwhile:
+    /// that answer predates the change, so it is dropped and the refetch
+    /// that follows asks again. `false` when it was dropped.
+    pub fn answer(&mut self, value: T) -> bool {
+        if self.is_outdated() {
+            return false;
+        }
+        *self = Self::Ready(value);
+        true
+    }
+
+    /// The request failed, unless a change outdated the list meanwhile (the
+    /// refetch that follows asks again). `false` when it was dropped.
+    pub fn answer_failed(&mut self, error: impl Into<String>) -> bool {
+        if self.is_outdated() {
+            return false;
+        }
+        self.fail(error);
+        true
+    }
+
     /// The request answered.
     pub fn succeed(&mut self, value: T) {
         *self = Self::Ready(value);
@@ -172,6 +190,13 @@ impl<T> Fetch<T> {
                 None => Self::Idle,
             };
         }
+    }
+}
+
+impl<T> Fetch<Vec<T>> {
+    /// The newest list held, empty when there is none.
+    pub fn items(&self) -> &[T] {
+        self.data().map(Vec::as_slice).unwrap_or(&[])
     }
 }
 

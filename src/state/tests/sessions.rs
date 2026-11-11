@@ -287,11 +287,12 @@ fn terminate_session_error_surfaces_honestly() {
 fn sessions_fetch_error_clears_loading() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.sessions.begin();
     // A failed stale-refetch (e.g. after a terminate-ok marked the
     // cache stale) must NOT leave the cache stale — otherwise the
     // next ingest retries the fetch and flood state worsens.
     session.settings.sessions.outdate();
+    // The refetch goes out after the mark.
+    session.settings.sessions.begin();
     let extra = session.request(RequestPurpose::GetActiveSessions, None);
     apply_json(
         &mut session,
@@ -549,11 +550,12 @@ fn disconnect_all_websites_error_surfaces_honestly() {
 fn websites_fetch_error_clears_loading() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.connected_websites.begin();
     // A failed stale-refetch (e.g. after a disconnect-ok marked the
     // cache stale) must NOT leave the cache stale — otherwise the
     // next ingest retries the fetch and flood state worsens.
     session.settings.connected_websites.outdate();
+    // The refetch goes out after the mark.
+    session.settings.connected_websites.begin();
     let extra = session.request(RequestPurpose::GetConnectedWebsites, None);
     apply_json(
         &mut session,

@@ -28,8 +28,9 @@ HistoryUi.last_highlight | compared with the session's highlight, which is the o
 HistoryUi.live_location_tick_chat | marks a running tick task, as slow_mode_tick_chat
 ShareUi.forward.Bar.dest | the chat the forward bar waits in; kept across chats on purpose (dismiss_forward_for_view)
 ShareUi.forward.Picking.bar | the forward bar the share box was opened over, which leaving the box returns to; it goes with the bar (dismiss_forward_for_view)
-ViewerUi.video | the media viewer's clip, which outlives a chat change (the viewer is the screen's)
-ViewerUi.pending_seek | a media-timestamp link's seek for the viewer's clip, as ViewerUi.video
+ViewerUi.clip.Playing.item | the media viewer's clip, which outlives a chat change (the viewer is the screen's)
+ViewerUi.clip.Gif.item | the media viewer's GIF clip, as ViewerUi.clip.Playing.item
+ViewerUi.pending_seek | a media-timestamp link's seek for the viewer's clip, as ViewerUi.clip.Playing.item
 ComposerUi.send_effect_once | an effect id, not a chat's: set and cleared around one synchronous send
 ComposerUi.suggest.stickers_dismissed | carries its chat and text: another chat never matches
 MessageUi.a11y.announce_first | carries its chat; read against the chat viewed
@@ -40,7 +41,7 @@ HistoryUi.row_hover.painted | the rows' hitboxes, rebuilt by every paint
 HistoryUi.stream_reveal.Finishing.message | the bot reply finishing its reveal: the reveal names its chat and starts over in another
 HistoryUi.pull.next_chat | the pull gesture's next chat; `pull_sync` resets it when the chat or topic shown changes
 HistoryUi.pull.window | the window and chat-window scope of that gesture, read by its jump, which `pull_sync` drops
-ViewerUi.extra.share_at | the media viewer's "Share at" forward, as ViewerUi.video
+ViewerUi.extra.share_at | the media viewer's "Share at" forward, as ViewerUi.clip.Playing.item
 ViewerUi.extra.caption.key | carries its chat and message: the caption built for another never matches
 # Round 7: walked through `Option`, `Vec`, map values and enums. Each of
 # these carries the chat it acts on, or holds no chat's ids at all (a time,

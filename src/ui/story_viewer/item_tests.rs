@@ -4,6 +4,7 @@
 //! `ready-story-viewer` demo, which opens on Leo's story 3.
 use super::icon_chrome::MenuAct;
 use super::open_tests::{frames, open_app};
+use crate::ui::stories_state::{PanelKind, ViewerPanel};
 use crate::ui::story_albums::StoryPrivacyEdit;
 use gpui_kit::TestAppContext;
 use quill::ids::ChatId;
@@ -30,10 +31,13 @@ fn a_menu_answer_for_another_story_does_nothing(cx: &mut TestAppContext) {
         app.stories.with_viewer_ui(|open| open.menu_open = true);
         app.run_story_menu(MenuAct::React, (LEO, 2), window, cx);
         let open = app.stories.viewer_ui();
-        assert!(!open.reaction_picker_open, "the menu was for story 2");
+        assert!(
+            !open.is_open(PanelKind::ReactionPicker),
+            "the menu was for story 2"
+        );
         assert!(!open.menu_open, "the menu closed");
         app.run_story_menu(MenuAct::React, (LEO, 3), window, cx);
-        assert!(app.stories.viewer_ui().reaction_picker_open);
+        assert!(app.stories.viewer_ui().is_open(PanelKind::ReactionPicker));
     });
 }
 
@@ -58,9 +62,8 @@ fn a_step_drops_the_last_storys_editors(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_app(cx, "ready-story-viewer");
     app.update(&mut vcx, |app, cx| {
         app.stories.with_viewer_ui(|open| {
-            open.privacy_edit = Some(privacy_edit());
+            open.show(ViewerPanel::Privacy(privacy_edit()));
             open.menu_open = true;
-            open.share_open = true;
         });
         app.step_story_viewer(1, cx);
     });
@@ -71,9 +74,9 @@ fn a_step_drops_the_last_storys_editors(cx: &mut TestAppContext) {
             app.stories.viewer.current().map(|item| item.chat_id),
             Some(LEO)
         );
-        assert!(open.privacy_edit.is_none(), "Leo's privacy editor");
+        assert!(open.privacy_edit().is_none(), "Leo's privacy editor");
         assert!(!open.menu_open);
-        assert!(!open.share_open);
+        assert!(!open.has_panel());
     });
 }
 
@@ -82,8 +85,7 @@ fn opening_over_the_viewer_starts_clean(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_app(cx, "ready-story-viewer");
     app.update(&mut vcx, |app, cx| {
         app.stories.with_viewer_ui(|open| {
-            open.privacy_edit = Some(privacy_edit());
-            open.reply_open = true;
+            open.show(ViewerPanel::Privacy(privacy_edit()));
         });
         app.open_story_viewer(ChatId(MAYA), 5, StoryOpenScope::Tray, cx);
     });
@@ -91,8 +93,8 @@ fn opening_over_the_viewer_starts_clean(cx: &mut TestAppContext) {
     app.read_with(&vcx, |app, _| {
         let open = app.stories.viewer_ui();
         assert!(app.stories.viewer.is_open());
-        assert!(open.privacy_edit.is_none(), "the old viewer's editor");
-        assert!(!open.reply_open, "the old viewer's reply row");
+        assert!(open.privacy_edit().is_none(), "the old viewer's editor");
+        assert!(!open.reply_open(), "the old viewer's reply row");
     });
 }
 
@@ -108,7 +110,7 @@ fn a_release_cancels_the_story_reply_being_recorded(cx: &mut TestAppContext) {
             let path = std::env::temp_dir().join("quill-story-reply-release-test.ogg");
             Ok(quill::voice::VoiceCapture::preview(path, 1, vec![4]))
         });
-        app.stories.with_viewer_ui(|open| open.reply_open = true);
+        app.stories.with_viewer_ui(|open| open.open_reply());
         app.start_voice_capture(CaptureFor::StoryReply, cx);
     });
     vcx.run_until_parked();

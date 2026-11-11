@@ -72,24 +72,23 @@ fn gifts_page_applies_and_registers_sticker_files() {
 fn gift_mutation_ok_marks_the_list_stale_and_errors_release_the_lock() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.payments.hub.gift_mutating = true;
-    session.payments.hub.set_gifts(Vec::new(), 0);
     let extra = session.request(
         RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { saved: false }),
         None,
     );
+    session.payments.hub.gift_mutation = crate::premium_hub::GiftMutation::Busy(extra);
     apply_json(
         &mut session,
         &seq,
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!session.payments.hub.gift_mutating);
-    assert!(session.payments.hub.gifts.is_outdated());
+    assert!(!session.payments.hub.gift_mutation.is_busy());
+    assert!(session.payments.hub.gifts_stale);
 
-    session.payments.hub.gift_mutating = true;
     session.payments.hub.gift_convert_confirm = Some("g1".into());
     let extra = session.request(RequestPurpose::SellGift, None);
+    session.payments.hub.gift_mutation = crate::premium_hub::GiftMutation::Busy(extra);
     apply_json(
         &mut session,
         &seq,
@@ -99,9 +98,38 @@ fn gift_mutation_ok_marks_the_list_stale_and_errors_release_the_lock() {
             extra.0
         ),
     );
-    assert!(!session.payments.hub.gift_mutating);
+    assert!(!session.payments.hub.gift_mutation.is_busy());
     assert!(session.payments.hub.gift_convert_confirm.is_none());
     assert!(session.payments.hub.gifts_error.is_some());
+}
+
+#[test]
+fn another_requests_answer_does_not_free_a_gift_mutation() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let busy = session.request(RequestPurpose::SellGift, None);
+    session.payments.hub.gift_mutation = crate::premium_hub::GiftMutation::Busy(busy);
+    let other = session.request(
+        RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { saved: true }),
+        None,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, other.0),
+    );
+    assert!(
+        session.payments.hub.gift_mutation.is_busy(),
+        "only the request that locked it frees it"
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, busy.0),
+    );
+    assert!(!session.payments.hub.gift_mutation.is_busy());
 }
 
 #[test]

@@ -134,7 +134,7 @@ impl Sim {
             s.threads
                 .thread
                 .as_ref()
-                .is_some_and(|thread| thread.history.loaded_complete)
+                .is_some_and(|thread| thread.history.loaded_complete())
         })
     }
 

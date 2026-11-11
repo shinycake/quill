@@ -849,18 +849,17 @@ impl QuillApp {
             &["connection.proxy_list", "connection.auto_switch"]
         };
         if state.entries().is_empty() {
-            body =
-                body.child(this.setting_spot(
-                    list_ids,
-                    div().py_3().text_sm().text_color(text_muted()).child(
-                        if state.list.loading() {
-                            tr(keys::Q_PREFS_LOADING)
-                        } else {
-                            tr(keys::PROXY_DESCRIPTION)
-                        },
-                    ),
-                    cx,
-                ));
+            body = body.child(this.setting_spot(
+                list_ids,
+                div().py_3().text_sm().text_color(text_muted()).child(
+                    if state.list.shows_loading() {
+                        tr(keys::Q_PREFS_LOADING)
+                    } else {
+                        tr(keys::PROXY_DESCRIPTION)
+                    },
+                ),
+                cx,
+            ));
         } else {
             let mut rows = div().flex().flex_col().gap_1();
             let connected = this.session().is_some_and(|s| {

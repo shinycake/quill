@@ -284,7 +284,7 @@ pub(super) fn decode_with_ffmpeg(
     cache: &Path,
     edge: usize,
     max_frames: usize,
-    child: &std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
+    extraction: &std::sync::Arc<crate::video::Extraction>,
     cancelled: &AtomicBool,
     each: &mut WebmSteps<'_>,
 ) -> Result<f64, String> {
@@ -299,7 +299,7 @@ pub(super) fn decode_with_ffmpeg(
         fps,
         i32::try_from(edge).unwrap_or(i32::MAX),
         i32::try_from(max_frames).unwrap_or(i32::MAX),
-        Some((child, cancelled)),
+        Some(extraction),
         Some("libvpx-vp9"),
     )
     .and_then(|paths| read_png_frames(&paths, cancelled, each));

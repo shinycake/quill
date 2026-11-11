@@ -53,7 +53,7 @@ fn edit_avatar(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, info: VideoS
                 .send_box
                 .video_editor
                 .as_ref()
-                .map_or(0, |editor| editor.serial);
+                .map_or(0, |editor| editor.serial());
             app.video_editor_probed(serial, Some(info), None, window, cx);
         });
     });

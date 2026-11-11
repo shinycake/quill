@@ -47,36 +47,50 @@ pub(crate) enum Peek {
     },
 }
 
+/// The column's preference. The pointer only peeks at a hidden column, so
+/// the peek lives in the hidden variant: showing the column ends it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mode {
+    Docked,
+    Hidden(Peek),
+}
+
 #[derive(Debug)]
 pub(crate) struct SidebarReveal {
-    hidden: bool,
+    mode: Mode,
     docked: Glide,
     peek: Glide,
-    pointer: Peek,
 }
 
 impl SidebarReveal {
     pub(crate) fn new(hidden: bool, now: Instant) -> Self {
         Self {
-            hidden,
+            mode: if hidden {
+                Mode::Hidden(Peek::Off)
+            } else {
+                Mode::Docked
+            },
             docked: Glide::settled(if hidden { 0. } else { 1. }, now, ease_out_cubic),
             peek: Glide::settled(0., now, ease_out_cubic),
-            pointer: Peek::Off,
         }
     }
 
     /// The stored preference: the user hid the column.
     pub(crate) fn hidden(&self) -> bool {
-        self.hidden
+        matches!(self.mode, Mode::Hidden(_))
     }
 
     /// Hide or show the column. Showing it while it peeks keeps it where it
     /// is on screen and only makes it take its room in the layout.
     pub(crate) fn set_hidden(&mut self, hidden: bool, animate: bool, now: Instant) {
-        if self.hidden == hidden {
+        if self.hidden() == hidden {
             return;
         }
-        self.hidden = hidden;
+        self.mode = if hidden {
+            Mode::Hidden(Peek::Off)
+        } else {
+            Mode::Docked
+        };
         if !hidden {
             let peeked = self.peek.value(now);
             if peeked > self.docked.value(now) {
@@ -84,7 +98,6 @@ impl SidebarReveal {
             }
         }
         self.peek = Glide::settled(0., now, ease_out_cubic);
-        self.pointer = Peek::Off;
         self.docked
             .go(if hidden { 0. } else { 1. }, SLIDE_DURATION, animate, now);
     }
@@ -92,14 +105,17 @@ impl SidebarReveal {
     /// The pointer reached the reveal edge or moved over the peeking
     /// column. Returns whether anything changed.
     pub(crate) fn pointer_entered(&mut self, animate: bool, now: Instant) -> bool {
-        if !self.hidden || self.pointer == Peek::Hovering {
+        let Mode::Hidden(pointer) = self.mode else {
+            return false;
+        };
+        if pointer == Peek::Hovering {
             return false;
         }
-        if self.pointer == Peek::Off && self.docked.value(now) > 0. {
+        if pointer == Peek::Off && self.docked.value(now) > 0. {
             // Still sliding out after Hide: no peek on top of it.
             return false;
         }
-        self.pointer = Peek::Hovering;
+        self.mode = Mode::Hidden(Peek::Hovering);
         self.peek.go(1., SLIDE_DURATION, animate, now);
         true
     }
@@ -107,19 +123,20 @@ impl SidebarReveal {
     /// The pointer moved off the peeking column. Returns whether the grace
     /// period started (the caller redraws once it is over).
     pub(crate) fn pointer_left(&mut self, now: Instant) -> bool {
-        if self.pointer != Peek::Hovering {
+        if self.mode != Mode::Hidden(Peek::Hovering) {
             return false;
         }
-        self.pointer = Peek::Leaving { since: now };
+        self.mode = Mode::Hidden(Peek::Leaving { since: now });
         true
     }
 
     /// Escape: slide the peeking column out now. Returns whether it peeked.
     pub(crate) fn dismiss(&mut self, animate: bool, now: Instant) -> bool {
-        if self.pointer == Peek::Off {
-            return false;
+        match self.mode {
+            Mode::Hidden(Peek::Hovering | Peek::Leaving { .. }) => {}
+            Mode::Hidden(Peek::Off) | Mode::Docked => return false,
         }
-        self.pointer = Peek::Off;
+        self.mode = Mode::Hidden(Peek::Off);
         self.peek.go(0., SLIDE_DURATION, animate, now);
         true
     }
@@ -128,17 +145,20 @@ impl SidebarReveal {
     /// out, unless something opened from it still needs it (`held`: its
     /// context menu, or its search field has the keyboard).
     pub(crate) fn settle(&mut self, held: bool, animate: bool, now: Instant) {
-        if let Peek::Leaving { since } = self.pointer
+        if let Mode::Hidden(Peek::Leaving { since }) = self.mode
             && !held
             && now.saturating_duration_since(since) >= LEAVE_GRACE
         {
-            self.pointer = Peek::Off;
+            self.mode = Mode::Hidden(Peek::Off);
             self.peek.go(0., SLIDE_DURATION, animate, now);
         }
     }
 
     pub(crate) fn pointer(&self) -> Peek {
-        self.pointer
+        match self.mode {
+            Mode::Hidden(pointer) => pointer,
+            Mode::Docked => Peek::Off,
+        }
     }
 
     /// Share of the column's width in the layout, `0..=1`.

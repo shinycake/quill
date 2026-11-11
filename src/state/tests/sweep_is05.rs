@@ -130,35 +130,6 @@ fn the_next_channel_preload_leaves_loading_on_its_error() {
 }
 
 #[test]
-fn a_sponsored_report_leaves_through_its_error_and_its_dismissals() {
-    let (mut session, _sink) = session();
-    session.messages.sponsored_report = SponsoredReport::Target {
-        chat_id: ChatId(3),
-        message_id: 7,
-        request: Some(RequestId(11)),
-    };
-    assert!(session.messages.sponsored_report.waits_for(RequestId(11)));
-    assert!(!session.messages.sponsored_report.waits_for(RequestId(12)));
-    assert_eq!(session.sponsored_report_chat(), Some(ChatId(3)));
-    session.dismiss_sponsored_report();
-    assert!(matches!(
-        session.messages.sponsored_report,
-        SponsoredReport::Idle
-    ));
-    // The outcome note survives a dismissal of the picker and leaves on
-    // its own dismissal.
-    session.messages.sponsored_report = SponsoredReport::Outcome(SponsoredReportOutcome {
-        chat_id: ChatId(3),
-        message_id: 0,
-        result: ReportSponsoredResult::AdsHidden,
-    });
-    session.dismiss_sponsored_report();
-    assert!(session.messages.sponsored_report.outcome().is_some());
-    session.clear_sponsored_report_outcome();
-    assert!(session.messages.sponsored_report.outcome().is_none());
-}
-
-#[test]
 fn an_outdated_fetch_keeps_its_answer_and_a_change_clears_its_line() {
     let mut list = Fetch::Ready(vec![1, 2]);
     list.outdate();
@@ -210,4 +181,85 @@ fn a_wearable_gifts_failure_leaves_loading_and_a_retry_asks_again() {
     assert!(gifts.can_ask() && gifts.error().is_some());
     gifts.begin();
     assert!(gifts.is_loading());
+}
+
+#[test]
+fn a_change_during_a_first_ask_outdates_it_and_drops_the_old_answer() {
+    let mut list: Fetch<Vec<i32>> = Fetch::Loading { stale: None };
+    list.outdate();
+    assert!(list.is_outdated() && list.shows_loading());
+    // The answer that was asked before the change does not land.
+    assert!(!list.answer(vec![1]));
+    assert!(list.is_outdated());
+    assert!(!list.answer_failed("late"));
+    assert!(list.is_outdated());
+    list.begin();
+    assert!(list.answer(vec![2]));
+    assert_eq!(list.items(), [2]);
+}
+
+#[test]
+fn a_change_during_the_first_proxy_fetch_drops_it_and_refetches() {
+    let (mut session, sink) = session();
+    let seq = std::sync::atomic::AtomicU64::new(0);
+    let fetch = session.request(RequestPurpose::GetProxies, None);
+    session.settings.proxy.list.begin(fetch, false);
+    // A link-box add succeeds while the first `getProxies` is in flight.
+    let add = session.request(RequestPurpose::MutateProxy, None);
+    session.settings.proxy.mutation = crate::proxy::ProxyMutation::InFlight(add);
+    let pending = session.requests.get(add).cloned();
+    session.apply_added_proxy(pending.as_ref());
+    assert!(session.settings.proxy.list.is_outdated());
+    assert!(session.settings.proxy.list.shows_loading());
+    assert_eq!(
+        session.settings.proxy.mutation,
+        crate::proxy::ProxyMutation::Idle
+    );
+    // The pre-change answer lands on nothing.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"proxies","proxies":[],"@extra":"{}"}}"#,
+            fetch.0
+        ),
+    );
+    assert!(session.settings.proxy.list.is_outdated());
+}
+
+#[test]
+fn an_active_sessions_answer_asked_before_a_terminate_is_dropped() {
+    let (mut session, sink) = session();
+    let seq = std::sync::atomic::AtomicU64::new(0);
+    let fetch = session.request(RequestPurpose::GetActiveSessions, None);
+    session.settings.sessions.begin();
+    session.settings.sessions.outdate();
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"sessions","sessions":[],"inactive_session_ttl_days":180,"@extra":"{}"}}"#,
+            fetch.0
+        ),
+    );
+    assert!(session.settings.sessions.is_outdated());
+}
+
+#[test]
+fn hiding_ads_keeps_a_report_in_flight() {
+    use crate::state::{SponsoredReportFlow, SponsoredReportTarget};
+    let (mut session, _sink) = session();
+    session.messages.sponsored_report = SponsoredReportFlow::Asking(SponsoredReportTarget {
+        chat_id: ChatId(3),
+        message_id: 7,
+        request: Some(RequestId(11)),
+    });
+    session.accept_sponsored_hidden(ChatId(3));
+    assert!(matches!(
+        session.messages.sponsored_report,
+        SponsoredReportFlow::Asking(_)
+    ));
+    assert!(session.messages.sponsored_hidden);
 }

@@ -21,8 +21,6 @@ use crate::telegram::requests::{
 };
 
 mod chat_search;
-mod debounce;
-pub(crate) use debounce::TypedDebounce;
 mod shared_media_calendar;
 mod shared_media_search;
 mod sponsored;
@@ -35,12 +33,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // Already open on a query: a debounce still pending for it keeps
         // its commit. Cleared, the legs stayed Searching with nothing sent.
-        if self.session.search.search.open && !self.session.search.search.query.is_empty() {
+        if self.session.search.search.is_open() && !self.session.search.search.query.is_empty() {
             return Ok(None);
         }
         self.clear_typed_debounce();
-        if self.session.search.search.open
-            && self.session.search.search.recents
+        if self.session.search.search.is_open()
+            && self.session.search.search.is_recents()
             && matches!(
                 self.session.search.search.status(),
                 SearchStatus::Searching | SearchStatus::Ready | SearchStatus::Idle
@@ -82,9 +80,9 @@ impl<S: JsonSender> ConnectDriver<S> {
                     None => SearchQueryOutcome::Unchanged,
                 });
             }
-            if self.session.search.search.open
+            if self.session.search.search.is_open()
                 && self.session.search.search.query.is_empty()
-                && self.session.search.search.recents
+                && self.session.search.search.is_recents()
                 && matches!(
                     self.session.search.search.status(),
                     SearchStatus::Searching | SearchStatus::Ready | SearchStatus::Idle
@@ -97,14 +95,14 @@ impl<S: JsonSender> ConnectDriver<S> {
                 None => SearchQueryOutcome::Unchanged,
             });
         }
-        if self.typed_search.pending() == Some(trimmed)
+        if self.typed_search.armed().is_some_and(|q| q == trimmed)
             && self.session.search.search.query == trimmed
         {
             return Ok(SearchQueryOutcome::Unchanged);
         }
-        if self.typed_search.pending().is_none()
+        if self.typed_search.is_idle()
             && self.session.search.search.query == trimmed
-            && !self.session.search.search.recents
+            && !self.session.search.search.is_recents()
             && matches!(
                 self.session.search.search.status(),
                 SearchStatus::Searching
@@ -116,7 +114,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(SearchQueryOutcome::Unchanged);
         }
         let _search_gen = self.session.search.search.begin_query(trimmed);
-        let token = self.typed_search.arm(trimmed);
+        let token = self.typed_search.arm(trimmed.to_string());
         Ok(SearchQueryOutcome::Debounced { token })
     }
 
@@ -125,7 +123,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         token: u64,
     ) -> Result<Option<SearchFlight>, ConnectSendError> {
-        let Some(query) = self.typed_search.commit(token) else {
+        let Some(query) = self.typed_search.take_if(token) else {
             return Ok(None);
         };
         self.send_typed_search(&query)
@@ -346,7 +344,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.clear_typed_debounce();
-        self.session.search.search.open = true;
         self.session.search.search.filters.scope = scope;
         let _search_gen = self.session.search.search.begin_query(tag);
         self.send_typed_search(tag)

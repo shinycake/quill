@@ -6,6 +6,7 @@
 use super::rows::{group, link_row};
 use super::{QuillApp, SubPage};
 use crate::ui::navigation::NavigationAction as Nav;
+use crate::ui::settings_state::SystemAccent;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::settings_catalog::Page;
@@ -96,7 +97,7 @@ impl QuillApp {
                 )),
             Page::Appearance => {
                 self.ensure_wallpapers_loaded(cx);
-                if !self.preferences.system_accent_probed {
+                if self.preferences.system_accent == SystemAccent::Unread {
                     self.refresh_system_accent(cx);
                 }
                 column

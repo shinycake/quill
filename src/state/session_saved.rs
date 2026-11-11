@@ -195,7 +195,7 @@ impl Session {
     /// offers Retry. It is not complete: only TDLib saying so ends it.
     pub(crate) fn fail_saved_tag_page(&mut self, pending: Option<&PendingRequest>) {
         if let Some(search) = self.awaiting_saved_tag_search(pending) {
-            search.history.older = OlderEnd::Failed;
+            search.history.fail_older();
         }
     }
 
@@ -209,7 +209,7 @@ impl Session {
             && view.page == SavedPage::Asking(pending.id)
         {
             view.page = SavedPage::Idle;
-            view.history.older = OlderEnd::Failed;
+            view.history.fail_older();
         }
     }
 
@@ -257,7 +257,7 @@ impl Session {
                 .insert(id, history_message(message, false));
         }
         if empty {
-            view.history.loaded_complete = true;
+            view.history.mark_complete();
         }
         if let Some(oldest) = oldest {
             view.history.next_from_message_id = MessageId(oldest);
@@ -296,7 +296,7 @@ impl Session {
                 .insert(message.id.0, history_message(message, false));
         }
         if next_from_message_id.0 == 0 || empty {
-            search.history.loaded_complete = true;
+            search.history.mark_complete();
         }
         search.history.next_from_message_id = next_from_message_id;
         search.history.total_count = total_count.max(search.history.messages.len() as i32);

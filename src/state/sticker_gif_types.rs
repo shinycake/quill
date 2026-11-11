@@ -272,7 +272,6 @@ pub struct StickerPanel {
     pub stickers: Vec<StickerItem>,
     /// The selected set's `getStickerSet`: asked, answered or failed.
     pub set: StickerSetStage,
-    pub installed_loaded: bool,
     /// Each list tab's own fetch: a failure of one list shows on that tab
     /// only, and a failed mutation is a note, not a list failure.
     pub lists: StickerLists,
@@ -288,8 +287,9 @@ pub struct StickerPanel {
     /// `updateTrendingStickerSets` arrived (another device changed them):
     /// refetch the loaded list.
     /// `getGreetingStickers`: hello stickers for empty private chats.
-    pub greeting: Vec<StickerItem>,
-    pub greeting_loaded: bool,
+    /// Asked once per session from `Idle`; a failure stays `Failed`, so a
+    /// redraw never asks again.
+    pub greeting: Fetch<Vec<StickerItem>>,
     /// `getAttachedStickerSets` answered: the sets (first opens in the
     /// sticker set dialog; `None` inside: the media has none).
     pub attached_answer: Option<Option<i64>>,
@@ -420,6 +420,12 @@ impl GifPanel {
 }
 
 impl StickerPanel {
+    /// The installed sets were answered once (a refetch keeps them); an
+    /// invalidated list is not.
+    pub fn installed_loaded(&self) -> bool {
+        self.lists.installed.data().is_some()
+    }
+
     pub fn visible_stickers(&self) -> &[StickerItem] {
         match self.tab {
             StickerTab::Installed | StickerTab::Trending => &self.stickers,

@@ -122,7 +122,7 @@ fn join_request_search_drops_stale_replies_and_pages_with_offset() {
     rig.ingest(&requests_json(first, 9, &[1, 2]));
     assert!(matches!(
         rig.driver.session.groups.join_requests.get(&13),
-        Some(JoinRequestFetch::Loading)
+        Some(JoinRequestFetch::Loading { .. })
     ));
     rig.ingest(&requests_json(second, 3, &[5, 6]));
     let Some(JoinRequestFetch::Loaded(list)) = rig.driver.session.groups.join_requests.get(&13)
@@ -646,7 +646,7 @@ fn reopening_during_a_search_shows_the_full_list_not_the_search() {
     rig.ingest(&requests_json(search, 1, &[1]));
     assert!(matches!(
         rig.driver.session.groups.join_requests.get(&13),
-        Some(JoinRequestFetch::Loading)
+        Some(JoinRequestFetch::Loading { .. })
     ));
     rig.ingest(&requests_json(fresh, 2, &[5, 6]));
     let Some(JoinRequestFetch::Loaded(list)) = rig.driver.session.groups.join_requests.get(&13)
@@ -733,7 +733,7 @@ fn a_join_request_ask_without_the_right_to_invite_fails_and_a_sent_one_loads() {
     admin.driver.ask_join_requests(ChatId(13), "", true);
     assert!(matches!(
         admin.driver.session.groups.join_requests.get(&13),
-        Some(JoinRequestFetch::Loading)
+        Some(JoinRequestFetch::Loading { .. })
     ));
 }
 

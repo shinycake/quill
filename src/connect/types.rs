@@ -356,17 +356,18 @@ pub struct ConnectDriver<S: JsonSender> {
     /// folder's owner (`account_data::claim`).
     pub(crate) claimed_owner: Option<i64>,
     pub(crate) database_key: DatabaseKey,
-    pub(crate) parameters_sent: bool,
-    pub(crate) typed_search: super::search::TypedDebounce,
-    pub(crate) typed_chat_search: super::search::TypedDebounce,
+    /// Whether `setTdlibParameters` went out, and as which request.
+    /// The typed chat-list search waiting out its quiet window.
+    pub(crate) typed_search: super::debounce::Debounce<String>,
+    /// The typed in-chat search waiting out its quiet window.
+    pub(crate) typed_chat_search: super::debounce::Debounce<String>,
     /// Last `chatActionTyping` we sent (Unigram `_lastTypingTime`).
     pub(crate) outgoing_typing: Option<OutgoingTyping>,
     /// Last `chatActionRecordingVoiceNote` (Unigram record button).
     pub(crate) outgoing_voice: Option<OutgoingTyping>,
-    /// tdesktop `saveDraft` clock for the open composer.
-    pub(crate) draft_clock: DraftSaveClock,
-    pub(crate) draft_save_token: u64,
-    pub(crate) pending_draft: Option<PendingDraft>,
+    /// The composer draft save waiting for its quiet window (tdesktop
+    /// `saveDraft`), or kept after a failed send.
+    pub(crate) pending_draft: super::debounce::Debounce<HeldDraft>,
     /// Q1: idempotent reads waiting out a 429 before being re-sent.
     pub(crate) flood_retries: Vec<super::flood_retry::FloodRetry>,
     /// Q1: re-send count per request id that hit a rate limit.
@@ -391,8 +392,43 @@ pub(crate) struct OutgoingTyping {
     pub(crate) last_sent_ms: u64,
 }
 
+/// A draft save that has not gone out.
+pub(crate) enum HeldDraft {
+    /// Waiting out the quiet window that began at `started_ms`.
+    Quiet {
+        started_ms: u64,
+        draft: PendingDraft,
+    },
+    /// The send failed: the save waits for the next flush, typing or chat
+    /// leave.
+    Kept(PendingDraft),
+}
+
+impl HeldDraft {
+    pub(crate) fn draft(&self) -> &PendingDraft {
+        match self {
+            Self::Quiet { draft, .. } | Self::Kept(draft) => draft,
+        }
+    }
+
+    pub(crate) fn into_draft(self) -> PendingDraft {
+        match self {
+            Self::Quiet { draft, .. } | Self::Kept(draft) => draft,
+        }
+    }
+
+    /// tdesktop's `saveDraft` clock: running only in a quiet window.
+    pub(crate) fn clock(&self) -> DraftSaveClock {
+        DraftSaveClock {
+            started_ms: match self {
+                Self::Quiet { started_ms, .. } => Some(*started_ms),
+                Self::Kept(_) => None,
+            },
+        }
+    }
+}
+
 pub(crate) struct PendingDraft {
-    pub(crate) token: u64,
     pub(crate) chat_id: ChatId,
     /// The slot the edit belongs to, fixed when the timer was armed: a
     /// topic or thread switch before it fires still saves to the right one.

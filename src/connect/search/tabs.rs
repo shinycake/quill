@@ -40,9 +40,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
     ) -> Result<Option<SearchFlight>, ConnectSendError> {
         let search = &self.session.search.search;
-        if search.open
+        if search.is_open()
             && search.query.is_empty()
-            && !search.recents
+            && !search.is_recents()
             && matches!(
                 search.status(),
                 SearchStatus::Searching
@@ -181,15 +181,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !tabs.recommended.can_ask() {
             return Ok(None);
         }
-        tabs.recommended.begin();
         let extra = self
             .session
             .request(RequestPurpose::GetRecommendedChats, None);
         if let Err(err) = self.sender.send_json(&get_recommended_chats(extra)) {
             self.session.requests.take(extra);
-            self.session.search.search.tabs.recommended.fail("not sent");
+            self.session
+                .search
+                .search
+                .tabs
+                .recommended
+                .fail("could not send");
             return Err(err);
         }
+        self.session.search.search.tabs.recommended.begin();
         Ok(Some(extra))
     }
 

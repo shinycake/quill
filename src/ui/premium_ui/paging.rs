@@ -76,11 +76,11 @@ impl QuillApp {
         };
         if !grams.open
             || grams.selected.is_some()
-            || (grams.error.is_some() && !scrolled)
+            || (grams.load.error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.payments.grams_scroll),
                 grams.has_more(),
-                grams.loading,
+                grams.load.is_loading(),
             )
             || !self
                 .payments

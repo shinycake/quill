@@ -146,7 +146,10 @@ fn log_out_asks_before_signing_out(cx: &mut TestAppContext) {
     assert_eq!(open_dialog(&shell, vcx), None);
     app.read_with(vcx, |app, _| {
         assert!(app.settings.open);
-        assert!(!app.settings.log_out_confirm);
+        assert!(
+            !app.settings
+                .box_open(crate::ui::settings_state::SettingsBox::LogOut)
+        );
     });
 }
 
@@ -198,7 +201,7 @@ fn a_narrow_window_shows_the_list_then_a_page_with_a_way_back(cx: &mut TestAppCo
 }
 
 fn query(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> String {
-    app.read_with(vcx, |app, _| app.settings.search.query.clone())
+    app.read_with(vcx, |app, cx| app.settings.search.query(cx))
 }
 
 #[gpui_kit::test]

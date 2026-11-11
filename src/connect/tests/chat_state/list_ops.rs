@@ -265,7 +265,7 @@ fn cl2_clear_recently_found_chats_optimistic_clear() {
     let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
     let seq = AtomicU64::new(0);
     ready_private_chat(&mut driver, &seq, &dyn_sink);
-    driver.session.search.search.recents = true;
+    driver.session.search.search.surface = crate::state::SearchSurface::Recents;
     driver.session.search.search.chat_ids = vec![ChatId(7)];
 
     let sent = driver.clear_recently_found_chats().expect("send");
@@ -340,15 +340,15 @@ fn cl2_archive_chat_list_settings_fetch_and_set() {
         driver
             .session
             .chat_list
-            .archive_chat_list_settings
+            .archive_chat_list_settings()
             .is_some()
     );
-    assert!(!driver.session.chat_list.archive_settings_loading);
+    assert!(!driver.session.chat_list.archive_settings_loading());
 
     let mut next = driver
         .session
         .chat_list
-        .archive_chat_list_settings
+        .archive_chat_list_settings()
         .expect("fetched");
     next.keep_unmuted_chats_archived = true;
     let sent = driver.set_archive_chat_list_settings(next).expect("send");
@@ -364,7 +364,7 @@ fn cl2_archive_chat_list_settings_fetch_and_set() {
         driver
             .session
             .chat_list
-            .archive_chat_list_settings
+            .archive_chat_list_settings()
             .expect("cached")
             .keep_unmuted_chats_archived,
         "optimistic flip applied"
@@ -386,7 +386,7 @@ fn cl2_archive_chat_list_settings_fetch_and_set() {
         !driver
             .session
             .chat_list
-            .archive_chat_list_settings
+            .archive_chat_list_settings()
             .expect("cached")
             .keep_unmuted_chats_archived,
         "refusal restored the old settings"

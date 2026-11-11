@@ -164,14 +164,16 @@ impl<P: Page> Paged<P> {
 
     /// The list is out of date, also when nothing was held (the change
     /// needs the answer). A page still in flight asked before the change,
-    /// so its answer is dropped with its request; a first page in flight
-    /// with nothing held keeps its place (there is nothing to refetch
-    /// over).
+    /// so its answer is dropped with its request, a first page with
+    /// nothing held included: it would land without the change.
     pub fn outdate(&mut self) {
-        if matches!(self, Self::Loading { stale: None, .. }) {
-            return;
-        }
         *self = Self::Outdated(self.take_data());
+    }
+
+    /// Something is being waited for: a page in flight, or a refetch due
+    /// with nothing held to show meanwhile. What draws a spinner.
+    pub fn shows_loading(&self) -> bool {
+        matches!(self, Self::Loading { .. } | Self::Outdated(None))
     }
 
     /// The owner of the list changed (a filter, a chat): nothing is kept.

@@ -20,11 +20,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 })
                 .and_then(|(id, window)| {
                     let messages = &mut self.session.messages;
-                    messages.instant_view_agent_requests.remove(&id);
                     messages
-                        .instant_view_urls
+                        .instant_view_requests
                         .remove(&id)
-                        .map(|url| (window, url, rich.clone()))
+                        .map(|ask| (window, ask.url, rich.clone()))
                 }),
             _ => None,
         }

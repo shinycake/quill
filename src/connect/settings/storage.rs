@@ -1,6 +1,5 @@
 //! Connect driver: storage statistics, auto-download presets and storage limits.
 use super::*;
-use crate::storage_limits::StorageSeed;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase S2: `getStorageStatistics` for the storage-usage overlay —
@@ -14,7 +13,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.settings.storage_stats.is_some()
+        if !self.session.settings.storage_stats.can_ask()
             || self
                 .session
                 .requests
@@ -25,12 +24,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetStorageStatistics, None);
-        self.session.settings.storage_stats_loading = true;
         match self.sender.send_json(&get_storage_statistics(extra, 50)) {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                self.session.settings.storage_stats.begin();
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.storage_stats_loading = false;
                 Err(err)
             }
         }
@@ -43,8 +43,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// data yet." until the old answer lands (late answers to the dropped
     /// `@extra` are ignored by the purpose match).
     pub fn refresh_storage_statistics(&mut self) {
-        self.session.settings.storage_stats = None;
-        self.session.settings.storage_stats_loading = false;
+        self.session.settings.storage_stats = Default::default();
         self.session
             .requests
             .take_purpose(RequestPurpose::GetStorageStatistics);
@@ -59,7 +58,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.settings.data_storage.seeded
+        if self.session.settings.data_storage.seeded != Seed::Unseeded
             || self
                 .session
                 .requests
@@ -70,17 +69,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetAutoDownloadSettingsPresets, None);
-        self.session.settings.auto_download_presets_loading = true;
         if let Err(err) = self
             .sender
             .send_json(&get_auto_download_settings_presets(extra))
         {
             self.session.requests.take(extra);
-            self.session.settings.auto_download_presets_loading = false;
             self.session.settings.data_storage_error =
                 Some("Couldn't load auto-download settings.".to_string());
             return Err(err);
         }
+        self.session.settings.data_storage.seeded = Seed::InFlight;
         Ok(())
     }
 
@@ -125,7 +123,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// all-off defaults would silently disable the user's
     /// auto-downloads account-wide.
     pub fn set_less_data_for_calls(&mut self, on: bool) -> Result<(), ConnectSendError> {
-        if !self.session.settings.data_storage.seeded {
+        if !self.session.settings.data_storage.seeded.is_seeded() {
             return Err(ConnectSendError::InvalidRequest);
         }
         if !self.chats_path_active() {
@@ -222,7 +220,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// the next Ready.
     pub(crate) fn maybe_seed_storage_limits(&mut self) -> Result<(), ConnectSendError> {
         let settings = &self.session.settings;
-        if settings.storage_seed != StorageSeed::Unseeded {
+        if settings.data_storage.storage_limits_seeded != Seed::Unseeded {
             return Ok(());
         }
         if !settings.storage_limits.chosen() {
@@ -230,7 +228,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Some(crate::storage_limits::DEFAULT_SIZE),
                 Some(crate::storage_limits::DEFAULT_KEEP),
             )?;
-            self.session.settings.storage_seed = StorageSeed::Sent;
+            self.session.settings.data_storage.storage_limits_seeded = Seed::InFlight;
         }
         self.note_storage_limits_seeded();
         Ok(())
@@ -241,11 +239,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// choice), so it counts as seeded from now on.
     pub(crate) fn note_storage_limits_seeded(&mut self) {
         let settings = &self.session.settings;
-        if settings.storage_seed == StorageSeed::Seeded || !settings.storage_limits.chosen() {
+        if settings.data_storage.storage_limits_seeded.is_seeded()
+            || !settings.storage_limits.chosen()
+        {
             return;
         }
-        self.session.settings.storage_seed = StorageSeed::Seeded;
-        self.session.settings.data_storage.storage_limits_seeded = true;
+        self.session.settings.data_storage.storage_limits_seeded = Seed::Seeded;
         let _ = self.save_data_storage_prefs();
     }
 

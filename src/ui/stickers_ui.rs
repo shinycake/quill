@@ -366,7 +366,7 @@ impl QuillApp {
             return Some(intro);
         }
         let session = self.session()?;
-        if !session.stickers.stickers.greeting_loaded {
+        if session.stickers.stickers.greeting.is_idle() {
             self.defer_screen(cx, move |this, cx| {
                 if let Some(live) = this.live.as_mut() {
                     let _ = live.driver.fetch_greeting_stickers();
@@ -374,7 +374,7 @@ impl QuillApp {
                 }
             });
         }
-        let sticker = greeting_pick(&session.stickers.stickers.greeting, chat.id.0)?.clone();
+        let sticker = greeting_pick(session.stickers.stickers.greeting.data()?, chat.id.0)?.clone();
         if let Some(file) = sticker.display_file_id()
             && let Some(live) = self.live.as_mut()
         {

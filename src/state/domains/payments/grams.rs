@@ -22,7 +22,7 @@ impl Session {
                         self.payments.hub.grams.balance_nano = Some(page.balance_nano);
                     }
                     Some((GramsPurpose::Page { append }, id))
-                        if id.0 == self.payments.hub.grams.request =>
+                        if self.payments.hub.grams.load.waits_for(id.0) =>
                     {
                         self.remember_files(&files);
                         self.payments.hub.grams.apply_page(page, append);
@@ -60,9 +60,8 @@ impl Session {
             GramsPurpose::PeerUser => grams.missing_users.extend(peer),
             GramsPurpose::PeerChat => grams.missing_chats.extend(peer),
             GramsPurpose::Page { .. } => {
-                if pending.is_some_and(|p| p.id.0 == grams.request) {
-                    grams.loading = false;
-                    grams.error = Some(error_reason(err));
+                if pending.is_some_and(|p| grams.load.waits_for(p.id.0)) {
+                    grams.load = crate::gift_market::PageLoad::Failed(error_reason(err));
                 }
             }
             GramsPurpose::WithdrawalUrl => {

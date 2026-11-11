@@ -58,7 +58,6 @@ impl Session {
                     if self.calls.take_recent_calls_request(pending.id) {
                         self.calls.recent_calls.extend(messages);
                         self.calls.recent_calls_offset = next_offset;
-                        self.calls.recent_calls_error = false;
                     }
                 }
             }

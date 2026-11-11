@@ -553,11 +553,7 @@ impl State {
         clip.cancel
             .flag
             .store(true, std::sync::atomic::Ordering::SeqCst);
-        if let Ok(mut child) = clip.cancel.child.lock()
-            && let Some(child) = child.as_mut()
-        {
-            let _ = child.kill();
-        }
+        clip.cancel.child.cancel();
         self.rendered.retain(|frame| frame.key != *key);
         if let Some(closed) = self.closed.get_mut(clip.worker) {
             closed.push(*key);
