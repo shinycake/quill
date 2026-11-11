@@ -115,7 +115,7 @@ fn owner_toggles_go_out_and_update_optimistically() {
             .admin
             .is_all_history_available
     );
-    assert!(driver.session.chats_state.chat_action_error.is_some());
+    assert!(!driver.session.chats_state.chat_action_error.is_empty());
 
     driver
         .set_group_hidden_members(ChatId(13), true)
@@ -629,7 +629,7 @@ fn channel_owner_switches_ads_off_and_a_refusal_rolls_back() {
             .session
             .chats_state
             .chat_action_error
-            .as_deref()
+            .last()
             .is_some_and(|line| line.contains("boost level"))
     );
     let _ = std::fs::remove_dir_all(dir);

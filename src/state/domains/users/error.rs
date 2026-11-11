@@ -101,27 +101,29 @@ impl Session {
                 | RequestPurpose::SetUserNote
                 | RequestPurpose::SetUserPersonalPhoto,
             ) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not save the change (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not save the change (error {})", err.code));
             }
             Some(RequestPurpose::ReportChatPhoto) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not send the report (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not send the report (error {})", err.code));
             }
             Some(RequestPurpose::SharePhoneNumber) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not share your phone number (error {})",
                     err.code
                 ));
             }
             Some(RequestPurpose::Users(UsersPurpose::SetMessageSenderBlockList { .. })) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not change the block state (error {})",
                     err.code
                 ));
             }
             Some(RequestPurpose::BlockSenderFromReplies) => {
-                self.chats_state.chat_action_error = Some(
+                self.chats_state.chat_action_error.push(
                     crate::lang::tr(crate::lang::keys::Q_CHAT_COULDNT_BLOCK_THE_SENDER_TRY_AGAIN)
                         .to_string(),
                 );

@@ -40,6 +40,15 @@ impl Session {
                     .links
                     .fail(error_reason(err));
             }
+            // The Delete folder box ends in the error with a Retry instead
+            // of waiting for a list that never comes.
+            Some((RequestPurpose::GetChatFolderChatsToLeave, Some(folder_id))) => {
+                self.chat_list
+                    .folder_chats_to_leave
+                    .entry(folder_id)
+                    .or_default()
+                    .fail(error_reason(err));
+            }
             Some((RequestPurpose::GetChatsForFolderInviteLink, Some(folder_id))) => {
                 self.chat_list
                     .folder_shares
@@ -65,10 +74,10 @@ impl Session {
                 RequestPurpose::ReorderChatFolders | RequestPurpose::ToggleChatFolderTags,
                 _,
             )) => {
-                self.chats_state.chat_action_error = Some(error_reason(err));
+                self.chats_state.chat_action_error.push(error_reason(err));
             }
             Some((RequestPurpose::GetRecommendedChatFolders, _)) => {
-                self.chats_state.chat_action_error = Some(error_reason(err));
+                self.chats_state.chat_action_error.push(error_reason(err));
             }
             _ => {}
         }
@@ -89,16 +98,19 @@ impl Session {
             // Only the numeric code is shown; TDLib's message is
             // never stored.
             Some(RequestPurpose::ToggleChatIsPinned) if !pins_box => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not pin the chat (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not pin the chat (error {})", err.code));
             }
             Some(RequestPurpose::ToggleChatIsMarkedAsUnread) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not change read state (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not change read state (error {})", err.code));
             }
             Some(RequestPurpose::DeleteChatHistory) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not clear history (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not clear history (error {})", err.code));
             }
             // tdesktop deletes the history whether or not leaving worked.
             Some(RequestPurpose::LeaveBeforeDelete) => {
@@ -107,8 +119,9 @@ impl Session {
                 }
             }
             Some(RequestPurpose::RemoveChatFromList) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not delete the chat (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not delete the chat (error {})", err.code));
             }
             // The removals waiting for this spec are dropped: asking again
             // on every ingest would loop at round-trip speed.
@@ -125,7 +138,7 @@ impl Session {
                     let before = queue.len();
                     queue.retain(|(_, folder)| *folder != folder_id);
                     if queue.len() != before {
-                        self.chats_state.chat_action_error = Some(format!(
+                        self.chats_state.chat_action_error.push(format!(
                             "{} (error {})",
                             crate::lang::tr(
                                 crate::lang::keys::Q_CHATLIST_COULD_NOT_REMOVE_FROM_FOLDER
@@ -137,7 +150,7 @@ impl Session {
             }
             // The bar stays: the offer is still open and can be tried again.
             Some(RequestPurpose::ProcessChatFolderNewChats) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "{} (error {})",
                     crate::lang::tr(crate::lang::keys::Q_NOTES_FAILED_PROCESS_NEW_CHATS),
                     err.code
@@ -153,7 +166,7 @@ impl Session {
                 }
             }
             Some(RequestPurpose::HidePromotion) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "{} (error {})",
                     crate::lang::tr(crate::lang::keys::Q_CHAT_COULD_NOT_HIDE_THE_ANNOUNCEMENT),
                     err.code
@@ -163,25 +176,25 @@ impl Session {
             // status note like the CL1 ones — a refusal is never
             // shown as success.
             Some(RequestPurpose::SetPinnedChats) if !pins_box => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not reorder pinned chats (error {})",
                     err.code
                 ));
             }
             Some(RequestPurpose::ReadChatInbox) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not mark the chat as read (error {})",
                     err.code
                 ));
             }
             Some(RequestPurpose::ReadChatList) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not mark all chats as read (error {})",
                     err.code
                 ));
             }
             Some(RequestPurpose::ClearRecentlyFoundChats) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not clear recent searches (error {})",
                     err.code
                 ));
@@ -189,13 +202,13 @@ impl Session {
             Some(RequestPurpose::GetArchiveChatListSettings) => {
                 self.chat_list.archive_settings_loading = false;
                 self.chat_list.archive_mute.note_reload_failed();
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not load archive settings (error {})",
                     err.code
                 ));
             }
             Some(RequestPurpose::SetArchiveChatListSettings) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not save archive settings (error {})",
                     err.code
                 ));

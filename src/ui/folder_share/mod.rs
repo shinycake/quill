@@ -23,6 +23,8 @@ use std::rc::Rc;
 
 /// Link names are 0–32 characters (`createChatFolderInviteLink`).
 const LINK_NAME_MAX: usize = 32;
+/// How long the copy button shows its check mark.
+const COPIED_MARK: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Whether the folder's rules allow a link (tdesktop
 /// `GoodForExportFilterLink`): only pinned and always-included chats may
@@ -349,10 +351,29 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn copy_folder_link(&mut self, link: &str, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn copy_folder_link(&mut self, link: &str, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(link.to_string()));
         if let Some(dialog) = self.folders.share.as_mut() {
-            dialog.copied = Some(link.to_string());
+            let at = std::time::Instant::now();
+            dialog.copied = CopyMark::Copied {
+                link: link.to_string(),
+                at,
+            };
+            // The check mark goes back to the copy icon on its own. The
+            // box is the screen's: a timer from an account switched away
+            // does not touch the next account's box.
+            self.spawn_screen(cx, async move |this, cx| {
+                cx.background_executor().timer(COPIED_MARK).await;
+                let _ = this.update(cx, |this, cx| {
+                    if let Some(dialog) = this.folders.share.as_mut()
+                        && matches!(&dialog.copied, CopyMark::Copied { at: now, .. } if *now == at)
+                    {
+                        dialog.copied = CopyMark::Idle;
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
         }
         self.set_note(StatusNote::info(tr(keys::STAR_REF_LINK_COPIED_TITLE)));
         cx.notify();
@@ -578,7 +599,7 @@ impl QuillApp {
                 trn(keys::FILTERS_CHATS_COUNT, link.chat_ids.len())
             );
             let confirming = state.confirm_delete.as_deref() == Some(url.as_str());
-            let copied = state.copied.as_deref() == Some(url.as_str());
+            let copied = state.copied.is_copied(&url);
             let copy_url = url.clone();
             let edit_link = link.clone();
             let ask_url = url.clone();

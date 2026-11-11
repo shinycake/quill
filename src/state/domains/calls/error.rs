@@ -104,8 +104,9 @@ impl Session {
             }
             Some(RequestPurpose::DeleteAllCallMessages) => {
                 self.calls.recent_calls_clearing = false;
-                self.chats_state.chat_action_error =
-                    Some(crate::chatlist_calls::clear_failed(err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(crate::chatlist_calls::clear_failed(err.code));
             }
             Some(RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules { setting })) => {
                 if let Some(pending) = pending {

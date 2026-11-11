@@ -179,6 +179,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.clear_typed_debounce();
+        if self.session.search.search.filters != filters {
+            self.session.search.search.restart_for_filters();
+        }
         self.session.search.search.filters = filters;
         let tab = crate::search_tabs::SearchTab::of(&filters);
         if tab == crate::search_tabs::SearchTab::Channels {
@@ -320,7 +323,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::SearchPublicPosts
         };
         if tag.is_none() {
-            let _ = self.fetch_public_post_limits(trimmed);
+            // What the last query's quota said is not this query's.
+            self.session.search.search.tabs.limits = None;
+            let _ = self.fetch_public_post_limits(trimmed, search_gen);
         }
         let extra = self.session.request_search(purpose, search_gen);
         let json = match tag {
@@ -562,7 +567,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<Option<RequestId>, ConnectSendError> {
         self.flush_leaving_composer(chat_id, leaving, leaving_reply, now_ms)?;
         self.remember_found_chat(chat_id);
-        self.session.close_search();
+        self.close_search();
         self.select_chat_open(chat_id, open)
     }
 
@@ -578,7 +583,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<Option<RequestId>, ConnectSendError> {
         self.flush_leaving_composer(chat_id, leaving, leaving_reply, now_ms)?;
         self.remember_found_chat(chat_id);
-        self.session.close_search();
+        self.close_search();
         let opened = self.select_chat(chat_id)?;
         // Open the found message in context (a window around it, with the
         // highlight) rather than splicing the lone hit into the history.

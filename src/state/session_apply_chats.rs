@@ -655,7 +655,9 @@ impl Session {
         {
             self.chat_list
                 .folder_chats_to_leave
-                .insert(folder_id, chat_ids.iter().map(|id| id.0).collect());
+                .entry(folder_id)
+                .or_default()
+                .succeed(chat_ids.iter().map(|id| id.0).collect());
         }
         // `getChatFolderNewChats` answer: the "N new chats" bar.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatFolderNewChats)
