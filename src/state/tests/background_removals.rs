@@ -84,16 +84,15 @@ fn a_refused_removal_keeps_the_installed_wallpaper() {
 #[test]
 fn a_refused_default_and_chat_delete_leave_the_wallpaper() {
     let (mut session, sink, seq) = with_list();
-    session.chats_state.default_backgrounds.insert(
-        true,
-        session
-            .chats_state
-            .installed_backgrounds
-            .data()
-            .cloned()
-            .unwrap_or_default()[0]
-            .clone(),
-    );
+    let first = session
+        .chats_state
+        .installed_backgrounds
+        .data()
+        .and_then(|list| list.first().cloned());
+    assert!(first.is_some(), "the fixture list has a wallpaper");
+    if let Some(first) = first {
+        session.chats_state.default_backgrounds.insert(true, first);
+    }
     let id = session.request(
         RequestPurpose::Chats(ChatsPurpose::DeleteDefaultBackground {
             for_dark_theme: true,

@@ -11,6 +11,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use crate::ui::notify_state::{MuteBox, MuteSection};
 use quill::notify::NotificationSoundKind;
 use quill::settings::BadgePrefs;
 use quill::state::ChatSummary;

@@ -833,9 +833,15 @@ impl QuillApp {
                         LookStage::Blocked(reason) => Some(reason.clone()),
                         _ => None,
                     };
-                    if let Some(error) = gate
-                        .or_else(|| session.and_then(|s| s.chats_state.background_error.clone()))
-                    {
+                    // A failed installed list has its own Retry row in the
+                    // grid; its error is not drawn a second time here.
+                    let list_failed = session
+                        .is_some_and(|s| s.chats_state.installed_backgrounds.error().is_some());
+                    if let Some(error) = gate.or_else(|| {
+                        session
+                            .filter(|_| !list_failed)
+                            .and_then(|s| s.chats_state.background_error.clone())
+                    }) {
                         wall = wall.child(
                             div()
                                 .id("chat-look-error")

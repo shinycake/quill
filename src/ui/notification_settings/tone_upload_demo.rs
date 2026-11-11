@@ -49,7 +49,7 @@ impl QuillApp {
             };
         }
         self.open_mute_menu(cx);
-        self.notify.notif_sound_picker_open = true;
+        self.notify.set_mute_section(MuteSection::SoundPicker);
         self.set_note(StatusNote::silent(
             "screenshot demo — sound picker · Upload Sound",
         ));

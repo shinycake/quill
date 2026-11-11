@@ -99,7 +99,7 @@ crate::ui::shell::register_dialogs! {
     /// A chat's notification settings (tdesktop `MuteSettingsBox`).
     MuteMenu => DialogSpec::new(
         2932,
-        |app| app.notify.mute_menu_open,
+        |app| app.notify.mute_box.is_some(),
         QuillApp::build_mute_menu_dialog,
     )
     .close(|app, _, cx| app.close_mute_menu(cx)),

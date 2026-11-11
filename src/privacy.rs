@@ -191,12 +191,16 @@ pub enum PrivacyKeyState {
     /// `getUserPrivacySettingRules` is out.
     Loading(RequestId),
     Ready(PrivacyRuleDetail),
-    /// `setUserPrivacySettingRules` is out: `detail` shows at once and
-    /// `previous` comes back if the server refuses.
+    /// `setUserPrivacySettingRules` is out: `detail` shows at once (the
+    /// live save, under `request`). `confirmed` is the last rule the
+    /// server is known to hold (the one before the first unanswered save,
+    /// moved forward as an older save's `ok` arrives) and comes back if the
+    /// live save is refused. `earlier` are the older saves still out.
     Saving {
         detail: PrivacyRuleDetail,
-        previous: PrivacyRuleDetail,
+        confirmed: PrivacyRuleDetail,
         request: RequestId,
+        earlier: Vec<(RequestId, PrivacyRuleDetail)>,
     },
     /// The last save was refused; `detail` is what the server kept, so the
     /// rule stays editable and the editor shows `error`.
@@ -253,25 +257,33 @@ impl crate::state::SettingsState {
         live
     }
 
-    /// A save answered `ok`: `detail` is the server's now, unless a newer
-    /// save of the key is already out.
+    /// A save answered `ok`. The live save's rule is the server's now; an
+    /// older save's `ok` moves `confirmed` up to that save's rule (and past
+    /// every save sent before it).
     pub fn finish_privacy_save(&mut self, key: PrivacySettingKey, request: Option<RequestId>) {
-        if let Some(PrivacyKeyState::Saving {
+        let Some(PrivacyKeyState::Saving {
             detail,
+            confirmed,
             request: live,
-            ..
-        }) = self.privacy.get(&key)
-            && Some(*live) == request
-        {
+            earlier,
+        }) = self.privacy.get_mut(&key)
+        else {
+            return;
+        };
+        if Some(*live) == request {
             let detail = detail.clone();
             self.privacy.insert(key, PrivacyKeyState::Ready(detail));
+        } else if let Some(at) = earlier.iter().position(|(id, _)| Some(*id) == request) {
+            if let Some((_, accepted)) = earlier.drain(..=at).last() {
+                *confirmed = accepted;
+            }
         }
     }
 
-    /// A save was refused: the key goes back to what the server kept and
-    /// says why. Returns the detail the key shows now, when it changed (the
-    /// call rules mirror it). An older save's refusal finds the key under a
-    /// newer request and changes nothing.
+    /// A save was refused. The live save's refusal puts the key back to
+    /// `confirmed`, what the server kept, and says why; it returns the
+    /// detail the key shows now (the call rules mirror it). An older save's
+    /// refusal only forgets that save: the live one is still out.
     pub fn fail_privacy_save(
         &mut self,
         key: PrivacySettingKey,
@@ -279,17 +291,19 @@ impl crate::state::SettingsState {
         error: String,
     ) -> Option<PrivacyRuleDetail> {
         let Some(PrivacyKeyState::Saving {
-            previous,
+            confirmed,
             request: live,
+            earlier,
             ..
-        }) = self.privacy.get(&key)
+        }) = self.privacy.get_mut(&key)
         else {
             return None;
         };
         if Some(*live) != request {
+            earlier.retain(|(id, _)| Some(*id) != request);
             return None;
         }
-        let detail = previous.clone();
+        let detail = confirmed.clone();
         self.privacy.insert(
             key,
             PrivacyKeyState::SaveFailed {
@@ -301,25 +315,35 @@ impl crate::state::SettingsState {
     }
 
     /// An edit goes out: the new rule shows at once. A save already in
-    /// flight keeps its own `previous` as the rule to fall back to.
+    /// flight stays in `earlier` and the confirmed rule is kept, so a
+    /// refusal restores what the server holds, never an edit it has not
+    /// accepted.
     pub fn begin_privacy_save(
         &mut self,
         key: PrivacySettingKey,
         detail: PrivacyRuleDetail,
         request: RequestId,
     ) {
-        let previous = match self.privacy.get(&key) {
-            Some(PrivacyKeyState::Saving { detail: older, .. }) => Some(older.clone()),
-            Some(state) => state.detail().cloned(),
-            None => None,
+        let (confirmed, earlier) = match self.privacy.remove(&key) {
+            Some(PrivacyKeyState::Saving {
+                detail: older,
+                confirmed,
+                request: older_request,
+                mut earlier,
+            }) => {
+                earlier.push((older_request, older));
+                (confirmed, earlier)
+            }
+            Some(state) => (state.detail().cloned().unwrap_or_else(|| detail.clone()), Vec::new()),
+            None => (detail.clone(), Vec::new()),
         };
-        let previous = previous.unwrap_or_else(|| detail.clone());
         self.privacy.insert(
             key,
             PrivacyKeyState::Saving {
                 detail,
-                previous,
+                confirmed,
                 request,
+                earlier,
             },
         );
     }
@@ -612,6 +636,49 @@ mod tests {
             session.settings.privacy[&key],
             PrivacyKeyState::Ready(who(PrivacyWho::Everybody))
         );
+    }
+
+    /// Two quick edits, both refused: the key goes back to what the server
+    /// kept, not to the first edit (04-046). An accepted first edit is the
+    /// rule the second one's refusal restores.
+    #[test]
+    fn a_refused_second_save_restores_what_the_server_kept() {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let key = PrivacySettingKey::ShowStatus;
+        let purpose = RequestPurpose::Settings(SettingsPurpose::SetPrivacyRules { key });
+        for first_accepted in [false, true] {
+            session
+                .settings
+                .privacy
+                .insert(key, PrivacyKeyState::Ready(who(PrivacyWho::Nobody)));
+            let first = session.request(purpose, None);
+            session
+                .settings
+                .begin_privacy_save(key, who(PrivacyWho::Contacts), first);
+            let second = session.request(purpose, None);
+            session
+                .settings
+                .begin_privacy_save(key, who(PrivacyWho::Everybody), second);
+            if first_accepted {
+                apply_json(
+                    &mut session,
+                    &seq,
+                    &sink,
+                    &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, first.0),
+                );
+            } else {
+                apply_json(&mut session, &seq, &sink, &error_json(first));
+            }
+            apply_json(&mut session, &seq, &sink, &error_json(second));
+            let kept = if first_accepted {
+                PrivacyWho::Contacts
+            } else {
+                PrivacyWho::Nobody
+            };
+            assert_eq!(session.settings.privacy[&key].detail(), Some(&who(kept)));
+            assert!(session.settings.privacy[&key].save_error().is_some());
+        }
     }
 
     /// A late `getUserPrivacySettingRules` answer never overwrites a newer

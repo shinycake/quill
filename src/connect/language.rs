@@ -58,7 +58,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .settings
                 .language
                 .packs
-                .fail("The language list request was not sent.");
+                .fail(crate::lang::tr(crate::lang::keys::Q_NOTES_SOMETHING_WENT_WRONG));
         }
         result
     }

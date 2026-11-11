@@ -118,7 +118,7 @@ mod motion;
 mod nested_click;
 mod new_contact;
 mod notify_delivery_state;
-mod notify_state;
+pub(crate) mod notify_state;
 mod on_screen;
 mod owned_image;
 mod paragraph_cache;

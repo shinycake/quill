@@ -40,7 +40,9 @@ pub(super) enum PreviewSource {
 /// Where the preview stands. A request in the stage is answered under its
 /// id, so an answer for a preview that was closed or reopened lands
 /// nowhere. Cancel (or the owner going away) drops the stage, and a failure
-/// leaves the box open with the reason and Apply and Share available again.
+/// leaves the box open with the reason and Share available again. Apply is
+/// not a stage: like tdesktop's `applyForEveryone` it closes the box at
+/// once, and its request is kept in `DialogUi::wallpaper_applies`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum PreviewStage {
     Editing,
@@ -50,12 +52,6 @@ pub(super) enum PreviewStage {
     },
     /// The link was copied.
     Copied,
-    /// `setDefaultBackground` is out; the box closes and the appearance
-    /// flips when it is accepted.
-    Applying {
-        request: RequestId,
-        dark: bool,
-    },
     /// Apply or Share was refused; the reason is under the preview.
     Failed(String),
 }
@@ -91,8 +87,7 @@ impl QuillApp {
     pub(super) fn open_wallpaper_preview(&mut self, source: PreviewSource, cx: &mut Context<Self>) {
         if let Some(session) = self.wallpaper_session_mut() {
             session.chats_state.background_error = None;
-            session.chats_state.background_answers.clear();
-        }
+            }
         self.dialogs.wallpaper_preview = Some(WallpaperPreview {
             source,
             blur: None,
@@ -177,7 +172,6 @@ impl QuillApp {
         self.dialogs.wallpaper_preview = None;
         if let Some(session) = self.wallpaper_session_mut() {
             session.chats_state.background_search = quill::state::BackgroundSearch::Idle;
-            session.chats_state.background_answers.clear();
         }
         cx.notify();
     }
@@ -186,9 +180,6 @@ impl QuillApp {
         let Some(preview) = self.dialogs.wallpaper_preview.clone() else {
             return;
         };
-        if matches!(preview.stage, PreviewStage::Applying { .. }) {
-            return;
-        }
         let dark = cx.theme().is_dark();
         let background = self.previewed_background(&preview.source);
         let sent = match (&preview.source, self.live.as_mut()) {
@@ -227,8 +218,8 @@ impl QuillApp {
         };
         match sent {
             Some(Ok(request)) => {
-                self.set_wallpaper_stage(PreviewStage::Applying { request, dark });
-                cx.notify();
+                self.dialogs.wallpaper_applies.push(request);
+                self.close_wallpaper_preview(cx);
             }
             Some(Err(err)) => {
                 self.set_note(StatusNote::error(user_error_for(
@@ -264,9 +255,6 @@ impl QuillApp {
         let Some(preview) = self.dialogs.wallpaper_preview.clone() else {
             return;
         };
-        if matches!(preview.stage, PreviewStage::Applying { .. }) {
-            return;
-        }
         let Some(background) = self.previewed_background(&preview.source) else {
             return;
         };
@@ -282,16 +270,17 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Poll-loop half of Apply and Share: take the answer to the request
-    /// the open preview waits for. Any other answer belongs to a preview
-    /// that was closed or reopened and is dropped.
+    /// Poll-loop half of Apply and Share: take the answers to the Share the
+    /// open preview waits for and to every Apply sent for this account.
+    /// An Apply answers whether or not its box is still open. Any other
+    /// answer is dropped.
     pub(super) fn drain_wallpaper_preview(&mut self, cx: &mut Context<Self>) -> bool {
-        let waiting = match self.dialogs.wallpaper_preview.as_ref().map(|p| &p.stage) {
-            Some(PreviewStage::Sharing { request } | PreviewStage::Applying { request, .. }) => {
-                Some(*request)
-            }
-            _ => None,
-        };
+        let mut waiting = self.dialogs.wallpaper_applies.clone();
+        if let Some(PreviewStage::Sharing { request }) =
+            self.dialogs.wallpaper_preview.as_ref().map(|p| &p.stage)
+        {
+            waiting.push(*request);
+        }
         let Some(session) = self.wallpaper_session_mut() else {
             return false;
         };
@@ -299,21 +288,27 @@ impl QuillApp {
         if answers.is_empty() {
             return false;
         }
-        let answer = waiting.and_then(|request| answers.take_for(&[request]).pop());
-        let Some((_, answer)) = answer else {
-            answers.clear();
+        let taken = answers.take_for(&waiting);
+        if taken.is_empty() {
             return false;
-        };
-        match answer {
-            Ok(BackgroundOutcome::Link(url)) => {
-                cx.write_to_clipboard(ClipboardItem::new_string(url));
-                self.set_wallpaper_stage(PreviewStage::Copied);
+        }
+        for (request, answer) in taken {
+            let applied = self.dialogs.wallpaper_applies.contains(&request);
+            self.dialogs.wallpaper_applies.retain(|r| *r != request);
+            match answer {
+                Ok(BackgroundOutcome::Link(url)) => {
+                    cx.write_to_clipboard(ClipboardItem::new_string(url));
+                    self.set_wallpaper_stage(PreviewStage::Copied);
+                }
+                Ok(BackgroundOutcome::Applied) => self.wallpaper_applied(cx),
+                Err(reason) if applied => {
+                    self.set_note(StatusNote::error(tr_with(
+                        keys::Q_MISC_COULDN_T_UPDATE_THE_WALLPAPER,
+                        &[("error", &reason)],
+                    )));
+                }
+                Err(reason) => self.set_wallpaper_stage(PreviewStage::Failed(reason)),
             }
-            Ok(BackgroundOutcome::Applied) => {
-                self.wallpaper_applied(cx);
-                self.close_wallpaper_preview(cx);
-            }
-            Err(reason) => self.set_wallpaper_stage(PreviewStage::Failed(reason)),
         }
         cx.notify();
         true
@@ -455,7 +450,6 @@ impl QuillApp {
                         )),
                 );
             }
-            let applying = matches!(preview.stage, PreviewStage::Applying { .. });
             let can_share = background.is_some() && this.live.is_some();
             let footer = div()
                 .flex()
@@ -466,7 +460,6 @@ impl QuillApp {
                         Button::new("wallpaper-preview-share")
                             .label(tr(keys::Q_MISC_SHARE))
                             .ghost()
-                            .disabled(applying)
                             .tooltip(tr(keys::Q_MISC_COPY_A_LINK_TO_THIS))
                             .on_click(
                                 cx.listener(|this, _, _, cx| this.share_wallpaper_preview(cx)),
@@ -488,7 +481,6 @@ impl QuillApp {
                         .label(tr(keys::Q_MISC_APPLY))
                         .primary()
                         .disabled(!ready)
-                        .loading(applying)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.apply_wallpaper_preview(cx);
                             this.close_kit_dialog_if_done(DialogKind::WallpaperPreview, window, cx);
@@ -570,3 +562,8 @@ mod tests {
         assert_eq!(file_label(Path::new("/a/b/sunset.jpg")), "sunset.jpg");
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "wallpaper_preview_tests.rs"]
+mod apply_tests;

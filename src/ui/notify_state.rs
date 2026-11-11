@@ -9,14 +9,31 @@ use super::*;
 use quill::ids::ChatId;
 use quill::telegram::envelope::NotificationSettingsScope;
 
+/// The part of the Mute panel that is expanded below the presets: one at a
+/// time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum MuteSection {
+    #[default]
+    Collapsed,
+    /// The "Custom..." duration row.
+    Custom,
+    /// The notification sound picker.
+    SoundPicker,
+}
+
+/// The open Mute panel (tdesktop Mute submenu: 1 hour / 8 hours / 2 days /
+/// Forever), for the chat it was opened for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MuteBox {
+    /// The chat the panel is for, set when it opens (from the header or a
+    /// chat row's menu): `None` with no chat open.
+    pub(super) chat: Option<ChatId>,
+    pub(super) section: MuteSection,
+}
+
 pub(crate) struct NotifyUi {
-    /// tdesktop Mute submenu (1 hour / 8 hours / 2 days / Forever).
-    pub(super) mute_menu_open: bool,
-    /// The chat the Mute panel is for, set when it opens (from the header
-    /// or a chat row's menu).
-    pub(super) mute_chat: Option<ChatId>,
-    /// The Mute submenu's "Custom..." duration row is expanded.
-    pub(super) mute_custom_open: bool,
+    /// The Mute panel, while it is open.
+    pub(super) mute_box: Option<MuteBox>,
     /// The days / hours / minutes fields of the custom mute duration
     /// (tdesktop `ChooseTimeWidget`), made when the panel opens.
     pub(super) mute_time: Option<super::notification_settings::MuteTimeInputs>,
@@ -24,8 +41,6 @@ pub(crate) struct NotifyUi {
     /// conversation header (`setChatMessageAutoDeleteTime`), open for
     /// this chat.
     pub(super) ttl_picker: Option<ChatId>,
-    /// Parity slice: the notifications panel's sound picker sub-view is open.
-    pub(super) notif_sound_picker_open: bool,
     /// The picker an "Upload Sound" in flight was started from: the new
     /// sound is selected there.
     pub(super) tone_upload_target: Option<SoundPickerTarget>,
@@ -61,14 +76,34 @@ pub(crate) struct NotifyUi {
 }
 
 impl NotifyUi {
+    /// The chat the open Mute panel is for.
+    pub(super) fn mute_chat(&self) -> Option<ChatId> {
+        self.mute_box.and_then(|b| b.chat)
+    }
+
+    pub(super) fn mute_section(&self) -> MuteSection {
+        self.mute_box.map_or(MuteSection::Collapsed, |b| b.section)
+    }
+
+    /// Expand one section of the open Mute panel (no-op when it is closed).
+    pub(super) fn set_mute_section(&mut self, section: MuteSection) {
+        if let Some(open) = self.mute_box.as_mut() {
+            open.section = section;
+        }
+    }
+
+    /// Flip `section`: it opens, or collapses when it was the open one.
+    pub(super) fn toggle_mute_section(&mut self, section: MuteSection) -> bool {
+        let open = self.mute_section() != section;
+        self.set_mute_section(if open { section } else { MuteSection::Collapsed });
+        open
+    }
+
     pub(super) fn new() -> Self {
         Self {
-            mute_menu_open: false,
-            mute_chat: None,
-            mute_custom_open: false,
+            mute_box: None,
             mute_time: None,
             ttl_picker: None,
-            notif_sound_picker_open: false,
             tone_upload_target: None,
             story_sound_picker_open: false,
             defaults_sound_picker: None,
