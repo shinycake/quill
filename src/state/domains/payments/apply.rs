@@ -35,12 +35,9 @@ impl Session {
                 // answer to an earlier checkout's fetch is not this one's.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPaymentForm)
                     && extra.is_some()
-                    && self.payments.form_request == extra
+                    && self.payments.checkout.waiting_for() == extra
                 {
-                    self.payments.form_request = None;
-                    self.payments.form = Some(form);
-                    self.payments.form_loading = false;
-                    self.payments.form_paid = false;
+                    self.payments.checkout = Checkout::Open(form);
                     self.payments.order_info = OrderInfoStage::Unvalidated;
                     self.payments.shipping_id = None;
                     self.payments.note = None;
@@ -75,7 +72,7 @@ impl Session {
                 {
                     let shown = self.payments.shows(&paid.invoice);
                     if shown {
-                        self.payments.verification_started = false;
+                        self.payments.end_verification();
                     }
                     if result.success {
                         self.note_paid_media_unlocked(&paid);
@@ -90,7 +87,7 @@ impl Session {
                             );
                         }
                         if shown {
-                            self.payments.form_paid = true;
+                            self.payments.mark_paid();
                             self.payments.note = Some(format!(
                                 "✅ {}",
                                 crate::lang::tr(crate::lang::keys::Q_MONEY_PAYMENT_SUCCESS_NOTE)
@@ -112,7 +109,7 @@ impl Session {
                             giveaway_chat_id: paid.invoice.giveaway_chat_id(),
                         });
                         if shown {
-                            self.payments.verification_started = true;
+                            self.payments.mark_verifying();
                         }
                     } else if shown {
                         self.payments.note = Some(

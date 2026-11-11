@@ -35,7 +35,7 @@ fn card_entry(provider: &PaymentProviderKind, is_test: bool) -> Option<CardEntry
 
 impl QuillApp {
     fn checkout_card_entry(&self) -> Option<CardEntry> {
-        let form = self.session()?.payments.form.as_ref()?;
+        let form = self.session()?.payments.form()?;
         let PaymentFormTypeData::Regular(regular) = &form.form_type else {
             return None;
         };

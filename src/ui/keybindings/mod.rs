@@ -83,28 +83,63 @@ pub(super) const COMPOSER_CONTEXT: &str = "QuillComposer";
 /// a depth tie), which `apply_custom_bindings` and `shortcut_rows` do.
 const COMPOSER_INPUT_CONTEXT: &str = "QuillComposer > Input";
 
-/// Also discard stale capture state once the Shortcuts page is gone.
-pub(super) fn capture_active(
-    shown: bool,
-    capture: &mut Option<String>,
-    error: &mut Option<(String, String)>,
-) -> bool {
-    if !shown {
-        *capture = None;
-        *error = None;
+/// The Shortcuts page's recording of a chord. `Armed` leaves with the
+/// captured chord, Escape, the Reset of a row, a refusal (`Rejected`), the
+/// page closing, the lock and an account change; `Rejected` (the chip keeps
+/// showing the chord that is really bound, with the conflict under it)
+/// leaves when a row is armed again or any of the other exits.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) enum KeyCapture {
+    #[default]
+    Idle,
+    /// The row `id` waits for a keystroke.
+    Armed { id: String },
+    /// The chord typed for row `id` collides with fixed chrome or another
+    /// live shortcut; `message` says with what.
+    Rejected { id: String, message: String },
+}
+
+impl KeyCapture {
+    pub(crate) fn is_armed(&self) -> bool {
+        matches!(self, Self::Armed { .. })
     }
-    shown && capture.is_some()
+
+    /// The row waiting for a keystroke.
+    pub(crate) fn armed_id(&self) -> Option<&str> {
+        match self {
+            Self::Armed { id } => Some(id),
+            _ => None,
+        }
+    }
+
+    /// The refusal shown for row `id`.
+    pub(crate) fn rejected_for(&self, id: &str) -> Option<&str> {
+        match self {
+            Self::Rejected { id: row, message } if row == id => Some(message),
+            _ => None,
+        }
+    }
+
+    /// Back to `Idle`, unless the refusal is another row's.
+    pub(crate) fn reset_row(&mut self, id: &str) {
+        if self.rejected_for(id).is_some() || self.is_armed() {
+            *self = Self::Idle;
+        }
+    }
+}
+
+/// Also discard stale capture state once the Shortcuts page is gone.
+pub(super) fn capture_active(shown: bool, capture: &mut KeyCapture) -> bool {
+    if !shown {
+        *capture = KeyCapture::Idle;
+    }
+    shown && capture.is_armed()
 }
 
 /// A new prefs root needs its own keymap, even when it has no overrides.
-pub(super) fn invalidate_account_keybindings(
-    applied: &mut bool,
-    capture: &mut Option<String>,
-    error: &mut Option<(String, String)>,
-) {
+pub(super) fn invalidate_account_keybindings(applied: &mut bool, capture: &mut KeyCapture) {
     *applied = false;
-    *capture = None;
-    *error = None;
+    *capture = KeyCapture::Idle;
 }
 
 /// Parity slice (platform-custom-keybindings): a user-rebindable action.
@@ -780,10 +815,11 @@ mod tests {
     // gpui's `#[test]` proc macro, which would shadow the builtin test
     // attribute and fail macro expansion ("recursion limit reached").
     use super::{
-        Action, HOST_OS, KeybindingConflict, Keystroke, Modifiers, OpenPinnedChat, QuitApp,
-        REBINDABLE_ACTIONS, ShowAccount, canonical_event_chord, capture_active, composer_bindings,
-        composer_scoped_bindings, conflict_message, context_menu_captures_key, default_bindings,
-        fixed_keystrokes, invalidate_account_keybindings, keybinding_conflict, resolve_keybindings,
+        Action, HOST_OS, KeyCapture, KeybindingConflict, Keystroke, Modifiers, OpenPinnedChat,
+        QuitApp, REBINDABLE_ACTIONS, ShowAccount, canonical_event_chord, capture_active,
+        composer_bindings, composer_scoped_bindings, conflict_message, context_menu_captures_key,
+        default_bindings, fixed_keystrokes, invalidate_account_keybindings, keybinding_conflict,
+        resolve_keybindings,
     };
     use quill::settings::CustomKeybinding;
 
@@ -838,26 +874,33 @@ mod tests {
 
     #[test]
     fn capture_only_consumes_keys_while_shortcuts_are_shown_and_armed() {
-        let mut capture = None;
-        let mut error = None;
-        assert!(!capture_active(true, &mut capture, &mut error));
-        capture = Some("focus-composer".to_string());
-        assert!(capture_active(true, &mut capture, &mut error));
-        error = Some(("focus-composer".to_string(), "Conflict".to_string()));
-        assert!(!capture_active(false, &mut capture, &mut error));
-        assert_eq!(capture, None);
-        assert_eq!(error, None);
+        let mut capture = KeyCapture::Idle;
+        assert!(!capture_active(true, &mut capture));
+        capture = KeyCapture::Armed {
+            id: "focus-composer".to_string(),
+        };
+        assert!(capture_active(true, &mut capture));
+        capture = KeyCapture::Rejected {
+            id: "focus-composer".to_string(),
+            message: "Conflict".to_string(),
+        };
+        assert!(
+            !capture_active(true, &mut capture),
+            "a refusal is not armed"
+        );
+        assert!(!capture_active(false, &mut capture));
+        assert_eq!(capture, KeyCapture::Idle);
     }
 
     #[test]
     fn account_change_invalidates_applied_bindings_and_capture() {
         let mut applied = true;
-        let mut capture = Some("focus-composer".to_string());
-        let mut error = Some(("focus-composer".to_string(), "Conflict".to_string()));
-        invalidate_account_keybindings(&mut applied, &mut capture, &mut error);
+        let mut capture = KeyCapture::Armed {
+            id: "focus-composer".to_string(),
+        };
+        invalidate_account_keybindings(&mut applied, &mut capture);
         assert!(!applied);
-        assert_eq!(capture, None);
-        assert_eq!(error, None);
+        assert_eq!(capture, KeyCapture::Idle);
     }
 
     #[test]

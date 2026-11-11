@@ -246,7 +246,7 @@ impl QuillApp {
             videos.leave_window(window);
             return;
         }
-        if !self.chat_ui.inline_results_open {
+        if !self.chat_ui.inline_results.is_open() {
             videos.leave_panel(window, Panel::InlineResults);
         }
         // This window's own media panel: the session's GIF flag is one for

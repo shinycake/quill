@@ -19,9 +19,8 @@ impl Session {
             // (rendered only there) would stay invisible.
             // An earlier checkout's form fetch failing is not this one's.
             Some(RequestPurpose::GetPaymentForm) => {
-                if extra.is_some() && self.payments.form_request == extra {
-                    self.payments.form_request = None;
-                    self.payments.form_loading = false;
+                if extra.is_some() && self.payments.checkout.waiting_for() == extra {
+                    self.payments.checkout = Checkout::Idle;
                     self.payments.note = Some(crate::lang::tr_with(
                         crate::lang::keys::Q_MONEY_PAYMENT_FAILED_REASON,
                         &[("reason", &error_reason(err))],
@@ -36,7 +35,6 @@ impl Session {
                     )
                 {
                     self.payments.order_info = OrderInfoStage::Unvalidated;
-                    self.payments.form_loading = false;
                     self.payments.note = Some(crate::lang::tr_with(
                         crate::lang::keys::Q_MONEY_PAYMENT_FAILED_REASON,
                         &[("reason", &error_reason(err))],

@@ -86,10 +86,14 @@ impl QuillApp {
             },
         )
         .detach();
-        if let Some(link_box) = self.admin.invite_link_box.as_mut() {
-            link_box.focus_custom.set(true);
-        }
-        self.set_invite_link_custom(Some(CustomBox::Limit(input)), cx);
+        let focus_pending = std::rc::Rc::new(std::cell::Cell::new(true));
+        self.set_invite_link_custom(
+            Some(CustomBox::Limit {
+                input,
+                focus_pending,
+            }),
+            cx,
+        );
     }
 
     /// The Custom box's value, when it is one tdesktop takes.
@@ -99,7 +103,7 @@ impl QuillApp {
                 .filter(|date| custom_date_ok(*date, WallClock::of(cx).now()))
                 .and_then(|date| i32::try_from(date).ok())
                 .map(CustomValue::Date),
-            CustomBox::Limit(input) => {
+            CustomBox::Limit { input, .. } => {
                 custom_limit(&input.read(cx).value()).map(CustomValue::Limit)
             }
         }
@@ -126,7 +130,10 @@ impl QuillApp {
     ) -> Option<(Entity<InputState>, std::rc::Rc<std::cell::Cell<bool>>)> {
         let link_box = self.admin.invite_link_box.as_ref()?;
         match &link_box.custom {
-            Some(CustomBox::Limit(input)) => Some((input.clone(), link_box.focus_custom.clone())),
+            Some(CustomBox::Limit {
+                input,
+                focus_pending,
+            }) => Some((input.clone(), focus_pending.clone())),
             _ => None,
         }
     }
@@ -160,7 +167,7 @@ impl QuillApp {
                 Some(CustomBox::Date(picker)) => DatePicker::new(&picker.state)
                     .placeholder(tr(keys::GROUP_INVITE_EXPIRE_AFTER))
                     .into_any_element(),
-                Some(CustomBox::Limit(input)) => Input::new(input).into_any_element(),
+                Some(CustomBox::Limit { input, .. }) => Input::new(input).into_any_element(),
                 None => return dialog.on_close(on_close),
             };
             let valid = this.invite_link_custom_value(cx).is_some();

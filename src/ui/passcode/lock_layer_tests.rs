@@ -134,13 +134,15 @@ fn a_key_capture_does_not_take_the_passcodes_first_key(cx: &mut TestAppContext) 
     let before = app.read_with(&vcx, |app, _| ptt_key(app));
     app.update(&mut vcx, |app, _| {
         app.group_call.ptt_capture = true;
-        app.preferences.keybinding_capture = Some("toggle_sidebar".into());
+        app.preferences.keybinding_capture = crate::ui::keybindings::KeyCapture::Armed {
+            id: "toggle_sidebar".into(),
+        };
     });
     lock(&app, &mut vcx);
     app.read_with(&vcx, |app, _| {
         assert!(!app.group_call.ptt_capture, "the PTT capture is off");
         assert!(
-            app.preferences.keybinding_capture.is_none(),
+            !app.preferences.keybinding_capture.is_armed(),
             "no binding is armed"
         );
     });

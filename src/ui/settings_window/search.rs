@@ -257,7 +257,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> bool {
         if window.has_active_dialog(cx)
-            || self.preferences.keybinding_capture.is_some()
+            || self.preferences.keybinding_capture.is_armed()
             || self.topmost_esc_layer().is_some()
         {
             return false;

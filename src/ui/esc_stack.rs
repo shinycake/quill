@@ -126,7 +126,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         "story-reply-recording",
         |app| app.story_reply_recording_active(),
         |app, _, cx| {
-            if app.recording.locked {
+            if app.recording.locked() {
                 app.set_note(StatusNote::silent(tr(
                     keys::Q_MISC_RECORDING_IS_LOCKED_UNLOCK_IT,
                 )));
@@ -183,14 +183,14 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // confirm row (locked recordings ignore Esc beyond a hint).
     layer!(
         "record-discard-confirm",
-        |app| app.recording.discard_confirm && app.recording_here(),
+        |app| app.recording.discard_confirming() && app.recording_here(),
         |app, _, cx| {
-            app.recording.discard_confirm = false;
+            app.recording.set_discard_confirming(false);
             cx.notify();
         }
     ),
     layer!("recording", |app| app.recording_here(), |app, _, cx| {
-        if app.recording.locked {
+        if app.recording.locked() {
             app.set_note(StatusNote::silent(tr(
                 keys::Q_MISC_RECORDING_IS_LOCKED_UNLOCK_IT,
             )));

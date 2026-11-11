@@ -30,7 +30,7 @@ impl QuillApp {
     /// fields from the form's `saved_order_info` (schema:4720) when present.
     pub(super) fn open_payment_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut dialog = PaymentDialog::new(window, cx);
-        if let Some(form) = self.session().and_then(|s| s.payments.form.clone()) {
+        if let Some(form) = self.session().and_then(|s| s.payments.form().cloned()) {
             dialog.prefill_from_form(&form, window, cx);
         }
         self.payments.dialog = Some(dialog);
@@ -45,7 +45,7 @@ impl QuillApp {
         // A giveaway that was paid is paid: its form closes with the
         // checkout, so Start cannot pay for it a second time.
         let paid_giveaway = self.session().is_some_and(|s| {
-            s.payments.form_paid
+            s.payments.checkout.is_paid()
                 && s.payments
                     .request
                     .as_ref()
@@ -387,7 +387,7 @@ impl QuillApp {
             .primary();
         body = body.child(if session.payments.checkout_sending() {
             pay.label(tr(keys::Q_MONEY_PROCESSING)).disabled(true)
-        } else if session.payments.form_paid {
+        } else if session.payments.checkout.is_paid() {
             pay.label(tr(keys::PAYMENTS_DATE_LABEL)).disabled(true)
         } else if can_pay {
             pay.on_click(cx.listener(|this, _, window, cx| {
@@ -470,11 +470,11 @@ impl QuillApp {
     pub(super) fn submit_payment(&mut self, cx: &mut Context<Self>) {
         let snapshot = self.session().map(|session| {
             (
-                session.payments.form.clone(),
+                session.payments.form().cloned(),
                 session.payments.request.clone(),
                 session.payments.order_info.clone(),
                 session.payments.shipping_id.clone(),
-                session.payments.form_paid,
+                session.payments.checkout.is_paid(),
             )
         });
         let dialog = self.payments.dialog.as_ref();

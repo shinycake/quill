@@ -34,9 +34,6 @@ pub(crate) struct InviteLinkBox {
     pub(crate) stars_input: Entity<InputState>,
     /// A Custom box shown in place of this one.
     pub(crate) custom: Option<CustomBox>,
-    /// The Custom number field takes focus when its content is first drawn
-    /// (shared with that content, which clears it).
-    pub(crate) focus_custom: std::rc::Rc<std::cell::Cell<bool>>,
     /// The last Save: the box closes on its answer, stays on its error.
     pub(crate) submit: Submit,
 }
@@ -45,7 +42,13 @@ pub(crate) struct InviteLinkBox {
 /// number of users.
 pub(crate) enum CustomBox {
     Date(TimePicker),
-    Limit(Entity<InputState>),
+    Limit {
+        input: Entity<InputState>,
+        /// The number field takes focus when its content is first drawn
+        /// (shared with that content, which clears it): the kit focuses a
+        /// dialog as it opens. It goes with the box.
+        focus_pending: std::rc::Rc<std::cell::Cell<bool>>,
+    },
 }
 
 impl QuillApp {
@@ -139,7 +142,6 @@ impl QuillApp {
             name_input,
             stars_input,
             custom: None,
-            focus_custom: std::rc::Rc::default(),
             submit: Submit::default(),
         });
         self.open_box(DialogKind::InviteLinkBox);

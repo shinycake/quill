@@ -186,7 +186,7 @@ impl QuillApp {
         self.stop_viewer_video();
         self.sound_starts(cx);
         // The sound was replaced, so a recording preview is over.
-        self.recording.preview = None;
+        self.recording.take_preview();
         self.viewer.clip_error = None;
         let playing = self.start_player(path, offset_secs, duration_secs, cx);
         match kind {
@@ -284,7 +284,7 @@ impl QuillApp {
             self.notify_playback_position(cx);
             return;
         }
-        let note = if self.recording.preview.take().is_some() {
+        let note = if self.recording.take_preview().is_some() {
             keys::Q_MISC_COULDNT_PLAY_THE_RECORDING
         } else {
             match self.active_playback_kind() {

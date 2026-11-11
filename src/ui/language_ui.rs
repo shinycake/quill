@@ -273,15 +273,24 @@ impl QuillApp {
         else {
             return false;
         };
-        let ready = state.ready.take();
-        let patch = std::mem::take(&mut state.patch);
-        let reload = std::mem::replace(&mut state.reload, false);
-        let error = state.error.take();
+        let (ready, error) = match std::mem::take(&mut state.outcome) {
+            quill::state::SwitchOutcome::None => (None, None),
+            quill::state::SwitchOutcome::Ready(ready) => (Some(ready), None),
+            quill::state::SwitchOutcome::Failed(error) => (None, Some(error)),
+        };
+        let refresh = std::mem::take(&mut state.refresh);
         let current = state.current.clone();
-        let progressed = ready.is_some() || !patch.is_empty() || reload || error.is_some();
+        let progressed = ready.is_some()
+            || error.is_some()
+            || !matches!(refresh, quill::state::LateChange::Nothing);
         if let Some(ready) = ready {
             self.install_language(ready, cx);
         }
+        let (patch, reload) = match refresh {
+            quill::state::LateChange::Nothing => (Vec::new(), false),
+            quill::state::LateChange::Patch(patch) => (patch, false),
+            quill::state::LateChange::Reload => (Vec::new(), true),
+        };
         if !patch.is_empty()
             && let Some(snapshot) = quill::lang::current()
             && current

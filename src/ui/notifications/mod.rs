@@ -233,7 +233,6 @@ impl QuillApp {
         super::keybindings::invalidate_account_keybindings(
             &mut self.preferences.keybindings_applied,
             &mut self.preferences.keybinding_capture,
-            &mut self.preferences.keybinding_error,
         );
         self.apply_pending_keybindings(cx);
     }

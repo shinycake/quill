@@ -29,7 +29,6 @@ Ceremony::finished
 ChatListState::archive_settings_loading
 ChatSummary::my_rights_fetched
 ChatSwipeFacts::is_saved
-ChatUi::inline_query_waiting
 ChatWindowsState::asked
 ChatbotDraft::loaded
 Checklist::others_can_mark_tasks_as_done
@@ -79,7 +78,6 @@ HeaderFacts::is_saved_messages
 HistoryState::load_failed
 HistoryState::loaded_complete
 HistoryState::newer_failed
-InlineMembersUi::admins_asked
 InstallResult::failed
 InviteLinkMembersState::loading
 InviteLinkMembersState::loading+error
@@ -108,7 +106,6 @@ MediaFacts::downloading
 MediaFacts::in_saved_messages
 MediaMenuFacts::downloading
 MediaState::disk_paused_saved_changed
-MembersView::loading
 MiniAppWindow::closing_confirmation
 MiniAppWindow::data_sent
 MiniAppWindow::waiting_write_access
@@ -128,9 +125,6 @@ ParsedGroupCall::loaded_all_participants
 ParsedSession::is_password_pending
 PasswordBox::sending
 PasswordBox::sending+error
-PaymentsState::form_loading
-PaymentsState::form_loading+receipt_error
-PaymentsState::verification_started
 PhotoSources::busy
 PlayHead::started
 PlaybackHealth::output_failed

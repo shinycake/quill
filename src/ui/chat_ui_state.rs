@@ -185,19 +185,9 @@ pub(crate) struct ChatUi {
     /// `/` token, or opened by the bot's Menu button.
     pub(super) command_menu: super::composer::CommandMenu,
     /// Bots slice: `@botname query` inline-mode results dropdown above
-    /// the composer. `inline_results_selected` is the highlighted row
-    /// (Up/Down/Enter). `inline_query_armed` is the `(username, query)` a
-    /// debounce timer is currently armed for — `poll_live` re-runs the
-    /// inline progress check after every batch of session updates, and the
-    /// armed identity keeps it from spawning a duplicate timer per poll.
-    pub(super) inline_results_open: bool,
-    pub(super) inline_results_selected: usize,
-    pub(super) inline_query_armed: Option<(String, String)>,
-    /// The trigger's query waits for the session: the bot is being
-    /// resolved, or an older query of this chat and bot is in flight.
-    /// `progress_inline_mode` sends it when updates land, in whichever
-    /// window this value is in.
-    pub(super) inline_query_waiting: bool,
+    /// the composer, and where its query is on the way (`inline_mode.rs`).
+    pub(super) inline_results: super::inline_mode::InlineResults,
+    pub(super) inline_query: super::inline_mode::InlineQuery,
     /// This window's copy of the session's resolution of the trigger's bot
     /// (the session has one slot any window's trigger replaces).
     pub(super) inline_bot: Option<quill::state::InlineBotResolve>,
@@ -220,7 +210,7 @@ pub(crate) struct ChatUi {
     /// a typed trigger) in this secret chat (TGX `SecretChatContextBotAlert`);
     /// the stashed query is inserted on Confirm. It lives with the chat
     /// that asked, so another chat never confirms it.
-    pub(super) pending_inline_bot_alert: Option<String>,
+    pub(super) bot_alert: super::inline_mode::BotAlert,
     /// What the last rich send took out of the field, until TDLib answers.
     pub(super) sent_text: super::composer::SentText,
     /// The draft the last AI composer action was asked about.

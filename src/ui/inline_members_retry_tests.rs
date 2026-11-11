@@ -2,10 +2,11 @@
 //! one is not (round 12, area B, finding 6).
 
 use crate::ui::app::QuillApp;
-use crate::ui::inline_members_state::Paging;
+use crate::ui::inline_members_state::{AdminsFallback, Paging};
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, px, size};
+use quill::ids::ChatId;
 use quill::state::{InfoPanelTarget, MemberListFilter};
 use quill::telegram::envelope::ChatKind;
 
@@ -85,7 +86,9 @@ fn the_administrators_fallback_is_asked_once_until_retry(cx: &mut TestAppContext
     let app = demo(cx);
     let chat = open_group_panel(&app, cx);
     let asked = |app: &Entity<QuillApp>, cx: &mut TestAppContext| {
-        app.read_with(cx, |app, _| app.inline_members.admins_asked)
+        app.read_with(cx, |app, _| {
+            app.inline_members.admins != AdminsFallback::NotAsked
+        })
     };
     app.update(cx, |app, cx| {
         if let Some(session) = app.session_mut() {
@@ -100,7 +103,7 @@ fn the_administrators_fallback_is_asked_once_until_retry(cx: &mut TestAppContext
     });
     assert!(asked(&app, cx), "the fallback was asked");
     app.update(cx, |app, cx| {
-        app.inline_members.admins_asked = true;
+        app.inline_members.admins = AdminsFallback::Asked(ChatId(chat));
         app.maybe_load_more_inline(false, cx);
         app.inline_members_stale(&[chat], cx);
     });
@@ -120,14 +123,14 @@ fn the_block_starts_over_each_time_the_panel_opens(cx: &mut TestAppContext) {
     let stale = |app: &Entity<QuillApp>, cx: &mut TestAppContext| {
         app.update(cx, |app, _| {
             app.inline_members.paging = Paging::Failed { offset: 40 };
-            app.inline_members.admins_asked = true;
+            app.inline_members.admins = AdminsFallback::Asked(ChatId(1));
             app.inline_members.shown = 120;
         });
     };
     let fresh = |app: &Entity<QuillApp>, cx: &mut TestAppContext| {
         app.read_with(cx, |app, _| {
             assert_eq!(app.inline_members.paging, Paging::Idle);
-            assert!(!app.inline_members.admins_asked);
+            assert_eq!(app.inline_members.admins, AdminsFallback::NotAsked);
             assert_eq!(app.inline_members.shown, quill::inline_members::ROWS_STEP);
         });
     };

@@ -449,7 +449,7 @@ fn a_refused_payment_form_send_leaves_no_checkout_behind() {
     assert!(t.driver.send_payment_form_request(invoice).is_err());
     let payments = &t.driver.session.payments;
     assert!(payments.request.is_none());
-    assert!(payments.form_request.is_none());
+    assert!(!payments.checkout.is_loading());
 }
 
 #[test]

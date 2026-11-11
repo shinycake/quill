@@ -121,13 +121,10 @@ impl super::on_screen::Farewell for SettingsUi {
 /// prefs and its box, app updates, What's New, the advanced page and the
 /// emoji set. A `QuillApp` field (`preferences`).
 pub(crate) struct PreferencesUi {
-    /// Parity slice (platform-custom-keybindings): the rebindable action id
-    /// currently capturing a keystroke, if any.
-    pub(super) keybinding_capture: Option<String>,
-    /// Parity slice (platform-custom-keybindings): a capture that was
-    /// refused (fixed chrome or another rebindable action). The shortcuts
-    /// chip keeps showing the chord that is actually bound.
-    pub(super) keybinding_error: Option<(String, String)>,
+    /// Parity slice (platform-custom-keybindings): the rebindable action
+    /// capturing a keystroke, or the one whose capture was refused (the
+    /// chip keeps showing the chord that is actually bound).
+    pub(super) keybinding_capture: super::keybindings::KeyCapture,
     /// Parity slice (platform-custom-keybindings): focus handle for the
     /// keystroke-capture row.
     pub(super) keybinding_focus: FocusHandle,
@@ -180,8 +177,7 @@ impl PreferencesUi {
         demo: Option<ScreenshotDemo>,
     ) -> Self {
         Self {
-            keybinding_capture: None,
-            keybinding_error: None,
+            keybinding_capture: Default::default(),
             keybinding_focus: cx.focus_handle(),
             keybindings_applied: false,
             appearance_applied: None,

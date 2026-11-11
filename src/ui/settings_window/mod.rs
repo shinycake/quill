@@ -264,7 +264,7 @@ impl QuillApp {
             // Escape and Find are app-wide bindings: answered here first,
             // so they act on Settings rather than on the chats behind it.
             .on_action(cx.listener(|this, _: &CancelSearch, window, cx| {
-                if this.preferences.keybinding_capture.is_some() {
+                if this.preferences.keybinding_capture.is_armed() {
                     return;
                 }
                 if this.search_field_focused(window, cx) {

@@ -16,6 +16,7 @@ mod state;
 mod suggested_posts;
 mod ton_wallet;
 
+pub use checkout::Checkout;
 pub use gift_code::*;
 pub use giveaway::*;
 pub use purpose::*;

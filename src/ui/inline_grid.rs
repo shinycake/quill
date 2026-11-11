@@ -188,7 +188,8 @@ impl QuillApp {
         let selected = order
             .get(
                 self.chat_ui
-                    .inline_results_selected
+                    .inline_results
+                    .selected()
                     .min(order.len().saturating_sub(1)),
             )
             .copied();
@@ -442,8 +443,8 @@ impl QuillApp {
         }) else {
             return;
         };
-        self.chat_ui.inline_results_open = false;
-        self.chat_ui.inline_query_armed = None;
+        self.chat_ui.inline_results = super::inline_mode::InlineResults::Closed;
+        self.chat_ui.inline_query = super::inline_mode::InlineQuery::Idle;
         match action {
             ButtonAction::StartBot { parameter } => {
                 // tdesktop sends the bot's start with the parameter once
@@ -494,7 +495,7 @@ impl QuillApp {
         if order.is_empty() {
             return;
         }
-        let Some(&target) = order.get(self.chat_ui.inline_results_selected.min(order.len() - 1))
+        let Some(&target) = order.get(self.chat_ui.inline_results.selected().min(order.len() - 1))
         else {
             return;
         };
@@ -521,7 +522,7 @@ impl QuillApp {
     /// one viewport of the end (`Widget::onScroll`), so a short first page
     /// keeps loading until the panel fills.
     pub(super) fn load_more_inline_results_if_needed(&mut self, cx: &mut Context<Self>) {
-        if !self.chat_ui.inline_results_open {
+        if !self.chat_ui.inline_results.is_open() {
             return;
         }
         let text = self.composer.read(cx).value().to_string();

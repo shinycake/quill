@@ -368,7 +368,7 @@ impl QuillApp {
             CaptureFor::Message,
         );
         // MED2: demo shows the locked record bar + a transcribed note.
-        self.recording.locked = true;
+        self.recording.set_locked(true);
         self.set_note(StatusNote::silent(
             "screenshot demo — recording voice · locked",
         ));

@@ -25,8 +25,8 @@ impl QuillApp {
             let Some(session) = this.session() else {
                 return dialog.on_close(on_close.clone());
             };
-            if session.payments.form.is_none()
-                && !session.payments.form_loading
+            if session.payments.form().is_none()
+                && !session.payments.checkout.is_loading()
                 && session.payments.note.is_none()
             {
                 return dialog.on_close(on_close.clone());
@@ -35,7 +35,7 @@ impl QuillApp {
                 return dialog.on_close(on_close.clone());
             };
             let mut body = div().flex().flex_col().gap_3();
-            if session.payments.form_loading {
+            if session.payments.checkout.is_loading() {
                 body = body.child(
                     div()
                         .text_sm()
@@ -50,7 +50,7 @@ impl QuillApp {
                         .child(note.clone()),
                 );
             }
-            let Some(form) = session.payments.form.as_ref() else {
+            let Some(form) = session.payments.form() else {
                 let body = body.into_any_element();
                 return dialog
                     .content(crate::ui::shell::scrollable_dialog_content({
@@ -126,7 +126,7 @@ impl QuillApp {
         };
         let is_test = self
             .session()
-            .and_then(|session| session.payments.form.as_ref())
+            .and_then(|session| session.payments.form())
             .is_some_and(|form| match &form.form_type {
                 PaymentFormTypeData::Regular(regular) => regular.invoice.is_test,
                 _ => false,

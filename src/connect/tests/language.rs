@@ -7,6 +7,7 @@ use crate::ids::ChatId;
 use crate::lang::PackValue;
 use crate::lang::prefs::{LanguageChoice, save_choice};
 use crate::platform::MemorySecretStore;
+use crate::state::{LateChange, SwitchOutcome};
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::LanguagePackInfoData;
 use serde_json::{Value, json};
@@ -118,9 +119,9 @@ fn switch_selects_fetches_pack_and_base_then_synchronizes() {
     let pack_extra = f.strings_extra("pt-br");
     let base_extra = f.strings_extra("pt");
     f.feed(strings(&pack_extra, "lng_languages", "Idioma"));
-    assert!(f.driver.session.settings.language.ready.is_none());
+    assert!(f.driver.session.settings.language.ready().is_none());
     f.feed(strings(&base_extra, "lng_box_ok", "OK"));
-    let ready = f.driver.session.settings.language.ready.take().unwrap();
+    let ready = f.driver.session.settings.language.take_ready().unwrap();
     assert_eq!(ready.info.id, "pt-br");
     assert_eq!(
         ready.pack,
@@ -148,7 +149,7 @@ fn a_newer_switch_drops_the_older_answers() {
     de.plural_code = "de".into();
     f.driver.switch_language(de).unwrap();
     f.feed(strings(&old, "lng_languages", "Idioma"));
-    assert!(f.driver.session.settings.language.ready.is_none());
+    assert!(f.driver.session.settings.language.ready().is_none());
     let new = f.strings_extra("de");
     f.feed(strings(&new, "lng_languages", "Sprache"));
     assert_eq!(
@@ -156,8 +157,7 @@ fn a_newer_switch_drops_the_older_answers() {
             .session
             .settings
             .language
-            .ready
-            .as_ref()
+            .ready()
             .map(|r| r.info.id.as_str()),
         Some("de")
     );
@@ -176,7 +176,7 @@ fn unofficial_packs_are_added_first_and_english_needs_no_strings() {
     let sent = f.sent();
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0]["value"]["value"], "en");
-    let ready = f.driver.session.settings.language.ready.take().unwrap();
+    let ready = f.driver.session.settings.language.take_ready().unwrap();
     assert!(ready.pack.is_empty());
     assert!(f.driver.session.settings.language.current.is_none());
 }
@@ -191,30 +191,41 @@ fn string_updates_patch_the_current_pack_or_ask_for_a_reload() {
         json!({"@type":"updateLanguagePackStrings","localization_target":"android",
         "language_pack_id":"pt-br","strings":[]}),
     );
-    assert!(!f.driver.session.settings.language.reload);
+    assert!(!matches!(
+        f.driver.session.settings.language.refresh,
+        LateChange::Reload
+    ));
     f.feed(
         json!({"@type":"updateLanguagePackStrings","localization_target":"tdesktop",
         "language_pack_id":"pt-br","strings":[{"@type":"languagePackString","key":"lng_box_ok",
         "value":{"@type":"languagePackStringValueOrdinary","value":"Certo"}}]}),
     );
     assert_eq!(
-        f.driver.session.settings.language.patch,
-        vec![("lng_box_ok".into(), PackValue::Ordinary("Certo".into()))]
+        f.driver.session.settings.language.refresh,
+        LateChange::Patch(vec![(
+            "lng_box_ok".into(),
+            PackValue::Ordinary("Certo".into())
+        )])
     );
-    assert!(!f.driver.session.settings.language.reload);
     // A deleted string falls back to the base pack: fetch again.
     f.feed(
         json!({"@type":"updateLanguagePackStrings","localization_target":"tdesktop",
         "language_pack_id":"pt-br","strings":[{"@type":"languagePackString","key":"lng_box_ok",
         "value":{"@type":"languagePackStringValueDeleted"}}]}),
     );
-    assert!(f.driver.session.settings.language.reload);
-    f.driver.session.settings.language.reload = false;
+    assert_eq!(
+        f.driver.session.settings.language.refresh,
+        LateChange::Reload
+    );
+    f.driver.session.settings.language.refresh = LateChange::Nothing;
     f.feed(
         json!({"@type":"updateLanguagePackStrings","localization_target":"tdesktop",
         "language_pack_id":"pt-br","strings":[]}),
     );
-    assert!(f.driver.session.settings.language.reload);
+    assert_eq!(
+        f.driver.session.settings.language.refresh,
+        LateChange::Reload
+    );
 }
 
 #[test]
@@ -223,18 +234,21 @@ fn a_finished_switch_drops_changes_queued_for_the_old_pack() {
     f.driver.switch_language(pack("pt-br", "")).unwrap();
     let extra = f.strings_extra("pt-br");
     f.feed(strings(&extra, "lng_languages", "Idioma"));
-    f.driver.session.settings.language.ready = None;
+    f.driver.session.settings.language.outcome = SwitchOutcome::None;
     f.driver.switch_language(pack("de", "")).unwrap();
     f.feed(
         json!({"@type":"updateLanguagePackStrings","localization_target":"tdesktop",
         "language_pack_id":"pt-br","strings":[{"@type":"languagePackString","key":"lng_box_ok",
         "value":{"@type":"languagePackStringValueOrdinary","value":"Certo"}}]}),
     );
-    assert_eq!(f.driver.session.settings.language.patch.len(), 1);
+    assert!(matches!(
+        &f.driver.session.settings.language.refresh,
+        LateChange::Patch(patch) if patch.len() == 1
+    ));
     let extra = f.strings_extra("de");
     f.feed(strings(&extra, "lng_languages", "Sprache"));
     let state = &f.driver.session.settings.language;
-    assert!(state.ready.is_some() && state.patch.is_empty());
+    assert!(state.ready().is_some() && state.refresh == LateChange::Nothing);
 }
 
 #[test]
@@ -249,12 +263,14 @@ fn a_change_to_the_pack_being_switched_to_is_kept_for_its_arrival() {
     let extra = f.strings_extra("pt-br");
     f.feed(strings(&extra, "lng_languages", "Idioma"));
     let state = &f.driver.session.settings.language;
-    assert!(state.ready.is_some());
+    assert!(state.ready().is_some());
     assert_eq!(
-        state.patch,
-        vec![("lng_box_ok".into(), PackValue::Ordinary("Certo".into()))]
+        state.refresh,
+        LateChange::Patch(vec![(
+            "lng_box_ok".into(),
+            PackValue::Ordinary("Certo".into())
+        )])
     );
-    assert!(!state.reload);
 
     // A deleted string while switching asks for a fetch once ready.
     let mut f = Fixture::new();
@@ -267,7 +283,7 @@ fn a_change_to_the_pack_being_switched_to_is_kept_for_its_arrival() {
     let extra = f.strings_extra("pt-br");
     f.feed(strings(&extra, "lng_languages", "Idioma"));
     let state = &f.driver.session.settings.language;
-    assert!(state.ready.is_some() && state.reload && state.patch.is_empty());
+    assert!(state.ready().is_some() && state.refresh == LateChange::Reload);
 }
 
 #[test]
@@ -277,8 +293,8 @@ fn failed_strings_end_the_switch_with_an_error() {
     let extra = f.strings_extra("pt-br");
     f.feed(json!({"@type":"error","@extra":extra,"code":400,"message":"LANG_PACK_INVALID"}));
     let state = &f.driver.session.settings.language;
-    assert!(state.switching.is_none() && state.ready.is_none());
-    assert!(state.error.is_some());
+    assert!(state.switching.is_none() && state.ready().is_none());
+    assert!(state.error().is_some());
     // TDLib goes back to the pack the interface still shows.
     let before = f.sent().len();
     f.driver.restore_language_option().unwrap();
@@ -321,8 +337,7 @@ fn startup_points_tdlib_at_tdesktop_strings_and_restores_the_saved_pack() {
             .session
             .settings
             .language
-            .ready
-            .as_ref()
+            .ready()
             .map(|r| r.info.native_name.as_str()),
         Some("Deutsch")
     );
@@ -523,7 +538,7 @@ fn a_client_coming_on_screen_follows_the_choice_saved_now() {
     f.driver.send_language_options().unwrap();
     let extra = f.strings_extra("de");
     f.feed(strings(&extra, "lng_languages", "Sprache"));
-    assert!(f.driver.session.settings.language.ready.is_some());
+    assert!(f.driver.session.settings.language.ready().is_some());
 
     let french = LanguageChoice {
         pack_id: "fr".into(),
@@ -535,8 +550,8 @@ fn a_client_coming_on_screen_follows_the_choice_saved_now() {
     save_choice(&f.dir, &french).unwrap();
     f.driver.adopt_saved_language().unwrap();
     let language = &f.driver.session.settings.language;
-    assert!(language.ready.is_none(), "the old pack is not installed");
-    assert!(!language.reload);
+    assert!(language.ready().is_none(), "the old pack is not installed");
+    assert_eq!(language.refresh, LateChange::Nothing);
     assert_eq!(
         language.switching.as_ref().map(|s| s.info.id.as_str()),
         Some("fr")

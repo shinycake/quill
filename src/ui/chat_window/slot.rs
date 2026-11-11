@@ -460,10 +460,9 @@ impl QuillApp {
     pub(in crate::ui) fn clear_slot_chrome_notify(&self, chat_id: ChatId) {
         if let Some(slot) = self.windows.slot_for(chat_id)
             && let Ok(slot) = slot.try_borrow()
+            && let Ok(mut refresh) = slot.history.chrome_refresh.try_borrow_mut()
         {
-            if let Ok(mut refresh) = slot.history.chrome_refresh.try_borrow_mut() {
-                refresh.notified();
-            }
+            refresh.notified();
         }
     }
 

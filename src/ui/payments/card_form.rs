@@ -168,7 +168,7 @@ impl QuillApp {
     /// "New Card..." on a Stripe or Smart Glocal checkout: the card form,
     /// focused on the number (tdesktop's `showEditCard`).
     pub(in crate::ui) fn open_card_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(form) = self.session().and_then(|s| s.payments.form.clone()) else {
+        let Some(form) = self.session().and_then(|s| s.payments.form().cloned()) else {
             return;
         };
         let PaymentFormTypeData::Regular(regular) = &form.form_type else {
@@ -617,7 +617,7 @@ impl QuillApp {
             return false;
         };
         let Some(PaymentFormTypeData::Regular(regular)) =
-            session.payments.form.as_ref().map(|form| &form.form_type)
+            session.payments.form().map(|form| &form.form_type)
         else {
             return false;
         };
@@ -634,7 +634,7 @@ impl QuillApp {
     pub(in crate::ui) fn needs_password_to_save(&self) -> bool {
         let need_password = self
             .session()
-            .and_then(|s| s.payments.form.as_ref())
+            .and_then(|s| s.payments.form())
             .is_some_and(|form| match &form.form_type {
                 PaymentFormTypeData::Regular(regular) => regular.need_password,
                 _ => false,

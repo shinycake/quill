@@ -24,8 +24,7 @@ delivery.next_preview_wait | the delay before the next preview build, for the pr
 delivery.notification_sounds * | the notification sound output device and player
 delivery.polled_redraw * | when the poll loop last redrew: timing, no ids
 delivery.windows * | Quill's notification windows; the queue is keyed by `(AccountKey, ChatId)` and each shown popup by its key
-preferences.keybinding_capture | the keybinding being recorded in Settings: a key name
-preferences.keybinding_error | the conflict message of that recording
+preferences.keybinding_capture * | the keybinding being recorded in Settings, or the conflict that refused it: a key name and a message
 preferences.keybinding_focus | the focus handle of the recording field
 preferences.keybindings_applied | whether the keymap was installed, once per process
 preferences.appearance_applied | the theme, accent and font last applied to the windows

@@ -55,7 +55,7 @@ pub enum LateChange {
 }
 
 impl LateChange {
-    fn note(&mut self, own_pack: bool, strings: Vec<(String, PackValue)>) {
+    pub(crate) fn note(&mut self, own_pack: bool, strings: Vec<(String, PackValue)>) {
         let deletes = strings.iter().any(|(_, v)| matches!(v, PackValue::Deleted));
         if !own_pack || strings.is_empty() || deletes {
             *self = Self::Reload;
@@ -85,15 +85,52 @@ pub struct LanguageState {
     pub current: Option<LanguagePackInfoData>,
     pub switching: Option<LanguageSwitch>,
     pub generation: u32,
-    /// One-shot for the UI: install these strings.
-    pub ready: Option<LanguageReady>,
-    /// One-shot for the UI: changed strings of the current pack.
-    pub patch: Vec<(String, PackValue)>,
-    /// One-shot for the UI: TDLib says every string changed; fetch the
-    /// current pack again.
-    pub reload: bool,
-    /// One-shot for the UI: why the last switch failed.
-    pub error: Option<String>,
+    /// One-shot for the UI: how the last switch ended. A new switch clears
+    /// it; the UI takes it (`drain_language`).
+    pub outcome: SwitchOutcome,
+    /// One-shot for the UI: what changed in the current pack since it was
+    /// installed. Changed strings patch it; deleted ones, a base-pack change
+    /// or an update with no strings mean fetch it again.
+    pub refresh: LateChange,
+}
+
+/// How the last language switch ended.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum SwitchOutcome {
+    /// Nothing to take: no switch ended since the UI last looked.
+    #[default]
+    None,
+    /// The strings to install.
+    Ready(LanguageReady),
+    /// Why the switch failed.
+    Failed(String),
+}
+
+impl LanguageState {
+    pub fn ready(&self) -> Option<&LanguageReady> {
+        match &self.outcome {
+            SwitchOutcome::Ready(ready) => Some(ready),
+            _ => None,
+        }
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        match &self.outcome {
+            SwitchOutcome::Failed(error) => Some(error),
+            _ => None,
+        }
+    }
+
+    /// The strings to install, if that is how the last switch ended.
+    pub fn take_ready(&mut self) -> Option<LanguageReady> {
+        match std::mem::take(&mut self.outcome) {
+            SwitchOutcome::Ready(ready) => Some(ready),
+            other => {
+                self.outcome = other;
+                None
+            }
+        }
+    }
 }
 
 impl Session {
@@ -140,14 +177,8 @@ impl Session {
                 {
                     state.current = Some(switch.info.clone());
                     // Changes queued for the old pack do not apply to this one.
-                    state.patch.clear();
-                    state.reload = false;
-                    match switch.late {
-                        LateChange::Nothing => {}
-                        LateChange::Patch(late) => state.patch = late,
-                        LateChange::Reload => state.reload = true,
-                    }
-                    state.ready = Some(LanguageReady {
+                    state.refresh = switch.late;
+                    state.outcome = SwitchOutcome::Ready(LanguageReady {
                         info: switch.info,
                         pack: switch.pack.unwrap_or_default(),
                         base: switch.base.unwrap_or_default(),
@@ -174,16 +205,11 @@ impl Session {
                     return;
                 };
                 // A deleted string falls back to the base pack, which the
-                // snapshot no longer keeps apart: fetch both again.
-                let deletes = strings.iter().any(|(_, v)| matches!(v, PackValue::Deleted));
-                if language_pack_id == current.id && !strings.is_empty() && !deletes {
-                    state.patch.extend(strings);
-                } else if language_pack_id == current.id
-                    || language_pack_id == current.base_language_pack_id
-                {
-                    // Every string changed, or the base pack changed under
-                    // the pack's own strings: fetch both again.
-                    state.reload = true;
+                // snapshot no longer keeps apart, and a base-pack change
+                // moves strings under the pack's own: fetch both again.
+                let own = language_pack_id == current.id;
+                if own || language_pack_id == current.base_language_pack_id {
+                    state.refresh.note(own, strings);
                 }
             }
         }
@@ -201,7 +227,7 @@ impl Session {
             LanguagePurpose::Strings { generation, .. } => {
                 if state.switching.as_ref().map(|s| s.generation) == Some(generation) {
                     state.switching = None;
-                    state.error = Some(error_reason(err));
+                    state.outcome = SwitchOutcome::Failed(error_reason(err));
                 }
             }
             // The badge types it asked for are asked again by the next pump.

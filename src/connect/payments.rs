@@ -3,7 +3,7 @@ use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::payment_invoice::InputInvoice;
 use crate::state::PaymentsPurpose;
-use crate::state::{BankCardLookup, BankCardStage, OrderInfoStage};
+use crate::state::{BankCardLookup, BankCardStage, Checkout, OrderInfoStage};
 use crate::state::{PaymentRequest, RequestPurpose};
 use crate::telegram::envelope::OrderInfoData;
 use crate::telegram::requests::{
@@ -42,7 +42,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sent = self.send_json_request(extra, &json)?;
         // The checkout waits on the form only once the request is out.
         self.session.payments.request = Some(PaymentRequest { invoice });
-        self.session.payments.form_request = Some(extra);
+        self.session.payments.checkout = Checkout::LoadingForm {
+            request: Some(extra),
+        };
         Ok(sent)
     }
 

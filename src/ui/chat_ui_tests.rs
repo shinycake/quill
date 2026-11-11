@@ -556,14 +556,11 @@ fn another_chat_drops_the_secret_inline_bot_alert(cx: &mut TestAppContext) {
     let other = other_chat(&app, &mut vcx);
     open(&app, &mut vcx, CHAT);
     app.update(&mut vcx, |app, _| {
-        app.chat_ui.pending_inline_bot_alert = Some("@bot query".into());
+        app.chat_ui.bot_alert = crate::ui::inline_mode::BotAlert::Switch("@bot query".into());
     });
     open(&app, &mut vcx, other);
     assert!(
-        app.read_with(&vcx, |app, _| app
-            .chat_ui
-            .pending_inline_bot_alert
-            .is_none()),
+        app.read_with(&vcx, |app, _| !app.chat_ui.bot_alert.is_pending()),
         "the alert stayed with the chat it was raised in"
     );
 }

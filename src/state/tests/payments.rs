@@ -12,15 +12,16 @@ fn payment_form_applies_only_to_own_request() {
         )
     };
     apply_json(&mut session, &seq, &sink, &form_json("999"));
-    assert!(session.payments.form.is_none());
+    assert!(session.payments.form().is_none());
     let extra = session.request(RequestPurpose::GetPaymentForm, Some(ChatId(51)));
-    session.payments.form_request = Some(extra);
-    session.payments.form_loading = true;
+    session.payments.checkout = Checkout::LoadingForm {
+        request: Some(extra),
+    };
     apply_json(&mut session, &seq, &sink, &form_json(&extra.0.to_string()));
-    let form = session.payments.form.as_ref().expect("form applies");
+    let form = session.payments.form().expect("form applies");
     assert_eq!(form.id, 7);
     assert_eq!(form.product_title, "Time machine");
-    assert!(!session.payments.form_loading);
+    assert!(!session.payments.checkout.is_loading());
 }
 
 #[test]
@@ -29,7 +30,9 @@ fn payment_request_survives_form_and_validated_answers() {
     let seq = AtomicU64::new(0);
     // Buy press: `getPaymentForm` sent, request context set.
     let extra = session.request(RequestPurpose::GetPaymentForm, Some(ChatId(51)));
-    session.payments.form_request = Some(extra);
+    session.payments.checkout = Checkout::LoadingForm {
+        request: Some(extra),
+    };
     session.payments.request = Some(PaymentRequest {
         invoice: crate::payment_invoice::InputInvoice::Message {
             chat_id: ChatId(51),
@@ -45,7 +48,7 @@ fn payment_request_survives_form_and_validated_answers() {
             extra.0
         ),
     );
-    assert!(session.payments.form.is_some());
+    assert!(session.payments.form().is_some());
     assert!(
         session.payments.request.is_some(),
         "form answer must not clear the payment request"
@@ -83,9 +86,10 @@ fn payment_request_survives_form_and_validated_answers() {
 fn payment_form_error_surfaces_note() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.payments.form_loading = true;
     let extra = session.request(RequestPurpose::GetPaymentForm, Some(ChatId(51)));
-    session.payments.form_request = Some(extra);
+    session.payments.checkout = Checkout::LoadingForm {
+        request: Some(extra),
+    };
     apply_json(
         &mut session,
         &seq,
@@ -95,7 +99,7 @@ fn payment_form_error_surfaces_note() {
             extra.0
         ),
     );
-    assert!(!session.payments.form_loading);
+    assert!(!session.payments.checkout.is_loading());
     assert!(
         session
             .payments

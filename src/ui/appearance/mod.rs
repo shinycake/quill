@@ -78,11 +78,7 @@ impl QuillApp {
     pub(super) fn keybinding_capture_active(&mut self) -> bool {
         let shown = self.settings.open
             && self.settings.page == Some(quill::settings_catalog::Page::Shortcuts);
-        super::keybindings::capture_active(
-            shown,
-            &mut self.preferences.keybinding_capture,
-            &mut self.preferences.keybinding_error,
-        )
+        super::keybindings::capture_active(shown, &mut self.preferences.keybinding_capture)
     }
 
     /// The app's own prefs folder (`<app root>/app`). Appearance is a

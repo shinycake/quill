@@ -86,7 +86,7 @@ impl QuillApp {
 
     fn demo_country_payment(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            session.payments.form = Some(shipping_form());
+            session.payments.set_form(shipping_form());
         }
         self.open_payment_dialog(window, cx);
         if let Some(dialog) = self.payments.dialog.as_mut() {
