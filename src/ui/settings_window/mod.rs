@@ -184,7 +184,7 @@ impl QuillApp {
             Page::System => self.preferences.link_handler_recheck = Default::default(),
             Page::Calls => {
                 self.call_boxes.mic_test = Default::default();
-                self.group_call.ptt_capture = false;
+                self.preferences.keybinding.end_ptt_capture();
             }
             _ => {}
         }

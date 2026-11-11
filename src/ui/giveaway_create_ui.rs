@@ -17,7 +17,7 @@ use super::*;
 use gpui_base::{Disableable, StyledExt};
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
-use gpui_kit::component::input::InputState;
+use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::giveaway::{
@@ -101,6 +101,17 @@ impl QuillApp {
                 .placeholder(tr(keys::GIVEAWAY_ADDITIONAL_PRIZES_PH))
                 .submit_on_enter(false)
         });
+        let search = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(tr(keys::Q_MONEY_SEARCH))
+                .submit_on_enter(false)
+        });
+        cx.subscribe_in(&search, window, |this, _, event: &InputEvent, _, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.giveaway_search_changed(cx);
+            }
+        })
+        .detach();
         if let Some(live) = self.live.as_mut() {
             let giveaway = &mut live.driver.session.payments.giveaway;
             giveaway.launches.for_form(chat_id.0);
@@ -113,6 +124,7 @@ impl QuillApp {
         self.giveaway.form = Some(GiveawayForm {
             draft: GiveawayDraft::new(chat_id.0, prepaid, now),
             prize_input,
+            search,
             note: None,
             page: GiveawayPage::Form,
         });

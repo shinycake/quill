@@ -1,7 +1,7 @@
 //! Screen-reader focus in the history: the pure focus steps, and the focus
 //! model against the "ready-chats" demo (needs the `demo-capture` feature
 //! for gpui-kit's test support).
-use super::{A11yItem, A11yKey, a11y_items, default_focus, step};
+use super::{A11yItem, A11yKey, HistoryFocus, a11y_items, default_focus, step};
 use crate::ui::actions::{HistoryToTop, SelectionFocusNewer, SelectionFocusOlder};
 use crate::ui::app::QuillApp;
 use crate::ui::history_row::HistoryRow;
@@ -181,9 +181,7 @@ fn the_first_messages_of_a_focused_empty_chat_take_focus(cx: &mut TestAppContext
     // Focus enters a history list that shows no messages yet (a thread,
     // topic or Saved view whose first page is still loading).
     let rows = app.update(vcx, |app, _| std::mem::take(&mut app.history.rows));
-    vcx.update(|window, cx| {
-        app.update(cx, |app, cx| app.history_a11y_focus_in(window, cx));
-    });
+    focus_history(&app, vcx);
     let armed = app.read_with(vcx, |app, _| app.message_ui.a11y.focus.armed());
     assert!(armed.is_some());
     assert_eq!(focused(&app, vcx), None);
@@ -200,6 +198,21 @@ fn the_first_messages_of_a_focused_empty_chat_take_focus(cx: &mut TestAppContext
         expected.and_then(|at| kids.get(at).copied())
     );
     assert!(app.read_with(vcx, |app, _| app.message_ui.a11y.focus.armed().is_none()));
+}
+
+/// The deferred focus-in runs a frame after the event: focus that left in
+/// between must not leave an empty history armed for its first messages.
+#[gpui_kit::test]
+fn a_focus_in_that_ran_after_focus_left_arms_nothing(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| app.history.rows.clear());
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| app.history_a11y_focus_in(window, cx));
+    });
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.message_ui.a11y.focus, HistoryFocus::Away);
+    });
 }
 
 #[gpui_kit::test]

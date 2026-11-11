@@ -18,6 +18,7 @@
 //! live pictures.
 #![deny(clippy::indexing_slicing)]
 
+use gpui_kit::Task;
 use std::time::{Duration, Instant};
 
 #[cfg(test)]
@@ -46,7 +47,6 @@ pub(crate) const HIDE_TIMEOUT: Duration = Duration::from_secs(5);
 /// lib_ui `slideWrapDuration`.
 pub(crate) const SLIDE: Duration = Duration::from_millis(150);
 
-#[derive(Debug, Clone)]
 pub(crate) struct ControlsFade {
     mode: Mode,
     over_picture: bool,
@@ -58,19 +58,43 @@ pub(crate) struct ControlsFade {
 }
 
 /// Windowed (the pointer decides) or full screen.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
     Window,
-    /// Full screen: the controls were asked for (a mouse move) and hide at
-    /// `shown_until`; `None` once they hid.
-    Full {
-        shown_until: Option<Instant>,
+    Full(Reveal),
+}
+
+/// Full screen: whether the controls were asked for (a mouse move).
+enum Reveal {
+    /// They hid, or were never asked for.
+    Hidden,
+    /// They hide at `until`. `timer` is the task that wakes the owner then,
+    /// armed by [`ControlsFade::arm_timer`]; it lives and dies with this
+    /// stage, so hiding, leaving full screen and dropping the fade all
+    /// cancel it.
+    Shown {
+        until: Instant,
+        timer: Option<Task<()>>,
     },
 }
 
-/// The moment the full-screen timer fires, `HIDE_TIMEOUT` after `now`.
-fn timer_from(now: Instant) -> Option<Instant> {
-    Some(now.checked_add(HIDE_TIMEOUT).unwrap_or(now))
+impl Reveal {
+    /// Asked for at `now`: the deadline moves, a running timer stays.
+    fn restart(&mut self, now: Instant) {
+        let until = now.checked_add(HIDE_TIMEOUT).unwrap_or(now);
+        match self {
+            Reveal::Shown { until: at, .. } => *at = until,
+            Reveal::Hidden => {
+                *self = Reveal::Shown { until, timer: None };
+            }
+        }
+    }
+
+    fn until(&self) -> Option<Instant> {
+        match self {
+            Reveal::Shown { until, .. } => Some(*until),
+            Reveal::Hidden => None,
+        }
+    }
 }
 
 impl Default for ControlsFade {
@@ -100,9 +124,9 @@ impl ControlsFade {
             return;
         }
         self.mode = if full {
-            Mode::Full {
-                shown_until: timer_from(now),
-            }
+            let mut reveal = Reveal::Hidden;
+            reveal.restart(now);
+            Mode::Full(reveal)
         } else {
             Mode::Window
         };
@@ -110,7 +134,7 @@ impl ControlsFade {
     }
 
     pub(crate) fn is_full(&self) -> bool {
-        matches!(self.mode, Mode::Full { .. })
+        matches!(self.mode, Mode::Full(_))
     }
 
     /// The mouse entered or left the picture. Ignored in full screen,
@@ -127,8 +151,12 @@ impl ControlsFade {
     /// shows them, leaving hides them, in either mode.
     pub(crate) fn hover_controls(&mut self, inside: bool, now: Instant) {
         self.over_controls = inside;
-        if let Mode::Full { shown_until } = &mut self.mode {
-            *shown_until = inside.then(|| timer_from(now)).flatten();
+        if let Mode::Full(reveal) = &mut self.mode {
+            if inside {
+                reveal.restart(now);
+            } else {
+                *reveal = Reveal::Hidden;
+            }
         }
         self.update(now);
     }
@@ -136,17 +164,28 @@ impl ControlsFade {
     /// The mouse moved over the picture. In full screen this shows the
     /// controls and restarts the timer.
     pub(crate) fn mouse_moved(&mut self, now: Instant) {
-        if let Mode::Full { shown_until } = &mut self.mode {
-            *shown_until = timer_from(now);
+        if let Mode::Full(reveal) = &mut self.mode {
+            reveal.restart(now);
             self.update(now);
         }
     }
 
     /// When the full-screen timer fires, if it runs.
     pub(crate) fn hide_at(&self) -> Option<Instant> {
-        match self.mode {
-            Mode::Full { shown_until } => shown_until,
+        match &self.mode {
+            Mode::Full(reveal) => reveal.until(),
             Mode::Window => None,
+        }
+    }
+
+    /// Give the running full-screen deadline its wake-up task, if it has
+    /// none: `spawn` runs only then. The task ends with the deadline.
+    pub(crate) fn arm_timer(&mut self, spawn: impl FnOnce() -> Task<()>) {
+        if let Mode::Full(Reveal::Shown {
+            timer: slot @ None, ..
+        }) = &mut self.mode
+        {
+            *slot = Some(spawn());
         }
     }
 
@@ -155,7 +194,7 @@ impl ControlsFade {
         if let Some(at) = self.hide_at()
             && now >= at
         {
-            self.mode = Mode::Full { shown_until: None };
+            self.mode = Mode::Full(Reveal::Hidden);
             self.update(now);
         }
     }
@@ -171,8 +210,8 @@ impl ControlsFade {
     }
 
     fn target(&self) -> f32 {
-        let shown = match self.mode {
-            Mode::Full { shown_until } => shown_until.is_some(),
+        let shown = match &self.mode {
+            Mode::Full(reveal) => reveal.until().is_some(),
             Mode::Window => self.over_picture || self.over_controls,
         };
         if shown { 1.0 } else { 0.0 }
@@ -268,6 +307,37 @@ mod tests {
         c.set_full(false, moved + HIDE_TIMEOUT * 3);
         assert!(c.shown());
         assert_eq!(c.hide_at(), None);
+    }
+
+    #[test]
+    fn the_wake_up_task_lives_and_dies_with_the_deadline() {
+        let t0 = Instant::now();
+        let mut c = ControlsFade::default();
+        let armed = std::cell::Cell::new(0);
+        let arm = |c: &mut ControlsFade| {
+            c.arm_timer(|| {
+                armed.set(armed.get() + 1);
+                gpui_kit::Task::ready(())
+            })
+        };
+        arm(&mut c);
+        assert_eq!(armed.get(), 0, "no deadline in a normal window");
+        c.set_full(true, t0);
+        arm(&mut c);
+        arm(&mut c);
+        assert_eq!(armed.get(), 1, "one task while the deadline runs");
+        c.mouse_moved(t0 + Duration::from_secs(1));
+        arm(&mut c);
+        assert_eq!(armed.get(), 1, "a move only pushes the deadline");
+        c.tick(t0 + Duration::from_secs(1) + HIDE_TIMEOUT);
+        arm(&mut c);
+        assert_eq!(armed.get(), 1, "hidden: the task went with the deadline");
+        c.mouse_moved(t0 + Duration::from_secs(9));
+        arm(&mut c);
+        assert_eq!(armed.get(), 2, "shown again: a fresh task");
+        c.set_full(false, t0 + Duration::from_secs(10));
+        arm(&mut c);
+        assert_eq!(armed.get(), 2, "leaving full screen ends it");
     }
 
     #[test]

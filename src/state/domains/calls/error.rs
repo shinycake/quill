@@ -333,6 +333,7 @@ impl Session {
                 {
                     self.calls.call_link = None;
                 }
+                self.calls.note_group_call_fetch_failed(group_call_id);
                 self.calls.group_call_error =
                     Some(call_request_error_line(err, "Voice chat request failed"));
             }

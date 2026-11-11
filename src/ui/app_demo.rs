@@ -167,7 +167,9 @@ impl QuillApp {
         let ptt_app = cx.weak_entity();
         super::passcode::intercept_keys_unlocked(cx, move |event, _window, cx| {
             let armed = ptt_app
-                .update(cx, |this, _| this.group_call.ptt_capture)
+                .update(cx, |this, _| {
+                    this.preferences.keybinding.ptt_armed()
+                })
                 .unwrap_or(false);
             if !armed || event.keystroke.is_modifier_key() {
                 return;

@@ -371,11 +371,10 @@ impl QuillApp {
         if self.group_call_needs_unlock(cx) {
             return;
         }
-        let call = self
-            .session()
-            .and_then(|s| s.calls.active_group_call.as_ref())
-            .map(|call| call.id);
-        self.group_call_boxes.call_box = CallBox::Invite { call };
+        // Without a tracked call there is nothing to invite to.
+        if !self.open_call_box(CallBox::Invite) {
+            return;
+        }
         if let Some(live) = self.live.as_mut()
             && live.driver.session.users_state.contacts.data().is_none()
         {
@@ -468,16 +467,20 @@ impl QuillApp {
         sender: MessageSender,
         level: i32,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Option<quill::ids::RequestId> {
         let level = level.clamp(1, 20000);
+        let mut sent = None;
         if let Some(live) = self.live.as_mut() {
             self.screen.connection.set_note_for(
                 &self.screen.windows,
                 match live.driver.set_group_call_participant_volume(sender, level) {
-                    Ok(_) => StatusNote::silent(tr_with(
-                        keys::Q_AV_VOLUME,
-                        &[("level_100", &(level / 100).to_string())],
-                    )),
+                    Ok(request) => {
+                        sent = Some(request);
+                        StatusNote::silent(tr_with(
+                            keys::Q_AV_VOLUME,
+                            &[("level_100", &(level / 100).to_string())],
+                        ))
+                    }
                     Err(_) => {
                         StatusNote::error(tr(keys::Q_AV_COULDNT_CHANGE_THE_PARTICIPANT_VOLUME))
                     }
@@ -494,6 +497,7 @@ impl QuillApp {
             )));
         }
         cx.notify();
+        sent
     }
 
     /// Phase C2f: accept a `messageGroupCall` invitation via
@@ -645,17 +649,19 @@ impl QuillApp {
             .map(|c| c.title.clone())
             .unwrap_or_default();
         let dialog = GroupCallTitleDialog::new(window, cx, &current);
-        self.group_call_screen.title_dialog = Some(dialog);
+        self.open_call_box(CallBox::Rename(dialog));
         cx.notify();
     }
 
     pub(super) fn close_group_call_title_dialog(&mut self, cx: &mut Context<Self>) {
-        self.group_call_screen.title_dialog = None;
+        if self.title_dialog().is_some() {
+            self.close_call_box();
+        }
         cx.notify();
     }
 
     pub(super) fn save_group_call_title(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.group_call_screen.title_dialog.take() else {
+        let Some(dialog) = self.take_title_dialog() else {
             return;
         };
         let title = dialog.title_input.read(cx).value().to_string();
@@ -664,7 +670,7 @@ impl QuillApp {
                 Ok(_) => StatusNote::silent(tr(keys::Q_AV_RENAMING_VOICE_CHAT)),
                 Err(_) => {
                     // Not sent: the box stays with the typed title.
-                    self.group_call_screen.title_dialog = Some(dialog);
+                    self.open_call_box(CallBox::Rename(dialog));
                     StatusNote::error(tr(keys::Q_AV_COULDNT_RENAME_THE_VOICE_CHAT))
                 }
             };
@@ -672,7 +678,7 @@ impl QuillApp {
                 .connection
                 .set_note_for(&self.screen.windows, note);
         } else {
-            self.group_call_screen.title_dialog = Some(dialog);
+            self.open_call_box(CallBox::Rename(dialog));
             self.set_note(StatusNote::info(tr(
                 keys::Q_AV_RENAMING_NEEDS_A_LIVE_CONNECTION,
             )));

@@ -9,6 +9,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::group_call_state::CallBox;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::switch::Switch;
@@ -22,12 +23,14 @@ impl QuillApp {
         if self.refused_while_locked() {
             return;
         }
-        self.group_call_screen.settings_open = true;
+        self.open_call_box(CallBox::Settings);
         cx.notify();
     }
 
     pub(super) fn close_group_call_settings(&mut self, cx: &mut Context<Self>) {
-        self.group_call_screen.settings_open = false;
+        if self.settings_open() {
+            self.close_call_box();
+        }
         cx.notify();
     }
 
@@ -40,11 +43,11 @@ impl QuillApp {
         if self.escape_screen_privacy(true, cx) {
             return true;
         }
-        if self.group_call_screen.settings_open {
+        if self.settings_open() {
             self.close_group_call_settings(cx);
             return true;
         }
-        if self.group_call_screen.title_dialog.is_some() {
+        if self.title_dialog().is_some() {
             self.close_group_call_title_dialog(cx);
             return true;
         }
@@ -63,7 +66,7 @@ impl QuillApp {
 
     /// The Settings box over the voice chat window, while open.
     pub(super) fn group_call_settings_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.group_call_screen.settings_open {
+        if !self.settings_open() {
             return None;
         }
         let noise_row = self.noise_suppression_row(cx);

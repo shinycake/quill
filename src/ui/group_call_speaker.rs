@@ -55,15 +55,19 @@ impl QuillApp {
             .map(|live| live.driver.group_call_speaker(p.audio_source_id, now))
             .unwrap_or_default();
         if !look.sounding {
-            self.group_call.row_levels.remove(&p.audio_source_id);
+            if let Some(view) = self.call_view_mut() {
+                view.row_levels.remove(&p.audio_source_id);
+            }
             return RowSpeaker { look, level: 0. };
         }
         if quill::power_saving::on(quill::power_saving::Flag::Calls) {
             return RowSpeaker { look, level: 0. };
         }
         let clock = self.group_call_now_ms();
-        let animation = self
-            .group_call
+        let Some(view) = self.call_view_mut() else {
+            return RowSpeaker { look, level: 0. };
+        };
+        let animation = view
             .row_levels
             .entry(p.audio_source_id)
             .or_insert_with(|| LevelAnimation::new(0., LEVEL_ANIMATION_MS));
