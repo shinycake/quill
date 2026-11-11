@@ -75,8 +75,8 @@ fn lists_the_passkeys_once_while_fresh() {
     assert!(p.0.request_passkeys().unwrap().is_none());
     answer(&mut p, "getLoginPasskeys", two_passkeys());
     let state = &p.0.session.settings.passkeys;
-    assert!(state.known);
-    assert_eq!(state.list.len(), 2);
+    assert!(state.is_known());
+    assert_eq!(state.passkeys().len(), 2);
     assert_eq!(state.row_label().text(), "2");
     // Fresh for 5 seconds: no new request.
     assert!(p.0.request_passkeys().unwrap().is_none());
@@ -109,13 +109,13 @@ fn a_removal_waits_for_the_server_then_refetches() {
     let sent = sent_request(&p.1, "removeLoginPasskey");
     assert_eq!(sent["passkey_id"], "k2");
     // Nothing leaves the list before the answer, and one removal at a time.
-    assert_eq!(p.0.session.settings.passkeys.list.len(), 2);
+    assert_eq!(p.0.session.settings.passkeys.passkeys().len(), 2);
     assert!(p.0.remove_passkey("k1").is_err());
     answer(&mut p, "removeLoginPasskey", json!({"@type": "ok"}));
     let state = &p.0.session.settings.passkeys;
     assert!(state.find("k2").is_none());
     assert!(state.removing.is_none());
-    assert!(!state.known);
+    assert!(!state.is_known());
     // The same ingest asked for the list again.
     assert_eq!(count(&p.1, "getLoginPasskeys"), 2);
     answer(
@@ -126,7 +126,7 @@ fn a_removal_waits_for_the_server_then_refetches() {
              "addition_date": 1_790_000_000}]}),
     );
     let state = &p.0.session.settings.passkeys;
-    assert!(state.known);
+    assert!(state.is_known());
     assert_eq!(state.row_label().text(), "iCloud Keychain");
 }
 
@@ -149,7 +149,7 @@ fn failures_are_shown_and_keep_the_list() {
         json!({"@type": "error", "code": 400, "message": "PASSKEY_INVALID"}),
     );
     let state = &p.0.session.settings.passkeys;
-    assert_eq!(state.list.len(), 2);
+    assert_eq!(state.passkeys().len(), 2);
     assert!(state.removing.is_none());
     assert_eq!(
         state.error.as_deref(),
@@ -166,7 +166,7 @@ fn failures_are_shown_and_keep_the_list() {
         json!({"@type": "error", "code": 500, "message": "INTERNAL"}),
     );
     let state = &p.0.session.settings.passkeys;
-    assert!(!state.known);
+    assert!(!state.is_known());
     assert_eq!(state.row_label().text(), "Loading...");
     assert_eq!(
         state.error.as_deref(),
@@ -232,8 +232,8 @@ fn creating_a_passkey_fetches_options_then_adds_the_result() {
                "software_icon_custom_emoji_id": "0"}),
     );
     let state = &p.0.session.settings.passkeys;
-    assert_eq!(state.list.len(), 3);
-    assert_eq!(state.list.last().map(|k| k.id.as_str()), Some("k3"));
+    assert_eq!(state.passkeys().len(), 3);
+    assert_eq!(state.passkeys().last().map(|k| k.id.as_str()), Some("k3"));
     assert!(matches!(state.add, crate::passkeys::PasskeyAdd::Added));
 }
 
@@ -259,7 +259,7 @@ fn a_failed_registration_forgets_the_options() {
     );
     let state = &p.0.session.settings.passkeys;
     assert!(matches!(state.add, crate::passkeys::PasskeyAdd::Idle));
-    assert_eq!(state.list.len(), 2);
+    assert_eq!(state.passkeys().len(), 2);
     assert!(state.error.is_some());
     // The next try asks for new options.
     p.0.begin_register().unwrap();
@@ -383,8 +383,7 @@ fn a_failed_refetch_send_keeps_the_list_stale() {
     sender.down.store(true, Ordering::SeqCst);
     assert!(driver.request_passkeys().is_err());
     let state = &driver.session.settings.passkeys;
-    assert!(state.stale);
-    assert!(state.requested_at.is_none());
+    assert!(state.is_stale());
     sender.down.store(false, Ordering::SeqCst);
     assert!(driver.request_passkeys().unwrap().is_some());
 }
@@ -395,7 +394,8 @@ fn a_failed_refetch_send_keeps_the_list_stale() {
 fn a_list_in_flight_during_a_removal_is_asked_again() {
     let mut p = parts();
     listed(&mut p);
-    p.0.session.settings.passkeys.requested_at = None;
+    let shown = p.0.session.settings.passkeys.passkeys().to_vec();
+    p.0.session.settings.passkeys.list = crate::passkeys::PasskeyList::Stale(shown);
     p.0.request_passkeys().unwrap();
     let old = sent_request(&p.1, "getLoginPasskeys");
     p.0.remove_passkey("k2").unwrap();
@@ -405,7 +405,8 @@ fn a_list_in_flight_during_a_removal_is_asked_again() {
     body["@extra"] = old["@extra"].clone();
     feed(&mut p, body);
     assert!(p.0.session.settings.passkeys.find("k2").is_none());
-    assert!(p.0.session.settings.passkeys.stale);
+    // The list is asked for again and waits for that answer.
+    assert!(!p.0.session.settings.passkeys.is_known());
     assert_eq!(count(&p.1, "getLoginPasskeys"), 3);
 }
 

@@ -101,7 +101,7 @@ impl QuillApp {
         self.background.notify_from_all = on;
         if !on {
             let mut shown: Vec<(AccountKey, ChatId)> = Vec::new();
-            for client in &mut self.background.clients {
+            for client in self.background.clients_mut().iter_mut() {
                 if let Some(live) = client.live.as_mut() {
                     let chats =
                         std::mem::take(&mut live.driver.session.settings.shown_notification_chats);

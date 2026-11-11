@@ -55,7 +55,9 @@ pub enum UserLinkFetch {
     Idle,
     Loading,
     Ready(UserLinkData),
-    Failed,
+    /// The ask failed. The reason is for the box to show once (`None`
+    /// after it did, or when there was none to tell).
+    Failed(Option<String>),
 }
 
 /// What the own-link resolution needs from the session.
@@ -135,7 +137,7 @@ pub fn own_link(inputs: OwnLinkInputs<'_>) -> OwnLinkState {
                 expires_at: data.expires_at,
             })
         }
-        UserLinkFetch::Failed => OwnLinkState::Unavailable,
+        UserLinkFetch::Failed(_) => OwnLinkState::Unavailable,
         UserLinkFetch::Loading => OwnLinkState::Waiting,
         UserLinkFetch::Idle | UserLinkFetch::Ready(_) => OwnLinkState::NeedsContactLink,
     }

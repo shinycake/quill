@@ -21,8 +21,8 @@ use gpui_kit::{TestSupportExt, *};
 use quill::ids::{ChatId, FileId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::message_menu::{
-    MediaAction, MediaFacts, MediaKind, MediaTarget, SeenKind, media_actions, media_target, order,
-    reacted_label, read_date_label, seen_kind, seen_label,
+    MediaAction, MediaFacts, MediaFile, MediaKind, MediaTarget, SeenKind, media_actions,
+    media_target, order, reacted_label, read_date_label, seen_kind, seen_label,
 };
 use quill::state::{Audience, MessageReportStage, Session};
 use quill::telegram::envelope::{
@@ -243,8 +243,13 @@ impl QuillApp {
             _ => (false, false),
         };
         MediaFacts {
-            downloading,
-            local: local_media_path(session, content, target).is_some(),
+            file: if downloading {
+                MediaFile::Downloading
+            } else if local_media_path(session, content, target).is_some() {
+                MediaFile::Local
+            } else {
+                MediaFile::Remote
+            },
             can_save: !protected && actions.is_none_or(|a| a.can_be_saved),
             set_installed: session
                 .stickers

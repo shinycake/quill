@@ -230,6 +230,7 @@ impl Session {
                 reaction_limits,
             } => {
                 self.settings.passkeys.display_allowed = passkeys.display;
+                self.login_config_answered(pending);
                 if passkeys.max.is_some() {
                     self.settings.passkeys.max_passkeys = passkeys.max;
                 }

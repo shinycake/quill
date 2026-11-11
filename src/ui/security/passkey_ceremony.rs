@@ -67,24 +67,34 @@ pub(in crate::ui) enum CeremonyMode {
     Login,
 }
 
-/// The open ceremony dialog.
+/// The open ceremony dialog: running, with what belongs to the run, or
+/// ended with its reason. The worker, the phone sheet's QR and the PIN
+/// focus ask exist only while it runs, so none outlives it.
+enum CeremonyRun {
+    Live {
+        sheet: CeremonySheet,
+        /// The running ceremony; `None` in demos and tests.
+        worker: Option<Ceremony>,
+        /// Focus the PIN field on the next render.
+        focus_pin: bool,
+        /// The phone sheet's QR code, rendered once.
+        qr: Option<hybrid::CableQr>,
+    },
+    /// The ceremony failed; the sheet says why.
+    Ended(Key),
+}
+
 pub(in crate::ui) struct CeremonyUi {
     pub(in crate::ui) mode: CeremonyMode,
-    pub(in crate::ui) sheet: CeremonySheet,
-    /// The running ceremony; `None` once it ended (and in demos).
-    ceremony: Option<Ceremony>,
-    /// Focus the PIN field on the next render.
-    focus_pin: bool,
-    /// The phone sheet's QR code, rendered once.
-    qr: Option<hybrid::CableQr>,
+    run: CeremonyRun,
 }
 
 impl std::fmt::Debug for CeremonyUi {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CeremonyUi")
             .field("mode", &self.mode)
-            .field("sheet", &self.sheet)
-            .field("running", &self.ceremony.is_some())
+            .field("sheet", &self.sheet())
+            .field("running", &self.worker().is_some())
             .finish()
     }
 }
@@ -153,10 +163,95 @@ impl CeremonyUi {
     ) -> Self {
         Self {
             mode,
-            sheet,
-            ceremony,
-            focus_pin: false,
-            qr: None,
+            run: CeremonyRun::Live {
+                sheet,
+                worker: ceremony,
+                focus_pin: false,
+                qr: None,
+            },
+        }
+    }
+
+    /// The sheet the dialog shows.
+    pub(in crate::ui) fn sheet(&self) -> CeremonySheet {
+        match &self.run {
+            CeremonyRun::Live { sheet, .. } => *sheet,
+            CeremonyRun::Ended(reason) => CeremonySheet::Error(*reason),
+        }
+    }
+
+    /// Moves a running dialog to `sheet`; the QR belongs to the sheet it
+    /// was made for and goes. An ended one stays ended.
+    fn show(&mut self, sheet: CeremonySheet) {
+        if let CeremonyRun::Live {
+            sheet: shown, qr, ..
+        } = &mut self.run
+        {
+            *shown = sheet;
+            *qr = None;
+        }
+    }
+
+    /// The PIN sheet opens and its field takes focus.
+    fn ask_pin(&mut self, invalid: bool) {
+        if let CeremonyRun::Live {
+            sheet, focus_pin, ..
+        } = &mut self.run
+        {
+            *sheet = CeremonySheet::Pin { invalid };
+            *focus_pin = true;
+        }
+    }
+
+    /// The phone sheet opens with its QR (`None`: Bluetooth is off).
+    fn show_choose(&mut self, code: Option<hybrid::CableQr>) {
+        if let CeremonyRun::Live { sheet, qr, .. } = &mut self.run {
+            *sheet = CeremonySheet::Choose {
+                bluetooth: code.is_some(),
+            };
+            *qr = code;
+        }
+    }
+
+    /// The ceremony failed: the worker and the QR go with the run.
+    fn end(&mut self, reason: Key) {
+        self.run = CeremonyRun::Ended(reason);
+    }
+
+    fn qr(&self) -> Option<&hybrid::CableQr> {
+        match &self.run {
+            CeremonyRun::Live { qr, .. } => qr.as_ref(),
+            CeremonyRun::Ended(_) => None,
+        }
+    }
+
+    fn worker_mut(&mut self) -> Option<&mut Ceremony> {
+        match &mut self.run {
+            CeremonyRun::Live { worker, .. } => worker.as_mut(),
+            CeremonyRun::Ended(_) => None,
+        }
+    }
+
+    pub(in crate::ui) fn worker(&self) -> Option<&Ceremony> {
+        match &self.run {
+            CeremonyRun::Live { worker, .. } => worker.as_ref(),
+            CeremonyRun::Ended(_) => None,
+        }
+    }
+
+    /// The focus ask is read once.
+    fn take_focus_pin(&mut self) -> bool {
+        match &mut self.run {
+            CeremonyRun::Live { focus_pin, .. } => std::mem::take(focus_pin),
+            CeremonyRun::Ended(_) => false,
+        }
+    }
+
+    /// Closing: the worker, if one runs, to be cancelled.
+    fn into_worker(self) -> Option<Ceremony> {
+        match self.run {
+            CeremonyRun::Live { worker, .. } => worker,
+            CeremonyRun::Ended(_) => None,
         }
     }
 }
@@ -263,7 +358,7 @@ impl QuillApp {
                 let state = &mut live.driver.session.settings.passkeys;
                 (
                     state.take_starting(),
-                    state.login.ceremony.take(),
+                    state.login.take_ceremony(),
                     state.take_added(),
                 )
             }
@@ -292,7 +387,7 @@ impl QuillApp {
             .privacy
             .passkeys
             .ceremony_mut()
-            .and_then(|ui| ui.ceremony.as_mut())
+            .and_then(|ui| ui.worker_mut())
             .map(Ceremony::poll)
             .unwrap_or_default();
         for event in events {
@@ -317,7 +412,7 @@ impl QuillApp {
             .privacy
             .passkeys
             .ceremony_mut()
-            .is_some_and(|ui| std::mem::take(&mut ui.focus_pin));
+            .is_some_and(CeremonyUi::take_focus_pin);
         if asked && let Some(input) = self.privacy.passkeys.pin_input.clone() {
             input.update(cx, |input, cx| input.focus(window, cx));
         }
@@ -327,16 +422,12 @@ impl QuillApp {
         match event {
             CeremonyEvent::NeedPin { invalid } => {
                 if let Some(ui) = self.privacy.passkeys.ceremony_mut() {
-                    ui.sheet = CeremonySheet::Pin { invalid };
-                    ui.focus_pin = true;
+                    ui.ask_pin(invalid);
                 }
             }
             CeremonyEvent::Hybrid { qr } => {
                 if let Some(ui) = self.privacy.passkeys.ceremony_mut() {
-                    ui.qr = qr.and_then(|qr| hybrid::render_cable_qr(&qr.0));
-                    ui.sheet = CeremonySheet::Choose {
-                        bluetooth: ui.qr.is_some(),
-                    };
+                    ui.show_choose(qr.and_then(|qr| hybrid::render_cable_qr(&qr.0)));
                 }
             }
             CeremonyEvent::PhoneConnecting => self.set_ceremony_sheet(CeremonySheet::Connecting),
@@ -374,7 +465,7 @@ impl QuillApp {
             }
             CeremonyEvent::Failed(error)
                 if self.privacy.passkeys.ceremony().is_some_and(|ui| {
-                    matches!(ui.sheet, CeremonySheet::System | CeremonySheet::Probing)
+                    matches!(ui.sheet(), CeremonySheet::System | CeremonySheet::Probing)
                 }) =>
             {
                 // tdesktop `ShowNativeError`: no error sheet over the
@@ -385,7 +476,7 @@ impl QuillApp {
                     return;
                 };
                 quill::webauthn::log(&format!("{:?} failed: {error:?}", ui.mode));
-                self.set_note(StatusNote::error(tr(match (ui.sheet, ui.mode) {
+                self.set_note(StatusNote::error(tr(match (ui.sheet(), ui.mode) {
                     (CeremonySheet::Probing, CeremonyMode::Register) => register_error(&error),
                     (CeremonySheet::Probing, CeremonyMode::Login) => login_error(&error),
                     (_, CeremonyMode::Register) => keys::PASSKEY_ERROR_REGISTER,
@@ -399,9 +490,7 @@ impl QuillApp {
                         CeremonyMode::Login => login_error(&error),
                     };
                     quill::webauthn::log(&format!("{:?} failed: {error:?}", ui.mode));
-                    ui.sheet = CeremonySheet::Error(reason);
-                    ui.ceremony = None;
-                    ui.qr = None;
+                    ui.end(reason);
                 }
             }
         }
@@ -409,8 +498,7 @@ impl QuillApp {
 
     fn set_ceremony_sheet(&mut self, sheet: CeremonySheet) {
         if let Some(ui) = self.privacy.passkeys.ceremony_mut() {
-            ui.sheet = sheet;
-            ui.qr = None;
+            ui.show(sheet);
         }
     }
 
@@ -428,7 +516,7 @@ impl QuillApp {
         let Some(ui) = self.privacy.passkeys.ceremony_mut() else {
             return;
         };
-        if !matches!(ui.sheet, CeremonySheet::Pin { .. }) {
+        if !matches!(ui.sheet(), CeremonySheet::Pin { .. }) {
             return;
         }
         let pin = Zeroizing::new(input.read(cx).value().to_string());
@@ -437,10 +525,10 @@ impl QuillApp {
             return;
         }
         input.update(cx, |input, cx| input.set_value("", window, cx));
-        if let Some(ceremony) = ui.ceremony.as_ref() {
+        if let Some(ceremony) = ui.worker() {
             ceremony.submit_pin(pin);
         }
-        ui.sheet = CeremonySheet::Key;
+        ui.show(CeremonySheet::Key);
         cx.notify();
     }
 
@@ -452,7 +540,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(ui) = self.privacy.passkeys.take_ceremony()
-            && let Some(ceremony) = ui.ceremony
+            && let Some(ceremony) = ui.into_worker()
         {
             ceremony.cancel();
         }
@@ -473,7 +561,7 @@ impl QuillApp {
     /// ceremony are dropped, so none starts under the lock.
     pub(in crate::ui) fn close_passkey_ceremony_for_lock(&mut self) {
         if let Some(ui) = self.privacy.passkeys.take_ceremony()
-            && let Some(ceremony) = ui.ceremony
+            && let Some(ceremony) = ui.into_worker()
         {
             ceremony.cancel();
         }
@@ -482,7 +570,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let state = &mut live.driver.session.settings.passkeys;
             state.cancel_register();
-            state.login.ceremony = None;
+            state.login.leave_sign_in();
         }
     }
 
@@ -506,7 +594,7 @@ impl QuillApp {
                 .passkeys
                 .ceremony()
                 .map_or((CeremonyMode::Register, CeremonySheet::Key), |ui| {
-                    (ui.mode, ui.sheet)
+                    (ui.mode, ui.sheet())
                 });
             let pin_input = this.privacy.passkeys.pin_input.clone();
             let bottom = hybrid::bottom_button(sheet, cx);
@@ -640,7 +728,7 @@ crate::ui::shell::register_dialogs! {
             .privacy
             .passkeys
             .ceremony()
-            .is_some_and(|ui| ui.sheet != CeremonySheet::Probing),
+            .is_some_and(|ui| ui.sheet() != CeremonySheet::Probing),
         QuillApp::build_passkey_ceremony_dialog,
     )
     .close(|app, window, cx| app.close_passkey_ceremony(window, cx)),
@@ -679,7 +767,7 @@ impl QuillApp {
         };
         let mut ui = CeremonyUi::new(CeremonyMode::Register, sheet, None);
         if sheet == (CeremonySheet::Choose { bluetooth: true }) {
-            ui.qr = hybrid::render_cable_qr(&hybrid::demo_qr());
+            ui.show_choose(hybrid::render_cable_qr(&hybrid::demo_qr()));
         }
         // box-host: demo
         self.privacy.passkeys.show_ceremony(ui);

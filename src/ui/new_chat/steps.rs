@@ -144,7 +144,7 @@ impl QuillApp {
         let Some(dialog) = self.new_chat_dialog() else {
             return div().into_any_element();
         };
-        let busy = view.busy;
+        let busy = view.busy();
         let ghost =
             |id: &'static str,
              label: Key,
@@ -268,9 +268,8 @@ impl QuillApp {
         let view = self.new_chat_view()?;
         self.new_chat_dialog()?;
         let failure = view
-            .failure
-            .as_ref()
-            .and_then(|(failure, reason)| failure_text(*failure, reason))
+            .failure()
+            .and_then(|(failure, reason)| failure_text(failure, reason))
             .map(|text| {
                 div()
                     .id("new-chat-failure")
@@ -283,7 +282,7 @@ impl QuillApp {
                 if let Some(panel) = self.photo_sources_panel(cx) {
                     return Some(panel);
                 }
-                let no_title = matches!(view.failure, Some((CreateFailure::NoTitle, _)));
+                let no_title = matches!(view.failure(), Some((CreateFailure::NoTitle, _)));
                 self.new_chat_info(no_title, cx)
             }
             NewChatStep::AutoDelete => {

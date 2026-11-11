@@ -217,13 +217,18 @@ fn a_balance_too_small_refuses_before_any_request() {
             .is_err()
     );
     assert_eq!(sent_count(&recorder, "addPendingPaidMessageReaction"), 0);
-    assert!(driver.session.payments.paid.note.is_some());
+    assert_eq!(
+        driver.add_paid_reaction(ChatId(-100), MessageId(7), 5, None, 0),
+        Err(PaidAddError::Refused(
+            crate::paid_reaction::Refusal::NotEnough
+        ))
+    );
     assert!(
         driver
             .add_paid_reaction(ChatId(-100), MessageId(7), 4, None, 0)
             .is_ok()
     );
-    assert!(driver.session.payments.paid.note.is_none());
+
     // The 4 waiting Stars are reserved.
     assert!(
         driver

@@ -192,6 +192,9 @@ pub(crate) struct PreferencesUi {
     /// The one task waiting for a Linux accent read to land; a second
     /// refresh while it runs does not start another.
     pub(super) system_accent_poll: Option<Task<()>>,
+    /// The wait for the link handler's background read to land; dropping
+    /// it ends the wait.
+    pub(super) link_handler_watch: Option<Task<()>>,
     /// Settings → Appearance: the searchable font family list.
     pub(super) font_picker: super::appearance_power::FontPicker,
     /// Settings → Appearance: the custom accent color field (kit
@@ -228,6 +231,7 @@ impl PreferencesUi {
             app_theme: Default::default(),
             system_accent: SystemAccent::Unread,
             system_accent_poll: None,
+            link_handler_watch: None,
             font_picker,
             accent_picker,
             translate: super::translate_ui::TranslateUi::load(),

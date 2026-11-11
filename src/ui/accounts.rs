@@ -178,7 +178,7 @@ impl QuillApp {
         }
         // The lock-screen log out is deleting every account's data; the
         // connection starts once it is gone.
-        if self.background.wiping {
+        if self.background.wiping() {
             return;
         }
         // Everything that can fail comes first, while nothing has been torn

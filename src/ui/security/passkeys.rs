@@ -314,7 +314,7 @@ impl QuillApp {
             // The demo has no server: the removal and the refetch at once.
             let passkeys = &mut session.settings.passkeys;
             passkeys.finish_remove(&id);
-            let list = std::mem::take(&mut passkeys.list);
+            let list = passkeys.passkeys().to_vec();
             let generation = passkeys.generation;
             passkeys.accept_list(list, generation);
         }
@@ -488,7 +488,7 @@ impl QuillApp {
                 .aria_label(tr(TITLE))
                 .flex()
                 .flex_col();
-            for passkey in &state.list {
+            for passkey in state.passkeys() {
                 list = list.child(this.passkey_row(passkey, busy, cx));
             }
             body = body.child(list).when(state.can_register(), |body| {

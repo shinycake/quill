@@ -338,14 +338,22 @@ impl QuillApp {
         if self.viewer_swipe(dx, dy, source, event.touch_phase, at, cx) {
             return;
         }
-        let action = self.screen.viewer.wheel.feed(WheelInput {
-            dx,
-            dy,
-            primary: event.modifiers.secondary(cx),
-            source,
-            zoomed: self.screen.viewer.zoom.is_zoomed(),
-            at,
-        });
+        let spent = self.screen.viewer.swipe.is_spent();
+        let action = self.screen.viewer.wheel.feed(
+            WheelInput {
+                dx,
+                dy,
+                primary: event.modifiers.secondary(cx),
+                source,
+                zoomed: self.screen.viewer.zoom.is_zoomed(),
+                at,
+            },
+            spent,
+        );
+        // A trackpad gesture moves or zooms at most once.
+        if matches!(source, WheelSource::Trackpad { .. }) && action != WheelAction::None {
+            self.screen.viewer.swipe.spend(at);
+        }
         match action {
             WheelAction::None => {}
             WheelAction::Zoom { delta_y } => {

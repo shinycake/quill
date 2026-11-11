@@ -129,7 +129,7 @@ impl super::app::QuillApp {
     pub(super) fn start_connection(&mut self, cx: &mut gpui_kit::Context<Self>) {
         // The lock-screen log out is deleting the local data; it starts the
         // connection itself once that is gone.
-        if self.background.wiping {
+        if self.background.wiping() {
             return;
         }
         // Under the lock the master key is cleared, so the preparation

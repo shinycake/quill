@@ -217,15 +217,14 @@ fn a_failed_contact_link_keeps_its_reason_and_is_asked_again() {
         ),
     );
     let qr = &mut f.1.session.users_state.peer_qr;
-    assert_eq!(qr.contact_link, UserLinkFetch::Failed);
-    assert!(
-        qr.contact_error
-            .as_ref()
-            .is_some_and(|reason| !reason.is_empty())
-    );
+    assert!(matches!(qr.contact_link, UserLinkFetch::Failed(Some(_))));
+    let reason = qr.take_contact_error();
+    assert!(reason.is_some_and(|reason| !reason.is_empty()));
+    // Shown once; the failure itself stays until a new box asks again.
+    assert_eq!(qr.take_contact_error(), None);
+    assert!(matches!(qr.contact_link, UserLinkFetch::Failed(None)));
     qr.retry_contact_link();
     assert_eq!(qr.contact_link, UserLinkFetch::Idle);
-    assert_eq!(qr.contact_error, None);
     let sent = f.2.snapshot().len();
     f.1.fetch_own_user_link(None).unwrap();
     assert_eq!(f.2.snapshot().len(), sent + 1);

@@ -3,7 +3,10 @@
 //! `Ui::Controls::SetupSwipeHandler`: a two-finger swipe pulls a round
 //! arrow in from the edge, and letting go once it is fully in moves one
 //! item. The gesture locks horizontal or vertical on its first clear
-//! movement; a vertical one is left to `WheelNav`.
+//! movement; a vertical one is left to `WheelNav`. The gesture is one
+//! value for both: once `WheelNav` moved or zoomed in it, the viewer marks
+//! it `Spent` here ([`SwipeNav::spend`]) and hands the mark back to
+//! `WheelNav` ([`SwipeNav::is_spent`]), so no second machine tracks it.
 
 use super::wheel::{VIEWER_TRACKPAD_GESTURE_GAP, WheelSource};
 use std::time::Instant;
@@ -84,6 +87,11 @@ enum Gesture {
     Pulling(Pull),
     /// Let go: the rest of it (macOS momentum) is swallowed.
     Released {
+        last_at: Instant,
+    },
+    /// `WheelNav` already moved or zoomed in this gesture: it moves at
+    /// most once, so the rest of it (momentum) does not move again.
+    Spent {
         last_at: Instant,
     },
 }
@@ -174,7 +182,7 @@ impl SwipeNav {
                 phased,
                 ..
             } => (*sum_dx + dx, *sum_dy + dy, *phased),
-            Gesture::Elsewhere { last_at } => {
+            Gesture::Elsewhere { last_at } | Gesture::Spent { last_at } => {
                 *last_at = at;
                 return SwipeAction::None;
             }
@@ -237,11 +245,34 @@ impl SwipeNav {
                 self.gesture = Gesture::Released { last_at: at };
                 None
             }
-            Gesture::Idle | Gesture::Undecided { .. } | Gesture::Elsewhere { .. } => {
+            Gesture::Idle
+            | Gesture::Undecided { .. }
+            | Gesture::Elsewhere { .. }
+            | Gesture::Spent { .. } => {
                 self.gesture = Gesture::Idle;
                 None
             }
         }
+    }
+
+    /// `WheelNav` moved or zoomed on this event of a trackpad gesture: the
+    /// gesture is spent until a new one begins or a pause ends it. A
+    /// swipe in progress or one that was let go is not touched.
+    pub fn spend(&mut self, at: Instant) {
+        if matches!(
+            self.gesture,
+            Gesture::Idle
+                | Gesture::Undecided { .. }
+                | Gesture::Elsewhere { .. }
+                | Gesture::Spent { .. }
+        ) {
+            self.gesture = Gesture::Spent { last_at: at };
+        }
+    }
+
+    /// The gesture in progress already moved or zoomed.
+    pub fn is_spent(&self) -> bool {
+        matches!(self.gesture, Gesture::Spent { .. })
     }
 
     /// Another item is shown: a pull in progress is dropped, and the rest
@@ -287,7 +318,8 @@ impl SwipeNav {
             Gesture::Pulling(Pull { last_at, .. })
             | Gesture::Undecided { last_at, .. }
             | Gesture::Elsewhere { last_at }
-            | Gesture::Released { last_at } => last_at,
+            | Gesture::Released { last_at }
+            | Gesture::Spent { last_at } => last_at,
         };
         at.saturating_duration_since(last_at) < VIEWER_TRACKPAD_GESTURE_GAP
     }
@@ -528,5 +560,33 @@ mod tests {
             SwipeAction::None
         );
         assert_eq!(nav.indicator(), None);
+    }
+
+    #[test]
+    fn a_spent_gesture_lasts_until_a_new_one_or_a_pause_and_leaves_a_pull_alone() {
+        let now = Instant::now();
+        let mut nav = SwipeNav::default();
+        nav.feed(event(0.0, -5.0, true, now));
+        nav.spend(now);
+        assert!(nav.is_spent());
+        // Momentum of the same gesture keeps it spent.
+        nav.feed(event(0.0, -5.0, false, ms(now, 16)));
+        assert!(nav.is_spent());
+        // A new gesture, or a pause, ends it.
+        nav.feed(event(0.0, -5.0, true, ms(now, 32)));
+        assert!(!nav.is_spent());
+        nav.spend(ms(now, 32));
+        nav.feed(event(
+            0.0,
+            -5.0,
+            false,
+            ms(now, 32) + VIEWER_TRACKPAD_GESTURE_GAP,
+        ));
+        assert!(!nav.is_spent());
+        // A swipe in progress is not spent by the wheel.
+        let mut pulling = SwipeNav::default();
+        swipe(&mut pulling, now, &[-20.0, -30.0]);
+        pulling.spend(ms(now, 40));
+        assert!(!pulling.is_spent() && pulling.indicator().is_some());
     }
 }

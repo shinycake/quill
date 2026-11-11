@@ -89,7 +89,7 @@ impl QuillApp {
             .as_ref()
             .map(|ring| (ring.account.clone(), ring.call_id));
         let mut new_ring = None;
-        for client in &mut self.background.clients {
+        for client in self.background.clients_mut().iter_mut() {
             let Some(live) = client.live.as_mut() else {
                 continue;
             };

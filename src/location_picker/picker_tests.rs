@@ -126,6 +126,23 @@ fn a_hidden_address_is_not_restored_for_another_place() {
     assert_eq!(picker.address_line(), AddressLine::Text("B street"));
 }
 
+/// An address that arrives while the pin is lifted is not drawn under it;
+/// it comes back when the pin rests at the place it is for.
+#[test]
+fn an_address_answered_while_the_pin_is_lifted_waits_for_its_return() {
+    let mut picker = fresh();
+    let here = point(48.85, 2.35);
+    picker.geolocated(GeoOutcome::Found(here), true);
+    let _ = picker.take_address_job();
+    let start = picker.view();
+    picker.moved_to(start.panned(40., 0.));
+    picker.address_resolved(here, Some("Street".into()));
+    assert_eq!(picker.address_line(), AddressLine::Loading);
+    picker.moved_to(start);
+    picker.move_ended();
+    assert_eq!(picker.address_line(), AddressLine::Text("Street"));
+}
+
 #[test]
 fn settling_elsewhere_offers_places_and_postpones_the_address() {
     let mut picker = fresh();

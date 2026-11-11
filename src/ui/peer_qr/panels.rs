@@ -319,7 +319,7 @@ impl QuillApp {
                 vec![label(tr(keys::NO_PAID_TOKEN_PILL_PERMANENT).to_string())]
             }
         };
-        let busy = open.state.free.requesting.is_some();
+        let busy = open.state.free.requesting().is_some();
         let control = rgba(view.colors.control);
         let pill = Button::new("peer-qr-pill")
             .rounded_full()
@@ -374,7 +374,7 @@ impl QuillApp {
             .peer_qr
             .open
             .as_ref()
-            .filter(|open| open.state.free.menu_open)
+            .filter(|open| open.state.free.menu_open())
         else {
             return Vec::new();
         };

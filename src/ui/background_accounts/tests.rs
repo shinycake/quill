@@ -214,9 +214,9 @@ fn an_account_row_shows_the_unread_count_or_the_status(cx: &mut TestAppContext) 
             .clients
             .push(client(BackgroundStatus::Ready, 0));
         assert!(app.background_account_badge(&key, cx).is_none(), "all read");
-        app.background.clients[0].unread.count = 3;
+        app.background.clients_mut()[0].unread.count = 3;
         assert!(app.background_account_badge(&key, cx).is_some());
-        app.background.clients[0].status = BackgroundStatus::NeedsSignIn;
+        app.background.clients_mut()[0].status = BackgroundStatus::NeedsSignIn;
         assert!(app.background_account_badge(&key, cx).is_some());
         assert_eq!(app.background.total_unread().count, 3);
     });

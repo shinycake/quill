@@ -19,13 +19,15 @@ impl QuillApp {
         let status = background_status(&live.driver.session.auth);
         let in_call = live.driver.session.calls.active_call.is_some()
             || live.driver.session.calls.active_group_call.is_some();
-        self.background.clients.retain(|client| client.key != key);
+        self.background
+            .clients_mut()
+            .retain(|client| client.key != key);
         if !status.stops_client() && !in_call && !live.bridge.stopped_unexpectedly() {
             let _ = live.driver.leave_for_background();
             let _ = live.driver.set_online(false);
             live.bridge.wake_with(&quill::wake::BACKGROUND_UPDATES);
             let unread = AccountUnread::of(&live.driver.session);
-            self.background.clients.push(BackgroundClient {
+            self.background.clients_mut().push(BackgroundClient {
                 key,
                 live: Some(live),
                 status,
@@ -34,7 +36,7 @@ impl QuillApp {
         } else {
             self.close_live_later(live, !status.stops_client(), cx);
             if status.stops_client() {
-                self.background.clients.push(BackgroundClient {
+                self.background.clients_mut().push(BackgroundClient {
                     key,
                     live: None,
                     status,
@@ -42,7 +44,6 @@ impl QuillApp {
                 });
             }
         }
-        self.publish_background_unread();
     }
 
     /// Take `key`'s background client when it runs (signed in, or still
@@ -53,14 +54,13 @@ impl QuillApp {
         key: &AccountKey,
         cx: &mut Context<Self>,
     ) -> Option<LiveConnect> {
-        self.background.starting.remove(key);
+        self.background.prepare.cancel(key);
         let index = self
             .background
             .clients
             .iter()
             .position(|client| &client.key == key)?;
-        let mut client = self.background.clients.remove(index);
-        self.publish_background_unread();
+        let mut client = self.background.clients_mut().remove(index);
         let usable = !client.status.stops_client()
             && client
                 .live

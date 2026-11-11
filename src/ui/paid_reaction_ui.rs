@@ -20,6 +20,7 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::connect::PaidAddError;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::paid_reaction::{
@@ -46,14 +47,9 @@ impl QuillApp {
         let result = if let Some(live) = self.live.as_mut() {
             live.driver
                 .add_paid_reaction(chat_id, message_id, stars, sender, now)
-                .map_err(|_| {
-                    live.driver
-                        .session
-                        .payments
-                        .paid
-                        .note
-                        .clone()
-                        .unwrap_or_else(|| tr(keys::Q_MONEY_COULDNT_SEND_THE_STARS).to_string())
+                .map_err(|err| match err {
+                    PaidAddError::Refused(refusal) => refusal.message().to_string(),
+                    PaidAddError::Send(_) => tr(keys::Q_MONEY_COULDNT_SEND_THE_STARS).to_string(),
                 })
         } else if let Some(session) = self.demo_session.as_mut() {
             let balance = session.payments.hub.balance.map(|b| b.stars);
@@ -92,12 +88,7 @@ impl QuillApp {
         message_id: MessageId,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if !self
-            .session()?
-            .payments
-            .paid
-            .offered_for(chat_id.0, message_id.0)
-        {
+        if !self.session()?.paid_reaction_offered(chat_id, message_id) {
             return None;
         }
         Some(

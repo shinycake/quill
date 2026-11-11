@@ -50,54 +50,80 @@ const TOAST: Duration = Duration::from_millis(2800);
 const CLOCK: Duration = Duration::from_secs(1);
 
 /// The panel's open or close motion, for drawing only: the reducer's
-/// `panel` says what is open.
+/// `panel` says what is open. A panel change replaces it whole; a close
+/// stays `Closing` (at rest) until the next change.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct PanelMotion {
-    /// The panel being shown, kept while it closes.
-    pub(super) shown: Option<QrPanel>,
-    pub(super) opening: bool,
-    pub(super) started: Option<Instant>,
+pub(super) enum PanelMotion {
+    /// No panel was shown yet.
+    Idle,
+    /// `panel` opens (or is open) since `since`.
+    Opening { panel: QrPanel, since: Instant },
+    /// `panel` closes (or is closed) since `since`; it is kept to draw
+    /// the close.
+    Closing { panel: QrPanel, since: Instant },
 }
 
 impl PanelMotion {
-    const IDLE: PanelMotion = PanelMotion {
-        shown: None,
-        opening: false,
-        started: None,
-    };
+    pub(super) const IDLE: PanelMotion = PanelMotion::Idle;
+
+    /// The motion after the reducer's panel went to `panel` at `now`.
+    pub(super) fn changed(self, panel: Option<QrPanel>, now: Instant) -> Self {
+        match (panel, self.shown()) {
+            (Some(panel), _) => Self::Opening { panel, since: now },
+            (None, Some(panel)) => Self::Closing { panel, since: now },
+            (None, None) => Self::Idle,
+        }
+    }
+
+    /// The panel being shown, kept while it closes.
+    pub(super) fn shown(&self) -> Option<QrPanel> {
+        match self {
+            Self::Idle => None,
+            Self::Opening { panel, .. } | Self::Closing { panel, .. } => Some(*panel),
+        }
+    }
+
+    fn opening(&self) -> bool {
+        matches!(self, Self::Opening { .. })
+    }
+
+    fn started(&self) -> Option<Instant> {
+        match self {
+            Self::Idle => None,
+            Self::Opening { since, .. } | Self::Closing { since, .. } => Some(*since),
+        }
+    }
+
+    fn duration_ms(&self) -> f64 {
+        if self.opening() {
+            quill::peer_qr::layout::PANEL_OPEN_MS
+        } else {
+            quill::peer_qr::layout::PANEL_CLOSE_MS
+        }
+    }
 
     /// 0 closed, 1 open.
     pub(super) fn progress(&self, now: Instant, animate: bool) -> f64 {
-        let target = if self.opening { 1. } else { 0. };
-        let Some(started) = self.started.filter(|_| animate) else {
+        let target = if self.opening() { 1. } else { 0. };
+        let Some(started) = self.started().filter(|_| animate) else {
             return target;
         };
-        let duration = if self.opening {
-            quill::peer_qr::layout::PANEL_OPEN_MS
-        } else {
-            quill::peer_qr::layout::PANEL_CLOSE_MS
-        };
-        let t = now.duration_since(started).as_secs_f64() * 1000. / duration;
+        let t = now.duration_since(started).as_secs_f64() * 1000. / self.duration_ms();
         let eased = quill::peer_qr::layout::panel_ease(t);
-        if self.opening { eased } else { 1. - eased }
+        if self.opening() { eased } else { 1. - eased }
     }
 
     pub(super) fn running(&self, now: Instant, animate: bool) -> bool {
-        let duration = if self.opening {
-            quill::peer_qr::layout::PANEL_OPEN_MS
-        } else {
-            quill::peer_qr::layout::PANEL_CLOSE_MS
-        };
         animate
-            && self
-                .started
-                .is_some_and(|started| now.duration_since(started).as_secs_f64() * 1000. < duration)
+            && self.started().is_some_and(|started| {
+                now.duration_since(started).as_secs_f64() * 1000. < self.duration_ms()
+            })
     }
 
     /// Milliseconds since the panel started to open.
     pub(super) fn open_elapsed_ms(&self, now: Instant) -> f64 {
-        match self.started {
-            Some(started) if self.opening => now.duration_since(started).as_secs_f64() * 1000.,
+        match self {
+            Self::Opening { since, .. } => now.duration_since(*since).as_secs_f64() * 1000.,
             _ => f64::MAX,
         }
     }
@@ -164,12 +190,28 @@ pub(super) struct OpenQr {
     /// Whether the box opened a share chooser, and which.
     pub(super) share: QrShare,
     /// A card image is being made for copy or share.
-    pub(super) exporting: bool,
+    pub(super) export: Export,
     /// The gifts grid's scroll position, kept across frames and reset
     /// each time the panel opens.
     pub(super) gifts_scroll: gpui_kit::base::VirtualListScrollHandle,
-    /// The countdown clock is ticking.
-    clock_running: bool,
+    /// The countdown clock, ticking while a countdown shows. Dropped with
+    /// the box, or by the clock itself when nothing counts down.
+    clock: Option<Task<()>>,
+}
+
+/// The card image behind Copy and Share. The render's task is kept here,
+/// so closing the box ends it and its result never lands.
+pub(super) enum Export {
+    Idle,
+    Rendering(
+        #[expect(dead_code, reason = "held so that closing the box ends the render")] Task<()>,
+    ),
+}
+
+impl Export {
+    pub(super) fn is_rendering(&self) -> bool {
+        matches!(self, Self::Rendering(_))
+    }
 }
 
 /// The QR box's part of the app.
@@ -253,9 +295,9 @@ impl QuillApp {
             swap: None,
             gift_entry: now,
             share: QrShare::Idle,
-            exporting: false,
+            export: Export::Idle,
             gifts_scroll: gpui_kit::base::VirtualListScrollHandle::new(),
-            clock_running: false,
+            clock: None,
         }));
         self.open_box(crate::ui::shell::DialogKind::PeerQr);
         if own && let Some(data) = self.qr_data_mut() {
@@ -346,18 +388,7 @@ impl QuillApp {
             if open.state.panel == Some(QrPanel::Gifts) {
                 open.gifts_scroll = gpui_kit::base::VirtualListScrollHandle::new();
             }
-            open.motion = match open.state.panel {
-                Some(panel) => PanelMotion {
-                    shown: Some(panel),
-                    opening: true,
-                    started: Some(now),
-                },
-                None => PanelMotion {
-                    shown: open.motion.shown,
-                    opening: false,
-                    started: Some(now),
-                },
-            };
+            open.motion = open.motion.changed(open.state.panel, now);
         }
         if !changed && effects.is_empty() {
             return;
@@ -500,12 +531,11 @@ impl QuillApp {
         let Some(open) = self.peer_qr.open.as_mut() else {
             return;
         };
-        if open.clock_running {
+        if open.clock.is_some() {
             return;
         }
-        open.clock_running = true;
         let id = open.state.id;
-        self.spawn_screen(cx, async move |this, cx| {
+        let clock = self.spawn_screen(cx, async move |this, cx| {
             loop {
                 cx.background_executor().timer(CLOCK).await;
                 let Ok(going) = this.update(cx, |this, cx| this.qr_clock(id, cx)) else {
@@ -515,8 +545,10 @@ impl QuillApp {
                     return;
                 }
             }
-        })
-        .detach();
+        });
+        if let Some(open) = self.peer_qr.open.as_mut() {
+            open.clock = Some(clock);
+        }
     }
 
     /// One clock tick for box `id`: a code may have run out, a countdown
@@ -529,7 +561,7 @@ impl QuillApp {
         // for it; the first poll after the unlock starts the clock again.
         if self.lock_waits() {
             if let Some(open) = self.peer_qr.open.as_mut() {
-                open.clock_running = false;
+                open.clock = None;
             }
             return false;
         }
@@ -538,7 +570,7 @@ impl QuillApp {
         cx.notify();
         let going = self.qr_counts_down();
         if !going && let Some(open) = self.peer_qr.open.as_mut() {
-            open.clock_running = false;
+            open.clock = None;
         }
         going
     }
@@ -558,7 +590,7 @@ impl QuillApp {
             return false;
         };
         let answers = data.take_free_answers();
-        let failed = if own { data.contact_error.take() } else { None };
+        let failed = if own { data.take_contact_error() } else { None };
         if !open {
             return self.qr_take_save_answers(cx);
         }

@@ -1,7 +1,8 @@
 //! New Group / New Channel's share of the session: each create request,
 //! the photo set once the chat exists, and how the request ended
 //! (`crate::new_chat`).
-use crate::new_chat::{CreationOutcome, NewChatStage, StageFacts};
+use crate::lang::{keys, tr};
+use crate::new_chat::{CreateProgress, CreationOutcome, NewChatStage, TypeSaveStage};
 use crate::profile_photo_sources::ChatPhotoInput;
 use crate::state::*;
 
@@ -33,8 +34,10 @@ pub struct NewChatCreation {
 /// A request of the type step's Save, from the send to its answer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeSave {
-    /// Out, or answered without a refusal.
+    /// Out: its answer has not come.
     Sent,
+    /// Answered without a refusal.
+    Done,
     /// Refused or lost: the step stays, with TDLib's reason.
     Failed(String),
 }
@@ -43,8 +46,8 @@ pub enum TypeSave {
 pub struct NewChatState {
     pub creations: HashMap<RequestId, NewChatCreation>,
     /// The requests of the type step's latest Save (a new Save replaces
-    /// them), by request id: any refusal, a lost request included, keeps
-    /// the step from moving on as if it saved.
+    /// them), by request id: any refusal keeps the step from moving on as
+    /// if it saved. A request that is gone while still `Sent` was lost.
     pub type_saves: HashMap<RequestId, TypeSave>,
 }
 
@@ -59,34 +62,62 @@ impl NewChatState {
 }
 
 impl Session {
-    /// What the New Group / New Channel dialog needs to know about the
-    /// requests of `stage`.
-    pub fn new_chat_facts(&self, stage: &NewChatStage) -> StageFacts {
+    /// `stage` after the session's answers to its requests: a create that
+    /// was answered or lost, a type Save whose requests ended (all well:
+    /// the subscribers step; any refused or lost: the step with TDLib's
+    /// reason). A stage with nothing to settle comes back as it was.
+    pub fn settled_new_chat(&self, stage: &NewChatStage) -> NewChatStage {
         match stage {
-            NewChatStage::Creating { request, .. } => StageFacts {
-                create_pending: self.requests.get(*request).is_some(),
-                outcome: self
+            NewChatStage::Creating {
+                request,
+                back,
+                progress: CreateProgress::InFlight,
+            } => {
+                let outcome = self
                     .groups
                     .new_chats
                     .creations
                     .get(request)
-                    .and_then(|creation| creation.outcome.clone()),
-                ..StageFacts::default()
-            },
+                    .and_then(|creation| creation.outcome.clone());
+                let progress = match outcome {
+                    Some(CreationOutcome::Created(chat)) => CreateProgress::Created(chat),
+                    Some(CreationOutcome::Failed { failure, reason }) => {
+                        CreateProgress::Refused { failure, reason }
+                    }
+                    None if self.requests.get(*request).is_some() => CreateProgress::InFlight,
+                    None => CreateProgress::Lost,
+                };
+                NewChatStage::Creating {
+                    request: *request,
+                    back: *back,
+                    progress,
+                }
+            }
             NewChatStage::Type {
                 chat,
-                saving: Some(sent),
-            } => StageFacts {
-                type_pending: sent.iter().any(|id| self.requests.get(*id).is_some()),
-                type_failed: self
-                    .groups
-                    .info_edit_errors
-                    .get(&chat.0)
-                    .is_some_and(|error| error.field == GroupInfoField::Username)
-                    || self.groups.new_chats.type_save_failure(sent).is_some(),
-                ..StageFacts::default()
-            },
-            _ => StageFacts::default(),
+                save: TypeSaveStage::Saving(sent),
+            } => {
+                if sent.iter().any(|id| self.requests.get(*id).is_some()) {
+                    return stage.clone();
+                }
+                let saves = &self.groups.new_chats.type_saves;
+                let refusal = sent.iter().find_map(|id| match saves.get(id) {
+                    Some(TypeSave::Done) => None,
+                    Some(TypeSave::Failed(reason)) => Some(reason.clone()),
+                    // Gone without an answer: the Save did not happen.
+                    Some(TypeSave::Sent) | None => {
+                        Some(tr(keys::Q_MISC_COULDNT_REACH_TELEGRAM_TRY_AGAIN).to_string())
+                    }
+                });
+                match refusal {
+                    Some(reason) => NewChatStage::Type {
+                        chat: *chat,
+                        save: TypeSaveStage::Refused(reason),
+                    },
+                    None => NewChatStage::Subscribers { chat: *chat },
+                }
+            }
+            other => other.clone(),
         }
     }
 }

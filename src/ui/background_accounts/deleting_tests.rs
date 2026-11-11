@@ -129,19 +129,19 @@ fn a_removal_never_deletes_while_a_start_is_in_flight_and_ends_the_start(cx: &mu
     app.update_in(&mut vcx, |app, _, cx| {
         app.credentials = Some(credentials());
         app.ensure_background_accounts(cx);
-        assert!(app.background.starting.contains(&account(1)));
-        assert!(app.background.preparing(&account(1)));
+        assert!(app.background.prepare.wanted(&account(1)));
+        assert!(app.background.prepare.running(&account(1)));
         app.remove_account_in(root.clone(), &account(1), cx);
-        assert!(!app.background.starting.contains(&account(1)));
+        assert!(!app.background.prepare.wanted(&account(1)));
         assert!(
-            app.background.preparing(&account(1)),
+            app.background.prepare.running(&account(1)),
             "its preparation still runs on a worker"
         );
     });
     assert!(folder(&root, &account(1)), "not while it is being prepared");
     run_for(&mut vcx, 200);
     app.read_with(&vcx, |app, _| {
-        assert!(!app.background.preparing(&account(1)));
+        assert!(!app.background.prepare.running(&account(1)));
         assert!(
             app.background.client(&account(1)).is_none(),
             "the ended start added nothing"
@@ -182,7 +182,7 @@ fn an_account_closed_for_a_call_restarts_once_closed_unless_removed(cx: &mut Tes
             "restarted after its close"
         );
         assert!(app.background.client(&account(1)).is_none());
-        assert!(!app.background.starting.contains(&account(1)));
+        assert!(!app.background.prepare.wanted(&account(1)));
     });
     assert!(!folder(&root, &account(1)));
     let _ = std::fs::remove_dir_all(&root);
@@ -205,7 +205,7 @@ fn the_lock_screen_log_out_wipes_only_after_every_client_closed(cx: &mut TestApp
             .closing
             .push(account(1), background.boxed(), true);
         app.begin_local_wipe(root.clone(), cx).unwrap();
-        assert!(app.background.wiping);
+        assert!(app.background.wiping());
         // Nothing connects while the data is being wiped.
         let generation = app.connect.generation;
         app.start_connection(cx);
@@ -237,10 +237,10 @@ fn the_lock_screen_log_out_wipes_only_after_every_client_closed(cx: &mut TestApp
         "the accounts stay, signed out"
     );
     app.read_with(&vcx, |app, _| {
-        assert!(!app.background.wiping);
+        assert!(!app.background.wiping());
         assert!(app.connect.generation > generation, "connects afresh");
         assert!(
-            app.background.clients.is_empty(),
+            app.background.clients().is_empty(),
             "the restart was cancelled"
         );
     });
@@ -279,7 +279,7 @@ fn a_quit_before_the_clients_closed_still_removes_and_logs_out_on_the_next_start
     pending.sort_by(|a, b| a.0.cmp(&b.0));
     assert_eq!(pending, vec![account(1), AccountKey::primary()]);
     app.read_with(&vcx, |app, _| {
-        assert!(app.background.wiping, "nothing opens in this run");
+        assert!(app.background.wiping(), "nothing opens in this run");
     });
     // The next start deletes them before any client opens.
     let (next, mut next_vcx) = new_app(cx);
@@ -359,7 +359,7 @@ fn a_log_out_that_cannot_be_recorded_keeps_the_passcode_and_says_why(cx: &mut Te
     assert!(config.exists(), "the passcode stays");
     assert!(folder(&root, &AccountKey::primary()));
     app.read_with(&vcx, |app, _| {
-        assert!(!app.background.wiping, "nothing started");
+        assert!(!app.background.wiping(), "nothing started");
         assert!(
             app.connection
                 .status_note()
@@ -387,7 +387,7 @@ fn an_unconfirmed_log_out_tells_the_user_to_restart_quill(cx: &mut TestAppContex
     });
     run_for(&mut vcx, 100);
     app.read_with(&vcx, |app, _| {
-        assert!(app.background.wiping);
+        assert!(app.background.wiping());
         assert_eq!(
             app.connection.status_note().to_string(),
             "Restart Quill to finish logging out. Nothing connects until then."
@@ -455,7 +455,7 @@ fn a_lock_screen_log_out_that_cannot_start_the_wipe_stays_locked(cx: &mut TestAp
             passcode.lock_error.text().is_some(),
             "the lock screen says why"
         );
-        assert!(!app.background.wiping, "nothing started");
+        assert!(!app.background.wiping(), "nothing started");
     });
     assert!(config.exists(), "the passcode stays on disk");
     assert!(folder(&root, &AccountKey::primary()), "nothing was wiped");

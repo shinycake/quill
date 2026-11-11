@@ -51,7 +51,10 @@ pub(super) fn shown_dialog(
 
 pub(super) fn sheet(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<CeremonySheet> {
     app.read_with(vcx, |app, _| {
-        app.privacy.passkeys.ceremony().map(|ui| ui.sheet)
+        app.privacy
+            .passkeys
+            .ceremony()
+            .map(super::CeremonyUi::sheet)
     })
 }
 

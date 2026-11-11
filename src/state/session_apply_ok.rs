@@ -10,6 +10,9 @@ impl Session {
         _seq: u64,
     ) {
         self.settle_own_reaction(extra, false);
+        if let Some(slot) = extra.and_then(|id| self.groups.new_chats.type_saves.get_mut(&id)) {
+            *slot = TypeSave::Done;
+        }
         self.settle_direct_messages_ok(pending);
         if let Some(pending) = pending
             && let RequestPurpose::Bots(BotsPurpose::StopPendingMessage { topic_id, draft_id }) =

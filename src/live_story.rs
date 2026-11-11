@@ -189,10 +189,10 @@ pub fn retain_comments(
     });
 }
 
-/// Whether the comments toggle has anything to say (tdesktop `CommentsHas`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// Whether the comments toggle has anything to say (tdesktop
+/// `CommentsHas`). It is read off the [`CommentsState`], never stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CommentsHas {
-    #[default]
     None,
     AllRead,
     WithUnread,
@@ -213,7 +213,6 @@ pub enum CommentsState {
 #[derive(Debug, Clone, Default)]
 pub struct CommentsTracker {
     state: CommentsState,
-    has: CommentsHas,
     last_id: i32,
     last_read_id: i32,
 }
@@ -221,6 +220,15 @@ pub struct CommentsTracker {
 impl CommentsTracker {
     pub fn state(&self) -> CommentsState {
         self.state
+    }
+
+    /// What the toggle says, from the state alone.
+    fn has(&self) -> CommentsHas {
+        match self.state {
+            CommentsState::Empty => CommentsHas::None,
+            CommentsState::WithNew => CommentsHas::WithUnread,
+            CommentsState::Shown | CommentsState::Hidden => CommentsHas::AllRead,
+        }
     }
 
     /// Whether the list is drawn.
@@ -259,10 +267,9 @@ impl CommentsTracker {
     }
 
     fn set_has(&mut self, has: CommentsHas) {
-        if has == self.has {
+        if has == self.has() {
             return;
         }
-        self.has = has;
         self.state = match has {
             CommentsHas::None => CommentsState::Empty,
             CommentsHas::WithUnread => CommentsState::WithNew,
@@ -273,12 +280,13 @@ impl CommentsTracker {
         };
     }
 
-    /// The toggle button was clicked.
+    /// The toggle button was clicked (it is not drawn while there are no
+    /// comments, so there is nothing to show or hide then).
     pub fn toggle(&mut self) {
-        if self.state == CommentsState::Shown {
-            self.state = CommentsState::Hidden;
-        } else {
-            self.show();
+        match self.state {
+            CommentsState::Empty => {}
+            CommentsState::Shown => self.state = CommentsState::Hidden,
+            CommentsState::Hidden | CommentsState::WithNew => self.show(),
         }
     }
 
@@ -293,9 +301,6 @@ impl CommentsTracker {
     /// The list opens: everything up to the last comment counts as read.
     fn show(&mut self) {
         self.last_read_id = self.last_id;
-        if self.has == CommentsHas::WithUnread {
-            self.has = CommentsHas::AllRead;
-        }
         self.state = CommentsState::Shown;
     }
 }
