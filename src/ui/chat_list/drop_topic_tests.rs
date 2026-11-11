@@ -446,6 +446,10 @@ fn all_messages_leaves_the_topic_the_chat_was_open_in(cx: &mut TestAppContext) {
     drop_file_on(vcx, 71);
     pick(vcx, 4);
     assert_eq!(open_topic(&app, vcx), Some(4));
+    // The dropped file waits in the send box, which covers the list: it
+    // goes before the next drop on the row.
+    app.update(vcx, |app, cx| app.clear_attachment(cx));
+    frames(vcx);
     drop_file_on(vcx, 71);
     choose(&app, vcx, None);
     assert_eq!(open_chat(&app, vcx), Some(ChatId(71)));

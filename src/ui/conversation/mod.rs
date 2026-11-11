@@ -530,6 +530,7 @@ impl ConversationPart {
     }
 }
 
+mod composer_field_view;
 mod conversation_part1;
 mod header_view;
 mod history_message_list;

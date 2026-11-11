@@ -8,7 +8,7 @@
 //! menu, and a video with a cover has a menu for changing or clearing it.
 #![deny(clippy::indexing_slicing)]
 
-use super::layout::{CardRoom, CardShape, FILES_WIDTH, TrayLayout, message_tiles};
+use super::layout::{MESSAGE_GAP, MOSAIC_WIDTH, TrayLayout, message_tiles};
 use crate::ui::app::QuillApp;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -80,26 +80,27 @@ impl QuillApp {
     pub(super) fn send_card_media(
         &self,
         layout: &TrayLayout,
-        room: CardRoom,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         if layout.media.is_empty() {
             return None;
         }
-        let max_height = layout.max_height();
+        let (max_height, max_width) = (layout.max_height(), layout.max_width());
+        // Messages that do not fit beside each other wrap: the box scrolls
+        // down, never sideways.
         let mut strip = div()
-            .id("send-card-media")
             .flex()
+            .flex_wrap()
+            .justify_center()
             .items_start()
-            .gap_2()
-            .max_w(px(room.preview as f32))
-            .overflow_x_scroll();
+            .gap(px(MESSAGE_GAP as f32))
+            .max_w(px(MOSAIC_WIDTH as f32));
         for message in &layout.media {
             let sizes: Vec<(i32, i32)> = message
                 .iter()
                 .map(|index| self.send_card_tile_size(*index))
                 .collect();
-            let tiles = message_tiles(&sizes, max_height, room.preview);
+            let tiles = message_tiles(&sizes, max_height, max_width);
             let (width, height) = layout_bounds(&tiles);
             let mut block = div()
                 .relative()
@@ -286,7 +287,10 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let actions = self.send_card_tile_actions(attachment);
+        // The pill takes its own presses and hover: none reaches the tile
+        // or the box under it.
         let pill = div()
+            .occlude()
             .absolute()
             .top_1()
             .right_1()
@@ -455,7 +459,6 @@ impl QuillApp {
     pub(super) fn send_card_files(
         &self,
         layout: &TrayLayout,
-        room: CardRoom,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         if layout.files.is_empty() {
@@ -472,10 +475,7 @@ impl QuillApp {
                 .flex()
                 .flex_col()
                 .gap_1()
-                .map(|files| match room.shape {
-                    CardShape::Beside => files.w(px(FILES_WIDTH.min(room.preview) as f32)),
-                    CardShape::Stacked => files.w_full(),
-                })
+                .w_full()
                 .max_h(px(4. * (FILE_THUMB + 8.)))
                 .overflow_y_scroll()
                 .children(rows)
@@ -697,7 +697,7 @@ fn spoiler_veil(corners: TileCorners, round: bool) -> AnyElement {
 impl EditKind {
     fn label(self) -> &'static str {
         match self {
-            EditKind::Photo => tr(keys::Q_CHAT_EDIT),
+            EditKind::Photo => tr(keys::Q_MISC_EDIT_PHOTO),
             EditKind::Video => tr(keys::Q_OPS_EDIT_VIDEO),
         }
     }

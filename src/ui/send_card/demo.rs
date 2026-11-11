@@ -1,5 +1,4 @@
-//! Send card demos. `QUILL_DEMO_SEND_STYLE` picks one of the three designs
-//! (`styles.rs`). `QUILL_DEMO_SEND_CARD` picks the tray: `album`
+//! Send box demos. `QUILL_DEMO_SEND_CARD` picks the tray: `album`
 //! (default: two photos and a video), `one`, `many`, `ten` (a full album,
 //! whose narrow tiles fold their controls into a menu), `apart` (the album
 //! sent as separate messages), `spoiler` (a hidden photo and the caption

@@ -1,78 +1,25 @@
-//! How the send card lays out the tray: the photos and videos as the
-//! messages they will be sent as (an album mosaic, or a tile each), the
-//! files as rows under them, and the send options beside them where the
-//! chat is wide enough. Pure, so it is tested without a window.
+//! How the send box lays out the tray: the photos and videos as the
+//! messages they will be sent as (an album mosaic, or a tile each) and the
+//! files as rows under them. Pure, so it is tested without a window.
 #![deny(clippy::indexing_slicing)]
 
 use quill::album::{ALBUM_MIN_WIDTH, AlbumRect, layout_bounds, layout_media_group, scale_layout};
 use quill::composer::{AttachmentKind, ComposerAttachment};
 
-/// The widest a mosaic grows in the card.
+/// The widest a mosaic grows: the room inside the box.
 pub(super) const MOSAIC_WIDTH: i32 = 400;
 /// The gap between the tiles of a mosaic.
 pub(super) const MOSAIC_GAP: i32 = 2;
-/// The tallest a preview stands: one message gets the room, several
-/// share a strip.
+/// The tallest a preview stands: one message gets the room, several lone
+/// pictures stand two to a row.
 pub(super) const ONE_HEIGHT: i32 = 240;
 pub(super) const STRIP_HEIGHT: i32 = 150;
+/// The gap between the messages of a tray.
+pub(super) const MESSAGE_GAP: i32 = 8;
 /// The narrowest an album's mosaic is drawn. One too tall for its room at
 /// this width (many pictures) scrolls, so its tiles stay big enough to see
 /// and to click.
 pub(super) const ALBUM_MIN_DRAWN: i32 = 220;
-/// The width of the file rows next to the options.
-pub(super) const FILES_WIDTH: i32 = 320;
-/// The options column next to the previews, and the gap between the two.
-/// In pixels like the mosaic, which is laid out in them.
-pub(super) const OPTIONS_WIDTH: f32 = 296.;
-pub(super) const COLUMN_GAP: f32 = 12.;
-/// The narrowest the previews get before the options move above them.
-const PREVIEW_MIN: f32 = 200.;
-/// What the composer and the card keep of the pane around the card's
-/// columns: the composer's inset, the card's own and its border.
-const CARD_CHROME: f32 = 2. * 12. + 2. * 8. + 2.;
-
-/// Where the options go: next to the previews, or above them in a chat too
-/// narrow for both.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum CardShape {
-    Beside,
-    Stacked,
-}
-
-/// The room the card has in a conversation pane.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct CardRoom {
-    pub(super) shape: CardShape,
-    /// The widest the previews may be.
-    pub(super) preview: i32,
-}
-
-impl CardRoom {
-    /// `pane` is the conversation's width as last painted; zero before the
-    /// first paint, when the card assumes a wide chat.
-    pub(super) fn for_pane(pane: f32) -> Self {
-        if pane <= 0. {
-            return Self {
-                shape: CardShape::Beside,
-                preview: MOSAIC_WIDTH,
-            };
-        }
-        let columns = (pane - CARD_CHROME).max(0.);
-        let beside = columns - OPTIONS_WIDTH - COLUMN_GAP;
-        if beside >= PREVIEW_MIN {
-            Self {
-                shape: CardShape::Beside,
-                preview: beside.floor() as i32,
-            }
-        } else {
-            Self {
-                shape: CardShape::Stacked,
-                preview: (columns.floor() as i32).max(1),
-            }
-        }
-    }
-}
-
 /// The tray split the way it is sent (`split_for_send`), by tray index:
 /// the photo and video messages, then every file.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -101,13 +48,29 @@ impl TrayLayout {
         layout
     }
 
-    /// The height a media message may take: several lone pictures share a
-    /// strip, an album gets the room its mosaic needs.
+    /// Every message is one picture and there are several: they share
+    /// rows, two to a row, instead of each taking the box's width.
+    fn lone_pictures(&self) -> bool {
+        self.media.len() > 1 && self.media.iter().all(|message| message.len() == 1)
+    }
+
+    /// The height a media message may take: lone pictures sharing rows
+    /// stay low, an album gets the room its mosaic needs.
     pub(super) fn max_height(&self) -> i32 {
-        if self.media.len() > 1 && self.media.iter().all(|message| message.len() == 1) {
+        if self.lone_pictures() {
             STRIP_HEIGHT
         } else {
             ONE_HEIGHT
+        }
+    }
+
+    /// The width a media message may take: half the box for lone pictures
+    /// sharing rows, so two fit side by side and the rest wrap under them.
+    pub(super) fn max_width(&self) -> i32 {
+        if self.lone_pictures() {
+            (MOSAIC_WIDTH - MESSAGE_GAP) / 2
+        } else {
+            MOSAIC_WIDTH
         }
     }
 }
@@ -183,6 +146,7 @@ mod tests {
         assert_eq!(apart.media, vec![vec![0], vec![1], vec![3]]);
         assert_eq!(apart.files, vec![2]);
         assert_eq!(apart.max_height(), STRIP_HEIGHT);
+        assert_eq!(apart.max_width() * 2 + MESSAGE_GAP, MOSAIC_WIDTH);
     }
 
     #[test]
@@ -248,19 +212,5 @@ mod tests {
         let (width, height) = layout_bounds(&album);
         assert!(width <= 210, "{width}");
         assert!(height <= ONE_HEIGHT, "{height}");
-    }
-
-    #[test]
-    fn options_sit_beside_the_previews_until_the_chat_is_too_narrow() {
-        // Not painted yet: a wide chat.
-        assert_eq!(CardRoom::for_pane(0.).shape, CardShape::Beside);
-        let wide = CardRoom::for_pane(1100.);
-        assert_eq!(wide.shape, CardShape::Beside);
-        assert_eq!(wide.preview, 1100 - 42 - 296 - 12);
-        // Exactly enough for the narrowest preview next to the options.
-        assert_eq!(CardRoom::for_pane(550.).shape, CardShape::Beside);
-        let narrow = CardRoom::for_pane(549.);
-        assert_eq!(narrow.shape, CardShape::Stacked);
-        assert_eq!(narrow.preview, 549 - 42);
     }
 }

@@ -1,21 +1,18 @@
-//! The send card's options: what is being sent and every choice about how
-//! (tdesktop's send box puts the same choices in checkboxes and its top
-//! menu). Each choice is a labelled control that shows its state, so none
-//! hides in a menu: a segmented control per either-or choice, a menu only
-//! for the timer's five values.
+//! The send box's options: every choice about how the files go (tdesktop's
+//! send box puts the same choices in checkboxes and its top menu). Each
+//! choice is a labelled control that shows its state, so none hides in a
+//! menu: a segmented control per either-or choice, a menu only for the
+//! self-destruct timer's five values.
 #![deny(clippy::indexing_slicing)]
 
-use super::layout::{CardShape, OPTIONS_WIDTH};
 use crate::ui::app::QuillApp;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
-use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::*;
-use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::composer::{AttachmentKind, ComposerAttachment};
 use quill::lang::{keys, tr, tr_with, trn};
@@ -56,7 +53,6 @@ impl Quality {
 /// tray or the chat does not offer is `None`.
 #[derive(Clone, Copy)]
 struct Choices {
-    several: bool,
     /// Sent as albums, for a tray of two or more.
     grouped: Option<bool>,
     /// Whether a group of this tray is an album: it has a photo or video.
@@ -73,7 +69,6 @@ impl QuillApp {
         let tray = self.pending_attachments();
         let several = tray.len() >= 2;
         Choices {
-            several,
             grouped: several.then(|| self.composer_group_media_effective()),
             album: tray
                 .iter()
@@ -159,99 +154,10 @@ impl QuillApp {
         }
     }
 
-    /// The options column: the title with Remove all, then one row per
-    /// choice. Above the previews (`Stacked`) the rows flow side by side.
+    /// One row per choice the tray and the chat offer.
     #[inline(never)]
-    pub(super) fn send_card_options(&self, shape: CardShape, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn send_card_option_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let choices = self.send_card_choices();
-        let rows = self.send_card_option_rows(choices, shape, cx);
-        div()
-            .id("send-card-options")
-            .debug_selector(|| "send-card-options".to_string())
-            .flex()
-            .flex_col()
-            .gap_2()
-            .map(|column| match shape {
-                CardShape::Beside => column.flex_none().w(px(OPTIONS_WIDTH)),
-                CardShape::Stacked => column.w_full(),
-            })
-            .child(self.send_card_title(choices, cx))
-            .when(!rows.is_empty(), |column| {
-                column.child(
-                    div()
-                        .flex()
-                        .map(|rows| match shape {
-                            CardShape::Beside => rows.flex_col().gap_2(),
-                            CardShape::Stacked => rows.flex_wrap().gap_x_4().gap_y_2(),
-                        })
-                        .children(rows),
-                )
-            })
-            .into_any_element()
-    }
-
-    /// The choices as rows, without the title: what the prototype box
-    /// (`styles.rs`) lists under its previews.
-    #[cfg(feature = "demo-capture")]
-    pub(super) fn send_card_choice_rows(
-        &self,
-        shape: CardShape,
-        cx: &mut Context<Self>,
-    ) -> Vec<AnyElement> {
-        self.send_card_option_rows(self.send_card_choices(), shape, cx)
-    }
-
-    fn send_card_title(&self, choices: Choices, cx: &mut Context<Self>) -> AnyElement {
-        let status = self.send_card_status();
-        let muted = cx.theme().muted_foreground;
-        div()
-            .id("send-card-title")
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(
-                div()
-                    .text_sm()
-                    .font_semibold()
-                    .flex_none()
-                    .child(tray_title(self.pending_attachments())),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .min_w_0()
-                    .items_center()
-                    .gap_1()
-                    .text_xs()
-                    .text_color(muted)
-                    .when_some(status, |row, status| {
-                        row.child(Spinner::new().xsmall().color(muted))
-                            .child(div().truncate().child(status))
-                    }),
-            )
-            .child(
-                Button::new("send-card-clear")
-                    .icon(IconName::X)
-                    .ghost()
-                    .small()
-                    .tooltip(if choices.several {
-                        tr(keys::Q_CHAT_REMOVE_ALL)
-                    } else {
-                        tr(keys::BOX_REMOVE)
-                    })
-                    .on_click(cx.listener(|this, _, _, cx| this.clear_attachment(cx))),
-            )
-            .into_any_element()
-    }
-
-    #[inline(never)]
-    fn send_card_option_rows(
-        &self,
-        choices: Choices,
-        shape: CardShape,
-        cx: &mut Context<Self>,
-    ) -> Vec<AnyElement> {
         let mut rows = Vec::new();
         if let Some(grouped) = choices.grouped {
             rows.push(option_row(
@@ -281,15 +187,8 @@ impl QuillApp {
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_remember_media_grouping(cx);
                 }));
-            rows.push(match shape {
-                // Under the control it is about, on the controls' spine.
-                CardShape::Beside => option_row("", remember, cx),
-                CardShape::Stacked => div()
-                    .flex()
-                    .items_center()
-                    .child(remember)
-                    .into_any_element(),
-            });
+            // Under the control it is about, on the controls' spine.
+            rows.push(option_row("", remember, cx));
         }
         if let Some((current, offered)) = choices.quality {
             rows.push(option_row(
@@ -331,7 +230,7 @@ impl QuillApp {
         }
         if let Some(current) = choices.timer {
             rows.push(option_row(
-                tr(keys::Q_CHAT_TIMER),
+                tr(keys::Q_CHAT_SELF_DESTRUCT),
                 self.send_card_timer_button(current, cx),
                 cx,
             ));
@@ -410,7 +309,7 @@ fn option_row(
         .child(
             div()
                 .flex_none()
-                .w_16()
+                .w_24()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
                 .truncate()

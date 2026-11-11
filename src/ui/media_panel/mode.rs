@@ -54,6 +54,11 @@ impl MediaPanel {
         self.panel_mode == PanelMode::GroupTitle
     }
 
+    /// Composing, on the emoji tab: all the send box shows of the panel.
+    pub(in crate::ui) fn composing_emoji(&self) -> bool {
+        self.panel_mode == PanelMode::Compose && self.tab == PanelTab::Emoji
+    }
+
     /// The message the reaction selector picks for.
     pub(in crate::ui) fn reaction(&self) -> Option<ReactionTarget> {
         match self.panel_mode {

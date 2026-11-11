@@ -281,7 +281,6 @@
 "qll_chat_downloading_files#one" = "downloading {count} file…";
 "qll_chat_downloading_files#other" = "downloading {count} files…";
 "qll_chat_drop_a_single_file_to" = "Drop a single file to replace the attachment.";
-"qll_chat_edit" = "Edit";
 "qll_chat_edit_cancelled" = "Edit cancelled";
 "qll_chat_editing_caption" = "Editing caption";
 "qll_chat_editing_message" = "Editing message";
@@ -434,7 +433,6 @@
 "qll_chat_remember_choice" = "Remember choice";
 "qll_chat_remove_attachment" = "Remove {name}";
 "qll_chat_reminder" = "Reminder";
-"qll_chat_remove_all" = "Remove all";
 "qll_chat_remove_all_disable" = "Remove all & Disable";
 "qll_chat_remove_from_recent_2" = "Remove from Recent";
 "qll_chat_remove_from_recent_3" = "Remove {row_title} from Recent";
@@ -505,11 +503,13 @@
 "qll_chat_select_a_chat_to_search" = "Select a chat to search in conversation";
 "qll_chat_select_a_chat_to_send" = "Select a chat to send";
 "qll_chat_select_a_chat_to_start" = "Select a chat to start messaging.";
+"qll_chat_self_destruct" = "Self-destruct";
 "qll_chat_self_destruct_off" = "Self-destruct off";
 "qll_chat_self_destruct_s" = "self-destruct: {secs}s";
 "qll_chat_self_destruct_timer" = "Self-destruct timer";
 "qll_chat_self_destruct_view_once" = "Self-destruct: view once";
 "qll_chat_send_a_gift" = "Send a gift";
+"qll_chat_send_options" = "Send options";
 "qll_chat_send_separately" = "Separately";
 "qll_chat_send_together" = "Together";
 "qll_chat_send_as" = "Send as";
@@ -549,7 +549,6 @@
 "qll_chat_the_text_changed_open_code" = "The text changed. Open Code Language again.";
 "qll_chat_the_text_changed_select_it" = "The text changed; select it again to add the date";
 "qll_chat_the_text_changed_select_it_2" = "The text changed; select it again to add the link";
-"qll_chat_timer" = "Timer";
 "qll_chat_this_chat_type_is_not" = "This chat type is not supported yet";
 "qll_chat_this_chat_was_added_to" = "This chat was added to community \"{name}\"";
 "qll_chat_this_chat_was_added_to_2" = "This chat was added to community";

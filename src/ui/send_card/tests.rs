@@ -1,25 +1,36 @@
-//! The send card on a demo `QuillApp`: where its two columns sit, what a
-//! tile offers, and that each choice is one click or one call away.
-//! Nothing is sent: the demo session has no sender.
+//! The send box on a demo `QuillApp`: when it shows, what its caption,
+//! buttons and tiles do, that more files join it, and that nothing under
+//! it takes a click. Nothing reaches Telegram: the demo session applies a
+//! send locally.
 
-use super::layout::{CardShape, OPTIONS_WIDTH};
 use super::options::Quality;
 use super::tiles::{EditKind, TileAction, TileControls};
 use crate::ui::app::QuillApp;
 use crate::ui::send_box_tests::{fixture, new_app_sized, own_paid_channel, tray};
+use gpui_kit::component::WindowExt as _;
 use gpui_kit::test::TestWindowExt;
-use gpui_kit::{Bounds, Entity, Modifiers, Pixels, TestAppContext, VisualTestContext};
+use gpui_kit::{
+    Bounds, Entity, ExternalPaths, FileDropEvent, Focusable, Modifiers, Pixels, PlatformInput,
+    TestAppContext, VisualTestContext, point, px,
+};
 use quill::composer::{AttachmentKind, ComposerAttachment};
+use quill::ids::ChatId;
 
 const PHOTO: (&str, AttachmentKind) = ("demo-thumb.png", AttachmentKind::Photo);
 const VIDEO: (&str, AttachmentKind) = ("demo-clip-12s.mp4", AttachmentKind::Video);
 
-/// Draw until the card has the chat's measured width.
 fn frames(vcx: &mut VisualTestContext) {
+    vcx.update(|_, cx| cx.set_reduce_motion(true));
     vcx.run_until_parked();
     for _ in 0..3 {
         vcx.update(|window, cx| window.render_frame(cx));
     }
+}
+
+fn open_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+    let (app, mut vcx) = new_app_sized(cx, 1100.);
+    frames(&mut vcx);
+    (app, vcx)
 }
 
 fn show_tray(
@@ -29,6 +40,8 @@ fn show_tray(
 ) {
     app.update_in(vcx, |app, _, cx| {
         tray(app, files);
+        // The reads a pick, a paste or a drop starts; a Send waits for them.
+        app.check_tray_videos(cx);
         cx.notify();
     });
     frames(vcx);
@@ -39,82 +52,263 @@ fn part(vcx: &mut VisualTestContext, selector: &'static str) -> Bounds<Pixels> {
         .unwrap_or_else(|| panic!("{selector} is drawn"))
 }
 
-#[gpui_kit::test]
-fn options_sit_beside_the_previews_and_the_card_hugs_them(cx: &mut TestAppContext) {
-    let (app, mut vcx) = new_app_sized(cx, 1300.);
-    let vcx = &mut vcx;
-    show_tray(&app, vcx, &[PHOTO, PHOTO]);
-    let (card, previews, options) = (
-        part(vcx, "send-card"),
-        part(vcx, "send-card-previews"),
-        part(vcx, "send-card-options"),
-    );
-    assert!(
-        options.left() >= previews.right(),
-        "{options:?} {previews:?}"
-    );
-    assert_eq!(options.top(), previews.top());
-    assert_eq!(f32::from(options.size.width), OPTIONS_WIDTH);
-    // No dead space: the card ends where its options do.
-    assert!(
-        card.right() - options.right() < gpui_kit::px(12.),
-        "{card:?}"
-    );
-    let pane = f32::from(app.read_with(vcx, |app, _| app.history.measure.get().pane()));
-    assert!(
-        f32::from(card.size.width) < pane - 100.,
-        "{card:?} in {pane}"
-    );
+fn click(vcx: &mut VisualTestContext, selector: &'static str) {
+    let at = part(vcx, selector).center();
+    vcx.simulate_click(at, Modifiers::none());
+    frames(vcx);
+}
+
+fn boxed(vcx: &mut VisualTestContext) -> bool {
+    vcx.debug_bounds("send-box-previews").is_some()
+}
+
+fn files(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> usize {
+    app.read_with(vcx, |app, _| app.pending_attachments().len())
+}
+
+fn text(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> String {
+    app.read_with(vcx, |app, cx| app.composer.read(cx).value().to_string())
+}
+
+fn field_focused(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
+    app.update_in(vcx, |app, window, cx| {
+        app.composer.read(cx).focus_handle(cx).is_focused(window)
+    })
+}
+
+fn open_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<ChatId> {
+    app.read_with(vcx, |app, _| app.session().and_then(|s| s.open_chat_id()))
+}
+
+fn type_draft(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, draft: &str) {
+    app.update_in(vcx, |app, window, cx| {
+        app.composer.update(cx, |input, cx| input.focus(window, cx));
+    });
+    vcx.simulate_input(draft);
+    frames(vcx);
 }
 
 #[gpui_kit::test]
-fn pictures_sent_separately_stand_side_by_side(cx: &mut TestAppContext) {
-    let (app, mut vcx) = new_app_sized(cx, 1300.);
+fn the_box_shows_while_the_open_chat_holds_files(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx);
     let vcx = &mut vcx;
+    assert!(!boxed(vcx));
+    show_tray(&app, vcx, &[PHOTO, PHOTO]);
+    assert!(boxed(vcx));
+    assert!(vcx.update(|window, cx| window.has_active_dialog(cx)));
+
+    // The tray is the chat's: another chat shows no box, and coming back
+    // shows it again with its files.
+    let home = open_chat(&app, vcx).expect("a chat is open");
+    let other = ChatId(13);
+    assert_ne!(home, other);
     app.update_in(vcx, |app, _, cx| {
-        tray(app, &[PHOTO, PHOTO]);
-        app.set_send_card_grouped(false, cx);
+        app.demo_session.as_mut().expect("demo").open_chat(other);
+        app.sync_chat_ui(cx);
+        cx.notify();
     });
     frames(vcx);
-    let previews = part(vcx, "send-card-previews");
-    let (first, second) = (
-        part(vcx, "send-card-message-0"),
-        part(vcx, "send-card-message-1"),
-    );
-    assert!(second.left() > first.right(), "{first:?} {second:?}");
-    assert_eq!(second.top(), first.top());
-    assert_eq!(second.size, first.size);
-    // The column is as wide as the two, so the options follow them.
-    assert_eq!(second.right(), previews.right());
-    assert!(part(vcx, "send-card-options").left() >= previews.right());
+    assert!(!boxed(vcx), "the other chat holds no files");
+    app.update_in(vcx, |app, _, cx| {
+        app.demo_session.as_mut().expect("demo").open_chat(home);
+        app.sync_chat_ui(cx);
+        cx.notify();
+    });
+    frames(vcx);
+    assert!(boxed(vcx));
+    assert_eq!(files(&app, vcx), 2);
+
+    // The last file removed closes it.
+    app.update_in(vcx, |app, _, cx| {
+        app.remove_attachment(0, cx);
+        app.remove_attachment(0, cx);
+    });
+    frames(vcx);
+    assert!(!boxed(vcx));
 }
 
 #[gpui_kit::test]
-fn a_narrow_chat_puts_the_options_above_the_previews(cx: &mut TestAppContext) {
-    let (app, mut vcx) = new_app_sized(cx, 760.);
+fn the_draft_is_the_caption_and_cancel_gives_it_back(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx);
+    let vcx = &mut vcx;
+    type_draft(&app, vcx, "look at this");
+    show_tray(&app, vcx, &[PHOTO]);
+    // The field is in the box, focused, with what was typed.
+    let (caption, dialog) = (part(vcx, "send-box-caption"), part(vcx, "dialog-0"));
+    assert!(dialog.contains(&caption.center()), "{caption:?} {dialog:?}");
+    assert!(field_focused(&app, vcx), "the caption takes the focus");
+    vcx.simulate_input(" now");
+    frames(vcx);
+    assert_eq!(text(&app, vcx), "look at this now");
+
+    click(vcx, "send-box-cancel");
+    assert!(!boxed(vcx));
+    assert_eq!(files(&app, vcx), 0);
+    assert_eq!(text(&app, vcx), "look at this now", "back in the composer");
+    assert!(field_focused(&app, vcx), "the composer takes the focus");
+}
+
+#[gpui_kit::test]
+fn escape_drops_the_files_and_keeps_the_text(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx);
+    let vcx = &mut vcx;
+    type_draft(&app, vcx, "kept");
+    show_tray(&app, vcx, &[PHOTO, VIDEO]);
+    vcx.simulate_keystrokes("escape");
+    frames(vcx);
+    assert!(!boxed(vcx));
+    assert_eq!(files(&app, vcx), 0);
+    assert_eq!(text(&app, vcx), "kept");
+    assert!(field_focused(&app, vcx));
+    assert!(open_chat(&app, vcx).is_some(), "the chat stays open");
+}
+
+#[gpui_kit::test]
+fn enter_in_the_caption_sends_and_leaves_the_composer_clean(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx);
     let vcx = &mut vcx;
     show_tray(&app, vcx, &[PHOTO, PHOTO]);
-    let pane = f32::from(app.read_with(vcx, |app, _| app.history.measure.get().pane()));
-    assert_eq!(
-        super::layout::CardRoom::for_pane(pane).shape,
-        CardShape::Stacked,
-        "the test window leaves a chat {pane} wide"
-    );
-    let (previews, options) = (
-        part(vcx, "send-card-previews"),
-        part(vcx, "send-card-options"),
-    );
-    assert!(
-        options.bottom() <= previews.top(),
-        "{options:?} {previews:?}"
-    );
-    assert_eq!(options.left(), previews.left());
-    assert!(previews.right() <= part(vcx, "send-card").right());
+    vcx.simulate_input("two of them");
+    frames(vcx);
+    let sent = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| -> usize {
+        app.read_with(vcx, |app, _| {
+            app.session().map_or(0, |session| {
+                let chat = session.open_chat_id().map_or(0, |chat| chat.0);
+                session
+                    .histories
+                    .get(&chat)
+                    .map_or(0, |history| history.messages.len())
+            })
+        })
+    };
+    let before = sent(&app, vcx);
+    vcx.simulate_keystrokes("enter");
+    frames(vcx);
+    assert!(!boxed(vcx));
+    assert_eq!(files(&app, vcx), 0);
+    assert_eq!(text(&app, vcx), "");
+    assert!(field_focused(&app, vcx));
+    assert!(sent(&app, vcx) > before, "the demo session got the message");
 }
 
 #[gpui_kit::test]
-fn one_click_on_a_tile_hides_it_with_a_spoiler_and_one_more_shows_it(cx: &mut TestAppContext) {
-    let (app, mut vcx) = new_app_sized(cx, 1300.);
+fn the_send_button_sends_and_its_arrow_opens_the_send_menu(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx);
+    let vcx = &mut vcx;
+    show_tray(&app, vcx, &[PHOTO]);
+    let menu_open = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| -> bool {
+        app.read_with(vcx, |app, _| app.composer_ui.send_menu.open.is_some())
+    };
+    click(vcx, "send-box-send-options");
+    assert!(menu_open(&app, vcx), "send without sound and Schedule");
+    assert!(boxed(vcx));
+    // Escape closes the menu, not the box.
+    vcx.simulate_keystrokes("escape");
+    frames(vcx);
+    assert!(!menu_open(&app, vcx));
+    assert!(boxed(vcx));
+    assert_eq!(files(&app, vcx), 1);
+
+    click(vcx, "send-box-send");
+    assert!(!boxed(vcx));
+    assert_eq!(files(&app, vcx), 0);
+    assert!(field_focused(&app, vcx));
+}
+
+#[gpui_kit::test]
+fn a_paste_a_drop_and_add_put_more_files_in_the_box(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx);
+    let vcx = &mut vcx;
+    show_tray(&app, vcx, &[PHOTO]);
+
+    // Paste, as the keymap dispatches it to the focused caption.
+    let bytes = std::fs::read(fixture("demo-thumb.png")).expect("fixture");
+    vcx.write_to_clipboard(gpui_kit::ClipboardItem::new_image(
+        &gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Png, bytes),
+    ));
+    assert!(field_focused(&app, vcx));
+    vcx.dispatch_action(gpui_kit::component::input::Paste);
+    frames(vcx);
+    assert_eq!(files(&app, vcx), 2, "the pasted picture joined");
+    assert_eq!(text(&app, vcx), "", "and was not pasted as text");
+
+    // A drop on the box.
+    let at = part(vcx, "send-box-previews").center();
+    for event in [
+        FileDropEvent::Entered {
+            position: at,
+            paths: ExternalPaths([fixture("demo-notes.txt")].into_iter().collect()),
+        },
+        FileDropEvent::Pending { position: at },
+        FileDropEvent::Submit { position: at },
+    ] {
+        vcx.update(|window, cx| window.dispatch_event(PlatformInput::FileDrop(event), cx));
+        frames(vcx);
+    }
+    assert_eq!(files(&app, vcx), 3, "the dropped file joined");
+    // A drop beside the box, over the chat list, joins it too and is not
+    // the chat row's.
+    let home = open_chat(&app, vcx);
+    let beside = point(px(120.), px(300.));
+    assert!(!part(vcx, "dialog-0").contains(&beside));
+    for event in [
+        FileDropEvent::Entered {
+            position: beside,
+            paths: ExternalPaths([fixture("demo-voice.ogg")].into_iter().collect()),
+        },
+        FileDropEvent::Pending { position: beside },
+        FileDropEvent::Submit { position: beside },
+    ] {
+        vcx.update(|window, cx| window.dispatch_event(PlatformInput::FileDrop(event), cx));
+        frames(vcx);
+    }
+    assert_eq!(files(&app, vcx), 4, "dropped beside the box");
+    assert_eq!(open_chat(&app, vcx), home);
+
+    // Add: the demo's picker answers with its fixture.
+    click(vcx, "send-box-add");
+    assert_eq!(files(&app, vcx), 5);
+    assert!(boxed(vcx));
+    let paths: Vec<_> = app.read_with(vcx, |app, _| {
+        app.pending_attachments()
+            .iter()
+            .filter(|file| file.path.to_string_lossy().contains("quill-paste-"))
+            .map(|file| file.path.clone())
+            .collect()
+    });
+    for path in paths {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[gpui_kit::test]
+fn nothing_under_the_box_takes_a_click_and_a_click_outside_keeps_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx);
+    let vcx = &mut vcx;
+    let home = open_chat(&app, vcx);
+    // Where a click lands on another chat's row while nothing covers it.
+    let dialog_left = {
+        show_tray(&app, vcx, &[PHOTO, PHOTO]);
+        part(vcx, "dialog-0").left()
+    };
+    let row = point(px(120.), px(300.));
+    assert!(row.x < dialog_left, "the point is outside the box");
+    vcx.simulate_click(row, Modifiers::none());
+    frames(vcx);
+    assert_eq!(open_chat(&app, vcx), home, "the chat list took no click");
+    assert!(boxed(vcx), "a click outside does not drop the files");
+    assert_eq!(files(&app, vcx), 2);
+
+    // The same click with no box does open that chat: the point is live.
+    click(vcx, "send-box-cancel");
+    vcx.simulate_click(row, Modifiers::none());
+    frames(vcx);
+    assert_ne!(open_chat(&app, vcx), home, "the row is under the point");
+}
+
+#[gpui_kit::test]
+fn a_tile_button_does_its_own_thing_and_no_more(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx);
     let vcx = &mut vcx;
     show_tray(&app, vcx, &[PHOTO]);
     let hidden = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
@@ -124,16 +318,117 @@ fn one_click_on_a_tile_hides_it_with_a_spoiler_and_one_more_shows_it(cx: &mut Te
     };
     assert_eq!(hidden(&app, vcx), Some(false));
     for expected in [true, false] {
-        let button = part(vcx, "send-card-spoiler-0");
-        vcx.simulate_click(button.center(), Modifiers::none());
-        frames(vcx);
+        click(vcx, "send-card-spoiler-0");
         assert_eq!(hidden(&app, vcx), Some(expected));
+        assert!(boxed(vcx));
+        assert_eq!(files(&app, vcx), 1);
     }
 }
 
 #[gpui_kit::test]
+fn the_emoji_panel_opens_over_the_box_and_closes_alone(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx);
+    let vcx = &mut vcx;
+    show_tray(&app, vcx, &[PHOTO]);
+    let shown = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| -> bool {
+        app.read_with(vcx, |app, _| app.send_box_emoji_shown())
+    };
+    click(vcx, "send-box-emoji");
+    assert!(shown(&app, vcx));
+    let panel = part(vcx, "send-box-emoji-panel");
+    assert!(panel.size.height > px(100.), "{panel:?}");
+    assert!(
+        !app.read_with(vcx, |app, _| app.media_panel_over_composer()),
+        "the box hosts it, not the composer"
+    );
+
+    // A click on the box beside the panel closes the panel and does
+    // nothing else: Cancel is under the click.
+    let cancel = part(vcx, "send-box-cancel").center();
+    assert!(!panel.contains(&cancel));
+    vcx.simulate_click(cancel, Modifiers::none());
+    frames(vcx);
+    assert!(!shown(&app, vcx));
+    assert!(boxed(vcx), "Cancel under the cover was not pressed");
+    assert!(field_focused(&app, vcx));
+
+    // Escape closes the panel first, then the box.
+    click(vcx, "send-box-emoji");
+    assert!(shown(&app, vcx));
+    vcx.simulate_keystrokes("escape");
+    frames(vcx);
+    assert!(!shown(&app, vcx));
+    assert!(boxed(vcx));
+
+    // Sent with the panel open: it does not stay behind over the composer.
+    click(vcx, "send-box-emoji");
+    app.update_in(vcx, |app, window, cx| {
+        app.submit_composer(String::new(), Default::default(), window, cx);
+    });
+    frames(vcx);
+    assert!(!boxed(vcx));
+    assert!(!app.read_with(vcx, |app, _| app.media_panel_open()));
+}
+
+#[gpui_kit::test]
+fn the_photo_editor_takes_the_window_and_the_box_comes_back(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx);
+    let vcx = &mut vcx;
+    show_tray(&app, vcx, &[PHOTO, PHOTO]);
+    app.update_in(vcx, |app, _, cx| app.open_photo_editor(0, cx));
+    frames(vcx);
+    app.read_with(vcx, |app, _| {
+        assert!(app.viewer.photo_editor.is_some(), "the editor opened");
+        assert!(!app.send_box_shown(), "the box steps aside");
+    });
+    assert!(!boxed(vcx));
+    app.update_in(vcx, |app, _, cx| app.close_photo_editor(cx));
+    frames(vcx);
+    assert!(boxed(vcx), "back with its files");
+    assert_eq!(files(&app, vcx), 2);
+    assert!(field_focused(&app, vcx));
+}
+
+#[gpui_kit::test]
+fn pictures_sent_separately_stand_side_by_side(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| {
+        tray(app, &[PHOTO, PHOTO]);
+        app.set_send_card_grouped(false, cx);
+    });
+    frames(vcx);
+    let previews = part(vcx, "send-box-previews");
+    let (first, second) = (
+        part(vcx, "send-card-message-0"),
+        part(vcx, "send-card-message-1"),
+    );
+    assert!(second.left() > first.right(), "{first:?} {second:?}");
+    assert_eq!(second.top(), first.top());
+    assert_eq!(second.size, first.size);
+    // Both fit: the box never scrolls sideways.
+    assert!(first.left() >= previews.left() && second.right() <= previews.right());
+
+    // A picture as wide as the mosaic's room fits the box too.
+    app.update_in(vcx, |app, _, cx| {
+        tray(app, &[("demo-gif-still-wide.jpg", AttachmentKind::Photo)]);
+        cx.notify();
+    });
+    frames(vcx);
+    let (previews, wide) = (
+        part(vcx, "send-box-previews"),
+        part(vcx, "send-card-message-0"),
+    );
+    assert_eq!(wide.size.width, px(400.));
+    assert!(wide.left() >= previews.left() && wide.right() <= previews.right());
+    // The options are under the previews, inside the box.
+    let options = part(vcx, "send-box-options");
+    assert!(options.top() >= previews.bottom(), "{options:?}");
+}
+
+#[gpui_kit::test]
 fn a_tile_offers_what_its_file_and_chat_allow(cx: &mut TestAppContext) {
-    let (app, mut vcx) = new_app_sized(cx, 1300.);
+    let (app, mut vcx) = open_app(cx);
     let vcx = &mut vcx;
     let actions = |app: &QuillApp, index: usize| {
         let file = app.pending_attachments().get(index).expect("a file");
@@ -200,7 +495,7 @@ fn quality_is_one_choice_of_three_and_files_keep_the_way_back(cx: &mut TestAppCo
     image::RgbImage::from_pixel(1400, 300, image::Rgb([9, 9, 9]))
         .save(&big)
         .expect("a picture");
-    let (app, mut vcx) = new_app_sized(cx, 1300.);
+    let (app, mut vcx) = open_app(cx);
     let vcx = &mut vcx;
     let all = [Quality::Compressed, Quality::Hd, Quality::File];
     app.update_in(vcx, |app, _, cx| {
@@ -256,7 +551,7 @@ fn quality_is_one_choice_of_three_and_files_keep_the_way_back(cx: &mut TestAppCo
 
 #[gpui_kit::test]
 fn album_or_separately_is_set_not_flipped(cx: &mut TestAppContext) {
-    let (app, mut vcx) = new_app_sized(cx, 1300.);
+    let (app, mut vcx) = open_app(cx);
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
         tray(app, &[PHOTO, PHOTO]);
