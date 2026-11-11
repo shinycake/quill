@@ -87,7 +87,7 @@ impl Session {
             Some(RequestPurpose::GetStory) => {
                 if let Some(story) = pending.and_then(|p| Some((p.chat_id?.0, p.story_id?))) {
                     if matches!(err.code, 400 | 404) {
-                        self.stories.missing.insert(story);
+                        self.stories.story_fetch.gone(story);
                     } else {
                         self.stories
                             .story_fetch_failed(story, std::time::Instant::now());

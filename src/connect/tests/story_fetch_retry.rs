@@ -86,9 +86,7 @@ impl Harness {
 
     /// The wait after a failure for `(7, story)` is over.
     fn end_wait(&mut self, story: i32) {
-        if let Some(entry) = self.driver.session.stories.story_retry.get_mut(&(7, story)) {
-            entry.0 = std::time::Instant::now();
-        }
+        self.driver.session.stories.story_fetch.end_wait((7, story));
     }
 }
 
@@ -145,9 +143,8 @@ fn opening_the_story_after_a_failure_asks_again_at_once() {
         .driver
         .session
         .stories
-        .story_retry
-        .get(&(7, 5))
-        .copied()
+        .story_fetch
+        .retry((7, 5))
         .expect("waiting again");
     assert_eq!(wait, STORIES_RETRY_FIRST, "the open started a new clock");
     assert_eq!(h.driver.get_story(ChatId(7), 5), Ok(None));
@@ -162,14 +159,14 @@ fn each_failure_doubles_the_wait_up_to_the_cap() {
     stories.story_fetch_failed((7, 5), now);
     stories.story_fetch_failed((7, 5), now);
     assert_eq!(
-        stories.story_retry.get(&(7, 5)).map(|(_, wait)| *wait),
+        stories.story_fetch.retry((7, 5)).map(|(_, wait)| wait),
         Some(STORIES_RETRY_FIRST * 2)
     );
     for _ in 0..20 {
         stories.story_fetch_failed((7, 5), now);
     }
     assert_eq!(
-        stories.story_retry.get(&(7, 5)).map(|(_, wait)| *wait),
+        stories.story_fetch.retry((7, 5)).map(|(_, wait)| wait),
         Some(STORIES_RETRY_MAX)
     );
     assert!(stories.story_fetch_waiting((7, 5), now));
@@ -190,7 +187,7 @@ fn the_story_arriving_ends_the_wait() {
         "storyContentPhoto",
         "",
     );
-    assert!(h.driver.session.stories.story_retry.is_empty());
+    assert!(h.driver.session.stories.story_fetch.is_empty());
 }
 
 /// Regression: the card counted as asked before `getStory` ran, so a 500

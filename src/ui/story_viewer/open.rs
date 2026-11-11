@@ -86,7 +86,10 @@ impl QuillApp {
             }
         } else {
             if let Some(session) = self.demo_session.as_mut() {
-                session.stories.story_retry.remove(&(chat_id.0, story_id));
+                session
+                    .stories
+                    .story_fetch
+                    .forget_retry((chat_id.0, story_id));
             }
             if !fetch.is_empty() {
                 self.set_note(StatusNote::silent(tr(
@@ -125,8 +128,9 @@ impl QuillApp {
         };
         let failed = session
             .stories
-            .story_retry
-            .contains_key(&(open.chat_id, open.story_id));
+            .story_fetch
+            .retry((open.chat_id, open.story_id))
+            .is_some();
         let state = session.story_card_state(open.chat_id, open.story_id);
         if let Some(gone) = open.if_gone
             && matches!(

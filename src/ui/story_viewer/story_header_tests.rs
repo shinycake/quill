@@ -138,7 +138,7 @@ fn a_repost_whose_origin_turns_out_gone_opens_the_poster_on_the_first_press(
     });
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.stories.missing.insert((CHANNEL, GONE_ORIGIN));
+            session.stories.story_fetch.gone((CHANNEL, GONE_ORIGIN));
         }
         cx.notify();
     });

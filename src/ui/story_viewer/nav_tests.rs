@@ -172,7 +172,7 @@ fn a_neighbour_whose_story_is_gone_is_passed_over(cx: &mut TestAppContext) {
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             session.stories.stories.remove(&(NEWS, 1));
-            session.stories.missing.insert((NEWS, 1));
+            session.stories.story_fetch.gone((NEWS, 1));
         }
         cx.notify();
     });
@@ -303,7 +303,7 @@ fn a_poster_waiting_out_a_failed_fetch_is_passed_over(cx: &mut TestAppContext) {
     assert_eq!(shown(&app, vcx), Some((MAYA, 5)), "Next does not close");
     app.update(vcx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.stories.story_retry.clear();
+            session.stories.story_fetch.forget_retries();
         }
     });
     let back = app.read_with(vcx, |app, _| app.story_sibling_key(-1));

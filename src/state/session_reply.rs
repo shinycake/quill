@@ -741,13 +741,13 @@ impl Session {
             .map(|reply| (reply.chat_id, reply.story_id))
             .filter(|(chat, story)| {
                 !self.stories.stories.contains_key(&(chat.0, *story))
-                    && !self.stories.reply_attempted.contains(&(chat.0, *story))
+                    && !self.stories.story_fetch.is_asked((chat.0, *story))
             })
             .collect();
         wanted.extend(self.message_story_candidates());
         wanted.retain(|(chat, story)| {
             let key = (chat.0, *story);
-            !self.stories.missing.contains(&key) && !self.stories.story_fetch_waiting(key, now)
+            !self.stories.story_fetch.is_gone(key) && !self.stories.story_fetch_waiting(key, now)
         });
         wanted.sort_by_key(|(chat, story)| (chat.0, *story));
         wanted.dedup();

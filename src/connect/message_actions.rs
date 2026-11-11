@@ -48,8 +48,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             if self.get_story(chat_id, story_id)?.is_some() {
                 self.session
                     .stories
-                    .reply_attempted
-                    .insert((chat_id.0, story_id));
+                    .story_fetch
+                    .asked((chat_id.0, story_id));
             }
         }
         Ok(())
