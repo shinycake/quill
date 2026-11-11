@@ -398,6 +398,11 @@ crate::ui::shell::register_dialogs! {
 }
 
 #[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "photo_editor_profile_tests.rs"]
+mod ui_tests;
+
+#[cfg(test)]
 mod tests {
     use super::{centered_square, finish_square, looks_like_image, ratio_is_bad, square_corner};
     use crate::ui::photo_edit::CropRect;

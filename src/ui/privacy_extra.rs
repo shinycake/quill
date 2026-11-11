@@ -26,7 +26,7 @@ use quill::privacy::GiftSettings;
 use quill::state::{PasswordCheck, PrivacyControl};
 use quill::telegram::requests::PrivacyWho;
 use quill::telegram::requests_privacy::PrivacySettingKey;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use zeroize::Zeroize;
@@ -723,10 +723,9 @@ impl QuillApp {
                     keys::Q_PREFS_OPEN_THIS_FILE,
                 )))
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
+                    let body = Rc::new(Cell::new(Some(body)));
                     move |content, _, _| {
                         let body = body
-                            .borrow_mut()
                             .take()
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
@@ -748,8 +747,7 @@ impl QuillApp {
             .to_string();
         let dir = quill::media_viewer::downloads_dir().unwrap_or_else(|| PathBuf::from("."));
         let picker = cx.prompt_for_new_path(&dir, Some(&name));
-        // screen-scope: the note reports a local file save to whichever account is on screen.
-        cx.spawn(async move |this, cx| {
+        self.spawn_scoped(cx, async move |this, cx| {
             let Ok(Ok(Some(dest))) = picker.await else {
                 return;
             };

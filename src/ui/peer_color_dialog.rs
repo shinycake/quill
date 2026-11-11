@@ -132,7 +132,15 @@ impl QuillApp {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.load_background_emoji_icons();
+            // A request that cannot go leaves the icons failed (the box
+            // says so), not loading for good.
+            if live.driver.load_background_emoji_icons().is_err() {
+                live.driver
+                    .session
+                    .users_state
+                    .background_emoji_icons
+                    .fail(tr(keys::Q_MISC_COULD_NOT_LOAD_ICONS_REOPEN));
+            }
             let _ = live.driver.load_wearable_gifts();
         }
         self.dialogs.peer_color_dialog = Some(PeerColorDialog {
@@ -447,8 +455,10 @@ impl QuillApp {
         let premium = session.is_some_and(|s| s.my_is_premium());
         let icons_failed =
             session.is_some_and(|s| s.users_state.background_emoji_icons.error().is_some());
-        let icons_empty =
-            session.is_some_and(|s| s.users_state.background_emoji_icons.items().is_empty());
+        let icons_loading = session.is_some_and(|s| {
+            s.users_state.background_emoji_icons.is_loading()
+                && s.users_state.background_emoji_icons.items().is_empty()
+        });
         let dark = super::chat_theme::is_dark_palette();
         let theme = cx.theme();
         let muted = theme.muted_foreground;
@@ -711,7 +721,7 @@ impl QuillApp {
         panel = panel
             .child(div().font_semibold().child(icon_title))
             .child(self.peer_color_icon_grid(selected_icon, cx))
-            .when(icons_empty && !icons_failed, |this| {
+            .when(icons_loading, |this| {
                 this.child(
                     div()
                         .text_xs()

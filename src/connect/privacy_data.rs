@@ -242,7 +242,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// "Do you still remember your password?": `getRecoveryEmailAddress`
     /// accepts only the right password. The caller zeroizes `password`.
     pub fn check_remembered_password(&mut self, password: &str) -> Result<(), ConnectSendError> {
-        if !self.chats_path_active() || password.is_empty() {
+        if password.is_empty() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.chats_path_active() {
+            // The card says the check failed, rather than staying as it was.
+            self.session.settings.privacy_data.password_check = crate::state::PasswordCheck::Failed;
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
