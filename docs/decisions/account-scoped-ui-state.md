@@ -8509,3 +8509,19 @@ send settles its own part, and the four-field checkout is one value.
 | 02-089 | A paid price is trusted only after the send left. |
 | 02-092 | `CheckoutForm` carries the invoice, order info and shipping choice (`Checkout`); `PaymentsState::{request, order_info, shipping_id}` are gone and a new form replaces the checkout whole, with its note, once its request went out (`send_payment_form_request`; the UI writes nothing before asking). A new form is refused while `Verifying`, which lasts until the poll opens the verification page and closes that checkout: a form started in between would be the one that close hits. |
 | new-01 | `ClosingClient::warned` is one `CloseWait` stage (`Since` / `SlowLogged`). |
+
+### Sweep fixes (r2-06b)
+
+| Id | Fix |
+| --- | --- |
+| 03-C011 | `VenueList::Failed` is its own list state (a failed lookup or bot lookup), drawn with "Couldn't load places." and a Retry (`LocationPicker::retry_venues`, `LocationSharing::retry_venues`, which also asks for the bot again when that was what failed). A missing bot is still "No places found" (`venues_unavailable`). |
+| 03-C012 | `AddressStage::HiddenWhileMoving` is gone: `Pin::Moving` is the one source for "the pin is lifted", and `address_line` hides the kept address while it holds. |
+| 03-C010 | Not a bug: `TileState::Failed` is a stage with exits (the map resting after a move, a resize), and `tile_to_request` skipping it is what keeps a dead connection from being asked on every poll. Tests: `a_failed_tile_is_asked_again_*`. |
+| 06-035 | Already fixed by r2-06: `State::opener_ended` fails the clips `Stage::Decoding { opener }` held. |
+| 06-036 | The first-frame mark lives in the open stage: `Stage::{Ready, Drawing}` carry `Open { info, first_frame: FirstFrame::{Awaited, Handed} }`, so `Clip::delivered` is gone and a re-opened clip (a new `Clip`) starts at `Awaited`. `State::workers_decode` (a copy of "every opener is gone") is derived. |
+| 10-072, 10-073 | Already fixed by r2-06 (Sending editor kept; `original_emoji` deleted). |
+| 10-079 | The manage dialog's body is built in the content closure (`forum_manage_body`), so there is no one-shot cell. |
+| 10-081, 10-082, 11-002, 11-004, 11-009, 11-030, 11-034, 14-024, 14-025, 14-043 | Already fixed by r2-06 (see its table); re-read here and found closed. |
+| 10-083 | `Decode::Failed(key)` is distinct from `Sdr`: no badge, no frame, not re-decoded from render, dropped by `reset` so the next open asks again. |
+| 14-042 | Turning translation on from the bar also starts a new pump scan, which drops the failures and asks again. |
+| new-01 | `FfmpegBackend::{image, surface}` (an image xor a surface, kept in step by hand) are one `OnScreen { Nothing, Image, Surface }`. |

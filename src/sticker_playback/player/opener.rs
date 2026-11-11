@@ -7,7 +7,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::engine::Shared;
-use super::engine::Stage;
+use super::engine::{Open, Stage};
 use super::source::Packer;
 use super::store::Scratch;
 use super::{Cancel, ClipInfo, ClipKey, DecodeAll};
@@ -55,7 +55,7 @@ pub(super) fn open(
     };
     match opened {
         Ok(timeline) => {
-            clip.stage = Stage::Ready(ClipInfo { timeline });
+            clip.stage = Stage::Ready(Open::new(ClipInfo { timeline }));
             state.install(&key, packed);
         }
         Err(error) => {
