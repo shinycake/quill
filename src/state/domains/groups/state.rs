@@ -208,14 +208,10 @@ pub struct GroupsState {
     /// App config `stars_usd_withdraw_rate_x1000` / 1000: US cents per
     /// Star, for the dollar hint next to a link's monthly fee.
     pub stars_usd_rate: Option<f64>,
-    /// Slice G2: available boost slot ids from `getAvailableChatBoostSlots`
-    /// (schema 1.8.67, line 13914), keyed by chat id. The driver consumes
-    /// them to chain `boostChat` once per boost intent.
-    pub boost_slots_by_chat: HashMap<i64, Vec<crate::telegram::envelope::ParsedBoostSlot>>,
-    /// Slice G2: the chat id of a pending user boost intent — set by
-    /// `request_chat_boost`, consumed by the driver's `boostChat` chain.
-    pub boost_intent: Option<i64>,
-    /// The open boost box (`crate::boost_box`).
+    /// The open boost box (`crate::boost_box`). Its phase holds the Boost
+    /// press waiting for `getAvailableChatBoostSlots` (schema 1.8.67, line
+    /// 13914) and the slots that answer; the driver chains `boostChat` from
+    /// them.
     pub boost_box: Option<crate::boost_box::BoostBoxState>,
     /// `boosts_per_sent_gift` of the app config: boosts a gifted Premium
     /// subscription gives. `None` until asked.
@@ -397,8 +393,6 @@ impl GroupsState {
             supergroup_size_max: 0,
             subscription_star_max: None,
             stars_usd_rate: None,
-            boost_slots_by_chat: HashMap::new(),
-            boost_intent: None,
             boost_box: None,
             boosts_per_gift: None,
             supergroup_usernames: HashMap::new(),

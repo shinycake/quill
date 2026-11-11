@@ -741,8 +741,10 @@ fn g2_boost_slots_stashed_for_chain() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetBoostSlotsForBoost, Some(ChatId(13)));
-    // Stashed only while a boost waits for the slots.
-    session.groups.boost_intent = Some(13);
+    // Kept only while the box of that chat waits for the slots.
+    let mut open = crate::boost_box::BoostBoxState::new(13, false);
+    open.phase = crate::boost_box::BoostPhase::Working(crate::boost_box::BoostWork::Slots);
+    session.groups.boost_box = Some(open);
     apply_json(
         &mut session,
         &seq,
@@ -752,10 +754,16 @@ fn g2_boost_slots_stashed_for_chain() {
             extra.0
         ),
     );
-    let ids: Vec<i32> = session.groups.boost_slots_by_chat[&13]
-        .iter()
-        .map(|slot| slot.slot_id)
-        .collect();
+    let Some(crate::boost_box::BoostPhase::Working(crate::boost_box::BoostWork::SlotsReady(slots))) =
+        session
+            .groups
+            .boost_box
+            .as_ref()
+            .map(|state| state.phase.clone())
+    else {
+        panic!("the box holds the slots");
+    };
+    let ids: Vec<i32> = slots.iter().map(|slot| slot.slot_id).collect();
     assert_eq!(ids, vec![3, 7]);
 }
 

@@ -175,7 +175,7 @@ fn a_free_slot_boosts_with_that_slot() {
     let mut rig = Rig::new(true);
     rig.driver.open_boost_box(ChatId(13)).unwrap();
     rig.driver.request_chat_boost(ChatId(13)).unwrap();
-    assert_eq!(rig.phase(), BoostPhase::Working);
+    assert!(matches!(rig.phase(), BoostPhase::Working(_)));
     assert!(rig.sent_all("boostChat").is_empty(), "slots first");
     rig.answer_slots(&format!("[{},{}]", slot(4, 20, 0), slot(5, 0, 0)));
     let sent = rig.sent_all("boostChat");
@@ -221,7 +221,7 @@ fn other_slots_open_the_reassign_list_and_wait_for_a_second_click() {
     let sent = rig.sent_all("boostChat");
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0]["slot_ids"], serde_json::json!([4, 5]));
-    assert_eq!(rig.phase(), BoostPhase::Working);
+    assert!(matches!(rig.phase(), BoostPhase::Working(_)));
     // The answer names where the boosts came from.
     let extra = rig.boost_extra();
     rig.ingest(&format!(
@@ -249,11 +249,11 @@ fn a_reassign_click_that_cannot_be_sent_returns_to_the_list() {
     assert!(rig.driver.reassign_boosts().is_err());
     assert_eq!(rig.phase(), before, "the list is back, not Working");
     let state = rig.driver.session.groups.boost_box.as_ref().unwrap();
-    assert!(state.reassigning.is_none());
+    assert!(matches!(state.phase, BoostPhase::Reassign { .. }));
     // The user can click again once the client is back.
     rig.recorder.refuse_sends(false);
     assert!(rig.driver.reassign_boosts().unwrap());
-    assert_eq!(rig.phase(), BoostPhase::Working);
+    assert!(matches!(rig.phase(), BoostPhase::Working(_)));
 }
 
 #[test]
@@ -343,13 +343,25 @@ fn a_press_after_closing_mid_request_takes_over_the_slots_read() {
     rig.driver.open_boost_box(ChatId(13)).unwrap();
     // The first read is still out: this press waits for it.
     assert_eq!(rig.driver.request_chat_boost(ChatId(13)).unwrap(), None);
-    assert_eq!(rig.phase(), BoostPhase::Working);
+    assert!(matches!(rig.phase(), BoostPhase::Working(_)));
     assert_eq!(rig.sent_all("getAvailableChatBoostSlots").len(), 1);
     rig.answer_slots(&format!("[{}]", slot(5, 0, 0)));
     let boost = rig.sent_all("boostChat");
     assert_eq!(boost.len(), 1, "the press boosts with the answer");
     assert_eq!(boost[0]["slot_ids"], serde_json::json!([5]));
-    assert!(rig.driver.session.groups.boost_slots_by_chat.is_empty());
+}
+
+#[test]
+fn a_press_while_the_box_works_sends_nothing_more() {
+    let mut rig = Rig::new(true);
+    rig.driver.open_boost_box(ChatId(13)).unwrap();
+    assert!(rig.driver.request_chat_boost(ChatId(13)).unwrap().is_some());
+    assert_eq!(rig.driver.request_chat_boost(ChatId(13)).unwrap(), None);
+    assert_eq!(rig.sent_all("getAvailableChatBoostSlots").len(), 1);
+    // No box, no press.
+    rig.driver.close_boost_box();
+    assert_eq!(rig.driver.request_chat_boost(ChatId(13)).unwrap(), None);
+    assert_eq!(rig.sent_all("getAvailableChatBoostSlots").len(), 1);
 }
 
 #[test]
@@ -359,12 +371,9 @@ fn slots_answered_after_the_box_closed_are_not_kept_for_the_next_press() {
     rig.driver.request_chat_boost(ChatId(13)).unwrap();
     rig.driver.close_boost_box();
     rig.answer_slots(&format!("[{}]", slot(5, 0, 0)));
-    assert!(
-        rig.driver.session.groups.boost_slots_by_chat.is_empty(),
-        "no stash runs a press behind"
-    );
-    // The next press reads the slots afresh.
+    // The next press reads the slots afresh; the late answer left nothing.
     rig.driver.open_boost_box(ChatId(13)).unwrap();
+    assert_eq!(rig.phase(), BoostPhase::Main);
     assert!(rig.driver.request_chat_boost(ChatId(13)).unwrap().is_some());
     assert!(rig.sent_all("boostChat").is_empty());
 }
