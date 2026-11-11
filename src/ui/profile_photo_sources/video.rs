@@ -102,9 +102,7 @@ impl QuillApp {
                     }
                     Err(note) => {
                         drop(output);
-                        if let Some(editor) = this.composer_ui.send_box.video_editor.as_mut() {
-                            editor.encode_failed(note);
-                        }
+                        this.video_encode_failed(note, cx);
                     }
                 }
                 cx.notify();
