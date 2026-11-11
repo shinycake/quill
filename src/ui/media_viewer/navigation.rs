@@ -272,8 +272,9 @@ impl QuillApp {
         self.viewer.reorient.reset();
         self.viewer.hdr.reset();
         self.viewer.over_controls = false;
-        // A pan held when the viewer closed ends with it.
+        // A pan or controller drag held when the viewer closed ends with it.
         self.viewer.drag = None;
+        self.viewer.controller.release();
         cx.notify();
     }
 

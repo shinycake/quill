@@ -285,6 +285,7 @@
 "qll_av_repeat_off" = "Repeat: off";
 "qll_av_repeat_this_track" = "Repeat: this track";
 "qll_av_reset" = "Reset";
+"qll_av_controls_snap_back" = "Move controls back";
 "qll_av_retry" = "Retry";
 "qll_av_revoke_invite_link" = "Revoke Invite Link";
 "qll_av_revoke_key" = "Revoke Key";

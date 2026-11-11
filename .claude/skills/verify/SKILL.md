@@ -71,6 +71,7 @@ order after the window is ready):
 | `dn:x,y` / `dm:x,y` / `up:x,y` | press, drag (button held) and release the left button as separate steps; end on `dm:` to capture a drag mid-flight |
 | `mid:x,y` | middle click |
 | `r:x,y` | right click (context menus) |
+| `dc:x,y` | double-click (the second press has click count 2) |
 | `k:key` | one key press, GPUI key names (`escape`, `enter`, `space`, `cmd-f`) |
 | `t:text` | type text into the focused field, one character at a time (spaces kept) |
 | `w:x,y,dx,dy,s\|m\|e[,cmd]` | one phased trackpad scroll event (`cmd` holds Cmd, Ctrl off macOS) |
