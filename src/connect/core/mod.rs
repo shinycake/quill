@@ -1,7 +1,6 @@
 //! Connect driver core: construction, the update pump, and lifecycle.
 use super::composer::ai_rich_draft_note;
 use super::*;
-use crate::composer::DraftSaveClock;
 use crate::credentials::TelegramCredentials;
 use crate::ids::{ChatId, ChatMessage, MessageId, RequestId};
 use crate::state::{

@@ -365,10 +365,10 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) outgoing_typing: Option<OutgoingTyping>,
     /// Last `chatActionRecordingVoiceNote` (Unigram record button).
     pub(crate) outgoing_voice: Option<OutgoingTyping>,
-    /// tdesktop `saveDraft` clock for the open composer.
-    pub(crate) draft_clock: DraftSaveClock,
+    /// The id of the last quiet window armed: a timer commits only its own.
     pub(crate) draft_save_token: u64,
-    pub(crate) pending_draft: Option<PendingDraft>,
+    /// The composer draft save waiting for its quiet window.
+    pub(crate) draft_save: DraftSave,
     /// Q1: idempotent reads waiting out a 429 before being re-sent.
     pub(crate) flood_retries: Vec<super::flood_retry::FloodRetry>,
     /// Q1: re-send count per request id that hit a rate limit.
@@ -391,6 +391,48 @@ pub(crate) struct OutgoingTyping {
     /// same chat ends it, and its cancel goes to the same place.
     pub(crate) topic: crate::ids::TopicId,
     pub(crate) last_sent_ms: u64,
+}
+
+/// Where the composer draft save stands (tdesktop `saveDraft`): one save
+/// waits at a time, with the clock of its quiet window.
+#[derive(Default)]
+pub(crate) enum DraftSave {
+    #[default]
+    Idle,
+    /// A save waits for its timer, a flush or a cancel. `started_ms` is when
+    /// its quiet window began; `None` for a save that failed to go out and
+    /// waits for the next flush without a window.
+    Waiting {
+        pending: PendingDraft,
+        started_ms: Option<u64>,
+    },
+}
+
+impl DraftSave {
+    pub(crate) fn pending(&self) -> Option<&PendingDraft> {
+        match self {
+            Self::Idle => None,
+            Self::Waiting { pending, .. } => Some(pending),
+        }
+    }
+
+    /// The quiet-window clock of the waiting save.
+    pub(crate) fn clock(&self) -> DraftSaveClock {
+        match self {
+            Self::Idle => DraftSaveClock::idle(),
+            Self::Waiting { started_ms, .. } => DraftSaveClock {
+                started_ms: *started_ms,
+            },
+        }
+    }
+
+    /// The waiting save, leaving none (and no clock).
+    pub(crate) fn take(&mut self) -> Option<PendingDraft> {
+        match std::mem::take(self) {
+            Self::Idle => None,
+            Self::Waiting { pending, .. } => Some(pending),
+        }
+    }
 }
 
 pub(crate) struct PendingDraft {

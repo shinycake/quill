@@ -1,7 +1,7 @@
 //! Connect driver: composer drafts and open-chat bookkeeping.
 use super::*;
 use crate::composer::{
-    DraftContent, DraftSaveClock, DraftSaveStep, DraftTopic, schedule_draft_save,
+    DraftContent, DraftSaveStep, DraftTopic, schedule_draft_save,
 };
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::RequestPurpose;
@@ -74,8 +74,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         // One save waits at a time: another slot's (a chat window's, typed
         // within this quiet window) goes out now instead of being replaced.
         if self
-            .pending_draft
-            .as_ref()
+            .draft_save
+            .pending()
             .is_some_and(|pending| (pending.chat_id, pending.topic) != (chat_id, topic))
         {
             self.settle_pending_draft()?;
@@ -84,38 +84,36 @@ impl<S: JsonSender> ConnectDriver<S> {
         let stored = content.to_store(reply_to.is_some() || terms.is_some());
         let reply_to = stored.as_ref().and(reply_to);
         if self.draft_matches(chat_id, topic, stored.as_ref(), reply_to.as_ref(), terms) {
-            self.pending_draft = None;
-            self.draft_clock = DraftSaveClock::idle();
+            self.draft_save = DraftSave::Idle;
             let existing = self.session.draft_for(chat_id, topic).cloned();
             self.session.store_composer_draft(chat_id, topic, existing);
             return Ok(DraftSaveOutcome::Skipped);
         }
         self.session.mark_draft_dirty(chat_id, topic);
-        match schedule_draft_save(self.draft_clock, now_ms, delayed) {
+        match schedule_draft_save(self.draft_save.clock(), now_ms, delayed) {
             DraftSaveStep::Wait {
                 delay_ms,
                 started_ms,
             } => {
-                self.draft_clock = DraftSaveClock {
-                    started_ms: Some(started_ms),
-                };
                 self.draft_save_token = self.draft_save_token.saturating_add(1);
                 let token = self.draft_save_token;
-                self.pending_draft = Some(PendingDraft {
-                    token,
-                    chat_id,
-                    topic,
-                    content: stored.unwrap_or(DraftContent::Text(String::new())),
-                    reply_to,
-                });
+                self.draft_save = DraftSave::Waiting {
+                    pending: PendingDraft {
+                        token,
+                        chat_id,
+                        topic,
+                        content: stored.unwrap_or(DraftContent::Text(String::new())),
+                        reply_to,
+                    },
+                    started_ms: Some(started_ms),
+                };
                 Ok(DraftSaveOutcome::Debounced {
                     token,
                     delay: Duration::from_millis(delay_ms),
                 })
             }
             DraftSaveStep::Write => {
-                self.pending_draft = None;
-                self.draft_clock = DraftSaveClock::idle();
+                self.draft_save = DraftSave::Idle;
                 let sent =
                     self.send_draft(chat_id, topic, stored.as_ref(), reply_to.as_ref(), terms);
                 if let Err(err) = sent {
@@ -144,14 +142,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         token: u64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some(pending) = self.pending_draft.take() else {
-            return Ok(None);
-        };
-        if pending.token != token {
-            self.pending_draft = Some(pending);
+        if self.draft_save.pending().map(|pending| pending.token) != Some(token) {
             return Ok(None);
         }
-        self.draft_clock = DraftSaveClock::idle();
+        let Some(pending) = self.draft_save.take() else {
+            return Ok(None);
+        };
         let terms = self.draft_suggestion(pending.chat_id, pending.topic);
         let content = pending
             .content
@@ -193,16 +189,19 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// for the next flush, typing or chat leave. A request TDLib can never
     /// take is not kept.
     fn keep_failed_draft(&mut self, err: ConnectSendError, pending: PendingDraft) {
-        if err != ConnectSendError::InvalidRequest && self.pending_draft.is_none() {
-            self.pending_draft = Some(pending);
+        if err != ConnectSendError::InvalidRequest && self.draft_save.pending().is_none() {
+            self.draft_save = DraftSave::Waiting {
+                pending,
+                started_ms: None,
+            };
             return;
         }
         // Not kept: the slot's unsaved mark must not outlive its save, or
         // drafts written on another device would never show there.
         let slot = (pending.chat_id, pending.topic);
         if !self
-            .pending_draft
-            .as_ref()
+            .draft_save
+            .pending()
             .is_some_and(|waiting| (waiting.chat_id, waiting.topic) == slot)
         {
             self.session.clear_draft_dirty(slot.0, slot.1);
@@ -226,8 +225,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.draft_for(chat_id, topic).is_none() {
             return Ok(None);
         }
-        self.pending_draft = None;
-        self.draft_clock = DraftSaveClock::idle();
+        self.draft_save = DraftSave::Idle;
         self.send_draft(chat_id, topic, None, None, None).map(Some)
     }
 
@@ -250,18 +248,17 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Send the draft waiting for its quiet window now.
     pub fn flush_pending_draft(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        match self.pending_draft.as_ref().map(|pending| pending.token) {
+        match self.draft_save.pending().map(|pending| pending.token) {
             Some(token) => self.commit_debounced_draft(token),
             None => Ok(None),
         }
     }
 
     pub fn cancel_pending_draft(&mut self) {
-        if let Some(pending) = self.pending_draft.take() {
+        if let Some(pending) = self.draft_save.take() {
             self.session
                 .clear_draft_dirty(pending.chat_id, pending.topic);
         }
-        self.draft_clock = DraftSaveClock::idle();
     }
 
     /// [`Self::cancel_pending_draft`] when the waiting save is `chat_id`'s
@@ -269,8 +266,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// chat window's, still goes.
     pub fn cancel_pending_draft_of(&mut self, chat_id: ChatId) {
         if self
-            .pending_draft
-            .as_ref()
+            .draft_save
+            .pending()
             .is_none_or(|pending| pending.chat_id == chat_id)
         {
             self.cancel_pending_draft();
@@ -281,9 +278,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// window of its own: the main window's chat changes, or another slot
     /// is typed in. Dropping it would lose text typed in a chat window.
     pub(crate) fn settle_pending_draft(&mut self) -> Result<(), ConnectSendError> {
-        let flushed = self.flush_pending_draft();
-        self.draft_clock = DraftSaveClock::idle();
-        flushed.map(|_| ())
+        self.flush_pending_draft().map(|_| ())
     }
 
     /// The suggest bar's terms a chat draft carries (only the chat slot
