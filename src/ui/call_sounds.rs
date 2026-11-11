@@ -130,6 +130,18 @@ impl CallSounds {
         self.spawn(sound);
     }
 
+    /// Play a cue once. A ring that loops keeps looping: the cue plays on
+    /// its own and the ring comes back after it, not cut by the loop's
+    /// next tick.
+    pub(super) fn play_cue(&mut self, sound: CallSound) {
+        if self.looping.is_none() {
+            self.play(sound);
+            return;
+        }
+        self.again_at = None;
+        self.spawn(sound);
+    }
+
     /// The sound kept looping, for tests.
     #[cfg(test)]
     pub(super) fn looping(&self) -> Option<CallSound> {
@@ -196,6 +208,14 @@ impl super::app::QuillApp {
         let second_rings = session.calls.second_call.prompt().is_some();
         let enabled = session.settings.inapp_sounds_enabled;
         let background_ring = self.background_ring_audible();
+        // A call that came in reached no chat window that pressed Call: its
+        // card is the main window's.
+        if let Some(call) = call.as_ref()
+            && !call.is_outgoing
+            && self.screen.call_screen.sound_marks.call_id != Some(call.id)
+        {
+            self.call_boxes.card_window = None;
+        }
         let marks = &mut self.screen.call_screen.sound_marks;
         let sounds = &mut self.calls.sounds;
         sounds.set_enabled(enabled);
@@ -221,11 +241,11 @@ impl super::app::QuillApp {
                     matches!(call.state, CallState::Ready) && call.transport.is_connected();
                 if connected && !marks.connected {
                     marks.connected = true;
-                    sounds.play(CallSound::Connect);
+                    sounds.play_cue(CallSound::Connect);
                 }
                 if marks.muted != call.muted {
                     marks.muted = call.muted;
-                    sounds.play(if call.muted {
+                    sounds.play_cue(if call.muted {
                         CallSound::Mute
                     } else {
                         CallSound::Unmute
@@ -254,5 +274,21 @@ impl super::app::QuillApp {
                     .keep_looping((invite_rings || background_ring).then_some(CallSound::Incoming));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cue_over_a_ringing_loop_leaves_the_loop_set() {
+        let mut sounds = CallSounds::new(SharedOutput::for_test(None));
+        sounds.keep_looping(Some(CallSound::Incoming));
+        sounds.play_cue(CallSound::Mute);
+        assert_eq!(sounds.looping(), Some(CallSound::Incoming));
+        // A plain play still cuts the loop.
+        sounds.play(CallSound::End);
+        assert_eq!(sounds.looping(), None);
     }
 }

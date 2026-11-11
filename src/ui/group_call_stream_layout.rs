@@ -119,8 +119,6 @@ pub(crate) struct StreamWindow {
     /// The open window was sized for this layout.
     pub(super) window_is_stream: bool,
     pub(super) overlay: Option<StreamOverlay>,
-    /// The Stream Key was revealed after its warning.
-    pub(super) key_shown: bool,
     /// Where the title band was pressed: a move past a few pixels drags
     /// the window (Linux).
     title_pressed: Option<Point<Pixels>>,
@@ -153,7 +151,6 @@ impl StreamWindow {
     /// (`sync_group_call_boxes`).
     pub(super) fn close_boxes(&mut self) {
         self.overlay = None;
-        self.key_shown = false;
     }
 }
 
@@ -269,6 +266,12 @@ impl QuillApp {
             .and_then(|s| s.calls.active_group_call.as_ref())
             .map(|call| call.id);
         self.group_call_screen.stream_join = Some((intent, tracked));
+        // A new ask starts clean: only an error after it ends the wish.
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.calls.group_call_error = None;
+        } else if let Some(session) = self.demo_session.as_mut() {
+            session.calls.group_call_error = None;
+        }
         // Asking again brings a window you closed back.
         self.group_call_screen.window_closed_by_user = None;
     }
@@ -352,6 +355,14 @@ impl QuillApp {
             .session()
             .and_then(|s| s.calls.active_group_call.as_ref())
         else {
+            // The request that fetches the call failed: no call will come
+            // for this wish, so it must not join one much later.
+            if self
+                .session()
+                .is_some_and(|s| s.calls.group_call_error.is_some())
+            {
+                self.group_call_screen.stream_join = None;
+            }
             return;
         };
         let chat = self.group_call_chat(call).map(|chat| chat.id.0);

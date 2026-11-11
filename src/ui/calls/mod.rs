@@ -422,6 +422,8 @@ impl QuillApp {
                 .send_call_rating(stars, &comment, &problems)
                 .is_err()
             {
+                // Not sent: the draft is still there to submit again.
+                self.dialogs.rating_detail = Some(detail);
                 self.set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_RATING)));
             }
         } else if self.demo_session.is_some() {
@@ -449,7 +451,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|session| session.calls.summary.as_mut())
         {
-            summary.debug_information = crate::state::CallUpload::Sent;
+            summary.debug_information = quill::state::CallUpload::Sent;
             self.set_note(StatusNote::silent(tr(
                 keys::Q_OPS_DEMO_DIAGNOSTICS_UPLOAD_NO_LIVE,
             )));
@@ -473,7 +475,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|session| session.calls.summary.as_mut())
         {
-            summary.log = crate::state::CallUpload::Sent;
+            summary.log = quill::state::CallUpload::Sent;
             self.set_note(StatusNote::silent(tr(keys::Q_OPS_DEMO_CALL_LOG_UPLOAD_NO)));
         }
         cx.notify();
@@ -482,8 +484,10 @@ impl QuillApp {
     /// Phase C1: dismiss the call-end screen (rating skipped or
     /// acknowledged).
     pub(super) fn dismiss_call_summary(&mut self, cx: &mut Context<Self>) {
-        // The rating draft was this summary's.
+        // The rating draft was this summary's, and so was the window that
+        // pressed Call for it.
         self.dialogs.rating_detail = None;
+        self.call_boxes.card_window = None;
         for session in self
             .live
             .as_mut()
@@ -498,6 +502,7 @@ impl QuillApp {
 
     /// Phase C1: dismiss a shown call-request error.
     pub(super) fn dismiss_call_error(&mut self, cx: &mut Context<Self>) {
+        self.call_boxes.card_window = None;
         for session in self
             .live
             .as_mut()

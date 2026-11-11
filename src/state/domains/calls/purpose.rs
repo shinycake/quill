@@ -123,7 +123,10 @@ pub enum CallsPurpose {
     ToggleGroupCallScreenPaused { group_call_id: i32, paused: bool },
     /// Phase C3a: `toggleGroupCallParticipantIsMuted`. Response is
     /// `ok`; state refreshes via updates.
-    ToggleGroupCallParticipantMute { group_call_id: i32 },
+    ToggleGroupCallParticipantMute {
+        group_call_id: i32,
+        participant: MessageSender,
+    },
     /// Phase C3a: `toggleGroupCallParticipantIsHandRaised`. Response is
     /// `ok`; state refreshes via updates.
     ToggleGroupCallParticipantHand { group_call_id: i32 },

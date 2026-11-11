@@ -222,6 +222,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         self.session.calls.recent_calls_request = Some(extra);
+        // A retry of a failed page shows as loading again.
+        self.session.calls.recent_calls_error = false;
         Ok(extra)
     }
 

@@ -166,11 +166,21 @@ impl QuillApp {
                     (Some(link), Some(window)) => link.window = Some(window),
                     // Closed before it opened: the window goes too.
                     (None, Some(window)) => close_window(window, false, cx),
-                    (_, None) => {
+                    (Some(_), None) => {
                         app.group_call.live_pip = None;
+                        // The stream window went when PiP was pressed: it
+                        // may open again.
+                        if let LivePipSource::Stream { call_id } = source
+                            && app.group_call_screen.window_closed_by_user == Some(call_id)
+                        {
+                            app.group_call_screen.window_closed_by_user = None;
+                        }
                         app.set_note(StatusNote::error(tr(keys::Q_MEDIA_PIP_FAILED)));
                         app.check_live_pip(cx);
                     }
+                    // Another PiP replaced this one before it failed: that
+                    // one's link stays.
+                    (None, None) => {}
                 }
                 cx.notify();
             });
@@ -313,9 +323,19 @@ impl QuillApp {
     /// PiP closes, as for a left call; the stream window keeps the
     /// manual Rejoin.
     fn live_pip_source_alive(&self, source: LivePipSource) -> bool {
-        let Some(calls) = self.session().map(|s| &s.calls) else {
+        let Some(session) = self.session() else {
             return false;
         };
+        // The same call id on another account is not this PiP's call.
+        if self
+            .group_call
+            .live_pip
+            .as_ref()
+            .is_some_and(|link| link.account.as_ref() != Some(&session.account))
+        {
+            return false;
+        }
+        let calls = &session.calls;
         match source {
             LivePipSource::Stream { call_id } => {
                 calls.active_group_call.as_ref().is_some_and(|call| {

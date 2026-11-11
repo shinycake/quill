@@ -493,3 +493,49 @@ fn a_failed_busy_decline_does_not_blame_the_active_call() {
     apply_json(&mut session, &seq, &sink, &error_json(request));
     assert!(session.calls.error.is_some());
 }
+
+#[test]
+fn a_call_ending_untracked_keeps_another_calls_open_rating() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    rated_summary(&mut session, &seq, &sink);
+    assert!(session.calls.active_call.is_none());
+    // A missed call from someone else ends with no active call.
+    apply_json(&mut session, &seq, &sink, &swap_discarded_json(90, 42));
+    let summary = session.calls.summary.as_ref().expect("summary");
+    assert_eq!(summary.call_id, 77, "the rating card is still call 77's");
+    assert!(summary.rating.is_open());
+}
+
+fn own_row(muted: bool) -> String {
+    format!(
+        r#"{{"@type":"updateGroupCallParticipant","group_call_id":555,"participant":{{"@type":"groupCallParticipant","participant_id":{{"@type":"messageSenderUser","user_id":1}},"audio_source_id":0,"screen_sharing_audio_source_id":0,"video_info":null,"screen_sharing_video_info":null,"bio":"","is_current_user":true,"is_speaking":false,"is_hand_raised":false,"can_be_muted_for_all_users":false,"can_be_unmuted_for_all_users":false,"can_be_muted_for_current_user":false,"can_be_unmuted_for_current_user":false,"is_muted_for_all_users":{muted},"is_muted_for_current_user":false,"can_unmute_self":true,"volume_level":10000,"order":"a1"}}}}"#
+    )
+}
+
+#[test]
+fn muting_someone_else_does_not_hold_back_your_own_row() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let mut call = ActiveGroupCall::fresh(555);
+    call.is_joined = true;
+    call.is_muted_self = true;
+    session.calls.active_group_call = Some(call);
+    let mute = |participant| {
+        RequestPurpose::Calls(CallsPurpose::ToggleGroupCallParticipantMute {
+            group_call_id: 555,
+            participant,
+        })
+    };
+    // An admin mutes another participant: that toggle is in flight.
+    let other = session.request(mute(MessageSender::User { user_id: 41 }), None);
+    apply_json(&mut session, &seq, &sink, &own_row(false));
+    let call = session.calls.active_group_call.as_ref().unwrap();
+    assert!(!call.is_muted_self, "your own row settles");
+    // Your own toggle in flight holds the row back.
+    session.requests.take(other);
+    session.request(mute(MessageSender::User { user_id: 1 }), None);
+    apply_json(&mut session, &seq, &sink, &own_row(true));
+    let call = session.calls.active_group_call.as_ref().unwrap();
+    assert!(!call.is_muted_self, "held while your own toggle is out");
+}

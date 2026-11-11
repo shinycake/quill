@@ -152,6 +152,11 @@ impl Session {
             Some(RequestPurpose::Calls(CallsPurpose::CreateVideoChat { .. })) => {
                 if let Some(extra) = extra {
                     self.calls.failed_creates.push(extra);
+                    // Nobody drains this for an account off screen: keep the
+                    // latest few (the box that asked is on screen, so asks
+                    // for one of the last few).
+                    let extra_old = self.calls.failed_creates.len().saturating_sub(8);
+                    self.calls.failed_creates.drain(..extra_old);
                 }
             }
             Some(RequestPurpose::Calls(CallsPurpose::CreateVideoChatJoinAs { .. })) => {
