@@ -14,6 +14,13 @@ fn passkeys_purpose(purpose: Option<RequestPurpose>) -> Option<PasskeysPurpose> 
 }
 
 impl Session {
+    /// The sign-in screens' own `getApplicationConfig` answered.
+    pub(crate) fn login_config_answered(&mut self, pending: Option<&PendingRequest>) {
+        if passkeys_purpose(pending.map(|p| p.purpose)) == Some(PasskeysPurpose::LoginConfig) {
+            self.settings.passkeys.login.config.succeed(());
+        }
+    }
+
     pub(crate) fn apply_passkeys(
         &mut self,
         payload: PasskeysPayload,

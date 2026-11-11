@@ -74,12 +74,15 @@ fn options_are_kept_until_their_timeout_and_a_failure_forgets_them() {
     assert_eq!(options.rp_id, "telegram.org");
     assert_eq!(options.challenge, vec![1, 2, 3]);
     assert!(login.take_ceremony().is_none(), "the UI takes them once");
-    let pending = login.pending.clone().unwrap();
-    assert!(pending.fresh(now + Duration::from_millis(999)));
-    assert!(!pending.fresh(now + Duration::from_millis(1000)));
+    assert!(matches!(login.stage, LoginStage::Asserting(_)));
+    let mut again = login.clone();
+    assert!(again.reuse_options(now + Duration::from_millis(999)));
+    assert!(matches!(again.stage, LoginStage::Ceremony(_)));
+    assert!(!login.reuse_options(now + Duration::from_millis(1000)));
     login.stage = LoginStage::Checking(RequestId(5));
     login.fail("PASSKEY_CREDENTIAL_NOT_FOUND".into());
-    assert!(login.pending.is_none() && !login.is_waiting());
+    assert!(matches!(login.stage, LoginStage::Failed(_)) && !login.is_waiting());
+    assert!(!login.reuse_options(now), "a failure forgets the options");
     assert_eq!(login.error(), Some("PASSKEY_CREDENTIAL_NOT_FOUND"));
     login.stage = LoginStage::FetchingOptions(RequestId(6));
     assert!(!login.accept_parameters(Some(RequestId(6)), r#"{"publicKey":{}}"#, now));
@@ -108,7 +111,8 @@ fn the_stage_follows_its_own_request_and_has_a_way_out() {
     // A step under way when the QR screen goes away.
     login.stage = LoginStage::Checking(RequestId(7));
     login.leave_sign_in();
-    assert!(matches!(login.stage, LoginStage::Idle) && login.pending.is_none());
+    assert!(matches!(login.stage, LoginStage::Idle));
+    assert!(!login.reuse_options(now));
     // The answer of the check after that leaves nothing behind.
     login.finish_check(Some(RequestId(7)));
     assert!(matches!(login.stage, LoginStage::Idle));

@@ -72,8 +72,9 @@ pub fn user_handle_valid(handle: &[u8]) -> bool {
         .is_ok_and(|dc| dc > 0 && dc < DC_SHIFT)
 }
 
-/// Request options fetched for a sign-in, reused while within their own
-/// timeout (tdesktop `_passkeyLoginData` and `_passkeyLoginTime`).
+/// Request options fetched for a sign-in and when, reused while within
+/// their own timeout (tdesktop `_passkeyLoginData` and
+/// `_passkeyLoginTime`).
 #[derive(Debug, Clone)]
 pub struct PendingLogin {
     pub options: RequestOptions,
@@ -99,7 +100,10 @@ pub enum LoginStage {
     FetchingOptions(RequestId),
     /// Options ready for a ceremony the UI has not started yet; the UI
     /// takes them.
-    Ceremony(RequestOptions),
+    Ceremony(PendingLogin),
+    /// The UI took the options and runs the ceremony. They stay for their
+    /// own timeout, so a second click before it ends reuses them.
+    Asserting(PendingLogin),
     /// `checkAuthenticationPasskey` is on its way.
     Checking(RequestId),
     /// The server's error type of the last failed step, shown under the
@@ -114,9 +118,6 @@ pub struct LoginState {
     /// the app config before login too). Asked once: a failed answer is not
     /// asked again by itself.
     pub config: Fetch<()>,
-    /// The options of the last `getAuthenticationPasskeyParameters`, kept
-    /// for their own timeout.
-    pub pending: Option<PendingLogin>,
     pub stage: LoginStage,
 }
 
@@ -132,17 +133,15 @@ impl LoginState {
         let Some(options) = RequestOptions::parse(json) else {
             return false;
         };
-        self.pending = Some(PendingLogin {
-            options: options.clone(),
+        self.stage = LoginStage::Ceremony(PendingLogin {
+            options,
             fetched_at: now,
         });
-        self.stage = LoginStage::Ceremony(options);
         true
     }
 
     /// A step failed: tdesktop forgets the options and shows the error.
     pub fn fail(&mut self, error: String) {
-        self.pending = None;
         self.stage = LoginStage::Failed(error);
     }
 
@@ -164,7 +163,6 @@ impl LoginState {
     /// authorization state moves on by itself.
     pub fn finish_check(&mut self, id: Option<RequestId>) {
         if matches!(&self.stage, LoginStage::Checking(waiting) if Some(*waiting) == id) {
-            self.pending = None;
             self.stage = LoginStage::Idle;
         }
     }
@@ -172,10 +170,32 @@ impl LoginState {
     /// The UI starts the ceremony with the options that landed.
     pub fn take_ceremony(&mut self) -> Option<RequestOptions> {
         match std::mem::take(&mut self.stage) {
-            LoginStage::Ceremony(options) => Some(options),
+            LoginStage::Ceremony(pending) => {
+                let options = pending.options.clone();
+                self.stage = LoginStage::Asserting(pending);
+                Some(options)
+            }
             other => {
                 self.stage = other;
                 None
+            }
+        }
+    }
+
+    /// The options of the last try, when they are still within their
+    /// timeout: they go to the ceremony again without a request. `false`
+    /// when a request is needed.
+    pub fn reuse_options(&mut self, now: Instant) -> bool {
+        match std::mem::take(&mut self.stage) {
+            LoginStage::Ceremony(pending) | LoginStage::Asserting(pending)
+                if pending.fresh(now) =>
+            {
+                self.stage = LoginStage::Ceremony(pending);
+                true
+            }
+            other => {
+                self.stage = other;
+                false
             }
         }
     }
@@ -193,7 +213,6 @@ impl LoginState {
     /// The sign-in screens went away (the account signed in, or the flow
     /// moved past the QR screen): options and any step under way go.
     pub fn leave_sign_in(&mut self) {
-        self.pending = None;
         self.stage = LoginStage::Idle;
     }
 

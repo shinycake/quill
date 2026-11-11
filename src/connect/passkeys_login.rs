@@ -37,21 +37,26 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// needed.
     pub fn begin_login(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         let state = &self.session.settings.passkeys;
-        if !self.passkey_login_state()
+        let blocked = !self.passkey_login_state()
             || !state.login_link_shown()
             || matches!(state.login.stage, LoginStage::Checking(_))
-            || self.session.requests.has_auth_submit()
-        {
+            || self.session.requests.has_auth_submit();
+        if blocked {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if let Some(pending) = &state.login.pending
-            && pending.fresh(Instant::now())
+        if self
+            .session
+            .settings
+            .passkeys
+            .login
+            .reuse_options(Instant::now())
         {
-            let options = pending.options.clone();
-            self.session.settings.passkeys.login.stage = LoginStage::Ceremony(options);
             return Ok(None);
         }
-        if matches!(state.login.stage, LoginStage::FetchingOptions(_)) {
+        if matches!(
+            self.session.settings.passkeys.login.stage,
+            LoginStage::FetchingOptions(_)
+        ) {
             return Ok(None);
         }
         let extra = self
@@ -60,9 +65,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_json_request(extra, &get_authentication_passkey_parameters(extra))?;
         // Only an ask that went out is waited for; the old options and
         // error go with it.
-        let login = &mut self.session.settings.passkeys.login;
-        login.pending = None;
-        login.stage = LoginStage::FetchingOptions(extra);
+        self.session.settings.passkeys.login.stage = LoginStage::FetchingOptions(extra);
         Ok(Some(extra))
     }
 

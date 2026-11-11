@@ -6793,12 +6793,9 @@ otherwise.
 
 | id | where | now |
 | --- | --- | --- |
-| 03-053 | `ResaleSearch` | `stage: SearchStage` (Idle, Loading{request}, Ready, Failed(reason)); the answer or error applies only to the request in `Loading`, a failed page keeps its rows and offset |
-| 03-054, 10-027 | `ResaleBuy` | `pay: BuyPay` (Idle, Paying{request}, Repriced(price)); the never-read `done` is gone |
-| 03-055, 09-X066, 09-126 | `CraftSession` | `candidates: CraftOwnGifts` carrying its own `SearchStage`; both Select Gifts lists read one stage |
-| 03-056 | `GiftMarketState` | `bid: BidStage` (Idle, Placing{gift_id, request}); the auction open was already `AuctionFetch` |
-| 09-124, 09-X064 | `CraftSession` | `stage: CraftStage` (Choosing, Forging{since, answer}, Done(result)); `GiftMarketUi::forge_started` is gone, the forge's minimum time is data of `Forging` |
-| 03-082 | `link_handler` | one `Cell` (generation + `Stage` Empty/Known/Reading); the three statics are gone, and the Appearance page's polling watcher with its `WATCHING` flag is replaced by `wake_when_read` (a waker the read runs once) |
+| 03-053, 03-054, 03-055, 03-056, 09-124, 09-126, 10-027, 09-X064 | gift market | the integration branch converted the same fields (`PageLoad`, `BuyPhase`, `CraftRun`, the auction was `AuctionFetch`); is-07 merged onto that version and dropped its own parallel enums, so the market has one stage type per list, buy and craft |
+| 09-X066 | `CraftSession` | a failed "your gifts" list draws its error with Retry (`retry_craft_candidates`) instead of "none" |
+| 03-082 | `link_handler` | one `Cell` (generation + `Stage` Empty/Known/Reading); the three statics are gone, and the Appearance page's polling watcher with its `WATCHING` flag is replaced by `wake_when_read` (a waker the read runs once; the page owns the waiting task, `PreferencesUi::link_handler_watch`) |
 | 03-077 | `CommentsTracker` | `has` is read off `CommentsState`; the toggle does nothing while there are no comments (its button is not drawn then) |
 | 03-084, 03-083, 03-076 | location picker | `Address.stage: AddressStage` (Idle, Postponed, Wanted, Resolving, Shown, HiddenWhileMoving); `VenueSearch.input: SearchInput` (Closed, Blank, Typing, Settled) replaces the query, shown and debounce fields. An address that lands while the pin is lifted waits for the pin's return (it was drawn under it) |
 | 03-088 | `BoostState` | enum Idle, Armed, Boosting |
@@ -6806,19 +6803,19 @@ otherwise.
 | 03-094 | `EffectWatch` | one bounded map of `EffectStage` (Unwatched, Watched) with one eviction |
 | 03-093 | `MessageEffects` | `by_id` folded into the per-effect `EffectLookup` (adds `Ready`) |
 | 03-099 | `MediaFacts` | `file: MediaFile` (Remote, Downloading, Local) |
-| 04-007, 14-050 | widgets | `Lifecycle` carries the stop streak (`Waiting`, `Loading`, `Stopped`) and the runtime with everything of it (`Live`: queries, theme, frame ask, cursor, `Pointer`); a stopped, released or restarted widget starts with none of it |
+| 04-007, 14-050 | widgets | `Lifecycle` carries the stop streak (`Waiting`, `Loading`, `Stopped`) and the runtime with everything of it (`Live`: queries, theme, frame ask, cursor, `Pointer`); the selected text stays on the entry until the content changes; a stopped, released or restarted widget starts with none of it |
 | 04-008 | crash handler | `IN_HANDLER` and `REPORT_DONE` are one `REPORT` atomic (Idle, Writing, Written) |
 | 04-003 | `Coalesce` | one `AtomicU8` (Idle, Running, RunningDirty) |
-| 04-005, 04-004 | `NewChatStage` | `Creating{progress: CreateProgress}` and `Type{save: TypeSaveStage}` carry the request state; `StageFacts` is gone, `Session::settled_new_chat` folds the answers in, and the poll drain stores the result; `NewChatView` holds one `ViewState` |
+| 04-005, 04-004 | `NewChatStage` | `Creating{progress: CreateProgress}` and `Type{save: TypeSaveStage}` carry the request state; `StageFacts` is gone, `Session::settled_new_chat` folds the answers in, and the poll drain stores the result; `NewChatView` holds one `ViewState`. A type Save is matched by the request ids in `Saving` (`TypeSave` Sent, Done, Failed); a request gone without an answer lands in `Refused`, and the chat-wide `info_edit_errors` no longer decides it |
 | 04-010 | `BackgroundAccounts` | `clients` is changed only through `clients_mut()`, whose guard publishes the combined unread when it ends: no other writer of the badge |
 | 08-047 | `BackgroundAccounts` | `prepare: PrepareSet` replaces `starting` + `preparing`; `poll: Option<Task>` replaces `polling`; `local: LocalData` replaces `swept` + `wiping` |
 | 08-048 | `BackgroundAccounts` | a client that could not start (`Failed`, no client) is replaced by the next `ensure_background_accounts` pass |
 | 04-067 | `notify_focus` | one `Mutex<Dnd>` (Unknown, Known, Refreshing{last}) |
 | 04-059 | `PaidReactions` | `offered` is `MessageReactionOptions::offers_paid` (the picker's own state); `senders` is a `Fetch` per chat, asked again after a failure; `note` is the error `add_paid_reaction` returns (`PaidAddError`) |
-| 04-064 | passkey sign-in | `LoginStage` (Idle, FetchingOptions, Ceremony, Checking, Failed) with request ids, `config: Fetch<()>`; a lost request ends the stage, the sign-in screens going away resets it |
-| 04-063, 05-147 | `PasskeysState` | `list: PasskeyList` (Unknown, Stale, Asking, Known, Failed); `removing: Option<Removal>` matched to its request. The registration was already `PasskeyAdd` |
+| 04-064 | passkey sign-in | `LoginStage` (Idle, FetchingOptions, Ceremony, Asserting, Checking, Failed) with request ids, `config: Fetch<()>`; `Ceremony` and `Asserting` carry the options and when they were fetched, so `LoginState::pending` is gone (reuse is `reuse_options`); a lost request ends the stage, the sign-in screens going away resets it |
+| 04-063, 05-147 | `PasskeysState` | `list: PasskeyList` (Unknown, Stale, Asking, Known, Failed); `Asking` and `Failed` carry a `Basis` (Unanswered, Answered) so a re-ask or a failed re-ask keeps the answered list and the Privacy row usable; `removing: Option<Removal>` matched to its request. The registration was already `PasskeyAdd` |
 | 12-081 | `CeremonyUi` | `run: CeremonyRun` (Live{sheet, worker, focus_pin, qr}, Ended(reason)) |
-| 04-015 | `FreeState` | `ui: FreeUi` (Idle, MenuOpen, Requesting{request, serial}) |
+| 04-015 | `FreeState` | `ui: FreeUi` (Idle, MenuOpen, Requesting{request}) |
 | 04-016 | `PeerQrData` | `UserLinkFetch::Failed(Option<reason>)`, taken once by the box |
 | 04-013 | `PeerQrBox` | `save: SaveStage` (Idle{failed}, Out{serial, choice}) replaces `saving` + `failed` |
 | 11-p8-006 | `PanelMotion` | enum Idle, Opening, Closing |
@@ -6829,10 +6826,14 @@ Skipped, with the reason:
 - 14-052: `Presence` (Shown/Hidden) already replaced `visible` and `hidden_at`.
 - 14-053: `WidgetsUi::lander` already holds the task.
 - 12-082: the ticker `Option<Task>` is the task handle the owner holds (as
-  `lander` is); the busy stages it follows are `PasskeyAdd` and
-  `LoginStage` now.
-- 03-099 (`favorite`, `gif_saved`, `in_profile`): each is one three-valued
-  fact loaded later, not a stage kept beside another field.
+  `lander` is). Busy is not stored: `passkey_creation_busy` and
+  `passkey_login_busy` derive it from the ceremony on screen and the
+  driver's `PasskeyAdd` / `LoginStage`, so no second copy of the stage
+  exists.
+- 03-099: the entry's `downloading` and `local` half is `MediaFile` now (in
+  the table above). Only `favorite`, `gif_saved` and `in_profile` are
+  skipped: each is one three-valued fact loaded later, not a stage kept
+  beside another field.
 - 03-076 (`moving`, `places_in_area`): the pin being dragged and the
   "search this area" offer are independent of the address and the query.
 - 04-008 (`INSTALLED`, Windows `IN_FILTER`): a one-time install guard and a
@@ -6844,7 +6845,7 @@ Skipped, with the reason:
   it is.
 
 Guards: the implicit-state baseline lost the fields converted here
-(`ResaleSearch`, `ResaleBuy`, `CraftSession`, `LoginState`, `MediaFacts`,
+(`LoginState`, `MediaFacts`,
 `PanelMotion`, `StageFacts`, `NewChatView`), `MediaFacts::in_saved_messages`
 is listed in the allow file (a fact about where the message lives).
 

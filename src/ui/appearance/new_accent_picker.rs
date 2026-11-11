@@ -349,7 +349,7 @@ impl QuillApp {
     }
 
     /// The handler is read on a thread (Linux): draw again when it lands.
-    fn repaint_when_link_handler_read(&self, cx: &mut Context<Self>) {
+    fn repaint_when_link_handler_read(&mut self, cx: &mut Context<Self>) {
         let (landed, wait) = futures_channel::oneshot::channel::<()>();
         // One watcher at a time; none when no read runs.
         if !quill::link_handler::wake_when_read(move || {
@@ -357,19 +357,24 @@ impl QuillApp {
         }) {
             return;
         }
-        cx.spawn(async move |this, cx| {
+        self.preferences.link_handler_watch = Some(cx.spawn(async move |this, cx| {
             // A read that died drops the sender: draw again then too.
             let _ = wait.await;
-            let _ = this.update(cx, |_, cx| cx.notify());
-        })
-        .detach();
+            let _ = this.update(cx, |this, cx| {
+                this.preferences.link_handler_watch = None;
+                cx.notify();
+            });
+        }));
     }
 
     /// "Open Telegram links with Quill": opt-in default handler for `tg:`
     /// links (`quill::link_handler`). Quill never claims it on its own.
     /// Windows/Linux get a switch; macOS cannot hand the scheme back to
     /// another app, so it gets a one-way "Make default" button.
-    pub(in crate::ui) fn general_link_handler_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::ui) fn general_link_handler_section(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         use quill::link_handler::{self, ControlKind, LinkHandlerState};
         let state = link_handler::state();
         self.repaint_when_link_handler_read(cx);

@@ -67,7 +67,6 @@ LinuxState::failed
 LiveInput::failed
 LocalFileState::is_downloading_active
 LocalFileState::is_downloading_completed
-LoginState::config_requested+error
 Lookup::fade_started
 Lookup::pending
 
@@ -76,7 +75,6 @@ MediaState::disk_paused_saved_changed
 MembersView::loading
 MiniAppWindow::closing_confirmation
 MutedSpeechHint::done
-NewChatView::busy+failure
 OutputState::opening
 
 ParsedFile::uploading

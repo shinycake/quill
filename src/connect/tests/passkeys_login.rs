@@ -176,7 +176,6 @@ mod with_webauthn {
             login.stage,
             crate::passkeys::login::LoginStage::Idle
         ));
-        assert!(login.pending.is_none());
         // A password-protected account: TDLib moves to the password screen.
         auth(
             &mut p,
@@ -207,7 +206,7 @@ mod with_webauthn {
         );
         let login = &p.driver.session.settings.passkeys.login;
         assert_eq!(login.error(), Some("PASSKEY_CREDENTIAL_NOT_FOUND"));
-        assert!(login.pending.is_none() && !login.is_waiting());
+        assert!(!login.is_waiting());
         // The next click asks for new options and clears the error.
         assert!(p.driver.begin_login().unwrap().is_some());
         assert_eq!(count(&p.recorder, "getAuthenticationPasskeyParameters"), 2);
@@ -227,7 +226,6 @@ mod with_webauthn {
         assert_eq!(count(&p.recorder, "checkAuthenticationPasskey"), 0);
         let login = &p.driver.session.settings.passkeys.login;
         assert_eq!(login.error(), Some("PASSKEY_HANDLE_INVALID"));
-        assert!(login.pending.is_none());
     }
 
     #[test]

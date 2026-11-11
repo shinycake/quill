@@ -468,10 +468,7 @@ impl PeerQrBox {
             return Vec::new();
         }
         self.free.serial += 1;
-        self.free.ui = FreeUi::Requesting {
-            request: what,
-            serial: self.free.serial,
-        };
+        self.free.ui = FreeUi::Requesting { request: what };
         vec![QrEffect::RequestFreeCode(FreeTicket {
             request: what,
             box_id: self.id,
@@ -521,10 +518,10 @@ impl PeerQrBox {
     /// after a reset the fee is back.
     fn free_answer(&mut self, ticket: FreeTicket, result: FreeResult, env: QrEnv) -> Vec<QrEffect> {
         if ticket.box_id != self.id
+            || ticket.serial != self.free.serial
             || self.free.ui
                 != (FreeUi::Requesting {
                     request: ticket.request,
-                    serial: ticket.serial,
                 })
         {
             return Vec::new();

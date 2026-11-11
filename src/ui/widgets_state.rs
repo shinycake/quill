@@ -200,12 +200,10 @@ pub(super) struct Pointer {
     pub pressed: Option<i32>,
     /// The mouse is over it (it was told so).
     pub hovered: bool,
-    /// The selected text, read after a press.
-    pub selection: String,
 }
 
 impl Pointer {
-    /// A later move is a hover again, not a drag. The selection stays.
+    /// A later move is a hover again, not a drag.
     pub(super) fn release(&mut self) {
         self.pressed = None;
         self.hovered = false;
@@ -271,6 +269,9 @@ pub(super) struct WidgetEntry {
     pub stored: Stored,
     /// The stored copy changed since the last write.
     pub unsaved: bool,
+    /// The selected text, read after a press. It stays through a stop or a
+    /// restart of the runtime and goes with the content.
+    pub selection: String,
 }
 
 impl WidgetEntry {
@@ -292,6 +293,7 @@ impl WidgetEntry {
         self.frame = None;
         self.height = height;
         self.poll = Poll::Off;
+        self.selection.clear();
         self.identity = Some(identity);
     }
 
@@ -317,6 +319,7 @@ impl WidgetEntry {
             poll: Poll::Off,
             stored,
             unsaved: false,
+            selection: String::new(),
         }
     }
 

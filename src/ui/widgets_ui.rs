@@ -632,10 +632,8 @@ impl QuillApp {
             }
             RuntimeEvent::Copy(text) => self.copy_widget_text(text, cx),
             RuntimeEvent::Selection(text) => {
-                if let Some(entry) = self.widgets.entries.get_mut(&key)
-                    && let Some(live) = entry.live_mut()
-                {
-                    live.pointer.selection = text;
+                if let Some(entry) = self.widgets.entries.get_mut(&key) {
+                    entry.selection = text;
                 }
             }
             RuntimeEvent::Watch(on) => {
@@ -672,8 +670,7 @@ impl QuillApp {
         self.widgets
             .entries
             .get(&key)
-            .and_then(|entry| entry.live())
-            .map(|live| live.pointer.selection.as_str())
+            .map(|entry| entry.selection.as_str())
             .filter(|text| !text.is_empty())
     }
 

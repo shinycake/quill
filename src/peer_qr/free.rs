@@ -91,10 +91,10 @@ pub enum FreeUi {
     #[default]
     Idle,
     MenuOpen,
-    /// The `getUserLink` out as ticket `serial`; only its answer applies.
+    /// The `getUserLink` out as the ticket of `FreeState::serial`; only its
+    /// answer applies.
     Requesting {
         request: FreeRequest,
-        serial: u64,
     },
 }
 
@@ -111,7 +111,7 @@ impl FreeState {
     /// The request out, if one is.
     pub fn requesting(&self) -> Option<FreeRequest> {
         match self.ui {
-            FreeUi::Requesting { request, .. } => Some(request),
+            FreeUi::Requesting { request } => Some(request),
             _ => None,
         }
     }

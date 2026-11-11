@@ -189,7 +189,6 @@ fn a_released_pointer_has_no_press_or_hover_left() {
     live.pointer.pressed = Some(0);
     live.pointer.hovered = true;
     live.pointer.hold = true;
-    live.pointer.selection = "kept".into();
     live.pointer.release();
     assert_eq!(
         (
@@ -199,7 +198,25 @@ fn a_released_pointer_has_no_press_or_hover_left() {
         ),
         (None, false, false)
     );
-    assert_eq!(live.pointer.selection, "kept");
+}
+
+/// The selected text outlives a stopped runtime and goes with the content.
+#[test]
+fn the_selection_stays_until_the_content_changes() {
+    let mut entry = entry();
+    entry.selection = "kept".into();
+    entry.lifecycle = Lifecycle::Idle;
+    assert_eq!(entry.selection, "kept");
+    entry.replace_content(
+        super::Identity {
+            html: "new".into(),
+            is_copy: false,
+            can_send_queries: false,
+            can_send_background_queries: false,
+        },
+        50.0,
+    );
+    assert!(entry.selection.is_empty());
 }
 
 /// A bot edits the message to new HTML: nothing of the old content's
