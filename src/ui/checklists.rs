@@ -6,7 +6,7 @@
 
 use super::ai_compose::marked_link;
 use super::app::QuillApp;
-use super::dialogs::{AddOptionStage, OptionMediaSlot};
+use super::dialogs::OptionMediaSlot;
 use super::polls::AttachTarget;
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -473,13 +473,7 @@ impl QuillApp {
                 .auto_grow(1, 2)
                 .submit_on_enter(false)
         });
-        self.message_ui.poll_add_option = Some(PollAddOption {
-            chat_id,
-            message_id,
-            input,
-            attach: Default::default(),
-            stage: AddOptionStage::Opening,
-        });
+        self.message_ui.poll_add_option = Some(PollAddOption::new(chat_id, message_id, input));
         cx.notify();
     }
 

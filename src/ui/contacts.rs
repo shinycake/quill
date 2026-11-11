@@ -18,9 +18,6 @@ use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{ContactRow, InfoPanelTarget};
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 impl QuillApp {
     /// kit Phase 2 (redo): import contacts hosted in a kit `Dialog` via
     /// `window.open_dialog`. Esc / backdrop / ✕ clear state via `on_close`.
@@ -69,18 +66,9 @@ impl QuillApp {
                         })),
                 );
             dialog
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::one_shot_dialog_content(
+                    body.into_any_element(),
+                ))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -233,18 +221,9 @@ impl QuillApp {
                     keys::NEW_CONTACT_ADD_NAME,
                     &[("user", &name.to_string())],
                 )))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::one_shot_dialog_content(
+                    body.into_any_element(),
+                ))
                 .footer(footer)
                 .on_close(on_close)
         })

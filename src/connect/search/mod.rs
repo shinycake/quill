@@ -230,14 +230,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         trimmed: &str,
     ) -> Result<Option<SearchFlight>, ConnectSendError> {
         let search_gen = self.session.search.search.generation;
-        if self.session.search.search.filters.scope
+        if self.session.search.search.filters.scope()
             == crate::search_filters::SearchScope::PublicPosts
         {
             return self.send_public_posts_search(trimmed, search_gen);
         }
         // The Apps tab lists bots the session already knows; nothing to
         // search for, so the query resolves at once.
-        if !self.session.search.search.filters.scope.searches_messages() {
+        if !self
+            .session
+            .search
+            .search
+            .filters
+            .scope()
+            .searches_messages()
+        {
             self.session.search.search.accept_chats(Vec::new(), false);
             self.session
                 .search
@@ -350,7 +357,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.clear_typed_debounce();
-        self.session.search.search.filters.scope = scope;
+        let filters = self.session.search.search.filters;
+        self.session.search.search.filters = filters.in_scope(scope);
         let _search_gen = self.session.search.search.begin_query(tag);
         self.send_typed_search(tag)
     }

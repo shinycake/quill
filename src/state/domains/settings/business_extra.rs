@@ -44,16 +44,25 @@ pub enum ChatLinkSave {
 pub struct BotLookup {
     pub generation: u32,
     pub query: String,
-    /// `None` while the exact lookup runs; `Some(None)` when nothing
-    /// matched.
-    pub exact: Option<Option<i64>>,
-    pub mine: Option<Vec<i64>>,
-    pub global: Option<Vec<i64>>,
+    /// `Ready(None)` when nothing matched; a refused search is `Failed`,
+    /// not an empty result.
+    pub exact: Fetch<Option<i64>>,
+    pub mine: Fetch<Vec<i64>>,
+    pub global: Fetch<Vec<i64>>,
 }
 
 impl BotLookup {
+    /// Every search answered or failed.
     pub fn done(&self) -> bool {
-        self.exact.is_some() && self.mine.is_some() && self.global.is_some()
+        !self.exact.is_loading() && !self.mine.is_loading() && !self.global.is_loading()
+    }
+
+    /// The first refusal, when any search failed.
+    pub fn error(&self) -> Option<&str> {
+        self.exact
+            .error()
+            .or_else(|| self.mine.error())
+            .or_else(|| self.global.error())
     }
 }
 
@@ -158,10 +167,11 @@ impl Session {
         };
         let lookup = &mut self.settings.business_extra.lookup;
         if lookup.generation == generation {
-            lookup.exact = Some(match kind {
+            let found = match kind {
                 ChatKind::Private { user_id } => Some(user_id.0),
                 _ => None,
-            });
+            };
+            lookup.exact.answered(pending.map(|p| p.id), found);
         }
         true
     }
@@ -187,9 +197,14 @@ impl Session {
             .collect();
         let lookup = &mut self.settings.business_extra.lookup;
         if lookup.generation == generation {
+            let id = pending.map(|p| p.id);
             match part {
-                BotLookupPart::Mine => lookup.mine = Some(users),
-                BotLookupPart::Global => lookup.global = Some(users),
+                BotLookupPart::Mine => {
+                    lookup.mine.answered(id, users);
+                }
+                BotLookupPart::Global => {
+                    lookup.global.answered(id, users);
+                }
                 BotLookupPart::Exact => {}
             }
         }
@@ -242,11 +257,12 @@ impl Session {
             SettingsPurpose::LookupBusinessBot { generation, part } => {
                 let lookup = &mut extra.lookup;
                 if lookup.generation == generation {
+                    let message = format!("Couldn't search for bots: {reason}");
                     match part {
-                        BotLookupPart::Exact => lookup.exact = Some(None),
-                        BotLookupPart::Mine => lookup.mine = Some(Vec::new()),
-                        BotLookupPart::Global => lookup.global = Some(Vec::new()),
-                    }
+                        BotLookupPart::Exact => lookup.exact.failed(extra_id, message, true),
+                        BotLookupPart::Mine => lookup.mine.failed(extra_id, message, true),
+                        BotLookupPart::Global => lookup.global.failed(extra_id, message, true),
+                    };
                 }
                 return true;
             }

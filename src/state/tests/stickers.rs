@@ -109,9 +109,12 @@ fn s9_gif_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.gifs.search_results.len(), 1);
-    assert_eq!(with_purpose.stickers.gifs.search_results[0].file_id.0, 101);
-    assert_eq!(with_purpose.stickers.gifs.search_next_offset, "50");
+    assert_eq!(with_purpose.stickers.gifs.search_results().len(), 1);
+    assert_eq!(
+        with_purpose.stickers.gifs.search_results()[0].file_id.0,
+        101
+    );
+    assert_eq!(with_purpose.stickers.gifs.search_next_offset(), "50");
     assert!(with_purpose.bots.inline_query.is_none());
 
     // Second page appends new entries (deduped by file id) and
@@ -132,9 +135,12 @@ fn s9_gif_backend_purpose_gated_dispatch() {
     );
     // g1 (file 101) was already on page one — deduped; g2 (file 102)
     // appends; the offset advances to "" (exhausted).
-    assert_eq!(with_purpose.stickers.gifs.search_results.len(), 2);
-    assert_eq!(with_purpose.stickers.gifs.search_results[1].file_id.0, 102);
-    assert_eq!(with_purpose.stickers.gifs.search_next_offset, "");
+    assert_eq!(with_purpose.stickers.gifs.search_results().len(), 2);
+    assert_eq!(
+        with_purpose.stickers.gifs.search_results()[1].file_id.0,
+        102
+    );
+    assert_eq!(with_purpose.stickers.gifs.search_next_offset(), "");
 
     // A stray inlineQueryResults (no matching purpose) is ignored.
     let (mut without_purpose, sink2) = session();
@@ -145,14 +151,14 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         &sink2,
         r#"{"@type":"inlineQueryResults","inline_query_id":7,"button":null,"results":[],"next_offset":"9"}"#,
     );
-    assert!(without_purpose.stickers.gifs.search_results.is_empty());
+    assert!(without_purpose.stickers.gifs.search_results().is_empty());
 
     // An addSavedAnimation `ok` clears the saved-GIF cache so it
     // refetches the server-confirmed list.
     with_purpose
         .stickers
         .gifs
-        .saved_answered(with_purpose.stickers.gifs.search_results.clone());
+        .saved_answered(with_purpose.stickers.gifs.search_results().to_vec());
     let extra = with_purpose.request(RequestPurpose::AddSavedAnimation, None);
     apply_json(
         &mut with_purpose,
@@ -166,7 +172,7 @@ fn s9_gif_backend_purpose_gated_dispatch() {
     with_purpose
         .stickers
         .gifs
-        .saved_answered(with_purpose.stickers.gifs.search_results.clone());
+        .saved_answered(with_purpose.stickers.gifs.search_results().to_vec());
     let extra = with_purpose.request(RequestPurpose::RemoveSavedAnimation, None);
     apply_json(
         &mut with_purpose,
@@ -434,4 +440,22 @@ fn an_update_during_the_request_survives_its_answer_and_asks_again() {
     assert_eq!(gifs.animations.len(), 1);
     gifs.saved_retry();
     assert!(!gifs.failed() && !gifs.loaded());
+}
+
+#[test]
+fn a_new_gif_search_starts_with_no_results_or_paging() {
+    let mut gifs = crate::state::GifPanel::default();
+    gifs.search_begun("cats".into());
+    gifs.search_page_asked(String::new());
+    gifs.search_sent(crate::ids::RequestId(1));
+    gifs.search_page_answered(vec![saved_gif(1)], "50".into(), true);
+    assert_eq!(gifs.search_results().len(), 1);
+    assert_eq!(gifs.search_next_offset(), "50");
+    // A different search replaces the results and the paging whole.
+    gifs.search_begun("dogs".into());
+    assert!(gifs.search_results().is_empty());
+    assert_eq!(gifs.search_next_offset(), "");
+    // Back on the saved GIFs there is no search to page.
+    gifs.search_left();
+    assert!(gifs.search_results().is_empty());
 }

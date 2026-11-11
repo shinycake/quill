@@ -17,6 +17,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use quill::group_type::{LinkStatus, join_approval_applies, request_to_join_about};
 use quill::lang::{keys, tr, trn};
+use quill::state::InviteLinkFetch;
 
 pub(super) fn heading(text: &str, cx: &App) -> Div {
     div()
@@ -270,9 +271,37 @@ impl QuillApp {
             .gap_2()
             .child(heading(tr(keys::CREATE_PERMANENT_LINK_TITLE), cx));
         let Some(link) = link else {
-            return block
-                .child(about(tr(keys::Q_PEOPLE_LOADING), cx))
-                .into_any_element();
+            let chat_id = facts.chat_id;
+            let fetch = self
+                .session()
+                .and_then(|s| s.groups.invite_links.get(&chat_id.0))
+                .cloned();
+            return match fetch {
+                Some(InviteLinkFetch::Failed(message)) => block
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .child(div().flex_1().text_sm().text_color(muted).child(message))
+                            .child(
+                                Button::new("group-type-link-retry")
+                                    .label(tr(keys::Q_PEOPLE_RETRY))
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.refresh_invite_links(chat_id, cx);
+                                    })),
+                            ),
+                    )
+                    .into_any_element(),
+                // Nothing was asked (no right to invite, no connection):
+                // there is no link to wait for either.
+                None | Some(InviteLinkFetch::Loaded(_)) => block
+                    .child(about(tr(keys::Q_PEOPLE_NO_INVITE_LINKS), cx))
+                    .into_any_element(),
+                Some(InviteLinkFetch::Loading(_)) => block
+                    .child(about(tr(keys::Q_PEOPLE_LOADING), cx))
+                    .into_any_element(),
+            };
         };
         let shown = link.invite_link.trim_start_matches("https://").to_string();
         let owner = cx.entity().downgrade();

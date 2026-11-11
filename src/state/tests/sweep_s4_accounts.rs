@@ -93,9 +93,8 @@ fn an_auto_download_save_is_answered_by_the_request_that_asked() {
         "the refusal is the first request's"
     );
     assert_eq!(
-        session.chat_list.dialog_answers.take(first),
-        None,
-        "an answer is taken once"
+        session.settings.auto_download_answers.peek(first),
+        Some(AutoDownloadAnswer::Refused(first))
     );
     apply_json(
         &mut session,
@@ -104,7 +103,16 @@ fn an_auto_download_save_is_answered_by_the_request_that_asked() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, second.0),
     );
     assert_eq!(
-        session.chat_list.dialog_answers.take(second),
-        Some(DialogAnswer::Done)
+        session.settings.auto_download_answers.peek(second),
+        Some(AutoDownloadAnswer::Saved(second)),
+        "the earlier refusal is still held for the editor that sent it"
+    );
+    assert_eq!(
+        session.settings.auto_download_answers.peek(first),
+        Some(AutoDownloadAnswer::Refused(first))
+    );
+    assert!(
+        session.settings.data_storage_error().is_some(),
+        "a later ok does not wipe the failure"
     );
 }

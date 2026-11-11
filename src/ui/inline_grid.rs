@@ -21,7 +21,7 @@ use quill::inline_grid::{
 };
 use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
-use quill::state::{DeepLinkAction, InlineBotResolve, InlineQueryFetch};
+use quill::state::{DeepLinkAction, InlineBotResolve, InlineMore, InlineQueryFetch};
 use quill::telegram::envelope::{InlineQueryResultSummary, InlineQueryResultsButton};
 use std::path::PathBuf;
 
@@ -545,6 +545,7 @@ impl QuillApp {
             results,
             button,
             next_offset,
+            more,
             ..
         } = &slot.fetch
         else {
@@ -553,12 +554,10 @@ impl QuillApp {
         let (bot_user_id, offset) = (slot.bot_user_id, next_offset.clone());
         // A failed page waits for the next query instead of being asked again
         // on every poll batch.
-        if slot.more_failed.as_ref() == Some(&offset) {
+        if matches!(more, InlineMore::Failed { offset: failed } if *failed == offset) {
             return;
         }
-        let loading = session
-            .requests
-            .has_inline_query_in_flight(chat_id, bot_user_id);
+        let loading = slot.fetch.in_flight();
         let mosaic = layout_results(results);
         let has_button = button
             .as_ref()

@@ -394,7 +394,7 @@ fn attachment_menu_bots_and_custom_requests_round_trip() {
 
     let extra = h
         .driver
-        .send_web_app_custom_request(42, "r9", "getRequestedContact", "{}")
+        .send_web_app_custom_request(42, 77, "r9", "getRequestedContact", "{}")
         .expect("sent");
     assert_eq!(
         h.last("sendWebAppCustomRequest")["method"],
@@ -407,6 +407,7 @@ fn attachment_menu_bots_and_custom_requests_round_trip() {
     let replies = std::mem::take(&mut h.driver.session.bots.web_apps.custom_replies);
     assert_eq!(replies.len(), 1);
     assert_eq!(replies[0].req_id, "r9");
+    assert_eq!(replies[0].launch_id, 77, "the answer names the launch");
     assert_eq!(replies[0].result, Ok("{\"ok\":true}".into()));
     assert!(h.driver.session.bots.web_apps.custom_requests.is_empty());
 }
@@ -680,4 +681,27 @@ fn emoji_status_access_is_put_back_when_the_send_fails() {
             .iter()
             .any(|json| json.contains("toggleBotCanManageEmojiStatus"))
     );
+}
+
+#[test]
+fn closing_a_mini_app_drops_its_custom_requests_and_answers() {
+    use crate::state::{CustomRequestReply, WebApps};
+    let mut apps = WebApps::default();
+    apps.custom_requests.insert(1, (10, "a".into()));
+    apps.custom_requests.insert(2, (20, "b".into()));
+    apps.custom_replies.push(CustomRequestReply {
+        launch_id: 10,
+        req_id: "x".into(),
+        result: Ok("{}".into()),
+    });
+    apps.custom_replies.push(CustomRequestReply {
+        launch_id: 20,
+        req_id: "y".into(),
+        result: Ok("{}".into()),
+    });
+    apps.forget_custom_requests_of(10);
+    assert_eq!(apps.custom_requests.len(), 1);
+    assert!(apps.custom_requests.contains_key(&2));
+    assert_eq!(apps.custom_replies.len(), 1);
+    assert_eq!(apps.custom_replies[0].launch_id, 20);
 }

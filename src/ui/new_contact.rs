@@ -19,8 +19,6 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::NewContactOutcome;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// tdesktop `IsValidPhone` (`boxes/add_contact_box.cpp`): eight or more
 /// digits, or one of the test numbers.
@@ -242,17 +240,8 @@ impl QuillApp {
                     );
                 (body, footer)
             };
-            let body = Rc::new(RefCell::new(Some(body)));
             dialog
-                .content(crate::ui::shell::scrollable_dialog_content(
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    },
-                ))
+                .content(crate::ui::shell::one_shot_dialog_content(body))
                 .footer(footer)
         })
     }

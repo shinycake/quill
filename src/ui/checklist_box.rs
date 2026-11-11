@@ -85,7 +85,7 @@ impl QuillApp {
                         .message_ui
                         .poll_add_option
                         .as_mut()
-                        .and_then(|panel| panel.take_focus().then(|| panel.input.clone()));
+                        .and_then(|panel| panel.take_focus());
                     focus_after_mount(focus, window, cx);
                     this.poll_add_option_panel(cx)
                 });

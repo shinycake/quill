@@ -159,10 +159,6 @@ pub(crate) struct PollToggles {
 /// or Cancel in a picker, "Keep editing" on the discard question; the box
 /// itself closes from any of them.
 pub(crate) enum PollPage {
-    /// Just opened: the form, and the question takes focus once the dialog
-    /// has mounted (the kit dialog takes focus when it opens, so focusing at
-    /// open time is lost). The first render moves on to `Form`.
-    Opening,
     Form,
     /// The allowed countries picker.
     Country(crate::ui::country_box::CountryBox),
@@ -213,6 +209,9 @@ pub struct PollDialog {
     /// Which page the box shows (the form, a picker over it, or the discard
     /// question).
     pub(crate) page: PollPage,
+    /// The question, until the dialog has mounted and focused it (the kit
+    /// dialog takes focus when it opens, so focusing at open time is lost).
+    pub(crate) focus_on_mount: Option<Entity<TextareaState>>,
     /// "Limit Duration" is on: the poll closes at `close`.
     pub(crate) limit_duration: bool,
     pub(crate) close: PollClose,
@@ -237,42 +236,42 @@ pub struct PollAddOption {
     pub(crate) message_id: MessageId,
     pub(crate) input: Entity<TextareaState>,
     pub(crate) attach: OptionAttach,
-    pub(crate) stage: AddOptionStage,
-}
-
-/// Where the "Add an Option" box is. Just opened, the field takes focus once
-/// the dialog has mounted (the kit dialog takes focus when it opens, so
-/// focusing at open time is lost); the first render moves on to `Editing`,
-/// which holds the refusal Add last got.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum AddOptionStage {
-    Opening,
-    Editing { error: Option<&'static str> },
+    /// The reason Add was refused, drawn under the field.
+    error: Option<&'static str>,
+    /// The field, until the dialog has mounted and focused it (the kit
+    /// dialog takes focus when it opens, so focusing at open time is lost).
+    focus_on_mount: Option<Entity<TextareaState>>,
 }
 
 impl PollAddOption {
-    /// The first render after open: whether the field takes focus now.
-    pub(crate) fn take_focus(&mut self) -> bool {
-        if self.stage == AddOptionStage::Opening {
-            self.stage = AddOptionStage::Editing { error: None };
-            true
-        } else {
-            false
+    /// A fresh panel: the field takes focus once the dialog has mounted.
+    pub(crate) fn new(
+        chat_id: ChatId,
+        message_id: MessageId,
+        input: Entity<TextareaState>,
+    ) -> Self {
+        Self {
+            chat_id,
+            message_id,
+            focus_on_mount: Some(input.clone()),
+            input,
+            attach: Default::default(),
+            error: None,
         }
+    }
+
+    /// The field to focus on the first render after open, once.
+    pub(crate) fn take_focus(&mut self) -> Option<Entity<TextareaState>> {
+        self.focus_on_mount.take()
     }
 
     /// The reason Add was refused, drawn under the field.
     pub(crate) fn error(&self) -> Option<&'static str> {
-        match self.stage {
-            AddOptionStage::Editing { error } => error,
-            AddOptionStage::Opening => None,
-        }
+        self.error
     }
 
     pub(crate) fn refuse(&mut self, reason: &'static str) {
-        self.stage = AddOptionStage::Editing {
-            error: Some(reason),
-        };
+        self.error = Some(reason);
     }
 }
 
@@ -312,14 +311,9 @@ impl PollDialog {
         self.page = PollPage::Form;
     }
 
-    /// The first render after open: whether the question takes focus now.
-    pub(crate) fn take_focus_question(&mut self) -> bool {
-        if matches!(self.page, PollPage::Opening) {
-            self.page = PollPage::Form;
-            true
-        } else {
-            false
-        }
+    /// The question to focus on the first render after open, once.
+    pub(crate) fn take_focus_question(&mut self) -> Option<Entity<TextareaState>> {
+        self.focus_on_mount.take()
     }
 }
 
@@ -363,7 +357,7 @@ impl PollDialog {
             .collect();
         let mut dialog = Self {
             description_input,
-            question_input,
+            question_input: question_input.clone(),
             options,
             explanation_input,
             limit_by_country: false,
@@ -380,7 +374,8 @@ impl PollDialog {
             members_only: false,
             limit_duration: false,
             close: PollClose::Period(POLL_DEFAULT_PERIOD_SECS),
-            page: PollPage::Opening,
+            page: PollPage::Form,
+            focus_on_mount: Some(question_input.clone()),
             dismiss_keyboard_on_send: None,
             baseline: None,
         };

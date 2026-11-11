@@ -250,15 +250,6 @@ impl QuillApp {
             ),
             stage => {
                 let resetting = matches!(stage, NetworkReset::Resetting(_));
-                if let NetworkReset::Failed(line) = stage {
-                    section = section.child(
-                        div()
-                            .id("network-usage-reset-failed")
-                            .text_xs()
-                            .text_color(cx.theme().danger)
-                            .child(line.clone()),
-                    );
-                }
                 section.child(
                     div().flex().child(
                         Button::new("network-usage-reset")
@@ -279,8 +270,9 @@ impl QuillApp {
 }
 
 /// "Reset statistics": from the confirmation to the request's answer.
-/// Every stage has a way out: Cancel, the answer, a failed send (`Failed`,
-/// cleared by pressing Reset again), or leaving the page.
+/// Every stage has a way out: Cancel, the answer, or leaving the page; a
+/// send that did not go out stays on the confirmation and says so through
+/// `data_storage_save` (`StorageSaveKind::ResetStatistics`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) enum NetworkReset {
     #[default]
@@ -288,8 +280,6 @@ pub(crate) enum NetworkReset {
     Confirming,
     /// `resetNetworkStatistics` is out; its answer ends the stage.
     Resetting(quill::ids::RequestId),
-    /// The request could not be sent.
-    Failed(String),
 }
 
 impl QuillApp {
@@ -299,18 +289,23 @@ impl QuillApp {
         if self.privacy.extra.network_reset != NetworkReset::Confirming {
             return;
         }
-        self.privacy.extra.network_reset = if let Some(live) = self.live.as_mut() {
+        if let Some(live) = self.live.as_mut() {
+            let save = &mut live.driver.session.settings.data_storage_save;
+            save.begin(quill::state::StorageSaveKind::ResetStatistics);
             match live.driver.reset_network_statistics() {
-                Ok(request) => NetworkReset::Resetting(request),
-                Err(_) => NetworkReset::Failed(tr(keys::Q_OPS_RESET_STATISTICS_FAILED).to_string()),
+                Ok(request) => self.privacy.extra.network_reset = NetworkReset::Resetting(request),
+                Err(_) => live.driver.session.settings.data_storage_save.fail(
+                    quill::state::StorageSaveKind::ResetStatistics,
+                    tr(keys::Q_OPS_RESET_STATISTICS_FAILED).to_string(),
+                ),
             }
-        } else {
-            if let Some(demo) = self.demo_session.as_mut() {
-                demo.settings.privacy_data.network =
-                    quill::state::fetch::Fetch::Ready(NetworkUsage::default());
-            }
-            NetworkReset::Idle
-        };
+            return;
+        }
+        if let Some(demo) = self.demo_session.as_mut() {
+            demo.settings.privacy_data.network =
+                quill::state::fetch::Fetch::Ready(NetworkUsage::default());
+        }
+        self.privacy.extra.network_reset = NetworkReset::Idle;
     }
 
     /// Poll-loop half: the reset's request answered (or its session went),

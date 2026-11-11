@@ -7,9 +7,9 @@ impl GroupTypePurpose {
     pub(crate) fn kind(&self) -> RequestKind {
         match self {
             Self::GetCreatedPublicChats => RequestKind::Lookup,
-            Self::CheckChatUsername { .. }
-            | Self::CheckPublicChatsLimit
-            | Self::DisableAllUsernames => RequestKind::UserAction,
+            Self::CheckChatUsername | Self::CheckPublicChatsLimit | Self::DisableAllUsernames => {
+                RequestKind::UserAction
+            }
         }
     }
 }

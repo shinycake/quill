@@ -118,7 +118,7 @@ fn account_loss_resets_the_loading_flags_of_pending_lookups() {
         RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { append: false }),
         None,
     );
-    session.payments.hub.tx = PageStage::Loading {
+    session.payments.hub.stars.page = PageStage::Loading {
         request: history,
         kind: PageKind::First,
     };
@@ -126,7 +126,7 @@ fn account_loss_resets_the_loading_flags_of_pending_lookups() {
         RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append: false }),
         None,
     );
-    session.payments.hub.gifts_page = PageStage::Loading {
+    session.payments.hub.received.page = PageStage::Loading {
         request: gifts,
         kind: PageKind::First,
     };
@@ -147,8 +147,8 @@ fn account_loss_resets_the_loading_flags_of_pending_lookups() {
 
     assert!(!session.settings.privacy_data.network.is_loading());
     assert!(!session.payments.star_subscriptions.is_loading());
-    assert!(!session.payments.hub.tx.is_loading());
-    assert!(!session.payments.hub.gifts_page.is_loading());
+    assert!(!session.payments.hub.stars.page.is_loading());
+    assert!(!session.payments.hub.received.page.is_loading());
     assert!(!session.media.playlists[&9].loading());
     assert!(session.requests.is_empty());
     assert!(session.requests.get(user_action).is_none());

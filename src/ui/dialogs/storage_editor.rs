@@ -2,7 +2,7 @@
 use super::super::app::QuillApp;
 use quill::data_settings::{AutoDownloadNetSettings, NetworkKind};
 use quill::ids::RequestId;
-use quill::state::DialogAnswer;
+use quill::state::AutoDownloadAnswer;
 
 /// The editor's stage. `Saving` holds the draft until TDLib answers the
 /// request that carries it: `ok` closes the editor, an error reopens it with
@@ -46,15 +46,20 @@ impl StorageEditor {
         }
     }
 
-    /// The editor after the answer to the request it waits for (taken by
-    /// that request's id, so no other request's answer reaches it): a save
-    /// that went through closes it, a refusal reopens it with its draft.
-    pub(crate) fn after_answer(self, answer: Option<DialogAnswer>) -> Self {
+    /// The editor after the answer `answer`: the save it waits for ended.
+    pub(crate) fn after_answer(self, answer: Option<AutoDownloadAnswer>) -> Self {
         match (self, answer) {
-            (Self::Saving { network, draft, .. }, Some(DialogAnswer::Failed(_))) => {
-                Self::Open { network, draft }
-            }
-            (Self::Saving { .. }, Some(_)) => Self::Closed,
+            (
+                Self::Saving {
+                    request: asked,
+                    network,
+                    draft,
+                },
+                Some(AutoDownloadAnswer::Saved(got) | AutoDownloadAnswer::Refused(got)),
+            ) if asked == got => match answer {
+                Some(AutoDownloadAnswer::Saved(_)) => Self::Closed,
+                _ => Self::Open { network, draft },
+            },
             (stage, _) => stage,
         }
     }
@@ -69,7 +74,7 @@ impl QuillApp {
         };
         let answer = self
             .session_mut()
-            .and_then(|session| session.chat_list.dialog_answers.take(request));
+            .and_then(|session| session.settings.auto_download_answers.take(request));
         let next = self.settings.data_storage_editor.after_answer(answer);
         let changed = next != self.settings.data_storage_editor;
         self.settings.data_storage_editor = next;

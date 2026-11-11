@@ -1,0 +1,2 @@
+# `.borrow()` calls that are not a RefCell (scripts/check-refcell-borrows.py).
+# One per line: <Type::function>::<receiver>.<call> <reason>

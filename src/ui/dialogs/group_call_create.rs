@@ -179,29 +179,7 @@ impl QuillApp {
         let initial = default_schedule_at(now, &offset_at);
         let max = schedule_max(now, &offset_at);
         let picker = new_date_time_picker(window, cx, initial, max - now);
-        let refresh = self.spawn_screen(cx, async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_secs(COUNTDOWN_REFRESH_SECS))
-                    .await;
-                let open = this.update(cx, |app, cx| {
-                    let open = matches!(
-                        app.group_call_boxes
-                            .start_dialog
-                            .as_ref()
-                            .map(|flow| &flow.step),
-                        Some(CreateStep::Schedule(_))
-                    );
-                    if open {
-                        cx.notify();
-                    }
-                    open
-                });
-                if !matches!(open, Ok(true)) {
-                    break;
-                }
-            }
-        });
+        let refresh = self.schedule_refresh_timer(cx);
         self.group_call_boxes.start_dialog = Some(GroupCallCreate {
             chat_id,
             kind: CreateKind::Schedule,
@@ -213,6 +191,36 @@ impl QuillApp {
         });
         self.open_box(DialogKind::GroupCallStart);
         cx.notify();
+    }
+
+    /// One wake-up that redraws the countdown and arms the next, owned by the
+    /// schedule step (`ScheduleStep::_refresh`): leaving the step drops it.
+    fn schedule_refresh_timer(&mut self, cx: &mut Context<Self>) -> Task<()> {
+        self.spawn_screen(cx, async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_secs(COUNTDOWN_REFRESH_SECS))
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if !matches!(
+                    app.group_call_boxes
+                        .start_dialog
+                        .as_ref()
+                        .map(|flow| &flow.step),
+                    Some(CreateStep::Schedule(_))
+                ) {
+                    return;
+                }
+                let next = app.schedule_refresh_timer(cx);
+                if let Some(GroupCallCreate {
+                    step: CreateStep::Schedule(step),
+                    ..
+                }) = app.group_call_boxes.start_dialog.as_mut()
+                {
+                    step._refresh = next;
+                }
+                cx.notify();
+            });
+        })
     }
 
     fn close_group_call_create(&mut self, cx: &mut Context<Self>) {
@@ -336,11 +344,11 @@ impl QuillApp {
         // The list belongs to the box waiting for it: a box that closed or
         // was replaced drops it, and a box whose request is no longer the
         // session's closes (nothing will answer it).
-        let held = session.calls.create_join_as.as_ref().map(|j| j.request);
+        let held = session.calls.create_join_as.as_ref().map(|j| j.request());
         let orphaned = held.is_some() && held != waiting;
         let abandoned = waiting.is_some() && held != waiting;
         let answer = match (waiting, session.calls.create_join_as.as_ref()) {
-            (Some(request), Some(join_as)) if join_as.request == request => join_as.answer.clone(),
+            (Some(request), Some(join_as)) if join_as.request() == request => join_as.answer(),
             _ => None,
         };
         if answer.is_some() || orphaned {

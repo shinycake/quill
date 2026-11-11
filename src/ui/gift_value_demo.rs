@@ -70,12 +70,12 @@ fn received_gift() -> Value {
 pub(super) fn seed_gift_value_session(sink: Arc<MemorySink>) -> Session {
     let mut session = seed_gift_market_session(sink);
     let hub = &mut session.payments.hub;
-    hub.gifts = parse_received_gift(&received_gift()).into_iter().collect();
-    hub.gifts_total = 1;
-    hub.gifts_page = quill::premium_hub::page_stage::PageStage::Ready;
-    hub.gifts_owner = Some(MessageSender::User { user_id: ME });
-    hub.gifts_open = true;
-    hub.gift_view.select(Some(RECEIVED_ID.into()));
+    hub.received.rows = parse_received_gift(&received_gift()).into_iter().collect();
+    hub.received.total = 1;
+    hub.received.page = quill::premium_hub::page_stage::PageStage::Ready;
+    hub.received.owner = Some(MessageSender::User { user_id: ME });
+    hub.received.open();
+    hub.received.view.select(Some(RECEIVED_ID.into()));
     session
 }
 
@@ -89,10 +89,7 @@ impl QuillApp {
         let gift = session.payments.hub.selected_gift()?;
         let collectible = gift.gift.collectible.as_deref()?;
         Some(GiftValueLookup {
-            stage: info.map_or(GiftValueStage::Idle, |info| GiftValueStage::Ready {
-                info,
-                open: false,
-            }),
+            stage: info.map_or(GiftValueStage::Idle, GiftValueStage::Known),
             ..GiftValueLookup::new(collectible)
         })
     }

@@ -99,7 +99,11 @@ pub struct SpeakingUpdate {
 pub struct SpeakingTracker {
     last_sound_ms: Option<u64>,
     last_voice_ms: Option<u64>,
+    /// What TDLib was last told and when: written by [`Self::sent`] once
+    /// the send left, so a refused send is offered again by the next poll.
     last_sent: Option<(u64, bool)>,
+    /// Whether you count as speaking at the latest update.
+    speaking: bool,
     /// When the latest level window was applied.
     last_level_ms: Option<u64>,
     /// The latest level, for the UI.
@@ -120,6 +124,7 @@ impl SpeakingTracker {
             }
         }
         let speaking = self.is_speaking(now_ms);
+        self.speaking = speaking;
         let send = match self.last_sent {
             Some((_, was)) if was != speaking => Some(speaking),
             Some((at, true)) if speaking && at + SEND_ACTION_EACH_MS <= now_ms => Some(true),
@@ -127,9 +132,6 @@ impl SpeakingTracker {
             None if speaking => Some(true),
             None => None,
         };
-        if let Some(value) = send {
-            self.last_sent = Some((now_ms, value));
-        }
         SpeakingUpdate { speaking, send }
     }
 
@@ -145,14 +147,22 @@ impl SpeakingTracker {
             self.level = 0.0;
         }
         let speaking = self.is_speaking(now_ms);
+        self.speaking = speaking;
         let send = match self.last_sent {
             Some((_, true)) if !speaking => Some(false),
             _ => None,
         };
-        if let Some(value) = send {
-            self.last_sent = Some((now_ms, value));
-        }
         SpeakingUpdate { speaking, send }
+    }
+
+    /// The `send` of an update left as `value` at `now_ms`.
+    pub fn sent(&mut self, now_ms: u64, value: bool) {
+        self.last_sent = Some((now_ms, value));
+    }
+
+    /// Whether you counted as speaking at the latest update.
+    pub fn speaking(&self) -> bool {
+        self.speaking
     }
 
     /// Sound above the threshold within the kept-for window.
@@ -312,9 +322,11 @@ mod tests {
                 send: Some(true)
             }
         );
+        t.sent(1100, true);
         // Still speaking 1,400 ms later, resent after 500 ms of sound.
         assert_eq!(t.update(1.5, false, 1500).send, None);
         assert_eq!(t.update(1.5, false, 1600).send, Some(true));
+        t.sent(1600, true);
         assert!(t.is_speaking(2500));
         // Silence: speaking ends 1,500 ms after the last voice window.
         let u = t.update(0.0, false, 3101);
@@ -325,7 +337,27 @@ mod tests {
                 send: Some(false)
             }
         );
+        t.sent(3101, false);
         assert_eq!(t.update(0.0, false, 3200).send, None);
+    }
+
+    #[test]
+    fn a_send_that_never_left_is_offered_again() {
+        let mut t = SpeakingTracker::default();
+        assert_eq!(t.update(1.5, false, 100).send, Some(true));
+        // The send was refused: nothing was told, so the next poll offers it
+        // again, and a reset owes no closing `false`.
+        assert_eq!(t.update(1.5, false, 200).send, Some(true));
+        assert!(t.speaking());
+        assert!(!t.clone().reset());
+        t.sent(200, true);
+        assert_eq!(t.update(1.5, false, 300).send, None);
+        // The closing `false` is retried the same way.
+        assert_eq!(t.update(0.0, false, 2000).send, Some(false));
+        assert_eq!(t.idle(2100).send, Some(false));
+        t.sent(2100, false);
+        assert_eq!(t.idle(2200).send, None);
+        assert!(!t.speaking());
     }
 
     #[test]
@@ -335,6 +367,7 @@ mod tests {
         assert_eq!(t.level(), 0.0);
         assert!(!t.reset());
         t.update(2.0, false, 20);
+        t.sent(20, true);
         assert_eq!(t.level(), 2.0);
         assert!(t.reset(), "a sent `true` needs a closing `false`");
         assert!(!t.is_speaking(20));

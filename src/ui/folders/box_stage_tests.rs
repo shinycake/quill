@@ -9,7 +9,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::dialogs::{
     AddContactDialog, AddContactStage, ContactSave, CopyMark, EditContactDialog,
     FolderDeleteConfirm, FolderEditorDialog, FolderInviteDialog, FolderLoad, FolderShareDialog,
-    InviteStage, LinkOp,
+    FolderShareView, InviteStage, LinkForm, LinkOp,
 };
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
@@ -118,28 +118,36 @@ fn a_failed_folder_fetch_ends_the_editor_in_the_error(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn a_share_save_answer_lands_only_in_the_form_that_sent_it(cx: &mut TestAppContext) {
     let (app, mut vcx) = open(cx);
-    app.update_in(&mut vcx, |app, _window, cx| {
+    app.update_in(&mut vcx, |app, window, cx| {
         let first = sent(app, RequestPurpose::EditChatFolderInviteLink, Some(5));
         let mut dialog = FolderShareDialog::new(5);
-        dialog.op = LinkOp::Saving(first);
+        dialog.view = FolderShareView::edit(
+            None,
+            LinkForm::new(window, cx, String::new(), Default::default()),
+        );
+        dialog.view.set_op(LinkOp::Saving(first));
         app.folders.share = Some(dialog);
         // Cancel (the form lets go of the request), then a new link is made.
         let second = sent(app, RequestPurpose::CreateChatFolderInviteLink, Some(5));
         if let Some(dialog) = app.folders.share.as_mut() {
-            dialog.op = LinkOp::Saving(second);
+            dialog.view = FolderShareView::edit(
+                None,
+                LinkForm::new(window, cx, String::new(), Default::default()),
+            );
+            dialog.view.set_op(LinkOp::Saving(second));
         }
         // The first save's answer lands late: not this form's.
         answer(app, first, r#""@type":"chatFolderInviteLink","invite_link":"https://t.me/addlist/a","name":"","chat_ids":[1]"#);
         assert!(!app.settle_folder_share(cx), "not its answer");
         assert_eq!(
-            app.folders.share.as_ref().map(|d| d.op.clone()),
+            app.folders.share.as_ref().map(|d| d.view.op().clone()),
             Some(LinkOp::Saving(second))
         );
         // Its own refusal ends the wait and shows the error.
         answer(app, second, REFUSED);
         assert!(app.settle_folder_share(cx));
         let dialog = app.folders.share.as_ref().expect("open");
-        assert!(matches!(dialog.op, LinkOp::Failed(_)));
+        assert!(matches!(dialog.view.op(), LinkOp::Failed(_)));
     });
 }
 
@@ -403,23 +411,6 @@ fn the_copied_check_mark_goes_back_to_the_copy_icon(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn a_second_link_delete_does_not_replace_the_one_in_flight(cx: &mut TestAppContext) {
-    let (app, mut vcx) = open(cx);
-    app.update_in(&mut vcx, |app, _window, cx| {
-        let first = sent(app, RequestPurpose::DeleteChatFolderInviteLink, Some(5));
-        let mut dialog = FolderShareDialog::new(5);
-        dialog.op = LinkOp::Saving(first);
-        app.folders.share = Some(dialog);
-        app.delete_folder_link("https://t.me/addlist/b", cx);
-        assert_eq!(
-            app.folders.share.as_ref().map(|d| d.op.clone()),
-            Some(LinkOp::Saving(first)),
-            "the first delete's answer is still the one waited for"
-        );
-    });
-}
-
-#[gpui_kit::test]
 fn the_reset_statistics_stage_ends_on_the_answer_or_the_session(cx: &mut TestAppContext) {
     use crate::ui::dialogs::data_extra::NetworkReset;
     let (app, mut vcx) = open(cx);
@@ -446,24 +437,27 @@ fn the_reset_statistics_stage_ends_on_the_answer_or_the_session(cx: &mut TestApp
 }
 
 #[gpui_kit::test]
-fn a_refused_limit_send_puts_the_sliders_back_on_what_tdlib_holds(cx: &mut TestAppContext) {
+fn a_limit_release_settles_on_the_answers_of_its_own_requests(cx: &mut TestAppContext) {
     use crate::ui::index_sliders::StorageDrag;
     let (app, mut vcx) = open(cx);
     app.update(&mut vcx, |app, cx| {
         app.ensure_storage_sliders(cx);
         let account = app.session().map(|s| s.account.clone()).expect("session");
-        // The release sent limits TDLib has not reported, and the save failed.
+        let first = sent(app, RequestPurpose::SetStorageOption, None);
+        let second = sent(app, RequestPurpose::SetStorageOption, None);
         app.index_sliders.storage = StorageDrag::Sent {
-            account,
-            size: Some(1),
-            keep: Some(1),
+            account: account.clone(),
+            requests: vec![first, second],
         };
-        if let Some(session) = app.session_mut() {
-            session
-                .settings
-                .data_storage_save
-                .fail("Couldn't save the storage limits.");
-        }
+        // One answer of two: still waiting, whichever came first.
+        answer(app, second, r#""@type":"ok""#);
+        app.settle_storage_sliders(cx);
+        assert!(matches!(
+            app.index_sliders.storage,
+            StorageDrag::Sent { .. }
+        ));
+        // The last one is refused: the sliders go back on what TDLib holds.
+        answer(app, first, REFUSED);
         app.settle_storage_sliders(cx);
         assert!(matches!(app.index_sliders.storage, StorageDrag::Settled));
         let held = app.session().map(|s| {
@@ -473,5 +467,43 @@ fn a_refused_limit_send_puts_the_sliders_back_on_what_tdlib_holds(cx: &mut TestA
             )
         });
         assert_eq!(held, Some(app.storage_slider_limits(cx)));
+        // Answered ok with limits TDLib rounded: the release is settled
+        // without waiting for the numbers to match.
+        let third = sent(app, RequestPurpose::SetStorageOption, None);
+        app.index_sliders.storage = StorageDrag::Sent {
+            account,
+            requests: vec![third],
+        };
+        answer(app, third, r#""@type":"ok""#);
+        app.settle_storage_sliders(cx);
+        assert!(matches!(app.index_sliders.storage, StorageDrag::Settled));
+    });
+}
+
+#[gpui_kit::test]
+fn a_delete_in_flight_keeps_the_list_and_takes_no_second_request(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let delete = sent(app, RequestPurpose::DeleteChatFolderInviteLink, Some(5));
+        let mut dialog = FolderShareDialog::new(5);
+        dialog.view.set_op(LinkOp::Saving(delete));
+        app.folders.share = Some(dialog);
+        // Edit and a second delete wait for the first answer.
+        app.start_folder_link_form(None, window, cx);
+        assert!(matches!(
+            app.folders.share.as_ref().map(|d| &d.view),
+            Some(FolderShareView::List { .. })
+        ));
+        app.delete_folder_link("https://t.me/addlist/b", cx);
+        assert_eq!(
+            app.folders.share.as_ref().map(|d| d.view.op().clone()),
+            Some(LinkOp::Saving(delete))
+        );
+        // The delete's refusal settles the list it came from.
+        answer(app, delete, REFUSED);
+        assert!(app.settle_folder_share(cx));
+        let dialog = app.folders.share.as_ref().expect("open");
+        assert!(matches!(dialog.view, FolderShareView::List { .. }));
+        assert!(matches!(dialog.view.op(), LinkOp::Failed(_)));
     });
 }

@@ -43,10 +43,61 @@ impl BackgroundSearch {
     }
 }
 
+/// The `getInstalledBackgrounds` answer of each theme: the server filters
+/// the list by theme, so each has its own fetch, asked and answered under
+/// its own request.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct InstalledBackgrounds {
+    light: crate::state::fetch::Fetch<Vec<Background>>,
+    dark: crate::state::fetch::Fetch<Vec<Background>>,
+}
+
+impl InstalledBackgrounds {
+    pub fn theme(&self, dark: bool) -> &crate::state::fetch::Fetch<Vec<Background>> {
+        if dark { &self.dark } else { &self.light }
+    }
+
+    pub fn theme_mut(&mut self, dark: bool) -> &mut crate::state::fetch::Fetch<Vec<Background>> {
+        if dark {
+            &mut self.dark
+        } else {
+            &mut self.light
+        }
+    }
+
+    /// Every installed background held, of either theme.
+    pub fn all(&self) -> impl Iterator<Item = &Background> {
+        [&self.light, &self.dark]
+            .into_iter()
+            .filter_map(|fetch| fetch.data())
+            .flatten()
+    }
+
+    /// An installed background by id, from either theme's list.
+    pub fn find(&self, id: i64) -> Option<&Background> {
+        self.all().find(|background| background.id == id)
+    }
+
+    /// Forget the last error of each list (a page opened: a failed list may
+    /// be asked once more).
+    pub fn clear_errors(&mut self) {
+        self.light.clear_error();
+        self.dark.clear_error();
+    }
+
+    /// `id` left the account's installed wallpapers: out of every list.
+    pub fn forget(&mut self, id: i64) {
+        for fetch in [&mut self.light, &mut self.dark] {
+            if let Some(list) = fetch.data_mut() {
+                list.retain(|background| background.id != id);
+            }
+        }
+    }
+}
+
 pub struct ChatsState {
-    /// `getInstalledBackgrounds` answer for the current theme; `None` until
-    /// fetched.
-    pub installed_backgrounds: crate::state::fetch::Fetch<Vec<Background>>,
+    /// `getInstalledBackgrounds` answers, per theme; nothing until fetched.
+    pub installed_backgrounds: InstalledBackgrounds,
     /// The account's default wallpaper per theme (`false` light, `true`
     /// dark), from `updateDefaultBackground` and `setDefaultBackground`.
     pub default_backgrounds: HashMap<bool, Background>,
@@ -135,7 +186,7 @@ pub struct ChatsState {
 impl ChatsState {
     pub(crate) fn new() -> Self {
         Self {
-            installed_backgrounds: crate::state::fetch::Fetch::Idle,
+            installed_backgrounds: InstalledBackgrounds::default(),
             default_backgrounds: HashMap::new(),
             chat_backgrounds: HashMap::new(),
             chat_theme_names: HashMap::new(),
@@ -173,6 +224,36 @@ impl ChatsState {
     /// by itself (tdesktop ties the flow to the session's window).
     pub fn end_deep_link_flow(&mut self) {
         self.deep_link = None;
+    }
+
+    /// The next generation for a request of the flow: answers of an older
+    /// one are dropped by comparing it.
+    pub fn next_deep_link_generation(&mut self) -> u64 {
+        self.deep_link_seq = self.deep_link_seq.wrapping_add(1);
+        self.deep_link_seq
+    }
+
+    /// The flow's step the UI acts on now. A request in flight is left in
+    /// place (`None`); an invite preview waiting for the user's answer is
+    /// copied and stays; any other terminal stage is taken, so it is
+    /// consumed once.
+    pub fn take_deep_link_step(&mut self) -> Option<DeepLinkFlow> {
+        match self.deep_link_stage()? {
+            DeepLinkState::ResolvingInfo { .. } | DeepLinkState::ResolvingChat { .. } => None,
+            DeepLinkState::InvitePreview { .. } => self.deep_link.clone(),
+            _ => self.deep_link.take(),
+        }
+    }
+
+    /// The user closed the invite box of `generation` unanswered: the flow
+    /// ends when it is still that preview.
+    pub fn cancel_deep_link_invite(&mut self, generation: u64) {
+        if matches!(
+            self.deep_link_stage(),
+            Some(DeepLinkState::InvitePreview { generation: shown, .. }) if *shown == generation
+        ) {
+            self.deep_link = None;
+        }
     }
 
     /// The stage of the flow in progress.

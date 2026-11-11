@@ -60,6 +60,12 @@ impl PageLoad {
         request != 0 && matches!(self, Self::Loading { request: asked, .. } if *asked == request)
     }
 
+    /// The page out as `request` extends the list instead of replacing it.
+    pub fn appends(&self, request: u64) -> bool {
+        request != 0
+            && matches!(self, Self::Loading { request: asked, more: true } if *asked == request)
+    }
+
     /// A page went out as `request`: a next page extends the list.
     pub fn begin(&mut self, request: u64, more: bool) {
         *self = Self::Loading { request, more };
@@ -98,8 +104,6 @@ pub struct ResaleSearch {
     /// The attribute lists, kept from the first unfiltered page.
     pub attributes: ResaleAttributes,
     pub next_offset: String,
-    /// The next page to ask for.
-    pub page: u32,
     /// The newest page request of this filter.
     pub load: PageLoad,
 }
@@ -162,31 +166,40 @@ pub enum BuyStep {
     Confirm,
 }
 
-/// Buying one resale listing.
+/// Buying one resale listing: the listing, who gets it, the currency the
+/// buyer picked and the one stage the box is in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResaleBuy {
     pub listing: ResaleListing,
     pub recipient: GiftRecipient,
-    pub step: BuyStep,
+    /// The currency tab the buyer picked (a choice that outlives a refused
+    /// purchase).
     pub pay_in_grams: bool,
-    /// The purchase in flight ([`BuyPhase`]).
-    pub phase: BuyPhase,
-    /// The price TDLib reported after a refused purchase ("Price change!").
-    pub price_changed: Option<GiftPrice>,
+    /// Where the box is ([`BuyStage`]).
+    pub stage: BuyStage,
     /// Bought for a craft slot: the gift lands there instead of a toast.
     pub for_craft: bool,
 }
 
-/// The purchase of a listing. `Sending` leaves on its own answer (the box
-/// goes on `giftResaleResultOk`, back to `Idle` for a refusal or a price
-/// change) or its error; only that answer applies here, not one for a box
-/// closed before it came.
+/// The box of buying a listing, one stage at a time: the three steps, a
+/// price TDLib changed under the buyer, and the purchase in flight.
+///
+/// `Sending` leaves on its own answer (the box goes on
+/// `giftResaleResultOk`, back to `Confirm` for a refusal, to `Changed` for a
+/// price change) or its error; only that answer applies here, not one for a
+/// box closed before it came. The steps leave on the buyer's Back and Buy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum BuyPhase {
+pub enum BuyStage {
     #[default]
-    Idle,
+    View,
+    Send,
+    Confirm,
+    /// The purchase was refused with a new price ("Price change!"); the
+    /// Confirm step shows it and the next Buy sends at it.
+    Changed(GiftPrice),
+    /// The purchase is out as `request`; the Confirm step shows "Buying".
     Sending {
-        request: u64,
+        request: crate::ids::RequestId,
     },
 }
 
@@ -196,27 +209,95 @@ impl ResaleBuy {
         Self {
             listing,
             recipient,
-            step: BuyStep::View,
             pay_in_grams,
-            phase: BuyPhase::Idle,
-            price_changed: None,
+            stage: BuyStage::View,
             for_craft,
+        }
+    }
+
+    /// The step the box draws.
+    pub fn step(&self) -> BuyStep {
+        match self.stage {
+            BuyStage::View => BuyStep::View,
+            BuyStage::Send => BuyStep::Send,
+            BuyStage::Confirm | BuyStage::Changed(_) | BuyStage::Sending { .. } => BuyStep::Confirm,
+        }
+    }
+
+    /// Moves to `step`. A purchase in flight keeps its stage, and the
+    /// Confirm step keeps a price change it already shows.
+    pub fn go(&mut self, step: BuyStep) {
+        self.stage = match (self.stage, step) {
+            (BuyStage::Sending { request }, _) => BuyStage::Sending { request },
+            (BuyStage::Changed(price), BuyStep::Confirm) => BuyStage::Changed(price),
+            (_, BuyStep::View) => BuyStage::View,
+            (_, BuyStep::Send) => BuyStage::Send,
+            (_, BuyStep::Confirm) => BuyStage::Confirm,
+        };
+    }
+
+    /// The buyer picked a currency; a changed price no longer applies.
+    pub fn choose_grams(&mut self, grams: bool) {
+        let gram_only = self.listing.gift.resale.is_some_and(|r| r.gram_only);
+        self.pay_in_grams = grams || gram_only;
+        if matches!(self.stage, BuyStage::Changed(_)) {
+            self.stage = BuyStage::Confirm;
+        }
+    }
+
+    /// The price TDLib reported after a refused purchase, if the box shows
+    /// one.
+    pub fn price_changed(&self) -> Option<GiftPrice> {
+        match self.stage {
+            BuyStage::Changed(price) => Some(price),
+            _ => None,
         }
     }
 
     /// The purchase is out and unanswered.
     pub fn sending(&self) -> bool {
-        matches!(self.phase, BuyPhase::Sending { .. })
+        matches!(self.stage, BuyStage::Sending { .. })
     }
 
     /// `request` is the purchase this box sent.
     pub fn waits_for(&self, request: u64) -> bool {
-        request != 0 && self.phase == (BuyPhase::Sending { request })
+        request != 0
+            && self.stage
+                == (BuyStage::Sending {
+                    request: crate::ids::RequestId(request),
+                })
+    }
+
+    /// The purchase went out as `request`.
+    pub fn begin_send(&mut self, request: u64) {
+        self.stage = BuyStage::Sending {
+            request: crate::ids::RequestId(request),
+        };
+    }
+
+    /// The purchase did not happen (refused, or it never left): back to the
+    /// Confirm step.
+    pub fn send_failed(&mut self) {
+        if self.sending() {
+            self.stage = BuyStage::Confirm;
+        }
+    }
+
+    /// The purchase was refused for a new price: the Confirm step shows it
+    /// (none: plain Confirm), and a Grams price moves the buyer to Grams.
+    pub fn price_increased(&mut self, price: Option<GiftPrice>) {
+        self.stage = match price {
+            Some(price) => BuyStage::Changed(price),
+            None => BuyStage::Confirm,
+        };
+        if let Some(GiftPrice::TonCents(_)) = price {
+            self.pay_in_grams = true;
+        }
     }
 
     /// The price the buy sends.
     pub fn price(&self) -> Option<GiftPrice> {
-        self.price_changed
+        self.price_changed()
             .or_else(|| super::listing_price(&self.listing.gift, self.pay_in_grams))
     }
 }
@@ -240,7 +321,6 @@ pub struct CraftSession {
     pub candidates: Vec<CraftGift>,
     pub candidates_total: i32,
     pub candidates_offset: String,
-    pub candidates_page: u32,
     /// The newest page request of the user's own candidate gifts.
     pub candidates_load: PageLoad,
     /// `attribute_persistence_probabilities`.

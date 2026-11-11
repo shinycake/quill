@@ -27,7 +27,7 @@ impl QuillApp {
             };
             if session.payments.checkout.form().is_none()
                 && !session.payments.checkout.is_loading()
-                && session.payments.note.is_none()
+                && session.payments.checkout.note().is_none()
             {
                 return dialog.on_close(on_close.clone());
             }
@@ -42,29 +42,20 @@ impl QuillApp {
                         .child(tr(keys::Q_MONEY_LOADING_PAYMENT_FORM)),
                 );
             }
-            if let Some(note) = &session.payments.note {
+            if let Some(note) = session.payments.checkout.note() {
                 body = body.child(
                     div()
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child(note.clone()),
+                        .child(note.to_string()),
                 );
             }
             let Some(form) = session.payments.checkout.form() else {
                 let body = body.into_any_element();
                 return dialog
-                    .content(crate::ui::shell::scrollable_dialog_content({
-                        // `content` needs an `Fn` closure, but the body is built once
-                        // per dialog render — hand it over through a one-shot cell.
-                        let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                        move |content, _, _| {
-                            let body = body
-                                .borrow_mut()
-                                .take()
-                                .unwrap_or_else(|| div().into_any_element());
-                            content.child(body)
-                        }
-                    }))
+                    .content(crate::ui::shell::one_shot_dialog_content(
+                        body.into_any_element(),
+                    ))
                     .on_close(on_close);
             };
             match &form.form_type {
@@ -100,18 +91,9 @@ impl QuillApp {
             }
             let body = body.into_any_element();
             dialog
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::one_shot_dialog_content(
+                    body.into_any_element(),
+                ))
                 .on_close(on_close)
         })
     }
@@ -218,18 +200,9 @@ impl QuillApp {
             }
             let body = body.into_any_element();
             dialog
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::one_shot_dialog_content(
+                    body.into_any_element(),
+                ))
                 .on_close(on_close)
         })
     }
@@ -340,13 +313,9 @@ impl QuillApp {
                 .content(crate::ui::shell::scrollable_dialog_content_tracked(
                     Some(scroll),
                     {
-                        let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                        let body = std::rc::Rc::new(std::cell::Cell::new(Some(body)));
                         move |content, _, _| {
-                            let body = body
-                                .borrow_mut()
-                                .take()
-                                .unwrap_or_else(|| div().into_any_element());
-                            content.child(body)
+                            content.child(body.take().unwrap_or_else(|| div().into_any_element()))
                         }
                     },
                 ))

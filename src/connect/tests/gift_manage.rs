@@ -141,7 +141,7 @@ fn pinning_sends_the_whole_order_and_respects_the_limit() {
     // One mutation at a time.
     assert!(p.0.set_gift_pinned("a", false).is_err());
     feed(&mut p, json!({"@type": "ok", "@extra": extra.as_extra()}));
-    assert!(!p.0.session.payments.hub.gifts_op.is_mutating());
+    assert!(!p.0.session.payments.hub.received.op.is_mutating());
     // The list refetches from the server (never optimistic).
     assert_eq!(count(&p.1, "getReceivedGifts"), 2);
     // At the limit a new pin is refused, an unpin still works.
@@ -210,7 +210,7 @@ fn upgrade_costs_are_taken_from_the_gift_and_balance_is_checked() {
     );
     let manage = &p.0.session.payments.gifts_manage;
     assert_eq!(manage.note.as_deref(), Some("Upgraded to Plush Pepe #12."));
-    assert!(!p.0.session.payments.hub.gifts_op.is_mutating());
+    assert!(!p.0.session.payments.hub.received.op.is_mutating());
     // Enough Stars: the paid upgrade sends the gift's price.
     p.0.session.payments.hub.balance = Some(StarAmount {
         stars: 50,
@@ -272,7 +272,7 @@ fn transfer_needs_a_readable_recipient_and_the_gifts_price() {
     assert_eq!(sent["star_count"], 25);
     feed(&mut p, json!({"@type": "ok", "@extra": extra.as_extra()}));
     let hub = &p.0.session.payments.hub;
-    assert!(!hub.gifts_op.is_mutating() && hub.gift_view.selected().is_none());
+    assert!(!hub.received.op.is_mutating() && hub.received.view.selected().is_none());
 }
 
 #[test]
@@ -359,7 +359,7 @@ fn collections_are_created_renamed_filled_and_deleted() {
     );
     p.0.change_gift_collection(4, "a", false).unwrap();
     assert_eq!(count(&p.1, "removeGiftCollectionGifts"), 1);
-    p.0.session.payments.hub.gifts_op = crate::state::fetch::ListOp::Idle;
+    p.0.session.payments.hub.received.op = crate::state::fetch::ListOp::Idle;
 
     assert!(p.0.rename_gift_collection(4, "").is_err());
     p.0.rename_gift_collection(4, "Kittens").unwrap();
@@ -367,7 +367,7 @@ fn collections_are_created_renamed_filled_and_deleted() {
         sent_request(&p.1, "setGiftCollectionName")["name"],
         "Kittens"
     );
-    p.0.session.payments.hub.gifts_op = crate::state::fetch::ListOp::Idle;
+    p.0.session.payments.hub.received.op = crate::state::fetch::ListOp::Idle;
     assert!(p.0.delete_gift_collection(99).is_err());
     let extra = p.0.delete_gift_collection(4).unwrap();
     feed(&mut p, json!({"@type": "ok", "@extra": extra.as_extra()}));
@@ -385,7 +385,12 @@ fn deleting_a_gift_sends_delete_gift_and_removes_it_on_ok() {
             received("c", json!({"can_be_deleted": true})),
         ],
     );
-    p.0.session.payments.hub.gift_view.select(Some("a".into()));
+    p.0.session
+        .payments
+        .hub
+        .received
+        .view
+        .select(Some("a".into()));
     // Only a gift TDLib marks deletable, and only one that is listed.
     assert!(p.0.delete_received_gift("b").is_err());
     assert!(p.0.delete_received_gift("zzz").is_err());
@@ -393,18 +398,22 @@ fn deleting_a_gift_sends_delete_gift_and_removes_it_on_ok() {
     let extra = p.0.delete_received_gift("a").unwrap();
     let sent = sent_request(&p.1, "deleteGift");
     assert_eq!(sent["received_gift_id"], "a");
-    assert!(p.0.session.payments.hub.gifts_op.is_mutating());
+    assert!(p.0.session.payments.hub.received.op.is_mutating());
     // Nothing is optimistic: the gift stays until the answer.
-    assert_eq!(p.0.session.payments.hub.gifts.len(), 3);
+    assert_eq!(p.0.session.payments.hub.received.rows.len(), 3);
     feed(&mut p, json!({"@type": "ok", "@extra": extra.as_extra()}));
     let hub = &p.0.session.payments.hub;
-    assert!(!hub.gifts_op.is_mutating());
+    assert!(!hub.received.op.is_mutating());
     assert_eq!(
-        hub.gifts.iter().map(|g| g.id.as_str()).collect::<Vec<_>>(),
+        hub.received
+            .rows
+            .iter()
+            .map(|g| g.id.as_str())
+            .collect::<Vec<_>>(),
         ["b", "c"]
     );
-    assert_eq!(hub.gifts_total, 2);
-    assert_eq!(hub.gift_view.selected(), None);
+    assert_eq!(hub.received.total, 2);
+    assert_eq!(hub.received.view.selected(), None);
     // The toast is a one-shot, and the server's list is refetched.
     assert!(p.0.session.payments.gifts_manage.deleted());
     // ...so the driver asked for the list again, right after the answer.
@@ -421,9 +430,8 @@ fn a_failed_delete_keeps_the_gift_and_says_why() {
         json!({"@type": "error", "@extra": extra.as_extra(), "code": 400, "message": "SAVED_ID_INVALID"}),
     );
     let hub = &p.0.session.payments.hub;
-    assert!(!hub.gifts_op.is_mutating());
-    assert_eq!(hub.gifts.len(), 1);
-    assert_eq!(p.0.session.payments.gifts_manage.deleting, None);
+    assert!(!hub.received.op.is_mutating());
+    assert_eq!(hub.received.rows.len(), 1);
     assert!(
         p.0.session
             .payments
@@ -498,7 +506,7 @@ fn sending_a_gift_needs_an_open_dialog_a_sendable_gift_and_enough_stars() {
 
     open_send_dialog(&mut p);
     let send = &p.0.session.payments.gifts_manage.send;
-    assert!(send.open && send.gifts_fetch == GiftListFetch::Answered && send.gifts.len() == 2);
+    assert!(send.is_open() && send.gifts_fetch == GiftListFetch::Answered && send.gifts.len() == 2);
     assert_eq!(count(&p.1, "getPremiumGiftPaymentOptions"), 1);
     // A sold-out gift and an unknown gift are refused.
     assert!(p.0.send_star_gift(56, "", false, false).is_err());
@@ -594,14 +602,14 @@ fn a_channel_creator_can_delete_its_gift_and_an_admin_cannot() {
         .assume_member_status(Some(
             crate::telegram::envelope::ChannelMemberStatus::Administrator,
         ));
-    p.0.session.payments.hub.gifts_owner = Some(MessageSender::Chat { chat_id: -1002 });
-    p.0.session.payments.hub.gifts = vec![
+    p.0.session.payments.hub.received.owner = Some(MessageSender::Chat { chat_id: -1002 });
+    p.0.session.payments.hub.received.rows = vec![
         crate::premium_hub::parse_received_gift(&regular("a", json!({"can_be_deleted": true})))
             .unwrap(),
     ];
     assert!(p.0.delete_received_gift("a").is_err());
     assert_eq!(count(&p.1, "deleteGift"), 0);
-    p.0.session.payments.hub.gifts_owner = Some(MessageSender::Chat { chat_id: -1001 });
+    p.0.session.payments.hub.received.owner = Some(MessageSender::Chat { chat_id: -1001 });
     p.0.delete_received_gift("a").unwrap();
     assert_eq!(sent_request(&p.1, "deleteGift")["received_gift_id"], "a");
 }
@@ -621,7 +629,10 @@ fn reopening_the_send_dialog_keeps_the_send_that_is_out() {
     p.0.close_send_gift();
     p.0.open_send_gift(ChatId(21)).unwrap();
     let send = &p.0.session.payments.gifts_manage.send;
-    assert!(send.open && send.sending(), "the same send, shown again");
+    assert!(
+        send.is_open() && send.sending(),
+        "the same send, shown again"
+    );
     assert!(
         p.0.send_star_gift(55, "", false, false).is_err(),
         "Send stays disabled: no double purchase"

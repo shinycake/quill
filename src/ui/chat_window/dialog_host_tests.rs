@@ -269,14 +269,15 @@ fn a_chat_windows_video_chat_start_goes_on_in_its_own_frames(cx: &mut TestAppCon
             kind: CreateKind::Now,
             step: CreateStep::Waiting(request),
         });
-        app.windows
-            .open_box_in(DialogKind::GroupCallStart, Some(OTHER));
+        app.windows.open_box_in(
+            DialogKind::GroupCallStart,
+            Some(OTHER),
+            crate::ui::chat_window::AskWaits::Demo,
+        );
         let session = app.demo_session.as_mut().expect("a demo session");
-        session.calls.create_join_as = Some(CreateJoinAs {
-            chat_id: OTHER.0,
-            request,
-            answer: Some(Ok(Vec::new())),
-        });
+        let mut asked = CreateJoinAs::asking(OTHER.0, request);
+        asked.accept(Some(request), Vec::new());
+        session.calls.create_join_as = Some(asked);
     });
     draw(h.main, cx);
     assert!(
@@ -352,5 +353,60 @@ fn an_account_notice_is_freed_by_its_windows_close_not_dismissed(cx: &mut TestAp
             app.windows.last_press,
             "free: it shows in the last-press window"
         );
+    });
+}
+
+/// Sweep 13-009: an ask ends when the requests it was made with settle, not
+/// when no request at all is in flight; a demo's ask never settles by itself.
+#[test]
+fn an_ask_settles_with_its_own_requests_only() {
+    use super::AskWaits;
+    use quill::ids::RequestId;
+    let (first, second, later) = (RequestId(1), RequestId(2), RequestId(9));
+    let waits = AskWaits::Requests(vec![first, second]);
+    assert!(!waits.settled(|id| id == first), "one of its own is out");
+    assert!(
+        waits.settled(|id| id == later),
+        "a request made after the ask does not hold it"
+    );
+    assert!(AskWaits::Requests(Vec::new()).settled(|_| true));
+    assert!(!AskWaits::Demo.settled(|_| false));
+    assert!(
+        !AskWaits::Unread.settled(|_| false),
+        "an ask whose requests are not read yet does not end"
+    );
+}
+
+/// Sweep 13-009: a box is asked for before the request whose answer opens
+/// it goes out. The ask reads its requests at the next dialog sync, so that
+/// request is one of them and the ask is not over before the answer.
+#[gpui_kit::test]
+fn an_ask_made_before_its_request_waits_for_that_request(cx: &mut TestAppContext) {
+    use super::AskWaits;
+    use quill::ids::RequestId;
+    let h = new_app(cx);
+    let sent_after = RequestId(41);
+    h.app.update(cx, |app, _| {
+        let waits_of = |app: &crate::ui::app::QuillApp| {
+            app.windows
+                .asked_dialogs()
+                .into_iter()
+                .find(|(kind, _)| *kind == DialogKind::AccountNotice)
+                .map(|(_, waits)| waits)
+        };
+        app.windows
+            .open_box_in(DialogKind::AccountNotice, None, AskWaits::Unread);
+        assert!(app.windows.has_unread_asks());
+        // The asking code sends its request after the ask; the sync that
+        // follows reads it.
+        app.windows.read_ask_waits(&[sent_after]);
+        assert!(!app.windows.has_unread_asks());
+        let waits = waits_of(app).expect("the ask waits");
+        assert_eq!(waits, AskWaits::Requests(vec![sent_after]));
+        assert!(!waits.settled(|id| id == sent_after), "its request is out");
+        assert!(waits.settled(|_| false), "its request settled");
+        // An ask already read keeps its own requests.
+        app.windows.read_ask_waits(&[RequestId(99)]);
+        assert_eq!(waits_of(app), Some(AskWaits::Requests(vec![sent_after])));
     });
 }

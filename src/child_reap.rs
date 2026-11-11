@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 /// Kill `child` now (sending the signal does not block) and reap it on a
 /// detached thread.
 pub fn kill_and_reap(mut child: Child) {
+    poll_parked();
     let _ = child.kill();
     reap_after(child, Duration::ZERO);
 }
@@ -32,31 +33,36 @@ pub fn reap_after_notice(child: Child, grace: Duration) -> Receiver<()> {
 }
 
 fn reap_after_with(child: Child, grace: Duration, done: Option<SyncSender<()>>) {
-    let slot = Arc::new(Mutex::new(Some(child)));
+    poll_parked();
+    // The notice sender travels with the child: whoever ends up reaping it
+    // (the thread, or a later poll of the parked ones) sends it, and it is
+    // never dropped while the child may still be running.
+    let slot = Arc::new(Mutex::new(Some((child, done))));
     let worker = slot.clone();
     let spawned = std::thread::Builder::new()
         .name("quill-child-reap".into())
         .spawn(move || {
-            let child = worker.lock().ok().and_then(|mut slot| slot.take());
-            if let Some(child) = child {
+            let held = worker.lock().ok().and_then(|mut slot| slot.take());
+            if let Some((child, done)) = held {
                 reap(child, grace);
-            }
-            if let Some(done) = done {
-                let _ = done.try_send(());
+                if let Some(done) = done {
+                    let _ = done.try_send(());
+                }
             }
         });
     if spawned.is_err() {
-        let child = slot.lock().ok().and_then(|mut slot| slot.take());
-        if let Some(mut child) = child {
+        let held = slot.lock().ok().and_then(|mut slot| slot.take());
+        if let Some((mut child, done)) = held {
             let _ = child.kill();
-            // Never block the caller: a few polls for the reap, then leave
-            // the child to the OS.
+            // Never block the caller: a few polls for the reap, then keep
+            // the child for the next call to look at.
             for _ in 0..5 {
                 if !matches!(child.try_wait(), Ok(None)) {
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(10));
             }
+            park(child, done);
         }
     }
 }
@@ -65,36 +71,60 @@ fn reap_after_with(child: Child, grace: Duration, done: Option<SyncSender<()>>) 
 /// zombie until Quill quits. Never kills: whatever `open` or `xdg-open`
 /// started may stay in the foreground.
 pub fn wait_in_background(child: Child) -> Receiver<()> {
+    poll_parked();
     let (done, notice) = sync_channel(1);
-    let slot = Arc::new(Mutex::new(Some(child)));
+    let slot = Arc::new(Mutex::new(Some((child, done))));
     let worker = slot.clone();
     let spawned = crate::thread_guard::spawn_guarded("quill-child-wait", move || {
-        let child = worker.lock().ok().and_then(|mut slot| slot.take());
-        if let Some(mut child) = child {
+        let held = worker.lock().ok().and_then(|mut slot| slot.take());
+        if let Some((mut child, done)) = held {
             let _ = child.wait();
+            let _ = done.try_send(());
         }
-        let _ = done.try_send(());
     });
     if spawned.is_err() {
         // No thread to wait on: reap it now if it already exited, and never
         // block the caller for one that has not. That one is kept, and the
         // next call looks at it again, instead of being dropped as a zombie.
-        let child = slot.lock().ok().and_then(|mut slot| slot.take());
-        if let Some(child) = child {
-            park(child);
+        let held = slot.lock().ok().and_then(|mut slot| slot.take());
+        if let Some((child, done)) = held {
+            park(child, Some(done));
         }
     }
     notice
 }
 
-/// Children no thread could wait on; each call to [`wait_in_background`]
-/// that cannot start a thread polls them once more.
-static PARKED: Mutex<Vec<Child>> = Mutex::new(Vec::new());
+/// A child no thread could wait on, with the notice its caller waits for.
+struct Parked {
+    child: Child,
+    notice: Option<SyncSender<()>>,
+}
 
-fn park(child: Child) {
+/// Children no thread could wait on; every call into this module polls
+/// them once more, and the notice goes out only once the child is reaped.
+static PARKED: Mutex<Vec<Parked>> = Mutex::new(Vec::new());
+
+fn park(child: Child, notice: Option<SyncSender<()>>) {
     let mut parked = crate::locks::lock_or_recover(&PARKED);
-    parked.push(child);
-    parked.retain_mut(|child| matches!(child.try_wait(), Ok(None)));
+    parked.push(Parked { child, notice });
+    poll_in(&mut parked);
+}
+
+fn poll_parked() {
+    poll_in(&mut crate::locks::lock_or_recover(&PARKED));
+}
+
+/// Reap the parked children that exited and tell whoever waits for them.
+fn poll_in(parked: &mut Vec<Parked>) {
+    parked.retain_mut(|entry| {
+        if matches!(entry.child.try_wait(), Ok(None)) {
+            return true;
+        }
+        if let Some(notice) = entry.notice.take() {
+            let _ = notice.try_send(());
+        }
+        false
+    });
 }
 
 fn reap(mut child: Child, grace: Duration) {
@@ -112,7 +142,7 @@ fn reap(mut child: Child, grace: Duration) {
 #[cfg(test)]
 #[cfg(unix)]
 mod tests {
-    use super::{kill_and_reap, wait_in_background};
+    use super::{Parked, kill_and_reap, poll_in, wait_in_background};
     use std::io::Read;
     use std::process::{Command, Stdio};
     use std::sync::mpsc::TryRecvError;
@@ -150,6 +180,41 @@ mod tests {
         let _ = Command::new("kill").arg(pid.to_string()).status();
         let _ = notice.recv();
         assert_eq!(process_state(pid), "");
+    }
+
+    #[test]
+    fn a_parked_child_notifies_only_once_it_is_reaped() {
+        let Ok(mut child) = Command::new("/bin/sh")
+            .args(["-c", "read -r line"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+        else {
+            return;
+        };
+        let input = child.stdin.take();
+        let mut output = child.stdout.take();
+        let (done, notice) = std::sync::mpsc::sync_channel(1);
+        let mut parked = vec![Parked {
+            child,
+            notice: Some(done),
+        }];
+        poll_in(&mut parked);
+        assert_eq!(parked.len(), 1, "still running: kept");
+        assert!(
+            matches!(notice.try_recv(), Err(TryRecvError::Empty)),
+            "not gone, so not announced (and the sender is not dropped)"
+        );
+        drop(input);
+        let mut said = String::new();
+        if let Some(output) = output.as_mut() {
+            let _ = output.read_to_string(&mut said);
+        }
+        while !parked.is_empty() {
+            poll_in(&mut parked);
+            std::thread::yield_now();
+        }
+        assert!(notice.try_recv().is_ok(), "announced after the reap");
     }
 
     /// The signal is sent before the call returns. The child is a shell

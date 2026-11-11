@@ -7,8 +7,7 @@ contact box, by request id. A purpose on that list with nothing in src/ui
 that takes it (`dialog_answers.take(`) only fills the queue with answers no
 one reads, and its box waits for ever. Each purpose therefore must be named
 in a file that also takes from `dialog_answers`, or in the request-sending
-code of a box that does (`ui/folders`, `ui/folder_share`, `ui/contacts`; the
-Data & Storage editor takes its `setAutoDownloadSettings` answer the same way).
+code of a box that does (`ui/folders`, `ui/folder_share`, `ui/contacts`).
 
 The box side is checked by tests (`ui/folders/box_stage_tests.rs`); this
 keeps a new entry on the list from being added without one.
@@ -31,7 +30,6 @@ SENDERS = {
     "CheckChatFolderInviteLink": "check_folder_invite_link",
     "AddChatFolderByInviteLink": "add_folder_by_invite_link",
     "AddContact": "add_contact",
-    "Settings": "set_auto_download_settings",
 }
 
 
@@ -55,7 +53,7 @@ def main():
         p.read_text()
         for d in ("folders", "folder_share")
         for p in (ui / d).rglob("*.rs")
-    ) + (ui / "contacts.rs").read_text() + (ui / "dialogs/data_storage.rs").read_text()
+    ) + (ui / "contacts.rs").read_text()
     problems = []
     for purpose in listed():
         call = SENDERS.get(purpose)

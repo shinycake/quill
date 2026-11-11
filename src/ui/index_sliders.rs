@@ -58,12 +58,12 @@ pub(crate) enum StorageDrag {
         size: Option<i64>,
         keep: Option<i64>,
     },
-    /// The release sent these limits; this stage ends when TDLib reports
-    /// them (`updateOption`) or the save fails.
+    /// The release sent its limits: the requests it waits for. The stage
+    /// ends when all are answered (`settle_storage_sliders`), on the limits
+    /// TDLib holds if one failed.
     Sent {
         account: quill::ids::AccountKey,
-        size: Option<i64>,
-        keep: Option<i64>,
+        requests: Vec<quill::ids::RequestId>,
     },
 }
 

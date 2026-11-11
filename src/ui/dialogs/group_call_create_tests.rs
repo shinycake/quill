@@ -598,11 +598,10 @@ fn a_join_as_list_nobody_waits_for_is_dropped(cx: &mut TestAppContext) {
     // The box was closed before the list answered: nothing waits for it.
     app.update_in(&mut main, |app, _, _| {
         if let Some(session) = app.demo_session.as_deref_mut() {
-            session.calls.create_join_as = Some(quill::calls::group_call_create::CreateJoinAs {
-                chat_id: CHANNEL,
-                request: RequestId(9),
-                answer: Some(Ok(vec![ME])),
-            });
+            let mut asked =
+                quill::calls::group_call_create::CreateJoinAs::asking(CHANNEL, RequestId(9));
+            asked.accept(Some(RequestId(9)), vec![ME]);
+            session.calls.create_join_as = Some(asked);
         }
     });
     frames(&mut main);

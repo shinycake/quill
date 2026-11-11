@@ -415,14 +415,9 @@ impl QuillApp {
     pub(in crate::ui) fn apply_storage_sliders(&mut self, cx: &mut Context<Self>) {
         let (size, keep) = self.storage_slider_limits(cx);
         let account = self.session().map(|s| s.account.clone());
-        let sent = self.send_storage_limits(size, keep);
-        match (sent, account) {
-            (true, Some(account)) => {
-                self.index_sliders.storage = StorageDrag::Sent {
-                    account,
-                    size,
-                    keep,
-                };
+        match (self.send_storage_limits(size, keep), account) {
+            (Some(requests), Some(account)) => {
+                self.index_sliders.storage = StorageDrag::Sent { account, requests };
             }
             // Not sent: the sliders show what was never asked for.
             _ => self.resync_storage_sliders(cx),
@@ -437,32 +432,32 @@ impl QuillApp {
         self.ensure_storage_sliders(cx);
     }
 
-    /// Per render of the page: a release's limits that TDLib reports are
-    /// settled; if the save failed instead (the send, or TDLib refused),
-    /// the sliders return to the limits TDLib holds.
+    /// Per render of the page: once every request a release sent has been
+    /// answered the drag is settled; if the save failed (the send, or TDLib
+    /// refused), the sliders return to the limits TDLib holds.
     pub(in crate::ui) fn settle_storage_sliders(&mut self, cx: &mut Context<Self>) {
-        let StorageDrag::Sent {
-            account,
-            size,
-            keep,
-        } = &self.index_sliders.storage
-        else {
+        let StorageDrag::Sent { account, requests } = &self.index_sliders.storage else {
             return;
         };
-        let (account, size, keep) = (account.clone(), *size, *keep);
-        let Some(session) = self.session().filter(|s| s.account == account) else {
+        let Some(session) = self.session().filter(|s| s.account == *account) else {
             self.index_sliders.storage = StorageDrag::Settled;
             return;
         };
-        let held = (
-            session.settings.storage_limits.size_limit(),
-            session.settings.storage_limits.keep_for(),
-        );
-        let failed = session.settings.data_storage_save.error().is_some();
-        if held == (size, keep) {
-            self.index_sliders.storage = StorageDrag::Settled;
-        } else if failed {
+        if requests
+            .iter()
+            .any(|id| session.requests.get(*id).is_some())
+        {
+            return;
+        }
+        let failed = session
+            .settings
+            .data_storage_save
+            .error_of(quill::state::StorageSaveKind::Limits)
+            .is_some();
+        if failed {
             self.resync_storage_sliders(cx);
+        } else {
+            self.index_sliders.storage = StorageDrag::Settled;
         }
     }
 
@@ -480,13 +475,16 @@ impl QuillApp {
         }
     }
 
-    /// Send the limits; `false` when the request did not go out. A refusal
-    /// from TDLib comes later (`settle_storage_sliders`).
-    fn send_storage_limits(&mut self, size: Option<i64>, keep: Option<i64>) -> bool {
+    /// Send the limits: the requests the release waits for, or `None` when
+    /// they did not go out. A refusal from TDLib comes later
+    /// (`settle_storage_sliders`).
+    fn send_storage_limits(
+        &mut self,
+        size: Option<i64>,
+        keep: Option<i64>,
+    ) -> Option<Vec<quill::ids::RequestId>> {
         if let Some(live) = self.live.as_mut() {
-            // A failure line from an earlier try must not read as this one's.
-            live.driver.session.settings.data_storage_save.clear_error();
-            live.driver.set_storage_limits(size, keep).is_ok()
+            live.driver.set_storage_limits(size, keep).ok()
         } else if let Some(demo) = self.demo_session.as_mut() {
             for (name, value) in options_for(size, keep) {
                 let value = match value {
@@ -499,9 +497,9 @@ impl QuillApp {
                 };
                 demo.settings.storage_limits.apply_option(name, &value);
             }
-            true
+            Some(Vec::new())
         } else {
-            false
+            None
         }
     }
 }
