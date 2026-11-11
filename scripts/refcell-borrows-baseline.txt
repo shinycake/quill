@@ -66,7 +66,6 @@ QuillApp::build_business_dialog::content.borrow_mut 1
 QuillApp::build_callback_password_dialog::body.borrow_mut 1
 QuillApp::build_cancel_edit_dialog::body.borrow_mut 1
 QuillApp::build_chat_appearance_dialog::body.borrow_mut 1
-QuillApp::build_chat_look_dialog::body.borrow_mut 1
 QuillApp::build_create_sticker_dialog::body.borrow_mut 1
 QuillApp::build_deep_link_dialog::body.borrow_mut 1
 QuillApp::build_deep_link_invite_dialog::body.borrow_mut 1
@@ -229,7 +228,6 @@ ai_apply_shortcut_text::keymap.borrow 1
 anchor::anchors.borrow 1
 anchor::seen.borrow 1
 anchor_tracker::anchors.borrow_mut 1
-apply_custom_bindings::key_bindings.borrow 1
 arm::slot.borrow_mut 1
 backdrop::cache.borrow_mut 2
 badge::app.borrow 1
