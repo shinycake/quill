@@ -74,10 +74,9 @@ impl SelectionDrag {
 #[derive(Debug, Clone)]
 pub(crate) struct DragSelect {
     chat: ChatId,
-    /// The row pressed, and whether it is still being sent (not
-    /// selectable).
+    /// The row pressed. Whether it is still being sent (not selectable) is
+    /// read when the button is released, not when it went down.
     press: MessageId,
-    pending: bool,
     origin: Point<Pixels>,
     /// Selection mode: a release without a drag toggles the press row
     /// (`needItemSelectionToggle`). Outside it a click does nothing.
@@ -105,7 +104,6 @@ impl QuillApp {
         &mut self,
         chat: ChatId,
         message_id: MessageId,
-        pending: bool,
         event: &MouseDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -143,7 +141,6 @@ impl QuillApp {
         let drag = DragSelect {
             chat,
             press: message_id,
-            pending,
             origin: event.position,
             click_toggles,
             forward,
@@ -292,7 +289,8 @@ impl QuillApp {
                 self.chat_ui.focus = A11yFocus::Row(range.to);
             }
             None if drag.click_toggles => {
-                self.toggle_forward_select(drag.chat, drag.press, drag.pending, cx);
+                let pending = self.message_still_sending(drag.chat, drag.press);
+                self.toggle_forward_select(drag.chat, drag.press, pending, cx);
                 self.chat_ui.selection_anchor = Some(drag.press);
                 self.chat_ui.focus = A11yFocus::Row(drag.press);
             }
@@ -391,12 +389,21 @@ impl QuillApp {
         }
     }
 
+    /// Whether the message is not on the server yet (or is gone), as it
+    /// stands now.
+    fn message_still_sending(&self, chat: ChatId, id: MessageId) -> bool {
+        self.session()
+            .and_then(|session| session.histories.get(&chat.0))
+            .and_then(|history| history.messages.get(&id.0))
+            .is_none_or(|message| message.pending())
+    }
+
     /// Where the history rows were painted last, in window pixels.
     fn history_row_bands(&self) -> Vec<RowBand> {
-        self.history
-            .hit_rows
-            .borrow()
-            .iter()
+        let Ok(rows) = self.history.hit_rows.try_borrow() else {
+            return Vec::new();
+        };
+        rows.iter()
             .map(|(index, bounds)| RowBand {
                 index: *index,
                 top: f32::from(bounds.top()),

@@ -451,10 +451,11 @@ impl QuillApp {
             .unwrap_or(4096)
     }
 
-    pub(in crate::ui) fn confirm_delete(&mut self, cx: &mut Context<Self>) {
-        let Some(confirm) = self.chat_ui.pending_delete.take() else {
-            return;
-        };
+    pub(in crate::ui) fn confirm_delete(
+        &mut self,
+        confirm: quill::composer::DeleteConfirm,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.delete_confirmed(&confirm);
             // The message dissolves only once the delete went out: a refused

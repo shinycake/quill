@@ -24,7 +24,7 @@ use quill::ids::{ChatId, FileId};
 use quill::power_saving;
 use quill::state::HistoryMessage;
 use quill::telegram::envelope::StickerContent;
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -61,10 +61,14 @@ const TICK_FPS: u32 = 60;
 thread_local! {
     /// Where each panel sticker cell was last painted (window coordinates),
     /// per window: the same sticker is in the panel of every window.
-    static CELLS: RefCell<HashMap<CellKey, Bounds<Pixels>>> = RefCell::new(HashMap::new());
-    /// What the cell just chosen showed, until the send takes it.
-    static SOURCE: RefCell<Option<Source>> = const { RefCell::new(None) };
-    static FLY: RefCell<Option<Fly>> = const { RefCell::new(None) };
+    static CELLS: Cell<HashMap<CellKey, Bounds<Pixels>>> = Cell::new(HashMap::new());
+    /// What the cell just chosen showed, until the send takes it or is
+    /// refused ([`forget_source`]).
+    static SOURCE: Cell<Option<Source>> = const { Cell::new(None) };
+    /// Where the one sticker flight stands. Ended by its own landing, its
+    /// window closing, the account leaving the screen and the lock
+    /// ([`end_flight`]).
+    static FLIGHT: Cell<Flight> = const { Cell::new(Flight::Idle) };
     /// Where the sent message's sticker was last painted.
     static TARGET: Cell<Option<Bounds<Pixels>>> = const { Cell::new(None) };
     /// The overlay's own top-left in the window, as of its last paint.
@@ -85,6 +89,39 @@ struct Source {
     size: (i32, i32),
 }
 
+/// Where the sticker's flight stands.
+#[derive(Default)]
+enum Flight {
+    #[default]
+    Idle,
+    /// Sent: the message's sticker has not been painted yet (it ends after
+    /// [`WAIT_FOR_TARGET`]).
+    Waiting(Fly),
+    /// The sticker is painted: the picture glides to it.
+    Flying { fly: Fly, started: Instant },
+}
+
+impl Flight {
+    fn fly(&self) -> Option<&Fly> {
+        match self {
+            Self::Idle => None,
+            Self::Waiting(fly) | Self::Flying { fly, .. } => Some(fly),
+        }
+    }
+}
+
+/// Runs `f` on a thread-local value taken out of its cell and put back, so
+/// no guard is held and nothing can be borrowed twice.
+fn with_taken<T: Default, R>(
+    cell: &'static std::thread::LocalKey<Cell<T>>,
+    f: impl FnOnce(&mut T) -> R,
+) -> R {
+    let mut value = cell.take();
+    let out = f(&mut value);
+    cell.set(value);
+    out
+}
+
 struct Fly {
     /// The window the sticker was sent from (`None`: the main window):
     /// only its conversation draws the flight, in its own coordinates.
@@ -96,7 +133,6 @@ struct Fly {
     from: Bounds<Pixels>,
     image: ImageSource,
     armed: Instant,
-    started: Option<Instant>,
 }
 
 /// `anim::easeOutQuint`.
@@ -189,8 +225,7 @@ pub(super) fn cell_probe(scope: Option<ChatId>, file: FileId) -> impl IntoElemen
             if visible.size.width <= Pixels::ZERO || visible.size.height <= Pixels::ZERO {
                 return;
             }
-            CELLS.with(|cells| {
-                let mut cells = cells.borrow_mut();
+            with_taken(&CELLS, |cells| {
                 let key = CellKey {
                     window: scope,
                     file: file.0,
@@ -209,13 +244,17 @@ pub(super) fn cell_probe(scope: Option<ChatId>, file: FileId) -> impl IntoElemen
 
 /// The picture of the cell being chosen, for the send that follows.
 pub(super) fn note_source(file: FileId, image: Option<ImageSource>, size: (i32, i32)) {
-    SOURCE.with(|source| {
-        *source.borrow_mut() = image.map(|image| Source {
-            file: file.0,
-            image,
-            size,
-        });
-    });
+    SOURCE.set(image.map(|image| Source {
+        file: file.0,
+        image,
+        size,
+    }));
+}
+
+/// The send of the chosen sticker was refused: nothing flies, and the
+/// noted cell is not left for a later send of the same sticker.
+pub(super) fn forget_source() {
+    SOURCE.set(None);
 }
 
 /// The row of a message in the chat: the sticker is hidden while it flies
@@ -226,9 +265,9 @@ pub(super) fn wrap(
     attachment: AnyElement,
 ) -> AnyElement {
     let key = (message.chat_id.0, message.id.0);
-    let hidden = FLY.with(|fly| {
-        fly.borrow()
-            .as_ref()
+    let hidden = with_taken(&FLIGHT, |flight| {
+        flight
+            .fly()
             .is_some_and(|fly| matches_fly(fly, message, sticker))
     });
     if !hidden {
@@ -263,11 +302,22 @@ pub(super) fn wrap(
         .into_any_element()
 }
 
+/// What one frame of the flight does.
+enum Step {
+    Idle,
+    Ended,
+    Draw {
+        from: Bounds<Pixels>,
+        image: ImageSource,
+        started: Option<Instant>,
+    },
+}
+
 impl QuillApp {
     /// A sticker was sent from the panel: start its flight, unless motion
     /// is reduced or message effects are off.
     pub(super) fn arm_send_fly(&mut self, chat_id: ChatId, file: FileId, cx: &mut Context<Self>) {
-        let source = SOURCE.with(|source| source.borrow_mut().take());
+        let source = SOURCE.take();
         let Some(source) = source.filter(|source| source.file == file.0) else {
             return;
         };
@@ -280,7 +330,7 @@ impl QuillApp {
             window: self.windows.last_press,
             file: file.0,
         };
-        let Some(cell) = CELLS.with(|cells| cells.borrow().get(&key).copied()) else {
+        let Some(cell) = with_taken(&CELLS, |cells| cells.get(&key).copied()) else {
             return;
         };
         let inner = {
@@ -300,18 +350,15 @@ impl QuillApp {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_secs() as i64);
         TARGET.with(|target| target.set(None));
-        FLY.with(|fly| {
-            *fly.borrow_mut() = Some(Fly {
-                window: key.window,
-                chat_id: chat_id.0,
-                file: file.0,
-                since,
-                from,
-                image: source.image,
-                armed: Instant::now(),
-                started: None,
-            });
-        });
+        FLIGHT.set(Flight::Waiting(Fly {
+            window: key.window,
+            chat_id: chat_id.0,
+            file: file.0,
+            since,
+            from,
+            image: source.image,
+            armed: Instant::now(),
+        }));
         self.notify_conversation(cx);
     }
 
@@ -320,32 +367,52 @@ impl QuillApp {
     pub(super) fn send_fly_overlay(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         // Another window's flight: its coordinates and target are not ours.
         let here = self.windows.scope;
-        if FLY.with(|fly| fly.borrow().as_ref().is_some_and(|fly| fly.window != here)) {
+        if with_taken(&FLIGHT, |flight| {
+            flight.fly().is_some_and(|fly| fly.window != here)
+        }) {
             return None;
         }
         let now = Instant::now();
-        let step = FLY.with(|fly| {
-            let mut fly = fly.borrow_mut();
-            let current = fly.as_mut()?;
-            if current.started.is_none() && TARGET.with(Cell::get).is_some() {
-                current.started = Some(now);
-            }
-            let ended = match current.started {
+        let step = with_taken(&FLIGHT, |flight| {
+            let (fly, started) = match std::mem::take(flight) {
+                Flight::Idle => return Step::Idle,
+                Flight::Waiting(fly) => {
+                    let started = TARGET.with(Cell::get).map(|_| now);
+                    (fly, started)
+                }
+                Flight::Flying { fly, started } => (fly, Some(started)),
+            };
+            let ended = match started {
                 Some(started) => now.duration_since(started) >= duration(),
-                None => now.duration_since(current.armed) >= WAIT_FOR_TARGET,
+                None => now.duration_since(fly.armed) >= WAIT_FOR_TARGET,
             };
             if ended {
-                *fly = None;
-                return Some(None);
+                return Step::Ended;
             }
-            Some(Some((current.from, current.image.clone(), current.started)))
+            let draw = Step::Draw {
+                from: fly.from,
+                image: fly.image.clone(),
+                started,
+            };
+            *flight = match started {
+                Some(started) => Flight::Flying { fly, started },
+                None => Flight::Waiting(fly),
+            };
+            draw
         });
-        let step = step?;
-        let Some((from, image, started)) = step else {
-            // Done: show the real sticker.
-            TARGET.with(|target| target.set(None));
-            self.notify_conversation(cx);
-            return None;
+        let (from, image, started) = match step {
+            Step::Idle => return None,
+            Step::Ended => {
+                // Done: show the real sticker.
+                TARGET.with(|target| target.set(None));
+                self.notify_conversation(cx);
+                return None;
+            }
+            Step::Draw {
+                from,
+                image,
+                started,
+            } => (from, image, started),
         };
         self.request_app_tick(TICK_FPS, cx);
         let origin = ORIGIN.with(Cell::get);
@@ -386,26 +453,36 @@ impl QuillApp {
 /// (only its own conversation draws and ends it), so the sticker it hides
 /// in the main window is shown again.
 pub(super) fn window_closed(closed: ChatId) {
-    let ended = FLY.with(|fly| {
-        let Ok(mut fly) = fly.try_borrow_mut() else {
-            return false;
-        };
-        let own = fly.as_ref().is_some_and(|fly| fly.window == Some(closed));
+    let own = with_taken(&FLIGHT, |flight| {
+        let own = flight.fly().is_some_and(|fly| fly.window == Some(closed));
         if own {
-            *fly = None;
+            *flight = Flight::Idle;
         }
         own
     });
-    if ended {
+    if own {
         TARGET.with(|target| target.set(None));
     }
+}
+
+/// The account on screen leaves, or Quill locks: nothing flies on, and the
+/// sticker it hides is shown. The flight belongs to the screen, and the lock
+/// screen draws no overlay to end it.
+pub(super) fn end_flight() {
+    FLIGHT.set(Flight::Idle);
+    SOURCE.set(None);
+    TARGET.with(|target| target.set(None));
 }
 
 /// Whether a flight is armed, and whether it has started moving.
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 pub(super) fn flight_state() -> Option<bool> {
-    FLY.with(|fly| fly.borrow().as_ref().map(|fly| fly.started.is_some()))
+    with_taken(&FLIGHT, |flight| match flight {
+        Flight::Idle => None,
+        Flight::Waiting(_) => Some(false),
+        Flight::Flying { .. } => Some(true),
+    })
 }
 
 /// A flight armed from `window` for `chat`, as `arm_send_fly` leaves it.
@@ -413,27 +490,22 @@ pub(super) fn flight_state() -> Option<bool> {
 #[cfg(feature = "demo-capture")]
 pub(super) fn arm_for_test(window: Option<ChatId>, chat: ChatId, image: ImageSource) {
     let from = Bounds::new(point(px(10.), px(10.)), size(px(40.), px(40.)));
-    FLY.with(|fly| {
-        *fly.borrow_mut() = Some(Fly {
-            window,
-            chat_id: chat.0,
-            file: 5,
-            since: 0,
-            from,
-            image,
-            armed: Instant::now(),
-            started: None,
-        });
-    });
+    FLIGHT.set(Flight::Waiting(Fly {
+        window,
+        chat_id: chat.0,
+        file: 5,
+        since: 0,
+        from,
+        image,
+        armed: Instant::now(),
+    }));
 }
 
 /// Forget any flight and what was noted (tests share a thread).
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 pub(super) fn reset() {
-    FLY.with(|fly| *fly.borrow_mut() = None);
-    SOURCE.with(|source| *source.borrow_mut() = None);
-    TARGET.with(|target| target.set(None));
+    end_flight();
 }
 
 #[cfg(test)]

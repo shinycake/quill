@@ -101,6 +101,34 @@ fn a_sticker_flies_only_in_the_window_it_was_sent_from(cx: &mut TestAppContext) 
     assert!(window, "the sending window does");
 }
 
+/// `end_flight` (the account leaving, the lock) drops a flight in progress,
+/// and a refused send leaves its chosen cell to no later send.
+#[gpui_kit::test]
+fn ending_the_flight_and_a_refused_send_leave_nothing_to_fly(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let image = std::sync::Arc::new(gpui_kit::RenderImage::new(smallvec::SmallVec::from_buf([
+        image::Frame::new(image::RgbaImage::new(2, 2)),
+    ])));
+    crate::ui::send_fly::reset();
+    crate::ui::send_fly::arm_for_test(None, OTHER, gpui_kit::ImageSource::Render(image.clone()));
+    assert_eq!(crate::ui::send_fly::flight_state(), Some(false));
+    crate::ui::send_fly::end_flight();
+    assert_eq!(crate::ui::send_fly::flight_state(), None, "ended");
+    // The chosen cell of a refused send is not kept for the next one.
+    crate::ui::send_fly::note_source(
+        quill::ids::FileId(5),
+        Some(gpui_kit::ImageSource::Render(image)),
+        (512, 512),
+    );
+    crate::ui::send_fly::forget_source();
+    let armed = scoped(&h, None, cx, |app, cx| {
+        app.arm_send_fly(OTHER, quill::ids::FileId(5), cx);
+        crate::ui::send_fly::flight_state()
+    });
+    assert_eq!(armed, None, "no source: no flight");
+    crate::ui::send_fly::reset();
+}
+
 fn hashtags(h: &Harness, chat: Option<ChatId>, cx: &mut TestAppContext) -> Vec<String> {
     scoped(h, chat, cx, |app, _| {
         app.recent_hashtags()

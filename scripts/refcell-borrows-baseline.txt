@@ -53,9 +53,6 @@ MotionState::start_reveal::reveal.borrow_mut 1
 Occluder::prepaint::occluders.borrow_mut 1
 QuillApp::advance_effects::active.borrow 2
 QuillApp::advance_effects::active.borrow_mut 1
-QuillApp::arm_send_fly::cells.borrow 1
-QuillApp::arm_send_fly::fly.borrow_mut 1
-QuillApp::arm_send_fly::source.borrow_mut 1
 QuillApp::begin_widget_pass::passes.borrow_mut 2
 QuillApp::build_account_lifecycle_dialog::body.borrow_mut 1
 QuillApp::build_account_notice_dialog::body.borrow_mut 1
@@ -182,7 +179,6 @@ QuillApp::ensure_sticker_pump::pump.borrow 1
 QuillApp::event_log_list_view::event_log_ids.borrow_mut 1
 QuillApp::event_log_reset_list::event_log_ids.borrow_mut 1
 QuillApp::follow_bar::presence.borrow_mut 1
-QuillApp::history_row_bands::hit_rows.borrow 1
 QuillApp::inline_members_view::snapshot.borrow 1
 QuillApp::jump_corner_buttons::corner_lift.borrow_mut 1
 QuillApp::jump_corner_buttons::corners.borrow_mut 1
@@ -214,10 +210,6 @@ QuillApp::round_record_overlay::round_preview.borrow_mut 1
 QuillApp::run_passcode_job::answer.borrow_mut 1
 QuillApp::run_passcode_job::asked.borrow_mut 1
 QuillApp::selection_bar::selection.borrow 1
-QuillApp::selection_motion::selection.borrow_mut 1
-QuillApp::selection_row::selection.borrow_mut 1
-QuillApp::send_fly_overlay::fly.borrow 1
-QuillApp::send_fly_overlay::fly.borrow_mut 1
 QuillApp::shortcuts_reference::bindings.borrow 1
 QuillApp::sidebar_chats::row_fx.borrow_mut 1
 QuillApp::spawn_system_unlock_wait::held.borrow_mut 1
@@ -243,8 +235,6 @@ RichPreview::blocks::editor.borrow_mut 1
 RichPreview::blocks::parsed.borrow 1
 RichPreview::blocks::parsed.borrow_mut 1
 RunningResize::drop::resize.borrow_mut 1
-SelectableRichText::paint::owners.borrow 1
-SelectableRichText::paint::owners.borrow_mut 1
 SizedLoad::get::state.borrow 1
 SizedLoad::new::state.borrow_mut 1
 SizedLoad::use_by::state.borrow_mut 1
@@ -273,7 +263,6 @@ build_community_hub_dialog::body.borrow_mut 1
 build_create_community_dialog::body.borrow_mut 1
 build_tile_in_background::tile.borrow_mut 1
 cancel::running.borrow_mut 1
-cell_probe::cells.borrow_mut 1
 char_width::cache.borrow 1
 char_width::cache.borrow_mut 1
 claim_build::tile.borrow_mut 1
@@ -321,7 +310,6 @@ nearest::badges.borrow 1
 newly_shown::slices.borrow 1
 next_frame::whole.borrow_mut 1
 note_playing::playing.borrow_mut 1
-note_source::source.borrow_mut 1
 note_target::last.borrow_mut 1
 once::body.borrow_mut 2
 one_shot::body.borrow_mut 2
@@ -393,5 +381,3 @@ wake::slot.borrow_mut 1
 watch_gpu_loss::slot.borrow_mut 1
 whole_of::whole.borrow 1
 with_layer::current.borrow_mut 1
-with_selected::selected.borrow_mut 1
-wrap::fly.borrow 1

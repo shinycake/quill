@@ -27,6 +27,16 @@ pub(super) struct SelectionRow {
     pub(super) slide: f32,
 }
 
+/// Where "Save Selected" stands in a chat: idle, or waiting for the folder
+/// the user picks. The picker's task lives in the stage, so a chat change
+/// (which replaces the `ChatUi`) drops it with the selection it was for.
+#[derive(Default)]
+pub(super) enum SaveSelection {
+    #[default]
+    Idle,
+    Picking(Task<()>),
+}
+
 impl QuillApp {
     /// Whether selection mode is on in `chat_id`, in the conversation the
     /// view shows there (`forward_draft` hides one made in another topic).
@@ -48,7 +58,10 @@ impl QuillApp {
         // A drag that is about to select rows shows the mode already.
         let on = self.selection_visible_in(chat_id);
         let count = on.then(|| self.selection_shown_count(chat_id));
-        let mut fx = self.frame.motion.selection.borrow_mut();
+        // A re-entrant frame skips this one's motion instead of panicking.
+        let Ok(mut fx) = self.frame.motion.selection.try_borrow_mut() else {
+            return (if on { 1. } else { 0. }, if on { 1. } else { 0. });
+        };
         if let Some(count) = count {
             fx.last_count = count;
         }
@@ -67,7 +80,6 @@ impl QuillApp {
         &self,
         chat_id: ChatId,
         message_id: MessageId,
-        pending: bool,
         // The wide layout's check position from the history's left edge
         // (`chat_wide::selection_right`); `None` puts it at the right edge.
         wide_right: Option<f32>,
@@ -80,12 +92,17 @@ impl QuillApp {
             return SelectionRow::default();
         }
         let now = std::time::Instant::now();
-        let checked = self.frame.motion.selection.borrow_mut().check(
-            chat_id.0,
-            message_id.0,
-            selected,
-            self.frame.window_active.get(),
-            now,
+        let checked = self.frame.motion.selection.try_borrow_mut().map_or(
+            if selected { 1. } else { 0. },
+            |mut fx| {
+                fx.check(
+                    chat_id.0,
+                    message_id.0,
+                    selected,
+                    self.frame.window_active.get(),
+                    now,
+                )
+            },
         );
         let interactive = self.selecting_in(chat_id);
         let focused = interactive && self.chat_ui.focus.row() == Some(message_id);
@@ -117,9 +134,7 @@ impl QuillApp {
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                                this.selection_press_row(
-                                    chat_id, message_id, pending, event, window, cx,
-                                );
+                                this.selection_press_row(chat_id, message_id, event, window, cx);
                             }),
                         )
                 })
@@ -357,10 +372,12 @@ impl QuillApp {
         if missing.is_empty() {
             return;
         }
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.ensure_media_files(&missing);
-        }
+        let sent = self
+            .live
+            .as_mut()
+            .is_none_or(|live| live.driver.ensure_media_files(&missing).is_ok());
         self.set_note(match missing.len() {
+            _ if !sent => StatusNote::error(tr(keys::Q_OPS_REQUEST_NOT_SENT)),
             1 => StatusNote::silent(tr(keys::Q_CHAT_DOWNLOADING_1_FILE)),
             n => StatusNote::silent(trn(keys::Q_CHAT_DOWNLOADING_FILES, n)),
         });
@@ -399,13 +416,21 @@ impl QuillApp {
             }
         }
         if !missing.is_empty() {
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.ensure_media_files(&missing);
-            }
-            self.set_note(StatusNote::silent(tr(
-                keys::Q_CHAT_DOWNLOADING_CHOOSE_SAVE_AGAIN_WHEN,
-            )));
+            let sent = self
+                .live
+                .as_mut()
+                .is_none_or(|live| live.driver.ensure_media_files(&missing).is_ok());
+            self.set_note(if sent {
+                StatusNote::silent(tr(keys::Q_CHAT_DOWNLOADING_CHOOSE_SAVE_AGAIN_WHEN))
+            } else {
+                StatusNote::error(tr(keys::Q_OPS_REQUEST_NOT_SENT))
+            });
             cx.notify();
+            return;
+        }
+        // One picker at a time: another click while it is open does not
+        // open a second one.
+        if matches!(self.chat_ui.save_selection, SaveSelection::Picking(_)) {
             return;
         }
         let picker = cx.prompt_for_paths(PathPromptOptions {
@@ -414,9 +439,17 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::SETTINGS_SAVE).into()),
         });
-        // screen-scope: the note reports a local file save to whichever account is on screen.
-        cx.spawn(async move |this, cx| {
-            let Ok(Ok(Some(dirs))) = picker.await else {
+        let task = self.spawn_screen(cx, async move |this, cx| {
+            let picked = picker.await;
+            // The picker is over, whatever it answered.
+            let _ = this.update(cx, |this, _| {
+                if let SaveSelection::Picking(done) =
+                    std::mem::take(&mut this.chat_ui.save_selection)
+                {
+                    done.detach();
+                }
+            });
+            let Ok(Ok(Some(dirs))) = picked else {
                 return;
             };
             let Some(dir) = dirs.into_iter().next() else {
@@ -447,8 +480,8 @@ impl QuillApp {
                 });
                 cx.notify();
             });
-        })
-        .detach();
+        });
+        self.chat_ui.save_selection = SaveSelection::Picking(task);
     }
 
     /// Whether the selection can be reported: other people's sent
@@ -647,8 +680,10 @@ impl QuillApp {
         revoke: bool,
         cx: &mut Context<Self>,
     ) {
-        self.delete_messages(chat_id, ids, revoke);
-        self.share.forward = super::forward_stage::ForwardStage::None;
+        // A refused send keeps the selection, so the delete can be retried.
+        if self.delete_messages(chat_id, ids, revoke) {
+            self.share.forward = super::forward_stage::ForwardStage::None;
+        }
         cx.notify();
     }
 
@@ -932,8 +967,7 @@ impl QuillApp {
                                 picked,
                             );
                         }
-                        this.chat_ui.pending_delete = Some(confirm);
-                        this.confirm_delete(cx);
+                        this.confirm_delete(confirm, cx);
                     });
                     true
                 })

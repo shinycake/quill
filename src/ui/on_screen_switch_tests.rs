@@ -75,7 +75,6 @@ fn a_delete_box_open_across_a_switch_closes(cx: &mut TestAppContext) {
     frames(&mut vcx);
     assert!(!dialog_up(&mut vcx));
     app.read_with(&vcx, |app, _| {
-        assert!(app.chat_ui.pending_delete.is_none());
         let kept = app
             .session()
             .and_then(|s| s.histories.get(&CHAT.0))

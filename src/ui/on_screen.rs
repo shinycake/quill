@@ -545,6 +545,8 @@ impl QuillApp {
     /// TDLib on close (the mini app's `closeWebApp`, the story's
     /// `closeStory`) goes to the client it was opened on.
     pub(super) fn end_account_surfaces(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // A sticker flying into the old account's chat lands nowhere.
+        super::send_fly::end_flight();
         self.farewell_screen(window, cx);
         self.close_main_window_dialogs(window, cx);
         self.replace_screen(window, cx);

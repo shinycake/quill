@@ -71,6 +71,9 @@ impl QuillApp {
         if sent {
             self.consume_sent_reply(chat_id, cx);
             self.arm_send_fly(chat_id, file_id, cx);
+        } else {
+            // The chosen cell is not left for a later send.
+            super::send_fly::forget_source();
         }
         cx.notify();
         sent
