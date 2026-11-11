@@ -10,13 +10,9 @@ use gpui_kit::*;
 /// The settings window of the account on screen: its pages, search,
 /// scrolls and the boxes they open. A field of `OnScreen`.
 pub(crate) struct SettingsUi {
-    /// The settings window covers the chat list and the chat.
-    pub(super) open: bool,
-    /// The page on screen. `None`: none chosen yet, so a wide window shows
-    /// Account and a narrow one the page list.
-    pub(super) page: Option<quill::settings_catalog::Page>,
-    /// A page reached from a row of `page`, with a back arrow.
-    pub(super) sub: Option<super::settings_window::SubPage>,
+    /// Whether the settings window covers the chat list and the chat, and
+    /// on which page or subpage.
+    pub(super) nav: super::settings_window::SettingsNav,
     /// The box the settings window has open, if any: one value, since
     /// kit dialogs never stack.
     pub(super) boxes: SettingsBox,
@@ -97,6 +93,22 @@ impl SettingsBox {
 }
 
 impl SettingsUi {
+    /// The settings window covers the chat list and the chat.
+    pub(super) fn open(&self) -> bool {
+        self.nav.is_open()
+    }
+
+    /// The page on screen. `None`: none chosen yet, so a wide window shows
+    /// Account and a narrow one the page list.
+    pub(super) fn page(&self) -> Option<quill::settings_catalog::Page> {
+        self.nav.page()
+    }
+
+    /// A page reached from a row of `page`, with a back arrow.
+    pub(super) fn sub(&self) -> Option<super::settings_window::SubPage> {
+        self.nav.sub()
+    }
+
     pub(super) fn box_open(&self, which: SettingsBox) -> bool {
         self.boxes == which
     }
@@ -109,9 +121,7 @@ impl SettingsUi {
 
     pub(super) fn new(cx: &mut Context<QuillApp>) -> Self {
         Self {
-            open: false,
-            page: None,
-            sub: None,
+            nav: Default::default(),
             boxes: SettingsBox::None,
             search: Default::default(),
             arrival: None,
@@ -162,7 +172,7 @@ impl super::on_screen::Farewell for SettingsUi {
         if archive {
             app.set_archive_settings_open(false);
         }
-        if let Some(page) = app.settings.page {
+        if let Some(page) = app.settings.page() {
             app.leave_settings_page(page);
         }
     }

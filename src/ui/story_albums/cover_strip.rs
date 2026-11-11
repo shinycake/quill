@@ -43,13 +43,6 @@ pub(in crate::ui) struct CoverPicker {
 }
 
 impl CoverPicker {
-    /// The story this picker is for.
-    pub(in crate::ui) fn story(&self) -> (i64, i32) {
-        (self.chat_id, self.story_id)
-    }
-}
-
-impl CoverPicker {
     /// The story the picker is for: `(chat id, story id)`.
     pub(in crate::ui) fn story(&self) -> (i64, i32) {
         (self.chat_id, self.story_id)

@@ -169,7 +169,7 @@ impl QuillApp {
             });
             cx.notify();
         }
-        if self.settings.page != Some(quill::settings_catalog::Page::Devices) {
+        if self.settings.page() != Some(quill::settings_catalog::Page::Devices) {
             if self.privacy.device_link.is_scanning() || self.privacy.device_link.is_confirming() {
                 self.privacy.device_link = DeviceLink::default();
             }

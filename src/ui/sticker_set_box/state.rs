@@ -317,7 +317,9 @@ impl StickerSetBoxUi {
 
 /// An encode that runs stops, and the editor's files go: the account on
 /// screen is replaced whole, and nothing else would cancel the job or
-/// remove them.
+/// remove them. The set it viewed (and a change to it in flight) lives in
+/// the session, which outlives the screen: it closes too, so the account
+/// comes back with no stale set.
 impl crate::ui::on_screen::Farewell for StickerSetBoxUi {
     fn farewell(
         app: &mut crate::ui::app::QuillApp,
@@ -325,6 +327,9 @@ impl crate::ui::on_screen::Farewell for StickerSetBoxUi {
         _: &mut gpui_kit::Context<crate::ui::app::QuillApp>,
     ) {
         app.sticker_box.reset();
+        if let Some(session) = app.session_mut() {
+            session.stickers.sticker_set_view = None;
+        }
     }
 }
 

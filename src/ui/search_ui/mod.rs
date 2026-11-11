@@ -29,7 +29,7 @@ use gpui_kit::*;
 use quill::connect::{ChatSearchQueryOutcome, SEARCH_DEBOUNCE, SearchQueryOutcome};
 use quill::diagnostics::{DiagnosticSink, MemorySink};
 use quill::ids::{ChatId, MessageId};
-use quill::lang::{keys, tr, tr_with};
+use quill::lang::{keys, tr};
 use quill::search_filters::{
     SearchChatType, SearchDateRange, SearchMediaKind, SearchScope, tag_query,
 };
@@ -276,7 +276,9 @@ pub(super) fn apply_ready_search_in_chat(
     seq: &AtomicU64,
 ) {
     let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
-    assert!(session.open_chat_search());
+    if !session.open_chat_search() {
+        return;
+    }
     let search_gen = session.search.chat_search.begin_query("hello");
     let extra =
         session.request_chat_search(RequestPurpose::SearchChatMessages, ChatId(11), search_gen);
@@ -362,7 +364,7 @@ impl QuillApp {
         if self.dismiss_topmost_layer(window, cx) {
             return;
         }
-        if self.settings.open && self.preferences.keybinding.waiting().is_none() {
+        if self.settings.open() && self.preferences.keybinding.waiting().is_none() {
             self.settings_escape(window, cx);
         } else {
             self.escape_to_chat_list(window, cx);
@@ -618,19 +620,20 @@ impl QuillApp {
         cx.notify();
     }
 
-    pub(super) fn sync_chat_search_query(&mut self, query: &str, cx: &mut Context<Self>) {
+    /// The "From:" picker's own field changed: filter the members. With no
+    /// picker open nothing is asked.
+    pub(super) fn sync_chat_search_members(&mut self, query: &str, cx: &mut Context<Self>) {
         if self.pane_mode() != PaneMode::Ready || !self.chat_search_is_open() {
             return;
         }
-        // While choosing a "From:" member the field filters the members.
-        if self
-            .session()
-            .is_some_and(|s| s.search.chat_search.from_picker().is_some())
-        {
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.search_from_members(query.trim());
-            }
-            cx.notify();
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.search_from_members(query.trim());
+        }
+        cx.notify();
+    }
+
+    pub(super) fn sync_chat_search_query(&mut self, query: &str, cx: &mut Context<Self>) {
+        if self.pane_mode() != PaneMode::Ready || !self.chat_search_is_open() {
             return;
         }
         if let Some(live) = self.live.as_mut() {
@@ -664,7 +667,7 @@ impl QuillApp {
     }
 
     pub(super) fn schedule_chat_search_commit(&mut self, token: u64, cx: &mut Context<Self>) {
-        self.spawn_scoped(cx, async move |this, cx| {
+        self.search_ui.debounce.chat = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor().timer(SEARCH_DEBOUNCE).await;
             this.update(cx, |this, cx| {
                 if let Some(live) = this.live.as_mut() {
@@ -680,8 +683,7 @@ impl QuillApp {
                 cx.notify();
             })
             .ok();
-        })
-        .detach();
+        });
     }
 
     pub(super) fn jump_selected_chat_search_hit(&mut self, cx: &mut Context<Self>) {
@@ -795,11 +797,8 @@ impl QuillApp {
             session.search.chat_search.set_sender(sender);
             session.close_from_picker();
         }
-        // The field's text was the member filter while choosing: start the
-        // message query from scratch.
-        self.search_ui
-            .chat_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
+        // The message field was never touched by the picker: it still holds
+        // the query the new sender narrows.
         self.search_ui
             .chat_input
             .update(cx, |input, cx| input.focus(window, cx));
@@ -844,13 +843,19 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_from_picker();
         }
-        // The field now filters members (or messages again): start empty.
-        self.search_ui
-            .chat_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.search_ui
-            .chat_input
-            .update(cx, |input, cx| input.focus(window, cx));
+        // The member field starts empty each time the picker opens; the
+        // message field keeps its text.
+        let input = if open {
+            &self.search_ui.chat_input
+        } else {
+            &self.search_ui.member_input
+        };
+        input.update(cx, |input, cx| {
+            if !open {
+                input.set_value("", window, cx);
+            }
+            input.focus(window, cx);
+        });
         cx.notify();
     }
 
@@ -891,90 +896,6 @@ impl QuillApp {
             .toggled(selected)
             .on_click(cx.listener(move |this, _, window, cx| on_click(this, window, cx)))
     }
-
-    /// The members list that replaces the hits while a "From:" is chosen.
-    fn chat_search_picker(&self, picker: &FromPicker, cx: &mut Context<Self>) -> impl IntoElement {
-        let session = self.session();
-        let mut list = div()
-            .id("chat-search-from-list")
-            .flex()
-            .flex_col()
-            .gap_0p5();
-        let rows: Vec<(MessageSender, String)> = picker
-            .members()
-            .iter()
-            .map(|m| {
-                (
-                    *m,
-                    session.map_or_else(|| "member".into(), |s| s.sender_label(*m)),
-                )
-            })
-            .collect();
-        if rows.is_empty() {
-            let text = if picker.loading() {
-                tr(keys::Q_CHAT_LOADING_MEMBERS)
-            } else {
-                tr(keys::Q_CHAT_NO_MEMBERS_FOUND)
-            };
-            list = list.child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(text),
-            );
-        }
-        for (sender, name) in rows {
-            let photo = match sender {
-                MessageSender::User { user_id } => self.chat_photo_for_row(ChatId(user_id)),
-                MessageSender::Chat { chat_id } => self.chat_photo_for_row(ChatId(chat_id)),
-            };
-            let key = match sender {
-                MessageSender::User { user_id } => user_id as u64,
-                MessageSender::Chat { chat_id } => chat_id as u64 ^ (1 << 62),
-            };
-            list = list.child(
-                div()
-                    .id(("chat-search-from", key))
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .px_2()
-                    .py_1()
-                    .rounded_md()
-                    .role(gpui_kit::Role::Button)
-                    .aria_label(tr_with(
-                        keys::Q_CHAT_SEARCH_MESSAGES_FROM,
-                        &[("name", &name.to_string())],
-                    ))
-                    .tab_index(0)
-                    .cursor_pointer()
-                    .pressable(cx.theme())
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.chat_search_pick_sender(Some(sender), window, cx);
-                    }))
-                    .child(super::chat_row::chat_avatar(&name, photo.as_deref(), 28.))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_sm()
-                            .child(super::bidi_line::name_line(name)),
-                    ),
-            );
-        }
-        div()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .child(
-                div()
-                    .text_xs()
-                    .font_semibold()
-                    .child(tr(keys::Q_CHAT_SEARCH_MESSAGES_FROM_2)),
-            )
-            .child(list.max_h(px(240.)).overflow_y_scroll())
-    }
 }
 
 impl QuillApp {
@@ -996,6 +917,11 @@ mod tab_results;
 mod tab_strip;
 mod top_people;
 mod top_people_demo;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "member_field_tests.rs"]
+mod member_field_tests;
 
 #[cfg(test)]
 mod match_tests {

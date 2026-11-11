@@ -7,6 +7,9 @@ use gpui_kit::*;
 pub(crate) struct SearchUi {
     pub(super) input: Entity<TextareaState>,
     pub(super) chat_input: Entity<TextareaState>,
+    /// The "From:" picker's filter field, shown in place of `chat_input`
+    /// while a sender is chosen.
+    pub(super) member_input: Entity<TextareaState>,
     /// The Channels tab lists all joined channels, not the first five.
     pub(super) channels_expanded: bool,
     /// Sideways scroll of the tab strip.
@@ -23,6 +26,16 @@ pub(crate) struct SearchUi {
     /// A press on the top-people strip: where the pointer and the scroll
     /// started, and whether it has become a drag.
     pub(super) top_drag: std::cell::Cell<Option<TopDrag>>,
+    /// The quiet-window timers of the two searches: a newer one replaces
+    /// (cancels) the one before it, and both go with the screen.
+    pub(super) debounce: Debounce,
+}
+
+/// The pending commit of a typed query. The driver's token still decides
+/// whether a fired timer is the newest.
+pub(super) struct Debounce {
+    pub(super) global: Task<()>,
+    pub(super) chat: Task<()>,
 }
 
 /// A drag that scrolls the top-people strip (`stripMouseMoveEvent`).
@@ -37,10 +50,12 @@ impl SearchUi {
     pub(super) fn new(
         search_input: Entity<TextareaState>,
         chat_search_input: Entity<TextareaState>,
+        member_search_input: Entity<TextareaState>,
     ) -> Self {
         Self {
             input: search_input,
             chat_input: chat_search_input,
+            member_input: member_search_input,
             channels_expanded: false,
             tabs_scroll: ScrollHandle::new(),
             results_scroll: ScrollHandle::new(),
@@ -48,6 +63,10 @@ impl SearchUi {
             top_scroll: ScrollHandle::new(),
             top_toggled_at: std::cell::Cell::new(None),
             top_drag: std::cell::Cell::new(None),
+            debounce: Debounce {
+                global: Task::ready(()),
+                chat: Task::ready(()),
+            },
         }
     }
 }

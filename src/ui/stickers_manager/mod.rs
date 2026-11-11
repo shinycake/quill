@@ -24,8 +24,6 @@ use quill::state::{MasksTab, StickerTab, StickersPurpose};
 use quill::stickers_manager::ManagerEdits;
 use quill::telegram::envelope::StickerSetInfo;
 use rows::RowState;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 #[cfg(feature = "demo-capture")]
 mod demo;
@@ -464,7 +462,6 @@ impl QuillApp {
                     kind,
                     tab: view.tab,
                     removed: edits.is_removed(set.id),
-                    pending: self.manager_set_pending(kind, set.id),
                 },
                 cx,
             ))
@@ -526,17 +523,11 @@ impl QuillApp {
                 this.close_stickers_manager(cx)
             });
         app.update(cx, |this, cx| {
-            let body = Rc::new(RefCell::new(Some(this.manager_panel(Kind::Stickers, cx))));
+            let body = this.manager_panel(Kind::Stickers, cx);
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(keys::STICKERS_YOU_HAVE)))
-                .content(move |content, _, _| {
-                    content.child(
-                        body.borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element()),
-                    )
-                })
+                .content(crate::ui::shell::one_shot_dialog_content(body))
                 .on_close(close)
         })
     }
@@ -551,17 +542,11 @@ impl QuillApp {
             this.close_mask_sets(cx)
         });
         app.update(cx, |this, cx| {
-            let body = Rc::new(RefCell::new(Some(this.manager_panel(Kind::Masks, cx))));
+            let body = this.manager_panel(Kind::Masks, cx);
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(keys::SWITCH_MASKS)))
-                .content(move |content, _, _| {
-                    content.child(
-                        body.borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element()),
-                    )
-                })
+                .content(crate::ui::shell::one_shot_dialog_content(body))
                 .on_close(close)
         })
     }

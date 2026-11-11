@@ -50,7 +50,8 @@ impl QuillApp {
         let requests = match &page.wait {
             PageWait::Idle => Vec::new(),
             PageWait::Creating(request) => vec![*request],
-            PageWait::SavingPicker(requests) => requests.clone(),
+            PageWait::SavingPicker { requests, .. }
+            | PageWait::SavingPickerPartly { requests, .. } => requests.clone(),
         };
         let waits = !matches!(page.wait, PageWait::Idle);
         let Some(session) = self.session() else {
@@ -77,14 +78,34 @@ impl QuillApp {
         if let Some(answered) = answered.filter(|answered| *answered != Answer::Waiting) {
             let wait = std::mem::replace(&mut page.wait, PageWait::Idle);
             if answered == Answer::Succeeded {
+                // What the answer acts on is what asked: a picker the user
+                // has moved on from is left as it is.
+                let picker_target = page.picker.as_ref().map(|picker| picker.target);
                 match wait {
                     PageWait::Idle => {}
                     PageWait::Creating(_) => {
-                        page.picker = None;
+                        if picker_target == Some(AlbumPickerTarget::NewAlbum) {
+                            page.picker = None;
+                        }
                         page.new_album_name
                             .update(cx, |input, cx| input.set_value("", window, cx));
                     }
-                    PageWait::SavingPicker(_) => page.picker = None,
+                    PageWait::SavingPicker { album_id, .. } => {
+                        if picker_target == Some(AlbumPickerTarget::Album(album_id)) {
+                            page.picker = None;
+                        }
+                    }
+                    PageWait::SavingPickerPartly {
+                        album_id, added, ..
+                    } => {
+                        if let Some(picker) = page
+                            .picker
+                            .as_mut()
+                            .filter(|picker| picker.target == AlbumPickerTarget::Album(album_id))
+                        {
+                            picker.album_holds(&added);
+                        }
+                    }
                 }
             }
         }

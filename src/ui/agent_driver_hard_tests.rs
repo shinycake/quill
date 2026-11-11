@@ -63,7 +63,7 @@ fn the_settings_and_lock_chords_open_nothing_for_an_agent(cx: &mut TestAppContex
         refusals.iter().any(|r| r.contains("open Settings")),
         "{refusals:?}"
     );
-    assert!(!vcx.update(|_, cx| app.read(cx).settings.open));
+    assert!(!vcx.update(|_, cx| app.read(cx).settings.open()));
 
     // Cmd/Ctrl+L with a passcode set: Quill stays unlocked.
     app.update(vcx, |app, _| {
@@ -90,7 +90,7 @@ fn the_settings_and_lock_chords_open_nothing_for_an_agent(cx: &mut TestAppContex
     // The user's own Cmd/Ctrl+, still opens Settings.
     vcx.simulate_keystrokes(&primary(","));
     settle(vcx);
-    assert!(vcx.update(|_, cx| app.read(cx).settings.open));
+    assert!(vcx.update(|_, cx| app.read(cx).settings.open()));
 }
 
 #[gpui_kit::test]
@@ -141,7 +141,7 @@ fn menu_routes_to_hard_surfaces_refuse_while_injecting(cx: &mut TestAppContext) 
     }
     vcx.update(|_, cx| {
         let app = app.read(cx);
-        assert!(!app.settings.open, "Settings");
+        assert!(!app.settings.open(), "Settings");
         assert!(!app.account_boxes.lifecycle.is_open(), "log out");
         assert!(!app.account.accounts.dialog.is_open(), "accounts");
         assert!(!app.account.passcode.open, "passcode");
@@ -153,7 +153,7 @@ fn menu_routes_to_hard_surfaces_refuse_while_injecting(cx: &mut TestAppContext) 
     app.update_in(vcx, |app, window, cx| {
         app.navigate(NavigationAction::Settings, window, cx);
     });
-    assert!(vcx.update(|_, cx| app.read(cx).settings.open));
+    assert!(vcx.update(|_, cx| app.read(cx).settings.open()));
     assert!(guard::take_refusals().is_empty());
 }
 

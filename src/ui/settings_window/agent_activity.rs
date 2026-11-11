@@ -54,6 +54,26 @@ fn passes(filter: &super::agent_page::ActivityFilter, action: &Action) -> bool {
         && filter.tool.as_ref().is_none_or(|tool| tool == &action.tool)
 }
 
+/// The filter as far as the log still has what it names: a chat, agent or
+/// tool whose entries are gone (their messages were deleted) filters
+/// nothing, and its button reads "All", as the rows do.
+fn effective(
+    filter: &super::agent_page::ActivityFilter,
+    log: &[Action],
+) -> super::agent_page::ActivityFilter {
+    let mut filter = filter.clone();
+    filter.agent = filter
+        .agent
+        .filter(|agent| log.iter().any(|a| &a.agent == agent));
+    filter.chat = filter
+        .chat
+        .filter(|chat| log.iter().any(|a| a.chat_id == *chat));
+    filter.tool = filter
+        .tool
+        .filter(|tool| log.iter().any(|a| &a.tool == tool));
+    filter
+}
+
 /// The distinct values of one field, in log order.
 fn distinct<T: PartialEq + Clone>(log: &[Action], field: impl Fn(&Action) -> T) -> Vec<T> {
     let mut seen: Vec<T> = Vec::new();
@@ -130,7 +150,7 @@ impl QuillApp {
             )
             .into_any_element();
         }
-        let filter = self.agent_ui.page.filter.clone();
+        let filter = effective(&self.agent_ui.page.filter, &log);
         let shown_log: Vec<&Action> = log
             .iter()
             .filter(|action| passes(&filter, action))
@@ -189,14 +209,18 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_3()
-            .child(self.agent_activity_filters(&log, cx))
+            .child(self.agent_activity_filters(&log, &filter, cx))
             .child(group(None, rows))
             .into_any_element()
     }
 
     /// Three menu buttons: agent, chat and action, each with "All".
-    fn agent_activity_filters(&self, log: &[Action], cx: &mut Context<Self>) -> AnyElement {
-        let filter = &self.agent_ui.page.filter;
+    fn agent_activity_filters(
+        &self,
+        log: &[Action],
+        filter: &super::agent_page::ActivityFilter,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let owner = cx.entity().downgrade();
         let agents = distinct(log, |a| a.agent.clone());
         let chats = distinct(log, |a| (a.chat_id, a.chat_title.clone()));

@@ -76,8 +76,8 @@ impl QuillApp {
 
     /// Shortcuts take keystrokes for rebinding only while their page is up.
     pub(super) fn keybinding_capture_active(&mut self) -> bool {
-        let shown = self.settings.open
-            && self.settings.page == Some(quill::settings_catalog::Page::Shortcuts);
+        let shown = self.settings.open()
+            && self.settings.page() == Some(quill::settings_catalog::Page::Shortcuts);
         self.preferences.keybinding.capture_active(shown)
     }
 

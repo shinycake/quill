@@ -37,6 +37,12 @@ impl AlbumPicker {
         self.selected.contains(&story_id)
     }
 
+    /// The album now holds `story_ids` (their add was answered): they are
+    /// no longer changes to send.
+    pub fn album_holds(&mut self, story_ids: &[i32]) {
+        self.initial.extend(story_ids.iter().copied());
+    }
+
     pub fn toggle(&mut self, story_id: i32) {
         if !self.selected.remove(&story_id) {
             self.selected.insert(story_id);
@@ -52,12 +58,6 @@ impl AlbumPicker {
         let mut ids: Vec<i32> = self.selected.difference(&self.initial).copied().collect();
         ids.reverse();
         ids
-    }
-
-    /// The adds went out: the album holds them from now on, so a retry
-    /// sends only what is left (the removes).
-    pub fn mark_added(&mut self, ids: &[i32]) {
-        self.initial.extend(ids.iter().copied());
     }
 
     /// Stories the album had that are no longer ticked.
@@ -124,11 +124,11 @@ mod tests {
     }
 
     #[test]
-    fn adds_that_went_out_are_not_sent_again() {
+    fn adds_the_album_holds_are_not_sent_again() {
         let mut picker = AlbumPicker::new(AlbumPickerTarget::Album(3), [5, 7]);
         picker.toggle(9);
         picker.toggle(7);
-        picker.mark_added(&[9]);
+        picker.album_holds(&[9]);
         assert!(picker.added().is_empty(), "a retry sends no adds");
         assert_eq!(picker.removed(), vec![7], "the removes are still to send");
         assert!(picker.is_selected(9), "the tick stays");

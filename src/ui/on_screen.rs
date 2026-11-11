@@ -320,6 +320,7 @@ impl OnScreen {
         )
         .detach();
         let chat_search_input = QuillApp::new_chat_search_field(window, cx);
+        let member_search_input = QuillApp::new_member_search_field(window, cx);
         let forward_search_input = QuillApp::new_forward_search_field(window, cx);
         let history = super::history_state::HistoryUi::new(cx);
         // The scroller notifies on every scroll: drives the floating date.
@@ -346,7 +347,11 @@ impl OnScreen {
                 emoji_search_input,
                 reaction_search_input,
             ),
-            search_ui: super::search_state::SearchUi::new(search_input, chat_search_input),
+            search_ui: super::search_state::SearchUi::new(
+                search_input,
+                chat_search_input,
+                member_search_input,
+            ),
             sticker_box: super::sticker_set_box::state::StickerSetBoxUi::new(window, cx),
             share: super::share_state::ShareUi::new(window, cx, forward_search_input),
             main_menu: super::main_menu_grid::MainMenuUi::new(window, cx),

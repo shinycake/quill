@@ -279,7 +279,10 @@ fn a_blocked_surface_answers_with_a_note_and_takes_no_input(cx: &mut TestAppCont
         }),
     );
     assert!(refused(&reply, "Settings"), "{reply:?}");
-    assert!(vcx.update(|_, cx| app.read(cx).settings.open), "still open");
+    assert!(
+        vcx.update(|_, cx| app.read(cx).settings.open()),
+        "still open"
+    );
     vcx.update(|_, cx| {
         app.update(cx, |app, _| app.close_settings());
     });
@@ -775,7 +778,9 @@ fn the_forced_tree_builds_on_every_screen(cx: &mut TestAppContext) {
     tree_on(vcx, "Settings");
     vcx.update(|_, cx| {
         app.update(cx, |app, _| {
-            app.settings.page = Some(quill::settings_catalog::Page::AgentAccess);
+            app.settings.nav = crate::ui::settings_window::SettingsNav::Page(
+                quill::settings_catalog::Page::AgentAccess,
+            );
         })
     });
     tree_on(vcx, "Settings > Agent access");

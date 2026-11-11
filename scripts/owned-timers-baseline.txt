@@ -8,12 +8,8 @@ detached:QuillApp::close_profile_modal 1
 detached:QuillApp::emoji_sets_search_typed 1
 detached:QuillApp::ensure_self_destruct_tick 1
 detached:QuillApp::new_chatbot_draft 1
-detached:QuillApp::schedule_chat_search_commit 1
-detached:QuillApp::schedule_search_commit 1
 detached:QuillApp::show_notification_with_preview 1
 detached:QuillApp::show_qr_toast 1
-detached:QuillApp::show_rich_paste_notice 1
-detached:QuillApp::sidebar_pointer_moved_away 1
 detached:QuillApp::spawn_passcode_tick 1
 detached:QuillApp::spawn_poll_loop 1
 detached:QuillApp::spawn_system_unlock_wait 1

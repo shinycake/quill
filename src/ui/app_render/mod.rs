@@ -419,7 +419,9 @@ impl Render for QuillApp {
                     match self.first_run_view(cx) {
                         Some(first_run) => this.child(div().flex_1().min_h_0().child(first_run)),
                         // Settings covers the chat list and the chat.
-                        None if self.settings.open => this.child(self.settings_window(window, cx)),
+                        None if self.settings.open() => {
+                            this.child(self.settings_window(window, cx))
+                        }
                         None => this.child(self.shell_columns(
                             &auth,
                             show_phone,

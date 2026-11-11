@@ -30,6 +30,16 @@ pub(super) struct StoryPrivacyEdit {
     pub(super) selected_user_ids: Vec<i64>,
 }
 
+/// What a page mutation sent.
+pub(super) enum PageSend {
+    /// Nothing went out.
+    Nothing,
+    /// Every call went out.
+    Whole(Vec<quill::ids::RequestId>),
+    /// The first calls went out and a later one failed to send.
+    Partly(Vec<quill::ids::RequestId>),
+}
+
 impl QuillApp {
     /// Phase 9.7: open the chat story page — story albums, chat-page
     /// stories (pin/unpin), and the archive list. The three loads fire
@@ -169,12 +179,29 @@ impl QuillApp {
         ) -> Result<(), quill::connect::ConnectSendError>,
         cx: &mut Context<Self>,
     ) -> Option<Vec<quill::ids::RequestId>> {
+        match self.story_page_send(what, f, cx) {
+            PageSend::Whole(sent) => Some(sent),
+            PageSend::Partly(_) | PageSend::Nothing => None,
+        }
+    }
+
+    /// [`Self::story_page_mutate`], saying also when only some of the calls
+    /// went out (the later one failed to send): those are in flight.
+    pub(super) fn story_page_send(
+        &mut self,
+        what: &str,
+        f: impl FnOnce(
+            &mut LiveConnect,
+            &mut Vec<quill::ids::RequestId>,
+        ) -> Result<(), quill::connect::ConnectSendError>,
+        cx: &mut Context<Self>,
+    ) -> PageSend {
         let chat = self.stories.page.as_ref().map(|page| page.chat_id);
         let busy = chat
             .zip(self.session())
             .is_some_and(|(chat, session)| session.stories.page_ops.mutating(chat));
         if busy {
-            return None;
+            return PageSend::Nothing;
         }
         let Some(live) = self.live.as_mut() else {
             self.set_note(StatusNote::silent(tr_with(
@@ -182,16 +209,20 @@ impl QuillApp {
                 &[("what", what)],
             )));
             cx.notify();
-            return None;
+            return PageSend::Nothing;
         };
         let mut sent = Vec::new();
         let result = f(live, &mut sent);
         cx.notify();
         match result {
-            Ok(()) => Some(sent),
+            Ok(()) => PageSend::Whole(sent),
             Err(err) => {
                 self.set_note(StatusNote::error(user_error_doing(what, &err)));
-                None
+                if sent.is_empty() {
+                    PageSend::Nothing
+                } else {
+                    PageSend::Partly(sent)
+                }
             }
         }
     }
@@ -412,8 +443,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        let mut adds_sent = false;
-        let sent = self.story_page_mutate(
+        let sent = self.story_page_send(
             tr(keys::Q_MEDIA_ADD_STORIES_TO_ALBUM),
             |live, sent| {
                 if !added.is_empty() {
@@ -421,7 +451,6 @@ impl QuillApp {
                         live.driver
                             .add_story_album_stories(chat_id, album_id, &added)?,
                     );
-                    adds_sent = true;
                 }
                 if !removed.is_empty() {
                     sent.push(
@@ -434,14 +463,21 @@ impl QuillApp {
             cx,
         );
         // The picker stays, with its ticks, until the changes are saved.
-        if let (Some(page), Some(requests)) = (self.stories.page.as_mut(), sent) {
-            page.wait = PageWait::SavingPicker(requests);
-        } else if adds_sent
-            && let Some(picker) = self.stories.page.as_mut().and_then(|p| p.picker.as_mut())
-        {
-            // The adds went out and the removes did not: a retry must not
-            // send the adds again.
-            picker.mark_added(&added);
+        let Some(page) = self.stories.page.as_mut() else {
+            return;
+        };
+        match sent {
+            PageSend::Whole(requests) => page.wait = PageWait::SavingPicker { album_id, requests },
+            // The adds are in flight and the removes never left: the picker
+            // stays, and a retry does not send the adds again.
+            PageSend::Partly(requests) => {
+                page.wait = PageWait::SavingPickerPartly {
+                    album_id,
+                    requests,
+                    added,
+                }
+            }
+            PageSend::Nothing => {}
         }
     }
 

@@ -8258,6 +8258,49 @@ Review fix round (r2-34, after merging `r2-followup` and `r2-28`):
 | new-01 | `group_call_join_sent` asked the request registry by purpose (`check-request-match`). The join is now `GroupTransport::Joining { request }`, set where the join is made (`start_group_join`) and ended by the answer (`store_answer(request, ..)`), by the error of that request (`join_failed`), by an offer that was never sent or is no longer wanted (`join_unsent`, from `undo_offer`) or by a reset. Another request's answer or error leaves it alone. The panel reads `call.transport.joining()`. |
 | new-02 | `fetch_installed_backgrounds` on the per-theme fetches of the follow-up: a send that cannot leave is that theme's `Fetch::fail("not sent")` with Retry (it was `cancel`, which asked again from the next arrival), as on this branch before the merge. |
 | new-03 | Merge repairs: the escape and lock tests use r2-28's `open_call_box` seam; the inline "load more" refusal sets `InlineMore::Failed { offset }` on the follow-up's slot; `EntryStage::Loading` (image budget) is allow-listed (the entry's `Load` handle sits beside it and ends with it). |
+
+### Sweep fixes (r2-40)
+
+| id | outcome |
+| --- | --- |
+| 12-C011 | `PasteNotice::Showing` holds its 9 s timer `Task`; closing the notice drops it. |
+| 12-C019 | `RichPreview::blocks` takes both cells with `try_borrow_mut`; the last parsed blocks live in a `Cell` beside them, so a frame that finds the cell busy draws those, never an empty frame. |
+| 12-C009, 12-C010 | The two search debounce timers are held in `SearchUi::debounce`; the next typed query replaces (cancels) the one before it. |
+| 12-C008 | The "From:" picker filters members with `SearchUi::member_input`, a field of its own (swapped per window with the chat window's slot). The message field never holds a member filter, so opening, picking or closing the picker no longer empties it and `restart_chat_search_field` is gone; the member field starts empty each time the picker opens. tdesktop does the same (`ShowSearchFromBox` has its own field). |
+| 12-C017 | The ready-search-in-chat seeder returns instead of `assert!`. |
+| 12-C012, 12-D004 | `refresh_active_sessions` and `refresh_connected_websites` in the driver own the reset: a fetch already in flight (`Fetch::is_loading`, which holds its request) is the refresh, so its stage is not overwritten with `Idle`. No purpose lookup. |
+| 12-D002 | The PIN focus ask is gone from the stage: the ticker focuses the field when the `NeedPin` event it just applied opens the sheet. |
+| 12-D001 | The delete confirmation no longer resets itself from the dialog builder: `QuillApp::passkey_confirm` answers `None` once its passkey left the list. |
+| 12-D003 | `once` in `passkeys.rs` (and the sticker set box's one-shot body cells) use `Cell::take`, no `RefCell`. |
+| 12-D015 | `Preview::stage` is one `PreviewStage` (`Shown`, `Playing`, `Hiding(since)`; `Shown` waits for no request, paint moves it on); `begin_playing` is the one transition paint makes. |
+| 13-001 | `SettingsUi::nav` is one `SettingsNav` (`Closed`, `List`, `Page`, `Sub`): a subpage carries its parent and a closed window has no page. |
+| 13-002 | `Arrival::Seeking` gives up `TOTAL` after it began, so a row that shows up much later does not scroll the page. The time comes from the frame clock (`cx.background_executor().now()`) passed in, so a test advances it. |
+| 13-003 | A send that fails for the exceptions list lands in `Fetch::Failed` (Retry), so the page render no longer re-sends it every frame. |
+| 13-004 | The activity filter drops a chat, agent or tool whose entries are gone (`effective`); rows and buttons read the same value. |
+| 13-015 | The sidebar's grace wake is held by `SidebarReveal` in its `Leaving` mode (`set_mode` is the one place the mode changes and drops it). |
+| 13-030 | The sticker player's upkeep slots use `try_borrow` / `try_borrow_mut`. |
+| 13-031 | See 12-D003. |
+| 13-026 | The set box's `Farewell` also clears the session's viewed set. |
+| 13-040 | `RowState::pending` is gone: the Add button asks the session where it draws. Baseline lines removed. |
+| 13-038 | `CoverStage::Probing` and `Ready` hold their probe and strip tasks, the preview cut holds its own; the serial and `NEXT_SERIAL` are gone because a closed picker drops its tasks. |
+| 13-042 | A save whose adds went out and whose removes did not send waits as `SavingPickerPartly`; once the adds are answered the picker counts them as held, so a retry does not resend them. |
+| 13-044 | A wait's answer acts only when the picker or view still is the one that asked (`Creating`, `SavingPicker { album_id }`, `Deleting { album_id }`). |
+| 13-034 | The picker asks for thumbnails once per candidate count, so later pages get theirs. |
+| 13-049 | Skipped: hosting is `ReplyRow::MediaPanel` inside the one `ViewerPanel` value, not a bool; the panel counts as the story's only while it is also open. |
+| 13-063, 13-064 | The touch bar's sync and followed composer are `Cell`-held stages (`SyncStage`, `Follow`); the observation lives in `Follow`. No `RefCell` borrow is left in them. |
+
+**Review fix round (r2-40).**
+
+| item | what changed |
+| --- | --- |
+| 1 (12-C008) | See the table above: own member field, no hand-emptying. Test: `member_field_tests`. |
+| 2 | Both stickers manager dialogs (`build_stickers_manager_dialog`, `build_mask_sets_dialog`) use `shell::one_shot_dialog_content`; no `RefCell`. |
+| 3 | `send_effects` cell rects: `try_borrow` / `try_borrow_mut` (strip, panel, `choose_send_effect`); a busy cell skips one frame's rect. |
+| 4, 5 | Already `Cell`-held on the integration merge (`media_roots_frame`, `BLOCKED`); no borrow left. |
+| nit | Preview keeps the last blocks; `Arrival` takes the frame clock (test `the_wash_ends_when_the_frame_clock_passes_its_length`). |
+| nit | 12-C009/C010: the debounce token is the driver's check that a fired timer is the newest, the `Task` is the timer; the two are not stages of one thing, so they stay apart. |
+| guards | `check-request-match` flagged the two `refresh_*` purpose lookups (fixed above); `check-stage-enums` flagged `PreviewStage::Waiting` (renamed `Shown`, it waits on no request); baseline lines for gone entries pruned. |
+
 ### Sweep fixes (r2-05)
 
 | id | what changed |

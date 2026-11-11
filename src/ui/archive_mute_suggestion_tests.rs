@@ -49,7 +49,7 @@ fn suggested(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
 
 fn on_privacy_page(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
     app.read_with(vcx, |app, _| {
-        app.settings.open && app.settings.page == Some(Page::Privacy)
+        app.settings.open() && app.settings.page() == Some(Page::Privacy)
     })
 }
 

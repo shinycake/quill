@@ -991,11 +991,7 @@ fn hiding_ads_does_not_drop_a_report_in_flight() {
     session.note_sponsored_report_request(report);
     assert!(session.begin_sponsored_hide(ChatId(1), 9001).is_some());
     assert_eq!(
-        session
-            .messages
-            .sponsored_report
-            .target()
-            .and_then(|target| target.request),
+        session.messages.sponsored_report.awaited(),
         Some(report),
         "the report still waits for its answer"
     );

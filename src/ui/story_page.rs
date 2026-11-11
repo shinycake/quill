@@ -38,6 +38,9 @@ pub(crate) struct StoryPage {
     pub(crate) archive_scroll: ScrollHandle,
     pub(crate) posted_asked: crate::ui::scroll_load::Asked,
     pub(crate) archive_asked: crate::ui::scroll_load::Asked,
+    /// The picker's candidate count its thumbnails were last asked at: a
+    /// page that arrives later asks for its own.
+    pub(crate) thumbs_asked: crate::ui::scroll_load::Asked,
 }
 
 /// What the story page shows below its header.
@@ -119,8 +122,19 @@ pub(crate) enum PageWait {
     Idle,
     /// `createStoryAlbum`: the name and the picker go once it is made.
     Creating(quill::ids::RequestId),
-    /// The picker's adds and removes on an opened album.
-    SavingPicker(Vec<quill::ids::RequestId>),
+    /// The picker's adds and removes on album `album_id`.
+    SavingPicker {
+        album_id: i32,
+        requests: Vec<quill::ids::RequestId>,
+    },
+    /// The picker's adds on album `album_id` went out and its removes
+    /// failed to send: the picker stays, and once the adds are answered
+    /// `added` count as done, so a retry does not send them again.
+    SavingPickerPartly {
+        album_id: i32,
+        requests: Vec<quill::ids::RequestId>,
+        added: Vec<i32>,
+    },
 }
 
 impl StoryPage {
@@ -145,6 +159,7 @@ impl StoryPage {
             archive_scroll: ScrollHandle::new(),
             posted_asked: Default::default(),
             archive_asked: Default::default(),
+            thumbs_asked: Default::default(),
         }
     }
 }

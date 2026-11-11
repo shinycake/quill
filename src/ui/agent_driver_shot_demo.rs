@@ -70,7 +70,7 @@ async fn press_demo_keys(
             other => vec![format!("{other:?}")],
         };
         let settings_open = app
-            .update_in(cx, |app, _, _| app.settings.open)
+            .update_in(cx, |app, _, _| app.settings.open())
             .unwrap_or(false);
         eprintln!(
             "quill screenshot demo: keys answered, settings open {settings_open}, refusals {refusals:?}"
