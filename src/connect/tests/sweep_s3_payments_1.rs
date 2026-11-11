@@ -610,10 +610,20 @@ fn an_outdated_gift_list_is_refetched_once_and_a_refused_refetch_is_not_retried(
     assert!(t.driver.session.payments.hub.gifts.loaded());
     // A mutation lands: the list is out of date and asked for again.
     t.driver.session.payments.hub.gifts.outdate();
-    assert!(t.driver.refresh_received_gifts_if_stale().unwrap().is_some());
+    assert!(
+        t.driver
+            .refresh_received_gifts_if_stale()
+            .unwrap()
+            .is_some()
+    );
     assert_eq!(t.sender.count("getReceivedGifts"), 2);
     // Not asked twice while the first page is out.
-    assert!(t.driver.refresh_received_gifts_if_stale().unwrap().is_none());
+    assert!(
+        t.driver
+            .refresh_received_gifts_if_stale()
+            .unwrap()
+            .is_none()
+    );
     t.answer(
         "getReceivedGifts",
         json!({"@type": "receivedGifts", "total_count": 0, "gifts": [], "next_offset": ""}),
@@ -625,7 +635,12 @@ fn an_outdated_gift_list_is_refetched_once_and_a_refused_refetch_is_not_retried(
     assert!(t.driver.refresh_received_gifts_if_stale().is_err());
     assert!(!t.driver.session.payments.hub.gifts.is_outdated());
     assert!(t.driver.session.payments.hub.gifts.error().is_some());
-    assert!(t.driver.refresh_received_gifts_if_stale().unwrap().is_none());
+    assert!(
+        t.driver
+            .refresh_received_gifts_if_stale()
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]

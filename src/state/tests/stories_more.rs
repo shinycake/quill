@@ -561,8 +561,8 @@ fn call_history_pages_accumulate_and_track_offset() {
 fn set_account_ttl_ok_stores_confirmed_days() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.settings.account_ttl_days = Some(90);
-    session.settings.account_mutating = true;
+    session.settings.account_ttl.succeed(90);
+    session.settings.account_change.begin();
     let extra = session.request(
         RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days: 365 }),
         None,
@@ -573,9 +573,9 @@ fn set_account_ttl_ok_stores_confirmed_days() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert_eq!(session.settings.account_ttl_days, Some(365));
-    assert!(!session.settings.account_mutating);
-    assert!(session.settings.account_error.is_none());
+    assert_eq!(session.settings.account_ttl_days(), Some(365));
+    assert!(!session.settings.account_change.busy());
+    assert!(session.settings.account_error().is_none());
 }
 
 #[test]

@@ -116,9 +116,7 @@ fn a_mutation_refetches_the_authoritative_list() {
         rig.driver.session.settings.proxy.enabled().map(|p| p.id),
         Some(7)
     );
-    assert!(
-        !rig.driver.session.settings.proxy.stale && !rig.driver.session.settings.proxy.mutating
-    );
+    assert!(!rig.driver.session.settings.proxy.settling());
 }
 
 #[test]
@@ -140,11 +138,13 @@ fn a_list_fetch_that_predates_a_change_does_not_clear_the_stale_mark() {
     stale["@extra"] = json!(old.0.to_string());
     rig.feed(stale);
     let proxy = &rig.driver.session.settings.proxy;
-    assert!(proxy.stale, "still waiting for the fetch after the change");
-    assert!(proxy.fetch.loading());
+    assert!(
+        proxy.list.loading(),
+        "still waiting for the fetch after the change"
+    );
     rig.answer("getProxies", proxies_json(&[(1, false), (2, true)]));
     let proxy = &rig.driver.session.settings.proxy;
-    assert!(!proxy.stale && !proxy.fetch.loading());
+    assert!(!proxy.settling());
     assert_eq!(proxy.enabled().map(|p| p.id), Some(2));
 }
 
@@ -167,11 +167,10 @@ fn ok_acks_refetch_and_errors_surface_without_touching_the_list() {
         json!({"@type": "error", "code": 400, "message": "PROXY_NOT_FOUND"}),
     );
     let proxy = &rig.driver.session.settings.proxy;
-    assert!(!proxy.mutating);
+    assert!(!proxy.mutating());
     assert!(
         proxy
-            .error
-            .as_deref()
+            .error()
             .is_some_and(|e| e.starts_with("Could not change the proxy"))
     );
     assert_eq!(proxy.entries().len(), 2, "never optimistic");
@@ -181,10 +180,10 @@ fn ok_acks_refetch_and_errors_surface_without_touching_the_list() {
 fn ping_answers_and_failures_set_the_row_status() {
     let mut rig = Rig::new();
     rig.load_list(&[(1, false), (2, false)]);
-    rig.driver.ping_listed_proxy(1).unwrap();
+    let ping = rig.driver.ping_listed_proxy(1).unwrap();
     assert_eq!(
         rig.driver.session.settings.proxy.pings.get(&1),
-        Some(&PingStatus::Checking)
+        Some(&PingStatus::Checking(ping))
     );
     rig.answer("pingProxy", json!({"@type": "seconds", "seconds": 0.0423}));
     assert_eq!(
@@ -426,7 +425,7 @@ fn a_refused_system_proxy_waits_and_stays_out_of_the_box() {
         "not sent again"
     );
     assert_eq!(rig.count("addProxy"), 1);
-    assert!(rig.driver.session.settings.proxy.error.is_none());
+    assert!(rig.driver.session.settings.proxy.error().is_none());
     // A new OS setting is tried at once.
     assert!(rig.driver.system_proxy_tick(&detected("good.lan")));
     assert_eq!(rig.count("addProxy"), 2);
@@ -456,10 +455,10 @@ fn the_users_failed_proxy_change_is_not_taken_for_the_system_steps() {
         "addProxy",
         json!({"@type": "error", "code": 400, "message": "Wrong server name"}),
     );
-    assert!(rig.driver.session.settings.proxy.error.is_some());
+    assert!(rig.driver.session.settings.proxy.error().is_some());
     let _ = rig.driver.system_proxy_tick(&detected("sys.lan"));
     assert!(
-        rig.driver.session.settings.proxy.error.is_some(),
+        rig.driver.session.settings.proxy.error().is_some(),
         "the user's error stays for the box"
     );
     assert_eq!(rig.count("addProxy"), 2, "the step was not resent");
@@ -485,11 +484,11 @@ fn a_system_step_succeeding_keeps_the_users_failed_change_error() {
         "addProxy",
         json!({"@type": "error", "code": 400, "message": "Wrong server name"}),
     );
-    assert!(rig.driver.session.settings.proxy.error.is_some());
+    assert!(rig.driver.session.settings.proxy.error().is_some());
     assert!(rig.driver.system_proxy_tick(&detected("sys.lan")));
     rig.answer("addProxy", system_entry(5, "sys.lan", true));
     assert!(
-        rig.driver.session.settings.proxy.error.is_some(),
+        rig.driver.session.settings.proxy.error().is_some(),
         "the step's success leaves the user's error"
     );
 }
@@ -652,7 +651,7 @@ fn a_refused_remove_keeps_the_ping_result() {
     rig.driver.ping_listed_proxy(1).unwrap();
     rig.answer("pingProxy", json!({"@type": "seconds", "seconds": 0.0423}));
     rig.driver.disable_proxy().unwrap();
-    assert!(rig.driver.session.settings.proxy.mutating);
+    assert!(rig.driver.session.settings.proxy.mutating());
     assert!(rig.driver.remove_proxy(1).is_err());
     assert_eq!(
         rig.driver.session.settings.proxy.pings.get(&1),

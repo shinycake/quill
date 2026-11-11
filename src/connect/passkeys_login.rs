@@ -6,9 +6,8 @@ use super::*;
 use crate::ids::RequestId;
 use crate::passkeys::PasskeysPurpose;
 use crate::passkeys::login::{
-    LoginStage,
-    HANDLE_INVALID, check_authentication_passkey, get_authentication_passkey_parameters,
-    user_handle_valid,
+    HANDLE_INVALID, LoginStage, check_authentication_passkey,
+    get_authentication_passkey_parameters, user_handle_valid,
 };
 use crate::state::{RequestPurpose, SettingsPurpose, ShutdownPhase};
 use crate::telegram::envelope::AuthorizationState;

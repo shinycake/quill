@@ -257,9 +257,9 @@ impl Session {
             SettingsPayload::DeviceLoginResult { result } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::ConfirmDeviceLogin) {
                     self.settings.device_login_result = Some(result);
-                    self.settings.sessions_mutating = false;
+                    self.settings.sessions_change.settle();
                     if result != crate::auth::DeviceLoginResult::Failed {
-                        self.settings.sessions_stale = true;
+                        self.settings.sessions.outdate();
                         self.settings.sessions.clear_error();
                     } else {
                         self.settings
@@ -309,7 +309,6 @@ impl Session {
                         self.settings.privacy_data.inactive_session_ttl_days =
                             inactive_session_ttl_days;
                     }
-                    self.settings.sessions_stale = false;
                 }
             }
             SettingsPayload::AccountTtl { days } => {
@@ -318,9 +317,8 @@ impl Session {
                 // `@extra`). Authoritative: replaces the cached days and
                 // clears any stale error.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetAccountTtl) {
-                    self.settings.account_ttl_days = Some(days);
-                    self.settings.account_ttl_loading = false;
-                    self.settings.account_error = None;
+                    self.settings.account_ttl.succeed(days);
+                    self.settings.account_change.clear_error();
                 }
             }
             SettingsPayload::ConnectedWebsites { websites } => {
@@ -330,10 +328,8 @@ impl Session {
                 // clears any stale error. No optimistic mutation ever
                 // happens client-side.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetConnectedWebsites) {
-                    self.settings.connected_websites = Some(websites);
-                    self.settings.connected_websites_loading = false;
-                    self.settings.websites_error = None;
-                    self.settings.websites_stale = false;
+                    self.settings.connected_websites.succeed(websites);
+                    self.settings.websites_change.clear_error();
                 }
             }
             SettingsPayload::ScopeNotificationSettings { settings, .. } => {

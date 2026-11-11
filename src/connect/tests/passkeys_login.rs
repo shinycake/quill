@@ -169,7 +169,11 @@ mod with_webauthn {
         assert!(p.driver.finish_login(&assertion(b"2:777")).is_err());
         answer(&mut p, "checkAuthenticationPasskey", json!({"@type": "ok"}));
         let login = &p.driver.session.settings.passkeys.login;
-        assert!(!login.checking() && login.error().is_none() && login.fresh_options(std::time::Instant::now()).is_none());
+        assert!(
+            !login.checking()
+                && login.error().is_none()
+                && login.fresh_options(std::time::Instant::now()).is_none()
+        );
         // A password-protected account: TDLib moves to the password screen.
         auth(
             &mut p,

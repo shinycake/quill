@@ -379,8 +379,10 @@ impl QuillApp {
                 || s.requests
                     .has_purpose(RequestPurpose::SetProfileAccentColor)
         });
-        let icons_failed = session.is_some_and(|s| s.users_state.background_emoji_icons.error().is_some());
-        let icons_empty = session.is_some_and(|s| s.users_state.background_emoji_icons.items().is_empty());
+        let icons_failed =
+            session.is_some_and(|s| s.users_state.background_emoji_icons.error().is_some());
+        let icons_empty =
+            session.is_some_and(|s| s.users_state.background_emoji_icons.items().is_empty());
         let dark = super::chat_theme::is_dark_palette();
         let theme = cx.theme();
         let muted = theme.muted_foreground;
@@ -705,7 +707,13 @@ impl QuillApp {
             .role(Role::List)
             .aria_label(tr(keys::Q_MISC_COLLECTIBLE_GIFTS));
         let mut count = 0;
-        for (ix, gift) in session.users_state.wearable_gifts.items().iter().enumerate() {
+        for (ix, gift) in session
+            .users_state
+            .wearable_gifts
+            .items()
+            .iter()
+            .enumerate()
+        {
             let Some(colors) = gift.gift.colors.clone() else {
                 continue;
             };

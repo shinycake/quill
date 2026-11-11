@@ -69,8 +69,7 @@ pub(super) fn seed_gift_value_session(sink: Arc<MemorySink>) -> Session {
     let mut session = seed_gift_market_session(sink);
     let hub = &mut session.payments.hub;
     hub.set_gifts(
-        parse_received_gift(&received_gift()).into_iter()
-        .collect(),
+        parse_received_gift(&received_gift()).into_iter().collect(),
         1,
     );
     hub.gifts_owner = Some(MessageSender::User { user_id: ME });

@@ -170,8 +170,8 @@ fn the_channels_tab_asks_for_recommendations_once() {
         r#""total_count":2,"chat_ids":[21,22]"#,
     );
     let tabs = &fx.driver.session.search.search.tabs;
-    assert_eq!(tabs.recommended, vec![ChatId(21), ChatId(22)]);
-    assert!(tabs.recommended_loaded && !tabs.recommended_loading);
+    assert_eq!(tabs.recommended.items(), [ChatId(21), ChatId(22)]);
+    assert!(!tabs.recommended.is_loading() && tabs.recommended.data().is_some());
     fx.open_tab(SearchTab::Chats);
     fx.open_tab(SearchTab::Channels);
     assert_eq!(fx.requests("getRecommendedChats").len(), 1);
@@ -430,7 +430,7 @@ fn the_paid_search_sends_the_reported_price_only_when_called() {
         "foundPublicPosts",
         r#""next_offset":"","are_limits_exceeded":true,"messages":[]"#,
     );
-    assert!(fx.driver.session.search.search.public_limits_exceeded);
+    assert!(fx.driver.session.search.search.public_limits_exceeded());
     // Nothing paid went out on its own.
     assert!(
         fx.requests("searchPublicPosts")
@@ -453,7 +453,9 @@ fn a_paid_search_needs_a_plain_query_and_a_price() {
     fx.driver
         .search_hashtag("#dune", crate::search_filters::SearchScope::PublicPosts)
         .unwrap();
-    fx.driver.session.search.search.public_limits_exceeded = true;
+    let search = &mut fx.driver.session.search.search;
+    search.accept_messages(Vec::new(), false);
+    search.note_public_limits(true);
     fx.driver.session.search.search.tabs.limits = Some(crate::state::PublicPostLimits {
         daily_free: 5,
         remaining_free: 0,

@@ -395,24 +395,26 @@ pub(crate) fn seed_message_statistics(session: &mut Session, chat_id: i64, from_
             token: "message-reactions".into(),
         },
     });
-    state.forwards.total = 2;
-    state.forwards.forwards = vec![
-        PublicForwardView {
-            kind: PublicForwardKind::Message {
-                chat_id: from_chat,
-                message_id: 5 << 20,
+    state.forwards.set(
+        vec![
+            PublicForwardView {
+                kind: PublicForwardKind::Message {
+                    chat_id: from_chat,
+                    message_id: 5 << 20,
+                },
+                date: 1,
+                view_count: 640,
             },
-            date: 1,
-            view_count: 640,
-        },
-        PublicForwardView {
-            kind: PublicForwardKind::Message {
-                chat_id: from_chat,
-                message_id: 6 << 20,
+            PublicForwardView {
+                kind: PublicForwardKind::Message {
+                    chat_id: from_chat,
+                    message_id: 6 << 20,
+                },
+                date: 2,
+                view_count: 0,
             },
-            date: 2,
-            view_count: 0,
-        },
-    ];
+        ],
+        2,
+    );
     message_id
 }

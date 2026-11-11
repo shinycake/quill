@@ -2,9 +2,9 @@
 //! removed live).
 use super::super::*;
 use super::*;
-use crate::passkeys::ListStage;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::AccountKey;
+use crate::passkeys::ListStage;
 use crate::platform::MemorySecretStore;
 use crate::state::Session;
 use crate::telegram::client::copy_and_parse;

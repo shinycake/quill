@@ -144,7 +144,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let query = search.query.trim().to_string();
         let price = search.tabs.limits.map_or(0, |limits| limits.star_count);
         if search.filters.scope != SearchScope::PublicPosts
-            || !search.public_limits_exceeded
+            || !search.public_limits_exceeded()
             || price <= 0
             || query.is_empty()
             || crate::search_filters::tag_query(&query).is_some()
@@ -178,16 +178,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let tabs = &mut self.session.search.search.tabs;
-        if tabs.recommended_loading || tabs.recommended_loaded {
+        if !tabs.recommended.can_ask() {
             return Ok(None);
         }
-        tabs.recommended_loading = true;
+        tabs.recommended.begin();
         let extra = self
             .session
             .request(RequestPurpose::GetRecommendedChats, None);
         if let Err(err) = self.sender.send_json(&get_recommended_chats(extra)) {
             self.session.requests.take(extra);
-            self.session.search.search.tabs.recommended_loading = false;
+            self.session.search.search.tabs.recommended.fail("not sent");
             return Err(err);
         }
         Ok(Some(extra))

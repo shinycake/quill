@@ -4,9 +4,8 @@
 use super::*;
 use crate::ids::RequestId;
 use crate::passkeys::{
-    ListStage, PasskeyRemove,
-    PasskeyAdd, PasskeysPurpose, add_login_passkey, get_login_passkeys, get_passkey_parameters,
-    remove_login_passkey,
+    ListStage, PasskeyAdd, PasskeyRemove, PasskeysPurpose, add_login_passkey, get_login_passkeys,
+    get_passkey_parameters, remove_login_passkey,
 };
 use crate::state::{RequestPurpose, SettingsPurpose};
 use crate::webauthn::Registration;

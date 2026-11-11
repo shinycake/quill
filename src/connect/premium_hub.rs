@@ -153,11 +153,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let collection = self.session.payments.gifts_manage.active_collection;
         let json = get_received_gifts_in(extra, owner, collection, &offset, GIFT_PAGE);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session
-                .payments
-                .hub
-                .gifts
-                .send_failed(crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_GIFTS));
+            self.session.payments.hub.gifts.send_failed(crate::lang::tr(
+                crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_GIFTS,
+            ));
             return Err(err);
         }
         Ok(extra)
@@ -266,11 +264,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::GetPremiumStickerExamples, None);
         if let Err(err) = self.send_json_request(extra, &get_premium_sticker_examples(extra)) {
-            self.session
-                .payments
-                .hub
-                .premium_stickers
-                .fail("not sent");
+            self.session.payments.hub.premium_stickers.fail("not sent");
             return Err(err);
         }
         Ok(Some(extra))

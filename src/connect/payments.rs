@@ -206,7 +206,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         append: bool,
     ) -> Result<RequestId, ConnectSendError> {
         let offset = if append {
-            self.session.payments.star_subs.list.next_offset().to_string()
+            self.session
+                .payments
+                .star_subs
+                .list
+                .next_offset()
+                .to_string()
         } else {
             String::new()
         };
@@ -220,9 +225,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Err(err) = self.send_json_request(extra, &json) {
             // A page that never left shows its error; it is not asked again
             // by itself.
-            self.session.payments.star_subs.list.send_failed(
-                crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_THE_SUBSCRIPTIONS),
-            );
+            self.session
+                .payments
+                .star_subs
+                .list
+                .send_failed(crate::lang::tr(
+                    crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_THE_SUBSCRIPTIONS,
+                ));
             return Err(err);
         }
         Ok(extra)

@@ -151,6 +151,113 @@ impl StickerLists {
     }
 }
 
+/// A bulk install or archive of sticker sets, one stage at a time: each
+/// set's answer (or its refusal to leave) takes it off `pending`, and the
+/// batch is `Done` once none is left.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum StickerBatch {
+    #[default]
+    Idle,
+    Running {
+        total: usize,
+        completed: usize,
+        failed: usize,
+        pending: Vec<i64>,
+    },
+    Done {
+        total: usize,
+        completed: usize,
+        failed: usize,
+    },
+}
+
+impl StickerBatch {
+    /// The sets go out.
+    pub fn begin(set_ids: Vec<i64>) -> Self {
+        if set_ids.is_empty() {
+            return Self::Idle;
+        }
+        Self::Running {
+            total: set_ids.len(),
+            completed: 0,
+            failed: 0,
+            pending: set_ids,
+        }
+    }
+
+    /// `set_id` answered (`success`) or failed; a set that is not pending
+    /// changes nothing.
+    pub fn finish(&mut self, set_id: i64, success: bool) {
+        let Self::Running {
+            total,
+            completed,
+            failed,
+            pending,
+        } = self
+        else {
+            return;
+        };
+        let Some(index) = pending.iter().position(|id| *id == set_id) else {
+            return;
+        };
+        pending.remove(index);
+        if success {
+            *completed += 1;
+        } else {
+            *failed += 1;
+        }
+        if pending.is_empty() {
+            *self = Self::Done {
+                total: *total,
+                completed: *completed,
+                failed: *failed,
+            };
+        }
+    }
+
+    pub fn total(&self) -> usize {
+        match self {
+            Self::Idle => 0,
+            Self::Running { total, .. } | Self::Done { total, .. } => *total,
+        }
+    }
+
+    pub fn completed(&self) -> usize {
+        match self {
+            Self::Idle => 0,
+            Self::Running { completed, .. } | Self::Done { completed, .. } => *completed,
+        }
+    }
+
+    pub fn failed(&self) -> usize {
+        match self {
+            Self::Idle => 0,
+            Self::Running { failed, .. } | Self::Done { failed, .. } => *failed,
+        }
+    }
+
+    pub fn pending(&self) -> &[i64] {
+        match self {
+            Self::Running { pending, .. } => pending,
+            _ => &[],
+        }
+    }
+}
+
+/// Where the GIF search tab stands. Every stage leaves: the results, a
+/// refusal, the bot changing, the saved tab showing again.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GifSearchStage {
+    /// The saved collection shows.
+    #[default]
+    Off,
+    /// A page, or the search bot, is being asked for.
+    Loading,
+    /// The page or the bot failed; opening the panel asks once more.
+    Failed,
+    Ready,
+}
+
 /// Composer sticker panel (Unigram `StickerDrawerViewModel` installed regular sets).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StickerPanel {
@@ -169,10 +276,8 @@ pub struct StickerPanel {
     /// Each list tab's own fetch: a failure of one list shows on that tab
     /// only, and a failed mutation is a note, not a list failure.
     pub lists: StickerLists,
-    pub batch_total: usize,
-    pub batch_completed: usize,
-    pub batch_failed: usize,
-    pub batch_pending: Vec<i64>,
+    /// The sets of the last bulk install / archive and how they went.
+    pub batch: StickerBatch,
     /// Slice S8: trending sets (`getTrendingStickerSets`) + premium-row flag.
     pub trending: Vec<StickerSetInfo>,
     pub trending_total: usize,
@@ -219,21 +324,18 @@ pub struct StickerPanel {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GifPanel {
     pub open: bool,
-    pub animations: Vec<AnimationItem>,
-    pub loaded: bool,
-    pub search_mode: bool,
-    pub search_loading: bool,
-    pub search_failed: bool,
+    /// `getSavedAnimations`: asked, answered, out of date (an update
+    /// arrived, or a change of the collection) or failed. A failure waits
+    /// for the panel to open again before it is asked once more.
+    pub saved: crate::state::fetch::Fetch<Vec<AnimationItem>>,
+    /// The search tab: off while the saved collection shows.
+    pub search: GifSearchStage,
     pub search_query: String,
     /// The chat of the window that asked (the inline query's chat); paging
     /// keeps it.
     pub search_chat: Option<crate::ids::ChatId>,
     pub search_bot_username: String,
     pub search_bot_user_id: Option<i64>,
-    pub loading: bool,
-    pub failed: bool,
-    /// `updateSavedAnimations` arrived; refresh even if the panel was closed.
-    pub stale: bool,
     /// Slice S9: GIF search via the animation search bot
     /// (`getInlineQueryResults`; schema 1.8.67, lines 6483, 13019).
     /// First page replaces; later pages append, deduped by file id.
@@ -289,11 +391,27 @@ impl GifSearches {
 
 impl GifPanel {
     pub fn visible_animations(&self) -> &[AnimationItem] {
-        if self.search_mode {
+        if self.searching() {
             &self.search_results
         } else {
-            &self.animations
+            self.animations()
         }
+    }
+
+    /// The saved collection so far.
+    pub fn animations(&self) -> &[AnimationItem] {
+        self.saved.items()
+    }
+
+    /// The saved list answered or failed (so a closed panel's tab is not
+    /// waiting on it).
+    pub fn saved_loaded(&self) -> bool {
+        self.saved.data().is_some() || self.saved.error().is_some()
+    }
+
+    /// The search tab is showing.
+    pub fn searching(&self) -> bool {
+        self.search != GifSearchStage::Off
     }
 
     pub fn close(&mut self) {

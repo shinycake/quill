@@ -394,7 +394,10 @@ fn deleting_a_gift_sends_delete_gift_and_removes_it_on_ok() {
     let hub = &p.0.session.payments.hub;
     assert!(!hub.gift_mutating);
     assert_eq!(
-        hub.gift_list().iter().map(|g| g.id.as_str()).collect::<Vec<_>>(),
+        hub.gift_list()
+            .iter()
+            .map(|g| g.id.as_str())
+            .collect::<Vec<_>>(),
         ["b", "c"]
     );
     assert_eq!(hub.gifts_total(), 2);
@@ -582,11 +585,8 @@ fn a_channel_creator_can_delete_its_gift_and_an_admin_cannot() {
     p.0.session.payments.hub.gifts_owner = Some(MessageSender::Chat { chat_id: -1002 });
     p.0.session.payments.hub.set_gifts(
         vec![
-            crate::premium_hub::parse_received_gift(&regular(
-                "a",
-                json!({"can_be_deleted": true}),
-            ))
-            .unwrap(),
+            crate::premium_hub::parse_received_gift(&regular("a", json!({"can_be_deleted": true})))
+                .unwrap(),
         ],
         1,
     );

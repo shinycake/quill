@@ -300,11 +300,7 @@ fn star_subscriptions_error_surfaces() {
     assert!(!session.payments.star_subs.list.loading());
     // `error_reason` never echoes the native TDLib message (it can
     // contain secrets) — the classified reason surfaces instead.
-    let err = session
-        .payments
-        .star_subs
-        .error()
-        .expect("error surfaces");
+    let err = session.payments.star_subs.error().expect("error surfaces");
     assert_eq!(err, "Couldn't load subscriptions: invalid request");
 }
 

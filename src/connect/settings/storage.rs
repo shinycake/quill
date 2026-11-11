@@ -1,5 +1,6 @@
 //! Connect driver: storage statistics, auto-download presets and storage limits.
 use super::*;
+use crate::storage_limits::StorageSeed;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase S2: `getStorageStatistics` for the storage-usage overlay —
@@ -221,7 +222,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// the next Ready.
     pub(crate) fn maybe_seed_storage_limits(&mut self) -> Result<(), ConnectSendError> {
         let settings = &self.session.settings;
-        if settings.data_storage.storage_limits_seeded || settings.storage_limits_seed_sent {
+        if settings.storage_seed != StorageSeed::Unseeded {
             return Ok(());
         }
         if !settings.storage_limits.chosen() {
@@ -229,7 +230,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Some(crate::storage_limits::DEFAULT_SIZE),
                 Some(crate::storage_limits::DEFAULT_KEEP),
             )?;
-            self.session.settings.storage_limits_seed_sent = true;
+            self.session.settings.storage_seed = StorageSeed::Sent;
         }
         self.note_storage_limits_seeded();
         Ok(())
@@ -240,9 +241,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// choice), so it counts as seeded from now on.
     pub(crate) fn note_storage_limits_seeded(&mut self) {
         let settings = &self.session.settings;
-        if settings.data_storage.storage_limits_seeded || !settings.storage_limits.chosen() {
+        if settings.storage_seed == StorageSeed::Seeded || !settings.storage_limits.chosen() {
             return;
         }
+        self.session.settings.storage_seed = StorageSeed::Seeded;
         self.session.settings.data_storage.storage_limits_seeded = true;
         let _ = self.save_data_storage_prefs();
     }

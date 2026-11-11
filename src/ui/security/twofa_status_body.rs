@@ -444,7 +444,8 @@ impl QuillApp {
         self.privacy.websites_confirm = None;
         // The last open's failure line goes: a cached list skips the fetch.
         if let Some(session) = self.session_mut() {
-            session.settings.websites_error = None;
+            session.settings.websites_change.clear_error();
+            session.settings.connected_websites.clear_error();
         }
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.maybe_fetch_connected_websites();
@@ -464,13 +465,13 @@ impl QuillApp {
     /// fetch refires; demo re-injects the fixture.
     pub(in crate::ui) fn refresh_websites(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.settings.connected_websites = None;
-            live.driver.session.settings.websites_stale = false;
+            live.driver.session.settings.connected_websites = Default::default();
             let _ = live.driver.maybe_fetch_connected_websites();
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.settings.connected_websites = Some(demo_websites());
-            session.settings.connected_websites_loading = false;
-            session.settings.websites_error = None;
+            session.settings.connected_websites =
+                quill::state::fetch::Fetch::Ready(demo_websites());
+            session.settings.websites_change.clear_error();
+            session.settings.connected_websites.clear_error();
         }
         cx.notify();
     }

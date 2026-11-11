@@ -17,15 +17,18 @@ pub struct StarsGiftTarget {
 /// The Gift Stars dialog.
 #[derive(Debug, Clone, Default)]
 pub struct StarsGiftState {
-    pub open: bool,
     pub stage: GiftStage,
 }
 
-/// What the dialog shows.
+/// What the dialog shows. Closing, Back and a new open each replace it
+/// whole, so nothing of a contact or its packs outlives the stage it
+/// belonged to.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum GiftStage {
-    /// The contact list shows.
+    /// The dialog is not on screen.
     #[default]
+    Closed,
+    /// The contact list shows.
     Contacts,
     /// A contact was picked; its packs load, or are in.
     Packs {
@@ -45,15 +48,30 @@ pub enum PackLoad {
 }
 
 impl StarsGiftState {
-    /// Back to the contact list.
-    pub fn clear_target(&mut self) {
+    pub fn is_open(&self) -> bool {
+        self.stage != GiftStage::Closed
+    }
+
+    /// Open on the contact list.
+    pub fn open(&mut self) {
         self.stage = GiftStage::Contacts;
+    }
+
+    pub fn close(&mut self) {
+        self.stage = GiftStage::Closed;
+    }
+
+    /// Back to the contact list (a closed dialog stays closed).
+    pub fn clear_target(&mut self) {
+        if self.is_open() {
+            self.stage = GiftStage::Contacts;
+        }
     }
 
     pub fn target(&self) -> Option<&StarsGiftTarget> {
         match &self.stage {
             GiftStage::Packs { target, .. } => Some(target),
-            GiftStage::Contacts => None,
+            GiftStage::Contacts | GiftStage::Closed => None,
         }
     }
 
@@ -129,7 +147,6 @@ mod tests {
     #[test]
     fn going_back_forgets_the_contact_and_packs() {
         let mut state = StarsGiftState {
-            open: true,
             stage: GiftStage::Packs {
                 target: StarsGiftTarget {
                     user_id: 5,
@@ -139,13 +156,12 @@ mod tests {
             },
         };
         state.clear_target();
-        assert!(state.open && state.target().is_none() && state.error().is_none());
+        assert!(state.is_open() && state.target().is_none() && state.error().is_none());
     }
 
     #[test]
     fn only_the_request_that_asked_fills_the_packs() {
         let mut state = StarsGiftState {
-            open: true,
             stage: GiftStage::Packs {
                 target: StarsGiftTarget {
                     user_id: 5,

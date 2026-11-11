@@ -28,7 +28,7 @@ impl Session {
         }
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::GetRecommendedChats) => {
-                self.search.search.tabs.recommended_loading = false;
+                self.search.search.tabs.recommended.fail(error_reason(err));
             }
             Some(RequestPurpose::SearchMessagesMore | RequestPurpose::SearchPublicPostsMore)
                 if self.search.search.matches_generation(pending) =>

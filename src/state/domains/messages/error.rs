@@ -14,6 +14,15 @@ impl Session {
         // The Edit box's Auto-translate switch is a Messages request: its
         // refusal keeps the box open with the reason.
         self.record_group_info_edit_error(err, pending);
+        // A preload that failed leaves no entry: the next pull asks again.
+        if let Some(p) = pending
+            && p.purpose == RequestPurpose::PreloadHistory
+            && let Some(chat_id) = p.chat_id
+            && self.chat_list.history_preloads.get(&chat_id.0)
+                == Some(&crate::state::HistoryPreload::Loading(p.id))
+        {
+            self.chat_list.history_preloads.remove(&chat_id.0);
+        }
         if let Some(RequestPurpose::GetRepliedMessage {
             chat_id,
             message_id,
@@ -317,14 +326,8 @@ impl Session {
             // A TDLib error dismisses the option picker; no outcome is shown.
             // Only for the request the flow waits on: a report already
             // dismissed, or an earlier step, has nothing left to dismiss.
-            let waits = pending.is_some_and(|p| {
-                self.messages
-                    .sponsored_report_target
-                    .is_some_and(|target| target.request == Some(p.id))
-            });
-            if waits {
-                self.messages.sponsored_report = None;
-                self.messages.sponsored_report_target = None;
+            if pending.is_some_and(|p| self.messages.sponsored_report.waits_for(p.id)) {
+                self.messages.sponsored_report = SponsoredReport::Idle;
             }
         }
     }

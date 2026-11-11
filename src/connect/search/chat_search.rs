@@ -206,15 +206,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.search.chat_search.clear_query();
             return Ok(ChatSearchQueryOutcome::Unchanged);
         }
-        if self
-            .pending_typed_chat_search
-            .as_ref()
-            .is_some_and(|(_, q)| q == trimmed)
+        if self.typed_chat_search.pending() == Some(trimmed)
             && self.session.search.chat_search.query == trimmed
         {
             return Ok(ChatSearchQueryOutcome::Unchanged);
         }
-        if self.pending_typed_chat_search.is_none()
+        if self.typed_chat_search.pending().is_none()
             && self.session.search.chat_search.query == trimmed
             && matches!(
                 self.session.search.chat_search.status,
@@ -227,9 +224,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(ChatSearchQueryOutcome::Unchanged);
         }
         let _search_gen = self.session.search.chat_search.begin_query(trimmed);
-        self.chat_search_debounce_token = self.chat_search_debounce_token.saturating_add(1);
-        let token = self.chat_search_debounce_token;
-        self.pending_typed_chat_search = Some((token, trimmed.to_string()));
+        let token = self.typed_chat_search.arm(trimmed);
         Ok(ChatSearchQueryOutcome::Debounced { token })
     }
 
@@ -505,19 +500,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         token: u64,
     ) -> Result<Option<ChatSearchFlight>, ConnectSendError> {
-        let Some((pending_token, query)) = self.pending_typed_chat_search.clone() else {
+        let Some(query) = self.typed_chat_search.commit(token) else {
             return Ok(None);
         };
-        if pending_token != token {
-            return Ok(None);
-        }
-        self.pending_typed_chat_search = None;
         self.send_chat_search(&query)
     }
 
     fn clear_chat_search_debounce(&mut self) {
-        self.pending_typed_chat_search = None;
-        self.chat_search_debounce_token = self.chat_search_debounce_token.saturating_add(1);
+        self.typed_chat_search.cancel();
     }
 
     fn send_chat_search(

@@ -16,6 +16,9 @@ pub enum Fetch<T> {
     Loading { stale: Option<T> },
     /// The latest request answered.
     Ready(T),
+    /// A change landed after the answer: the old answer, if any, stays
+    /// visible until the refetch replaces it (never optimistic).
+    Outdated(Option<T>),
     /// The latest request failed; `stale` is the last answer, if any.
     Failed { error: String, stale: Option<T> },
 }
@@ -38,6 +41,21 @@ impl<T> Fetch<T> {
         matches!(self, Self::Idle | Self::Failed { .. })
     }
 
+    /// The answer is out of date and a refetch is due.
+    pub fn is_outdated(&self) -> bool {
+        matches!(self, Self::Outdated(_))
+    }
+
+    /// A change landed: what is held stays visible and is asked for
+    /// again, also when nothing was held (the change needs the answer). A
+    /// request in flight keeps its place: it answers a question asked
+    /// before the change, so the caller's next change outdates it again.
+    pub fn outdate(&mut self) {
+        if !self.is_loading() {
+            *self = Self::Outdated(self.take_data());
+        }
+    }
+
     pub fn is_loading(&self) -> bool {
         matches!(self, Self::Loading { .. })
     }
@@ -56,7 +74,9 @@ impl<T> Fetch<T> {
         match self {
             Self::Idle => None,
             Self::Ready(value) => Some(value),
-            Self::Loading { stale } | Self::Failed { stale, .. } => stale.as_ref(),
+            Self::Outdated(held)
+            | Self::Loading { stale: held }
+            | Self::Failed { stale: held, .. } => held.as_ref(),
         }
     }
 
@@ -64,7 +84,9 @@ impl<T> Fetch<T> {
         match self {
             Self::Idle => None,
             Self::Ready(value) => Some(value),
-            Self::Loading { stale } | Self::Failed { stale, .. } => stale.as_mut(),
+            Self::Outdated(held)
+            | Self::Loading { stale: held }
+            | Self::Failed { stale: held, .. } => held.as_mut(),
         }
     }
 
@@ -73,7 +95,9 @@ impl<T> Fetch<T> {
         match std::mem::take(self) {
             Self::Idle => None,
             Self::Ready(value) => Some(value),
-            Self::Loading { stale } | Self::Failed { stale, .. } => stale,
+            Self::Outdated(held)
+            | Self::Loading { stale: held }
+            | Self::Failed { stale: held, .. } => held,
         }
     }
 
@@ -92,6 +116,7 @@ impl<T> Fetch<T> {
                 error,
                 stale: Some(make()),
             },
+            Self::Outdated(_) => Self::Outdated(Some(make())),
             Self::Idle | Self::Ready(_) => Self::Ready(make()),
         };
     }
@@ -344,5 +369,50 @@ mod tests {
         let mut fetch = Fetch::Ready(7);
         assert_eq!(fetch.take_data(), Some(7));
         assert!(fetch.is_idle());
+    }
+}
+
+/// One change request at a time (a terminate, a disconnect, a delete):
+/// idle, in flight, or failed with the honest one-line reason. Its answer,
+/// its error and a send that never left each leave `Busy`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Change {
+    #[default]
+    Idle,
+    Busy,
+    Failed(String),
+}
+
+impl Change {
+    pub fn busy(&self) -> bool {
+        matches!(self, Self::Busy)
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            Self::Failed(error) => Some(error),
+            _ => None,
+        }
+    }
+
+    /// The request goes out; the last failure's line goes.
+    pub fn begin(&mut self) {
+        *self = Self::Busy;
+    }
+
+    /// The request answered, or never left.
+    pub fn settle(&mut self) {
+        *self = Self::Idle;
+    }
+
+    pub fn fail(&mut self, error: impl Into<String>) {
+        *self = Self::Failed(error.into());
+    }
+
+    /// Forget the failure's line; a change in flight is left alone.
+    pub fn clear_error(&mut self) {
+        if matches!(self, Self::Failed(_)) {
+            *self = Self::Idle;
+        }
     }
 }

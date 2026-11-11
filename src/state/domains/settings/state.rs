@@ -1,7 +1,7 @@
 //! Notifications, storage, privacy, sessions, websites, the account and preferences: the `settings` domain's share of `Session`.
 //! Added to by features in this domain only; `Session::new` builds it
 //! with `new`.
-use crate::state::fetch::Fetch;
+use crate::state::fetch::{Change, Fetch};
 use crate::state::*;
 
 /// The read-date privacy round-trip. A get and a set are told apart, so
@@ -70,12 +70,10 @@ pub struct SettingsState {
     /// Chats with an OS notification we showed (or TDLib reports active
     /// from a previous launch); only these produce a clear.
     pub shown_notification_chats: std::collections::HashSet<ChatId>,
-    /// `getDefaultMessageAutoDeleteTime` cache, seconds (0 = off).
-    pub default_auto_delete_secs: Option<i32>,
-    /// A default auto-delete fetch or write is in flight.
-    pub default_auto_delete_busy: bool,
-    /// Honest one-line failure of the last default auto-delete request.
-    pub default_auto_delete_error: Option<String>,
+    /// `getDefaultMessageAutoDeleteTime` cache, seconds (0 = off): in
+    /// flight for a fetch or a write, or the honest one-line failure of the
+    /// last request.
+    pub default_auto_delete: Fetch<i32>,
     /// Parity slice: `getSavedNotificationSounds` cache (titles / durations
     /// for the sound picker; `sound` files download on demand).
     pub saved_notification_sounds: Vec<NotificationSound>,
@@ -138,9 +136,10 @@ pub struct SettingsState {
     pub storage_clearing: bool,
     /// Batch 6: the local storage limits TDLib reports (`updateOption`).
     pub storage_limits: crate::storage_limits::StorageLimits,
-    /// This session sent the first cache limits; the account counts as
-    /// seeded once TDLib echoes them (`storage_limits.chosen()`).
-    pub storage_limits_seed_sent: bool,
+    /// The first cache limits: sent by this session, then seeded once TDLib
+    /// echoes them (`storage_limits.chosen()`). Persisted through
+    /// `data_storage.storage_limits_seeded`.
+    pub storage_seed: crate::storage_limits::StorageSeed,
     /// B13: new-chat privacy, inactive-session TTL, 18+ option, network
     /// usage and the remember-password check.
     pub privacy_data: PrivacyData,
@@ -156,44 +155,31 @@ pub struct SettingsState {
     /// visible meanwhile and the next successful fetch clears the error.
     pub sessions: Fetch<Vec<ParsedSession>>,
     /// Slice A3: a `terminateSession` / `terminateAllOtherSessions` round
-    /// trip is in flight — terminate buttons stay disabled meanwhile.
-    pub sessions_mutating: bool,
+    /// trip is in flight — terminate buttons stay disabled meanwhile. A
+    /// terminate that succeeded outdates `sessions` (refetched on the next
+    /// ingest, never an optimistic delete); its failure is the error line
+    /// of `sessions`.
+    pub sessions_change: Change,
     pub device_login_result: Option<crate::auth::DeviceLoginResult>,
-    /// Slice A3: a terminate succeeded — the old cache stays visible and
-    /// is refetched from the authoritative answer on the next ingest
-    /// (the `saved_sounds_stale` pattern); never an optimistic delete.
-    pub sessions_stale: bool,
     /// Slice A7: cached `getAccountTtl` answer, in days — drives the
-    /// self-destruct-if-away picker (UI half ships post-Phase-9).
-    pub account_ttl_days: Option<i32>,
-    /// Slice A7: a `getAccountTtl` round trip is in flight.
-    pub account_ttl_loading: bool,
+    /// self-destruct-if-away picker.
+    pub account_ttl: Fetch<i32>,
     /// Slice A7: a `deleteAccount` / `setAccountTtl` round trip is in
-    /// flight — the account surfaces stay disabled meanwhile.
-    pub account_mutating: bool,
-    /// Slice A7: honest one-line failure of the last account-lifecycle
-    /// op (classified from the TDLib error code, never the native
-    /// message). Cleared on the next attempt and on success.
-    pub account_error: Option<String>,
+    /// flight — the account surfaces stay disabled meanwhile — or the
+    /// honest one-line failure of the last one (classified from the TDLib
+    /// error code, never the native message).
+    pub account_change: Change,
     /// Slice A4: cached `getConnectedWebsites` answer (TGX
     /// `SettingsWebsitesController` style); drives the Connected Websites
-    /// overlay.
-    pub connected_websites: Option<Vec<ParsedWebsite>>,
+    /// overlay. A disconnect that succeeded outdates it; its failure is
+    /// `websites_change`'s line.
+    pub connected_websites: Fetch<Vec<ParsedWebsite>>,
     /// The account's login passkeys (`crate::passkeys`).
     pub passkeys: crate::passkeys::PasskeysState,
-    /// Slice A4: a `getConnectedWebsites` round trip is in flight.
-    pub connected_websites_loading: bool,
     /// Slice A4: a `disconnectWebsite` / `disconnectAllWebsites` round trip
-    /// is in flight — disconnect buttons stay disabled meanwhile.
-    pub websites_mutating: bool,
-    /// Slice A4: honest one-line failure of the last websites fetch or
-    /// disconnect (classified from the TDLib error code, never the native
-    /// message). Cleared on the next successful fetch.
-    pub websites_error: Option<String>,
-    /// Slice A4: a disconnect succeeded — the old cache stays visible and
-    /// is refetched from the authoritative answer on the next ingest
-    /// (the `saved_sounds_stale` pattern); never an optimistic delete.
-    pub websites_stale: bool,
+    /// is in flight — disconnect buttons stay disabled meanwhile — or the
+    /// honest one-line failure of the last one.
+    pub websites_change: Change,
     /// Parity slice: downloaded-file id → notification sound id, for files
     /// fetched as notification sounds.
     pub sound_file_ids: HashMap<i32, i64>,
@@ -253,11 +239,6 @@ pub struct SettingsState {
     /// `parity:proxy-settings`: TDLib's proxy list, ping results and the
     /// auto-switch / IPv6 preferences.
     pub proxy: crate::proxy::ProxyState,
-    /// The latest `pingProxy` sent for each ping slot (a list entry, or
-    /// the link box's). Only its answer fills the slot: an older ping of
-    /// another server (the previous link, the entry before an edit) is
-    /// dropped.
-    pub(crate) proxy_ping_requests: HashMap<i32, RequestId>,
     /// The running or just-finished account export ("Export Telegram
     /// data"); the UI shows its progress and clears it.
     pub account_export: Option<crate::export::AccountExport>,
@@ -283,6 +264,33 @@ pub struct SettingsState {
 }
 
 impl SettingsState {
+    /// The inactivity timer in days, once known.
+    pub fn account_ttl_days(&self) -> Option<i32> {
+        self.account_ttl.data().copied()
+    }
+
+    /// Why the last account-lifecycle request failed: the timer fetch, or
+    /// a set / delete.
+    pub fn account_error(&self) -> Option<&str> {
+        self.account_ttl.error().or(self.account_change.error())
+    }
+
+    /// Why the last websites fetch or disconnect failed.
+    pub fn websites_error(&self) -> Option<&str> {
+        self.connected_websites
+            .error()
+            .or(self.websites_change.error())
+    }
+
+    /// The default auto-delete timer in seconds, once known.
+    pub fn default_auto_delete_secs(&self) -> Option<i32> {
+        self.default_auto_delete.data().copied()
+    }
+
+    pub fn default_auto_delete_error(&self) -> Option<&str> {
+        self.default_auto_delete.error()
+    }
+
     /// The blocked list starts over (a fresh fetch, or its data was
     /// dropped): pages asked for the old one no longer apply.
     pub fn restart_blocked_list(&mut self) {
@@ -357,9 +365,7 @@ impl SettingsState {
             pending_attention: false,
             disable_contact_registered_notifications: false,
             shown_notification_chats: std::collections::HashSet::new(),
-            default_auto_delete_secs: None,
-            default_auto_delete_busy: false,
-            default_auto_delete_error: None,
+            default_auto_delete: Fetch::Idle,
             saved_notification_sounds: Vec::new(),
             saved_sounds_loaded: false,
             saved_sounds_stale: false,
@@ -380,23 +386,17 @@ impl SettingsState {
             storage_freed: None,
             storage_clearing: false,
             storage_limits: Default::default(),
-            storage_limits_seed_sent: false,
+            storage_seed: crate::storage_limits::StorageSeed::Unseeded,
             privacy_data: Default::default(),
             notices: AccountNotices::default(),
             sessions: Fetch::Idle,
-            sessions_mutating: false,
+            sessions_change: Change::Idle,
             device_login_result: None,
-            sessions_stale: false,
-            account_ttl_days: None,
-            account_ttl_loading: false,
-            account_mutating: false,
-            account_error: None,
-            connected_websites: None,
+            account_ttl: Fetch::Idle,
+            account_change: Change::Idle,
+            connected_websites: Fetch::Idle,
             passkeys: Default::default(),
-            connected_websites_loading: false,
-            websites_mutating: false,
-            websites_error: None,
-            websites_stale: false,
+            websites_change: Change::Idle,
             sound_file_ids: HashMap::new(),
             pending_sound_downloads: HashSet::new(),
             pending_sound_plays: Vec::new(),
@@ -412,7 +412,6 @@ impl SettingsState {
             language_prefs: LanguagePrefs::default(),
             device_prefs: Default::default(),
             proxy: Default::default(),
-            proxy_ping_requests: HashMap::new(),
             account_export: None,
             chat_export: None,
             rich_html_exports: Vec::new(),

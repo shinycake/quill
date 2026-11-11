@@ -3,7 +3,7 @@
 //! `Session::proxy`. Mutations never touch the list optimistically: the
 //! answer marks it stale and the driver refetches `getProxies`.
 use super::*;
-use crate::proxy::{PingStatus, ProxyFetch};
+use crate::proxy::{PingStatus, ProxyList, ProxyMutation};
 
 /// Ping slot used by the "enable this proxy?" link box, whose proxy is
 /// not in the list (TDLib ids are non-negative).
@@ -23,7 +23,7 @@ impl Session {
         let proxy = &mut self.settings.proxy;
         // An older fetch (sent before a change, or replaced) says nothing
         // about the list as it is now.
-        if !proxy.fetch.answers(pending.id) {
+        if !proxy.list.waits_for(Some(pending.id)) {
             return;
         }
         proxy
@@ -39,9 +39,7 @@ impl Session {
         if proxy.carrier_failed != enabled {
             proxy.carrier_failed = None;
         }
-        proxy.list = Some(list);
-        proxy.fetch = ProxyFetch::Idle;
-        proxy.stale = false;
+        proxy.list.answer(pending.id, ProxyList(list));
     }
 
     /// `updateWebProxyCarrierOpened`: host it, or refuse it when this
@@ -105,15 +103,18 @@ impl Session {
     fn proxy_mutation_succeeded(&mut self, pending: Option<&PendingRequest>) {
         let proxy = &mut self.settings.proxy;
         let system = pending.is_some_and(|p| proxy.system_step.answered(p.id, false));
-        proxy.mutating = false;
-        proxy.stale = true;
+        if matches!(proxy.mutation, ProxyMutation::InFlight(_))
+            && pending.is_some_and(|p| proxy.mutation == ProxyMutation::InFlight(p.id))
+        {
+            proxy.mutation = ProxyMutation::Idle;
+        }
         // A list fetch still out may predate this change: its answer is not
         // the one to wait for any more, and the refetch asks again.
-        proxy.fetch = ProxyFetch::Idle;
+        proxy.list.outdate();
         // The box's error line is the user's: the system step's success
         // does not wipe the error of the user's own failed change.
         if !system {
-            proxy.error = None;
+            proxy.change_error = None;
         }
     }
 
@@ -127,13 +128,10 @@ impl Session {
         else {
             return None;
         };
-        if self.settings.proxy_ping_requests.get(&proxy_id) != Some(&pending.id) {
-            return None;
-        }
-        self.settings.proxy_ping_requests.remove(&proxy_id);
+        // The slot's latest ping still shows Checking for this very request.
         matches!(
             self.settings.proxy.pings.get(&proxy_id),
-            Some(PingStatus::Checking)
+            Some(PingStatus::Checking(asked)) if *asked == pending.id
         )
         .then_some(proxy_id)
     }
@@ -169,21 +167,26 @@ impl Session {
     ) {
         match purpose {
             RequestPurpose::GetProxies => {
-                if pending.is_some_and(|p| self.settings.proxy.fetch.answers(p.id)) {
-                    self.settings.proxy.fetch = ProxyFetch::Idle;
-                    self.settings.proxy.stale = false;
-                    self.settings.proxy.error =
-                        Some(sessions_error_line("load the proxy list", err));
-                }
+                self.settings.proxy.list.fail(
+                    pending.map(|p| p.id),
+                    sessions_error_line("load the proxy list", err),
+                );
             }
             RequestPurpose::MutateProxy => {
-                self.settings.proxy.mutating = false;
+                let proxy = &mut self.settings.proxy;
                 // TDLib refusing the system step is not the user's error:
                 // the box does not show it, and the tick reads it here.
-                let system =
-                    pending.is_some_and(|p| self.settings.proxy.system_step.answered(p.id, true));
-                if !system {
-                    self.settings.proxy.error = Some(sessions_error_line("change the proxy", err));
+                let system = pending.is_some_and(|p| proxy.system_step.answered(p.id, true));
+                let mine = pending.is_some_and(|p| proxy.mutation == ProxyMutation::InFlight(p.id));
+                if system {
+                    if mine {
+                        proxy.mutation = ProxyMutation::Idle;
+                    }
+                } else {
+                    if mine {
+                        proxy.mutation = ProxyMutation::Idle;
+                    }
+                    proxy.change_error = Some(sessions_error_line("change the proxy", err));
                 }
             }
             // A failed ping is the answer: the proxy is not available.
@@ -196,7 +199,7 @@ impl Session {
                 }
             }
             RequestPurpose::Settings(SettingsPurpose::SetPreferIpv6 { .. }) => {
-                self.settings.proxy.error =
+                self.settings.proxy.change_error =
                     Some(sessions_error_line("change the IPv6 setting", err));
             }
             _ => {}

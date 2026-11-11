@@ -31,9 +31,9 @@ pub enum Paged<P> {
         stale: Option<P>,
     },
     Ready(P),
-    /// A change landed: the old list stays visible until the refetch
-    /// replaces it (never optimistic).
-    Outdated(P),
+    /// A change landed: the old list, if any, stays visible until the
+    /// refetch replaces it (never optimistic).
+    Outdated(Option<P>),
     Failed {
         error: String,
         stale: Option<P>,
@@ -45,24 +45,30 @@ impl<P: Page> Paged<P> {
     pub fn data(&self) -> Option<&P> {
         match self {
             Self::Idle => None,
-            Self::Ready(data) | Self::Outdated(data) => Some(data),
-            Self::Loading { stale, .. } | Self::Failed { stale, .. } => stale.as_ref(),
+            Self::Ready(data) => Some(data),
+            Self::Outdated(held)
+            | Self::Loading { stale: held, .. }
+            | Self::Failed { stale: held, .. } => held.as_ref(),
         }
     }
 
     pub fn data_mut(&mut self) -> Option<&mut P> {
         match self {
             Self::Idle => None,
-            Self::Ready(data) | Self::Outdated(data) => Some(data),
-            Self::Loading { stale, .. } | Self::Failed { stale, .. } => stale.as_mut(),
+            Self::Ready(data) => Some(data),
+            Self::Outdated(held)
+            | Self::Loading { stale: held, .. }
+            | Self::Failed { stale: held, .. } => held.as_mut(),
         }
     }
 
     fn take_data(&mut self) -> Option<P> {
         match std::mem::take(self) {
             Self::Idle => None,
-            Self::Ready(data) | Self::Outdated(data) => Some(data),
-            Self::Loading { stale, .. } | Self::Failed { stale, .. } => stale,
+            Self::Ready(data) => Some(data),
+            Self::Outdated(held)
+            | Self::Loading { stale: held, .. }
+            | Self::Failed { stale: held, .. } => held,
         }
     }
 
@@ -96,10 +102,7 @@ impl<P: Page> Paged<P> {
     /// Whether a first page may go out: never asked, failed, or outdated.
     /// A page in flight or an answer is not asked again.
     pub fn wants_first_page(&self) -> bool {
-        matches!(
-            self,
-            Self::Idle | Self::Outdated(_) | Self::Failed { .. }
-        )
+        matches!(self, Self::Idle | Self::Outdated(_) | Self::Failed { .. })
     }
 
     /// The list is out of date and a refetch is due.
@@ -159,12 +162,16 @@ impl<P: Page> Paged<P> {
         true
     }
 
-    /// The list is out of date: a page still in flight asked before the
-    /// change, so its answer is dropped with its request.
+    /// The list is out of date, also when nothing was held (the change
+    /// needs the answer). A page still in flight asked before the change,
+    /// so its answer is dropped with its request; a first page in flight
+    /// with nothing held keeps its place (there is nothing to refetch
+    /// over).
     pub fn outdate(&mut self) {
-        if let Some(data) = self.take_data() {
-            *self = Self::Outdated(data);
+        if matches!(self, Self::Loading { stale: None, .. }) {
+            return;
         }
+        *self = Self::Outdated(self.take_data());
     }
 
     /// The owner of the list changed (a filter, a chat): nothing is kept.

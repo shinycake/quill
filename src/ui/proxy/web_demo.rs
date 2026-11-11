@@ -62,11 +62,11 @@ impl QuillApp {
             .unwrap_or_else(|_| ProxyDraft::empty(ProxyKind::Web));
         if let Some(session) = self.demo_session.as_mut() {
             session.settings.proxy = ProxyState {
-                list: Some(vec![
+                list: quill::state::paged::Paged::Ready(quill::proxy::ProxyList(vec![
                     entry(1, false, socks),
                     entry(2, false, mtproto),
                     entry(3, true, web),
-                ]),
+                ])),
                 // The live client gets this from its carrier host.
                 carriers: quill::proxy_carrier::Carriers {
                     hosting,

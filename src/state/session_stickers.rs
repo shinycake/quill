@@ -28,20 +28,7 @@ impl Session {
     }
 
     pub(crate) fn finish_sticker_batch_item(&mut self, set_id: i64, success: bool) {
-        if let Some(index) = self
-            .stickers
-            .stickers
-            .batch_pending
-            .iter()
-            .position(|id| *id == set_id)
-        {
-            self.stickers.stickers.batch_pending.remove(index);
-            if success {
-                self.stickers.stickers.batch_completed += 1;
-            } else {
-                self.stickers.stickers.batch_failed += 1;
-            }
-        }
+        self.stickers.stickers.batch.finish(set_id, success);
     }
 
     /// The box's change of the viewed set went out.
@@ -259,11 +246,7 @@ impl Session {
     }
 
     pub fn accept_saved_animations(&mut self, animations: Vec<AnimationItem>) {
-        self.stickers.gifs.loading = false;
-        self.stickers.gifs.failed = false;
-        self.stickers.gifs.stale = false;
-        self.stickers.gifs.animations = animations;
-        self.stickers.gifs.loaded = true;
+        self.stickers.gifs.saved.succeed(animations);
     }
 
     /// Slice S9: store a GIF-search `inlineQueryResults` page. A first page
@@ -277,8 +260,7 @@ impl Session {
         next_offset: String,
         first_page: bool,
     ) {
-        self.stickers.gifs.search_loading = false;
-        self.stickers.gifs.search_failed = false;
+        self.stickers.gifs.search = GifSearchStage::Ready;
         if first_page {
             self.stickers.gifs.search_results = animations;
         } else {

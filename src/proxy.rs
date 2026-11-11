@@ -18,6 +18,7 @@
 
 use crate::calls::proxy::{EnabledProxy, ProxyKind};
 use crate::ids::RequestId;
+use crate::state::paged::{Page, Paged};
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -522,8 +523,9 @@ pub fn proxy_link_from_text(text: &str) -> Option<Result<ProxyDraft, ProxyIssue>
 /// Availability of one proxy (`pingProxy`, tdesktop's row status).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PingStatus {
-    /// Ping request in flight ("checking…").
-    Checking,
+    /// Ping request in flight ("checking…"); only that request's answer
+    /// settles the slot.
+    Checking(RequestId),
     /// Answered after this many milliseconds.
     Available(u32),
     /// The ping failed ("not available").
@@ -534,7 +536,7 @@ impl PingStatus {
     /// Row status text, tdesktop's `lng_proxy_*` wording.
     pub fn label(self) -> String {
         match self {
-            PingStatus::Checking => "checking…".into(),
+            PingStatus::Checking(_) => "checking…".into(),
             PingStatus::Available(ms) => format!("available (ping: {ms} ms)"),
             PingStatus::Unavailable => "not available".into(),
         }
@@ -649,45 +651,47 @@ impl SystemStepState {
     }
 }
 
-/// Whether a `getProxies` is awaited, and which one.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum ProxyFetch {
-    #[default]
-    Idle,
-    /// This request is the one whose answer replaces the list.
-    Loading(RequestId),
+/// `getProxies` without the system proxy's entries: the page a
+/// [`Paged`](crate::state::paged::Paged) list holds.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ProxyList(pub Vec<ProxyEntry>);
+
+impl Page for ProxyList {
+    fn next_offset(&self) -> &str {
+        ""
+    }
+
+    fn append(&mut self, later: Self) {
+        self.0.extend(later.0);
+    }
 }
 
-impl ProxyFetch {
-    pub fn loading(self) -> bool {
-        matches!(self, Self::Loading(_))
-    }
-
-    /// `request` is the fetch the list waits for.
-    pub fn answers(self, request: RequestId) -> bool {
-        self == Self::Loading(request)
-    }
+/// One proxy mutation (`addProxy`, `editProxy`, enable, disable, remove) at
+/// a time. Only its own answer or error leaves `InFlight`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ProxyMutation {
+    #[default]
+    Idle,
+    InFlight(RequestId),
 }
 
 /// Everything the proxy UI and driver cache (`Session::proxy`).
 #[derive(Debug, Clone, Default)]
 pub struct ProxyState {
-    /// `getProxies` answer without the system proxy's entries; `None`
-    /// until the first one arrives.
-    pub list: Option<Vec<ProxyEntry>>,
+    /// `getProxies` without the system proxy's entries. The page in flight
+    /// names its request, so only that answer or failure lands; a
+    /// mutation's success outdates it (an answer may predate the change). A
+    /// failed first fetch is not retried in a tight loop: only the dialog's
+    /// Refresh asks again.
+    pub list: Paged<ProxyList>,
     /// The system proxy's entries (`crate::system_proxy`), oldest first:
     /// never listed, shared or rotated.
     pub system: Vec<ProxyEntry>,
-    /// The `getProxies` the list waits for. Only that request's answer or
-    /// failure lands; a mutation's success drops it (its answer may
-    /// predate the change).
-    pub fetch: ProxyFetch,
-    /// The list changed under us (an add / edit / enable / remove
-    /// succeeded): refetch the authoritative answer.
-    pub stale: bool,
-    /// A mutation is in flight.
-    pub mutating: bool,
-    pub error: Option<String>,
+    pub mutation: ProxyMutation,
+    /// Why the user's last change failed (a mutation, or the IPv6 option).
+    /// A system proxy step in flight leaves it alone: it is not that
+    /// step's.
+    pub change_error: Option<String>,
     /// The system proxy step's own outcome (not `error`).
     pub system_step: SystemStepState,
     /// Per-proxy-id ping results.
@@ -695,9 +699,6 @@ pub struct ProxyState {
     /// Option `prefer_ipv6` (tdesktop "Try connecting through IPv6").
     pub prefer_ipv6: bool,
     pub prefs: ProxyPrefs,
-    /// First `getProxies` was sent (so a failed one is not retried in a
-    /// tight loop).
-    pub fetch_attempted: bool,
     /// Auto-switch: when the connection last stopped being usable (ms).
     pub disconnected_since_ms: Option<u64>,
     /// The enabled web proxy whose last carrier failed or was refused;
@@ -709,8 +710,25 @@ pub struct ProxyState {
 }
 
 impl ProxyState {
+    /// The line the proxy box shows: why the list failed to load, else why
+    /// the last change failed.
+    pub fn error(&self) -> Option<&str> {
+        self.list.error().or(self.change_error.as_deref())
+    }
+
+    /// A change or a fetch is in flight, or the list is out of date: the
+    /// list is not the one to compare or mirror yet.
+    pub fn settling(&self) -> bool {
+        self.mutating() || self.list.is_outdated() || self.list.loading()
+    }
+
+    /// A mutation is in flight.
+    pub fn mutating(&self) -> bool {
+        matches!(self.mutation, ProxyMutation::InFlight(_))
+    }
+
     pub fn entries(&self) -> &[ProxyEntry] {
-        self.list.as_deref().unwrap_or(&[])
+        self.list.data().map_or(&[], |list| list.0.as_slice())
     }
 
     /// Whether a proxy of `kind` may be switched to: a web proxy only when
@@ -736,7 +754,7 @@ impl ProxyState {
     /// background accounts mirror (`crate::proxy_sync`). `None` until the
     /// first `getProxies` answer.
     pub fn all_entries(&self) -> Option<Vec<ProxyEntry>> {
-        let mut all = self.list.clone()?;
+        let mut all = self.list.data()?.0.clone();
         all.extend(self.system.iter().cloned());
         Some(all)
     }
@@ -792,7 +810,7 @@ impl ProxyState {
         if self
             .pings
             .values()
-            .any(|p| matches!(p, PingStatus::Checking))
+            .any(|p| matches!(p, PingStatus::Checking(_)))
         {
             return RotationAction::None;
         }
@@ -851,7 +869,7 @@ mod tests {
 
     fn state(list: Vec<ProxyEntry>, auto: bool) -> ProxyState {
         ProxyState {
-            list: Some(list),
+            list: Paged::Ready(ProxyList(list)),
             prefs: ProxyPrefs {
                 auto_switch: auto,
                 auto_switch_secs: 10,
@@ -997,7 +1015,7 @@ mod tests {
         assert_eq!(s.rotation_step(9_999, false), RotationAction::None);
         // Timeout reached: probe the proxy after the current one.
         assert_eq!(s.rotation_step(10_000, false), RotationAction::Ping(2));
-        s.pings.insert(2, PingStatus::Checking);
+        s.pings.insert(2, PingStatus::Checking(RequestId(5)));
         assert_eq!(s.rotation_step(10_500, false), RotationAction::None);
         s.pings.insert(2, PingStatus::Unavailable);
         assert_eq!(s.rotation_step(11_000, false), RotationAction::Ping(3));

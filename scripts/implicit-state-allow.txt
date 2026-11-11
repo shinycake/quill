@@ -1,3 +1,5 @@
 # Bools that name a stage word but are not a stage (scripts/check-implicit-state.py).
 # One per line: Struct::field <reason>
 State::frame_requested mirrors the C qw_state struct field by field (repr(C)); it is a per-poll flag from the native side, not a stage Quill keeps
+SettingsState::pending_attention a one-shot dock-bounce event the notifier drains with take (notify_accounts.rs), not a stage of any request
+SettingsState::pending_attention+data_storage_error the dock-bounce event shares no stage with the storage error line; it is drained by take, not a request stage

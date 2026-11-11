@@ -39,7 +39,7 @@ impl QuillApp {
         let show_messages = !matches!(tab, SearchTab::Apps | SearchTab::Downloads)
             && !channels_idle
             && !(tab == SearchTab::Posts && query.trim().is_empty());
-        let limits_exceeded = session.is_some_and(|s| s.search.search.public_limits_exceeded);
+        let limits_exceeded = session.is_some_and(|s| s.search.search.public_limits_exceeded());
         let messages: Vec<(ChatId, MessageId, String, String, i32)> = session
             .map(|s| {
                 s.search

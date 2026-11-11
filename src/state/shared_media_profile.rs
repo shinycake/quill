@@ -10,8 +10,8 @@
 //! Messages and the common-groups / similar tabs are not shared media.
 use super::*;
 use crate::ids::{FileId, RequestId};
-use crate::state::paged::{Page, Paged};
 use crate::premium_hub::GiftsPage;
+use crate::state::paged::{Page, Paged};
 use crate::telegram::envelope::{ChatKind, ProfileAudio, ProfileAudiosPage};
 use std::collections::HashMap;
 
@@ -403,8 +403,8 @@ impl PlaylistData {
 
     fn add(&mut self, audios: Vec<ProfileAudio>) {
         for track in audios {
-            let known = track.file_id.0 != 0
-                && self.tracks.iter().any(|old| old.file_id == track.file_id);
+            let known =
+                track.file_id.0 != 0 && self.tracks.iter().any(|old| old.file_id == track.file_id);
             if !known {
                 self.tracks.push(track);
             }
@@ -625,7 +625,10 @@ impl Session {
             .entry(user_id)
             .or_default()
             .list
-            .answer(request, PlaylistData::from_page(page.audios, page.total_count));
+            .answer(
+                request,
+                PlaylistData::from_page(page.audios, page.total_count),
+            );
     }
 
     /// A `getUserProfileAudios` request failed. `request` is the page that

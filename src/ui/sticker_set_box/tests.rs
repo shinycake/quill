@@ -707,19 +707,22 @@ fn the_chooser_lists_saved_gifs_except_when_adapting(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.stickers.gifs.animations.push(AnimationItem {
-                duration: 2,
-                width: 320,
-                height: 240,
-                file_name: "dance.mp4".into(),
-                mime_type: "video/mp4".into(),
-                file_id: FileId(9_001),
-                thumb_file_id: None,
-                thumb_width: 0,
-                thumb_height: 0,
-                minithumbnail: None,
-                thumb_still: true,
-            });
+            session.stickers.gifs.saved.insert_data_if_missing(Vec::new);
+            if let Some(list) = session.stickers.gifs.saved.data_mut() {
+                list.push(AnimationItem {
+                    duration: 2,
+                    width: 320,
+                    height: 240,
+                    file_name: "dance.mp4".into(),
+                    mime_type: "video/mp4".into(),
+                    file_id: FileId(9_001),
+                    thumb_file_id: None,
+                    thumb_width: 0,
+                    thumb_height: 0,
+                    minithumbnail: None,
+                    thumb_still: true,
+                });
+            }
         }
         app.sticker_box.pick = Some(PickExisting {
             set_id: 78,

@@ -447,7 +447,9 @@ impl QuillApp {
                 this.close_session_details(cx)
             });
         let (footer, renaming) = app.update(cx, |this, cx| {
-            let mutating = this.session().is_some_and(|s| s.settings.sessions_mutating);
+            let mutating = this
+                .session()
+                .is_some_and(|s| s.settings.sessions_change.busy());
             let footer = this
                 .details_session()
                 .map(|s| this.session_box_footer(&s, mutating, cx));

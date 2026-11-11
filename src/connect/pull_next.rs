@@ -1,7 +1,7 @@
 //! Connect driver: the pull to the next unread channel (`pull_next`).
 use super::*;
 use crate::ids::{ChatId, MessageId};
-use crate::state::RequestPurpose;
+use crate::state::{HistoryPreload, RequestPurpose};
 use crate::telegram::requests::get_chat_history;
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -21,17 +21,21 @@ impl<S: JsonSender> ConnectDriver<S> {
             .filter(|chat| chat.unread_count > 0)
             .map_or(MessageId(0), |chat| chat.last_read_inbox_message_id);
         let purpose = RequestPurpose::PreloadHistory;
-        if !self.session.requests.has_purpose_for_chat(purpose, chat_id) {
-            self.session
-                .chat_list
-                .preloaded_histories
-                .remove(&chat_id.0);
+        let asked = matches!(
+            self.session.chat_list.history_preloads.get(&chat_id.0),
+            Some(HistoryPreload::Loading(_))
+        );
+        if !asked {
             let offset = if around.0 != 0 {
                 -crate::pull_next::PRELOAD_MESSAGES / 2
             } else {
                 0
             };
             let extra = self.session.request(purpose, Some(chat_id));
+            self.session
+                .chat_list
+                .history_preloads
+                .insert(chat_id.0, HistoryPreload::Loading(extra));
             if let Err(err) = self.sender.send_json(&get_chat_history(
                 extra,
                 chat_id,
@@ -41,6 +45,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 false,
             )) {
                 self.session.requests.take(extra);
+                self.session.chat_list.history_preloads.remove(&chat_id.0);
                 return Err(err);
             }
         }
@@ -58,10 +63,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// The next channel's history page arrived (tdesktop
     /// `History::isReadyFor(ShowAtUnreadMsgId)`).
     pub fn next_channel_history_ready(&self, chat_id: ChatId) -> bool {
-        self.session
-            .chat_list
-            .preloaded_histories
-            .contains(&chat_id.0)
+        self.session.chat_list.history_preloaded(chat_id.0)
     }
 
     /// The next channel's pinned messages arrived (tdesktop

@@ -53,7 +53,10 @@ impl QuillApp {
                 !hub.gifts.next_offset().is_empty(),
                 hub.gifts.loading(),
             )
-            || !self.payments.gifts_asked.allow(hub.gift_list().len(), scrolled)
+            || !self
+                .payments
+                .gifts_asked
+                .allow(hub.gift_list().len(), scrolled)
         {
             return;
         }

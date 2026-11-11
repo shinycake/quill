@@ -3,7 +3,7 @@ use super::*;
 use crate::ids::FileId;
 use crate::ids::RequestId;
 use crate::state::StickersPurpose;
-use crate::state::{RequestPurpose, StickerSearch, StickerTab};
+use crate::state::{GifSearchStage, RequestPurpose, StickerBatch, StickerSearch, StickerTab};
 use crate::sticker_suggest::{SUGGEST_LIMIT, StickerSuggestMode, suggest_emoji_for};
 use crate::telegram::requests::{
     add_favorite_sticker, change_sticker_set, clear_recent_stickers, get_archived_sticker_sets,
@@ -328,10 +328,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .copied()
             .filter(|id| seen.insert(*id))
             .collect();
-        self.session.stickers.stickers.batch_total = ids.len();
-        self.session.stickers.stickers.batch_completed = 0;
-        self.session.stickers.stickers.batch_failed = 0;
-        self.session.stickers.stickers.batch_pending = ids.clone();
+        self.session.stickers.stickers.batch = StickerBatch::begin(ids.clone());
         let mut sent = 0;
         for id in ids {
             if self
@@ -713,15 +710,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.stickers.gifs.open = true;
-        if self.session.stickers.gifs.failed {
-            self.session.stickers.gifs.loaded = false;
+        if self.session.stickers.gifs.saved.error().is_some() {
+            self.session.stickers.gifs.saved.outdate();
         }
-        if self.session.stickers.gifs.search_mode && self.session.stickers.gifs.search_failed {
-            self.session.stickers.gifs.search_loading = true;
+        if self.session.stickers.gifs.search == GifSearchStage::Failed {
+            self.session.stickers.gifs.search = GifSearchStage::Loading;
         }
-        self.session.stickers.gifs.failed = false;
         let saved = self.maybe_refresh_saved_animations()?;
-        if self.session.stickers.gifs.search_mode && self.session.stickers.gifs.search_loading {
+        if self.session.stickers.gifs.search == GifSearchStage::Loading {
             Ok(self.maybe_search_gifs(false)?.or(saved))
         } else {
             Ok(saved)
@@ -819,12 +815,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        let needs = !self.session.stickers.gifs.loaded || self.session.stickers.gifs.stale;
-        if !needs {
+        let saved = &self.session.stickers.gifs.saved;
+        if !(saved.is_idle() || saved.is_outdated()) {
             return Ok(None);
         }
-        self.session.stickers.gifs.loading = true;
-        self.session.stickers.gifs.stale = false;
+        self.session.stickers.gifs.saved.begin();
         let extra = self
             .session
             .request(RequestPurpose::GetSavedAnimations, None);
@@ -832,9 +827,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.stickers.gifs.loading = false;
-                self.session.stickers.gifs.loaded = true;
-                self.session.stickers.gifs.failed = true;
+                self.session
+                    .stickers
+                    .gifs
+                    .saved
+                    .fail("Could not load the saved GIFs");
                 Err(err)
             }
         }

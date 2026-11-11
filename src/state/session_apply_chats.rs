@@ -83,8 +83,7 @@ impl Session {
                 _ => None,
             };
             if self.stickers.gifs.search_bot_user_id.is_none() {
-                self.stickers.gifs.search_failed = true;
-                self.stickers.gifs.search_loading = false;
+                self.stickers.gifs.search = GifSearchStage::Failed;
             }
         }
         // Bots slice: `searchPublicChat` answer for `@botname`

@@ -13,8 +13,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let state = &mut self.session.payments.stars_gift;
-        state.clear_target();
-        state.open = true;
+        state.open();
         self.fetch_contacts()?;
         // The people you write to most are listed first, unless the
         // frequent contacts are switched off.
@@ -33,8 +32,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     pub fn close_stars_gift(&mut self) {
         let state = &mut self.session.payments.stars_gift;
-        state.clear_target();
-        state.open = false;
+        state.close();
     }
 
     /// A contact was picked: ask which packs they can get
@@ -46,7 +44,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<RequestId, ConnectSendError> {
         let is_bot = self.session.is_bot_user(user_id);
         if !self.chats_path_active()
-            || !self.session.payments.stars_gift.open
+            || !self.session.payments.stars_gift.is_open()
             || !can_gift_stars(user_id, self.session.my_user_id, is_bot)
         {
             return Err(ConnectSendError::InvalidRequest);

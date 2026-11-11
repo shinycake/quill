@@ -259,7 +259,10 @@ pub enum ListStage {
 pub enum PasskeyRemove {
     #[default]
     Idle,
-    Removing { id: String, request: RequestId },
+    Removing {
+        id: String,
+        request: RequestId,
+    },
 }
 
 /// The account's passkeys as last fetched (tdesktop `Data::Passkeys`).

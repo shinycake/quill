@@ -200,9 +200,9 @@ fn message_statistics_open_the_page_and_page_through_forwards() {
         .message_for(-100, 42 << 20)
         .unwrap();
     assert!(matches!(state.statistics, MessageStatsFetch::Loaded(_)));
-    assert_eq!(state.forwards.forwards.len(), 2);
-    assert_eq!(state.forwards.forwards[0].view_count, 40);
-    assert_eq!(state.forwards.total, 3);
+    assert_eq!(state.forwards.items().len(), 2);
+    assert_eq!(state.forwards.items()[0].view_count, 40);
+    assert_eq!(state.forwards.total(), 3);
     assert!(!state.forwards.loading());
 
     let more = rig
@@ -214,7 +214,7 @@ fn message_statistics_open_the_page_and_page_through_forwards() {
     assert!(rig.driver.load_more_message_forwards().unwrap().is_none());
     rig.answer(more, &forwards_page("", &[3]));
     let state = rig.driver.session.groups.stats.message.as_ref().unwrap();
-    assert_eq!(state.forwards.forwards.len(), 3);
+    assert_eq!(state.forwards.items().len(), 3);
     assert!(rig.driver.load_more_message_forwards().unwrap().is_none());
 
     // Opening the panel again starts on the overview.
@@ -500,7 +500,7 @@ fn a_stale_forwards_page_does_not_join_a_reopened_posts_list() {
         .stats
         .message_for(-100, a.0)
         .unwrap();
-    assert!(state.forwards.forwards.is_empty());
+    assert!(state.forwards.items().is_empty());
     assert!(state.forwards.loading());
 
     rig.answer(again, &forwards_page("p2", &[1, 2]));
@@ -511,8 +511,8 @@ fn a_stale_forwards_page_does_not_join_a_reopened_posts_list() {
         .stats
         .message_for(-100, a.0)
         .unwrap();
-    assert_eq!(state.forwards.forwards.len(), 2);
-    assert_eq!(state.forwards.next_offset, "p2");
+    assert_eq!(state.forwards.items().len(), 2);
+    assert_eq!(state.forwards.next_offset(), "p2");
 }
 
 #[test]
@@ -560,7 +560,7 @@ fn reopening_a_post_whose_statistics_are_out_asks_for_its_forwards_again() {
         .stats
         .message_for(-100, a.0)
         .unwrap();
-    assert_eq!(state.forwards.forwards.len(), 2);
+    assert_eq!(state.forwards.items().len(), 2);
 }
 
 /// A chat whose statistics TDLib will not give ends in an error the panel

@@ -172,9 +172,7 @@ impl Session {
                 );
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GetWearableGifts)) => {
-                self.users_state
-                    .wearable_gifts
-                    .fail(error_reason(err));
+                self.users_state.wearable_gifts.fail(error_reason(err));
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { .. })) => {
                 // Only the newest page's error counts (an older page's is
@@ -199,10 +197,7 @@ impl Session {
             }
             // The Business screen keeps tdesktop's fallback order.
             Some(RequestPurpose::GetBusinessFeatures) => {
-                self.payments
-                    .hub
-                    .business_features
-                    .fail(error_reason(err));
+                self.payments.hub.business_features.fail(error_reason(err));
             }
             Some(RequestPurpose::GetPremiumFeatures) => {
                 self.payments.hub.premium.fail(format!(
@@ -263,10 +258,7 @@ impl Session {
             }
             // The next look at the sticker preview asks again.
             Some(RequestPurpose::GetPremiumStickerExamples) => {
-                self.payments
-                    .hub
-                    .premium_stickers
-                    .fail(error_reason(err));
+                self.payments.hub.premium_stickers.fail(error_reason(err));
             }
             _ => {}
         }

@@ -604,11 +604,11 @@ fn sticker_batches_report_confirmed_partial_results_and_reject_overlapping_work(
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
     assert!(driver.manage_sticker_sets(&[77, -1], true).is_err());
-    assert_eq!(driver.session.stickers.stickers.batch_total, 0);
+    assert_eq!(driver.session.stickers.stickers.batch.total(), 0);
     assert_eq!(driver.manage_sticker_sets(&[77, 88, 77], true).unwrap(), 2);
-    assert_eq!(driver.session.stickers.stickers.batch_total, 2);
-    assert_eq!(driver.session.stickers.stickers.batch_completed, 0);
-    assert_eq!(driver.session.stickers.stickers.batch_pending, vec![77, 88]);
+    assert_eq!(driver.session.stickers.stickers.batch.total(), 2);
+    assert_eq!(driver.session.stickers.stickers.batch.completed(), 0);
+    assert_eq!(driver.session.stickers.stickers.batch.pending(), [77, 88]);
     assert!(driver.manage_sticker_sets(&[99], false).is_err());
     let ok = driver
         .session
@@ -636,8 +636,8 @@ fn sticker_batches_report_confirmed_partial_results_and_reject_overlapping_work(
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.stickers.stickers.batch_completed, 1);
-    assert_eq!(driver.session.stickers.stickers.batch_pending, vec![88]);
+    assert_eq!(driver.session.stickers.stickers.batch.completed(), 1);
+    assert_eq!(driver.session.stickers.stickers.batch.pending(), [88]);
     driver
         .ingest(
             copy_and_parse(
@@ -648,8 +648,8 @@ fn sticker_batches_report_confirmed_partial_results_and_reject_overlapping_work(
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.stickers.stickers.batch_failed, 1);
-    assert!(driver.session.stickers.stickers.batch_pending.is_empty());
+    assert_eq!(driver.session.stickers.stickers.batch.failed(), 1);
+    assert!(driver.session.stickers.stickers.batch.pending().is_empty());
     driver
         .ingest(
             copy_and_parse(
@@ -660,11 +660,11 @@ fn sticker_batches_report_confirmed_partial_results_and_reject_overlapping_work(
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.stickers.stickers.batch_completed, 1);
+    assert_eq!(driver.session.stickers.stickers.batch.completed(), 1);
     assert_eq!(driver.manage_sticker_sets(&[88], false).unwrap(), 1);
-    assert_eq!(driver.session.stickers.stickers.batch_failed, 0);
-    assert_eq!(driver.session.stickers.stickers.batch_completed, 0);
-    assert_eq!(driver.session.stickers.stickers.batch_total, 1);
+    assert_eq!(driver.session.stickers.stickers.batch.failed(), 0);
+    assert_eq!(driver.session.stickers.stickers.batch.completed(), 0);
+    assert_eq!(driver.session.stickers.stickers.batch.total(), 1);
     assert_eq!(
         sent_request(&recorder, "changeStickerSet")["is_installed"],
         false
@@ -720,7 +720,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
     let saved = driver.open_gif_panel().unwrap().unwrap();
     driver.search_gifs("before bot option", None).unwrap();
-    assert!(driver.session.stickers.gifs.search_failed);
+    assert!(driver.session.stickers.gifs.search == crate::state::GifSearchStage::Failed);
     driver
         .ingest(
             copy_and_parse(
@@ -732,8 +732,8 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.gifs.loaded);
-    assert!(driver.session.stickers.gifs.search_failed); // Saved loading must not hide a search failure.
+    assert!(driver.session.stickers.gifs.saved_loaded());
+    assert!(driver.session.stickers.gifs.search == crate::state::GifSearchStage::Failed); // Saved loading must not hide a search failure.
     driver.ingest(copy_and_parse(&json!({"@type":"updateOption","name":"animation_search_bot_username","value":{"@type":"optionValueString","value":"gif"}}).to_string(),&seq,&sink).unwrap()).unwrap();
     let count_saved = || {
         recorder
@@ -828,7 +828,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(!driver.session.stickers.gifs.loaded);
+    assert!(!driver.session.stickers.gifs.saved_loaded());
     driver
         .ingest(
             copy_and_parse(
@@ -852,8 +852,8 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.stickers.gifs.animations.len(), 1);
-    assert!(driver.session.stickers.gifs.failed);
+    assert_eq!(driver.session.stickers.gifs.animations().len(), 1);
+    assert!(driver.session.stickers.gifs.saved.error().is_some());
     let remove = driver.set_gif_saved(FileId(9), false).unwrap().unwrap();
     driver
         .ingest(
@@ -891,7 +891,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.gifs.stale);
+    assert!(driver.session.stickers.gifs.saved.is_outdated());
     assert!(driver.open_gif_panel().unwrap().is_some());
     let failed_fetch = sent_request(&recorder, "getSavedAnimations")["@extra"].clone();
     driver
@@ -905,7 +905,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.gifs.failed);
+    assert!(driver.session.stickers.gifs.saved.error().is_some());
     let count = count_saved();
     driver
         .ingest(
@@ -944,7 +944,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.gifs.animations.is_empty());
+    assert!(driver.session.stickers.gifs.animations().is_empty());
     driver.search_gifs("", None).unwrap();
     let old_page = sent_request(&recorder, "getInlineQueryResults")["@extra"].clone();
     driver.ingest(copy_and_parse(&json!({"@type":"updateOption","name":"animation_search_bot_username","value":{"@type":"optionValueString","value":"othergif"}}).to_string(),&seq,&sink).unwrap()).unwrap();

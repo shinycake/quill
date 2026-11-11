@@ -478,7 +478,8 @@ impl QuillApp {
                 );
             }
         }
-        let failed = playlist.is_some_and(|p| p.loaded() && p.tracks().is_empty() && p.error().is_some());
+        let failed =
+            playlist.is_some_and(|p| p.loaded() && p.tracks().is_empty() && p.error().is_some());
         let empty = !failed && playlist.is_none_or(|p| p.loaded() && p.tracks().is_empty());
         div()
             .id("playlist-panel")

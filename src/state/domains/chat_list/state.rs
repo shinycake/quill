@@ -129,12 +129,26 @@ pub struct ChatListState {
     pub psa_labels: crate::promotion::PsaLabels,
     /// The one-time "about this announcement" box.
     pub psa_about: crate::psa_about::PsaAbout,
-    /// Chats whose history page was preloaded for the pull to the next
-    /// channel (`pull_next`): the answer arrived.
-    pub preloaded_histories: HashSet<i64>,
+    /// The history page preloaded for the pull to the next channel
+    /// (`pull_next`), per chat: asked, or arrived. The request's error
+    /// drops the entry, and a new pull asks again.
+    pub history_preloads: std::collections::HashMap<i64, HistoryPreload>,
+}
+
+/// One chat's preloaded history page for the pull to the next channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistoryPreload {
+    /// This request's answer makes the history ready.
+    Loading(RequestId),
+    Ready,
 }
 
 impl ChatListState {
+    /// The next channel's history page arrived.
+    pub fn history_preloaded(&self, chat: i64) -> bool {
+        self.history_preloads.get(&chat) == Some(&HistoryPreload::Ready)
+    }
+
     /// The folder tab order: the folders with "All chats" at its position.
     pub fn folder_order(&self) -> crate::folder_order::FolderOrder {
         crate::folder_order::FolderOrder {
@@ -240,7 +254,7 @@ impl ChatListState {
             promoted_chats: HashMap::new(),
             psa_labels: crate::promotion::PsaLabels::default(),
             psa_about: crate::psa_about::PsaAbout::default(),
-            preloaded_histories: HashSet::new(),
+            history_preloads: std::collections::HashMap::new(),
         }
     }
 }

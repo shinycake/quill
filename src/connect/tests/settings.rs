@@ -496,8 +496,8 @@ fn sessions_terminate_ok_triggers_authoritative_refetch() {
     assert_eq!(snapshot.len(), sent + 1);
     assert!(snapshot[sent].contains("\"@type\":\"getActiveSessions\""));
     assert_eq!(driver.session.settings.sessions.data().unwrap().len(), 2);
-    assert!(driver.session.settings.sessions_stale);
-    assert!(!driver.session.settings.sessions_mutating);
+    assert!(driver.session.settings.sessions.is_outdated());
+    assert!(!driver.session.settings.sessions_change.busy());
     // The authoritative answer lands — the @extra comes from the
     // recorded outbound JSON (what TDLib would echo back).
     let fetch_extra: i64 = {
@@ -525,7 +525,7 @@ fn sessions_terminate_ok_triggers_authoritative_refetch() {
     let sessions = driver.session.settings.sessions.data().expect("refetched");
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0].id, 11);
-    assert!(!driver.session.settings.sessions_stale);
+    assert!(!driver.session.settings.sessions.is_outdated());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -594,7 +594,7 @@ fn session_toggle_ok_triggers_authoritative_refetch() {
     assert_eq!(snapshot.len(), sent + 1);
     assert!(snapshot[sent].contains("\"@type\":\"getActiveSessions\""));
     assert!(driver.session.settings.sessions.data().unwrap()[1].can_accept_calls);
-    assert!(driver.session.settings.sessions_stale);
+    assert!(driver.session.settings.sessions.is_outdated());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -621,7 +621,7 @@ fn websites_fetch_guards() {
     );
     assert_eq!(recorder.snapshot().len(), sent_after_first);
     // Cached: no refetch.
-    driver.session.settings.connected_websites = Some(vec![]);
+    driver.session.settings.connected_websites = crate::state::fetch::Fetch::Ready(vec![]);
     assert!(
         driver
             .maybe_fetch_connected_websites()
@@ -642,20 +642,21 @@ fn websites_disconnect_guards() {
     // nothing sent.
     let sent_before = recorder.snapshot().len();
     assert_invalid(driver.disconnect_all_websites());
-    driver.session.settings.connected_websites = Some(vec![]);
+    driver.session.settings.connected_websites = crate::state::fetch::Fetch::Ready(vec![]);
     assert_invalid(driver.disconnect_all_websites());
     assert_eq!(recorder.snapshot().len(), sent_before);
-    driver.session.settings.connected_websites = Some(vec![ParsedWebsite {
-        id: 55,
-        domain_name: "example.com".into(),
-        bot_user_id: 77,
-        browser: "Chrome".into(),
-        platform: "Web".into(),
-        log_in_date: 1758900000,
-        last_active_date: 1759000000,
-        ip_address: "9.9.9.9".into(),
-        location: "Boston, United States".into(),
-    }]);
+    driver.session.settings.connected_websites =
+        crate::state::fetch::Fetch::Ready(vec![ParsedWebsite {
+            id: 55,
+            domain_name: "example.com".into(),
+            bot_user_id: 77,
+            browser: "Chrome".into(),
+            platform: "Web".into(),
+            log_in_date: 1758900000,
+            last_active_date: 1759000000,
+            ip_address: "9.9.9.9".into(),
+            location: "Boston, United States".into(),
+        }]);
     // Unknown id: refused, nothing sent.
     let sent_before = recorder.snapshot().len();
     assert_invalid(driver.disconnect_website(66));
@@ -681,17 +682,18 @@ fn websites_disconnect_guards() {
 #[test]
 fn disconnect_all_websites_ok_triggers_authoritative_refetch() {
     let (dir, mut driver, recorder, _sink, dyn_sink, seq) = sessions_driver();
-    driver.session.settings.connected_websites = Some(vec![ParsedWebsite {
-        id: 55,
-        domain_name: "example.com".into(),
-        bot_user_id: 77,
-        browser: "Chrome".into(),
-        platform: "Web".into(),
-        log_in_date: 1758900000,
-        last_active_date: 1759000000,
-        ip_address: "9.9.9.9".into(),
-        location: "Boston, United States".into(),
-    }]);
+    driver.session.settings.connected_websites =
+        crate::state::fetch::Fetch::Ready(vec![ParsedWebsite {
+            id: 55,
+            domain_name: "example.com".into(),
+            bot_user_id: 77,
+            browser: "Chrome".into(),
+            platform: "Web".into(),
+            log_in_date: 1758900000,
+            last_active_date: 1759000000,
+            ip_address: "9.9.9.9".into(),
+            location: "Boston, United States".into(),
+        }]);
     let extra = driver.disconnect_all_websites().expect("disconnect send");
     let sent = recorder.snapshot().len();
     driver
@@ -715,12 +717,12 @@ fn disconnect_all_websites_ok_triggers_authoritative_refetch() {
             .session
             .settings
             .connected_websites
-            .as_ref()
+            .data()
             .unwrap()
             .len(),
         1
     );
-    assert!(driver.session.settings.websites_stale);
+    assert!(driver.session.settings.connected_websites.is_outdated());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -753,7 +755,7 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
             serde_json::json!({"@type":"session","id":11}),
         ))
         .unwrap();
-    assert!(driver.session.settings.sessions_mutating);
+    assert!(driver.session.settings.sessions_change.busy());
     assert_eq!(driver.session.settings.device_login_result, None);
     driver
         .ingest(response(
@@ -765,7 +767,7 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         driver.session.settings.device_login_result,
         Some(crate::auth::DeviceLoginResult::Linked)
     );
-    assert!(!driver.session.settings.sessions_mutating);
+    assert!(!driver.session.settings.sessions_change.busy());
     assert!(
         recorder.snapshot()[sent..]
             .iter()
@@ -781,7 +783,7 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
             driver.session.settings.device_login_result,
             Some(crate::auth::DeviceLoginResult::Failed)
         );
-        assert!(!driver.session.settings.sessions_mutating);
+        assert!(!driver.session.settings.sessions_change.busy());
     }
     let request = driver.confirm_device_login(link).unwrap();
     driver
@@ -860,7 +862,7 @@ fn default_auto_delete_fetch_and_set() {
         .ingest(copy_and_parse(&answer, &seq, &dyn_sink).unwrap())
         .unwrap();
     assert_eq!(
-        driver.session.settings.default_auto_delete_secs,
+        driver.session.settings.default_auto_delete_secs(),
         Some(86_400)
     );
     // Cached: no refetch.
@@ -886,7 +888,7 @@ fn default_auto_delete_fetch_and_set() {
         .ingest(copy_and_parse(&ok, &seq, &dyn_sink).unwrap())
         .unwrap();
     assert_eq!(
-        driver.session.settings.default_auto_delete_secs,
+        driver.session.settings.default_auto_delete_secs(),
         Some(604_800)
     );
     let _ = std::fs::remove_dir_all(&dir);

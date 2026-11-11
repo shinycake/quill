@@ -108,6 +108,9 @@ pub enum Leg {
     /// Asked, no answer yet.
     Pending,
     Done,
+    /// A public-posts search answered, and the free searches are used up:
+    /// another one costs Stars. Cleared with the results.
+    Exceeded,
     /// The request answered with an error.
     Failed,
 }
@@ -156,7 +159,6 @@ pub struct SearchState {
     /// The top-people strip: collapsed to one row or expanded to a grid.
     pub top_view: crate::top_people::StripView,
     /// `searchPublicPosts` said the free daily quota is spent.
-    pub public_limits_exceeded: bool,
     /// Empty-query surface: `searchRecentlyFoundChats` (official Recent).
     pub recents: bool,
     /// Paging, recommendations and quota of the strip's tabs.
@@ -185,7 +187,6 @@ impl Default for SearchState {
             top_chats_disabled: false,
             confirm: None,
             top_view: Default::default(),
-            public_limits_exceeded: false,
             recents: false,
             tabs: SearchTabsState::default(),
             chats: Leg::Idle,
@@ -307,7 +308,6 @@ impl SearchState {
         self.messages.clear();
         self.public_chat_ids.clear();
         self.server_chat_ids.clear();
-        self.public_limits_exceeded = false;
         self.tabs.reset_paging();
         self.chats = Leg::Idle;
         self.messages_leg = Leg::Idle;
@@ -329,6 +329,19 @@ impl SearchState {
     pub fn accept_messages(&mut self, messages: Vec<SearchMessageHit>, error: bool) {
         self.messages = messages;
         self.messages_leg = Leg::answered(error);
+    }
+
+    /// The answer of a public-posts search said whether the free searches
+    /// are used up. Only a leg that answered carries it.
+    pub fn note_public_limits(&mut self, exceeded: bool) {
+        if matches!(self.messages_leg, Leg::Done | Leg::Exceeded) {
+            self.messages_leg = if exceeded { Leg::Exceeded } else { Leg::Done };
+        }
+    }
+
+    /// The free public-post searches are used up for the open query.
+    pub fn public_limits_exceeded(&self) -> bool {
+        self.messages_leg == Leg::Exceeded
     }
 
     pub fn accept_public_chats(&mut self, chat_ids: Vec<ChatId>, error: bool) {

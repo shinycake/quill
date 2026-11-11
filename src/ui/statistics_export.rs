@@ -98,7 +98,7 @@ fn page_sheets(
                 PostLookup::Ready(post) => Some(post),
                 _ => None,
             };
-            let public = state.forwards.total;
+            let public = state.forwards.total();
             let forwards = recent
                 .map(|r| r.forward_count)
                 .or(post.as_ref().map(|p| p.forwards));

@@ -50,12 +50,13 @@ impl QuillApp {
         let tabs = &session.search.search.tabs;
         let recommended: Vec<(ChatId, String, String)> = tabs
             .recommended
+            .items()
             .iter()
             .filter(|id| !joined.iter().any(|chat| chat.id == **id))
             .filter_map(|id| session.chats.get(&id.0))
             .map(|chat| (chat.id, chat.title.clone(), chat.sidebar_preview()))
             .collect();
-        let loading = tabs.recommended_loading;
+        let loading = tabs.recommended.is_loading();
         let muted = cx.theme().muted_foreground;
         let section = |id: &'static str,
                        prefix: &'static str,
@@ -369,7 +370,7 @@ impl QuillApp {
     pub(super) fn posts_paid_block(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         let search = &session.search.search;
-        if !search.public_limits_exceeded || search.query.trim().is_empty() {
+        if !search.public_limits_exceeded() || search.query.trim().is_empty() {
             return None;
         }
         let muted = cx.theme().muted_foreground;

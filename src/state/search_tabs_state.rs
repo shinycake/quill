@@ -72,9 +72,9 @@ pub enum SearchPaging {
 #[derive(Debug, Clone, Default)]
 pub struct SearchTabsState {
     /// `getRecommendedChats`, shown under "Recommended channels".
-    pub recommended: Vec<ChatId>,
-    pub recommended_loading: bool,
-    pub recommended_loaded: bool,
+    /// Asked once per session; a failed ask waits for the next search
+    /// panel opening to start over (`reset_recommended`).
+    pub recommended: crate::state::fetch::Fetch<Vec<ChatId>>,
     /// `next_offset` of the newest page of the open query; empty = no more.
     pub next_offset: String,
     /// The next page: asked once, and a refused or failed one waits for
@@ -146,9 +146,7 @@ impl SearchState {
 
     /// `getRecommendedChats` answer.
     pub(crate) fn accept_recommended(&mut self, chat_ids: Vec<ChatId>) {
-        self.tabs.recommended = chat_ids;
-        self.tabs.recommended_loading = false;
-        self.tabs.recommended_loaded = true;
+        self.tabs.recommended.succeed(chat_ids);
     }
 }
 

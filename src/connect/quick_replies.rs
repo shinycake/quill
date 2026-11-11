@@ -50,17 +50,18 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// `loadQuickReplyShortcuts`, once per session unless a load failed.
     pub fn ensure_quick_reply_shortcuts(&mut self) -> Result<(), ConnectSendError> {
-        if self.session.settings.quick_replies.shortcuts_requested {
+        if !self.session.settings.quick_replies.shortcuts_load.is_idle() {
             return Ok(());
         }
-        self.session.settings.quick_replies.shortcuts_requested = true;
+        self.session.settings.quick_replies.shortcuts_load.begin();
         let sent = self.send_quick_reply_request(
             RequestPurpose::Settings(SettingsPurpose::LoadQuickReplyShortcuts),
             None,
             qr::load_shortcuts_request,
         );
         if sent.is_err() {
-            self.session.settings.quick_replies.shortcuts_requested = false;
+            // Never left: asked again by the next look.
+            self.session.settings.quick_replies.shortcuts_load = Default::default();
         }
         sent.map(|_| ())
     }
@@ -71,25 +72,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         shortcut_id: i32,
     ) -> Result<(), ConnectSendError> {
-        if !self
-            .session
-            .settings
-            .quick_replies
-            .messages_requested
-            .insert(shortcut_id)
-        {
+        let loads = &mut self.session.settings.quick_replies.message_loads;
+        if loads.contains_key(&shortcut_id) {
             return Ok(());
         }
+        loads.entry(shortcut_id).or_default().begin();
         let sent = self.send_quick_reply_request(
             RequestPurpose::Settings(SettingsPurpose::LoadQuickReplyMessages { shortcut_id }),
             None,
             |extra| qr::load_messages_request(extra, shortcut_id),
         );
         if sent.is_err() {
+            // Never left: asked again by the next look.
             self.session
                 .settings
                 .quick_replies
-                .messages_requested
+                .message_loads
                 .remove(&shortcut_id);
         }
         sent.map(|_| ())

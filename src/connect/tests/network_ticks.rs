@@ -138,7 +138,8 @@ fn enabled_proxy() -> ProxyEntry {
 fn a_proxy_keeps_tdlib_trying_with_no_route_out() {
     let (mut driver, recorder) = driver();
     let now = Instant::now();
-    driver.session.settings.proxy.list = Some(vec![enabled_proxy()]);
+    driver.session.settings.proxy.list =
+        crate::state::paged::Paged::Ready(crate::proxy::ProxyList(vec![enabled_proxy()]));
     driver.poll_ticks(TickScope::Background, now, network(0, false));
     assert!(told(&recorder).is_empty(), "the start is not a change");
     driver.poll_ticks(TickScope::Background, now, network(1, false));

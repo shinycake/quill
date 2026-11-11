@@ -120,17 +120,17 @@ fn account_loss_resets_the_loading_flags_of_pending_lookups() {
         None,
     );
     session.payments.hub.gifts.begin(gifts, false);
+    let audios = session.request_for_user(
+        RequestPurpose::Media(MediaPurpose::GetProfileAudios { append: false }),
+        9,
+    );
     session
         .media
         .playlists
         .entry(9)
         .or_default()
         .list
-        .begin(RequestId(9_000), false);
-    session.request_for_user(
-        RequestPurpose::Media(MediaPurpose::GetProfileAudios { append: false }),
-        9,
-    );
+        .begin(audios, false);
     let user_action = session.request(RequestPurpose::SendMessage, Some(ChatId(5)));
     session.stale_history_requests.insert(77);
 
@@ -221,12 +221,12 @@ fn sweeping_a_lost_transfer_check_lets_the_next_open_ask_again() {
 #[test]
 fn sweeping_lost_recommended_channels_clears_their_loading_flag() {
     let mut session = ready_session();
-    session.search.search.tabs.recommended_loading = true;
+    session.search.search.tabs.recommended.begin();
     session.request(RequestPurpose::GetRecommendedChats, None);
 
     assert!(sweep(&mut session));
 
-    assert!(!session.search.search.tabs.recommended_loading);
+    assert!(!session.search.search.tabs.recommended.is_loading());
 }
 
 /// A swept upgrade or history toggle takes its waiting step with it and

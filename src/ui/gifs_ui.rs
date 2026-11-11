@@ -20,7 +20,7 @@ use quill::gif_grid::{GIF_GRID_PADDING, layout_gifs};
 use quill::ids::{ChatId, FileId};
 use quill::inline_grid::{MEDIA_HEIGHT, Placed, SKIP, should_load_more};
 use quill::lang::{keys, tr, tr_with};
-use quill::state::{GifPanel, RequestPurpose};
+use quill::state::{GifPanel, GifSearchStage, RequestPurpose};
 use quill::telegram::envelope::AnimationItem;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -46,7 +46,7 @@ fn empty_tile(color: Hsla) -> AnyElement {
 
 /// An answer for the session's GIF list is on its way.
 fn gifs_on_their_way(panel: &GifPanel) -> bool {
-    panel.loading || panel.search_loading
+    panel.saved.is_loading() || panel.search == GifSearchStage::Loading
 }
 
 /// What the footer's sections choose.
@@ -121,7 +121,7 @@ impl GifWanted {
 
     /// What the session's list holds now.
     fn shown(panel: &GifPanel) -> Self {
-        if panel.search_mode {
+        if panel.searching() {
             Self::Search(panel.search_query.clone())
         } else {
             Self::Saved
@@ -177,10 +177,10 @@ impl QuillApp {
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             match &wanted {
-                GifWanted::Saved => session.stickers.gifs.search_mode = false,
+                GifWanted::Saved => session.stickers.gifs.search = GifSearchStage::Off,
                 GifWanted::Search(query) => {
                     // No search bot offline: the demo finds nothing.
-                    session.stickers.gifs.search_mode = true;
+                    session.stickers.gifs.search = GifSearchStage::Ready;
                     session.stickers.gifs.search_query = query.clone();
                     session.accept_gif_search_results(Vec::new(), String::new(), true);
                 }
@@ -278,9 +278,7 @@ impl QuillApp {
             return GifShown::Live;
         }
         match &self.pickers.gif_wanted {
-            GifWanted::Saved if panel.loaded || !panel.animations.is_empty() => {
-                GifShown::Saved(&panel.animations)
-            }
+            GifWanted::Saved if panel.saved_loaded() => GifShown::Saved(panel.animations()),
             GifWanted::Saved => GifShown::Missing,
             GifWanted::Search(query) => panel
                 .searches_kept
@@ -317,8 +315,8 @@ impl QuillApp {
             scroll_top,
             viewport,
             content as f32,
-            panel.search_mode && !panel.search_next_offset.is_empty(),
-            panel.search_loading,
+            panel.searching() && !panel.search_next_offset.is_empty(),
+            panel.search == GifSearchStage::Loading,
         ) {
             return;
         }
@@ -403,11 +401,11 @@ impl QuillApp {
             Some(tr(keys::Q_MISC_NO_GIFS_FOUND))
         } else if matches!(shown, GifShown::Missing) || gifs_on_their_way(panel) {
             None
-        } else if panel.search_mode && panel.search_failed && panel.search_bot_username.is_empty() {
+        } else if panel.search == GifSearchStage::Failed && panel.search_bot_username.is_empty() {
             Some(tr(keys::Q_MISC_GIF_SEARCH_IS_NOT_AVAILABLE))
-        } else if panel.failed || panel.search_mode && panel.search_failed {
+        } else if panel.saved.error().is_some() || panel.search == GifSearchStage::Failed {
             Some(tr(keys::Q_MISC_COULD_NOT_UPDATE_GIFS_TRY))
-        } else if panel.search_mode {
+        } else if panel.searching() {
             Some(tr(keys::Q_MISC_NO_GIFS_FOUND))
         } else {
             Some(tr(keys::Q_MISC_NO_SAVED_GIFS_YET_RIGHT))
@@ -456,7 +454,7 @@ impl QuillApp {
                     continue;
                 };
                 let saved = panel
-                    .animations
+                    .animations()
                     .iter()
                     .any(|item| item.file_id == animation.file_id);
                 line = line.child(self.gif_tile(animation, cell, saved, pending, &roots, cx));

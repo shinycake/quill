@@ -271,7 +271,7 @@ impl QuillApp {
             let status = match ping {
                 Some(status) => {
                     let (text, color) = match status {
-                        PingStatus::Checking => {
+                        PingStatus::Checking(_) => {
                             (tr(keys::PROXY_BOX_TABLE_CHECKING).to_string(), text_muted())
                         }
                         PingStatus::Available(ms) => (

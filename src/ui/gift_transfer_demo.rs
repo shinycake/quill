@@ -87,10 +87,10 @@ pub(super) fn seed_gift_transfer_session(sink: Arc<MemorySink>) -> Session {
     hub.gifts_owner = Some(MessageSender::User { user_id: ME });
     hub.set_gifts(
         parse_received_gift(&own_received_gift(
-        export_date(&mode, now),
-        mode == "action-locked",
-    ))
-    .into_iter()
+            export_date(&mode, now),
+            mode == "action-locked",
+        ))
+        .into_iter()
         .collect(),
         1,
     );

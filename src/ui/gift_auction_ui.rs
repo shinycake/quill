@@ -492,7 +492,7 @@ impl QuillApp {
                     cx,
                 ));
             }
-            None | Some(Fetch::Idle | Fetch::Loading { stale: None }) => {
+            None | Some(Fetch::Idle | Fetch::Outdated(_) | Fetch::Loading { stale: None }) => {
                 body = body.child(
                     div()
                         .text_sm()

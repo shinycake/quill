@@ -40,10 +40,9 @@ use crate::telegram::envelope::{
     PaymentFormData, PaymentReceiptData, Poll, ReactionNotificationSettings, RecommendedChatFolder,
     ReplyKeyboard, ReplyMarkup, ReportChatOutcome, ReportOption, ReportSponsoredResult,
     ReportStoryResult, RichMessageContent, ScopeNotificationSettings, SecretChatState,
-    SponsoredMessage, StickerItem, StickerSetInfo, StorageStats,
-    StoryAvailableReactionView, StoryInteractionView, StoryInteractionsView, StoryListView,
-    TdError, UsernameCheckResult, ValidatedOrderInfoData, effective_content,
-    reply_markup_demands_reply,
+    SponsoredMessage, StickerItem, StickerSetInfo, StorageStats, StoryAvailableReactionView,
+    StoryInteractionView, StoryInteractionsView, StoryListView, TdError, UsernameCheckResult,
+    ValidatedOrderInfoData, effective_content, reply_markup_demands_reply,
 };
 use crate::telegram::envelope::{AvailableMessageSender, CallState, ReadyParams};
 use crate::telegram::envelope_story::ParsedStoryAlbum;
@@ -72,7 +71,6 @@ mod conference_add_people;
 mod conference_invite;
 mod domains;
 pub mod fetch;
-pub mod paged;
 mod folder_order_cache;
 mod history_calendar;
 mod history_prune;
@@ -85,6 +83,7 @@ mod media_library;
 mod member_list;
 pub mod optimistic;
 mod ownership_types;
+pub mod paged;
 mod paging;
 mod photo_gallery;
 mod redraw;

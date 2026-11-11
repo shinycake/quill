@@ -305,7 +305,7 @@ crate::ui::shell::register_dialogs! {
     /// "Gift Stars": pick a contact, then a pack for them.
     StarsGift => DialogSpec::new(
         3750,
-        |app| app.session().is_some_and(|s| s.payments.stars_gift.open),
+        |app| app.session().is_some_and(|s| s.payments.stars_gift.is_open()),
         QuillApp::build_stars_gift_dialog,
     )
     .close(|app, _, cx| app.close_stars_gift_dialog(cx)),

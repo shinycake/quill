@@ -5,8 +5,8 @@ use crate::ids::{ChatId, RequestId};
 use crate::state::GroupsPurpose;
 use crate::state::send_failed_line;
 use crate::state::{
-    INVITE_ADMIN_PAGE_SIZE, InviteLinkCountsFetch, InviteLinkFetch, InviteLinkMembersState, MembersStage,
-    JoinRequestFetch, RequestPurpose,
+    INVITE_ADMIN_PAGE_SIZE, InviteLinkCountsFetch, InviteLinkFetch, InviteLinkMembersState,
+    JoinRequestFetch, MembersStage, RequestPurpose,
 };
 use crate::telegram::requests::{
     create_chat_subscription_invite_link, delete_all_revoked_chat_invite_links,

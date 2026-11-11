@@ -7,9 +7,9 @@ impl Session {
     pub(crate) fn accept_profile_photo_emoji_icons(&mut self, stickers: Vec<StickerItem>) {
         self.users_state.profile_photo_emoji_icons.succeed(
             stickers
-            .into_iter()
-            .filter(|sticker| sticker.custom_emoji_id.is_some_and(|id| id > 0))
-            .collect(),
+                .into_iter()
+                .filter(|sticker| sticker.custom_emoji_id.is_some_and(|id| id > 0))
+                .collect(),
         );
     }
 
@@ -18,9 +18,9 @@ impl Session {
     pub(crate) fn accept_chat_photo_emoji_icons(&mut self, stickers: Vec<StickerItem>) {
         self.users_state.chat_photo_emoji_icons.succeed(
             stickers
-            .into_iter()
-            .filter(|sticker| sticker.custom_emoji_id.is_some_and(|id| id > 0))
-            .collect(),
+                .into_iter()
+                .filter(|sticker| sticker.custom_emoji_id.is_some_and(|id| id > 0))
+                .collect(),
         );
     }
 
@@ -29,9 +29,9 @@ impl Session {
     pub(crate) fn accept_background_emoji_icons(&mut self, stickers: Vec<StickerItem>) {
         self.users_state.background_emoji_icons.succeed(
             stickers
-            .into_iter()
-            .filter(|sticker| sticker.custom_emoji_id.is_some_and(|id| id > 0))
-            .collect(),
+                .into_iter()
+                .filter(|sticker| sticker.custom_emoji_id.is_some_and(|id| id > 0))
+                .collect(),
         );
     }
 }

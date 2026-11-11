@@ -357,10 +357,8 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) claimed_owner: Option<i64>,
     pub(crate) database_key: DatabaseKey,
     pub(crate) parameters_sent: bool,
-    pub(crate) search_debounce_token: u64,
-    pub(crate) pending_typed_search: Option<(u64, String)>,
-    pub(crate) chat_search_debounce_token: u64,
-    pub(crate) pending_typed_chat_search: Option<(u64, String)>,
+    pub(crate) typed_search: super::search::TypedDebounce,
+    pub(crate) typed_chat_search: super::search::TypedDebounce,
     /// Last `chatActionTyping` we sent (Unigram `_lastTypingTime`).
     pub(crate) outgoing_typing: Option<OutgoingTyping>,
     /// Last `chatActionRecordingVoiceNote` (Unigram record button).
