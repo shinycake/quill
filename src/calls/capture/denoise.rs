@@ -19,14 +19,18 @@ const FRAME: usize = EXTERNAL_AUDIO_FRAME_SAMPLES;
 /// RNNoise works on the 16-bit scale, not -1..1.
 const I16_SCALE: f32 = 32_768.0;
 
+/// Whether the previous frame went through the denoiser. Switching it on
+/// builds a fresh state, not a stale one; off drops it.
+enum Denoise {
+    Off,
+    On(Box<DenoiseState<'static>>),
+}
+
 /// Turns microphone chunks into processed 10 ms frames.
 pub struct MicProcessor {
     /// Samples (-1..1) waiting for a full frame.
     pending: Vec<f32>,
-    denoiser: Box<DenoiseState<'static>>,
-    /// Whether the previous frame went through the denoiser; switching
-    /// it back on starts from a fresh state, not a stale one.
-    denoised_last: bool,
+    denoise: Denoise,
     window: PeakWindow,
     /// The raw microphone's windows while muted, for the "You are on
     /// mute" hint (tdesktop measures the device itself then).
@@ -43,8 +47,7 @@ impl MicProcessor {
     pub fn new() -> Self {
         Self {
             pending: Vec::with_capacity(FRAME * 2),
-            denoiser: DenoiseState::new(),
-            denoised_last: false,
+            denoise: Denoise::Off,
             window: PeakWindow::default(),
             muted_window: PeakWindow::default(),
         }
@@ -80,7 +83,7 @@ impl MicProcessor {
     /// One 480-sample frame to i16, through the denoiser when on.
     fn process_frame(&mut self, input: &[f32; FRAME], controls: &MicControls) -> Vec<i16> {
         if controls.muted() {
-            self.denoised_last = false;
+            self.denoise = Denoise::Off;
             // Muted means silent: the system audio of this frame is dropped
             // too, so unmuting does not replay it late.
             if let Some(mix) = controls.system_audio() {
@@ -97,15 +100,16 @@ impl MicProcessor {
             *out = sample.clamp(-1.0, 1.0) * I16_SCALE;
         }
         let processed = if controls.noise_suppression() {
-            if !self.denoised_last {
-                self.denoiser = DenoiseState::new();
+            if !matches!(self.denoise, Denoise::On(_)) {
+                self.denoise = Denoise::On(DenoiseState::new());
             }
-            self.denoised_last = true;
             let mut denoised = [0.0_f32; FRAME];
-            self.denoiser.process_frame(&mut denoised, &scaled);
+            if let Denoise::On(denoiser) = &mut self.denoise {
+                denoiser.process_frame(&mut denoised, &scaled);
+            }
             denoised
         } else {
-            self.denoised_last = false;
+            self.denoise = Denoise::Off;
             scaled
         };
         let mut normalized = [0.0_f32; FRAME];

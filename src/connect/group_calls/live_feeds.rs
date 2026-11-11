@@ -69,7 +69,7 @@ fn participant_has_video(
 ) -> bool {
     if screen {
         participant.screen_sharing_enabled
-            || (participant.is_current_user && (call.screen_sharing || call.screen_share_pending))
+            || (participant.is_current_user && (call.screen_share.is_on()))
     } else {
         participant.video_enabled
     }
@@ -120,7 +120,7 @@ impl FeedInputs {
         Self {
             participants: call.participants.revision(),
             my_video: call.is_my_video_enabled,
-            sharing: call.screen_sharing || call.screen_share_pending,
+            sharing: call.screen_share.is_on(),
         }
     }
 }

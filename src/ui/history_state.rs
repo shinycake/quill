@@ -156,7 +156,6 @@ pub(crate) struct HistoryUi {
     /// Where the dissolves read the time: the wall clock in the app, a
     /// clock that only moves when told to in tests.
     pub(super) vanish_clock: std::cell::Cell<super::vanish::VanishClock>,
-    /// The open chat whose live-location countdowns are being refreshed
     /// The history's width class at the last paint (tdesktop
     /// `Adaptive::ChatLayout`, `chat_wide_ui`).
     pub(super) chat_layout: std::rc::Rc<std::cell::Cell<quill::chat_wide::ChatLayout>>,

@@ -210,18 +210,31 @@ pub(super) fn export_error_text(error: &ExportError) -> SharedString {
     }
 }
 
-/// Whether a password box's field has taken the keyboard since the box
-/// last opened.
-enum Keyboard {
-    Away,
-    Taken,
+/// What a password box shows this frame. The box is shown with its field
+/// ready for a password (`Idle`), or shown while a try is out (`Sending`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Showing {
+    Off,
+    Sending,
+    Idle,
 }
 
-/// A password box's input and its keyboard stage, one value. It reads as
-/// the input (`Deref`).
+/// A password box's input and where its field stands: one value. It reads
+/// as the input (`Deref`).
 pub(super) struct PasswordField {
     input: Entity<InputState>,
-    keyboard: Keyboard,
+    stage: FieldStage,
+}
+
+/// The field's stage. `Typing` is the idle phase after the field took the
+/// keyboard, so it takes it once per phase and not on every frame.
+enum FieldStage {
+    /// The box is off screen; the field is empty.
+    Away,
+    /// A try is out; the field waits for its answer.
+    Waiting,
+    /// Idle, and the field has taken the keyboard.
+    Typing,
 }
 
 impl std::ops::Deref for PasswordField {
@@ -235,23 +248,24 @@ impl PasswordField {
     pub(super) fn new(input: Entity<InputState>) -> Self {
         Self {
             input,
-            keyboard: Keyboard::Away,
+            stage: FieldStage::Away,
         }
     }
 
     /// Per frame: the field takes the keyboard when the idle box opens and
     /// after each answer (tdesktop `PasscodeBox` focuses the field), and is
     /// emptied whenever the box is not on screen.
-    pub(super) fn keep(&mut self, showing: bool, idle: bool, window: &mut Window, cx: &mut App) {
-        match (idle, &self.keyboard) {
-            (true, Keyboard::Away) => {
-                self.keyboard = Keyboard::Taken;
+    pub(super) fn keep(&mut self, showing: Showing, window: &mut Window, cx: &mut App) {
+        self.stage = match (showing, &self.stage) {
+            (Showing::Idle, FieldStage::Typing) => FieldStage::Typing,
+            (Showing::Idle, _) => {
                 self.input.update(cx, |input, cx| input.focus(window, cx));
+                FieldStage::Typing
             }
-            (false, _) => self.keyboard = Keyboard::Away,
-            (true, Keyboard::Taken) => {}
-        }
-        if !showing && !self.input.read(cx).value().is_empty() {
+            (Showing::Sending, _) => FieldStage::Waiting,
+            (Showing::Off, _) => FieldStage::Away,
+        };
+        if showing == Showing::Off && !self.input.read(cx).value().is_empty() {
             self.input
                 .update(cx, |input, cx| input.set_value("", window, cx));
         }

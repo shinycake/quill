@@ -65,7 +65,6 @@ impl QuillApp {
     }
 
     fn location_search_close(&mut self, cx: &mut Context<Self>) {
-        self.location_ui.search = super::state::Search::Closed;
         self.location_search_changed(None, cx);
     }
 

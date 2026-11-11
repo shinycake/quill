@@ -3,54 +3,95 @@
 use crate::state::*;
 use crate::telegram::envelope::GiftCodeInfoData;
 
+/// Where a gift code box stands. One value: each stage leaves by the
+/// answer, the error, or the box closing (the lookup is dropped with it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GiftCodeStage {
+    /// `checkPremiumGiftCode` is out as this request.
+    Checking(RequestId),
+    /// Checked; Apply is offered when the code is unused.
+    Known(GiftCodeInfoData),
+    /// `applyPremiumGiftCode` is out as `request`.
+    Applying {
+        request: RequestId,
+        info: GiftCodeInfoData,
+    },
+    /// `applyPremiumGiftCode` answered `ok`.
+    Applied(GiftCodeInfoData),
+    /// The check failed: the link is expired or not valid.
+    Failed(String),
+    /// The apply failed; the checked code stays, with the reason under it.
+    ApplyFailed {
+        info: GiftCodeInfoData,
+        error: String,
+    },
+}
+
 /// The code a link carries and where its box stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GiftCodeLookup {
     pub code: String,
-    /// `None` while loading or after a failed check.
-    pub info: Option<GiftCodeInfoData>,
-    pub loading: bool,
-    /// Why the check or the apply failed.
-    pub error: Option<String>,
-    /// `applyPremiumGiftCode` is in flight.
-    pub applying: bool,
-    /// `applyPremiumGiftCode` answered `ok`.
-    pub applied: bool,
-    /// The `checkPremiumGiftCode` and `applyPremiumGiftCode` this box
-    /// waits for: an answer to another box's request (one closed, then
-    /// another link opened) settles nothing here.
-    pub(crate) check: Option<RequestId>,
-    pub(crate) apply: Option<RequestId>,
+    /// The box waits only for the request its stage names: an answer to
+    /// another box's request (one closed, then another link opened)
+    /// settles nothing here.
+    pub stage: GiftCodeStage,
 }
 
 impl GiftCodeLookup {
-    pub fn new(code: String) -> Self {
+    /// A box whose check went out as `check`.
+    pub(crate) fn checking(code: String, check: RequestId) -> Self {
         Self {
             code,
-            info: None,
-            loading: true,
-            error: None,
-            applying: false,
-            applied: false,
-            check: None,
-            apply: None,
+            stage: GiftCodeStage::Checking(check),
         }
     }
 
-    /// The box waits for `check` to answer.
-    pub(crate) fn checking(mut self, check: RequestId) -> Self {
-        self.check = Some(check);
-        self
+    /// The check is still out.
+    pub fn loading(&self) -> bool {
+        matches!(self.stage, GiftCodeStage::Checking(_))
+    }
+
+    pub fn applying(&self) -> bool {
+        matches!(self.stage, GiftCodeStage::Applying { .. })
+    }
+
+    pub fn applied(&self) -> bool {
+        matches!(self.stage, GiftCodeStage::Applied(_))
+    }
+
+    /// What the check said, once it did.
+    pub fn info(&self) -> Option<&GiftCodeInfoData> {
+        match &self.stage {
+            GiftCodeStage::Known(info)
+            | GiftCodeStage::Applying { info, .. }
+            | GiftCodeStage::Applied(info)
+            | GiftCodeStage::ApplyFailed { info, .. } => Some(info),
+            GiftCodeStage::Checking(_) | GiftCodeStage::Failed(_) => None,
+        }
+    }
+
+    /// Why the check or the apply failed.
+    pub fn error(&self) -> Option<&str> {
+        match &self.stage {
+            GiftCodeStage::Failed(error) | GiftCodeStage::ApplyFailed { error, .. } => Some(error),
+            _ => None,
+        }
+    }
+
+    /// Apply is allowed: the code is known and unused, and no apply is
+    /// out or done.
+    pub fn can_apply(&self) -> bool {
+        matches!(
+            &self.stage,
+            GiftCodeStage::Known(info) | GiftCodeStage::ApplyFailed { info, .. }
+                if !info.is_used()
+        )
     }
 }
 
 /// The box's own request: `pending` is `wanted`, and of `purpose`.
-fn is_ours(
-    pending: Option<&PendingRequest>,
-    purpose: RequestPurpose,
-    wanted: Option<RequestId>,
-) -> bool {
-    pending.is_some_and(|p| p.purpose == purpose && Some(p.id) == wanted)
+fn is_ours(pending: Option<&PendingRequest>, purpose: RequestPurpose, wanted: RequestId) -> bool {
+    pending.is_some_and(|p| p.purpose == purpose && p.id == wanted)
 }
 
 impl Session {
@@ -61,24 +102,20 @@ impl Session {
         pending: Option<&PendingRequest>,
     ) {
         if let Some(lookup) = self.payments.gift_code.as_mut()
-            && is_ours(pending, RequestPurpose::CheckPremiumGiftCode, lookup.check)
+            && let GiftCodeStage::Checking(check) = lookup.stage
+            && is_ours(pending, RequestPurpose::CheckPremiumGiftCode, check)
         {
-            lookup.check = None;
-            lookup.loading = false;
-            lookup.error = None;
-            lookup.info = Some(info);
+            lookup.stage = GiftCodeStage::Known(info);
         }
     }
 
     /// `ok` for `applyPremiumGiftCode`.
     pub(crate) fn apply_gift_code_ok(&mut self, pending: Option<&PendingRequest>) {
         if let Some(lookup) = self.payments.gift_code.as_mut()
-            && is_ours(pending, RequestPurpose::ApplyPremiumGiftCode, lookup.apply)
+            && let GiftCodeStage::Applying { request, info } = &lookup.stage
+            && is_ours(pending, RequestPurpose::ApplyPremiumGiftCode, *request)
         {
-            lookup.apply = None;
-            lookup.applying = false;
-            lookup.applied = true;
-            lookup.error = None;
+            lookup.stage = GiftCodeStage::Applied(info.clone());
         }
     }
 
@@ -91,20 +128,21 @@ impl Session {
         let Some(lookup) = self.payments.gift_code.as_mut() else {
             return;
         };
-        let purpose = pending
-            .filter(|p| Some(p.id) == lookup.check || Some(p.id) == lookup.apply)
-            .map(|p| p.purpose);
-        match purpose {
-            Some(RequestPurpose::CheckPremiumGiftCode) => {
-                lookup.check = None;
-                lookup.loading = false;
-                lookup.info = None;
-                lookup.error = Some("This gift code link has expired or is not valid.".into());
+        match &lookup.stage {
+            GiftCodeStage::Checking(check)
+                if is_ours(pending, RequestPurpose::CheckPremiumGiftCode, *check) =>
+            {
+                lookup.stage = GiftCodeStage::Failed(
+                    "This gift code link has expired or is not valid.".into(),
+                );
             }
-            Some(RequestPurpose::ApplyPremiumGiftCode) => {
-                lookup.apply = None;
-                lookup.applying = false;
-                lookup.error = Some(format!("Couldn't use the gift code: {}", error_reason(err)));
+            GiftCodeStage::Applying { request, info }
+                if is_ours(pending, RequestPurpose::ApplyPremiumGiftCode, *request) =>
+            {
+                lookup.stage = GiftCodeStage::ApplyFailed {
+                    info: info.clone(),
+                    error: format!("Couldn't use the gift code: {}", error_reason(err)),
+                };
             }
             _ => {}
         }

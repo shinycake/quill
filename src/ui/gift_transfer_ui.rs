@@ -19,6 +19,7 @@ use super::app::QuillApp;
 use super::gift_manage_ui::{hint, stars};
 use super::gift_transfer_view::{StageView, stage_view};
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::fragment_password::Showing;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::*;
@@ -248,7 +249,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (url, done, in_password, idle_password) = match self.gift_manage_mut() {
+        let (url, done, field) = match self.gift_manage_mut() {
             Some(manage) => {
                 let stage = manage.transfer().map(|p| &p.stage);
                 let in_password = matches!(stage, Some(TransferStage::Password { .. }));
@@ -259,19 +260,19 @@ impl QuillApp {
                         ..
                     })
                 );
-                (
-                    manage.export_url.take(),
-                    manage.transferred.take(),
-                    in_password,
-                    idle,
-                )
+                let field = match (in_password, idle) {
+                    (false, _) => Showing::Off,
+                    (true, true) => Showing::Idle,
+                    (true, false) => Showing::Sending,
+                };
+                (manage.export_url.take(), manage.transferred.take(), field)
             }
-            None => (None, None, false, false),
+            None => (None, None, Showing::Off),
         };
         self.screen
             .payments
             .gift_export_password
-            .keep(in_password, idle_password, window, cx);
+            .keep(field, window, cx);
         if let Some(url) = url {
             self.open_fragment_url(&url, cx);
             self.clear_transfer_inputs(window, cx);

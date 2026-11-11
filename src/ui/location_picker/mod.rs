@@ -347,6 +347,11 @@ impl QuillApp {
         query: Option<String>,
         cx: &mut Context<Self>,
     ) {
+        // The field is open exactly while the picker holds a query: the one
+        // place that changes the picker's query also closes the field.
+        if query.is_none() {
+            self.location_ui.search = state::Search::Closed;
+        }
         let pending = self
             .location_sharing_mut()
             .and_then(|sharing| sharing.picker_mut())

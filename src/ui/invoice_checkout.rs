@@ -109,7 +109,7 @@ impl QuillApp {
     ) {
         let pack = self
             .session()
-            .and_then(|s| s.payments.star_packs.options.get(index).cloned());
+            .and_then(|s| s.payments.star_packs.options.items().get(index).cloned());
         match pack {
             Some(pack) => self.start_invoice_checkout(stars_pack_invoice(&pack), window, cx),
             None => self.set_status_note(

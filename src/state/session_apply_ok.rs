@@ -427,7 +427,6 @@ impl Session {
             ) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                     self.groups.welcome_messages.remove(&chat_id.0);
-                    self.groups.welcome_message_fetches.remove(&chat_id.0);
                 }
             }
             // Slice (communities backend core): a
@@ -729,7 +728,9 @@ impl Session {
                 if let Some(state) = self.groups.invite_pages.join_requests_mut(chat_id.0)
                     && link == Some(state.invite_link.as_str())
                 {
-                    if let Some(page) = state.request.take() {
+                    if let PageStage::Loading(page) =
+                        std::mem::replace(&mut state.stage, PageStage::Ready)
+                    {
                         self.requests.take(page);
                     }
                     state.requests.clear();
@@ -750,9 +751,10 @@ impl Session {
                     JoinRequestFetch::Loaded(JoinRequestList {
                         total_count: 0,
                         requests: Vec::new(),
+                        query: String::new(),
+                        more: None,
                     }),
                 );
-                self.groups.join_request_queries.remove(&chat_id.0);
                 self.groups.pending_join_request_counts.insert(chat_id.0, 0);
                 self.groups.pending_join_request_users.remove(&chat_id.0);
             }

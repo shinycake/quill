@@ -32,18 +32,27 @@ use quill::new_chat::{
 /// The description shows three lines and grows to eight.
 const DESCRIPTION_ROWS: (usize, usize) = (3, 8);
 
-/// Whether the name field shows its error.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The name the last Confirm judged, so the name field's error is about that
+/// text: typing anything else ends it with no reset, whoever refused it.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TitleCheck {
+    /// Nothing judged yet.
     Fine,
-    /// Confirm found the name empty or too long.
-    Rejected,
+    /// Confirm found this name empty or too long.
+    Rejected(String),
+    /// This name went to TDLib; its `NO_CHAT_TITLE` refusal is about it.
+    Sent(String),
 }
 
 impl TitleCheck {
-    /// The error shows for the dialog's own verdict or TDLib's.
-    pub(crate) fn shows_error(self, server_rejected: bool) -> bool {
-        self == Self::Rejected || server_rejected
+    /// The error shows while the field still holds the judged text and it
+    /// was refused by the dialog's own check or by TDLib.
+    pub(crate) fn shows_error(&self, server_rejected: bool, current: &str) -> bool {
+        match self {
+            Self::Fine => false,
+            Self::Rejected(text) => text == current,
+            Self::Sent(text) => server_rejected && text == current,
+        }
     }
 }
 
@@ -165,11 +174,8 @@ impl QuillApp {
             .map(|secs| SharedString::from(quill::auto_delete::format_ttl(*secs)))
             .collect();
         let auto_delete_picker = cx.new(|cx| SelectState::new(choices, None, window, cx));
-        cx.subscribe(&title_input, |this, _, event: &InputEvent, cx| {
+        cx.subscribe(&title_input, |_, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
-                if let Some(dialog) = this.admin.create_chat_dialog.as_mut() {
-                    dialog.title = TitleCheck::Fine;
-                }
                 cx.notify();
             }
         })
@@ -301,7 +307,7 @@ impl QuillApp {
         match plan_new_chat(kind, &title, &description, &[], None, 0) {
             Err(NewChatInvalid::EmptyTitle | NewChatInvalid::TitleTooLong) => {
                 if let Some(dialog) = self.new_chat_dialog_mut() {
-                    dialog.title = TitleCheck::Rejected;
+                    dialog.title = TitleCheck::Rejected(title);
                     let input = dialog.title_input.clone();
                     input.update(cx, |input, cx| input.focus(window, cx));
                 }
@@ -348,6 +354,9 @@ impl QuillApp {
         };
         match live.driver.create_new_chat(&request, photo) {
             Ok(Some(request)) => {
+                if let Some(dialog) = self.admin.create_chat_dialog.as_mut() {
+                    dialog.title = TitleCheck::Sent(title);
+                }
                 self.set_new_chat_stage(NewChatStage::Creating { request, back }, cx);
             }
             Ok(None) => {}

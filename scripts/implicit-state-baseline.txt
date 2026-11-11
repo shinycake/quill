@@ -1,8 +1,4 @@
 # Implicit-state debt (scripts/check-implicit-state.py). Only remove lines.
-ActiveGroupCall::join_as_requested
-ActiveGroupCall::loaded_all_participants
-ActiveGroupCall::loaded_all_participants+transport_error
-ActiveGroupCall::screen_share_pending
 AppearancePrefs::ignore_battery_saving
 Assembly::started
 AudioEngine::failed
@@ -16,9 +12,6 @@ AwardMembers::loading+error
 Backdrops::loading
 BackendStatus::failed
 BarFacts::bot_start_pending
-BotCreateDialog::submitted
-BotEditTexts::load_failed
-BotEditTexts::load_failed+error
 BusinessSettingsState::time_zones_requested
 BusinessSettingsState::time_zones_requested+error
 CallSnap::connecting
@@ -26,7 +19,6 @@ CallSummary::busy
 CallUi::window_opening
 CameraDraft::starting
 Ceremony::finished
-ChatListState::archive_settings_loading
 ChatSummary::my_rights_fetched
 ChatSwipeFacts::is_saved
 ChatUi::inline_query_waiting
@@ -60,8 +52,6 @@ GifPanel::loaded
 GifPanel::loading
 GifPanel::search_failed
 GifPanel::search_loading
-GiftCodeLookup::loading
-GiftCodeLookup::loading+error
 GiftManageState::collections_loading
 GiftValueLookup::loading
 GiftValueLookup::loading+error
@@ -80,14 +70,10 @@ HistoryState::newer_failed
 HistoryUi::anchor_pending
 InlineMembersUi::admins_asked
 InstallResult::failed
-InviteLinkMembersState::loading
-InviteLinkMembersState::loading+error
 InvoiceWatch::failed
 InvoiceWatch::pending
 InvoiceWatch::sending
 JoinedLines::started
-LanguageLinkLookup::loading
-LanguageLinkLookup::loading+error
 Latest::wake_pending
 LayerFade::closing
 LinuxState::failed
@@ -100,9 +86,6 @@ Lookup::fade_started
 Lookup::pending
 ManagerView::failed
 ManagerView::loading
-MasksPanel::archived_loaded
-MasksPanel::failed
-MasksPanel::installed_loaded
 MediaFacts::downloading
 MediaFacts::in_saved_messages
 MediaMenuFacts::downloading
@@ -115,12 +98,9 @@ MutedSpeechHint::done
 NewChatView::busy
 NewChatView::busy+failure
 OutputState::opening
-OwnershipState::check_in_flight
-OwnershipState::check_in_flight+check_error
 Paged::loaded
 Paged::loading
 Paged::loading+error
-PaidMessages::trust_loaded
 PanelMotion::opening
 ParsedFile::uploading
 ParsedGroupCall::loaded_all_participants
@@ -149,7 +129,6 @@ Queued::failed
 QuickRepliesState::shortcuts_requested
 QuickRepliesState::shortcuts_requested+error
 ReceivedGift::is_saved
-Relay::started
 ResaleBuy::sending
 ResaleSearch::loaded
 ResaleSearch::loading
@@ -173,7 +152,6 @@ SettingsState::pending_attention+default_auto_delete_error
 SettingsState::saved_sounds_loaded
 SettingsState::saved_sounds_stale
 SettingsState::storage_limits_seed_sent
-SettingsState::storage_stats_loading
 SharedMediaTabState::loading_more
 SharedMediaTabState::loading_more+error
 SignInUi::tick_armed
@@ -181,9 +159,6 @@ SignInUi::tick_armed+error_clock
 StageFacts::create_pending
 StageFacts::type_failed
 StageFacts::type_pending
-StarPacksState::loaded
-StarPacksState::loading
-StarPacksState::loading+error
 State::started
 Step::started
 StickerPanel::greeting_loaded
@@ -192,7 +167,6 @@ StickerPanel::suggest_waiting_for_sets
 StickerSetView::files_requested
 StorageScroll::pending
 StreamFacts::transport_failed
-StyleExamples::loading
 Tempo::done
 Tempo::inner_done
 ThreadView::reading_started
@@ -203,11 +177,6 @@ TopicHistory::newer_failed
 TransportMachine::loop_sent
 UiClip::failed
 UpdatePill::downloading
-UsersState::background_emoji_icons_failed
-UsersState::background_emoji_icons_failed+profile_edit_error
-UsersState::chat_photo_emoji_icons_failed
-UsersState::profile_photo_emoji_icons_failed
-UsersState::wearable_gifts_loaded
 Validation::finished
 VideoEditorDialog::busy
 WebApps::grossing_loading

@@ -407,6 +407,32 @@ fn bots_games_high_scores_answer_lands_in_panel() {
 }
 
 #[test]
+fn a_refused_game_scores_request_leaves_the_panel_failed_to_retry() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra =
+        session.request_for_message(RequestPurpose::GetGameHighScores, ChatId(7), MessageId(301));
+    session.bots.game_scores.insert(
+        (7, 301),
+        crate::state::fetch::Fetch::Loading { stale: None },
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"GAME_INVALID"}}"#,
+            extra.0
+        ),
+    );
+    let panel = session.bots.game_scores.get(&(7, 301));
+    assert!(
+        matches!(panel, Some(crate::state::fetch::Fetch::Failed { .. })),
+        "the panel stays, failed, so it can draw Retry: {panel:?}"
+    );
+}
+
+#[test]
 fn fast_buttons_target_the_last_message_when_it_has_an_inline_keyboard() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);

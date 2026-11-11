@@ -344,7 +344,8 @@ impl QuillApp {
             cx,
         );
         let name_label = tr(dialog.kind.name_label());
-        let title_error = dialog.title.shows_error(no_title).then(|| {
+        let typed = dialog.title_input.read(cx).value().to_string();
+        let title_error = dialog.title.shows_error(no_title, &typed).then(|| {
             div()
                 .text_xs()
                 .text_color(danger)

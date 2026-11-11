@@ -382,17 +382,14 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.close_message_menu();
-        // The flow is the session's: one report at a time, so a box another
-        // window still shows for the one this replaces goes.
-        self.end_report_boxes(cx);
-        self.message_ui.menu_ui.show_report();
+        // The flow is the session's: one report at a time, so it replaces
+        // the one another window hosted.
         if let Some(live) = self.live.as_mut() {
             if live
                 .driver
                 .report_messages(chat_id, &message_ids, "", "", None)
                 .is_err()
             {
-                self.message_ui.menu_ui.end_report();
                 self.set_note(StatusNote::error(tr(
                     keys::Q_CHAT_COULD_NOT_START_THE_REPORT,
                 )));
@@ -402,14 +399,19 @@ impl QuillApp {
                 session.request(quill::state::RequestPurpose::ReportMessages, Some(chat_id));
             session.begin_message_report(chat_id, message_ids, request);
         }
+        let host = self.windows.scope;
+        if let Some(session) = self.session_mut() {
+            session.host_message_report(host);
+        }
         cx.notify();
     }
 
-    /// Clear the report box's flag in every window: the flow it shows is
-    /// the session's, so no window keeps a box for a flow that is gone or
-    /// replaced.
-    fn end_report_boxes(&mut self, cx: &mut Context<Self>) {
-        self.in_every_window(cx, |this, _| this.message_ui.menu_ui.end_report());
+    /// The report dialog shows in the window that hosts the session's
+    /// report flow, for as long as the flow lasts.
+    pub(in crate::ui) fn report_shown(&self) -> bool {
+        self.session()
+            .and_then(|s| s.messages.message_report.as_ref())
+            .is_some_and(|flow| flow.host == self.windows.scope)
     }
 
     pub(in crate::ui) fn close_message_report(
@@ -417,7 +419,6 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.end_report_boxes(cx);
         // The details text belongs to the flow that ends here.
         self.message_ui
             .menu_ui

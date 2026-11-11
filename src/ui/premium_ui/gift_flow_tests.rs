@@ -75,10 +75,7 @@ fn a_purchase_on_its_way_is_not_taken_over_by_another_chats_box(cx: &mut TestApp
                     recipient: MessageSender::User { user_id: 501 },
                     recipient_name: "Ada".into(),
                     requested_name: "plush".into(),
-                    quote: None,
-                    price: None,
-                    stage: quill::marketplace::GiftStage::Loading,
-                    note: None,
+                    stage: quill::marketplace::GiftPurchaseStage::Loading(quill::ids::RequestId(1)),
                 });
             }
             app.payments.marketplace.open_for(ChatId(501), false);

@@ -139,9 +139,25 @@ fn game_scores_panel(
         .rounded_md()
         .bg(bg_subtle());
     match scores {
-        quill::state::fetch::Fetch::Idle
-        | quill::state::fetch::Fetch::Loading { .. }
-        | quill::state::fetch::Fetch::Failed { .. } => {
+        quill::state::fetch::Fetch::Failed { .. } => {
+            panel = panel
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(tr(keys::Q_MISC_COULDNT_LOAD_THE_SCORES)),
+                )
+                .child(
+                    Button::new(format!("game-scores-retry-{row_id}"))
+                        .label(tr(keys::Q_CHAT_RETRY))
+                        .ghost()
+                        .small()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.load_game_scores(chat_id, message_id, cx);
+                        })),
+                );
+        }
+        quill::state::fetch::Fetch::Idle | quill::state::fetch::Fetch::Loading { .. } => {
             panel = panel.child(
                 div()
                     .text_xs()
@@ -204,6 +220,13 @@ impl QuillApp {
             cx.notify();
             return;
         }
+        self.load_game_scores(chat_id, message_id, cx);
+    }
+
+    /// Ask `getGameHighScores` for the panel: the first open, or Retry
+    /// after a refusal.
+    fn load_game_scores(&mut self, chat_id: ChatId, message_id: MessageId, cx: &mut Context<Self>) {
+        let key = (chat_id.0, message_id.0);
         let user_id = self
             .live
             .as_ref()

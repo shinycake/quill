@@ -242,7 +242,9 @@ fn driver_send_album_rejects_overlong_caption() {
         ],
     );
     let sent_before = recorder.snapshot().len();
-    let err = driver.send_album_snapshot(&snap).unwrap_err();
+    let err = driver
+        .send_album_snapshot_to(&driver.send_place(snap.chat_id()), &snap)
+        .unwrap_err();
     assert!(matches!(err, ConnectSendError::CaptionTooLong { limit: 4 }));
     assert_eq!(recorder.snapshot().len(), sent_before);
     let _ = std::fs::remove_dir_all(&dir);

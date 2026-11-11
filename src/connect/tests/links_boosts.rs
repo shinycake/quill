@@ -164,7 +164,7 @@ fn a_stale_admin_reply_is_dropped_after_switching_admin() {
         .admin_links(13)
         .unwrap();
     assert_eq!(state.creator_user_id, 10);
-    assert!(matches!(state.active, InviteLinkFetch::Loading));
+    assert!(matches!(state.active, InviteLinkFetch::Loading(_)));
     rig.ingest(&links_json(second.0, &[link_json("https://t.me/+ten", 1)]));
     let state = rig
         .driver

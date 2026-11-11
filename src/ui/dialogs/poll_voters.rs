@@ -7,14 +7,8 @@ pub struct PollVotersDialog {
     pub(crate) chat_id: ChatId,
     pub(crate) message_id: MessageId,
     pub(crate) selected_option: Option<usize>,
-    /// What the dialog opened as.
-    pub(crate) view: PollView,
-}
-
-/// B15: the voter lists alone, or opened from "Poll Stats" with the vote
-/// graph above them (`getPollVoteStatistics`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PollView {
-    Voters,
-    Stats,
+    /// Opened from "Poll Stats" (`getPollVoteStatistics`) with the vote
+    /// graph above the lists. Fixed when the dialog opens and never
+    /// switched: a setting, not a stage.
+    pub(crate) show_stats: bool,
 }

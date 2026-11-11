@@ -136,11 +136,10 @@ pub struct MessagesState {
     /// its rows. Entries can be stale; `apply_update_poll` re-checks and
     /// prunes them.
     pub(crate) poll_messages: HashMap<i64, HashSet<(i64, i64)>>,
-    /// In-flight `forwardMessages` (dest / source / requested count).
-    pub in_flight_forward: Option<ForwardFlight>,
-    /// Further `forwardMessages` in flight while the share box sends to
-    /// several chats at once (`in_flight_forward` holds the first).
-    pub queued_forward_flights: Vec<ForwardFlight>,
+    /// In-flight `forwardMessages` (dest / source / requested count): one
+    /// per destination while the share box sends to several chats at once.
+    /// A flight leaves with its answer, its error or a failed send.
+    pub forward_flights: Vec<ForwardFlight>,
     /// Share box search (local `searchChats` + `searchChatsOnServer`).
     pub share_search: ShareSearch,
     /// Last `forwardMessages` outcome for the dest picker success surface.
@@ -231,8 +230,7 @@ impl MessagesState {
             pending_bot_messages: HashMap::new(),
             pending_bot_period_secs: 30,
             poll_messages: HashMap::new(),
-            in_flight_forward: None,
-            queued_forward_flights: Vec::new(),
+            forward_flights: Vec::new(),
             share_search: ShareSearch::default(),
             last_forward: None,
             pinned_messages: HashMap::new(),

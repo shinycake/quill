@@ -259,6 +259,50 @@ fn the_sticker_set_box_closes_in_the_window_that_showed_it(cx: &mut TestAppConte
     });
 }
 
+/// The report dialog shows in the one window that started the session's
+/// report flow and ends with the flow; a sticker set box of that window is
+/// not replaced by it and is still there after the report ends.
+#[gpui_kit::test]
+fn the_report_box_follows_the_session_flow_and_leaves_the_sticker_box(cx: &mut TestAppContext) {
+    let (app, _, _) = new_app(cx);
+    app.update(cx, |app, cx| {
+        app.set_window_scope(None);
+        app.in_window_scope(Some(OTHER), cx, |app, cx| {
+            app.message_ui.menu_ui.show_sticker_set();
+            app.open_message_report(OTHER, Vec::new(), cx);
+        });
+        let shown_in = |app: &mut QuillApp, cx: &mut gpui_kit::Context<QuillApp>, w| {
+            app.in_window_scope(w, cx, |app, _| app.report_shown())
+        };
+        assert_eq!(shown_in(app, cx, Some(OTHER)), Some(true));
+        assert_eq!(
+            shown_in(app, cx, None),
+            Some(false),
+            "not in the main window"
+        );
+        let sticker = app.in_window_scope(Some(OTHER), cx, |app, _| {
+            app.message_ui.menu_ui.sticker_set_open()
+        });
+        assert_eq!(
+            sticker,
+            Some(true),
+            "the report did not replace the sticker box"
+        );
+        // Reported from the main window next: the flow moves there.
+        app.open_message_report(OTHER, Vec::new(), cx);
+        assert_eq!(shown_in(app, cx, Some(OTHER)), Some(false));
+        assert_eq!(shown_in(app, cx, None), Some(true));
+        if let Some(session) = app.session_mut() {
+            session.clear_message_report();
+        }
+        assert_eq!(shown_in(app, cx, None), Some(false), "the flow ended");
+        let sticker = app.in_window_scope(Some(OTHER), cx, |app, _| {
+            app.message_ui.menu_ui.sticker_set_open()
+        });
+        assert_eq!(sticker, Some(true), "the sticker box is back after Report");
+    });
+}
+
 /// A video picked for a set in a chat window, still downloading when that
 /// window closes, is dropped: its editor never pops up in the main window.
 #[gpui_kit::test]
