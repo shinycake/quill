@@ -163,8 +163,6 @@ QuillApp::build_welcome_dialog::body.borrow_mut 1
 QuillApp::chat_frame_starts::slot.borrow 1
 QuillApp::chat_list_item_element::row_fx.borrow_mut 1
 QuillApp::choose_send_effect::cells.borrow 1
-QuillApp::close_kit_dialog_if_done::dialogs_closed.borrow_mut 1
-QuillApp::close_main_window_dialogs::dialogs_closed.borrow_mut 1
 QuillApp::composer_draft_parts::parsed.borrow_mut 1
 QuillApp::effect_list_cell::cells.borrow_mut 1
 QuillApp::effects_strip::cells.borrow_mut 1
@@ -182,7 +180,6 @@ QuillApp::media_display_roots::media_roots_frame.borrow_mut 1
 QuillApp::media_panel_reveal::media_panel.borrow_mut 1
 QuillApp::note_layer_drawn::layers_drawn.borrow_mut 1
 QuillApp::note_widget::passes.borrow_mut 1
-QuillApp::pinned_message_banner::pinned_bar.borrow_mut 1
 QuillApp::premium_autoplay::played.borrow 1
 QuillApp::premium_autoplay::played.borrow_mut 2
 QuillApp::premium_autoplay::seen.borrow 1
@@ -226,7 +223,6 @@ QuillApp::tray_photo_size::photo_sizes.borrow_mut 1
 QuillApp::try_open_chat_window_at::slot.borrow 1
 QuillApp::widgets_left_window::passes.borrow_mut 1
 QuillApp::window_title_in_place::title_badge.borrow_mut 1
-QuillShell::sync_host_dialogs::dialogs_closed.borrow_mut 1
 RichPreview::blocks::editor.borrow_mut 1
 RichPreview::blocks::parsed.borrow 1
 RichPreview::blocks::parsed.borrow_mut 1

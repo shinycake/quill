@@ -8072,9 +8072,9 @@ Round 2, files: `inline_members_state/view`, `inline_playback`,
 | 10-125 | The link pump sleeps; `pump_deep_link` pokes it when its slot is free and a link waits in the OS inbox. |
 | 10-121 | A giftcode lookup is refused while a code is being applied; a refused send puts the old box back. The same for the `setlanguage` lookup. |
 | 11-010 | Each cause has its own line: no chat, not connected, request not sent. |
-| 11-027 | The effect-badge registries use `try_borrow` / `try_borrow_mut`, take the map out while a callback runs, and skip a re-entrant paint. |
+| 11-027 | The effect-badge registries use `try_borrow` / `try_borrow_mut`, take the map out while a callback runs, and skip a re-entrant paint. The pinned bar's presence is followed through `try_borrow_mut`; a frame that could not take it draws no bar. |
 | 11-028 | The effect descriptions are asked once when an entry is added. |
-| 11-037 | `MotionState::reveal` is a `Cell<Option<Reveal>>`. |
+| 11-037 | `MotionState::reveal` is a `Cell<Option<Reveal>>`. The marks of kit dialogs closed from outside (`MainWindow::dialogs_closed`) are written and read through `try_borrow_mut`. |
 | 11-043 | Save price takes the staged price once the change is on its way; a refused save keeps it, and a lapsed Premium says so. |
 | 11-041 | `DirectStage` is gone: saving, refused and done come from the session's `PaidSave` (`TargetSave::Saved` closes the box and is taken by it). |
 | 11-042 | `PaidConfirmStage` holds the confirmation and its "Don't ask me again" tick in one value (`None`, `Composer { confirm, trust }`, `Held { trusted }`). |
