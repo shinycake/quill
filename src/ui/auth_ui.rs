@@ -107,11 +107,12 @@ impl QuillApp {
             return;
         };
         match live.driver.submit_phone(&number) {
-            Ok(_) => {
+            Ok(request) => {
                 // The field keeps the number so "Wrong number?" can edit it.
                 // The code step names it only once TDLib accepted it.
                 let back = std::mem::take(&mut self.auth_ui.signin.phone_step);
                 self.auth_ui.signin.phone_step = PhoneStep::Sending {
+                    request,
                     phone: shown,
                     back: Box::new(back),
                 };

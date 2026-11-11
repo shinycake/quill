@@ -25,7 +25,8 @@ pub struct AuthState {
     /// offers Retry).
     pub countries: crate::state::fetch::Fetch<Vec<crate::phone::Country>>,
     /// Uppercase ISO code from `getCountryCode`: the default country guess.
-    pub guessed_country_iso: Option<String>,
+    /// Asked once; a failure is not asked again (the guess is a nicety).
+    pub guessed_country: crate::state::fetch::Fetch<String>,
     /// Slice A8: the while-authorized change-number flow: the target
     /// number the code was sent to, the resend timeout, the round trip in
     /// flight and the honest one-line failure of the last operation.
@@ -50,12 +51,17 @@ pub struct AuthState {
 }
 
 impl AuthState {
+    /// The default country guess (uppercase ISO), once it answered.
+    pub fn guessed_country_iso(&self) -> Option<&str> {
+        self.guessed_country.data().map(String::as_str)
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             password_recovery: PasswordRecovery::Idle,
             last_auth_error: None,
             countries: crate::state::fetch::Fetch::Idle,
-            guessed_country_iso: None,
+            guessed_country: crate::state::fetch::Fetch::Idle,
             change_number: ChangeNumber::Idle,
             twofa_flow: TwofaFlow::default(),
             password_state: None,

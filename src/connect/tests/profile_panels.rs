@@ -199,3 +199,37 @@ fn a_follow_up_page_that_fails_ends_the_groups_in_common_list() {
     assert!(driver.fetch_more_groups_in_common(31).unwrap().is_none());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A list whose send is refused is failed, not absent: the strip that asks
+/// for it while drawing sees it as asked and does not send again.
+#[test]
+fn a_refused_profile_list_send_leaves_the_list_failed() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let session = crate::state::Session::new(crate::ids::AccountKey::primary(), sink);
+    let mut driver = ConnectDriver::new(
+        session,
+        Arc::new(RefusingSender),
+        test_credentials(),
+        prepared,
+    );
+    assert!(driver.fetch_similar_chats(crate::ids::ChatId(5)).is_err());
+    assert!(matches!(
+        driver
+            .session
+            .users_state
+            .profile_chat_lists
+            .get(&(ProfileChatsKind::SimilarChats, 5)),
+        Some(ProfileChatsFetch::Failed(_))
+    ));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Refuses every request, as a closed client does.
+struct RefusingSender;
+
+impl JsonSender for Arc<RefusingSender> {
+    fn send_json(&self, _: &str) -> Result<(), ConnectSendError> {
+        Err(ConnectSendError::Native)
+    }
+}

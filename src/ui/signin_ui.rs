@@ -14,6 +14,7 @@ use gpui_kit::component::popover::Popover;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::auth::AuthView;
+use quill::ids::RequestId;
 use quill::lang::{keys, tr};
 use quill::phone::{self, Country};
 use quill::signin;
@@ -23,16 +24,6 @@ use std::time::Duration;
 
 /// The country list under the 380 px sign-in card's button.
 const PICKER_WIDTH: f32 = 356.;
-
-/// The two phone-screen lookups (country list, IP default), asked once from
-/// the transition onto the phone screen. A settled answer, empty or an
-/// error, is not asked again until the screen is left and reopened.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) enum PhoneLookups {
-    #[default]
-    Idle,
-    Asked,
-}
 
 /// Where the phone number is, on the phone form and the code step after
 /// it: one value, advanced by the answer to `setAuthenticationPhoneNumber`
@@ -48,9 +39,14 @@ pub(super) enum PhoneStep {
     /// "Wrong number?": the phone form over the code step. The code stays
     /// requested for `sent_to` until a new number is accepted.
     Editing { sent_to: String },
-    /// The number is sent. The answer moves to `CodeSentTo(phone)`; a
-    /// rejection returns to `back`, which still holds the old number.
-    Sending { phone: String, back: Box<PhoneStep> },
+    /// The number is sent as `request`. Its answer (the request is gone)
+    /// moves to `CodeSentTo(phone)`; a rejection returns to `back`, which
+    /// still holds the old number.
+    Sending {
+        request: RequestId,
+        phone: String,
+        back: Box<PhoneStep>,
+    },
 }
 
 impl PhoneStep {
@@ -68,7 +64,7 @@ impl PhoneStep {
         match self {
             Self::Entering => "",
             Self::CodeSentTo(phone) | Self::Editing { sent_to: phone } => phone,
-            Self::Sending { phone, back } if !back.is_editing() => phone,
+            Self::Sending { phone, back, .. } if !back.is_editing() => phone,
             Self::Sending { back, .. } => back.code_phone(),
         }
     }
@@ -90,7 +86,6 @@ pub(super) struct SignInUi {
     pub(super) touched: bool,
     pub(super) step_clock: StepClock,
     pub(super) error_clock: ErrorClock,
-    pub(super) lookups: PhoneLookups,
     ticker: Ticker,
     /// Demo-only fixtures (no live TDLib to ask).
     pub(super) demo_countries: Vec<Country>,
@@ -132,7 +127,6 @@ impl SignInUi {
             touched: false,
             step_clock: StepClock::None,
             error_clock: ErrorClock::None,
-            lookups: PhoneLookups::Idle,
             ticker: Ticker::Idle,
             demo_countries: Vec::new(),
             demo_guess: None,
@@ -200,7 +194,12 @@ impl QuillApp {
 
     fn signin_guess_iso(&self) -> Option<String> {
         match self.live.as_ref() {
-            Some(live) => live.driver.session.auth_state.guessed_country_iso.clone(),
+            Some(live) => live
+                .driver
+                .session
+                .auth_state
+                .guessed_country_iso()
+                .map(str::to_string),
             None => self.auth_ui.signin.demo_guess.clone(),
         }
     }
@@ -210,14 +209,15 @@ impl QuillApp {
     /// auth state and prefill the default country code.
     pub(super) fn sync_signin(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let auth = self.current_auth();
-        if !matches!(auth, AuthorizationState::WaitPhoneNumber) {
-            self.auth_ui.signin.lookups = PhoneLookups::Idle;
-        } else if self.auth_ui.signin.lookups == PhoneLookups::Idle && self.live.is_some() {
-            self.auth_ui.signin.lookups = PhoneLookups::Asked;
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.fetch_countries();
-                let _ = live.driver.fetch_country_code();
-            }
+        // The two phone-screen lookups (country list, IP default) are
+        // asked once: each fetch holds its own stage, and a refused send
+        // or an error leaves it failed, not idle, so a frame never asks
+        // again (the picker's Retry does, for the list).
+        if matches!(auth, AuthorizationState::WaitPhoneNumber)
+            && let Some(live) = self.live.as_mut()
+        {
+            let _ = live.driver.fetch_countries();
+            let _ = live.driver.fetch_country_code();
         }
         self.auth_ui.signin.step_clock.follow(&auth);
         self.sync_phone_step(&auth);
@@ -370,12 +370,16 @@ impl QuillApp {
     /// number?".
     fn sync_phone_step(&mut self, auth: &AuthorizationState) {
         if matches!(self.auth_ui.signin.phone_step, PhoneStep::Sending { .. }) {
-            let (waiting, rejected) = match self.live.as_ref() {
-                Some(live) => (
-                    live.driver.session.requests.has_auth_submit(),
+            let sent = match &self.auth_ui.signin.phone_step {
+                PhoneStep::Sending { request, .. } => Some(*request),
+                _ => None,
+            };
+            let (waiting, rejected) = match (self.live.as_ref(), sent) {
+                (Some(live), Some(request)) => (
+                    live.driver.session.requests.get(request).is_some(),
                     live.driver.session.auth_state.last_auth_error.is_some(),
                 ),
-                None => (false, true),
+                _ => (false, true),
             };
             if waiting {
                 return;
@@ -851,6 +855,7 @@ impl QuillApp {
 #[cfg(test)]
 mod phone_step_tests {
     use super::PhoneStep;
+    use quill::ids::RequestId;
 
     /// A number TDLib rejects leaves the old number on the code step.
     #[test]
@@ -859,6 +864,7 @@ mod phone_step_tests {
             sent_to: "+1 555 0100".into(),
         };
         let sending = PhoneStep::Sending {
+            request: RequestId(1),
             phone: "+1 555 0199".into(),
             back: Box::new(editing.clone()),
         };
@@ -875,6 +881,7 @@ mod phone_step_tests {
     #[test]
     fn the_code_step_names_the_number_it_was_sent_to() {
         let first = PhoneStep::Sending {
+            request: RequestId(2),
             phone: "+1 555 0100".into(),
             back: Box::new(PhoneStep::Entering),
         };

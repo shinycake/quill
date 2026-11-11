@@ -245,8 +245,13 @@ impl Session {
             CommonPayload::Text { text } => match pending.map(|p| p.purpose) {
                 Some(RequestPurpose::GetCountryCode) => {
                     let iso = text.trim().to_ascii_uppercase();
+                    let id = pending.map(|p| p.id);
                     if iso.len() == 2 && iso.chars().all(|c| c.is_ascii_alphabetic()) {
-                        self.auth_state.guessed_country_iso = Some(iso);
+                        self.auth_state.guessed_country.answered(id, iso);
+                    } else {
+                        self.auth_state
+                            .guessed_country
+                            .failed(id, "not a country code", false);
                     }
                 }
                 Some(RequestPurpose::Settings(SettingsPurpose::Passkeys(

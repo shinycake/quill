@@ -22,7 +22,6 @@ purpose:ConnectDriver::fetch_archived_stickers 1
 purpose:ConnectDriver::fetch_auto_download_presets 1
 purpose:ConnectDriver::fetch_boosts_per_gift 1
 purpose:ConnectDriver::fetch_contacts 1
-purpose:ConnectDriver::fetch_country_code 1
 purpose:ConnectDriver::fetch_marketplace_gift 2
 purpose:ConnectDriver::fetch_message_statistics 1
 purpose:ConnectDriver::fetch_new_chat_privacy 1
