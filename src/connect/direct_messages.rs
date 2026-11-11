@@ -135,7 +135,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             topic.unread_count > 0,
             topic.last_message_id,
         );
+        // The two halves are independent: a refused one does not stop the
+        // other. The call fails only when nothing went out, so a half that
+        // landed is not reported as a failure (the other half stays visible
+        // and can be asked again).
         let mut sent = None;
+        let mut refused = None;
         if marked == read {
             let purpose =
                 RequestPurpose::Threads(ThreadsPurpose::SetDirectMessagesChatTopicMarkedAsUnread {
@@ -144,7 +149,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             let extra = self.session.request(purpose, Some(chat_id));
             let json =
                 set_direct_messages_chat_topic_is_marked_as_unread(extra, chat_id, topic_id, !read);
-            sent = Some(self.send_json_request(extra, &json)?);
+            match self.send_json_request(extra, &json) {
+                Ok(id) => sent = Some(id),
+                Err(err) => refused = Some(err),
+            }
         }
         if read && unread && last != 0 {
             let purpose =
@@ -157,9 +165,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                 "messageSourceDirectMessagesChatTopicHistory",
                 true,
             );
-            sent = Some(self.send_json_request(extra, &json)?);
+            match self.send_json_request(extra, &json) {
+                Ok(id) => sent = Some(id),
+                Err(err) => refused = Some(err),
+            }
         }
-        Ok(sent)
+        match (sent, refused) {
+            (None, Some(err)) => Err(err),
+            (sent, _) => Ok(sent),
+        }
     }
 
     /// "Delete chat": every message of the conversation

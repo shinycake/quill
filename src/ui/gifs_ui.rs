@@ -322,7 +322,7 @@ impl QuillApp {
             scroll_top,
             viewport,
             content as f32,
-            panel.search_mode() && !panel.search_next_offset.is_empty(),
+            !panel.search_next_offset().is_empty(),
             panel.search_loading(),
         ) {
             return;
@@ -601,7 +601,7 @@ impl QuillApp {
         let full = (animation.file_id, (animation.width, animation.height));
         let preview = animation
             .preview_clip()
-            .map(|id| (id, (animation.thumb_width, animation.thumb_height)));
+            .map(|id| (id, animation.thumb.size()));
         [Some(full), preview]
             .into_iter()
             .flatten()

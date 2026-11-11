@@ -59,7 +59,7 @@ impl QuillApp {
         let Some(open) = self.ai_compose.open.as_mut() else {
             return;
         };
-        open.editor = Some(StyleEditor {
+        open.view = AiComposeView::StyleEditor(StyleEditor {
             emoji_id: editing.as_ref().map_or(0, |style| style.custom_emoji_id),
             show_creator: editing
                 .as_ref()
@@ -68,7 +68,6 @@ impl QuillApp {
             warning: None,
             save: StyleSave::Editing,
         });
-        open.view = AiComposeView::StyleEditor;
         cx.notify();
     }
 
@@ -95,11 +94,11 @@ impl QuillApp {
     }
 
     fn ai_style_editor(&self) -> Option<&StyleEditor> {
-        self.ai_compose.open.as_ref()?.editor.as_ref()
+        self.ai_compose.open.as_ref()?.view.editor()
     }
 
     pub(super) fn ai_style_editor_mut(&mut self) -> Option<&mut StyleEditor> {
-        self.ai_compose.open.as_mut()?.editor.as_mut()
+        self.ai_compose.open.as_mut()?.view.editor_mut()
     }
 
     pub(super) fn ai_style_editor_title(&self) -> &'static str {

@@ -8,10 +8,10 @@ impl QuillApp {
     pub(in crate::ui) fn chat_search_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let session = self.session();
         let status = session
-            .map(|s| s.search.chat_search.status)
+            .map(|s| s.search.chat_search.status())
             .unwrap_or(SearchStatus::Closed);
         let query = session
-            .map(|s| s.search.chat_search.query.clone())
+            .map(|s| s.search.chat_search.query().to_owned())
             .unwrap_or_default();
         let position = session
             .map(|s| s.search.chat_search.position_label())
@@ -21,19 +21,19 @@ impl QuillApp {
         let sender_label = session.and_then(|s| {
             s.search
                 .chat_search
-                .sender
+                .sender()
                 .map(|sender| s.sender_label(sender))
         });
         let media = session
-            .map(|s| s.search.chat_search.media)
+            .map(|s| s.search.chat_search.media())
             .unwrap_or_default();
-        let picker = session.and_then(|s| s.search.chat_search.from_picker.clone());
+        let picker = session.and_then(|s| s.search.chat_search.from_picker().cloned());
         let more_failed = session.is_some_and(|s| s.search.chat_search.more_failed());
         let hits: Vec<(MessageId, String, i32, bool)> = session
             .map(|s| {
                 s.search
                     .chat_search
-                    .hits
+                    .hits()
                     .iter()
                     .enumerate()
                     .map(|(i, hit)| {
@@ -41,7 +41,7 @@ impl QuillApp {
                             hit.message_id,
                             hit.preview.clone(),
                             hit.date,
-                            s.search.chat_search.selected == Some(i),
+                            s.search.chat_search.selected() == Some(i),
                         )
                     })
                     .collect()
@@ -225,7 +225,7 @@ impl QuillApp {
                             |this, window, cx| {
                                 if this
                                     .session()
-                                    .is_some_and(|s| s.search.chat_search.sender.is_some())
+                                    .is_some_and(|s| s.search.chat_search.sender().is_some())
                                 {
                                     this.chat_search_pick_sender(None, window, cx);
                                 } else {

@@ -123,7 +123,7 @@ fn a_box_opens_over_settings_and_closing_it_comes_back(cx: &mut TestAppContext) 
     vcx.update(|window, cx| window.click("settings-row-Accounts", cx));
     assert_eq!(open_dialog(&shell, vcx), Some(DialogKind::Accounts));
     app.update(vcx, |app, cx| {
-        app.account.accounts.open = false;
+        app.account.accounts.dialog = crate::ui::accounts::AccountsDialog::Closed;
         cx.notify();
     });
     assert_eq!(open_dialog(&shell, vcx), None);

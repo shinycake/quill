@@ -88,7 +88,11 @@ impl Session {
             // The rows show "No chats" and do not ask again.
             Some(RequestPurpose::GetForumTopics) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.threads.forum_topics.fail(chat_id.0, error_reason(err));
+                    self.threads.forum_topics.failed_request(
+                        chat_id.0,
+                        pending.map(|p| p.id),
+                        error_reason(err),
+                    );
                 }
             }
             Some(RequestPurpose::GetForumTopicLink) => {

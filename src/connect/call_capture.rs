@@ -341,10 +341,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let shown = |driver: &Self| {
             (
                 driver.call_capture.target(),
-                driver.call_capture.error().map(str::to_string),
                 driver.call_screen.target(),
                 driver.call_screen.paused(),
-                driver.call_screen.error().map(str::to_string),
+                driver.call_media_errors(),
             )
         };
         let before = shown(self);
@@ -354,7 +353,64 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.key_group_call_by_chat();
         self.pump_call_capture(now);
         self.pump_call_screen(now);
-        listed || landed || before != shown(self)
+        let after = shown(self);
+        let noted = self.note_call_media_errors(&before.3, &after.3);
+        listed || landed || noted || before != after
+    }
+
+    /// Why the call's microphone, its level tap and its shared screen
+    /// stopped, each on its own: one that still stands must not hide a new
+    /// failure of another.
+    fn call_media_errors(&self) -> [Option<String>; 3] {
+        [
+            self.call_capture.error(),
+            self.call_audio.error(),
+            self.call_screen.error(),
+        ]
+        .map(|error| error.map(str::to_string))
+    }
+
+    /// Put the media failures on the call being shown. A joined group
+    /// call's error line is the user's to dismiss, so only a failure that is
+    /// new writes it. The 1:1 call's note follows the devices: the newest
+    /// failure, else the one it shows while that still stands, else another
+    /// that stands, and nothing once they all work again. True when the
+    /// call changed.
+    pub(in crate::connect) fn note_call_media_errors(
+        &mut self,
+        before: &[Option<String>; 3],
+        after: &[Option<String>; 3],
+    ) -> bool {
+        let newest = after
+            .iter()
+            .zip(before)
+            .find(|(now, was)| now.is_some() && now != was)
+            .and_then(|(now, _)| now.clone());
+        let calls = &mut self.session.calls;
+        if calls
+            .active_group_call
+            .as_ref()
+            .is_some_and(|call| call.is_joined)
+        {
+            let Some(error) = newest else {
+                return false;
+            };
+            calls.group_call_error = Some(error);
+            return true;
+        }
+        let Some(call) = calls.active_call.as_mut() else {
+            return false;
+        };
+        let kept = call
+            .media_note
+            .clone()
+            .filter(|note| after.iter().flatten().any(|error| error == note));
+        let note = newest
+            .or(kept)
+            .or_else(|| after.iter().flatten().next().cloned());
+        let changed = call.media_note != note;
+        call.media_note = note;
+        changed
     }
 
     fn warm_call_devices(&mut self) {

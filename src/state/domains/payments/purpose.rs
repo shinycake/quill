@@ -166,11 +166,9 @@ pub enum PaymentsPurpose {
     GetPremiumGiftOptions,
     /// `sendGift`: spends Stars, sent only on the send button.
     SendStarGift,
-    /// `getSupergroupMembers` for a page of the "Choose members" list;
-    /// `generation` tells an older search from the current one.
-    GetAwardMembers {
-        generation: u64,
-    },
+    /// `getSupergroupMembers` for a page of the "Choose members" list; the
+    /// list's stage holds the request that is current.
+    GetAwardMembers,
     /// Revenue screens and affiliate programs (`crate::earn`).
     Earn(crate::earn::EarnPurpose),
     /// Suggested posts in channel direct messages

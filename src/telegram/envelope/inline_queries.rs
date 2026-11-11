@@ -32,13 +32,75 @@ pub struct InlineMedia {
     pub height: i32,
 }
 
+/// Which `inlineQueryResult*` variant a result is; a future variant is
+/// `Unknown`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum InlineResultKind {
+    Article,
+    Contact,
+    Location,
+    Venue,
+    Game,
+    Animation,
+    Audio,
+    Document,
+    Photo,
+    Sticker,
+    Video,
+    VoiceNote,
+    #[default]
+    Unknown,
+}
+
+impl InlineResultKind {
+    /// The snake-case name (`voice_note`), which a row without a title
+    /// shows as its label.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Article => "article",
+            Self::Contact => "contact",
+            Self::Location => "location",
+            Self::Venue => "venue",
+            Self::Game => "game",
+            Self::Animation => "animation",
+            Self::Audio => "audio",
+            Self::Document => "document",
+            Self::Photo => "photo",
+            Self::Sticker => "sticker",
+            Self::Video => "video",
+            Self::VoiceNote => "voice_note",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+impl From<&str> for InlineResultKind {
+    fn from(name: &str) -> Self {
+        match name {
+            "article" => Self::Article,
+            "contact" => Self::Contact,
+            "location" => Self::Location,
+            "venue" => Self::Venue,
+            "game" => Self::Game,
+            "animation" => Self::Animation,
+            "audio" => Self::Audio,
+            "document" => Self::Document,
+            "photo" => Self::Photo,
+            "sticker" => Self::Sticker,
+            "video" => Self::Video,
+            "voice_note" => Self::VoiceNote,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 /// Bots slice: one inline query result, reduced to what the results panel
 /// shows: text for list rows plus the image for grid cells and list
 /// thumbnails.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct InlineQueryResultSummary {
     pub id: String,
-    pub kind: String,
+    pub kind: InlineResultKind,
     pub title: String,
     pub description: String,
     /// `inline_query_id` of the page this result came from. Every page of
@@ -61,12 +123,18 @@ pub struct InlineQueryResultSummary {
 #[derive(Debug, Clone, PartialEq)]
 pub struct InlineQueryResultsButton {
     pub text: String,
-    pub kind: String,
-    /// StartBot parameter, empty unless `kind == "start_bot"`
-    /// (schema `td_api.tl:8036`).
-    pub parameter: String,
-    /// WebApp url, empty unless `kind == "web_app"` (schema `td_api.tl:8039`).
-    pub url: String,
+    pub kind: InlineQueryResultsButtonKind,
+}
+
+/// What the button does (schema `td_api.tl:8036`, `:8039`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum InlineQueryResultsButtonKind {
+    /// Start the bot with `parameter`.
+    StartBot { parameter: String },
+    /// Open the web app at `url`.
+    WebApp { url: String },
+    #[default]
+    Unknown,
 }
 
 fn str_field(value: &Value, key: &str) -> String {
@@ -141,19 +209,19 @@ pub(crate) fn parse_inline_query_result(
         .and_then(Value::as_str)
         .unwrap_or_default();
     let kind = match type_name {
-        "inlineQueryResultArticle" => "article",
-        "inlineQueryResultContact" => "contact",
-        "inlineQueryResultLocation" => "location",
-        "inlineQueryResultVenue" => "venue",
-        "inlineQueryResultGame" => "game",
-        "inlineQueryResultAnimation" => "animation",
-        "inlineQueryResultAudio" => "audio",
-        "inlineQueryResultDocument" => "document",
-        "inlineQueryResultPhoto" => "photo",
-        "inlineQueryResultSticker" => "sticker",
-        "inlineQueryResultVideo" => "video",
-        "inlineQueryResultVoiceNote" => "voice_note",
-        _ => "unknown",
+        "inlineQueryResultArticle" => InlineResultKind::Article,
+        "inlineQueryResultContact" => InlineResultKind::Contact,
+        "inlineQueryResultLocation" => InlineResultKind::Location,
+        "inlineQueryResultVenue" => InlineResultKind::Venue,
+        "inlineQueryResultGame" => InlineResultKind::Game,
+        "inlineQueryResultAnimation" => InlineResultKind::Animation,
+        "inlineQueryResultAudio" => InlineResultKind::Audio,
+        "inlineQueryResultDocument" => InlineResultKind::Document,
+        "inlineQueryResultPhoto" => InlineResultKind::Photo,
+        "inlineQueryResultSticker" => InlineResultKind::Sticker,
+        "inlineQueryResultVideo" => InlineResultKind::Video,
+        "inlineQueryResultVoiceNote" => InlineResultKind::VoiceNote,
+        _ => InlineResultKind::Unknown,
     };
     let mut files = Vec::new();
     let mut title = str_field(value, "title");
@@ -162,8 +230,10 @@ pub(crate) fn parse_inline_query_result(
     let mut clip = None;
     let mut preview_clip = None;
     let media = match kind {
-        "article" | "location" => thumbnail_media(value.get("thumbnail"), &mut files),
-        "contact" => {
+        InlineResultKind::Article | InlineResultKind::Location => {
+            thumbnail_media(value.get("thumbnail"), &mut files)
+        }
+        InlineResultKind::Contact => {
             let contact = value.get("contact").unwrap_or(&null);
             title = join_nonempty(
                 &[
@@ -175,19 +245,19 @@ pub(crate) fn parse_inline_query_result(
             description = str_field(contact, "phone_number");
             thumbnail_media(value.get("thumbnail"), &mut files)
         }
-        "venue" => {
+        InlineResultKind::Venue => {
             let venue = value.get("venue").unwrap_or(&null);
             title = str_field(venue, "title");
             description = str_field(venue, "address");
             thumbnail_media(value.get("thumbnail"), &mut files)
         }
-        "game" => {
+        InlineResultKind::Game => {
             let game = value.get("game").unwrap_or(&null);
             title = str_field(game, "title");
             description = str_field(game, "description");
             None
         }
-        "audio" => {
+        InlineResultKind::Audio => {
             let audio = value.get("audio").unwrap_or(&null);
             title = str_field(audio, "title");
             if title.is_empty() {
@@ -196,36 +266,25 @@ pub(crate) fn parse_inline_query_result(
             description = str_field(audio, "performer");
             None
         }
-        "document" => {
+        InlineResultKind::Document => {
             let document = value.get("document").unwrap_or(&null);
             if title.is_empty() {
                 title = str_field(document, "file_name");
             }
             thumbnail_media(document.get("thumbnail"), &mut files)
         }
-        "photo" => photo_media(value.get("photo"), &mut files),
-        "animation" => {
+        InlineResultKind::Photo => photo_media(value.get("photo"), &mut files),
+        InlineResultKind::Animation => {
             let (item, item_files) = parse_animation_value(value.get("animation"));
             // No thumbnail yet still gets a cell: the animation's size
             // decides the layout (file 0 draws a placeholder).
-            let video_thumb = value
-                .get("animation")
-                .and_then(|animation| animation.get("thumbnail"))
-                .and_then(|thumb| thumb.get("format"))
-                .and_then(|format| format.get("@type"))
-                .and_then(Value::as_str)
-                == Some("thumbnailFormatMpeg4");
             item.map(|item| {
                 files.extend(item_files);
                 clip = Some(item.file_id).filter(|id| id.0 != 0 && item.mime_type != "image/gif");
                 // An MP4 thumbnail cannot be drawn as an image: it plays
                 // as the preview clip instead.
-                let still = if video_thumb {
-                    preview_clip = item.thumb_file_id;
-                    None
-                } else {
-                    item.thumb_file_id
-                };
+                preview_clip = item.preview_clip();
+                let still = item.still_thumb();
                 InlineMedia {
                     file_id: still.unwrap_or(FileId(0)),
                     width: item.width,
@@ -233,7 +292,7 @@ pub(crate) fn parse_inline_query_result(
                 }
             })
         }
-        "sticker" => {
+        InlineResultKind::Sticker => {
             let (item, item_files) = parse_sticker_value(value.get("sticker"));
             item.map(|item| {
                 let file_id = item.display_file_id().unwrap_or(FileId(0));
@@ -245,7 +304,7 @@ pub(crate) fn parse_inline_query_result(
                 }
             })
         }
-        "video" => {
+        InlineResultKind::Video => {
             let video = value.get("video").unwrap_or(&null);
             thumbnail_media(video.get("thumbnail"), &mut files)
         }
@@ -255,7 +314,7 @@ pub(crate) fn parse_inline_query_result(
     (
         InlineQueryResultSummary {
             id: str_field(value, "id"),
-            kind: kind.to_string(),
+            kind,
             title,
             description,
             query_id: 0,
@@ -270,13 +329,24 @@ pub(crate) fn parse_inline_query_result(
 /// Bots slice: `inlineQueryResultsButton` (schema 1.8.68, line 8043).
 pub(crate) fn parse_inline_query_results_button(value: &Value) -> InlineQueryResultsButton {
     let button_type = value.get("type");
+    let text_of = |key: &str| {
+        button_type
+            .and_then(|type_value| type_value.get(key))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
     let kind = match button_type
         .and_then(|type_value| type_value.get("@type"))
         .and_then(Value::as_str)
     {
-        Some("inlineQueryResultsButtonTypeStartBot") => "start_bot",
-        Some("inlineQueryResultsButtonTypeWebApp") => "web_app",
-        _ => "unknown",
+        Some("inlineQueryResultsButtonTypeStartBot") => InlineQueryResultsButtonKind::StartBot {
+            parameter: text_of("parameter"),
+        },
+        Some("inlineQueryResultsButtonTypeWebApp") => InlineQueryResultsButtonKind::WebApp {
+            url: text_of("url"),
+        },
+        _ => InlineQueryResultsButtonKind::Unknown,
     };
     InlineQueryResultsButton {
         text: value
@@ -284,17 +354,7 @@ pub(crate) fn parse_inline_query_results_button(value: &Value) -> InlineQueryRes
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string(),
-        kind: kind.to_string(),
-        parameter: button_type
-            .and_then(|type_value| type_value.get("parameter"))
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
-        url: button_type
-            .and_then(|type_value| type_value.get("url"))
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
+        kind,
     }
 }
 
@@ -409,7 +469,7 @@ mod tests {
         let text: Vec<_> = p
             .results
             .iter()
-            .map(|r| (r.kind.as_str(), r.title.as_str(), r.description.as_str()))
+            .map(|r| (r.kind.name(), r.title.as_str(), r.description.as_str()))
             .collect();
         assert_eq!(
             text,
@@ -436,15 +496,22 @@ mod tests {
         );
         let button = start.button.unwrap();
         assert_eq!(
-            (button.kind.as_str(), button.parameter.as_str()),
-            ("start_bot", "p1")
+            button.kind,
+            InlineQueryResultsButtonKind::StartBot {
+                parameter: "p1".into()
+            }
         );
         let app = page(
             json!([]),
             json!({"@type": "inlineQueryResultsButton", "text": "App",
                 "type": {"@type": "inlineQueryResultsButtonTypeWebApp", "url": "https://x.test"}}),
         );
-        assert_eq!(app.button.unwrap().url, "https://x.test");
+        assert_eq!(
+            app.button.unwrap().kind,
+            InlineQueryResultsButtonKind::WebApp {
+                url: "https://x.test".into()
+            }
+        );
         assert!(page(json!([]), Value::Null).button.is_none());
     }
 }

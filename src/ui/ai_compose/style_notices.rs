@@ -132,7 +132,7 @@ impl QuillApp {
         let Some(open) = self.ai_compose.open.as_mut() else {
             return;
         };
-        let Some(editor) = open.editor.as_mut() else {
+        let Some(editor) = open.view.editor_mut() else {
             return;
         };
         // Only the save this editor sent answers it.
@@ -149,7 +149,6 @@ impl QuillApp {
                     Some(_) => keys::AI_COMPOSE_TONE_UPDATED,
                     None => keys::AI_COMPOSE_TONE_CREATED,
                 };
-                open.editor = None;
                 open.view = AiComposeView::Card;
                 open.select_saved = Some(style.name.clone());
                 Some(self.ai_style_toast(

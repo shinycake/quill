@@ -261,8 +261,7 @@ fn the_password_check_on_the_page_and_in_the_2fa_box_has_a_field_each(cx: &mut T
                 password_hint: String::new(),
                 has_recovery_email_address: false,
                 has_passport_data: false,
-                pending_email_pattern: None,
-                pending_email_code_length: 0,
+                pending_email: None,
                 login_email_address_pattern: String::new(),
                 pending_reset_date: 0,
             });
@@ -309,8 +308,10 @@ fn aborting_the_recovery_email_asks_inside_the_2fa_box(cx: &mut TestAppContext) 
                 password_hint: String::new(),
                 has_recovery_email_address: false,
                 has_passport_data: false,
-                pending_email_pattern: Some("a***@example.com".into()),
-                pending_email_code_length: 6,
+                pending_email: Some(quill::telegram::envelope::PendingRecoveryEmail {
+                    pattern: "a***@example.com".into(),
+                    code_length: 6,
+                }),
                 login_email_address_pattern: String::new(),
                 pending_reset_date: 0,
             });

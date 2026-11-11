@@ -29,8 +29,9 @@ pub struct ReplyKeyboardState {
     /// Per chat, what TDLib said about the keyboard and whether its
     /// message is being fetched.
     pub by_chat: HashMap<i64, KeyboardFetch>,
-    /// `getRecentInlineBots` answer (`None` until fetched).
-    pub recent_inline_bots: Option<Vec<i64>>,
+    /// `getRecentInlineBots`: asked when the user types "@"; a failed ask is
+    /// asked again by the next "@" (an event of the composer, never a frame).
+    pub recent_inline_bots: crate::state::fetch::Fetch<Vec<i64>>,
 }
 
 impl Session {
@@ -158,7 +159,7 @@ impl Session {
         self.bots
             .reply_keyboards
             .recent_inline_bots
-            .as_deref()
-            .unwrap_or(&[])
+            .data()
+            .map_or(&[], Vec::as_slice)
     }
 }

@@ -258,8 +258,6 @@ mod tests {
             can_unmute_self: false,
             volume_level: 10000,
             order: String::new(),
-            video_enabled: false,
-            screen_sharing_enabled: false,
             video_info: None,
             screen_sharing_video_info: None,
         };

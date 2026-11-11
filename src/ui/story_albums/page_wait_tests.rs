@@ -37,10 +37,10 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
 fn set_op(app: &mut QuillApp, request: RequestId, state: StoryPageOpState) {
     if let Some(session) = app.demo_session.as_deref_mut() {
         session.stories.page_ops.begin(StoryPageOp {
-            label: "creating album".into(),
+            kind: quill::story_page::StoryPageOpKind::CreateAlbum,
             state,
             request,
-            chat_id: Some(CHAT.0),
+            chat_id: Some(CHAT),
         });
     }
 }

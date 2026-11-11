@@ -11,6 +11,7 @@ use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
+use quill::agent::activity::Outcome;
 use quill::agent::grants::{self, ChatGrant, Scope};
 use quill::agent::prompts::{self, Ask};
 use quill::agent::ui_driver::bridge::{self, BridgeError, Button, Target, UiCommand, UiReply};
@@ -238,7 +239,10 @@ fn the_tree_has_granted_rows_only_and_a_click_by_id_lands(cx: &mut TestAppContex
         log.first().map(|a| a.summary.as_str()),
         Some("type \"ann\"")
     );
-    assert!(log.iter().all(|a| a.chat_id == 11 && a.ok));
+    assert!(
+        log.iter()
+            .all(|a| a.chat_id == 11 && a.outcome == Outcome::Done)
+    );
 }
 
 #[gpui_kit::test]
@@ -708,6 +712,44 @@ fn input_commands_run_one_at_a_time(cx: &mut TestAppContext) {
     );
 }
 
+/// A running input command whose task cannot reach its finish (the window
+/// closed under it) leaves the stage, and the command waiting behind it is
+/// answered instead of waiting for ever.
+#[gpui_kit::test]
+fn an_abandoned_input_command_frees_the_driver_and_answers_the_waiting(cx: &mut TestAppContext) {
+    use crate::ui::agent_state::Driver;
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    turn_on();
+    grant(11, Scope::ReadWrite);
+    let _presence = activity::connect("Test agent");
+    settle(vcx);
+    let post = |text: &str| {
+        bridge::post("Test agent", UiCommand::TypeText { text: text.into() })
+            .unwrap_or_else(|_| panic!("posted"))
+    };
+    let (_first, second) = (post("a"), post("b"));
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.agent_driver_tick(window, cx);
+        })
+    });
+    app.update(vcx, |app, _| {
+        let running = match &app.agent_bridge.driver {
+            Driver::Running { id, .. } => Some(*id),
+            Driver::Idle => None,
+        };
+        let id = running.unwrap_or_else(|| panic!("an input command runs"));
+        app.agent_command_abandoned(id);
+        assert!(matches!(app.agent_bridge.driver, Driver::Idle));
+    });
+    assert!(
+        matches!(second.poll(), Some(UiReply::Refused(_))),
+        "the waiting command is answered"
+    );
+}
+
 /// The cost of building the tree every frame, printed for the decision
 /// doc: `cargo test --features demo-capture --bin quill -- --ignored
 /// --nocapture forced_tree_frame_cost`.
@@ -867,7 +909,7 @@ fn a_link_resolved_after_the_step_opens_a_granted_chat_only(cx: &mut TestAppCont
         .into_iter()
         .find(|action| action.summary.contains("not granted"))
         .unwrap_or_else(|| panic!("the refusal is in the activity log"));
-    assert!(logged.declined && !logged.ok);
+    assert_eq!(logged.outcome, Outcome::Declined);
     assert!(logged.tool.starts_with("ui_"), "{}", logged.tool);
     // Chat 11 is granted: the open runs (here, the `/start` prefill).
     assert_eq!(resolved(&app, vcx, 11, "hello", true), "/start hello");

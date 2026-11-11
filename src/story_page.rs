@@ -5,6 +5,7 @@
 //! arms, and the `Session` methods.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ids::ChatId;
 use crate::state::RequestPurpose;
 
 /// Phase 9.7: one chat's `getChatPostedToChatPageStories` state — the
@@ -42,18 +43,66 @@ pub enum StoryPageOpState {
     Failed(String),
 }
 
-/// Phase 9.7: one story-page call — `label` names the operation, `state`
+/// Which story-page call an op is, so a status line and a "this read is in
+/// flight" check match the call and not a text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoryPageOpKind {
+    LoadAlbums,
+    LoadAlbumStories,
+    CreateAlbum,
+    ReorderAlbums,
+    DeleteAlbum,
+    RenameAlbum,
+    AddAlbumStories,
+    RemoveAlbumStories,
+    ReorderAlbumStories,
+    LoadArchive,
+    LoadChatPage,
+    PinStories,
+    LoadCloseFriends,
+    SaveCloseFriends,
+    MoveStories,
+    ToggleProfileStory,
+    Other,
+}
+
+impl StoryPageOpKind {
+    /// The status-line wording.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::LoadAlbums => "loading albums",
+            Self::LoadAlbumStories => "loading album stories",
+            Self::CreateAlbum => "creating album",
+            Self::ReorderAlbums => "reordering albums",
+            Self::DeleteAlbum => "deleting album",
+            Self::RenameAlbum => "renaming album",
+            Self::AddAlbumStories => "adding stories to album",
+            Self::RemoveAlbumStories => "removing stories from album",
+            Self::ReorderAlbumStories => "reordering album stories",
+            Self::LoadArchive => "loading archived stories",
+            Self::LoadChatPage => "loading chat page stories",
+            Self::PinStories => "pinning stories",
+            Self::LoadCloseFriends => "loading close friends",
+            Self::SaveCloseFriends => "saving close friends",
+            Self::MoveStories => "moving stories",
+            Self::ToggleProfileStory => "updating profile stories",
+            Self::Other => "story request",
+        }
+    }
+}
+
+/// Phase 9.7: one story-page call — `kind` names the operation, `state`
 /// the honest TDLib round-trip state, `request` the call it tracks (only
 /// its answer moves `state`) and `chat_id` the chat page it is about.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoryPageOp {
-    pub label: String,
+    pub kind: StoryPageOpKind,
     pub state: StoryPageOpState,
     pub request: crate::ids::RequestId,
-    pub chat_id: Option<i64>,
+    pub chat_id: Option<ChatId>,
 }
 
-/// Most story-page ops kept; past it the oldest finished ones go.
+/// Most story-page ops kept; past it the oldest go, finished ones first.
 const STORY_PAGE_OPS_CAP: usize = 64;
 
 /// Every story-page call the session is tracking, one entry per request:
@@ -65,13 +114,26 @@ pub struct StoryPageOps {
 }
 
 impl StoryPageOps {
-    /// Track `op`; a call tracked under the same request is replaced.
+    /// Track `op`. A call tracked under the same request is replaced, and
+    /// the finished outcome of the same call on the same page is dropped:
+    /// repeating it makes the earlier line stale. Past the cap the oldest
+    /// op goes, a finished one first.
     pub fn begin(&mut self, op: StoryPageOp) {
-        self.ops.retain(|tracked| tracked.request != op.request);
-        if self.ops.len() >= STORY_PAGE_OPS_CAP
-            && let Some(oldest) = self.ops.iter().position(|tracked| tracked.is_finished())
-        {
-            self.ops.remove(oldest);
+        self.ops.retain(|tracked| {
+            tracked.request != op.request
+                && !(tracked.is_finished()
+                    && tracked.kind == op.kind
+                    && tracked.chat_id == op.chat_id)
+        });
+        if self.ops.len() >= STORY_PAGE_OPS_CAP {
+            let oldest = self
+                .ops
+                .iter()
+                .position(|tracked| tracked.is_finished())
+                .unwrap_or(0);
+            if oldest < self.ops.len() {
+                self.ops.remove(oldest);
+            }
         }
         self.ops.push(op);
     }
@@ -97,7 +159,7 @@ impl StoryPageOps {
 
     /// The page of `chat_id` was left: nothing it asked for is tracked
     /// any more, so a late answer changes no status line.
-    pub fn forget_chat(&mut self, chat_id: i64) {
+    pub fn forget_chat(&mut self, chat_id: ChatId) {
         self.ops.retain(|op| op.chat_id != Some(chat_id));
     }
 
@@ -110,17 +172,15 @@ impl StoryPageOps {
         self.ops.is_empty()
     }
 
-    /// A read labelled `label` for `chat_id` is in flight.
-    pub fn loading(&self, chat_id: i64, label: &str) -> bool {
+    /// A read of `kind` for `chat_id` is in flight.
+    pub fn loading(&self, chat_id: ChatId, kind: StoryPageOpKind) -> bool {
         self.ops.iter().any(|op| {
-            op.chat_id == Some(chat_id)
-                && op.state == StoryPageOpState::Checking
-                && op.label == label
+            op.chat_id == Some(chat_id) && op.state == StoryPageOpState::Checking && op.kind == kind
         })
     }
 
     /// A mutation for `chat_id` is in flight.
-    pub fn mutating(&self, chat_id: i64) -> bool {
+    pub fn mutating(&self, chat_id: ChatId) -> bool {
         self.ops
             .iter()
             .any(|op| op.chat_id == Some(chat_id) && op.state == StoryPageOpState::Sending)
@@ -128,7 +188,7 @@ impl StoryPageOps {
 
     /// The one line a page shows: a failure first, then a mutation in
     /// flight, a finished one, and a read last; the newest of each kind.
-    pub fn status_for(&self, chat_id: Option<i64>) -> Option<&StoryPageOp> {
+    pub fn status_for(&self, chat_id: Option<ChatId>) -> Option<&StoryPageOp> {
         let rank = |op: &StoryPageOp| match op.state {
             StoryPageOpState::Failed(_) => 3,
             StoryPageOpState::Sending => 2,
@@ -156,28 +216,28 @@ impl StoryPageOp {
     }
 }
 
-/// Phase 9.7: the status-line label for a story-page request purpose —
-/// shared by the driver's `begin_story_page_op` and the reducer's
-/// succeed/fail/clear so both sides name the same op.
-pub fn story_page_op_label(purpose: RequestPurpose) -> String {
+/// Phase 9.7: the kind of story-page op a request purpose is — shared by
+/// the driver's `begin_story_page_op` and the reducer's succeed/fail/clear
+/// so both sides name the same op.
+pub fn story_page_op_label(purpose: RequestPurpose) -> StoryPageOpKind {
     match purpose {
-        RequestPurpose::GetChatStoryAlbums => "loading albums".to_string(),
-        RequestPurpose::GetStoryAlbumStories => "loading album stories".to_string(),
-        RequestPurpose::CreateStoryAlbum => "creating album".to_string(),
-        RequestPurpose::ReorderStoryAlbums => "reordering albums".to_string(),
-        RequestPurpose::DeleteStoryAlbum => "deleting album".to_string(),
-        RequestPurpose::SetStoryAlbumName => "renaming album".to_string(),
-        RequestPurpose::AddStoryAlbumStories => "adding stories to album".to_string(),
-        RequestPurpose::RemoveStoryAlbumStories => "removing stories from album".to_string(),
-        RequestPurpose::ReorderStoryAlbumStories => "reordering album stories".to_string(),
-        RequestPurpose::GetChatArchivedStories => "loading archived stories".to_string(),
-        RequestPurpose::GetChatPostedToChatPageStories => "loading chat page stories".to_string(),
-        RequestPurpose::SetChatPinnedStories => "pinning stories".to_string(),
-        RequestPurpose::GetCloseFriends => "loading close friends".to_string(),
-        RequestPurpose::SetCloseFriends => "saving close friends".to_string(),
-        RequestPurpose::SetChatActiveStoriesList => "moving stories".to_string(),
-        RequestPurpose::ToggleStoryIsPostedToChatPage => "updating profile stories".to_string(),
-        _ => "story request".to_string(),
+        RequestPurpose::GetChatStoryAlbums => StoryPageOpKind::LoadAlbums,
+        RequestPurpose::GetStoryAlbumStories => StoryPageOpKind::LoadAlbumStories,
+        RequestPurpose::CreateStoryAlbum => StoryPageOpKind::CreateAlbum,
+        RequestPurpose::ReorderStoryAlbums => StoryPageOpKind::ReorderAlbums,
+        RequestPurpose::DeleteStoryAlbum => StoryPageOpKind::DeleteAlbum,
+        RequestPurpose::SetStoryAlbumName => StoryPageOpKind::RenameAlbum,
+        RequestPurpose::AddStoryAlbumStories => StoryPageOpKind::AddAlbumStories,
+        RequestPurpose::RemoveStoryAlbumStories => StoryPageOpKind::RemoveAlbumStories,
+        RequestPurpose::ReorderStoryAlbumStories => StoryPageOpKind::ReorderAlbumStories,
+        RequestPurpose::GetChatArchivedStories => StoryPageOpKind::LoadArchive,
+        RequestPurpose::GetChatPostedToChatPageStories => StoryPageOpKind::LoadChatPage,
+        RequestPurpose::SetChatPinnedStories => StoryPageOpKind::PinStories,
+        RequestPurpose::GetCloseFriends => StoryPageOpKind::LoadCloseFriends,
+        RequestPurpose::SetCloseFriends => StoryPageOpKind::SaveCloseFriends,
+        RequestPurpose::SetChatActiveStoriesList => StoryPageOpKind::MoveStories,
+        RequestPurpose::ToggleStoryIsPostedToChatPage => StoryPageOpKind::ToggleProfileStory,
+        _ => StoryPageOpKind::Other,
     }
 }
 
@@ -201,6 +261,44 @@ mod tests {
         let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
         let owned = copy_and_parse(json, seq, &dyn_sink).unwrap();
         session.apply(owned);
+    }
+
+    fn op(kind: StoryPageOpKind, state: StoryPageOpState, request: u64, chat: i64) -> StoryPageOp {
+        StoryPageOp {
+            kind,
+            state,
+            request: crate::ids::RequestId(request),
+            chat_id: Some(ChatId(chat)),
+        }
+    }
+
+    #[test]
+    fn repeating_a_call_drops_its_finished_outcome_and_the_list_stays_bounded() {
+        let mut ops = StoryPageOps::default();
+        let kind = StoryPageOpKind::DeleteAlbum;
+        ops.begin(op(kind, StoryPageOpState::Failed("no".into()), 1, 11));
+        ops.begin(op(
+            StoryPageOpKind::CreateAlbum,
+            StoryPageOpState::Succeeded,
+            2,
+            11,
+        ));
+        // The same call on the same page again: its old failure is stale.
+        ops.begin(op(kind, StoryPageOpState::Sending, 3, 11));
+        assert!(ops.get(crate::ids::RequestId(1)).is_none());
+        assert!(
+            ops.get(crate::ids::RequestId(2)).is_some(),
+            "another call's line stays"
+        );
+        // Calls that never answer cannot grow the list past the cap.
+        for request in 100..300 {
+            ops.begin(op(kind, StoryPageOpState::Sending, request, 12));
+        }
+        assert!(ops.ops.len() <= STORY_PAGE_OPS_CAP);
+        assert!(
+            ops.get(crate::ids::RequestId(299)).is_some(),
+            "the newest is kept"
+        );
     }
 
     #[test]

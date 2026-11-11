@@ -30,7 +30,7 @@ fn password_state_response_replaces_cache_and_clears_error() {
     assert!(state.has_password);
     assert_eq!(state.password_hint, "street");
     assert!(state.has_recovery_email_address);
-    assert_eq!(state.pending_email_pattern, None);
+    assert_eq!(state.pending_email, None);
     assert_eq!(
         session.auth_state.password_op,
         crate::state::PasswordFlight::Idle

@@ -53,11 +53,8 @@ mod tests {
             supports_streaming: true,
             has_stickers: false,
             file_id: FileId(7),
-            thumb_file_id: None,
-            thumb_width: 0,
-            thumb_height: 0,
+            thumb: crate::telegram::envelope::Thumb::of(None, 0, 0, true),
             minithumbnail: None,
-            thumb_still: true,
             alternatives: Vec::new(),
         })
     }

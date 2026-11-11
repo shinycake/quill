@@ -262,6 +262,32 @@ fn record_folders(json: &str) {
         .insert(client_of(&update), folders);
 }
 
+/// A client closed (log-out, account removed): its folders, and the new
+/// messages and send outcomes it produced, go with it.
+pub(crate) fn forget_client(client_id: i32) {
+    if let Some(all) = crate::locks::lock_or_recover(&FOLDERS).as_mut() {
+        all.remove(&client_id);
+    }
+    if let Some(state) = crate::locks::lock_or_recover(&MESSAGES).as_mut() {
+        state.recent.retain(|m| m.client_id != client_id);
+    }
+    if let Some(state) = crate::locks::lock_or_recover(&OUTCOMES).as_mut() {
+        state.recent.retain(|o| o.client_id != client_id);
+    }
+}
+
+/// Nobody is reading the buffers any more (the last agent left, or Quill
+/// locked): drop the message bodies and outcomes they hold. Sequence
+/// numbers go on, so a waiter's cursor stays valid.
+pub(crate) fn clear_buffers() {
+    if let Some(state) = crate::locks::lock_or_recover(&MESSAGES).as_mut() {
+        state.recent.clear();
+    }
+    if let Some(state) = crate::locks::lock_or_recover(&OUTCOMES).as_mut() {
+        state.recent.clear();
+    }
+}
+
 /// The chat folders of `client_id`, in the user's order.
 pub fn folders(client_id: i32) -> Vec<(i64, String)> {
     crate::locks::lock_or_recover(&FOLDERS)
@@ -281,6 +307,12 @@ pub fn latest_seq() -> u64 {
 pub(crate) fn wake_waiters() {
     let _guard = crate::locks::lock_or_recover(&MESSAGES);
     ARRIVED.notify_all();
+}
+
+/// Quill locked: wake every waiter and drop what the buffers hold.
+pub(crate) fn locked() {
+    wake_waiters();
+    clear_buffers();
 }
 
 /// Messages of `client_id` after `since` that `keep` accepts, waiting up to
@@ -400,14 +432,24 @@ mod tests {
 
     #[test]
     fn waiters_see_messages_that_arrive_after_they_start() {
+        // Locking Quill in another test wakes and empties the buffers.
+        let _guard = crate::locks::lock_or_recover(&crate::agent::access::TEST_LOCK);
         let since = super::latest_seq();
+        let (checked_tx, checked_rx) = std::sync::mpsc::channel();
         let waiter = std::thread::spawn(move || {
-            wait_for(91, since, Duration::from_secs(5), |m| m.chat_id == 5)
+            // The deadline is only a bound: the wait ends when a message
+            // `keep` accepts arrives.
+            wait_for(91, since, Duration::from_secs(3600), |m| {
+                let _ = checked_tx.send(m.chat_id);
+                m.chat_id == 5
+            })
         });
-        std::thread::sleep(Duration::from_millis(50));
         record_message(
             r#"{"@type":"updateNewMessage","message":{"id":1,"chat_id":4},"@client_id":91}"#,
         );
+        // The waiter has looked at the chat-4 message and rejected it; the
+        // next one reaches it whether it is waiting yet or about to.
+        assert_eq!(checked_rx.recv().ok(), Some(4));
         record_message(
             r#"{"@type":"updateNewMessage","message":{"id":2,"chat_id":5},"@client_id":91}"#,
         );
@@ -415,8 +457,36 @@ mod tests {
         assert_eq!(got.len(), 1);
         assert_eq!(got.first().map(|m| m.chat_id), Some(5));
         let latest = super::latest_seq();
-        let (none, checked) = wait_for(91, latest, Duration::from_millis(20), |_| true);
+        let (none, checked) = wait_for(91, latest, Duration::ZERO, |_| true);
         assert!(none.is_empty());
         assert_eq!(checked, latest);
+    }
+
+    #[test]
+    fn a_closed_client_and_the_last_agent_leaving_drop_what_was_kept() {
+        let _guard = crate::locks::lock_or_recover(&crate::agent::access::TEST_LOCK);
+        let since = super::send_mark();
+        super::record_send(
+            r#"{"@type":"updateMessageSendSucceeded","message":{"id":9,"chat_id":8},"old_message_id":3,"@client_id":95}"#,
+        );
+        record_message(
+            r#"{"@type":"updateNewMessage","message":{"id":1,"chat_id":8},"@client_id":95}"#,
+        );
+        observe(r#"{"@type":"updateChatFolders","chat_folders":[],"@client_id":95}"#);
+        let seen = super::latest_seq();
+        super::forget_client(95);
+        assert!(folders(95).is_empty());
+        assert_eq!(
+            super::wait_sent(95, 8, since, &[3], Duration::ZERO),
+            vec![None]
+        );
+        let (none, _) = wait_for(95, seen.saturating_sub(1), Duration::ZERO, |_| true);
+        assert!(none.is_empty());
+        record_message(
+            r#"{"@type":"updateNewMessage","message":{"id":2,"chat_id":8},"@client_id":96}"#,
+        );
+        super::clear_buffers();
+        let (none, _) = wait_for(96, seen.saturating_sub(1), Duration::ZERO, |_| true);
+        assert!(none.is_empty());
     }
 }

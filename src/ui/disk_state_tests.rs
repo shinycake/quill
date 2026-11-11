@@ -493,9 +493,9 @@ fn the_storage_list_stays_in_view_when_rows_above_arrive(cx: &mut TestAppContext
     let rows = |app: &mut QuillApp, arrived: bool| {
         if let Some(demo) = app.demo_session.as_mut() {
             demo.settings.data_storage.seeded = if arrived {
-                quill::data_settings::Seed::Seeded
+                quill::data_settings::PresetsSeed::Seeded
             } else {
-                quill::data_settings::Seed::InFlight
+                quill::data_settings::PresetsSeed::Loading(quill::ids::RequestId(1))
             };
         }
     };
@@ -596,7 +596,8 @@ fn a_running_update_download_waits_for_space_and_starts_again(cx: &mut TestAppCo
     };
     let progress = DownloadProgress::default();
     app.update_in(&mut vcx, |app, _, _| {
-        app.preferences.update_state = UpdateState::Downloading(release.clone(), progress.clone());
+        app.preferences.update_state =
+            UpdateState::Downloading(release.clone(), progress.clone(), Default::default());
     });
     read(&app, &mut vcx, Some(FLOORS.warn - 1));
     assert!(progress.is_held(), "the low disk stops the download");

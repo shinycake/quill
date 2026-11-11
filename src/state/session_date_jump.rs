@@ -7,10 +7,8 @@ impl Session {
     /// Open the calendar box for the open chat. `None` when no chat is open.
     pub fn open_history_calendar(&mut self, now: i64) -> Option<&HistoryCalendar> {
         let chat_id = self.open_chat_id()?;
-        let media = if self.search.chat_search.is_open()
-            && self.search.chat_search.chat_id == Some(chat_id)
-        {
-            self.search.chat_search.media
+        let media = if self.search.chat_search.chat_id() == Some(chat_id) {
+            self.search.chat_search.media()
         } else {
             SearchMediaKind::All
         };
@@ -51,12 +49,18 @@ impl Session {
         ) {
             self.search.date_jump = DateJumpAnswer::Idle;
         }
-        if self
-            .search
-            .date_jump_pending
-            .is_some_and(|(pending_chat, ..)| is_chat(pending_chat))
+        // A date jump still loading becomes a plain one: it lands on the
+        // message TDLib resolved, without retargeting.
+        if let ChatSearchJump::Loading {
+            message_id,
+            then: JumpLanding::Date { chat_id, .. },
+        } = self.search.chat_search.jump
+            && is_chat(chat_id)
         {
-            self.search.date_jump_pending = None;
+            self.search.chat_search.jump = ChatSearchJump::Loading {
+                message_id,
+                then: JumpLanding::Message,
+            };
         }
         self.search.clear_date_jump_note();
     }
@@ -127,33 +131,36 @@ impl Session {
         message_id: MessageId,
         mode: DateJumpMode,
     ) -> ChatSearchJumpNeed {
-        self.search.date_jump_pending = self
+        let then = self
             .search
             .chat_search
-            .chat_id
+            .chat_id()
             .or(self.open_chat_id())
             .filter(|_| mode != DateJumpMode::Exact)
-            .map(|chat_id| (chat_id, message_id, mode));
-        let need = self.begin_chat_search_jump(message_id);
-        if need == ChatSearchJumpNeed::AlreadyReady {
-            self.resolve_date_jump(message_id);
+            .map_or(JumpLanding::Message, |chat_id| JumpLanding::Date {
+                chat_id,
+                mode,
+            });
+        let need = self.begin_jump(message_id, then);
+        if need == ChatSearchJumpNeed::AlreadyReady
+            && let JumpLanding::Date { chat_id, mode } = then
+        {
+            self.resolve_date_jump(chat_id, message_id, mode);
         }
         need
     }
 
     /// The window around `message_id` is loaded: land on the day's first
     /// message (`Next`) or the chat's oldest loaded one (`Oldest`).
-    pub(crate) fn resolve_date_jump(&mut self, message_id: MessageId) {
-        let Some((chat_id, pending_id, mode)) = self.search.date_jump_pending else {
-            return;
-        };
-        if pending_id != message_id {
-            return;
-        }
-        self.search.date_jump_pending = None;
+    pub(crate) fn resolve_date_jump(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        mode: DateJumpMode,
+    ) {
         // The view moved to another chat since the jump began: its window
         // is not the one the jump was for.
-        if self.search.chat_search.chat_id.or(self.open_chat_id()) != Some(chat_id) {
+        if self.search.chat_search.chat_id().or(self.open_chat_id()) != Some(chat_id) {
             return;
         }
         let Some(history) = self.histories.get(&chat_id.0) else {
@@ -179,7 +186,7 @@ impl Session {
     /// "From: member" needs someone to choose from: basic groups and
     /// supergroups (not channels, private chats or Saved Messages).
     pub fn chat_search_can_pick_sender(&self) -> bool {
-        let Some(chat_id) = self.search.chat_search.chat_id.or(self.open_chat_id()) else {
+        let Some(chat_id) = self.search.chat_search.chat_id().or(self.open_chat_id()) else {
             return false;
         };
         self.chats.get(&chat_id.0).is_some_and(|chat| {
@@ -196,27 +203,29 @@ impl Session {
 
     /// Open the "From:" picker (groups only; the caller checks).
     pub fn open_from_picker(&mut self) {
-        if self.search.chat_search.is_open() && self.search.chat_search.from_picker.is_none() {
-            self.search.chat_search.from_picker = Some(FromPicker::default());
+        if self.search.chat_search.is_open() && self.search.chat_search.from_picker().is_none() {
+            self.search
+                .chat_search
+                .set_from_picker(Some(FromPicker::default()));
         }
     }
 
     pub fn close_from_picker(&mut self) {
-        self.search.chat_search.from_picker = None;
+        self.search.chat_search.set_from_picker(None);
     }
 
     pub(crate) fn apply_from_members(&mut self, request: RequestId, members: &[ParsedChatMember]) {
         let Some(picker) = self
             .search
             .chat_search
-            .from_picker
-            .as_mut()
-            .filter(|p| p.request == Some(request))
+            .open_mut()
+            .and_then(|open| open.from_picker.as_mut())
         else {
             return;
         };
-        picker.request = None;
-        picker.members = members.iter().map(|m| m.member_id).collect();
+        picker
+            .members
+            .answered(Some(request), members.iter().map(|m| m.member_id).collect());
     }
 
     /// A short label for a member in the picker and the "From:" chip.

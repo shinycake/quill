@@ -720,11 +720,8 @@ fn the_chooser_lists_saved_gifs_except_when_adapting(cx: &mut TestAppContext) {
                 file_name: "dance.mp4".into(),
                 mime_type: "video/mp4".into(),
                 file_id: FileId(9_001),
-                thumb_file_id: None,
-                thumb_width: 0,
-                thumb_height: 0,
+                thumb: quill::telegram::envelope::Thumb::of(None, 0, 0, true),
                 minithumbnail: None,
-                thumb_still: true,
             }]);
         }
         app.sticker_box.pick = Some(PickExisting {

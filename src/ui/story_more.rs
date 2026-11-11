@@ -495,7 +495,7 @@ impl QuillApp {
             .session()
             .and_then(|s| s.stories.close_friends.ids().cloned());
         self.stories.with_viewer_ui(|open| {
-            let mut stage = CloseFriendsStage::Loading;
+            let mut stage = CloseFriendsStage::Awaiting;
             if let Some(list) = &loaded {
                 stage.loaded(list);
             }
@@ -628,20 +628,9 @@ impl QuillApp {
             }
             return;
         }
-        // The list's own load, matched to its request.
-        let load_failed = self
-            .session()
-            .is_some_and(|s| s.stories.close_friends.failed_without_list());
+        // No list yet: the panel keeps showing the session's load (loading,
+        // or failed with a retry).
         let Some(loaded) = loaded else {
-            // No list yet: a failed request ends the wait with a retry.
-            if load_failed
-                && let Some(stage) = self
-                    .stories
-                    .viewer_ui_mut()
-                    .and_then(|open| open.close_friends_mut())
-            {
-                stage.load_failed();
-            }
             return;
         };
         let Some(stage) = self
@@ -652,10 +641,8 @@ impl QuillApp {
             return;
         };
         match stage {
-            CloseFriendsStage::Closed
-            | CloseFriendsStage::Failed
-            | CloseFriendsStage::Saving { .. } => {}
-            CloseFriendsStage::Loading => stage.loaded(&loaded),
+            CloseFriendsStage::Closed | CloseFriendsStage::Saving { .. } => {}
+            CloseFriendsStage::Awaiting => stage.loaded(&loaded),
             CloseFriendsStage::Editing(edit) => {
                 if !edit.changed() && CloseFriendsEdit::new(&loaded) != *edit {
                     *edit = CloseFriendsEdit::new(&loaded);
@@ -693,7 +680,7 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(chrome::secondary())
-                            .child(format!("{}…", op.label)),
+                            .child(format!("{}…", op.kind.label())),
                     );
                 }
                 S::Failed(reason) => {
@@ -701,7 +688,7 @@ impl QuillApp {
                         div()
                             .text_xs()
                             .text_color(danger())
-                            .child(format!("{} failed: {reason}", op.label)),
+                            .child(format!("{} failed: {reason}", op.kind.label())),
                     );
                 }
                 S::Succeeded => {}
@@ -781,7 +768,11 @@ impl QuillApp {
     fn close_friends_panel(&self, cx: &mut Context<Self>) -> AnyElement {
         let stage = self.stories.viewer_ui().close_friends();
         let Some(edit) = stage.edit() else {
-            let failed = matches!(stage, CloseFriendsStage::Failed);
+            // The load is the session's: a failed one with no list to fall
+            // back on offers the retry.
+            let failed = self
+                .session()
+                .is_some_and(|s| s.stories.close_friends.failed_without_list());
             let mut buttons = div().flex().gap_2();
             if failed {
                 buttons = buttons.child(

@@ -58,7 +58,7 @@ use std::rc::Rc;
 
 thread_local! {
     /// The layer of the slice being rendered, laid out or painted.
-    static CURRENT: RefCell<Option<Layer>> = const { RefCell::new(None) };
+    static CURRENT: Cell<Option<Layer>> = const { Cell::new(None) };
     /// Paint order of layered items (see [`Item::seq`]).
     static PAINT_SEQ: Cell<u64> = const { Cell::new(0) };
     /// The slice is painting a tile the layer draws again on top.
@@ -75,14 +75,18 @@ pub(super) fn painting_under_layer() -> bool {
 /// The layer that content built now belongs to, if any: only content of a
 /// slice with a layer is drawn by one.
 pub(super) fn current() -> Option<Layer> {
-    CURRENT.with(|current| current.borrow().clone())
+    CURRENT.with(|current| {
+        let layer = current.take();
+        current.set(layer.clone());
+        layer
+    })
 }
 
 /// Run `f` with `layer` as the current one.
 pub(super) fn with_layer<R>(layer: Option<&Layer>, f: impl FnOnce() -> R) -> R {
     let outer = CURRENT.with(|current| current.replace(layer.cloned()));
     let result = f();
-    CURRENT.with(|current| *current.borrow_mut() = outer);
+    CURRENT.with(|current| current.set(outer));
     result
 }
 
@@ -147,6 +151,7 @@ impl Content {
     }
 }
 
+#[derive(Clone)]
 struct Item {
     content: Content,
     bounds: Bounds<Pixels>,
@@ -154,24 +159,63 @@ struct Item {
     /// The text style where the slice lays it out, for the elements the
     /// layer builds (tiles, mirrors) to lay out the same.
     text: Option<TextStyleRefinement>,
-    /// The slice draws it: something it paints later covers the item, or
-    /// (a mirror) nothing the layer draws is under it. A mirror the layer
-    /// draws isn't painted by the slice at all, so a translucent pill
-    /// doesn't darken twice.
-    inline: Cell<bool>,
-    /// Paint order once painted (0: registered by a prepaint that was
-    /// discarded, or not painted yet).
-    seq: Cell<u64>,
-    /// The opacity it was painted at (a dimmed cell).
-    opacity: Cell<f32>,
+    /// Where the item stands in the slice's frame.
+    slot: Cell<Slot>,
     /// Its place in the slice's hit test (a [`hover_tile`]).
     hitbox: Option<Hitbox>,
 }
 
+/// Where an item stands in the slice's frame: registered by its prepaint,
+/// or painted.
+#[derive(Clone, Copy)]
+enum Slot {
+    /// Registered by a prepaint; not painted (yet: a discarded prepaint
+    /// leaves it here). `inline`: the slice draws it, because something it
+    /// paints later covers the item, or (a mirror) nothing the layer draws
+    /// is under it. A mirror the layer draws isn't painted by the slice at
+    /// all, so a translucent pill doesn't darken twice.
+    Registered { inline: bool },
+    /// The slice painted it, at paint order `seq` and at `opacity` (a dimmed
+    /// cell).
+    Painted {
+        inline: bool,
+        seq: u64,
+        opacity: f32,
+    },
+}
+
 impl Item {
+    fn inline(&self) -> bool {
+        match self.slot.get() {
+            Slot::Registered { inline } | Slot::Painted { inline, .. } => inline,
+        }
+    }
+
+    fn set_inline(&self, inline: bool) {
+        self.slot.set(match self.slot.get() {
+            Slot::Registered { .. } => Slot::Registered { inline },
+            Slot::Painted { seq, opacity, .. } => Slot::Painted {
+                inline,
+                seq,
+                opacity,
+            },
+        });
+    }
+
+    /// Paint order and opacity, once the slice painted it.
+    fn painted_at(&self) -> Option<(u64, f32)> {
+        match self.slot.get() {
+            Slot::Painted { seq, opacity, .. } => Some((seq, opacity)),
+            Slot::Registered { .. } => None,
+        }
+    }
+
     fn painted(&self, window: &Window) {
-        self.seq.set(next_seq());
-        self.opacity.set(window.element_opacity());
+        self.slot.set(Slot::Painted {
+            inline: self.inline(),
+            seq: next_seq(),
+            opacity: window.element_opacity(),
+        });
     }
 
     /// The part of it that can show.
@@ -181,12 +225,39 @@ impl Item {
     }
 }
 
+/// The slice's frame: the items its prepaint registers, then, once it
+/// painted, the same items as final.
+enum Frame {
+    /// The slice prepaints.
+    Prepainting(Vec<Item>),
+    /// The slice painted since it last prepainted: the items are final.
+    Painted(Vec<Item>),
+}
+
+impl Default for Frame {
+    fn default() -> Self {
+        Self::Prepainting(Vec::new())
+    }
+}
+
+impl Frame {
+    fn items(&self) -> &[Item] {
+        match self {
+            Self::Prepainting(items) | Self::Painted(items) => items,
+        }
+    }
+
+    fn items_mut(&mut self) -> &mut Vec<Item> {
+        match self {
+            Self::Prepainting(items) | Self::Painted(items) => items,
+        }
+    }
+}
+
 #[derive(Default)]
 struct LayerState {
-    items: RefCell<Vec<Item>>,
+    frame: RefCell<Frame>,
     occluders: RefCell<Vec<Bounds<Pixels>>>,
-    /// The slice painted since it last prepainted: the items are final.
-    painted: Cell<bool>,
 }
 
 /// A slice's animated content and what covers it, as of the slice's last
@@ -195,16 +266,47 @@ struct LayerState {
 pub(super) struct Layer(Rc<LayerState>);
 
 impl Layer {
+    /// Read the frame, unless it is being changed (a re-entrant call finds
+    /// nothing instead of panicking). `f` never calls into GPUI.
+    fn read<R>(&self, f: impl FnOnce(&Frame) -> R) -> Option<R> {
+        self.0.frame.try_borrow().ok().map(|frame| f(&frame))
+    }
+
+    fn write<R>(&self, f: impl FnOnce(&mut Frame) -> R) -> Option<R> {
+        self.0
+            .frame
+            .try_borrow_mut()
+            .ok()
+            .map(|mut frame| f(&mut frame))
+    }
+
+    /// The items as of now, copied out so nothing is held while the layer
+    /// calls into GPUI.
+    fn snapshot(&self) -> Vec<Item> {
+        self.read(|frame| frame.items().to_vec())
+            .unwrap_or_default()
+    }
+
+    fn add_occluder(&self, covered: Bounds<Pixels>) {
+        if let Ok(mut occluders) = self.0.occluders.try_borrow_mut() {
+            occluders.push(covered);
+        }
+    }
+
     /// The slice prepaints a new frame: forget the last one's content.
     pub(super) fn begin_frame(&self) {
-        self.0.items.borrow_mut().clear();
-        self.0.occluders.borrow_mut().clear();
-        self.0.painted.set(false);
+        self.write(|frame| *frame = Frame::Prepainting(Vec::new()));
+        if let Ok(mut occluders) = self.0.occluders.try_borrow_mut() {
+            occluders.clear();
+        }
     }
 
     /// The slice painted its frame (`SliceScope`).
     pub(super) fn end_frame(&self) {
-        self.0.painted.set(true);
+        self.write(|frame| {
+            let items = std::mem::take(frame.items_mut());
+            *frame = Frame::Painted(items);
+        });
     }
 
     fn register(
@@ -214,34 +316,37 @@ impl Layer {
         mask: ContentMask<Pixels>,
         text: Option<TextStyleRefinement>,
         hitbox: Option<Hitbox>,
-    ) -> usize {
-        let mut items = self.0.items.borrow_mut();
-        items.push(Item {
-            content,
-            bounds,
-            mask,
-            text,
-            inline: Cell::new(false),
-            seq: Cell::new(0),
-            opacity: Cell::new(1.),
-            hitbox,
-        });
-        items.len() - 1
+    ) -> Option<usize> {
+        self.write(|frame| {
+            let items = frame.items_mut();
+            items.push(Item {
+                content,
+                bounds,
+                mask,
+                text,
+                slot: Cell::new(Slot::Registered { inline: false }),
+                hitbox,
+            });
+            items.len().saturating_sub(1)
+        })
     }
 
     /// What covered the slice's content in its last real frame.
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
     pub(super) fn occluders(&self) -> Vec<Bounds<Pixels>> {
-        self.0.occluders.borrow().clone()
+        self.0
+            .occluders
+            .try_borrow()
+            .map(|occluders| occluders.clone())
+            .unwrap_or_default()
     }
 
     fn occluded(&self, visible: Bounds<Pixels>) -> bool {
         self.0
             .occluders
-            .borrow()
-            .iter()
-            .any(|occluder| occluder.intersects(&visible))
+            .try_borrow()
+            .is_ok_and(|occluders| occluders.iter().any(|o| o.intersects(&visible)))
     }
 
     /// Register content the slice is painting now (its prepaint is over,
@@ -257,30 +362,36 @@ impl Layer {
         if inline {
             content.paint_inline(bounds, window);
         }
-        let index = self.register(content, bounds, mask, None, None);
-        let items = self.0.items.borrow();
-        if let Some(item) = items.get(index) {
-            item.inline.set(inline);
-            item.painted(window);
-        }
+        let Some(index) = self.register(content, bounds, mask, None, None) else {
+            return;
+        };
+        self.read(|frame| {
+            if let Some(item) = frame.items().get(index) {
+                item.set_inline(inline);
+                item.painted(window);
+            }
+        });
     }
 
     /// The frame rates its painted content wants: drawn by the layer, and
     /// drawn inline by the slice.
     pub(super) fn demand(&self) -> (u32, u32) {
-        let (mut layer, mut inline) = (0, 0);
-        for item in self.0.items.borrow().iter() {
-            if item.seq.get() == 0 || item.visible().is_none() {
-                continue;
+        self.read(|frame| {
+            let (mut layer, mut inline) = (0, 0);
+            for item in frame.items() {
+                if item.painted_at().is_none() || item.visible().is_none() {
+                    continue;
+                }
+                let fps = item.content.fps();
+                if item.inline() {
+                    inline = inline.max(fps);
+                } else {
+                    layer = layer.max(fps);
+                }
             }
-            let fps = item.content.fps();
-            if item.inline.get() {
-                inline = inline.max(fps);
-            } else {
-                layer = layer.max(fps);
-            }
-        }
-        (layer, inline)
+            (layer, inline)
+        })
+        .unwrap_or_default()
     }
 
     /// Whether drawing the layer in `draw` would change what it shows. A
@@ -288,55 +399,66 @@ impl Layer {
     /// so each frame stays up for the same number of refreshes; the ticks
     /// between need no draw.
     pub(super) fn changes_in(&self, draw: TickDraw) -> bool {
-        self.0.items.borrow().iter().any(|item| {
-            item.seq.get() != 0
-                && !item.inline.get()
-                && item.visible().is_some()
-                && item.content.changes_in(draw)
+        self.read(|frame| {
+            frame.items().iter().any(|item| {
+                item.painted_at().is_some()
+                    && !item.inline()
+                    && item.visible().is_some()
+                    && item.content.changes_in(draw)
+            })
         })
+        .unwrap_or(false)
     }
 
     /// Before the slice paints a new frame (the layer's prepaint): decide
     /// which items the slice draws (`inline`), and say which ones need an
     /// element built (tiles and mirrors the layer draws).
     fn plan(&self) -> Vec<bool> {
-        let items = self.0.items.borrow();
-        // A replayed slice: what its last real frame painted stays decided,
-        // and what it didn't paint (a discarded prepaint) never shows.
-        let replay = self.0.painted.get();
-        let mut drawn: Vec<Bounds<Pixels>> = Vec::new();
-        let mut build = Vec::with_capacity(items.len());
-        for item in items.iter() {
-            let visible = item.visible().filter(|_| !replay || item.seq.get() != 0);
-            let Some(visible) = visible else {
-                build.push(false);
-                continue;
-            };
-            let mirror = item.content.is_mirror();
-            if !replay {
-                item.inline.set(if mirror {
-                    !drawn.iter().any(|r| r.intersects(&visible))
-                } else {
-                    self.occluded(visible)
-                });
+        self.read(|frame| {
+            // A replayed slice: what its last real frame painted stays
+            // decided, and what it didn't paint (a discarded prepaint)
+            // never shows.
+            let replay = matches!(frame, Frame::Painted(_));
+            let items = frame.items();
+            let mut drawn: Vec<Bounds<Pixels>> = Vec::new();
+            let mut build = Vec::with_capacity(items.len());
+            for item in items {
+                let visible = item
+                    .visible()
+                    .filter(|_| !replay || item.painted_at().is_some());
+                let Some(visible) = visible else {
+                    build.push(false);
+                    continue;
+                };
+                let mirror = item.content.is_mirror();
+                if !replay {
+                    item.set_inline(if mirror {
+                        !drawn.iter().any(|r| r.intersects(&visible))
+                    } else {
+                        self.occluded(visible)
+                    });
+                }
+                let layered = !item.inline();
+                if layered && !mirror {
+                    drawn.push(visible);
+                }
+                build.push(
+                    layered
+                        && matches!(item.content, Content::Tile { .. } | Content::Mirror { .. }),
+                );
             }
-            let layered = !item.inline.get();
-            if layered && !mirror {
-                drawn.push(visible);
-            }
-            build.push(
-                layered && matches!(item.content, Content::Tile { .. } | Content::Mirror { .. }),
-            );
-        }
-        build
+            build
+        })
+        .unwrap_or_default()
     }
 
     /// The layer's prepaint: the elements it redraws, laid out and
     /// prepainted at their items' bounds.
     fn prepaint(&self, window: &mut Window, cx: &mut App) -> Vec<Option<AnyElement>> {
         let plan = self.plan();
-        let items = self.0.items.borrow();
-        items
+        // Copied out: building an element may register or paint layered
+        // content, which must not find the frame held.
+        self.snapshot()
             .iter()
             .zip(plan)
             .map(|(item, build)| {
@@ -367,24 +489,26 @@ impl Layer {
 
     /// The layer's paint: the painted, uncovered items in paint order.
     fn paint(&self, built: &mut [Option<AnyElement>], window: &mut Window, cx: &mut App) {
-        let items = self.0.items.borrow();
-        let mut order: Vec<usize> = (0..items.len())
-            .filter(|&ix| {
-                items
-                    .get(ix)
-                    .is_some_and(|item| item.seq.get() != 0 && !item.inline.get())
+        let items = self.snapshot();
+        let mut order: Vec<(usize, u64, f32)> = items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| !item.inline())
+            .filter_map(|(ix, item)| {
+                let (seq, opacity) = item.painted_at()?;
+                Some((ix, seq, opacity))
             })
             .collect();
-        order.sort_by_key(|&ix| items.get(ix).map_or(0, |item| item.seq.get()));
+        order.sort_by_key(|&(_, seq, _)| seq);
         let painter_opacity = window.element_opacity();
-        for ix in order {
+        for (ix, _, item_opacity) in order {
             let Some(item) = items.get(ix) else {
                 continue;
             };
             if item.visible().is_none() {
                 continue;
             }
-            let opacity = (painter_opacity > 0.).then(|| item.opacity.get() / painter_opacity);
+            let opacity = (painter_opacity > 0.).then(|| item_opacity / painter_opacity);
             window.with_element_opacity(opacity, |window| {
                 window.with_content_mask(Some(item.mask), |window| match &item.content {
                     Content::Frames(view) => view.paint(item.bounds, window),
@@ -544,13 +668,13 @@ impl Element for Layered {
         let hitbox = self
             .hover
             .then(|| window.insert_hitbox(bounds, HitboxBehavior::Normal));
-        Some(layer.register(
+        layer.register(
             self.content.clone(),
             bounds,
             window.content_mask(),
             text,
             hitbox,
-        ))
+        )
     }
 
     fn paint(
@@ -564,10 +688,13 @@ impl Element for Layered {
         cx: &mut App,
     ) {
         let inline = self.layer.as_ref().zip(*index).and_then(|(layer, index)| {
-            let items = layer.0.items.borrow();
-            let item = items.get(index)?;
-            item.painted(window);
-            Some(item.inline.get())
+            layer
+                .read(|frame| {
+                    let item = frame.items().get(index)?;
+                    item.painted(window);
+                    Some(item.inline())
+                })
+                .flatten()
         });
         // Without a layer, or covered: the slice draws it. A mirror the
         // layer draws is drawn there only.
@@ -641,7 +768,7 @@ impl Element for Occluder {
     ) -> Self::PrepaintState {
         if let Some(layer) = &self.layer {
             let covered = bounds.intersect(&window.content_mask().bounds);
-            layer.0.occluders.borrow_mut().push(covered);
+            layer.add_occluder(covered);
         }
         self.child.prepaint(window, cx);
     }
@@ -802,7 +929,7 @@ pub(in crate::ui) mod layer_tick_tests;
 
 #[cfg(test)]
 mod tests {
-    use super::{Content, Layer};
+    use super::{Content, Layer, Slot};
     use gpui_kit::{Bounds, ContentMask, point, px, size};
     use std::rc::Rc;
 
@@ -839,9 +966,15 @@ mod tests {
 
     /// The slice paints every registered item, in order.
     fn paint_all(layer: &Layer) {
-        for (seq, item) in layer.0.items.borrow().iter().enumerate() {
-            item.seq.set(seq as u64 + 1);
-        }
+        layer.read(|frame| {
+            for (seq, item) in frame.items().iter().enumerate() {
+                item.slot.set(Slot::Painted {
+                    inline: item.inline(),
+                    seq: seq as u64 + 1,
+                    opacity: 1.,
+                });
+            }
+        });
         layer.end_frame();
     }
 
@@ -849,7 +982,7 @@ mod tests {
     fn covered_content_is_drawn_by_the_slice() {
         let layer = Layer::default();
         layer.begin_frame();
-        layer.0.occluders.borrow_mut().push(rect(0., 0., 50., 50.));
+        layer.add_occluder(rect(0., 0., 50., 50.));
         layer.register(frames(), rect(40., 40., 20., 20.), mask(), None, None);
         layer.register(frames(), rect(100., 100., 20., 20.), mask(), None, None);
         // Hidden by its mask: neither drawn nor ticking.
@@ -864,10 +997,12 @@ mod tests {
         );
         layer.plan();
         paint_all(&layer);
-        let items = layer.0.items.borrow();
-        assert!(items[0].inline.get());
-        assert!(!items[1].inline.get());
-        drop(items);
+        let inline =
+            layer.read(|frame| frame.items().iter().map(|i| i.inline()).collect::<Vec<_>>());
+        assert_eq!(
+            inline.as_deref().and_then(|i| i.get(..2)),
+            Some(&[true, false][..])
+        );
         // The covered emoji ticks the slice, the other one the layer (at
         // the clip's 10 fps).
         assert_eq!(layer.demand(), (10, 10));
@@ -885,13 +1020,13 @@ mod tests {
             // The pill over the video is the layer's alone (the slice skips
             // it, so a translucent pill doesn't darken twice); the other
             // one stays with the slice.
-            let items = layer.0.items.borrow();
-            assert!(!items[1].inline.get());
-            assert!(items[2].inline.get());
+            let inline =
+                layer.read(|frame| frame.items().iter().map(|i| i.inline()).collect::<Vec<_>>());
+            assert_eq!(inline, Some(vec![false, false, true]));
         }
         // Covered, the tile is the slice's: no copy of the pill either.
         layer.begin_frame();
-        layer.0.occluders.borrow_mut().push(rect(0., 0., 10., 10.));
+        layer.add_occluder(rect(0., 0., 10., 10.));
         layer.register(tile(), rect(0., 0., 100., 100.), mask(), None, None);
         layer.register(mirror(), rect(80., 80., 10., 10.), mask(), None, None);
         assert_eq!(layer.plan(), vec![false, false]);

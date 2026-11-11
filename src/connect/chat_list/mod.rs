@@ -117,6 +117,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Parity slice: channel/supergroup header extras.
         self.maybe_fetch_supergroup_profile(chat_id)?;
         self.maybe_fetch_supergroup_full_info_for_header(chat_id)?;
+        // Opening the chat retries a failed topic list; the rows never do.
+        self.session.threads.forum_topics.clear_failure(chat_id.0);
         self.maybe_fetch_forum_topics(chat_id)?;
         self.retry_direct_topics_on_open(chat_id);
         Ok(())
@@ -386,6 +388,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chat_list
             .archive_chat_list_settings()
             .is_some()
+            || self.session.chat_list.archive_settings_loading()
         {
             return Ok(None);
         }
@@ -394,30 +397,30 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// `getArchiveChatListSettings` even when a copy is cached, as
     /// tdesktop reloads its global privacy settings for the "Hide new
-    /// chats?" suggestion. `Ok(None)` = a fetch in flight.
+    /// chats?" suggestion. A fetch already in flight predates the
+    /// suggestion, so a new one goes out and takes its place (the older
+    /// answer no longer matches the stage).
     pub fn reload_archive_chat_list_settings(
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
-            self.session.chat_list.archive_mute.note_reload_failed();
+            self.session.chat_list.archive_mute.note_reload_failed(None);
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::GetArchiveChatListSettings;
-        if self.session.requests.has_purpose(purpose) {
-            return Ok(None);
-        }
         let extra = self.session.request(purpose, None);
         if let Err(err) = self
             .sender
             .send_json(&get_archive_chat_list_settings(extra))
         {
             self.session.requests.take(extra);
-            self.session.chat_list.archive_mute.note_reload_failed();
+            self.session.chat_list.archive_mute.note_reload_failed(None);
             return Err(err);
         }
         // A cached copy stays on screen while it reloads.
         self.session.chat_list.archive_settings.begin();
         self.session.chat_list.archive_settings.sent(extra);
+        self.session.chat_list.archive_mute.note_sent(extra);
         Ok(Some(extra))
     }
 

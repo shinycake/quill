@@ -249,10 +249,11 @@ fn the_request_poll_button_opens_the_box_for_the_type_it_asks_for(cx: &mut TestA
     use quill::ids::MessageId;
     use quill::telegram::envelope::{KeyboardButton, KeyboardButtonType, ReplyKeyboard};
     let (app, mut vcx) = new_app(cx);
-    for (force_regular, force_quiz, lock) in [
-        (false, false, QuizLock::Free),
-        (true, false, QuizLock::Regular),
-        (false, true, QuizLock::Quiz),
+    use quill::telegram::envelope::PollRequest;
+    for (request, lock) in [
+        (PollRequest::Any, QuizLock::Free),
+        (PollRequest::RegularOnly, QuizLock::Regular),
+        (PollRequest::QuizOnly, QuizLock::Quiz),
     ] {
         app.update(&mut vcx, |app, cx| {
             let session = app.demo_session.as_mut().unwrap();
@@ -264,10 +265,7 @@ fn the_request_poll_button_opens_the_box_for_the_type_it_asks_for(cx: &mut TestA
                     ReplyKeyboard {
                         rows: vec![vec![KeyboardButton {
                             text: "Make a poll".into(),
-                            kind: KeyboardButtonType::RequestPoll {
-                                force_regular,
-                                force_quiz,
-                            },
+                            kind: KeyboardButtonType::RequestPoll(request),
                         }]],
                         is_persistent: false,
                         resize_keyboard: false,

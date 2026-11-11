@@ -143,7 +143,7 @@ fn menu_routes_to_hard_surfaces_refuse_while_injecting(cx: &mut TestAppContext) 
         let app = app.read(cx);
         assert!(!app.settings.open(), "Settings");
         assert!(!app.account_boxes.lifecycle.is_open(), "log out");
-        assert!(!app.account.accounts.open, "accounts");
+        assert!(!app.account.accounts.dialog.is_open(), "accounts");
         assert!(!app.account.passcode.open, "passcode");
         assert!(!app.twofa.is_open(), "two-step verification");
         assert!(!app.account.passcode.is_locked(), "lock");
@@ -273,6 +273,45 @@ fn an_opener_without_a_guard_leaves_no_hard_dialog_for_an_agent(cx: &mut TestApp
     settle(vcx);
     assert!(paid_box_open(&app, vcx));
     assert_eq!(dialog_shown(&app, vcx), Some("PaidReaction"));
+}
+
+/// What an agent's step opened is closed by the shell of the window the
+/// step ran in, not by another window's shell.
+#[gpui_kit::test]
+fn a_blocked_dialog_waits_for_the_shell_of_its_window(cx: &mut TestAppContext) {
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    turn_on();
+    grant(11, Scope::ReadWrite);
+    grant_everything();
+    let _presence = activity::connect("Test agent");
+    settle(vcx);
+    let message_id = add_star_reaction(&app, vcx);
+    // No frame draws in between, so the shell has not yet closed it.
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.open_paid_box(
+                quill::ids::ChatId(11),
+                quill::ids::MessageId(message_id),
+                cx,
+            );
+            crate::ui::agent_driver_surface::block_opened_by_agent(app, &[]);
+        });
+        // Another window's shell finds nothing of its own.
+        let other = Some(quill::ids::ChatId(99));
+        let taken =
+            crate::ui::agent_driver_surface::take_blocked_closing_layers(&app, other, window, cx);
+        assert!(taken.is_empty(), "{taken:?}");
+        // The window the step ran in (the main one) takes it.
+        let taken =
+            crate::ui::agent_driver_surface::take_blocked_closing_layers(&app, None, window, cx);
+        assert_eq!(taken, vec!["PaidReaction"]);
+    });
+    app.update(vcx, |app, cx| {
+        app.paid_reaction.boxed = None;
+        cx.notify();
+    });
 }
 
 #[gpui_kit::test]

@@ -160,7 +160,7 @@ pub fn local_error(
     let checks = [
         (
             CardField::Number,
-            validate::validate_card(&card.number).state == valid,
+            validate::validate_card(&card.number).state() == valid,
         ),
         (
             CardField::Expiry,
@@ -168,7 +168,7 @@ pub fn local_error(
         ),
         (
             CardField::Cvc,
-            validate::validate_cvc(&card.number, &card.cvc).state == valid,
+            validate::validate_cvc(&card.number, &card.cvc).state() == valid,
         ),
         (CardField::Name, !card.cardholder_name.is_empty()),
         (CardField::Country, !card.address_country.is_empty()),

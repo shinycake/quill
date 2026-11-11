@@ -23,10 +23,7 @@ fn another_gift_drops_the_first_gifts_upgrade_box(cx: &mut TestAppContext) {
     window
         .update(cx, |app, _, cx| {
             if let Some(manage) = app.gift_manage_mut() {
-                manage.flow = Some(GiftFlow::Upgrade {
-                    id: "first".into(),
-                    keep_details: true,
-                });
+                manage.flow = Some(GiftFlow::upgrade("first".into(), true));
             }
             app.select_gift(Some("first".into()), cx);
             let flow = |app: &mut QuillApp| app.gift_manage_mut().and_then(|m| m.flow.clone());
@@ -45,7 +42,7 @@ fn buy_by_name_from_send_gift_buys_for_its_recipient(cx: &mut TestAppContext) {
             if let Some(session) = app.demo_session.as_mut() {
                 session.open_chat(ChatId(11));
                 let send = &mut session.payments.gifts_manage.send;
-                send.open = true;
+                send.stage = quill::gift_manage::SendStage::Idle;
                 send.recipient = Some(GiftRecipient {
                     sender: MessageSender::User { user_id: 501 },
                     name: "Ada".into(),

@@ -105,7 +105,7 @@ impl Render for QuillApp {
         self.sync_video_avatar(active, window.scale_factor(), cx);
         self.sync_userpic_videos(active, window.scale_factor(), history_drawn);
         self.viewer_follow_window_fullscreen(window);
-        self.frame.media_roots_frame.borrow_mut().take();
+        self.frame.media_roots_frame.set(None);
         let opening = self.viewer.state.is_open().then_some(self.viewer.open_gen);
         let cover = self.frame.viewer_cover.get();
         self.frame
@@ -338,8 +338,11 @@ impl Render for QuillApp {
             .when(
                 matches!(
                     self.preferences.update_state,
-                    quill::updater::UpdateState::Installed(_)
-                ) && !self.preferences.update_banner_dismissed,
+                    quill::updater::UpdateState::Installed(
+                        _,
+                        quill::updater::ChangelogBanner::Shown
+                    )
+                ),
                 |this| this.child(self.update_banner(cx)),
             )
             // Slice parity:platform-offline-indicator — slim connection
@@ -473,7 +476,7 @@ impl Render for QuillApp {
                 }
             })
             // Phase 9.3: story composer overlay above the story viewer.
-            .when(self.stories.composer.open, |this| {
+            .when(self.stories.composer.is_open(), |this| {
                 this.child(self.story_composer_overlay(cx))
             })
             // Phase 9.7: chat story page overlay (albums / chat page /

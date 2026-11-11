@@ -227,7 +227,7 @@ impl QuillApp {
         f: impl FnOnce(&mut AppearancePrefs),
     ) {
         f(&mut self.appearance);
-        quill::tray::set_tray_enabled(self.appearance.show_tray_icon);
+        quill::tray::set_tray_enabled(self.appearance.work_mode.has_tray());
         quill::tray::monochrome::set_monochrome(self.appearance.tray_icon_monochrome);
         self.appearance.font_size_px = clamp_font_size(self.appearance.font_size_px);
         save_appearance_prefs(&Self::appearance_paths(), &self.appearance);
@@ -502,8 +502,10 @@ impl QuillApp {
         // Tray-dependent switches only exist while a tray icon does:
         // a hidden window with no tray to reopen it from would
         // strand the user (Linux without a StatusNotifier host).
-        let tray =
-            quill::tray::tray_setting_switches(tray_available, this.appearance.show_tray_icon);
+        let tray = quill::tray::tray_setting_switches(
+            tray_available,
+            this.appearance.work_mode.has_tray(),
+        );
         body.extend(this.tray_icon_sections(tray_available, cx));
         if tray.start_in_tray {
             body.push(

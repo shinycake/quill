@@ -10,9 +10,15 @@ Rules every person and coding agent follows in this repository.
   owner: `OnScreen` per account, `ChatUi` per chat, the `WindowSlot` per
   window. Read docs/contributing/state-machines.md before you add state.
   CI (`scripts/check-implicit-state.py`) rejects new stage flags such as
-  `loading: bool` or `pending: bool`.
+  `loading: bool` or `pending: bool`. Three more guards hold the shapes
+  the state sweeps kept finding: an in-flight variant that holds no
+  request or task (`check-stage-enums.py`), an answer matched by purpose
+  instead of its `RequestId` (`check-request-match.py`), and a detached
+  timer or a timer in a loop (`check-owned-timers.py`).
 - **Never crash.** docs/contributing/panic-safety.md: no new
   `unwrap`/`expect`/`panic!`, unchecked indexing or long-held borrows.
+  CI (`scripts/check-refcell-borrows.py`) rejects a new `RefCell`
+  `borrow()`/`borrow_mut()`.
 - **Where code goes.** docs/contributing/structure.md: file size limit,
   hotspot files, and how to add features without editing shared files.
 - **Tests are deterministic.** No sleeps, timeouts or wall-clock waits in
@@ -24,6 +30,10 @@ Before pushing, run the CI checks locally:
 
 ```bash
 python3 scripts/check-implicit-state.py
+python3 scripts/check-stage-enums.py
+python3 scripts/check-request-match.py
+python3 scripts/check-owned-timers.py
+python3 scripts/check-refcell-borrows.py
 python3 scripts/check-screen-state.py
 python3 scripts/check-window-scope.py
 bash scripts/check-file-size.sh

@@ -671,7 +671,14 @@ impl TranslatePrefs {
             .iter()
             .filter_map(|code| normalize_code(code))
             .collect();
-        list.dedup();
+        // Two spellings of one language (`zh` and `zh-CN`) or a repeat that
+        // is not adjacent count once, so a toggle removes the language.
+        let mut seen = Vec::new();
+        list.retain(|code| {
+            let first = !seen.contains(code);
+            seen.push(*code);
+            first
+        });
         if list.is_empty() {
             list.push(normalize_code(ui_language).unwrap_or("en"));
         }

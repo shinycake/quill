@@ -16,7 +16,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::locks::LockExt;
-use std::sync::{Mutex, mpsc};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 /// How long `new` waits for COM and the language list to come up. Callers
@@ -127,8 +128,26 @@ fn init(wanted_locales: &[String], chosen: &[String]) -> Option<Opened> {
     Some((factory, list, available))
 }
 
+/// One job waiting for the COM thread, counted until it starts or is dropped.
+struct Queued(Arc<AtomicUsize>);
+
+impl Queued {
+    fn take(count: &Arc<AtomicUsize>) -> Self {
+        count.fetch_add(1, Ordering::SeqCst);
+        Self(Arc::clone(count))
+    }
+}
+
+impl Drop for Queued {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 pub struct WindowsSpellBackend {
     tx: Mutex<mpsc::Sender<Job>>,
+    /// Jobs sent and not started yet.
+    queued: Arc<AtomicUsize>,
     languages: Vec<(String, Script)>,
     available: Vec<String>,
 }
@@ -178,6 +197,7 @@ impl WindowsSpellBackend {
             .collect::<Vec<_>>();
         (!languages.is_empty()).then_some(Self {
             tx: Mutex::new(job_tx),
+            queued: Arc::new(AtomicUsize::new(0)),
             languages,
             available,
         })
@@ -206,11 +226,31 @@ impl WindowsSpellBackend {
         f: impl FnOnce(&mut Checkers) -> T + Send + 'static,
     ) -> Option<T> {
         let (tx, rx) = mpsc::channel();
+        // Set when the caller stopped waiting: the COM thread then skips
+        // the job instead of running it for nobody, so abandoned calls
+        // cannot pile up behind a cold dictionary.
+        let abandoned = Arc::new(AtomicBool::new(false));
+        let skip = Arc::clone(&abandoned);
+        let waiting = Queued::take(&self.queued);
         let job: Job = Box::new(move |c| {
+            drop(waiting);
+            if skip.load(Ordering::Acquire) {
+                return;
+            }
             let _ = tx.send(f(c));
         });
         self.tx.lock_or_recover().send(job).ok()?;
-        rx.recv_timeout(wait).ok()
+        let answer = rx.recv_timeout(wait).ok();
+        if answer.is_none() {
+            abandoned.store(true, Ordering::Release);
+        }
+        answer
+    }
+
+    /// The COM thread has jobs it has not started: a caller that must not
+    /// wait (the UI thread) asks nothing now.
+    fn is_busy(&self) -> bool {
+        self.queued.load(Ordering::SeqCst) > 0
     }
 
     /// Which checkers apply to this word (by script).
@@ -253,9 +293,37 @@ impl SpellBackend for WindowsSpellBackend {
     /// dictionary loading, or a backlog of jobs): the word is neither
     /// flagged nor remembered as correct.
     fn judge(&self, word: &str) -> Option<bool> {
+        self.judge_within(word, CHECK_WAIT)
+    }
+
+    /// [`Self::judge`] for the UI thread: no verdict while the COM thread
+    /// has other jobs queued, and a short wait otherwise.
+    fn judge_now(&self, word: &str) -> Option<bool> {
+        if self.is_busy() {
+            return None;
+        }
+        self.judge_within(word, CALL_WAIT)
+    }
+
+    fn suggestions(&self, word: &str, limit: usize) -> Vec<String> {
+        self.suggestions_within(word, limit)
+    }
+
+    /// [`Self::suggestions`] for the UI thread: none while the COM thread
+    /// has other jobs queued.
+    fn suggestions_now(&self, word: &str, limit: usize) -> Vec<String> {
+        if self.is_busy() {
+            return Vec::new();
+        }
+        self.suggestions_within(word, limit)
+    }
+}
+
+impl WindowsSpellBackend {
+    fn judge_within(&self, word: &str, wait: Duration) -> Option<bool> {
         let tags = self.tags_for(word);
         let word = word.to_string();
-        self.run_within(CHECK_WAIT, move |c| {
+        self.run_within(wait, move |c| {
             let mut judged = false;
             for (tag, checker) in &c.list {
                 if !tags.contains(tag) {
@@ -290,7 +358,7 @@ impl SpellBackend for WindowsSpellBackend {
         })
     }
 
-    fn suggestions(&self, word: &str, limit: usize) -> Vec<String> {
+    fn suggestions_within(&self, word: &str, limit: usize) -> Vec<String> {
         let tags = self.tags_for(word);
         let word = word.to_string();
         self.run(move |c| {

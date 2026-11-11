@@ -514,3 +514,52 @@ fn another_accounts_states_do_not_move_the_launch_wait() {
     gate.observe(&json, &copy_and_parse(&json, &seq, &sink).unwrap());
     assert_eq!(gate.wait(Duration::ZERO), LaunchWait::Skipped);
 }
+
+#[test]
+fn a_new_claim_starts_the_launch_wait_over_for_its_client() {
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let seq = AtomicU64::new(0);
+    let gate = LaunchChats::new();
+    gate.claim(2);
+    let json = auth_state("authorizationStateReady");
+    gate.observe(&json, &copy_and_parse(&json, &seq, &sink).unwrap());
+    // Client 1 ready first changed nothing; now it takes the screen.
+    gate.claim(1);
+    assert!(!gate.is_in());
+    gate.observe(&json, &copy_and_parse(&json, &seq, &sink).unwrap());
+    assert_eq!(gate.wait(Duration::ZERO), LaunchWait::Capped);
+}
+
+#[test]
+fn a_replacement_loop_reports_running_without_the_old_hub_touching_it() {
+    let (tx, rx) = mpsc::channel::<()>();
+    let source: ReceiveSource = Box::new(move |_| {
+        let _ = rx.recv();
+        panic!("receive source failed");
+    });
+    let dead =
+        Arc::new(TdHub::with_source(source, no_wake(), Arc::new(MemorySink::new())).unwrap());
+    let bridge = dead.bridge(1);
+    tx.send(()).unwrap();
+    drop(tx);
+    // The loop gives up after its run of panics. Joining its thread is the
+    // wait: it returns once the loop has ended and reported itself.
+    let ended = lock(&dead.thread).take().expect("the loop's thread");
+    let _ = ended.join();
+    assert!(bridge.stopped_unexpectedly());
+    let (live_tx, live_rx) = mpsc::channel::<String>();
+    let source: ReceiveSource =
+        Box::new(move |timeout| live_rx.recv_timeout(Duration::from_secs_f64(timeout)).ok());
+    let replacement = TdHub::with_source_replacing(
+        source,
+        wake_on(&live_tx),
+        Arc::new(MemorySink::new()),
+        &dead,
+    )
+    .unwrap();
+    assert!(!bridge.stopped_unexpectedly());
+    // The dead hub being dropped later stops only its own (ended) loop.
+    drop(dead);
+    assert!(!bridge.stopped_unexpectedly());
+    assert!(!replacement.stopped_unexpectedly());
+}

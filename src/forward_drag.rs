@@ -145,9 +145,11 @@ mod tests {
         use crate::telegram::envelope::DiceContent;
         let dice = MessageContent::Dice(DiceContent {
             emoji: "🎲".into(),
-            value: 3,
-            initial: None,
-            landing: None,
+            state: crate::telegram::envelope::DiceState::Landed {
+                value: 3,
+                initial: None,
+                landing: None,
+            },
         });
         assert!(media_press_drags(&dice));
         assert!(!media_press_drags(&MessageContent::ScreenshotTaken));

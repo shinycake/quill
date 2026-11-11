@@ -174,10 +174,7 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             session.groups.new_chats.creations.insert(
                 CREATE_REQUEST,
-                NewChatCreation {
-                    outcome: Some(CreationOutcome::Created(ChatId(NEW_CHANNEL))),
-                    ..NewChatCreation::default()
-                },
+                NewChatCreation::settled(CreationOutcome::Created(ChatId(NEW_CHANNEL))),
             );
         }
         if let Some(dialog) = self.admin.create_chat_dialog.as_mut() {

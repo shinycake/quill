@@ -44,9 +44,9 @@ pub enum ChatsPurpose {
     /// and Report work on the first tap. The chat joins the session but is
     /// not opened.
     EnsurePrivateChat,
-    /// `getInstalledBackgrounds`. Response is `backgrounds`
-    /// (`Session::installed_backgrounds`).
-    GetInstalledBackgrounds,
+    /// `getInstalledBackgrounds` for a theme. Response is `backgrounds`
+    /// (`ChatsState::installed_backgrounds`, under `for_dark_theme`).
+    GetInstalledBackgrounds { for_dark_theme: bool },
     /// `setDefaultBackground`. Response is `background`
     /// (`Session::default_backgrounds`) under `for_dark_theme`, the theme this
     /// request was sent for.
@@ -93,7 +93,6 @@ flat_purposes!(Chats(ChatsPurpose) {
     RemoveBusinessBotFromChat,
     CreatePrivateChat,
     EnsurePrivateChat,
-    GetInstalledBackgrounds,
     SearchBackground,
     SetChatBackground,
     DeleteChatBackground,

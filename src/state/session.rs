@@ -4,6 +4,11 @@ use super::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShutdownPhase {
     Running,
+    /// The account is closing but `close` waits behind a call's hang-up
+    /// until the hang-up landed or `until` passed. Nothing new starts.
+    HoldingClose {
+        until: std::time::Instant,
+    },
     CloseRequested,
     WaitingClosed,
     Closed,
@@ -12,7 +17,6 @@ pub enum ShutdownPhase {
 #[derive(Debug, Clone)]
 pub struct PendingBotMessage {
     pub draft_id: i64,
-    pub can_stop: bool,
     pub keep_on_stop: bool,
     pub content: MessageContent,
     pub expires_at_ms: u64,

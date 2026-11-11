@@ -4,7 +4,7 @@
 use super::*;
 use crate::ids::RequestId;
 use crate::passkeys::{
-    PasskeyAdd, PasskeysPurpose, Removal, add_login_passkey, get_login_passkeys,
+    PasskeyAdd, PasskeyList, PasskeysPurpose, add_login_passkey, get_login_passkeys,
     get_passkey_parameters, remove_login_passkey,
 };
 use crate::state::{RequestPurpose, SettingsPurpose};
@@ -16,12 +16,13 @@ fn purpose(purpose: PasskeysPurpose) -> RequestPurpose {
 }
 
 impl<S: JsonSender> ConnectDriver<S> {
+    /// The list ask the list stage waits for is still out (a request the
+    /// session lost does not hold the list back).
     fn list_in_flight(&self) -> bool {
-        self.session
-            .requests
-            .has_purpose(purpose(PasskeysPurpose::List(
-                self.session.settings.passkeys.generation,
-            )))
+        match &self.session.settings.passkeys.list {
+            PasskeyList::Asking { request, .. } => self.session.requests.get(*request).is_some(),
+            _ => false,
+        }
     }
 
     /// A look at the passkeys (the Privacy and Security screen or the
@@ -38,15 +39,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !state.wants_fetch(Instant::now()) || self.list_in_flight() {
             return Ok(None);
         }
-        let generation = state.generation;
-        let extra = self
-            .session
-            .request(purpose(PasskeysPurpose::List(generation)), None);
+        let extra = self.session.request(purpose(PasskeysPurpose::List), None);
         let sent = self.send_json_request(extra, &get_login_passkeys(extra))?;
         // Only a look that went out counts: a failed send leaves the list
         // stale and the throttle open for the next try, and the answer
         // (not the send) clears the stale mark.
-        self.session.settings.passkeys.list_asked(Instant::now());
+        self.session
+            .settings
+            .passkeys
+            .list_asked(sent, Instant::now());
         Ok(Some(sent))
     }
 
@@ -55,19 +56,14 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// for again.
     pub fn remove_passkey(&mut self, passkey_id: &str) -> Result<RequestId, ConnectSendError> {
         let state = &self.session.settings.passkeys;
-        if !self.chats_path_active() || state.removing.is_some() || state.find(passkey_id).is_none()
-        {
+        if !self.chats_path_active() || state.is_removing() || state.find(passkey_id).is_none() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(purpose(PasskeysPurpose::Remove), None);
         let sent = self.send_json_request(extra, &remove_login_passkey(extra, passkey_id))?;
         // Only a removal that went out is waited for.
         let state = &mut self.session.settings.passkeys;
-        state.removing = Some(Removal {
-            passkey_id: passkey_id.to_string(),
-            request: sent,
-        });
-        state.error = None;
+        state.remove_started(passkey_id.to_string(), sent);
         Ok(sent)
     }
 
@@ -106,7 +102,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         // matched to, so the answer of a box closed earlier is ignored.
         let state = &mut self.session.settings.passkeys;
         state.add = PasskeyAdd::FetchingOptions(sent);
-        state.error = None;
         Ok(Some(sent))
     }
 
@@ -139,7 +134,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sent = self.send_json_request(extra, &add_login_passkey(extra, registration))?;
         let state = &mut self.session.settings.passkeys;
         state.add = PasskeyAdd::Sending(sent);
-        state.error = None;
         Ok(sent)
     }
 

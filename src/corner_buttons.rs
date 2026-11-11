@@ -5,6 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ids::{ChatId, MessageId};
+use crate::state::SendState;
 
 /// One button's width plus the gap after it.
 const SLOT: f32 = 28.;
@@ -42,8 +43,8 @@ pub enum FastShareChat {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FastShareFacts {
     pub chat: FastShareChat,
-    /// The server has the message (not still sending).
-    pub sent: bool,
+    /// Where the send stands; only a message the server has gets the button.
+    pub send: SendState,
     pub outgoing: bool,
     /// Forwarding is allowed: not protected content, not a secret chat, not
     /// an anchored ephemeral message, and `messageProperties.can_be_forwarded`
@@ -78,7 +79,7 @@ pub enum FastShare {
 /// click) and `displayFastShare` (channel posts; forwards from channels and
 /// bot media in private chats), the latter only when forwarding is allowed.
 pub fn fast_share(facts: FastShareFacts) -> Option<FastShare> {
-    if !facts.sent {
+    if facts.send != SendState::Sent {
         return None;
     }
     if let Some((chat_id, message_id)) = facts.forward_source
@@ -103,11 +104,12 @@ pub fn fast_share(facts: FastShareFacts) -> Option<FastShare> {
 mod tests {
     use super::{FastShare, FastShareChat, FastShareFacts, fast_share, span, visible};
     use crate::ids::{ChatId, MessageId};
+    use crate::state::SendState;
 
     fn facts(chat: FastShareChat) -> FastShareFacts {
         FastShareFacts {
             chat,
-            sent: true,
+            send: SendState::Sent,
             outgoing: false,
             forwardable: true,
             forwarded_from_channel: false,
@@ -131,7 +133,7 @@ mod tests {
         f.forwardable = false;
         assert_eq!(fast_share(f), None);
         f.forwardable = true;
-        f.sent = false;
+        f.send = SendState::Sending;
         assert_eq!(fast_share(f), None);
     }
 
@@ -166,7 +168,7 @@ mod tests {
             fast_share(f),
             Some(FastShare::GoToOriginal(ChatId(7), MessageId(9)))
         );
-        f.sent = false;
+        f.send = SendState::Sending;
         assert_eq!(fast_share(f), None);
     }
 

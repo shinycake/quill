@@ -725,7 +725,7 @@ impl ServiceAction {
                     } else if flag(value, "is_upgrade_separate") {
                         base
                     } else {
-                        base + upgrade
+                        base.saturating_add(upgrade)
                     },
                     prepaid_upgrade,
                     from_auction: flag(value, "is_from_auction"),

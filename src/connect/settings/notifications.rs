@@ -88,16 +88,21 @@ impl<S: JsonSender> ConnectDriver<S> {
             ))
         {
             self.session.requests.take(extra);
-            // A list that never left is failed like one that errored: the
-            // page asks nothing again by itself and the list offers Retry.
+            // The list says so with its Retry; nothing asks again by itself.
             self.session
                 .settings
                 .notification_exceptions
                 .entry(scope)
                 .or_default()
-                .fail("could not send the exceptions request");
+                .fail("could not send the request");
             return Err(err);
         }
+        self.session
+            .settings
+            .notification_exceptions
+            .entry(scope)
+            .or_default()
+            .sent(extra);
         Ok(())
     }
 

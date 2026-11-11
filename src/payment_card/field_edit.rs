@@ -9,8 +9,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::validate::{
-    Validation, ValidationState, YearMonth, card_number_groups, validate_card, validate_cvc,
-    validate_expiry,
+    Validation, YearMonth, card_number_groups, validate_card, validate_cvc, validate_expiry,
 };
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
@@ -61,22 +60,41 @@ impl EditSnapshot {
     }
 }
 
+/// How the field stands after an edit: shown as an error, finished (focus
+/// moves to the next field), or neither.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FieldCheck {
+    Fine,
+    Invalid,
+    Finished,
+}
+
 /// What the field shows after the edit, and whether it is invalid (shown
 /// as an error) or finished (focus moves to the next field).
 #[derive(Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
 pub struct FieldResult {
     text: FieldText,
-    invalid: bool,
-    finished: bool,
+    #[zeroize(skip)]
+    check: FieldCheck,
 }
 
 impl FieldResult {
     fn from_validation(text: FieldText, validation: Validation) -> Self {
-        Self {
-            text,
-            invalid: validation.state == ValidationState::Invalid,
-            finished: validation.finished,
-        }
+        let check = match validation {
+            Validation::Invalid => FieldCheck::Invalid,
+            Validation::Finished => FieldCheck::Finished,
+            Validation::Incomplete | Validation::Valid => FieldCheck::Fine,
+        };
+        Self { text, check }
+    }
+
+    fn checked(text: FieldText, invalid: bool) -> Self {
+        let check = if invalid {
+            FieldCheck::Invalid
+        } else {
+            FieldCheck::Fine
+        };
+        Self { text, check }
     }
 
     pub fn value(&self) -> &str {
@@ -88,11 +106,11 @@ impl FieldResult {
     }
 
     pub fn invalid(&self) -> bool {
-        self.invalid
+        self.check == FieldCheck::Invalid
     }
 
     pub fn finished(&self) -> bool {
-        self.finished
+        self.check == FieldCheck::Finished
     }
 }
 
@@ -260,20 +278,13 @@ pub fn edit_holder_name(now: &FieldText) -> FieldResult {
         .flat_map(char::to_uppercase)
         .count();
     let len = upper.chars().count();
-    FieldResult {
-        invalid: upper.is_empty(),
-        text: FieldText::new(upper, cursor.min(len)),
-        finished: false,
-    }
+    let invalid = upper.is_empty();
+    FieldResult::checked(FieldText::new(upper, cursor.min(len)), invalid)
 }
 
 /// A required text field (the ZIP code): empty is an error.
 pub fn edit_required(now: &FieldText) -> FieldResult {
-    FieldResult {
-        invalid: now.value.is_empty(),
-        text: now.clone(),
-        finished: false,
-    }
+    FieldResult::checked(now.clone(), now.value.is_empty())
 }
 
 /// Digits only, as the number and CVC fields hand their value on. The

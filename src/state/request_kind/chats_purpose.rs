@@ -10,7 +10,7 @@ impl ChatsPurpose {
             | Self::DeepLinkInternalType { .. }
             | Self::DeepLinkResolve { .. }
             | Self::DeepLinkCheckInvite { .. }
-            | Self::GetInstalledBackgrounds
+            | Self::GetInstalledBackgrounds { .. }
             | Self::SearchBackground
             | Self::GetBackgroundUrl => RequestKind::Lookup,
             Self::DeepLinkJoin { .. }

@@ -54,10 +54,12 @@ impl QuillApp {
         if !present {
             return;
         }
+        if !self.apply_force_reply(target, window, cx) {
+            return;
+        }
         if let Some(session) = self.session_mut() {
             session.bots.pending_force_replies.remove(&chat_id);
         }
-        self.apply_force_reply(target, window, cx);
         let standalone = self
             .session()
             .and_then(|session| session.histories.get(&target.chat_id.0))

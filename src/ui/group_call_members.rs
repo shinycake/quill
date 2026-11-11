@@ -259,9 +259,9 @@ impl QuillApp {
                             .child(status),
                     ),
             )
-            .when(p.video_enabled || p.screen_sharing_enabled, |this| {
+            .when(p.video_enabled() || p.screen_sharing_enabled(), |this| {
                 this.child(
-                    Icon::new(if p.screen_sharing_enabled {
+                    Icon::new(if p.screen_sharing_enabled() {
                         IconName::ScreenShare
                     } else {
                         IconName::Video

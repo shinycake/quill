@@ -574,7 +574,7 @@ impl QuillApp {
     /// Leaving the Devices page stops a camera scan and drops a pending
     /// terminate confirmation.
     pub(crate) fn leave_devices(&mut self) {
-        self.clear_device_qr();
+        self.leave_device_link();
         self.privacy.devices.close_all();
     }
 

@@ -439,3 +439,26 @@ fn update_chat_reply_markup_survives_an_unparsable_message_body() {
         other => panic!("{other:?}"),
     }
 }
+
+#[test]
+fn a_request_poll_button_with_both_flags_is_a_quiz() {
+    let parse = |forced: &str| {
+        let json = format!(
+            r#"{{"@type":"keyboardButton","text":"Poll","type":{{"@type":"keyboardButtonTypeRequestPoll",{forced}}}}}"#
+        );
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        Some(super::keyboards::parse_keyboard_button(&value).kind)
+    };
+    assert_eq!(
+        parse(r#""force_regular":true,"force_quiz":true"#),
+        Some(KeyboardButtonType::RequestPoll(PollRequest::QuizOnly))
+    );
+    assert_eq!(
+        parse(r#""force_regular":true,"force_quiz":false"#),
+        Some(KeyboardButtonType::RequestPoll(PollRequest::RegularOnly))
+    );
+    assert_eq!(
+        parse(r#""force_regular":false,"force_quiz":false"#),
+        Some(KeyboardButtonType::RequestPoll(PollRequest::Any))
+    );
+}

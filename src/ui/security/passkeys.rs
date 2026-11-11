@@ -19,6 +19,7 @@ use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::ids::RequestId;
 use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::local_time::{civil_local, now_unix};
@@ -287,7 +288,7 @@ impl QuillApp {
 
     pub(in crate::ui) fn ask_delete_passkey(&mut self, passkey_id: String, cx: &mut Context<Self>) {
         if let Some(session) = self.live_or_demo_session_mut() {
-            session.settings.passkeys.error = None;
+            session.settings.passkeys.dismiss_remove_error();
         }
         self.privacy.passkeys.ask_delete(passkey_id);
         cx.notify();
@@ -297,10 +298,8 @@ impl QuillApp {
     /// failed attempt's error.
     fn dismiss_delete_passkey(&mut self, cx: &mut Context<Self>) {
         self.privacy.passkeys.dismiss_confirm();
-        if let Some(session) = self.live_or_demo_session_mut()
-            && session.settings.passkeys.removing.is_none()
-        {
-            session.settings.passkeys.error = None;
+        if let Some(session) = self.live_or_demo_session_mut() {
+            session.settings.passkeys.dismiss_remove_error();
         }
         cx.notify();
     }
@@ -325,8 +324,9 @@ impl QuillApp {
             let passkeys = &mut session.settings.passkeys;
             passkeys.finish_remove(&id);
             let list = passkeys.passkeys().to_vec();
-            let generation = passkeys.generation;
-            passkeys.accept_list(list, generation);
+            let demo_ask = RequestId(0);
+            passkeys.list_asked(demo_ask, std::time::Instant::now());
+            passkeys.accept_list(demo_ask, list);
         }
         cx.notify();
     }
@@ -463,7 +463,7 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let muted = cx.theme().muted_foreground;
             let state = this.passkeys_state().cloned().unwrap_or_default();
-            let busy = state.removing.is_some();
+            let busy = state.is_removing();
             let mut body = div()
                 .flex()
                 .flex_col()
@@ -476,7 +476,13 @@ impl QuillApp {
                         .text_color(muted)
                         .child(tr(ABOUT)),
                 );
-            if let Some(error) = state.error.clone() {
+            // A confirmation whose passkey is gone (removed) is done.
+            if let Some(id) = this.privacy.passkeys.confirm()
+                && state.find(id).is_none()
+            {
+                this.privacy.passkeys.dismiss_confirm();
+            }
+            if let Some(error) = state.error().map(str::to_string) {
                 body = body.child(
                     div()
                         .id("passkeys-error")
@@ -546,13 +552,13 @@ impl QuillApp {
                 .passkey_confirm()
                 .and_then(|id| state.find(id))
                 .cloned();
-            let busy = state.removing.is_some();
+            let busy = state.is_removing();
             let mut body = div().flex().flex_col().gap_3();
             if let Some(passkey) = &passkey {
                 let emoji = this.passkey_emoji(passkey.software_icon_custom_emoji_id, 18., cx);
                 body = body.child(question(&passkey.name, emoji));
             }
-            if let Some(error) = state.error.clone() {
+            if let Some(error) = state.remove_error().map(str::to_string) {
                 body = body.child(
                     div()
                         .id("passkey-delete-error")
@@ -613,7 +619,9 @@ impl QuillApp {
                 .passkeys_state()
                 .is_some_and(PasskeysState::can_register);
             let busy = this.passkey_creation_busy();
-            let error = this.passkeys_state().and_then(|s| s.error.clone());
+            let error = this
+                .passkeys_state()
+                .and_then(|s| s.add_error().map(str::to_string));
             let entry = |icon: IconName, title: &'static str, about: &'static str| {
                 div()
                     .flex()
@@ -843,8 +851,9 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             let passkeys = &mut session.settings.passkeys;
             passkeys.display_allowed = true;
-            let generation = passkeys.generation;
-            passkeys.accept_list(demo_passkeys_list(), generation);
+            let demo_ask = RequestId(0);
+            passkeys.list_asked(demo_ask, std::time::Instant::now());
+            passkeys.accept_list(demo_ask, demo_passkeys_list());
         }
     }
 

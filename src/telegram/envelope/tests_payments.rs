@@ -169,10 +169,15 @@ fn p1_validated_order_info_and_result_parsed() {
     match env.payload {
         EnvelopePayload::Payments(PaymentsPayload::PaymentReceipt(receipt)) => {
             assert_eq!(receipt.product_title, "Time machine");
-            assert_eq!(receipt.currency, "USD");
-            assert_eq!(receipt.total_amount, 1999);
-            assert_eq!(receipt.credentials_title, "Visa •• 4242");
-            assert!(!receipt.is_stars);
+            assert_eq!(
+                receipt.kind,
+                PaymentReceiptKind::Regular {
+                    currency: "USD".into(),
+                    total_amount: 1999,
+                    credentials_title: "Visa •• 4242".into(),
+                    tip_amount: 0,
+                }
+            );
         }
         other => panic!("{other:?}"),
     }
@@ -213,8 +218,16 @@ fn receipt_total_includes_shipping_and_tip() {
     let env = parse_envelope(json).unwrap();
     match env.payload {
         EnvelopePayload::Payments(PaymentsPayload::PaymentReceipt(receipt)) => {
-            assert_eq!(receipt.total_amount, 1999 + 700 + 300);
-            assert_eq!(receipt.tip_amount, 300);
+            let PaymentReceiptKind::Regular {
+                total_amount,
+                tip_amount,
+                ..
+            } = receipt.kind
+            else {
+                panic!("not a card receipt");
+            };
+            assert_eq!(total_amount, 1999 + 700 + 300);
+            assert_eq!(tip_amount, 300);
         }
         other => panic!("{other:?}"),
     }
@@ -444,4 +457,16 @@ fn card_providers_keep_their_tokenization_keys() {
         provider_of(r#"{"@type":"paymentProviderFuture"}"#),
         PaymentProviderKind::Unsupported
     );
+}
+
+#[test]
+fn a_stars_receipt_carries_only_its_star_count() {
+    let json = r#"{"@type":"paymentReceipt","@extra":"26","product_info":{"@type":"productInfo","title":"Sticker pack","description":{"@type":"formattedText","text":"","entities":[]},"photo":null},"date":1790000000,"seller_bot_user_id":21,"type":{"@type":"paymentReceiptTypeStars","star_count":5,"transaction_id":"tx"}}"#;
+    let env = parse_envelope(json).unwrap();
+    match env.payload {
+        EnvelopePayload::Payments(PaymentsPayload::PaymentReceipt(receipt)) => {
+            assert_eq!(receipt.kind, PaymentReceiptKind::Stars { star_count: 5 });
+        }
+        other => panic!("unexpected {other:?}"),
+    }
 }

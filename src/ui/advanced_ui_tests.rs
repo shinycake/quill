@@ -387,7 +387,7 @@ fn a_release_the_check_finds_downloads_on_its_own(cx: &mut TestAppContext) {
         app.preferences.update_state = UpdateState::Idle;
         app.apply_check_result(UpdateState::Available(release.clone()), cx);
         assert!(
-            matches!(&app.preferences.update_state, UpdateState::Downloading(r, _) if r.version == "999.0.0"),
+            matches!(&app.preferences.update_state, UpdateState::Downloading(r, ..) if r.version == "999.0.0"),
             "the release downloads without a click"
         );
     });
@@ -434,7 +434,7 @@ fn a_low_disk_holds_the_update_download_until_it_is_healthy(cx: &mut TestAppCont
         );
         app.apply_disk_reading(Some(FLOORS.warn_clear), cx);
         assert!(
-            matches!(&app.preferences.update_state, UpdateState::Downloading(r, _) if r.version == "999.0.0"),
+            matches!(&app.preferences.update_state, UpdateState::Downloading(r, ..) if r.version == "999.0.0"),
             "a healthy disk starts it"
         );
     });

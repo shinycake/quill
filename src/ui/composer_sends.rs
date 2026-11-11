@@ -15,11 +15,12 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::composer::LeftSend;
 use super::composer_state::DraftClear;
 use quill::composer::{
     ComposerAttachment, ComposerScheduling, DraftKey, LinkPreviewChoice, PreviewMediaSize,
 };
-use quill::ids::{AccountKey, ChatId};
+use quill::ids::{AccountKey, ChatId, RequestId};
 use quill::telegram::envelope::AuthorizationState;
 use quill::telegram::requests::SelfDestructSend;
 use std::collections::HashMap;
@@ -235,11 +236,20 @@ struct AccountSends {
     /// this account). An entry goes with its ack; a newer send of the slot
     /// replaces it; the account's goes with it.
     draft_clears: HashMap<DraftKey, DraftClear>,
+    /// Rich sends of chat views since replaced, still waiting for TDLib's
+    /// answer (`LeftSend`); each goes with its answer.
+    left_sends: Vec<LeftSend>,
 }
+
+/// How many left sends an account keeps waiting; an older one is forgotten.
+const KEPT_LEFT_SENDS: usize = 8;
 
 impl AccountSends {
     fn is_empty(&self) -> bool {
-        self.slots.is_empty() && self.silent.is_empty() && self.draft_clears.is_empty()
+        self.slots.is_empty()
+            && self.silent.is_empty()
+            && self.draft_clears.is_empty()
+            && self.left_sends.is_empty()
     }
 }
 
@@ -256,6 +266,37 @@ pub(crate) struct ComposerSends {
 }
 
 impl ComposerSends {
+    /// A send whose chat view went waits on its own. Returns the oldest one
+    /// when the account holds too many: the caller forgets its ack.
+    pub(super) fn keep_left_send(&mut self, send: LeftSend) -> Option<LeftSend> {
+        let sends = self.accounts.entry(send.slot.account.clone()).or_default();
+        sends.left_sends.push(send);
+        (sends.left_sends.len() > KEPT_LEFT_SENDS).then(|| sends.left_sends.remove(0))
+    }
+
+    /// The left sends of `account` whose answer `answer_of` has: each with
+    /// its answer, no longer waiting.
+    pub(super) fn take_left_sends(
+        &mut self,
+        account: &AccountKey,
+        mut answer_of: impl FnMut(RequestId) -> Option<quill::state::Answer>,
+    ) -> Vec<(LeftSend, quill::state::Answer)> {
+        let Some(sends) = self.accounts.get_mut(account) else {
+            return Vec::new();
+        };
+        let mut answered = Vec::new();
+        let mut waiting = Vec::new();
+        for send in std::mem::take(&mut sends.left_sends) {
+            match answer_of(send.request) {
+                Some(answer) => answered.push((send, answer)),
+                None => waiting.push(send),
+            }
+        }
+        sends.left_sends = waiting;
+        self.drop_if_empty(account);
+        answered
+    }
+
     pub(super) fn get(&self, slot: &SendSlot) -> &PendingSend {
         self.accounts
             .get(&slot.account)

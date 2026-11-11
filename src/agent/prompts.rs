@@ -75,8 +75,9 @@ pub enum Decision {
 struct Pending {
     prompt: Prompt,
     reply: SyncSender<Decision>,
-    /// The agent connection whose call is waiting (0 when none).
-    conn: u64,
+    /// The agent connection whose call is waiting; none when the prompt was
+    /// filed off a connection.
+    conn: Option<u64>,
 }
 
 static QUEUE: Mutex<VecDeque<Pending>> = Mutex::new(VecDeque::new());
@@ -137,10 +138,7 @@ pub fn withdraw(id: u64) {
 /// waiting calls hear the channel close and stop at once, so an Allow
 /// clicked later cannot send for a call nobody waits on.
 pub(crate) fn withdraw_connection(conn: u64) {
-    if conn == 0 {
-        return;
-    }
-    crate::locks::lock_or_recover(&QUEUE).retain(|p| p.conn != conn);
+    crate::locks::lock_or_recover(&QUEUE).retain(|p| p.conn != Some(conn));
     crate::wake::AGENT.poke();
 }
 
@@ -217,10 +215,7 @@ mod tests {
         .unwrap_or_else(|| panic!("filed"));
         assert_eq!(current().map(|p| p.id), Some(id));
         answer(id, Decision::Allowed);
-        assert_eq!(
-            wait(id, &rx, Duration::from_millis(10)),
-            Some(Decision::Allowed)
-        );
+        assert_eq!(wait(id, &rx, Duration::ZERO), Some(Decision::Allowed));
         assert!(current().is_none_or(|p| p.id != id));
 
         let (id, rx) = file(
@@ -230,7 +225,7 @@ mod tests {
             "why".into(),
         )
         .unwrap_or_else(|| panic!("filed"));
-        assert_eq!(wait(id, &rx, Duration::from_millis(10)), None);
+        assert_eq!(wait(id, &rx, Duration::ZERO), None);
         assert!(current().is_none_or(|p| p.id != id), "withdrawn");
     }
 

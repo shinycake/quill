@@ -454,34 +454,52 @@ fn the_form_checks_against_its_limits() {
 
 #[test]
 fn the_members_list_pages_and_drops_older_searches() {
+    use crate::ids::RequestId;
     let mut list = AwardMembers::default();
     assert!(!list.can_load_more());
-    let first = list.restart(-100, "");
+    list.restart(-100, "");
+    let first = RequestId(1);
+    list.begin_page(first);
     assert!(list.is_loading() && !list.can_load_more());
     assert!(list.accept(first, vec![1, 2, 3], 3, 5));
     assert_eq!((list.offset, list.total, list.is_done()), (3, 5, false));
     assert!(list.can_load_more());
-    let page = list.begin_page();
-    assert_eq!(page, first);
+    let page = RequestId(2);
+    list.begin_page(page);
+    // The answer to the first page again changes nothing.
+    assert!(!list.accept(first, vec![8], 1, 5));
     assert!(list.accept(page, vec![3, 4, 5], 3, 5));
     assert_eq!(list.user_ids, vec![1, 2, 3, 4, 5]);
     assert!(list.is_done() && !list.can_load_more());
     // A new search starts over and an answer to the old one is dropped.
-    let second = list.restart(-100, "ada");
-    assert_ne!(first, second);
+    list.restart(-100, "ada");
+    let second = RequestId(3);
+    list.begin_page(second);
     assert!(list.user_ids.is_empty() && list.query == "ada");
-    assert!(!list.accept(first, vec![9], 1, 1));
+    assert!(!list.accept(page, vec![9], 1, 1));
     assert!(list.user_ids.is_empty() && list.is_loading());
+    // An older request's error leaves the live one loading.
+    list.fail(first, "old".into());
+    assert!(list.is_loading());
     list.fail(second, "boom".into());
     assert_eq!(list.error(), Some("boom"));
     assert!(!list.is_loading());
-    // A failed page is asked for again by the next scroll.
+    // A failed page is asked for again by the next scroll, and the failed
+    // request's late answer no longer counts.
     assert!(list.can_load_more());
-    let retry = list.begin_page();
+    let retry = RequestId(4);
+    list.begin_page(retry);
     assert!(list.is_loading() && list.error().is_none());
+    assert!(!list.accept(second, vec![6], 1, 0));
     assert!(list.accept(retry, vec![7], 1, 0));
     // An empty page ends the list.
-    let third = list.restart(-100, "");
+    list.restart(-100, "");
+    let third = RequestId(5);
+    list.begin_page(third);
     assert!(list.accept(third, Vec::new(), 0, 0));
     assert!(list.is_done());
+    // A page that could not be asked for at all is a failure to retry.
+    list.restart(-100, "");
+    list.fail_unsent("no".into());
+    assert!(list.error().is_some() && list.can_load_more());
 }

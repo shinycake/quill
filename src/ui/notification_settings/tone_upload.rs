@@ -128,9 +128,14 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             let size = std::fs::metadata(path).map_or(0, |meta| meta.len());
             check_file(path, size, session.messages.tone_limits).map(|()| {
+                let request = session.request(
+                    quill::state::RequestPurpose::UploadSavedNotificationSound,
+                    None,
+                );
                 session.settings.tone_upload = ToneUpload::Uploading {
                     name: display_name(path),
                     target,
+                    request,
                 };
             })
         } else {
