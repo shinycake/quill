@@ -23,7 +23,7 @@ pub(crate) enum BanStep {
 /// a failed ask bans without the warning.
 pub(crate) fn ban_step(fetch: &Fetch<quill::telegram::envelope::CommunityMemberChats>) -> BanStep {
     match fetch {
-        Fetch::Loading { .. } => BanStep::Wait,
+        Fetch::Loading { .. } | Fetch::Stale { .. } => BanStep::Wait,
         Fetch::Idle => BanStep::Cancel,
         Fetch::Failed { .. } => BanStep::BanNow,
         Fetch::Ready(chats) if chats.owned_chat_ids.is_empty() => BanStep::BanNow,
