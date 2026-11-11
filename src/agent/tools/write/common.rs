@@ -378,7 +378,9 @@ fn sent_ids(messages: &[Value]) -> Vec<i64> {
 /// [`change`]'s queue turn and switch check, for writes that build their
 /// own call.
 pub fn take_write_turn(ctx: &Ctx, chat_id: i64) -> Result<(), ToolError> {
-    pacing::take_turn(&ctx.account, ctx.client.id(), chat_id, 1, false).map_err(refusal_error)?;
+    pacing::take_turn(&ctx.account, ctx.client.id(), chat_id, 1, false)
+        .map_err(refusal_error)?
+        .commit();
     still_allowed()
 }
 
@@ -572,7 +574,7 @@ pub fn admit(ctx: &Ctx, target: &Target, count: u32) -> Result<(), ToolError> {
         return Err(paid_refusal());
     }
     let new_peer = is_new_peer(ctx, target);
-    pacing::take_turn(
+    let turn = pacing::take_turn(
         &ctx.account,
         ctx.client.id(),
         target.chat_id,
@@ -580,7 +582,8 @@ pub fn admit(ctx: &Ctx, target: &Target, count: u32) -> Result<(), ToolError> {
         new_peer,
     )
     .map_err(refusal_error)?;
-    still_allowed()
+    still_allowed()?;
+    Ok(turn)
 }
 
 fn refusal_error(refusal: Refusal) -> ToolError {
@@ -676,11 +679,12 @@ pub fn send(
 }
 
 fn send_inner(ctx: &Ctx, target: &Target, request: Value, count: u32) -> Result<Batch, ToolError> {
-    admit(ctx, target, count)?;
+    let turn = admit(ctx, target, count)?;
     // Before the request goes out: no outcome recorded earlier is this
     // send's.
     let since = events::send_mark();
     let answer = td::call(&ctx.client, request).map_err(write_error(ctx))?;
+    turn.commit();
     let pending: Vec<Value> = match answer.get("messages").and_then(Value::as_array) {
         Some(list) => list.clone(),
         None => vec![answer],

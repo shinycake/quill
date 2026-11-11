@@ -76,10 +76,7 @@ impl QuillApp {
 
     /// Send-box choices for the snapshot of the next send.
     pub(super) fn composer_media_options(&self) -> MediaSendOptions {
-        let as_files = self
-            .pending_attachments()
-            .iter()
-            .all(|attachment| attachment.kind == AttachmentKind::Document);
+        let as_files = ComposerAttachment::sends_as_files(self.pending_attachments());
         MediaSendOptions {
             hd_photos: self.pending_send().hd_photos && !as_files,
             paid_stars: self.paid_stars_in_effect(),
