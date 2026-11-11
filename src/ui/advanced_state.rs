@@ -13,6 +13,13 @@ pub(crate) enum DebugConfirm {
     Asking { logs_on: bool },
 }
 
+impl DebugConfirm {
+    /// The box closed (or its question is gone).
+    pub(super) fn close(&mut self) {
+        *self = Self::Closed;
+    }
+}
+
 pub(crate) struct AdvancedUi {
     /// Keystrokes typed on the sign-in screen or the Settings list
     /// (tdesktop `CodesFeedString`).

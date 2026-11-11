@@ -91,7 +91,7 @@ fn debugmode_typed_in_settings_asks_before_turning_the_logs_on(cx: &mut TestAppC
     // Cancel keeps the mode as it was and clears the question.
     let was = quill::advanced::debug_mode::enabled();
     app.update_in(vcx, |app, _, cx| {
-        app.preferences.advanced.debug_confirm = DebugConfirm::Closed;
+        app.preferences.advanced.debug_confirm.close();
         cx.notify();
     });
     vcx.run_until_parked();

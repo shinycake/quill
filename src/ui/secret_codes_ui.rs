@@ -242,7 +242,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::DebugModeConfirm, |this, _, cx| {
-                this.preferences.advanced.debug_confirm = DebugConfirm::Closed;
+                this.preferences.advanced.debug_confirm.close();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
@@ -258,7 +258,7 @@ impl QuillApp {
                         .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.preferences.advanced.debug_confirm = DebugConfirm::Closed;
+                            this.preferences.advanced.debug_confirm.close();
                             this.close_kit_dialog_if_done(DialogKind::DebugModeConfirm, window, cx);
                             cx.notify();
                         })),
@@ -268,7 +268,7 @@ impl QuillApp {
                         .label(tr(keys::BOX_OK))
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.preferences.advanced.debug_confirm = DebugConfirm::Closed;
+                            this.preferences.advanced.debug_confirm.close();
                             this.switch_debug_mode(cx);
                             this.close_kit_dialog_if_done(DialogKind::DebugModeConfirm, window, cx);
                         })),
@@ -300,5 +300,5 @@ crate::ui::shell::register_dialogs! {
         |app| app.preferences.advanced.debug_confirm != DebugConfirm::Closed,
         QuillApp::build_debug_mode_dialog,
     )
-    .close(|app, _, cx| { app.preferences.advanced.debug_confirm = DebugConfirm::Closed; cx.notify(); }),
+    .close(|app, _, cx| { app.preferences.advanced.debug_confirm.close(); cx.notify(); }),
 }
