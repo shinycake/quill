@@ -206,14 +206,11 @@ fn a_follow_up_page_that_fails_ends_the_groups_in_common_list() {
 fn a_refused_profile_list_send_leaves_the_list_failed() {
     let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
-    let session = crate::state::Session::new(crate::ids::AccountKey::primary(), sink);
-    let mut driver = ConnectDriver::new(
-        session,
-        Arc::new(RefusingSender),
-        test_credentials(),
-        prepared,
-    );
-    assert!(driver.fetch_similar_chats(crate::ids::ChatId(5)).is_err());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    recorder.refuse_sends(true);
+    assert!(driver.fetch_similar_chats(ChatId(5)).is_err());
     assert!(matches!(
         driver
             .session
@@ -222,14 +219,7 @@ fn a_refused_profile_list_send_leaves_the_list_failed() {
             .get(&(ProfileChatsKind::SimilarChats, 5)),
         Some(ProfileChatsFetch::Failed(_))
     ));
+    recorder.refuse_sends(false);
+    assert!(driver.fetch_similar_chats(ChatId(5)).unwrap().is_some());
     let _ = std::fs::remove_dir_all(dir);
-}
-
-/// Refuses every request, as a closed client does.
-struct RefusingSender;
-
-impl JsonSender for Arc<RefusingSender> {
-    fn send_json(&self, _: &str) -> Result<(), ConnectSendError> {
-        Err(ConnectSendError::Native)
-    }
 }
