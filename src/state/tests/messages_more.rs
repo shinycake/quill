@@ -512,9 +512,11 @@ fn delete_account_error_surfaces_honestly() {
 fn code_send_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.auth_state.change_number_phone = Some("+15550199".into());
-    session.auth_state.change_number_timeout = Some(60);
-    session.auth_state.change_number_loading = true;
+    session.auth_state.change_number =
+        crate::state::ChangeNumber::Resending(crate::state::CodeSent {
+            phone: "+15550199".into(),
+            timeout: 60,
+        });
     let extra = session.request(RequestPurpose::SendPhoneNumberCode, None);
     apply_json(
         &mut session,
@@ -525,14 +527,11 @@ fn code_send_error_surfaces_honestly() {
             extra.0
         ),
     );
-    assert!(!session.auth_state.change_number_loading);
+    assert!(!session.auth_state.change_number.is_sending());
+    assert_eq!(session.auth_state.change_number.phone(), Some("+15550199"));
+    assert_eq!(session.auth_state.change_number.timeout(), Some(60));
     assert_eq!(
-        session.auth_state.change_number_phone.as_deref(),
-        Some("+15550199")
-    );
-    assert_eq!(session.auth_state.change_number_timeout, Some(60));
-    assert_eq!(
-        session.auth_state.change_number_error.as_deref(),
+        session.auth_state.change_number.error(),
         Some("Could not send the verification code: Telegram refused the request")
     );
 }

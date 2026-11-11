@@ -9,6 +9,7 @@
 //! `updateContactCloseBirthdays` (yesterday, today and tomorrow).
 #![deny(clippy::indexing_slicing)]
 
+use crate::ids::RequestId;
 use std::collections::BTreeSet;
 
 pub const ACTION_BIRTHDATE: &str = "suggestedActionSetBirthdate";
@@ -47,6 +48,18 @@ pub enum PhonePrompt {
     NotMine,
 }
 
+/// The birthday suggestion's card. Hiding it is optimistic: it goes at
+/// once and comes back only if the server refuses that very request.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BirthdayCard {
+    #[default]
+    Shown,
+    /// `hideContactCloseBirthdays` is out under this request.
+    Hiding { request: RequestId },
+    /// The server took it; a fresh list from TDLib shows the card again.
+    Hidden,
+}
+
 /// What the account knows right now.
 #[derive(Debug, Clone, Default)]
 pub struct SuggestionFacts {
@@ -54,7 +67,7 @@ pub struct SuggestionFacts {
     pub phone_prompt: PhonePrompt,
     pub close_birthdays: Vec<CloseBirthday>,
     /// The user dismissed the birthday suggestion (`hideContactCloseBirthdays`).
-    pub birthdays_hidden: bool,
+    pub birthday_card: BirthdayCard,
 }
 
 impl SuggestionFacts {
@@ -71,6 +84,38 @@ impl SuggestionFacts {
         if self.actions.remove(name) {
             self.reset_phone_prompt(name);
         }
+    }
+
+    /// The birthday card was dismissed; `request` hides it on the server.
+    pub fn hide_birthdays(&mut self, request: RequestId) {
+        self.birthday_card = BirthdayCard::Hiding { request };
+    }
+
+    /// The server took `request`.
+    pub fn birthdays_hidden_by(&mut self, request: RequestId) {
+        if self.birthday_card == (BirthdayCard::Hiding { request }) {
+            self.birthday_card = BirthdayCard::Hidden;
+        }
+    }
+
+    /// `request` failed: the card returns, but only for the request that
+    /// hid it.
+    pub fn birthdays_hide_failed(&mut self, request: RequestId) -> bool {
+        let matched = self.birthday_card == (BirthdayCard::Hiding { request });
+        if matched {
+            self.birthday_card = BirthdayCard::Shown;
+        }
+        matched
+    }
+
+    /// A fresh list from TDLib shows the card again.
+    pub fn show_birthdays(&mut self) {
+        self.birthday_card = BirthdayCard::Shown;
+    }
+
+    /// The card is dismissed (or being dismissed).
+    pub fn birthdays_hidden(&self) -> bool {
+        self.birthday_card != BirthdayCard::Shown
     }
 
     fn reset_phone_prompt(&mut self, name: &str) {
@@ -105,7 +150,7 @@ pub fn pick(
     if has(ACTION_PASSWORD) {
         return Some(Suggestion::CheckPassword);
     }
-    if premium_can_buy && !facts.birthdays_hidden {
+    if premium_can_buy && !facts.birthdays_hidden() {
         let today = today_birthdays(&facts.close_birthdays, month, day);
         if !today.is_empty() {
             return Some(Suggestion::Birthdays(today));
@@ -246,7 +291,11 @@ mod tests {
                     year: None,
                 })
                 .collect(),
-            birthdays_hidden: hidden,
+            birthday_card: if hidden {
+                BirthdayCard::Hidden
+            } else {
+                BirthdayCard::Shown
+            },
             ..Default::default()
         }
     }

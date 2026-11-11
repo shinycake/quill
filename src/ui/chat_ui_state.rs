@@ -126,6 +126,37 @@ impl A11yFocus {
     }
 }
 
+/// Where the `@bot query` trigger's inline query stands in this window.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) enum InlineQueryStage {
+    #[default]
+    Idle,
+    /// The query waits for the session: the bot is being resolved, or an
+    /// older query of this chat and bot is in flight.
+    /// `progress_inline_mode` sends it when updates land, in whichever
+    /// window this value is in.
+    Waiting,
+    /// A debounce timer is armed for `(username, query)` and fires under
+    /// `token`. `poll_live` re-runs the inline progress check after every
+    /// batch of session updates, and the armed identity keeps it from
+    /// spawning a duplicate timer per poll. Leaving the stage cancels the
+    /// timer: it fires only while the stage still holds its token.
+    Armed {
+        username: String,
+        query: String,
+        token: u64,
+    },
+}
+
+impl InlineQueryStage {
+    /// A query waiting out its pause is for a panel that is gone.
+    pub(crate) fn disarm(&mut self) {
+        if matches!(self, Self::Armed { .. }) {
+            *self = Self::Idle;
+        }
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct ChatUi {
     /// Which value this is; new with each one made.
@@ -160,18 +191,11 @@ pub(crate) struct ChatUi {
     pub(super) command_menu: super::composer::CommandMenu,
     /// Bots slice: `@botname query` inline-mode results dropdown above
     /// the composer. `inline_results_selected` is the highlighted row
-    /// (Up/Down/Enter). `inline_query_armed` is the `(username, query)` a
-    /// debounce timer is currently armed for — `poll_live` re-runs the
-    /// inline progress check after every batch of session updates, and the
-    /// armed identity keeps it from spawning a duplicate timer per poll.
+    /// (Up/Down/Enter). `inline_query` is where the trigger's query
+    /// stands (see [`InlineQueryStage`]).
     pub(super) inline_results_open: bool,
     pub(super) inline_results_selected: usize,
-    pub(super) inline_query_armed: Option<(String, String)>,
-    /// The trigger's query waits for the session: the bot is being
-    /// resolved, or an older query of this chat and bot is in flight.
-    /// `progress_inline_mode` sends it when updates land, in whichever
-    /// window this value is in.
-    pub(super) inline_query_waiting: bool,
+    pub(super) inline_query: InlineQueryStage,
     /// This window's copy of the session's resolution of the trigger's bot
     /// (the session has one slot any window's trigger replaces).
     pub(super) inline_bot: Option<quill::state::InlineBotResolve>,

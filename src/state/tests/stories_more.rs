@@ -582,8 +582,11 @@ fn set_account_ttl_ok_stores_confirmed_days() {
 fn code_info_answer_stores_pending_number_for_matching_request() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.auth_state.change_number_loading = true;
-    session.auth_state.change_number_error = Some("stale".into());
+    session.auth_state.change_number = crate::state::ChangeNumber::Failed {
+        error: "stale".into(),
+        code: None,
+    };
+    assert!(session.auth_state.change_number.begin_send());
     let extra = session.request(RequestPurpose::SendPhoneNumberCode, None);
     apply_json(
         &mut session,
@@ -594,13 +597,10 @@ fn code_info_answer_stores_pending_number_for_matching_request() {
             extra.0
         ),
     );
-    assert_eq!(
-        session.auth_state.change_number_phone.as_deref(),
-        Some("+15550199")
-    );
-    assert_eq!(session.auth_state.change_number_timeout, Some(60));
-    assert!(!session.auth_state.change_number_loading);
-    assert!(session.auth_state.change_number_error.is_none());
+    assert_eq!(session.auth_state.change_number.phone(), Some("+15550199"));
+    assert_eq!(session.auth_state.change_number.timeout(), Some(60));
+    assert!(!session.auth_state.change_number.is_sending());
+    assert!(session.auth_state.change_number.error().is_none());
 }
 
 #[test]

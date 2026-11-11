@@ -99,7 +99,7 @@ fn the_terms_prompt_starts_over_for_another_version(cx: &mut TestAppContext) {
     // The terms cleared (accepted elsewhere): the prompt is gone with them.
     app.update(&mut vcx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.settings.notices.terms = Some(terms("tos-1"));
+            session.settings.notices.terms = quill::state::TermsState::Offered(terms("tos-1"));
         }
         app.drain_account_notices();
         assert!(
@@ -107,7 +107,7 @@ fn the_terms_prompt_starts_over_for_another_version(cx: &mut TestAppContext) {
             "kept while the terms stand"
         );
         if let Some(session) = app.demo_session.as_mut() {
-            session.settings.notices.terms = None;
+            session.settings.notices.terms = quill::state::TermsState::None;
         }
         app.drain_account_notices();
         assert_eq!(app.auth_ui.terms_prompt, None::<TermsPrompt>);

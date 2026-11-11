@@ -13,7 +13,6 @@ fn password_state_response_replaces_cache_and_clears_error() {
         None,
     );
     session.auth_state.password_op = crate::state::PasswordFlight::InFlight(extra);
-    session.auth_state.password_op_error = Some("stale".into());
     apply_json(
         &mut session,
         &seq,
@@ -26,6 +25,7 @@ fn password_state_response_replaces_cache_and_clears_error() {
     let state = session
         .auth_state
         .password_state
+        .clone()
         .expect("password state cached");
     assert!(state.has_password);
     assert_eq!(state.password_hint, "street");
@@ -35,7 +35,7 @@ fn password_state_response_replaces_cache_and_clears_error() {
         session.auth_state.password_op,
         crate::state::PasswordFlight::Idle
     );
-    assert!(session.auth_state.password_op_error.is_none());
+    assert!(session.auth_state.password_op_error().is_none());
 }
 
 #[test]
@@ -82,13 +82,11 @@ fn password_state_error_surfaces_honest_classified_line() {
         );
         let line = session
             .auth_state
-            .password_op_error
-            .expect("error line set");
+            .password_op_error()
+            .expect("error line set")
+            .to_string();
         assert!(line.contains(expect), "op {op:?} code {code}: {line}");
-        assert_eq!(
-            session.auth_state.password_op,
-            crate::state::PasswordFlight::Idle
-        );
+        assert!(!session.auth_state.password_state_loading());
         assert!(session.auth_state.password_state.is_none());
     }
 }
@@ -359,7 +357,7 @@ fn account_ttl_fetch_error_surfaces_honestly() {
 fn code_info_answer_ignores_unknown_extra() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.auth_state.change_number_loading = true;
+    session.auth_state.change_number = crate::state::ChangeNumber::Sending { code: None };
     let extra = session.request(RequestPurpose::SendPhoneNumberCode, None);
     apply_json(
         &mut session,
@@ -370,8 +368,8 @@ fn code_info_answer_ignores_unknown_extra() {
             extra.0 + 1000
         ),
     );
-    assert!(session.auth_state.change_number_phone.is_none());
-    assert!(session.auth_state.change_number_loading);
+    assert!(session.auth_state.change_number.phone().is_none());
+    assert!(session.auth_state.change_number.is_sending());
 }
 
 #[test]
@@ -387,9 +385,11 @@ fn check_code_ok_updates_own_phone_number() {
             ..Default::default()
         },
     );
-    session.auth_state.change_number_phone = Some("+15550199".into());
-    session.auth_state.change_number_checking = true;
-    session.auth_state.change_number_error = Some("stale".into());
+    session.auth_state.change_number =
+        crate::state::ChangeNumber::Checking(crate::state::CodeSent {
+            phone: "+15550199".into(),
+            timeout: 60,
+        });
     let resend_extra = session.request(RequestPurpose::ResendPhoneNumberCode, None);
     let extra = session.request(RequestPurpose::CheckPhoneNumberCode, None);
     apply_json(
@@ -399,9 +399,10 @@ fn check_code_ok_updates_own_phone_number() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
     assert_eq!(session.users.get(&31).unwrap().phone_number, "+15550199");
-    assert!(session.auth_state.change_number_phone.is_none());
-    assert!(!session.auth_state.change_number_checking);
-    assert!(session.auth_state.change_number_error.is_none());
+    assert_eq!(
+        session.auth_state.change_number,
+        crate::state::ChangeNumber::Idle
+    );
     // The stale resend purpose is gone: its late answer writes nothing.
     apply_json(
         &mut session,
@@ -412,16 +413,21 @@ fn check_code_ok_updates_own_phone_number() {
             resend_extra.0
         ),
     );
-    assert!(session.auth_state.change_number_phone.is_none());
-    assert!(session.auth_state.change_number_error.is_none());
+    assert_eq!(
+        session.auth_state.change_number,
+        crate::state::ChangeNumber::Idle
+    );
 }
 
 #[test]
 fn code_check_error_keeps_pending_number() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.auth_state.change_number_phone = Some("+15550199".into());
-    session.auth_state.change_number_checking = true;
+    session.auth_state.change_number =
+        crate::state::ChangeNumber::Checking(crate::state::CodeSent {
+            phone: "+15550199".into(),
+            timeout: 60,
+        });
     let extra = session.request(RequestPurpose::CheckPhoneNumberCode, None);
     apply_json(
         &mut session,
@@ -432,13 +438,10 @@ fn code_check_error_keeps_pending_number() {
             extra.0
         ),
     );
-    assert!(!session.auth_state.change_number_checking);
+    assert!(!session.auth_state.change_number.is_checking());
+    assert_eq!(session.auth_state.change_number.phone(), Some("+15550199"));
     assert_eq!(
-        session.auth_state.change_number_phone.as_deref(),
-        Some("+15550199")
-    );
-    assert_eq!(
-        session.auth_state.change_number_error.as_deref(),
+        session.auth_state.change_number.error(),
         Some("Could not check the verification code: Telegram refused the request")
     );
 }
@@ -724,7 +727,6 @@ fn a_late_2fa_answer_leaves_the_newer_request_waiting() {
     let older = session.request(op(PasswordOp::Fetch), None);
     let newer = session.request(op(PasswordOp::SetPassword), None);
     session.auth_state.password_op = PasswordFlight::InFlight(newer);
-    session.auth_state.password_op_error = Some("kept".into());
     apply_json(
         &mut session,
         &seq,
@@ -738,10 +740,7 @@ fn a_late_2fa_answer_leaves_the_newer_request_waiting() {
         session.auth_state.password_op,
         PasswordFlight::InFlight(newer)
     );
-    assert_eq!(
-        session.auth_state.password_op_error.as_deref(),
-        Some("kept")
-    );
+    assert_eq!(session.auth_state.password_op_error(), None);
     apply_json(
         &mut session,
         &seq,
@@ -751,9 +750,8 @@ fn a_late_2fa_answer_leaves_the_newer_request_waiting() {
             newer.0
         ),
     );
-    assert_eq!(session.auth_state.password_op, PasswordFlight::Idle);
-    assert_ne!(
-        session.auth_state.password_op_error.as_deref(),
-        Some("kept")
-    );
+    assert!(matches!(
+        session.auth_state.password_op,
+        PasswordFlight::Failed(_)
+    ));
 }

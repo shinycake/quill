@@ -94,7 +94,7 @@ impl QuillApp {
     /// The notice to show, if any.
     pub(crate) fn account_notice(&self) -> Option<AccountNotice> {
         let session = self.session()?;
-        if session.settings.notices.terms.is_some() {
+        if session.settings.notices.terms.terms().is_some() {
             Some(AccountNotice::Terms)
         } else if !session.settings.notices.service.is_empty() {
             Some(AccountNotice::Service)
@@ -133,14 +133,14 @@ impl QuillApp {
         if self.auth_ui.terms_prompt.is_some()
             && self
                 .session()
-                .is_none_or(|session| session.settings.notices.terms.is_none())
+                .is_none_or(|session| session.settings.notices.terms.terms().is_none())
         {
             self.auth_ui.terms_prompt = None;
         }
         let outcome = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.settings.notices.review_outcome.take());
+            .and_then(|live| live.driver.session.settings.notices.review.take_outcome());
         match outcome {
             Some(LoginReview::Allowed) => {
                 self.set_note(StatusNote::silent(tr(
@@ -334,7 +334,7 @@ impl QuillApp {
         let session = self.session();
         let terms = session
             .as_ref()
-            .and_then(|s| s.settings.notices.terms.clone());
+            .and_then(|s| s.settings.notices.terms.terms().cloned());
         let Some(terms) = terms else {
             return (
                 "".into(),
@@ -345,10 +345,10 @@ impl QuillApp {
         };
         let in_flight = session
             .as_ref()
-            .is_some_and(|s| s.settings.notices.terms_accept.is_loading());
+            .is_some_and(|s| s.settings.notices.terms.is_accepting());
         let error = session
             .as_ref()
-            .and_then(|s| s.settings.notices.terms_accept.error().map(str::to_string));
+            .and_then(|s| s.settings.notices.terms.error().map(str::to_string));
         let terms_id = terms.id.clone();
         let busy_delete = session
             .as_ref()
@@ -439,11 +439,12 @@ impl QuillApp {
                                             },
                                         );
                                     } else if let Some(live) = this.live.as_mut() {
-                                        // A failed send lands in `terms_accept`,
+                                        // A failed send lands in `terms`,
                                         // which the box draws.
                                         let _ = live.driver.accept_terms();
                                     } else if let Some(demo) = this.demo_session.as_mut() {
-                                        demo.settings.notices.terms = None;
+                                        demo.settings.notices.terms =
+                                            quill::state::TermsState::None;
                                     }
                                     cx.notify();
                                 })

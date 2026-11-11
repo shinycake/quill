@@ -44,7 +44,7 @@ impl QuillApp {
             let loading = session.is_some_and(|s| s.auth_state.password_state_loading());
             let error = session
                 .as_ref()
-                .and_then(|s| s.auth_state.password_op_error.clone());
+                .and_then(|s| s.auth_state.password_op_error().map(str::to_string));
             let notice = this.twofa_notice_line();
             let mut body = div().flex().flex_col().gap_2();
             if let Some(line) = notice.filter(|_| this.twofa.view == TwofaView::Status) {
@@ -510,7 +510,7 @@ impl QuillApp {
         if let Some(auth) = self.session_mut().map(|session| &mut session.auth_state)
             && !auth.password_state_loading()
         {
-            auth.password_op_error = None;
+            auth.clear_password_error();
         }
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_password_state();

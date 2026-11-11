@@ -8,10 +8,9 @@ use crate::state::*;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BusinessSettingsState {
-    /// `getTimeZones`, sorted for the picker; `None` until it answers.
-    pub time_zones: Option<Vec<TimeZone>>,
-    /// `getTimeZones` was sent.
-    pub time_zones_requested: bool,
+    /// `getTimeZones`, sorted for the picker: asked once per session, again
+    /// only after it failed.
+    pub time_zones: crate::state::fetch::Fetch<Vec<TimeZone>>,
     /// Saves sent and not answered yet.
     pub saving: Vec<BusinessSettingKind>,
     /// The last refused save, in words.
@@ -26,7 +25,7 @@ pub struct BusinessSettingsState {
 
 impl Session {
     pub(crate) fn apply_time_zones(&mut self, zones: Vec<TimeZone>) {
-        self.settings.business.time_zones = Some(zones);
+        self.settings.business.time_zones.succeed(zones);
     }
 
     /// `ok` of a `setBusiness*` request.
@@ -85,11 +84,9 @@ impl Session {
         let state = &mut self.settings.business;
         match purpose {
             Some(RequestPurpose::Settings(SettingsPurpose::GetTimeZones)) => {
-                state.time_zones_requested = false;
-                state.error = Some(format!(
-                    "Couldn't load the time zones: {}",
-                    error_reason(err)
-                ));
+                let line = format!("Couldn't load the time zones: {}", error_reason(err));
+                state.time_zones.fail(line.clone());
+                state.error = Some(line);
             }
             Some(RequestPurpose::Settings(SettingsPurpose::SaveBusinessSetting { kind })) => {
                 state.saving.retain(|k| *k != kind);

@@ -8,8 +8,6 @@ Assembly::started
 AudioEngine::failed
 AudioEngine::start_failed
 AudioEngine::start_failed+error
-AuthState::change_number_loading
-AuthState::change_number_loading+last_auth_error
 AwardMembers::done
 AwardMembers::loading
 AwardMembers::loading+error
@@ -19,8 +17,6 @@ BarFacts::bot_start_pending
 BotCreateDialog::submitted
 BotEditTexts::load_failed
 BotEditTexts::load_failed+error
-BusinessSettingsState::time_zones_requested
-BusinessSettingsState::time_zones_requested+error
 CallSnap::connecting
 CallSummary::busy
 CallUi::window_opening
@@ -29,7 +25,6 @@ Ceremony::finished
 ChatListState::archive_settings_loading
 ChatSummary::my_rights_fetched
 ChatSwipeFacts::is_saved
-ChatUi::inline_query_waiting
 ChatWindowsState::asked
 ChatbotDraft::loaded
 Checklist::others_can_mark_tasks_as_done

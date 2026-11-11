@@ -443,7 +443,7 @@ impl QuillApp {
             return;
         };
         self.chat_ui.inline_results_open = false;
-        self.chat_ui.inline_query_armed = None;
+        self.chat_ui.inline_query.disarm();
         match action {
             ButtonAction::StartBot { parameter } => {
                 // tdesktop sends the bot's start with the parameter once

@@ -185,19 +185,15 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::CheckPhoneNumberCode)
         ) {
-            if let Some(target) = self.auth_state.change_number_phone.clone()
+            if let Some(target) = self.auth_state.change_number.phone().map(str::to_string)
                 && let Some(my_id) = self.my_user_id
                 && let Some(me) = self.users.get_mut(&my_id)
             {
                 me.phone_number = target;
             }
-            self.auth_state.change_number_phone = None;
-            self.auth_state.change_number_timeout = None;
-            self.auth_state.change_number_checking = false;
             // The send/resend answers are dropped below, so nothing else
-            // would clear this.
-            self.auth_state.change_number_loading = false;
-            self.auth_state.change_number_error = None;
+            // would end a send in flight.
+            self.auth_state.change_number.finish();
             // A8: drop any stale in-flight send/resend purposes —
             // a late resend answer must not resurrect the
             // completed flow (re-write phone/timeout or park a
@@ -239,10 +235,7 @@ impl Session {
             // Only the terms that were accepted: newer ones pushed while
             // the request was out stay for the user to answer.
             let accepted = pending.and_then(|p| p.subject_id.as_deref());
-            if self.settings.notices.terms.as_ref().map(|t| t.id.as_str()) == accepted {
-                self.settings.notices.terms = None;
-                self.settings.notices.terms_accept = crate::state::fetch::Fetch::Idle;
-            }
+            self.settings.notices.terms.accepted(accepted);
         }
         // Batch 6: a 2FA step answered `ok` (cancel reset, login email
         // code check).

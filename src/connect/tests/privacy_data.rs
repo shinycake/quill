@@ -494,13 +494,31 @@ fn suggestions_follow_updates_and_hide_with_rollback() {
     f.1.hide_suggestion(&Suggestion::Birthdays(vec![9]))
         .unwrap();
     assert_eq!(last_request(&f)["@type"], "hideContactCloseBirthdays");
-    assert!(f.1.session.chat_list.suggestions.birthdays_hidden);
+    assert!(f.1.session.chat_list.suggestions.birthdays_hidden());
+    // A refusal of an older request does not bring the card back; its own
+    // refusal does.
+    let hide = last_request(&f);
+    ingest(
+        &mut f,
+        r#"{"@type":"error","@extra":"999999","code":400,"message":"NO"}"#,
+    );
+    assert!(f.1.session.chat_list.suggestions.birthdays_hidden());
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"NO"}}"#,
+            extra_of(&hide)
+        ),
+    );
+    assert!(!f.1.session.chat_list.suggestions.birthdays_hidden());
+    f.1.hide_suggestion(&Suggestion::Birthdays(vec![9]))
+        .unwrap();
     // A fresh list from TDLib shows them again.
     ingest(
         &mut f,
         r#"{"@type":"updateContactCloseBirthdays","close_birthday_users":[]}"#,
     );
-    assert!(!f.1.session.chat_list.suggestions.birthdays_hidden);
+    assert!(!f.1.session.chat_list.suggestions.birthdays_hidden());
     cleanup(f);
 }
 

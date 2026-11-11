@@ -60,12 +60,10 @@ impl Session {
                 // The failure of an older terms' answer is not the current
                 // box's.
                 let asked = pending.and_then(|p| p.subject_id.as_deref());
-                if self.settings.notices.terms.as_ref().map(|t| t.id.as_str()) == asked {
-                    self.settings
-                        .notices
-                        .terms_accept
-                        .fail(sessions_error_line("accept the terms of service", err));
-                }
+                self.settings.notices.terms.fail_accept_of(
+                    asked,
+                    &sessions_error_line("accept the terms of service", err),
+                );
             }
             Some(RequestPurpose::GetAutoDownloadSettingsPresets) => {
                 self.settings.auto_download_presets_loading = false;

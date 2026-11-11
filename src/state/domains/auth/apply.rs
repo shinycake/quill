@@ -15,8 +15,7 @@ impl Session {
         match payload {
             AuthPayload::UpdateAuthorizationState(state) => self.set_auth(state),
             AuthPayload::UpdateTermsOfService { terms } => {
-                self.settings.notices.terms = Some(terms);
-                self.settings.notices.terms_accept = crate::state::fetch::Fetch::Idle;
+                self.settings.notices.terms = crate::state::TermsState::Offered(terms);
             }
             AuthPayload::EmailCodeInfo { pattern, .. } => {
                 // Batch 6: only our own in-flight 2FA step takes the
@@ -24,9 +23,7 @@ impl Session {
                 if let Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp { op })) =
                     pending.map(|p| p.purpose)
                 {
-                    if self.auth_state.settle_password_op(pending.map(|p| p.id)) {
-                        self.auth_state.password_op_error = None;
-                    }
+                    self.auth_state.settle_password_op(pending.map(|p| p.id));
                     self.apply_email_code_info(op, pattern);
                 }
             }
@@ -45,10 +42,10 @@ impl Session {
                         RequestPurpose::SendPhoneNumberCode | RequestPurpose::ResendPhoneNumberCode
                     )
                 ) {
-                    self.auth_state.change_number_phone = Some(phone_number);
-                    self.auth_state.change_number_timeout = Some(timeout);
-                    self.auth_state.change_number_loading = false;
-                    self.auth_state.change_number_error = None;
+                    self.auth_state.change_number.code_sent(CodeSent {
+                        phone: phone_number,
+                        timeout,
+                    });
                 }
             }
             // Phase C2g: `joinVideoChat` returns `text` — the tgcalls

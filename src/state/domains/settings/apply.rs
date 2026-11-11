@@ -223,9 +223,7 @@ impl Session {
                         op: PasswordOp::ResetPassword
                     }))
                 ) {
-                    if self.auth_state.settle_password_op(pending.map(|p| p.id)) {
-                        self.auth_state.password_op_error = None;
-                    }
+                    self.auth_state.settle_password_op(pending.map(|p| p.id));
                     self.apply_reset_password_result(outcome);
                 }
             }
@@ -241,12 +239,9 @@ impl Session {
                 ) {
                     let has_password = state.has_password;
                     self.auth_state.password_state = Some(state);
-                    let ours = self.auth_state.settle_password_op(pending.map(|p| p.id));
+                    self.auth_state.settle_password_op(pending.map(|p| p.id));
                     self.route_gift_export_on_password(has_password);
                     self.route_gram_withdrawal_on_password(has_password);
-                    if ours {
-                        self.auth_state.password_op_error = None;
-                    }
                     if let Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp { op })) =
                         pending.map(|p| p.purpose)
                     {
@@ -271,7 +266,7 @@ impl Session {
             SettingsPayload::UpdateContactCloseBirthdays { users } => {
                 // A new list (also an empty one) re-enables the suggestion.
                 self.chat_list.suggestions.close_birthdays = users;
-                self.chat_list.suggestions.birthdays_hidden = false;
+                self.chat_list.suggestions.show_birthdays();
             }
             SettingsPayload::AddedProxies { proxies } => {
                 self.apply_added_proxies(pending, proxies);

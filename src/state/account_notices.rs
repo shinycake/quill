@@ -4,7 +4,6 @@
 //! (`updateTermsOfService`) — and Batch 6: the two-step verification
 //! recovery/reset flow state. Pure state and text, no UI.
 use super::*;
-use crate::state::fetch::Fetch;
 use crate::telegram::envelope::{ResetPasswordOutcome, TermsOfService, UnconfirmedLogin};
 
 /// One unconfirmed login resolved from `getActiveSessions`
@@ -49,6 +48,9 @@ pub enum ReviewStage {
         error: String,
         done: Vec<UnconfirmedEntry>,
     },
+    /// Every request succeeded: the follow-up waits for the UI, which takes
+    /// it once ([`ReviewStage::take_outcome`]).
+    Reviewed(LoginReview),
 }
 
 impl ReviewStage {
@@ -62,7 +64,7 @@ impl ReviewStage {
         match self {
             Self::Reviewing { error, .. } => error.as_deref(),
             Self::Failed { error, .. } => Some(error),
-            Self::Idle => None,
+            Self::Idle | Self::Reviewed(_) => None,
         }
     }
 
@@ -70,7 +72,99 @@ impl ReviewStage {
     pub fn done(&self) -> Vec<UnconfirmedEntry> {
         match self {
             Self::Reviewing { done, .. } | Self::Failed { done, .. } => done.clone(),
-            Self::Idle => Vec::new(),
+            Self::Idle | Self::Reviewed(_) => Vec::new(),
+        }
+    }
+
+    /// The follow-up of a finished review, until the UI takes it.
+    pub fn outcome(&self) -> Option<&LoginReview> {
+        match self {
+            Self::Reviewed(outcome) => Some(outcome),
+            _ => None,
+        }
+    }
+
+    /// The follow-up of a finished review, once.
+    pub fn take_outcome(&mut self) -> Option<LoginReview> {
+        match std::mem::take(self) {
+            Self::Reviewed(outcome) => Some(outcome),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+}
+
+/// The terms of service the user must accept, and the accept round trip.
+/// The failure and the wait belong to the terms they were asked for.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum TermsState {
+    #[default]
+    None,
+    Offered(TermsOfService),
+    /// `acceptTermsOfService` is out for these terms.
+    Accepting(TermsOfService),
+    /// The send or the request failed; the box draws the line.
+    Failed {
+        terms: TermsOfService,
+        error: String,
+    },
+}
+
+impl TermsState {
+    /// The terms the box shows.
+    pub fn terms(&self) -> Option<&TermsOfService> {
+        match self {
+            Self::None => None,
+            Self::Offered(terms) | Self::Accepting(terms) | Self::Failed { terms, .. } => {
+                Some(terms)
+            }
+        }
+    }
+
+    pub fn is_accepting(&self) -> bool {
+        matches!(self, Self::Accepting(_))
+    }
+
+    /// The failure line of the accept.
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            Self::Failed { error, .. } => Some(error),
+            _ => None,
+        }
+    }
+
+    /// The accept goes out (again, after a failure).
+    pub fn begin_accept(&mut self) {
+        if let Self::Offered(terms) | Self::Failed { terms, .. } = self {
+            *self = Self::Accepting(terms.clone());
+        }
+    }
+
+    /// The accept failed to go out or came back with `error`.
+    pub fn fail_accept(&mut self, error: &str) {
+        if let Self::Offered(terms) | Self::Accepting(terms) | Self::Failed { terms, .. } = self {
+            *self = Self::Failed {
+                terms: terms.clone(),
+                error: error.to_string(),
+            };
+        }
+    }
+
+    /// `id` was accepted (here or elsewhere): only those terms go; newer
+    /// ones pushed meanwhile stay for the user to answer.
+    pub fn accepted(&mut self, id: Option<&str>) {
+        if self.terms().map(|t| t.id.as_str()) == id {
+            *self = Self::None;
+        }
+    }
+
+    /// The failure of the accept for `id`; an older terms' answer is not
+    /// the current box's.
+    pub fn fail_accept_of(&mut self, id: Option<&str>, error: &str) {
+        if self.terms().map(|t| t.id.as_str()) == id {
+            self.fail_accept(error);
         }
     }
 }
@@ -100,15 +194,10 @@ pub struct AccountNotices {
     pub unconfirmed_entries: Vec<UnconfirmedEntry>,
     /// `confirmSession` / `terminateSession` requests of the review.
     pub review: ReviewStage,
-    /// The follow-up after a finished review; the UI takes it once.
-    pub review_outcome: Option<LoginReview>,
     /// Popups in arrival order; the UI shows the front one.
     pub service: VecDeque<ServiceNotice>,
     /// Terms the user must accept, and the accept round-trip.
-    pub terms: Option<TermsOfService>,
-    /// `acceptTermsOfService`: loading while it is out, failed with a line
-    /// the box draws when the send or the request failed.
-    pub terms_accept: Fetch<()>,
+    pub terms: TermsState,
 }
 
 /// Where the two-step recovery/reset flow is, as the dialog needs it.
@@ -240,12 +329,11 @@ impl Session {
                         .map(|entry| unconfirmed_place(&entry.device, &entry.location))
                         .collect()
                 };
-                notices.review_outcome = Some(if confirmed {
+                notices.review = ReviewStage::Reviewed(if confirmed {
                     LoginReview::Allowed
                 } else {
                     LoginReview::Prevented { places }
                 });
-                notices.review = ReviewStage::Idle;
                 notices.unconfirmed = None;
                 notices.unconfirmed_count = 0;
                 notices.unconfirmed_entries.clear();
@@ -306,9 +394,7 @@ impl Session {
 
     /// A `PasswordStateOp` answered `ok`.
     pub(crate) fn apply_password_op_ok(&mut self, op: PasswordOp, request: Option<RequestId>) {
-        if self.auth_state.settle_password_op(request) {
-            self.auth_state.password_op_error = None;
-        }
+        self.auth_state.settle_password_op(request);
         match op {
             PasswordOp::CancelPasswordReset => {
                 self.auth_state.twofa_flow.notice = Some(TwofaNotice::ResetCancelled);
