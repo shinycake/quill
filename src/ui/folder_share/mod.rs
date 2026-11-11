@@ -71,8 +71,9 @@ pub(super) fn finish_dialog(
         .content(crate::ui::shell::scrollable_dialog_content(
             move |content, _, _| {
                 let body = body
-                    .borrow_mut()
-                    .take()
+                    .try_borrow_mut()
+                    .ok()
+                    .and_then(|mut body| body.take())
                     .unwrap_or_else(|| div().into_any_element());
                 content.child(body)
             },

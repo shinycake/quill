@@ -5,7 +5,9 @@
 //! timer while they last.
 
 use super::*;
+use crate::ui::status_note::StatusNote;
 use crate::ui::wake_wait::{PassEnd, PollPace, backlog_hold, run_poll_loop};
+use quill::lang::{keys, tr};
 
 /// A poke is applied after at most `gap`; `ceiling` is the longest an
 /// answer with no poke of its own can wait.
@@ -73,6 +75,17 @@ impl QuillApp {
         for event in events {
             self.handle_helper_event(event, cx);
         }
+        let overdue = self.mini_apps.window.as_ref().is_some_and(|window| {
+            window.helper.start_due_in(std::time::Instant::now()) == Some(Duration::ZERO)
+        });
+        if overdue {
+            // The helper started but never said ready: close the launch.
+            self.close_mini_app_window(cx);
+            self.set_status_note(
+                StatusNote::error(tr(keys::Q_MEDIA_THE_MINI_APP_WINDOW_COULDNT)),
+                cx,
+            );
+        }
         self.mini_apps.window.is_some()
             || self.mini_apps.flow.is_waiting()
             || self.session().is_some_and(|session| {
@@ -84,6 +97,9 @@ impl QuillApp {
     /// its next look: while one is open.
     fn mini_app_watch_due(&self) -> Option<Duration> {
         let window = self.mini_apps.window.as_ref()?;
+        if let Some(due) = window.helper.start_due_in(std::time::Instant::now()) {
+            return Some(due.max(WATCH_TICK));
+        }
         let watching = window.emoji.is_active()
             || window.phone != phone::PhoneFlow::Idle
             || window.invoice.is_some();

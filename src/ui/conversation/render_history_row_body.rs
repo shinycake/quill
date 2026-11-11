@@ -280,7 +280,7 @@ impl QuillApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                            this.message_ui
+                            this.chat_ui
                                 .swipe_reply
                                 .press(row_chat, row_msg, event.position.x);
                             // A press that starts on text selects text; any
@@ -304,7 +304,7 @@ impl QuillApp {
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseUpEvent, window, cx| {
                             if this
-                                .message_ui
+                                .chat_ui
                                 .swipe_reply
                                 .release_on(row_chat, row_msg, event.position.x)
                             {

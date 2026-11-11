@@ -115,7 +115,7 @@ impl QuillApp {
         self.mini_apps.window = Some(MiniAppWindow {
             child: Some(child),
             writer: HelperWriter::spawn(stdin),
-            helper: launch_flow::HelperState::Starting,
+            helper: launch_flow::HelperState::starting(std::time::Instant::now()),
             events,
             launch,
             theme: theme_params(cx),

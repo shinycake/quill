@@ -619,14 +619,11 @@ impl QuillApp {
                             if phase.bubble() && event.button == MouseButton::Left {
                                 let position = event.position;
                                 let _ = released.update(cx, |this, cx| {
-                                    this.selection_release(position, window, cx)
-                                });
-                                // A release off every row ends a swipe too;
-                                // after the rows saw this one.
-                                let ended = released.clone();
-                                window.defer(cx, move |_, cx| {
-                                    let _ = ended.update(cx, |this, _| {
-                                        this.message_ui.swipe_reply.clear()
+                                    this.selection_release(position, window, cx);
+                                    // A release off every row ends a swipe
+                                    // too; after the rows saw this one.
+                                    this.defer_screen(cx, |this, _| {
+                                        this.chat_ui.swipe_reply.clear()
                                     });
                                 });
                             }

@@ -109,11 +109,33 @@ impl LaunchFlow {
 }
 
 /// The helper process: starting, loaded, or killed after it stopped reading.
+/// A start that says nothing for [`HELPER_START_TIMEOUT`] is given up: the
+/// window closes and TDLib hears `closeWebApp`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum HelperState {
-    Starting,
+    Starting { since: std::time::Instant },
     Ready,
     Wedged,
+}
+
+/// How long a helper may take to report ready.
+pub(super) const HELPER_START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+impl HelperState {
+    pub(super) fn starting(now: std::time::Instant) -> Self {
+        Self::Starting { since: now }
+    }
+
+    /// How long until a start that has not reported ready is given up
+    /// (zero once it is); `None` for a helper that is ready or wedged.
+    pub(super) fn start_due_in(self, now: std::time::Instant) -> Option<std::time::Duration> {
+        match self {
+            Self::Starting { since } => Some(
+                HELPER_START_TIMEOUT.saturating_sub(now.saturating_duration_since(since)),
+            ),
+            Self::Ready | Self::Wedged => None,
+        }
+    }
 }
 
 /// The app's "allow messaging" request: none, or one on its way. A second
@@ -172,6 +194,18 @@ mod tests {
             "the older link's answer is nobody's"
         );
         assert!(flow.take_search_for(RequestId(2)).is_some());
+    }
+
+    #[test]
+    fn a_helper_that_never_reports_ready_is_given_up() {
+        use std::time::{Duration, Instant};
+        let began = Instant::now();
+        let helper = HelperState::starting(began);
+        assert_eq!(helper.start_due_in(began), Some(HELPER_START_TIMEOUT));
+        let late = began + HELPER_START_TIMEOUT + Duration::from_secs(1);
+        assert_eq!(helper.start_due_in(late), Some(Duration::ZERO));
+        assert_eq!(HelperState::Ready.start_due_in(late), None);
+        assert_eq!(HelperState::Wedged.start_due_in(late), None);
     }
 
     #[test]
