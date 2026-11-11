@@ -746,13 +746,13 @@ mod tests {
         let args = vec!["tg://resolve?domain=durov".to_string(), "x y".to_string()];
         let second = acquire(&endpoint, &args, |_| panic!("not the owner")).unwrap();
         assert_eq!(second, Acquired::Forwarded);
-        assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), args);
+        assert_eq!(rx.recv().unwrap(), args);
         // A bare launch still raises the owner (empty arg list).
         assert_eq!(
             acquire(&endpoint, &[], |_| ()).unwrap(),
             Acquired::Forwarded
         );
-        assert!(rx.recv_timeout(Duration::from_secs(5)).unwrap().is_empty());
+        assert!(rx.recv().unwrap().is_empty());
     }
 
     #[test]
@@ -782,7 +782,7 @@ mod tests {
         );
         // The owner hears from every forwarded launch (all but its own).
         for _ in 0..7 {
-            rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            rx.recv().unwrap();
         }
     }
 

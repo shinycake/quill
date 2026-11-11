@@ -17,7 +17,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::spellcheck::{
@@ -230,6 +230,9 @@ const RETRY_AFTER: Duration = Duration::from_secs(30);
 /// Where one dictionary's parse stands.
 enum Load {
     Unloaded,
+    /// One thread is parsing the files; every other asker waits for it
+    /// ([`Entry::dict`]) or answers "not yet" ([`Entry::ready`]).
+    Parsing,
     Loaded(Arc<spellbook::Dictionary>),
     /// The files were unreadable or unparsable; asked again at `retry_at`.
     Failed {
@@ -237,13 +240,25 @@ enum Load {
     },
 }
 
+/// What an asker that must not wait gets from a dictionary.
+enum Ready {
+    Dict(Arc<spellbook::Dictionary>),
+    /// Not parsed yet (or being parsed): ask again later.
+    Pending,
+    /// The files failed to load.
+    Unavailable,
+}
+
 struct Entry {
     file: DictionaryFile,
     script: Script,
-    /// Parsed on first use (a big dictionary takes a noticeable moment),
-    /// which happens on the checker's background thread. The lock is held
-    /// while parsing, so a second asker waits for the one parse.
+    /// Parsed on first use by [`Entry::dict`] (a big dictionary takes a
+    /// noticeable moment), which happens on the checker's background thread
+    /// or the warm-up thread. The lock is held only to read or change the
+    /// stage, never while parsing.
     dict: Mutex<Load>,
+    /// Signalled when a parse ends, for the askers waiting on it.
+    parsed: Condvar,
 }
 
 impl Entry {
@@ -251,14 +266,32 @@ impl Entry {
         self.dict_at(Instant::now())
     }
 
+    /// The dictionary, parsing it if nobody has, or waiting for the parse
+    /// that is running. For background threads only.
     fn dict_at(&self, now: Instant) -> Option<Arc<spellbook::Dictionary>> {
         let mut load = crate::locks::lock_or_recover(&self.dict);
-        match &*load {
-            Load::Loaded(dict) => return Some(Arc::clone(dict)),
-            Load::Failed { retry_at } if now < *retry_at => return None,
-            Load::Unloaded | Load::Failed { .. } => {}
+        loop {
+            match &*load {
+                Load::Loaded(dict) => return Some(Arc::clone(dict)),
+                Load::Failed { retry_at } if now < *retry_at => return None,
+                Load::Parsing => {
+                    load = match self.parsed.wait(load) {
+                        Ok(load) => load,
+                        Err(poisoned) => poisoned.into_inner(),
+                    };
+                }
+                Load::Unloaded | Load::Failed { .. } => break,
+            }
         }
-        match load_dictionary(&self.file) {
+        *load = Load::Parsing;
+        drop(load);
+        // A panic in the parser must still end the stage, or every waiter
+        // would wait for good.
+        let parsed =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| load_dictionary(&self.file)))
+                .unwrap_or(None);
+        let mut load = crate::locks::lock_or_recover(&self.dict);
+        let out = match parsed {
             Some(dict) => {
                 let dict = Arc::new(dict);
                 *load = Load::Loaded(Arc::clone(&dict));
@@ -270,12 +303,28 @@ impl Entry {
                 };
                 None
             }
+        };
+        drop(load);
+        self.parsed.notify_all();
+        out
+    }
+
+    /// The dictionary if it is parsed now; never parses and never waits
+    /// for a parse. For the UI thread.
+    fn ready(&self) -> Ready {
+        match &*crate::locks::lock_or_recover(&self.dict) {
+            Load::Loaded(dict) => Ready::Dict(Arc::clone(dict)),
+            Load::Unloaded | Load::Parsing => Ready::Pending,
+            Load::Failed { .. } => Ready::Unavailable,
         }
     }
 
-    /// Whether a parse has been tried (it may have failed).
+    /// Whether a parse has been tried and ended (it may have failed).
     fn is_tried(&self) -> bool {
-        !matches!(*crate::locks::lock_or_recover(&self.dict), Load::Unloaded)
+        !matches!(
+            *crate::locks::lock_or_recover(&self.dict),
+            Load::Unloaded | Load::Parsing
+        )
     }
 }
 
@@ -297,6 +346,7 @@ impl HunspellBackend {
                     file,
                     script,
                     dict: Mutex::new(Load::Unloaded),
+                    parsed: Condvar::new(),
                 })
             })
             .collect();
@@ -359,10 +409,58 @@ impl SpellBackend for HunspellBackend {
         Some(false)
     }
 
+    /// [`Self::judge`] without parsing or waiting for a parse: a word is
+    /// called wrong only when every dictionary of its script is loaded and
+    /// none accepts it; while one is still parsing there is no verdict.
+    fn judge_now(&self, word: &str) -> Option<bool> {
+        let mut any_entry = false;
+        let mut any_loaded = false;
+        let mut any_pending = false;
+        for entry in self.for_word(word) {
+            any_entry = true;
+            match entry.ready() {
+                Ready::Dict(dict) => {
+                    any_loaded = true;
+                    if dict.check(word) {
+                        return Some(true);
+                    }
+                }
+                Ready::Pending => any_pending = true,
+                Ready::Unavailable => {}
+            }
+        }
+        if !any_entry {
+            return Some(true);
+        }
+        if any_pending || !any_loaded {
+            return None;
+        }
+        Some(false)
+    }
+
     fn suggestions(&self, word: &str, limit: usize) -> Vec<String> {
+        self.suggest_from(word, limit, |entry| entry.dict())
+    }
+
+    /// [`Self::suggestions`] from the dictionaries parsed now only.
+    fn suggestions_now(&self, word: &str, limit: usize) -> Vec<String> {
+        self.suggest_from(word, limit, |entry| match entry.ready() {
+            Ready::Dict(dict) => Some(dict),
+            Ready::Pending | Ready::Unavailable => None,
+        })
+    }
+}
+
+impl HunspellBackend {
+    fn suggest_from(
+        &self,
+        word: &str,
+        limit: usize,
+        dict_of: impl Fn(&Entry) -> Option<Arc<spellbook::Dictionary>>,
+    ) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
         for entry in self.for_word(word) {
-            let Some(dict) = entry.dict() else { continue };
+            let Some(dict) = dict_of(entry) else { continue };
             let mut found = Vec::new();
             dict.suggest(word, &mut found);
             for s in found {
@@ -424,8 +522,9 @@ pub fn select_backend(
 }
 
 /// Parse the dictionaries off the calling thread. Until it finishes the
-/// checker's background pass simply waits on the same lock, so the UI
-/// thread (which only paints cached underlines) never blocks on the parse.
+/// checker's background pass waits for the parse, while the UI thread (which
+/// paints cached underlines and opens the spelling menu through the
+/// `_now` calls) never waits for it.
 /// The returned guard stops the remaining parses when the engine is dropped.
 fn warm_in_background(backend: &Arc<dyn SpellBackend>) -> WarmGuard {
     let backend = Arc::clone(backend);
@@ -692,6 +791,56 @@ mod tests {
         let start = std::time::Instant::now();
         let loaded = super::load_dictionary(&file).is_some();
         println!("parse 400k words: {:?} (ok={loaded})", start.elapsed());
+    }
+
+    fn english_only() -> super::HunspellBackend {
+        let files: Vec<_> = discover_dictionaries(&[fixtures()])
+            .into_iter()
+            .filter(|f| f.code == "en_US")
+            .collect();
+        super::HunspellBackend::new(files).expect("fixture dictionary")
+    }
+
+    #[test]
+    fn the_ui_calls_never_parse_or_wait_for_a_parse() {
+        let backend = english_only();
+        let entry = backend.entries.first().expect("one entry");
+        // Not parsed yet: no verdict and no suggestions, and nothing parsed.
+        assert_eq!(backend.judge_now("wrold"), None);
+        assert!(backend.suggestions_now("wrold", 5).is_empty());
+        assert!(!backend.is_warm());
+        // A parse in flight on another thread: still no waiting.
+        *crate::locks::lock_or_recover(&entry.dict) = super::Load::Parsing;
+        assert_eq!(backend.judge_now("wrold"), None);
+        assert!(backend.suggestions_now("wrold", 5).is_empty());
+        assert!(!backend.is_warm());
+        // Parsed: the same answers as the waiting calls.
+        *crate::locks::lock_or_recover(&entry.dict) = super::Load::Unloaded;
+        backend.warm(&std::sync::atomic::AtomicBool::new(false));
+        assert_eq!(backend.judge_now("wrold"), Some(false));
+        assert_eq!(backend.judge_now("hello"), Some(true));
+        assert!(
+            backend
+                .suggestions_now("wrold", 5)
+                .contains(&"world".to_string())
+        );
+    }
+
+    #[test]
+    fn a_background_asker_waits_for_the_parse_in_flight() {
+        let backend = Arc::new(english_only());
+        let entry = backend.entries.first().expect("one entry");
+        let dict = Arc::new(super::load_dictionary(&entry.file).expect("fixture parses"));
+        *crate::locks::lock_or_recover(&entry.dict) = super::Load::Parsing;
+        let asker = {
+            let backend = Arc::clone(&backend);
+            std::thread::spawn(move || backend.judge("hello"))
+        };
+        // The parse ends: the waiter, whether it is waiting yet or not,
+        // gets the loaded dictionary instead of parsing a second time.
+        *crate::locks::lock_or_recover(&entry.dict) = super::Load::Loaded(dict);
+        entry.parsed.notify_all();
+        assert_eq!(asker.join().expect("asker ends"), Some(true));
     }
 
     #[test]

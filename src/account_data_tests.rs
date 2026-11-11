@@ -27,10 +27,8 @@ fn action(account: &AccountKey) -> Action {
         chat_id: 5,
         chat_title: "Old chat".into(),
         summary: "hello".into(),
-        ok: true,
-        declined: false,
+        outcome: crate::agent::activity::Outcome::Done,
         message_ids: Vec::new(),
-        undone: false,
     }
 }
 

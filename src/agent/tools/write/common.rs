@@ -356,10 +356,8 @@ fn record_on(
         chat_id,
         chat_title: chat_title.to_string(),
         summary: summary.chars().take(200).collect(),
-        ok,
-        declined,
+        outcome: activity::Outcome::of(ok, declined),
         message_ids,
-        undone: false,
     });
 }
 
