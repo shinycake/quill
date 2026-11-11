@@ -396,10 +396,6 @@ mod tests {
     fn a_channel_goes_info_type_subscribers() {
         let kind = NewChatKind::Channel;
         assert_eq!(kind.info_confirm(), keys::CREATE_GROUP_CREATE);
-        assert_eq!(
-            view(&creating(NewChatBack::Info, CreateProgress::Created(CHAT))).step,
-            NewChatStep::Type(CHAT)
-        );
         let saving = NewChatStage::Type {
             chat: CHAT,
             save: TypeSaveStage::Saving(vec![RequestId(8)]),

@@ -864,10 +864,10 @@ fn a_stale_proxy_list_whose_refetch_cannot_be_sent_is_not_asked_every_tick() {
     use crate::proxy::ProxyFetch;
     let mut t = Flaky::new();
     t.sender.refuse(&["getProxies"]);
-    t.driver.session.settings.proxy.fetch = ProxyFetch::Stale;
+    t.driver.session.settings.proxy.ops.invalidate();
     assert!(t.driver.refresh_proxies_if_stale().is_err());
     assert_eq!(
-        t.driver.session.settings.proxy.fetch,
+        t.driver.session.settings.proxy.ops.fetch(),
         ProxyFetch::FailedStale
     );
     assert!(

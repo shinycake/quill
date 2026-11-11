@@ -34,7 +34,7 @@ fn open(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
         let Some(session) = app.demo_session.as_mut() else {
             return;
         };
-        session.chat_list.psa_about.restore(Default::default());
+        session.restore_psa_about(Default::default(), std::time::Instant::now());
         let seq = std::sync::atomic::AtomicU64::new(session.last_seq);
         let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> = app.demo_ui.sink.clone();
         let source = r#"{"@type":"chatSourcePublicServiceAnnouncement","type":"covid","text":""}"#;
