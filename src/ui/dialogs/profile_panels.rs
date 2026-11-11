@@ -32,6 +32,8 @@ pub struct EditContactDialog {
     /// the note (`setUserNote` and `addContact` take the whole note).
     pub(crate) note: ContactNote,
     pub(crate) share_phone: bool,
+    /// The `addContact` Save waits on, and its refusal.
+    pub(crate) save: super::ContactSave,
 }
 
 /// The edit-contact box's private note, by whether it is known.
@@ -122,6 +124,7 @@ impl EditContactDialog {
                 None => ContactNote::Waiting,
             },
             share_phone: false,
+            save: super::ContactSave::Idle,
         }
     }
 }

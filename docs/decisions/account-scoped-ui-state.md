@@ -4145,6 +4145,39 @@ and 10 are widget items another fixer owns).
   at the first refusal with the limit box up (08-073; the pre-check already
   counted the pins of the batch, since the driver flips a chat when it sends
   its `toggleChatIsPinned`, so only the repeated limit box was wrong).
+- **Review round: the twin, the merge, the limit line.**
+  - *Edit Contact* (09-X002 twin): its `addContact` Save is
+    `ContactSave::Saving(request)` in `EditContactDialog::save`, settled from
+    `dialog_answers` by `settle_edit_contact`. The box closes with the
+    "Contact saved" toast only on `ok`; a refusal is an inline line and Save
+    sends again. The note-only `setUserNote` path is unchanged (nothing asks
+    on its answer).
+  - *Save onto the current folder* (03-049): Save sends
+    `FolderEditor::spec_onto_current(base, fresh)`: the merge whenever a
+    fresh copy exists and differs from `base` (another consumer refetched
+    after `updateChatFolders`), the form as it is when they are equal, and a
+    fetch first (`Merging`) when there is no fresh copy.
+  - *Merging has an exit*: the fetch is asked once on entry
+    (`start_folder_editor_merge`); a send that fails goes back to `Ready`
+    with the error. The per-frame settle asks nothing while the request is
+    in flight; a copy that went stale again with nothing in flight is asked
+    for once, and a failing send ends the stage in `Ready` with the error,
+    so it cannot loop (an `Err` from the inactive path writes no
+    `folder_spec_errors`).
+  - *Limit errors say it once*: a folder request whose error carries a limit
+    hint (`RequestPurpose::folder_op`) answers `DialogAnswer::LimitHit`, so
+    the box draws no line (nor toast, for a recommended Add) on top of the
+    limit box, as in tdesktop.
+  - *Answers nobody waits for are not queued*: the remove-from-folder chain
+    sends `RemoveChatFromFolder` (not `EditChatFolder`), which
+    `answered_to_a_box` does not list, so its edits cannot push a waiting
+    box's answer out of the 16 `DialogAnswers` keeps. (A box that closes
+    before its answer still leaves one until it ages out.)
+  - *Smaller*: no "Jumping to date" toast when `jump_to_date` sent nothing
+    (`Ok(None)`: the guard refused, or the target was already in view); a
+    refused `reorderChatFolders` / `toggleChatFolderTags` says why in the
+    toast as its rollback snaps the UI back (02-020); the `purpose.rs` docs
+    name `ChatListState` fields, not removed `Session` ones.
 - **Skipped.** 08-072: `set_pinned_chat_order` already refuses an order
   whose id set differs from the current pinned set
   (`cl2_set_pinned_chat_order_id_mismatch_is_noop`).

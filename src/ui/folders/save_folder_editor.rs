@@ -21,40 +21,59 @@ impl QuillApp {
                 return;
             }
         }
-        let spec = self
+        let Some((spec, base)) = self
             .folders
             .editor
             .as_ref()
-            .map(|dialog| dialog.editor.to_spec());
-        let Some(spec) = spec else { return };
-        // The folder changed since the form was filled (a pin, a chat added
-        // or removed, here or on another device): fetch it, and send the
-        // person's edits onto it, not the old copy over it.
+            .map(|dialog| (dialog.editor.to_spec(), dialog.base.clone()))
+        else {
+            return;
+        };
+        // The folder may have changed since the form was filled (a pin, a
+        // chat added or removed, here or on another device). The person's
+        // edits go onto the folder as it is now, never the old copy over
+        // it: onto the fresh copy when there is one, else the folder is
+        // fetched first (the Merging stage).
         if let Some(folder_id) = folder_id
             && self.live.is_some()
-            && self
-                .session()
-                .is_some_and(|s| s.chat_list.fresh_spec(folder_id).is_none())
         {
-            let sent = self
-                .live
-                .as_mut()
-                .map(|live| live.driver.fetch_chat_folder(folder_id));
-            if let Some(dialog) = self.folders.editor.as_mut() {
-                match sent {
-                    Some(Err(err)) => {
-                        dialog.error = Some(user_error_for(keys::Q_NOTES_FAILED_FOLDER, &err));
-                    }
-                    _ => {
-                        dialog.load = FolderLoad::Merging;
-                        dialog.error = None;
-                    }
-                }
+            let fresh = self
+                .session()
+                .and_then(|s| s.chat_list.fresh_spec(folder_id).cloned());
+            let onto = self
+                .folders
+                .editor
+                .as_ref()
+                .and_then(|d| d.editor.spec_onto_current(&base, fresh.as_ref()));
+            match onto {
+                Some(spec) => self.send_folder_editor_spec(Some(folder_id), spec, cx),
+                None => self.start_folder_editor_merge(folder_id, cx),
             }
-            cx.notify();
             return;
         }
         self.send_folder_editor_spec(folder_id, spec, cx);
+    }
+
+    /// Save found no fresh copy of the folder: ask for it once, and wait in
+    /// `Merging` for the answer. A request that cannot be sent leaves the
+    /// form as it was, with the error shown.
+    fn start_folder_editor_merge(&mut self, folder_id: i32, cx: &mut Context<Self>) {
+        let sent = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.fetch_chat_folder(folder_id));
+        if let Some(dialog) = self.folders.editor.as_mut() {
+            match sent {
+                Some(Err(err)) => {
+                    dialog.error = Some(user_error_for(keys::Q_NOTES_FAILED_FOLDER, &err));
+                }
+                _ => {
+                    dialog.load = FolderLoad::Merging;
+                    dialog.error = None;
+                }
+            }
+        }
+        cx.notify();
     }
 
     /// Check the limits and send the editor's folder (the form's own, or

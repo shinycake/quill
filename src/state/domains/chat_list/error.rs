@@ -1,5 +1,5 @@
 //! Failed requests for the chat list: loading, folders, archive and pins.
-use crate::folder_limits::{FolderOp, limit_kind_for_error};
+use crate::folder_limits::limit_kind_for_error;
 use crate::state::*;
 
 impl Session {
@@ -19,13 +19,7 @@ impl Session {
         ) && self.note_premium_limit(err, pending);
         // A folder request that hit a limit opens the limit box (tdesktop
         // `ShowImportError` / the `*LimitBox`es) instead of an error line.
-        let folder_op = match pending.map(|p| p.purpose) {
-            Some(RequestPurpose::CreateChatFolder) => Some(FolderOp::Create),
-            Some(RequestPurpose::EditChatFolder) => Some(FolderOp::Edit),
-            Some(RequestPurpose::CreateChatFolderInviteLink) => Some(FolderOp::CreateLink),
-            Some(RequestPurpose::AddChatFolderByInviteLink) => Some(FolderOp::AddByLink),
-            _ => None,
-        };
+        let folder_op = pending.and_then(|p| p.purpose.folder_op());
         let limit_kind = folder_op
             .zip(err.limit_hint)
             .map(|(op, hint)| limit_kind_for_error(op, hint));
@@ -64,6 +58,11 @@ impl Session {
                     .or_default()
                     .links
                     .fail_dropping_data(error_reason(err));
+            }
+            // The tab order or the tags switch snapped back (its rollback):
+            // the toast says why.
+            Some((RequestPurpose::ReorderChatFolders | RequestPurpose::ToggleChatFolderTags, _)) => {
+                self.chats_state.chat_action_error = Some(error_reason(err));
             }
             Some((RequestPurpose::GetRecommendedChatFolders, _)) => {
                 self.chats_state.chat_action_error = Some(error_reason(err));

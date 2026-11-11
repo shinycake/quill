@@ -7,7 +7,7 @@
 
 use crate::ui::app::QuillApp;
 use crate::ui::dialogs::{
-    AddContactDialog, ContactSave, FolderEditorDialog, FolderInviteDialog, FolderLoad,
+    AddContactDialog, ContactSave, EditContactDialog, FolderEditorDialog, FolderInviteDialog, FolderLoad,
     FolderShareDialog, InviteStage, LinkOp,
 };
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -229,5 +229,86 @@ fn a_save_after_the_folder_changed_goes_onto_the_fresh_folder(cx: &mut TestAppCo
             .expect("the saved spec");
         assert_eq!(saved.pinned_chat_ids, vec![1], "the new pin stays");
         assert_eq!(saved.included_chat_ids, vec![2, 5, 7], "7 stays, 5 added");
+    });
+}
+
+fn edit_contact_save(app: &QuillApp) -> Option<ContactSave> {
+    match &app.dialogs.profile_dialog {
+        Some(crate::ui::dialogs::ProfileDialog::EditContact(dialog)) => Some(dialog.save.clone()),
+        _ => None,
+    }
+}
+
+#[gpui_kit::test]
+fn the_edit_contact_box_closes_on_its_answer_and_shows_a_refusal(cx: &mut TestAppContext) {
+    use crate::ui::dialogs::ProfileDialog;
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let request = sent(app, RequestPurpose::AddContact, None);
+        let mut dialog = EditContactDialog::new(window, cx, 42, "Ada", "", None);
+        dialog.save = ContactSave::Saving(request);
+        app.dialogs.profile_dialog = Some(ProfileDialog::EditContact(dialog));
+        // Another request's answer does not settle it.
+        let other = sent(app, RequestPurpose::AddContact, None);
+        answer(app, other, r#""@type":"ok""#);
+        assert!(!app.settle_edit_contact(cx));
+        assert_eq!(edit_contact_save(app), Some(ContactSave::Saving(request)));
+        // The refusal stays in the box, which Saves again.
+        answer(app, request, REFUSED);
+        assert!(app.settle_edit_contact(cx));
+        assert!(matches!(
+            edit_contact_save(app),
+            Some(ContactSave::Failed(_))
+        ));
+        let retry = sent(app, RequestPurpose::AddContact, None);
+        if let Some(ProfileDialog::EditContact(dialog)) = &mut app.dialogs.profile_dialog {
+            dialog.save = ContactSave::Saving(retry);
+        }
+        answer(app, retry, r#""@type":"ok""#);
+        assert!(app.settle_edit_contact(cx));
+        assert!(app.dialogs.profile_dialog.is_none(), "saved: closed");
+    });
+}
+
+#[gpui_kit::test]
+fn a_limit_box_leaves_the_folder_editor_without_an_error_line(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let request = sent(app, RequestPurpose::CreateChatFolder, None);
+        let mut dialog = FolderEditorDialog::new(window, cx, None);
+        dialog.load = FolderLoad::Saving(request);
+        app.folders.editor = Some(dialog);
+        answer(
+            app,
+            request,
+            r#""@type":"error","code":400,"message":"DIALOG_FILTERS_TOO_MUCH""#,
+        );
+        app.maybe_prefill_folder_editor(window, cx);
+        let dialog = app.folders.editor.as_ref().expect("still open");
+        assert_eq!(dialog.load, FolderLoad::Ready, "Save works again");
+        assert_eq!(dialog.error, None, "the limit box says it alone");
+    });
+}
+
+#[gpui_kit::test]
+fn a_save_waiting_for_the_fresh_folder_never_spins_without_a_request(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let mut dialog = FolderEditorDialog::new(window, cx, Some(5));
+        dialog.load = FolderLoad::Merging;
+        app.folders.editor = Some(dialog);
+        // The fetch is in flight: the stage waits and asks nothing more.
+        let request = sent(app, RequestPurpose::GetChatFolder, Some(5));
+        app.maybe_prefill_folder_editor(window, cx);
+        assert_eq!(
+            app.folders.editor.as_ref().map(|d| d.load.clone()),
+            Some(FolderLoad::Merging)
+        );
+        // It failed: back to the form with the error, edits kept.
+        answer(app, request, REFUSED);
+        app.maybe_prefill_folder_editor(window, cx);
+        let dialog = app.folders.editor.as_ref().expect("still open");
+        assert_eq!(dialog.load, FolderLoad::Ready);
+        assert!(dialog.error.is_some(), "the form says why");
     });
 }

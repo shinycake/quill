@@ -16,7 +16,7 @@ pub enum ChatListPurpose {
     LoadArchiveChats,
     /// Slice CL: one-shot `getChatHistory` for the chat-list peek preview
     /// (`parity:chatlist-chat-preview`). The `messages` answer lands in
-    /// `Session::chat_preview_fetch` — it must NOT merge into the open
+    /// `ChatListState::chat_preview_fetch` — it must NOT merge into the open
     /// chat's history (the `GetHistory` branch drops answers for non-open
     /// chats, and the preview never calls `openChat`).
     GetChatPreview,
@@ -69,54 +69,59 @@ pub enum ChatListPurpose {
     ClearRecentlyFoundChats,
     /// Slice CL2: `getArchiveChatListSettings` (schema 1.8.67, line
     /// 13421). Response is `archiveChatListSettings`; stored in
-    /// `Session::archive_chat_list_settings`.
+    /// `ChatListState::archive_chat_list_settings`.
     GetArchiveChatListSettings,
     /// Slice CL2: `setArchiveChatListSettings` (schema 1.8.67, line
     /// 13424). Response is `ok`; the settings were flipped
     /// optimistically, rollback on refusal.
     SetArchiveChatListSettings,
     /// Parity slice: `createChatFolder`. Response is `chatFolderInfo`;
-    /// upserted into `Session::chat_folders` (`updateChatFolders` stays the
+    /// upserted into `ChatListState::chat_folders` (`updateChatFolders` stays the
     /// source of truth).
     CreateChatFolder,
     /// Parity slice: `editChatFolder`. Response is `chatFolderInfo`;
-    /// upserted into `Session::chat_folders`. Also the purpose of the
+    /// upserted into `ChatListState::chat_folders`. Also the purpose of the
     /// remove-from-folder chain (chat dropped from the folder's spec);
     /// correlated via `PendingRequest::folder_id`.
     EditChatFolder,
     /// Parity slice: `deleteChatFolder`. Response is `ok`; the folder leaves
-    /// `Session::chat_folders` on ok (correlated via
+    /// `ChatListState::chat_folders` on ok (correlated via
     /// `PendingRequest::folder_id`).
     DeleteChatFolder,
+    /// `editChatFolder` sent by the remove-from-folder chain, which no box
+    /// waits on (the box edit is `EditChatFolder`): its answer is not kept
+    /// in `DialogAnswers`.
+    RemoveChatFromFolder,
     /// Parity slice: `reorderChatFolders`. Response is `ok`; the tab order
     /// is applied optimistically at send time and confirmed by the next
     /// `updateChatFolders`.
     ReorderChatFolders,
     /// Parity slice: `toggleChatFolderTags`. Response is `ok`;
-    /// `Session::are_folder_tags_enabled` flips optimistically at send.
+    /// `ChatListState::are_folder_tags_enabled` flips optimistically at send.
     ToggleChatFolderTags,
     /// Parity slice: `getChatFolder`. Response is the full `chatFolder`
-    /// spec, cached in `Session::folder_specs` (keyed by
+    /// spec, cached in `ChatListState::folder_specs` (keyed by
     /// `PendingRequest::folder_id`) for the edit dialog prefill and the
     /// remove-from-folder chain.
     GetChatFolder,
     /// Parity slice: `getChatListsToAddChat`. Response is `chatLists`;
-    /// cached in `Session::chat_lists_for_add` (keyed by
+    /// cached in `ChatListState::chat_lists_for_add` (keyed by
     /// `PendingRequest::chat_id`) for the per-chat folder picker.
     GetChatListsToAddChat,
     /// Parity slice: `getChatFolderChatsToLeave`. Response is `chats`;
-    /// cached in `Session::folder_chats_to_leave` (keyed by
+    /// cached in `ChatListState::folder_chats_to_leave` (keyed by
     /// `PendingRequest::folder_id`) for the delete-confirm dialog.
     GetChatFolderChatsToLeave,
     /// `getRecommendedChatFolders`. Response is `recommendedChatFolders`,
-    /// cached in `Session::recommended_folders`.
+    /// cached in `ChatListState::recommended_folders`.
     GetRecommendedChatFolders,
     /// `getChatsForChatFolderInviteLink`. Response is `chats` — the folder
-    /// chats a link can grant (`Session::folder_link_chats`, keyed by
-    /// `PendingRequest::folder_id`).
+    /// chats a link can grant (`ChatListState::folder_shares`, the
+    /// box's `chats`, keyed by `PendingRequest::folder_id`).
     GetChatsForFolderInviteLink,
     /// `getChatFolderInviteLinks`. Response is `chatFolderInviteLinks`
-    /// (`Session::folder_invite_links`, keyed by folder id).
+    /// (`ChatListState::folder_shares`, the box's `links`,
+    /// keyed by folder id).
     GetChatFolderInviteLinks,
     /// `createChatFolderInviteLink`. Response is `chatFolderInviteLink`.
     CreateChatFolderInviteLink,
@@ -126,7 +131,8 @@ pub enum ChatListPurpose {
     /// cache optimistically at send time.
     DeleteChatFolderInviteLink,
     /// `checkChatFolderInviteLink` (an `addlist` link). Response is
-    /// `chatFolderInviteLinkInfo` (`Session::folder_invite_info`).
+    /// `chatFolderInviteLinkInfo`, which goes to the Add folder box
+    /// that asked (`DialogAnswers`).
     CheckChatFolderInviteLink,
     /// `addChatFolderByInviteLink`. Response is `ok`.
     AddChatFolderByInviteLink,
@@ -134,7 +140,7 @@ pub enum ChatListPurpose {
     /// yet (its title shows in the "Add folder" dialog).
     GetFolderInviteChat,
     /// `getChatFolderNewChats`. Response is `chats`
-    /// (`Session::folder_new_chats`, keyed by `PendingRequest::folder_id`).
+    /// (`ChatListState::folder_new_chats`, keyed by `PendingRequest::folder_id`).
     GetChatFolderNewChats,
     /// `processChatFolderNewChats`. Response is `ok`; fire-and-forget.
     ProcessChatFolderNewChats,
@@ -164,6 +170,7 @@ flat_purposes!(ChatList(ChatListPurpose) {
     SetArchiveChatListSettings,
     CreateChatFolder,
     EditChatFolder,
+    RemoveChatFromFolder,
     DeleteChatFolder,
     ReorderChatFolders,
     ToggleChatFolderTags,

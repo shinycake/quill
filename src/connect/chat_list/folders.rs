@@ -405,10 +405,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         folder_id: i32,
         chats: &[ChatId],
     ) -> Result<bool, ConnectSendError> {
-        if self
-            .session
-            .requests
-            .has_purpose_for_folder(RequestPurpose::EditChatFolder, folder_id)
+        let requests = &self.session.requests;
+        if requests.has_purpose_for_folder(RequestPurpose::EditChatFolder, folder_id)
+            || requests.has_purpose_for_folder(RequestPurpose::RemoveChatFromFolder, folder_id)
         {
             return Ok(false);
         }
@@ -430,7 +429,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let extra = self
             .session
-            .request_for_folder(RequestPurpose::EditChatFolder, folder_id);
+            .request_for_folder(RequestPurpose::RemoveChatFromFolder, folder_id);
         if let Err(err) = self
             .sender
             .send_json(&edit_chat_folder(extra, folder_id, &edited))

@@ -121,6 +121,23 @@ impl FolderEditor {
         }
     }
 
+    /// What Save sends given the folder as it is now (`fresh`, `None` while
+    /// there is no current copy: the caller fetches it first): the form
+    /// as it is when the folder is as the form started from it, else the
+    /// edits merged onto the newer folder.
+    pub fn spec_onto_current(
+        &self,
+        base: &ChatFolderSpec,
+        fresh: Option<&ChatFolderSpec>,
+    ) -> Option<ChatFolderSpec> {
+        let fresh = fresh?;
+        Some(if fresh == base {
+            self.to_spec()
+        } else {
+            self.merged_onto(base, fresh)
+        })
+    }
+
     /// What Save sends when the folder changed after the editor opened
     /// (`base` is the spec the form started from, `fresh` the folder now):
     /// the fields the person touched go onto the fresh folder, and what
@@ -550,6 +567,28 @@ mod merge_tests {
         assert_eq!(saved.name, "Jobs", "the rename is the person's");
         assert_eq!(saved.pinned_chat_ids, vec![1], "the new pin stays");
         assert_eq!(saved.included_chat_ids, vec![5, 7], "2 removed, 5 and 7 in");
+    }
+
+    #[test]
+    fn save_goes_onto_a_folder_refetched_since_the_form_was_filled() {
+        let base = spec(&[1, 2], &[]);
+        let mut editor = FolderEditor::from_spec(&base);
+        editor.toggle_included(5);
+        // Another consumer refetched the folder after a pin elsewhere, so
+        // a fresh copy exists and differs from what the form started from.
+        let fresh = spec(&[2, 7], &[1]);
+        let saved = editor.spec_onto_current(&base, Some(&fresh));
+        assert_eq!(
+            saved.as_ref().map(|s| s.pinned_chat_ids.clone()),
+            Some(vec![1]),
+            "the newer pin is not overwritten by the old copy"
+        );
+        assert_eq!(saved.map(|s| s.included_chat_ids), Some(vec![2, 5, 7]));
+        // Nothing changed elsewhere: the form goes as it is.
+        let same = editor.spec_onto_current(&base, Some(&base));
+        assert_eq!(same, Some(editor.to_spec()));
+        // No current copy: the folder is fetched first.
+        assert_eq!(editor.spec_onto_current(&base, None), None);
     }
 
     #[test]

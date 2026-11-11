@@ -376,7 +376,9 @@ impl QuillApp {
             dialog.op = LinkOp::Idle;
             match answer {
                 quill::state::DialogAnswer::Failed(line) => dialog.error = Some(line),
-                _ => {
+                // The limit box is up; no line on top of it.
+                quill::state::DialogAnswer::LimitHit => dialog.error = None,
+                quill::state::DialogAnswer::Done | quill::state::DialogAnswer::Checked(_) => {
                     if matches!(dialog.view, FolderShareView::Edit { .. }) {
                         dialog.view = FolderShareView::List;
                     }

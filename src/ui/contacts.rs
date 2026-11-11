@@ -543,7 +543,9 @@ impl QuillApp {
                     dialog.save = ContactSave::Failed(line);
                 }
             }
-            _ => {
+            quill::state::DialogAnswer::Done
+            | quill::state::DialogAnswer::Checked(_)
+            | quill::state::DialogAnswer::LimitHit => {
                 self.dialogs.add_contact_dialog = None;
                 self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_CONTACT_ADD_REQUESTED)));
             }

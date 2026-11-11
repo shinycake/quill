@@ -105,7 +105,12 @@ impl QuillApp {
                 };
                 false
             }
-            (InviteStage::Adding { info, .. }, _) => {
+            (InviteStage::Adding { info, .. }, DialogAnswer::LimitHit) => {
+                // The limit box is up; the form stays as it was.
+                dialog.stage = InviteStage::Ready { info, error: None };
+                false
+            }
+            (InviteStage::Adding { info, .. }, DialogAnswer::Done | DialogAnswer::Checked(_)) => {
                 let joined = dialog.selected.len();
                 let name = info.folder.name.clone();
                 self.folders.invite = None;

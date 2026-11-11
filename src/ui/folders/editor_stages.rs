@@ -66,13 +66,18 @@ impl QuillApp {
                 continue;
             };
             self.folders.recommended_adds.remove(&name);
-            self.set_note(match answer {
-                quill::state::DialogAnswer::Failed(line) => StatusNote::error(line),
-                _ => StatusNote::silent(tr_with(
-                    keys::Q_CHATLIST_FOLDER_ADDED_2,
-                    &[("name", &name.to_string())],
-                )),
-            });
+            use quill::state::DialogAnswer;
+            match answer {
+                DialogAnswer::Failed(line) => self.set_note(StatusNote::error(line)),
+                // The limit box says it; no toast on top.
+                DialogAnswer::LimitHit => {}
+                DialogAnswer::Done | DialogAnswer::Checked(_) => {
+                    self.set_note(StatusNote::silent(tr_with(
+                        keys::Q_CHATLIST_FOLDER_ADDED_2,
+                        &[("name", &name.to_string())],
+                    )))
+                }
+            }
             changed = true;
         }
         if changed {
@@ -152,52 +157,57 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Save found the folder changed: once the fresh folder is here the
-    /// edits go onto it and the save goes out; a failed fetch puts the
-    /// form back with the error and the edits kept.
+    /// Save found no fresh copy of the folder and asked for it
+    /// (`start_folder_editor_merge`). Once it is here the edits go onto it
+    /// and the save goes out; a failed fetch puts the form back with the
+    /// error and the edits kept. Nothing is asked here while the request
+    /// is in flight; only a copy that went stale again with nothing in
+    /// flight is asked for once more, and a send that fails ends the stage.
     fn settle_folder_editor_merge(&mut self, cx: &mut Context<Self>) {
-        let Some((folder_id, merged)) = self
-            .folders
-            .editor
-            .as_ref()
-            .and_then(|d| Some((d.folder_id?, d)))
-            .map(|(folder_id, dialog)| {
-                let fresh = self
-                    .session()
-                    .and_then(|s| s.chat_list.fresh_spec(folder_id).cloned());
-                (
-                    folder_id,
-                    fresh.map(|fresh| dialog.editor.merged_onto(&dialog.base, &fresh)),
-                )
-            })
-        else {
+        let Some(folder_id) = self.folders.editor.as_ref().and_then(|d| d.folder_id) else {
             return;
         };
-        match merged {
-            Some(spec) => {
-                if let Some(dialog) = self.folders.editor.as_mut() {
-                    dialog.load = FolderLoad::Ready;
-                }
-                self.send_folder_editor_spec(Some(folder_id), spec, cx);
+        let fresh = self
+            .session()
+            .and_then(|s| s.chat_list.fresh_spec(folder_id).cloned());
+        if fresh.is_some() {
+            let merged = self
+                .folders
+                .editor
+                .as_ref()
+                .and_then(|d| d.editor.spec_onto_current(&d.base, fresh.as_ref()));
+            let Some(spec) = merged else { return };
+            if let Some(dialog) = self.folders.editor.as_mut() {
+                dialog.load = FolderLoad::Ready;
             }
+            self.send_folder_editor_spec(Some(folder_id), spec, cx);
+            return;
+        }
+        let error = self
+            .session()
+            .and_then(|s| s.chat_list.folder_spec_errors.get(&folder_id).cloned());
+        let in_flight = self.session().is_some_and(|s| {
+            s.requests
+                .has_purpose_for_folder(quill::state::RequestPurpose::GetChatFolder, folder_id)
+        });
+        let error = match error {
+            Some(error) => error,
+            None if in_flight => return,
             None => {
-                let error = self
-                    .session()
-                    .and_then(|s| s.chat_list.folder_spec_errors.get(&folder_id).cloned());
-                let Some(error) = error else {
-                    // The fetched copy went stale again before it was used
-                    // (another update landed): ask once more, so the form
-                    // is never left waiting with nothing in flight.
-                    if let Some(live) = self.live.as_mut() {
-                        let _ = live.driver.fetch_chat_folder(folder_id);
-                    }
-                    return;
-                };
-                if let Some(dialog) = self.folders.editor.as_mut() {
-                    dialog.load = FolderLoad::Ready;
-                    dialog.error = Some(error);
+                let sent = self
+                    .live
+                    .as_mut()
+                    .map(|live| live.driver.fetch_chat_folder(folder_id));
+                match sent {
+                    Some(Ok(_)) => return,
+                    Some(Err(err)) => user_error_for(keys::Q_NOTES_FAILED_FOLDER, &err),
+                    None => return,
                 }
             }
+        };
+        if let Some(dialog) = self.folders.editor.as_mut() {
+            dialog.load = FolderLoad::Ready;
+            dialog.error = Some(error);
         }
         cx.notify();
     }
@@ -222,7 +232,14 @@ impl QuillApp {
                     dialog.error = Some(line);
                 }
             }
-            Some(_) => {
+            // The limit box is up; the form stays as it was, with no line.
+            Some(DialogAnswer::LimitHit) => {
+                if let Some(dialog) = self.folders.editor.as_mut() {
+                    dialog.load = FolderLoad::Ready;
+                    dialog.error = None;
+                }
+            }
+            Some(DialogAnswer::Done | DialogAnswer::Checked(_)) => {
                 let edited = self
                     .folders
                     .editor

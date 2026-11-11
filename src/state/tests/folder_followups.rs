@@ -137,3 +137,81 @@ fn a_limit_error_opens_the_limit_box_instead_of_an_error_line() {
         Some(crate::state::DialogAnswer::Failed(_))
     ));
 }
+
+fn refuse(session: &mut Session, seq: &AtomicU64, sink: &Arc<MemorySink>, extra: RequestId, message: &str) {
+    apply_json(
+        session,
+        seq,
+        sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"{message}"}}"#,
+            extra.0
+        ),
+    );
+}
+
+#[test]
+fn a_request_that_hit_a_limit_answers_its_box_with_the_limit_not_a_line() {
+    use crate::state::DialogAnswer;
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    for (purpose, message, other) in [
+        (RequestPurpose::CreateChatFolder, "DIALOG_FILTERS_TOO_MUCH", "FILTER_TITLE_EMPTY"),
+        (RequestPurpose::CreateChatFolderInviteLink, "INVITES_TOO_MUCH", "INVITE_HASH_EXPIRED"),
+        (RequestPurpose::AddChatFolderByInviteLink, "CHATLISTS_TOO_MUCH", "INVITE_SLUG_EXPIRED"),
+    ] {
+        let extra = session.request_for_folder(purpose, 3);
+        refuse(&mut session, &seq, &sink, extra, message);
+        assert!(session.chat_list.folder_limit_hit.take().is_some());
+        assert_eq!(
+            session.chat_list.dialog_answers.take(extra),
+            Some(DialogAnswer::LimitHit),
+            "{purpose:?}: the limit box alone says it"
+        );
+        let extra = session.request_for_folder(purpose, 3);
+        refuse(&mut session, &seq, &sink, extra, other);
+        assert!(matches!(
+            session.chat_list.dialog_answers.take(extra),
+            Some(DialogAnswer::Failed(_))
+        ));
+    }
+}
+
+#[test]
+fn only_answers_a_box_waits_for_are_kept() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let ok = |extra: RequestId| format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0);
+    // A box is waiting on this edit.
+    let waited = session.request_for_folder(RequestPurpose::EditChatFolder, 3);
+    apply_json(&mut session, &seq, &sink, &ok(waited));
+    // The remove-from-folder chain sends its edits with no box: many of
+    // them must not push the box's answer out.
+    for _ in 0..40 {
+        let removal = session.request_for_folder(RequestPurpose::RemoveChatFromFolder, 3);
+        apply_json(&mut session, &seq, &sink, &ok(removal));
+        assert_eq!(session.chat_list.dialog_answers.take(removal), None);
+    }
+    assert_eq!(
+        session.chat_list.dialog_answers.take(waited),
+        Some(crate::state::DialogAnswer::Done)
+    );
+}
+
+#[test]
+fn a_refused_folder_reorder_or_tags_switch_says_why() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    for purpose in [
+        RequestPurpose::ReorderChatFolders,
+        RequestPurpose::ToggleChatFolderTags,
+    ] {
+        assert!(session.chats_state.chat_action_error.is_none());
+        let extra = session.request(purpose, None);
+        refuse(&mut session, &seq, &sink, extra, "PREMIUM_ACCOUNT_REQUIRED");
+        assert!(
+            session.chats_state.chat_action_error.take().is_some(),
+            "{purpose:?}: the toast is not silent"
+        );
+    }
+}

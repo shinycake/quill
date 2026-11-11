@@ -19,6 +19,9 @@ pub enum DialogAnswer {
     Checked(Box<ChatFolderInviteLinkInfo>),
     /// It failed; the line is what the box shows.
     Failed(String),
+    /// It failed on a limit: the limit box is shown (tdesktop shows only
+    /// that), so the asking box draws no error line of its own.
+    LimitHit,
 }
 
 /// The answers of box requests not yet taken ([`DialogAnswer`]).
@@ -49,6 +52,11 @@ impl DialogAnswers {
             return;
         };
         let answer = match payload {
+            EnvelopePayload::Error(err)
+                if pending.purpose.folder_op().is_some() && err.limit_hint.is_some() =>
+            {
+                DialogAnswer::LimitHit
+            }
             EnvelopePayload::Error(err) => DialogAnswer::Failed(error_reason(err)),
             EnvelopePayload::ChatList(ChatListPayload::ChatFolderInviteLinkInfo(info)) => {
                 DialogAnswer::Checked(Box::new(info.clone()))
@@ -60,6 +68,18 @@ impl DialogAnswers {
 }
 
 impl RequestPurpose {
+    /// The folder request this is, for picking the limit an error names.
+    pub(crate) fn folder_op(self) -> Option<crate::folder_limits::FolderOp> {
+        use crate::folder_limits::FolderOp;
+        match self {
+            RequestPurpose::CreateChatFolder => Some(FolderOp::Create),
+            RequestPurpose::EditChatFolder => Some(FolderOp::Edit),
+            RequestPurpose::CreateChatFolderInviteLink => Some(FolderOp::CreateLink),
+            RequestPurpose::AddChatFolderByInviteLink => Some(FolderOp::AddByLink),
+            _ => None,
+        }
+    }
+
     /// Whether a box waits on the answer of this request: its end is kept
     /// for the box to take ([`DialogAnswers`]).
     pub(crate) fn answered_to_a_box(self) -> bool {
