@@ -41,6 +41,9 @@ pub(super) struct ViewerFrame {
     /// An album's thumbnail strip sits at the bottom (hidden in full
     /// screen).
     pub(super) strip: bool,
+    /// The video controller was dragged away and the caption went with
+    /// it, so the bottom bar keeps no room for the caption.
+    pub(super) caption_docked: bool,
 }
 
 impl ViewerFrame {
@@ -92,7 +95,7 @@ fn bottom_band(frame: ViewerFrame) -> f32 {
     } else {
         ZOOM_CONTROLS
     };
-    let caption = if frame.caption > 0.0 && !frame.fullscreen {
+    let caption = if frame.caption > 0.0 && !frame.fullscreen && !frame.caption_docked {
         frame.caption + CAPTION_GAP
     } else {
         0.0
@@ -148,6 +151,7 @@ mod tests {
             caption,
             fullscreen,
             strip: false,
+            caption_docked: false,
         }
     }
 
@@ -256,6 +260,15 @@ mod tests {
             ..frame(0.0, true)
         };
         assert_eq!(controller_home(full).bottom(), 1000.0 - BAR_BOTTOM_GAP);
+    }
+
+    #[test]
+    fn a_docked_caption_takes_no_room_under_the_picture() {
+        let docked = ViewerFrame {
+            caption_docked: true,
+            ..frame(60.0, false)
+        };
+        assert_eq!(bottom_chrome(docked), VIDEO_CONTROLS);
     }
 
     #[test]

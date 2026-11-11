@@ -8,7 +8,7 @@ use super::geometry::{BAR_BOTTOM_GAP, BAR_SIDE_GAP, CAPTION_GAP, GROUP_STRIP_ROO
 use super::layer::ViewerGeometry;
 use super::*;
 use crate::ui::pressable::PressableDiv;
-use crate::ui::video_player::controls::hide_cursor;
+use crate::ui::video_player::controls::{PANEL_WIDTH, hide_cursor, panel_background};
 use quill::album_pin::AlbumPin;
 use quill::lang::{keys, tr};
 use quill::media_viewer::ViewerTtl;
@@ -97,10 +97,12 @@ impl QuillApp {
                     AlbumPin::Unpin => Some(tr(keys::Q_AV_UNPIN_ALBUM).to_string()),
                 }
             });
+        // The caption rides on top of a controller dragged off its spot.
+        let docked = geometry.caption_docked && geometry.caption.is_some();
         // Parity slice 5: the video player panel (or a download CTA).
         let is_video = item.kind == MediaViewerKind::Video;
         let video_controls: Option<AnyElement> = is_video
-            .then(|| self.viewer_video_controls(item, row_id, geometry.controller, cx))
+            .then(|| self.viewer_video_controls(item, row_id, geometry.controller, docked, cx))
             .flatten();
         let key_focus = self.viewer_key_focus_probe(cx);
         // Videos get the player panel; zoom controls are for photos.
@@ -142,7 +144,7 @@ impl QuillApp {
                 0.0
             };
         let caption = caption.zip(geometry.caption).map(|(caption, layout)| {
-            self.viewer_caption_plate(item, caption, layout, viewport_h, cx)
+            self.viewer_caption_plate(item, caption, layout, viewport_h, docked, cx)
         });
         let sender_profile = self.viewer_sender_profile(item);
         let saved_toast: Option<AnyElement> = self.viewer_saved_toast(cx);
@@ -490,6 +492,37 @@ impl QuillApp {
         // still keeps the wheel, so a scroll there does not change the item.
         let controller_offset = self.viewer_controller_offset(geometry.controller);
         let drag_layer = self.viewer_controller_drag_layer(geometry.controller, cx);
+        // Docked, the caption and the controller are one bar: one plate,
+        // dragged by either part.
+        let (caption, transport) = match (docked, caption, transport) {
+            (true, Some(caption), Some(transport)) => {
+                let press = self.viewer_controller_press(geometry.controller, cx);
+                let bar = div()
+                    .id(("media-viewer-docked-bar", row_id))
+                    .w(PANEL_WIDTH)
+                    .max_w_full()
+                    .flex()
+                    .flex_col()
+                    .rounded(cx.theme().radius_lg)
+                    .bg(panel_background())
+                    .when(self.viewer.controller.is_held(), |bar| {
+                        bar.cursor_grabbing()
+                    })
+                    .child(
+                        div()
+                            .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+                                // "Show more" claims its own press.
+                                if !window.default_prevented() {
+                                    press(event.position, event.click_count, window, cx);
+                                }
+                            })
+                            .child(caption),
+                    )
+                    .child(transport);
+                (None, Some(bar.into_any_element()))
+            }
+            (_, caption, transport) => (caption, transport),
+        };
         let rows = [
             ("media-viewer-caption-row", caption),
             ("media-viewer-error-row", error),

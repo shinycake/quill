@@ -258,6 +258,7 @@ impl QuillApp {
         text: AnyElement,
         layout: CaptionLayout,
         viewport_h: f32,
+        docked: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let key = (item.chat_id.0, item.message_id.0);
@@ -305,13 +306,19 @@ impl QuillApp {
                     })),
             )
         });
+        // Docked, the bar it sits in draws the plate.
         div()
             .id(("media-viewer-caption", row_id))
-            .w(px(layout.plate_w))
+            .when(docked, |plate| plate.w_full())
+            .when(!docked, |plate| {
+                plate
+                    .w(px(layout.plate_w))
+                    .rounded(cx.theme().radius_lg)
+                    .bg(crate::ui::video_player::controls::panel_background())
+            })
             .max_w_full()
             .px(rems(PLATE_PAD_X_REM))
             .py(rems(PLATE_PAD_Y_REM))
-            .bg(gpui_kit::black().opacity(0.55))
             .text_color(gpui_kit::white())
             .child(text_box)
             .children(toggle)

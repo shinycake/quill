@@ -40,16 +40,22 @@ window of its own, maximized to the screen's available area
   background (not a button, the seek bar or the volume slider) picks it up
   and it follows the pointer inside the safe area, 8 pt in from its edges.
   Within 24 pt of home it snaps onto it, and a double-click on the panel
-  puts it home from anywhere. While held, a dashed outline marks home. The
-  spot lives with the account's viewer state, so it stays moved from one
-  video to the next, and is kept inside the window as the window resizes.
+  puts it home from anywhere. The spot lives with the account's viewer
+  state, so it stays moved from one video to the next, and is kept inside
+  the window as the window resizes.
+- **The caption goes with it.** Away from home, the caption leaves the
+  bottom bar and sits on top of the controller in one bar of the
+  controller's width (one translucent plate; a press on either part drags
+  it), and the picture takes the caption's old room. Back home, it returns
+  under the picture. The caption plate is translucent and rounded like the
+  controller's in both places.
 
 ## Verified
 
 Screenshot demos (`ready-video-controls`) with
 `QUILL_DEMO_SCREEN_COVER=top,right,bottom,left` standing in for a Dock,
 and the new `dc:x,y` double-click step: before/after, a 70 pt bottom Dock,
-a drag mid-flight with the home outline, release, snap back, double-click
+a drag mid-flight, release with the caption docked, snap back, double-click
 home, and a seek-bar drag that does not move the panel. Unit tests cover
 bottom, left and right docks, an auto-hidden Dock, Windows' invisible
 border, a second screen, a window hanging off the screen, and the drag.

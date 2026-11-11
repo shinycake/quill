@@ -243,6 +243,7 @@ pub(crate) struct VideoController {
     actions: ControllerActions,
     press: Option<PanelPress>,
     grabbed: bool,
+    bare: bool,
 }
 
 impl VideoController {
@@ -268,6 +269,7 @@ impl VideoController {
             actions,
             press: None,
             grabbed: false,
+            bare: false,
         }
     }
 
@@ -299,6 +301,13 @@ impl VideoController {
     /// The quality picker, for clips with alternative qualities.
     pub(crate) fn quality(mut self, quality: Option<AnyElement>) -> Self {
         self.quality = quality;
+        self
+    }
+
+    /// No plate of its own: it sits in a bar that draws one (the viewer's
+    /// caption and controller, docked together).
+    pub(crate) fn bare(mut self, bare: bool) -> Self {
+        self.bare = bare;
         self
     }
 
@@ -504,8 +513,9 @@ impl RenderOnce for VideoController {
             .w(PANEL_WIDTH)
             .max_w_full()
             .h(PANEL_HEIGHT)
-            .rounded(cx.theme().radius_lg)
-            .bg(panel_background())
+            .when(!self.bare, |panel| {
+                panel.rounded(cx.theme().radius_lg).bg(panel_background())
+            })
             .when(self.grabbed, |panel| panel.cursor_grabbing())
             .when_some(self.press, |panel, press| {
                 // Buttons claim their presses with `prevent_default`.

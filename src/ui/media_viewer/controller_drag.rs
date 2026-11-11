@@ -2,7 +2,7 @@
 //! (`quill::media_viewer::ControllerPlace`): a press on the panel's
 //! background picks it up, it follows the pointer inside the safe area,
 //! snaps back onto its home spot close to it, and a double-click puts it
-//! home from anywhere. While it is held, an outline marks home.
+//! home from anywhere. Away from home the caption rides on top of it.
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
@@ -49,8 +49,8 @@ impl QuillApp {
         self.viewer.controller.offset(frame.home, frame.area)
     }
 
-    /// While the controller is held: the outline of its home spot and the
-    /// window-wide listeners that move and drop it. The pointer leaves the
+    /// While the controller is held: the window-wide listeners that move
+    /// and drop it. The pointer leaves the
     /// panel during a fast drag and the release can land anywhere, so the
     /// listeners are the window's, not the panel's.
     pub(super) fn viewer_controller_drag_layer(
@@ -61,7 +61,6 @@ impl QuillApp {
         if !self.viewer.controller.is_held() {
             return None;
         }
-        let moved = self.viewer.controller.spot() != ControllerSpot::Home;
         let view = cx.entity().downgrade();
         let listeners = canvas(
             |_, _, _| {},
@@ -99,26 +98,11 @@ impl QuillApp {
         )
         .absolute()
         .size_0();
-        let home = frame.home;
-        let outline = moved.then(|| {
-            div()
-                .absolute()
-                .left(px(home.x))
-                .top(px(home.y))
-                .w(px(home.w))
-                .h(px(home.h))
-                .rounded(cx.theme().radius_lg)
-                .border_1()
-                .border_dashed()
-                .border_color(gpui_kit::white().opacity(0.45))
-                .bg(gpui_kit::white().opacity(0.06))
-        });
         Some(
             div()
                 .absolute()
                 .inset_0()
                 .child(listeners)
-                .children(outline)
                 .into_any_element(),
         )
     }
