@@ -58,6 +58,12 @@ register_demos![
         "screenshot demo — empty bot chat with the bot's description"
     )
     .setup(QuillApp::demo_bot_about),
+    // The same card with a description clip in place of the photo.
+    DemoSpec::chats(
+        "ready-bot-about-clip",
+        "screenshot demo — empty bot chat with the bot's description clip"
+    )
+    .setup(QuillApp::demo_bot_about_clip),
 ];
 
 impl QuillApp {
@@ -97,6 +103,24 @@ impl QuillApp {
     }
 
     fn demo_bot_about(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        let path = crate::ui::demo::demo_media_allowlist().join("showcase/p1.jpg");
+        let file = crate::ui::demo::demo_file_json(9401, &path.to_string_lossy(), true);
+        self.seed_bot_about(&format!(
+            r#""photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"x","photo":{file},"width":1100,"height":739,"progressive_sizes":[]}}]}}"#
+        ));
+    }
+
+    fn demo_bot_about_clip(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        let path = crate::ui::demo::demo_media_allowlist().join("demo-gif-loop-wide.mp4");
+        let file = crate::ui::demo::demo_file_json(9402, &path.to_string_lossy(), true);
+        self.seed_bot_about(&format!(
+            r#""animation":{{"@type":"animation","duration":2,"width":192,"height":108,"file_name":"intro.mp4","mime_type":"video/mp4","has_stickers":false,"minithumbnail":null,"thumbnail":null,"animation":{file}}}"#
+        ));
+    }
+
+    /// The empty bot chat with full info whose `botInfo` carries `media`
+    /// (a `"photo"` or `"animation"` field).
+    fn seed_bot_about(&mut self, media: &str) {
         let clear = r#"{"@type":"updateDeleteMessages","chat_id":21,"message_ids":[301,302],"is_permanent":true,"from_cache":false}"#;
         let Some(session) = self.demo_session.as_mut() else {
             return;
@@ -110,10 +134,8 @@ impl QuillApp {
             quill::state::RequestPurpose::GetUserFullInfo,
             Some(quill::ids::ChatId(21)),
         );
-        let path = crate::ui::demo::demo_media_allowlist().join("showcase/p1.jpg");
-        let file = crate::ui::demo::demo_file_json(9401, &path.to_string_lossy(), true);
         let full_info = format!(
-            r#"{{"@type":"userFullInfo","@extra":"{}","bot_info":{{"@type":"botInfo","short_description":"A demo bot","description":"Demo Bot answers questions and shows how the info panel looks. It understands /start, /help and /ping.","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"x","photo":{file},"width":1100,"height":739,"progressive_sizes":[]}}]}},"commands":[]}}}}"#,
+            r#"{{"@type":"userFullInfo","@extra":"{}","bot_info":{{"@type":"botInfo","short_description":"A demo bot","description":"Demo Bot answers questions and shows how the info panel looks. It understands /start, /help and /ping.",{media},"commands":[]}}}}"#,
             extra.0,
         );
         for json in [clear, full_info.as_str()] {

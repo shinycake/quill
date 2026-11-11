@@ -559,6 +559,32 @@ fn bot_info_keeps_its_description_photo() {
 }
 
 #[test]
+fn bot_info_keeps_its_description_animation() {
+    let file = |id: i32| {
+        format!(
+            r#"{{"@type":"file","id":{id},"size":1000,"expected_size":1000,"local":{{"path":"","can_be_downloaded":true,"is_downloading_active":false,"is_downloading_completed":false,"downloaded_size":0}},"remote":{{"id":"","unique_id":"","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":0}}}}"#
+        )
+    };
+    let json = format!(
+        r#"{{"@type":"updateUserFullInfo","user_id":21,"user_full_info":{{"@type":"userFullInfo","bot_info":{{"@type":"botInfo","short_description":"","description":"Hi","animation":{{"@type":"animation","duration":3,"width":640,"height":360,"file_name":"intro.mp4","mime_type":"video/mp4","has_stickers":false,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":320,"height":180,"file":{}}},"animation":{}}},"commands":[]}}}}}}"#,
+        file(72),
+        file(73)
+    );
+    let env = parse_envelope(&json).unwrap();
+    match env.payload {
+        EnvelopePayload::Users(UsersPayload::UpdateUserFullInfo { bot_info, .. }) => {
+            let info = bot_info.expect("bot_info");
+            let animation = info.description_animation.expect("animation");
+            assert_eq!((animation.width, animation.height), (640, 360));
+            assert_eq!(animation.file_id.0, 73);
+            assert_eq!(info.description_animation_files.len(), 2);
+            assert!(info.description_photo.is_empty());
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
 fn draft_message_text_and_same_chat_reply() {
     let json = r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0,"draft_message":{"@type":"draftMessage","reply_to":{"@type":"inputMessageReplyToMessage","message_id":101,"quote":null,"checklist_task_id":0,"poll_option_id":""},"date":1700000000,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"meet at 6","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null}}}"#;
     let env = parse_envelope(json).unwrap();

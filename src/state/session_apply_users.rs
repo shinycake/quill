@@ -65,7 +65,9 @@ impl Session {
         let mut info = bot_info?;
         info.description_entities =
             crate::text::about::bot_description_entities(info.description.trim());
-        for file in std::mem::take(&mut info.description_photo_files) {
+        let mut files = std::mem::take(&mut info.description_photo_files);
+        files.append(&mut info.description_animation_files);
+        for file in files {
             self.upsert_file(file, false);
         }
         Some(info)
