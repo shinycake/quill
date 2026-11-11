@@ -190,3 +190,44 @@ fn the_add_contact_box_closes_on_the_answer_and_shows_a_refusal(cx: &mut TestApp
         assert!(app.dialogs.add_contact_dialog.is_none(), "added: closed");
     });
 }
+
+#[gpui_kit::test]
+fn a_save_after_the_folder_changed_goes_onto_the_fresh_folder(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        // The form was filled from a folder with chats 1 and 2; the person
+        // adds chat 5 and presses Save, which finds the folder changed.
+        let base = quill::telegram::envelope::ChatFolderSpec {
+            name: "Work".into(),
+            included_chat_ids: vec![1, 2],
+            ..Default::default()
+        };
+        let mut dialog = FolderEditorDialog::new(window, cx, Some(5));
+        dialog.prefill_from_spec(&base, window, cx);
+        dialog.editor.toggle_included(5);
+        dialog.load = FolderLoad::Merging;
+        app.folders.editor = Some(dialog);
+        app.maybe_prefill_folder_editor(window, cx);
+        assert!(
+            app.folders.editor.is_some(),
+            "still waiting for the fresh folder"
+        );
+        // Elsewhere chat 1 was pinned and chat 7 added.
+        let request = sent(app, RequestPurpose::GetChatFolder, Some(5));
+        answer(
+            app,
+            request,
+            r#""@type":"chatFolder","name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"Work","entities":[]}},"icon":null,"color_id":-1,"is_shareable":false,"pinned_chat_ids":[1],"included_chat_ids":[2,7],"excluded_chat_ids":[],"exclude_muted":false,"exclude_read":false,"exclude_archived":false,"include_contacts":false,"include_non_contacts":false,"include_bots":false,"include_groups":false,"include_channels":false"#,
+        );
+        app.maybe_prefill_folder_editor(window, cx);
+        assert!(app.folders.editor.is_none(), "saved");
+        let saved = app
+            .demo_session
+            .as_ref()
+            .and_then(|s| s.chat_list.folder_specs.get(&5))
+            .cloned()
+            .expect("the saved spec");
+        assert_eq!(saved.pinned_chat_ids, vec![1], "the new pin stays");
+        assert_eq!(saved.included_chat_ids, vec![2, 5, 7], "7 stays, 5 added");
+    });
+}

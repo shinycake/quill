@@ -184,7 +184,15 @@ impl QuillApp {
                 let error = self
                     .session()
                     .and_then(|s| s.chat_list.folder_spec_errors.get(&folder_id).cloned());
-                let Some(error) = error else { return };
+                let Some(error) = error else {
+                    // The fetched copy went stale again before it was used
+                    // (another update landed): ask once more, so the form
+                    // is never left waiting with nothing in flight.
+                    if let Some(live) = self.live.as_mut() {
+                        let _ = live.driver.fetch_chat_folder(folder_id);
+                    }
+                    return;
+                };
                 if let Some(dialog) = self.folders.editor.as_mut() {
                     dialog.load = FolderLoad::Ready;
                     dialog.error = Some(error);
