@@ -112,10 +112,22 @@ impl Session {
     }
 
     /// `updateSavedMessagesTags` / `getSavedMessagesTags`.
-    pub(crate) fn apply_saved_tags(&mut self, topic_id: i64, tags: Vec<SavedMessagesTag>) {
+    /// An answer (`request`) lands only in the fetch that waits for it; an
+    /// update (`None`) is the server's current list, whatever the fetch.
+    pub(crate) fn apply_saved_tags(
+        &mut self,
+        topic_id: i64,
+        tags: Vec<SavedMessagesTag>,
+        request: Option<RequestId>,
+    ) {
         if topic_id == 0 {
-            self.threads.saved.tags = tags;
-            self.threads.saved.tags_loaded = true;
+            let fetch = &mut self.threads.saved.tags;
+            match request {
+                Some(_) => {
+                    fetch.answered(request, tags);
+                }
+                None => fetch.succeed(tags),
+            }
         } else {
             self.threads.saved.topic_tags.insert(topic_id, tags);
         }
@@ -170,7 +182,6 @@ impl Session {
             topic_id,
             tag,
             history: TopicHistory::default(),
-            loaded: false,
             page: SavedPage::Idle,
         });
         self.view_generation.bump();
@@ -300,7 +311,6 @@ impl Session {
         }
         search.history.next_from_message_id = next_from_message_id;
         search.history.total_count = total_count.max(search.history.messages.len() as i32);
-        search.loaded = true;
         self.view_generation.bump();
     }
 
@@ -345,7 +355,7 @@ impl Session {
     /// own tags (named from the global list) or all tags.
     pub fn saved_tag_choices(&self) -> Vec<SavedMessagesTag> {
         let Some(view) = &self.threads.saved.sublist else {
-            return self.threads.saved.tags.clone();
+            return self.threads.saved.tag_list().to_vec();
         };
         self.threads
             .saved
@@ -359,7 +369,7 @@ impl Session {
                             && let Some(named) = self
                                 .threads
                                 .saved
-                                .tags
+                                .tag_list()
                                 .iter()
                                 .find(|other| other.tag == tag.tag)
                         {

@@ -225,7 +225,7 @@ impl QuillApp {
                 .session
                 .bots
                 .game_scores
-                .insert(key, quill::state::fetch::Fetch::Loading { stale: None });
+                .insert(key, quill::state::fetch::Fetch::Loading { stale: None, request: None });
             live.driver
                 .send_game_high_scores(chat_id, message_id, user_id)
         });

@@ -91,7 +91,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .settings
                 .quick_replies
                 .messages
-                .insert(shortcut_id, Fetch::Loading { stale: None });
+                .insert(shortcut_id, Fetch::Loading {
+                    stale: None,
+                    request: None,
+                });
         }
         sent.map(|_| ())
     }

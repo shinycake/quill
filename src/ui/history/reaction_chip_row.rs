@@ -180,7 +180,7 @@ pub(super) fn reaction_chip_row(
             let named = session.is_some_and(|s| {
                 s.threads
                     .saved
-                    .tags
+                    .tag_list()
                     .iter()
                     .any(|entry| entry.tag == tag_type && !entry.label.is_empty())
             });

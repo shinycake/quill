@@ -2,7 +2,7 @@
 //! sublists and tags (batch B16).
 use super::*;
 use crate::ids::{ChatId, FileId, RequestId};
-use crate::state::{OlderEnd, SavedPage, ThreadsPurpose};
+use crate::state::{OlderEnd, SavedPage, SavedTopicsLoad, ThreadsPurpose};
 use crate::state::{RequestPurpose, SAVED_PAGE, SAVED_TOPICS_PAGE};
 use crate::telegram::envelope::ReactionType;
 use crate::telegram::requests::{TOPIC_ICON_COLORS, valid_topic_icon_color};
@@ -252,7 +252,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Ask for more sublists (`loadSavedMessagesTopics`); deduped, and
     /// silent once TDLib said everything is loaded.
     pub fn load_saved_topics(&mut self) -> Sent {
-        if self.session.threads.saved.topics_exhausted
+        if self.session.threads.saved.topics_exhausted()
             || self
                 .session
                 .requests
@@ -260,10 +260,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.session.threads.saved.topics_requested = true;
-        self.send_purpose(RequestPurpose::LoadSavedMessagesTopics, None, |extra| {
+        let sent = self.send_purpose(RequestPurpose::LoadSavedMessagesTopics, None, |extra| {
             load_saved_messages_topics(extra, SAVED_TOPICS_PAGE)
-        })
+        });
+        // A page that never left waits for the connection like a failed one.
+        let saved = &mut self.session.threads.saved;
+        match &sent {
+            Ok(Some(_)) if saved.topics_load != SavedTopicsLoad::Exhausted => {
+                saved.topics_load = SavedTopicsLoad::Started;
+            }
+            Err(_) => saved.topics_load = SavedTopicsLoad::Retry,
+            _ => {}
+        }
+        sent
     }
 
     /// `getSavedMessagesTags` for all of Saved Messages (once; updates keep
@@ -273,9 +282,28 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.has_purpose(purpose) {
             return Ok(None);
         }
-        self.send_purpose(purpose, None, |extra| {
+        if topic_id != 0 {
+            return self.send_purpose(purpose, None, |extra| {
+                get_saved_messages_tags(extra, topic_id)
+            });
+        }
+        // All of Saved Messages: the list's fetch records the ask, so a
+        // send that fails lands in `Failed` (the pump waits for the
+        // connection) instead of being asked again at every pump.
+        let saved = &mut self.session.threads.saved;
+        if !saved.tags.is_idle() {
+            return Ok(None);
+        }
+        saved.tags.begin();
+        let sent = self.send_purpose(purpose, None, |extra| {
             get_saved_messages_tags(extra, topic_id)
-        })
+        });
+        let tags = &mut self.session.threads.saved.tags;
+        match &sent {
+            Ok(Some(extra)) => tags.sent(*extra),
+            _ => tags.fail_dropping_data("could not send the request"),
+        }
+        sent
     }
 
     /// Enter a sublist: reset its view, load its first page and its tags.
@@ -380,7 +408,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .threads
             .saved
             .tags
-            .iter_mut()
+            .data_mut()
+            .into_iter()
+            .flatten()
             .find(|entry| entry.tag == *tag)
         {
             entry.label = label;

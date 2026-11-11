@@ -217,7 +217,7 @@ impl Session {
         // that failed while online (FLOOD_WAIT, a server error), which no
         // reconnect follows.
         if previous != Some(chat_id) && self.is_saved_messages(chat_id) {
-            self.threads.saved.retry_when_online = false;
+            self.threads.saved.retry_after_reconnect();
         }
         // ... and any comment thread that lives elsewhere.
         let left_thread_chat = self

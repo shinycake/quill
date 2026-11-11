@@ -319,10 +319,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     call.rejoin.attempt_unsent(extra);
                 }
             }
-            OfferSend::Conference => {
-                self.session.calls.pending_conference = None;
-                self.forget_conference_crypto();
-            }
+            OfferSend::Conference => self.abandon_conference_join(),
             OfferSend::Screen => {
                 if let Some(call) = self.session.calls.group_call_mut(id) {
                     call.screen_share.cancel_start();

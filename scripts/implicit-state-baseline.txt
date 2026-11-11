@@ -3,9 +3,7 @@
 ActiveGroupCall::loaded_all_participants
 AppearancePrefs::ignore_battery_saving
 
-AwardMembers::done
-AwardMembers::loading
-AwardMembers::loading+error
+
 BackendStatus::failed
 BarFacts::bot_start_pending
 
@@ -28,17 +26,17 @@ DestRow::saved
 DragSelect::pending
 Drawn::leaving
 
+DestRow::saved
+DragSelect::pending
+Drawn::leaving
 FastShareFacts::sent
 FieldResult::finished
 FooterMeta::pending
 
-GiftValueLookup::loading
-GiftValueLookup::loading+error
-GiveawayInfoLookup::loading
-GiveawayInfoLookup::loading+error
 GiveawaySummary::finished
 
 
+GiveawaySummary::finished
 HeaderFacts::is_saved_messages
 HistoryState::load_failed
 HistoryState::loaded_complete
@@ -57,7 +55,7 @@ Lookup::pending
 MediaFacts::downloading
 MediaFacts::in_saved_messages
 MediaMenuFacts::downloading
-MediaState::disk_paused_saved_changed
+
 MiniAppWindow::closing_confirmation
 
 NewChatView::busy
@@ -82,11 +80,12 @@ ReceivedGift::is_saved
 RowForum::loaded
 RowMenuFacts::is_saved_messages
 RowState::pending
-SavedMessagesState::tags_loaded
-SavedMessagesState::topics_requested
-SavedTagSearch::loaded
 
 
+ReceivedGift::is_saved
+RowForum::loaded
+RowMenuFacts::is_saved_messages
+RowState::pending
 SettingsState::pending_attention
 
 SettingsState::pending_attention

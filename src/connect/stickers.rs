@@ -841,7 +841,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::GetSavedAnimations, None);
         match self.sender.send_json(&get_saved_animations(extra)) {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                self.session.stickers.gifs.saved.sent(extra);
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 self.session.stickers.gifs.saved_failed();

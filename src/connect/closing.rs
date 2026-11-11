@@ -16,7 +16,7 @@
 //! deadline cut off, stays "unconfirmed" for the rest of the process:
 //! [`ClosingSet::may_be_open`] keeps saying its database may be in use.
 //!
-//! On quit every client closes together under one shared deadline
+//! Dropping the set never waits. On quit every client closes together under one shared deadline
 //! ([`ClosingSet::close_all_within`], [`QUIT_CLOSE_DEADLINE`]). A deadline
 //! only stops Quill listening: with `td_json_client` a client id is never
 //! destroyed by its owner, so TDLib finishes its own close on its own
@@ -26,7 +26,6 @@ use super::*;
 use crate::ids::AccountKey;
 use crate::telegram::client::{OwnedEnvelope, ReceiveBridge};
 use crate::telegram::envelope::AuthorizationState;
-use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 /// A client still closing after this long is logged once. Not a deadline:
@@ -197,13 +196,27 @@ pub struct ClosedClient {
     pub confirmed: bool,
 }
 
+/// Where one account's close stands in the set: its client still being
+/// drained, or finished without a confirmed Closed (its database may still
+/// be closing, for the rest of the process). An account is in one stage.
+enum Slot {
+    Closing(ClosingClient),
+    Unconfirmed(AccountKey),
+}
+
+impl Slot {
+    fn key(&self) -> &AccountKey {
+        match self {
+            Self::Closing(entry) => &entry.key,
+            Self::Unconfirmed(key) => key,
+        }
+    }
+}
+
 /// Clients sent `close` and not yet finished.
 #[derive(Default)]
 pub struct ClosingSet {
-    entries: Vec<ClosingClient>,
-    /// Finished without a confirmed Closed: their databases may still be
-    /// closing, for the rest of the process.
-    unconfirmed: HashSet<AccountKey>,
+    slots: Vec<Slot>,
 }
 
 impl ClosingSet {
@@ -211,48 +224,82 @@ impl ClosingSet {
         Self::default()
     }
 
+    fn closing(&self) -> impl Iterator<Item = &ClosingClient> {
+        self.slots.iter().filter_map(|slot| match slot {
+            Slot::Closing(entry) => Some(entry),
+            Slot::Unconfirmed(_) => None,
+        })
+    }
+
+    fn closing_mut(&mut self) -> impl Iterator<Item = &mut ClosingClient> {
+        self.slots.iter_mut().filter_map(|slot| match slot {
+            Slot::Closing(entry) => Some(entry),
+            Slot::Unconfirmed(_) => None,
+        })
+    }
+
+    /// `key` finished without a confirmed Closed.
+    fn mark_unconfirmed(&mut self, key: AccountKey) {
+        if !self
+            .slots
+            .iter()
+            .any(|slot| matches!(slot, Slot::Unconfirmed(held) if *held == key))
+        {
+            self.slots.push(Slot::Unconfirmed(key));
+        }
+    }
+
     /// Send `close` to `client` and keep it until Closed. Never blocks.
     pub fn push(&mut self, key: AccountKey, mut client: Box<dyn Closable>, restart: bool) {
         client.begin_close();
-        self.entries.push(ClosingClient {
+        self.slots.push(Slot::Closing(ClosingClient {
             key,
             client,
             since: Instant::now(),
             warned: false,
             restart,
-        });
+        }));
     }
 
     /// No client is being drained.
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.closing().next().is_none()
     }
 
     pub fn len(&self) -> usize {
-        self.entries.len()
+        self.closing().count()
     }
 
     /// `key`'s client is still being drained.
     pub fn contains(&self, key: &AccountKey) -> bool {
-        self.entries.iter().any(|entry| &entry.key == key)
+        self.closing().any(|entry| &entry.key == key)
     }
 
     /// `key`'s database may still be open in TDLib: it must be neither
     /// opened nor deleted.
     pub fn may_be_open(&self, key: &AccountKey) -> bool {
-        self.contains(key) || self.unconfirmed.contains(key)
+        self.slots.iter().any(|slot| slot.key() == key)
     }
 
     /// `key` finished without a confirmed Closed: it stays
     /// [`Self::may_be_open`] until the process ends.
     pub fn unconfirmed(&self, key: &AccountKey) -> bool {
-        self.unconfirmed.contains(key)
+        self.slots
+            .iter()
+            .any(|slot| matches!(slot, Slot::Unconfirmed(held) if held == key))
     }
 
     /// Every account whose database may still be open.
     pub fn keys(&self) -> Vec<AccountKey> {
-        let mut keys: Vec<AccountKey> = self.unconfirmed.iter().cloned().collect();
-        for entry in &self.entries {
+        let mut keys: Vec<AccountKey> = self
+            .slots
+            .iter()
+            .filter_map(|slot| match slot {
+                Slot::Unconfirmed(key) => Some(key.clone()),
+                Slot::Closing(_) => None,
+            })
+            .collect();
+        for entry in self.closing() {
             if !keys.contains(&entry.key) {
                 keys.push(entry.key.clone());
             }
@@ -262,27 +309,30 @@ impl ClosingSet {
 
     /// Take over `other`'s clients and its unconfirmed accounts.
     pub fn absorb(&mut self, mut other: ClosingSet) {
-        self.entries.append(&mut other.entries);
-        self.unconfirmed
-            .extend(std::mem::take(&mut other.unconfirmed));
+        for slot in std::mem::take(&mut other.slots) {
+            match slot {
+                Slot::Closing(entry) => self.slots.push(Slot::Closing(entry)),
+                Slot::Unconfirmed(key) => self.mark_unconfirmed(key),
+            }
+        }
     }
 
     /// Nothing restarts any more (local data is about to be wiped).
     pub fn cancel_restarts(&mut self) {
-        for entry in &mut self.entries {
+        for entry in self.closing_mut() {
             entry.restart = false;
         }
     }
 
     pub fn restart_all(&mut self) {
-        for entry in &mut self.entries {
+        for entry in self.closing_mut() {
             entry.restart = true;
         }
     }
 
     /// `key` does not restart (it is being removed).
     pub fn cancel_restart(&mut self, key: &AccountKey) {
-        for entry in &mut self.entries {
+        for entry in self.closing_mut() {
             if &entry.key == key {
                 entry.restart = false;
             }
@@ -293,8 +343,11 @@ impl ClosingSet {
     /// the ones that reached Closed or can no longer reach it.
     pub fn poll(&mut self, now: Instant) -> Vec<ClosedClient> {
         let mut done = Vec::new();
-        let unconfirmed = &mut self.unconfirmed;
-        self.entries.retain_mut(|entry| {
+        for slot in std::mem::take(&mut self.slots) {
+            let Slot::Closing(mut entry) = slot else {
+                self.slots.push(slot);
+                continue;
+            };
             let confirmed = match entry.client.drain(CLOSE_DRAIN_BUDGET) {
                 CloseProgress::Closed => true,
                 CloseProgress::Lost => false,
@@ -306,27 +359,44 @@ impl ClosingSet {
                             entry.key, CLOSE_GRACE
                         );
                     }
-                    return true;
+                    self.slots.push(Slot::Closing(entry));
+                    continue;
                 }
             };
             entry.client.finish();
             if !confirmed {
-                unconfirmed.insert(entry.key.clone());
+                self.mark_unconfirmed(entry.key.clone());
             }
             done.push(ClosedClient {
                 key: entry.key.clone(),
                 restart: entry.restart,
                 confirmed,
             });
-            false
-        });
+        }
         done
+    }
+
+    /// Stop listening to every client still closing, without waiting: they
+    /// stay unconfirmed. Returns how many there were.
+    fn abandon_closing(&mut self) -> usize {
+        let mut abandoned = 0;
+        for slot in std::mem::take(&mut self.slots) {
+            match slot {
+                Slot::Closing(mut entry) => {
+                    entry.client.finish();
+                    self.mark_unconfirmed(entry.key);
+                    abandoned += 1;
+                }
+                Slot::Unconfirmed(key) => self.mark_unconfirmed(key),
+            }
+        }
+        abandoned
     }
 
     /// Quit: wait for every client together until all are Closed or
     /// `deadline` passes, then finish them all. Blocks at most until
     /// `deadline`, however many clients there are. Returns how many
-    /// finished without a confirmed Closed.
+    /// finished without a confirmed Closed. The only place the set waits.
     pub fn close_all_within(&mut self, deadline: Instant) -> usize {
         let mut unconfirmed = 0;
         loop {
@@ -336,16 +406,11 @@ impl ClosingSet {
                 .iter()
                 .filter(|closed| !closed.confirmed)
                 .count();
-            if self.entries.is_empty() {
+            if self.is_empty() {
                 return unconfirmed;
             }
             if now >= deadline {
-                for mut entry in std::mem::take(&mut self.entries) {
-                    entry.client.finish();
-                    self.unconfirmed.insert(entry.key);
-                    unconfirmed += 1;
-                }
-                return unconfirmed;
+                return unconfirmed + self.abandon_closing();
             }
             let left = deadline.saturating_duration_since(now);
             std::thread::sleep(left.min(Duration::from_millis(5)));
@@ -360,11 +425,14 @@ pub fn deadline_after(after: Duration) -> Instant {
 }
 
 impl Drop for ClosingSet {
-    /// Last resort (the quit hook normally emptied it): the same shared
-    /// deadline, never one wait per client.
+    /// Dropping never waits on the thread that drops: the quit paths call
+    /// [`ClosingSet::close_all_within`] (the one wait, under one shared
+    /// deadline). What arrived is applied, and a client still closing is
+    /// let go at once: TDLib finishes its own close on its own threads.
     fn drop(&mut self) {
-        if !self.entries.is_empty() {
-            let _ = self.close_all_within(deadline_after(QUIT_CLOSE_DEADLINE));
+        if !self.is_empty() {
+            let _ = self.poll(Instant::now());
+            let _ = self.abandon_closing();
         }
     }
 }

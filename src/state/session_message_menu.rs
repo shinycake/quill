@@ -441,7 +441,10 @@ impl Session {
             chat_id,
             message_id,
             option_id: option_id.to_string(),
-            properties: crate::state::fetch::Fetch::Loading { stale: None },
+            properties: crate::state::fetch::Fetch::Loading {
+                stale: None,
+                request: None,
+            },
         });
     }
 

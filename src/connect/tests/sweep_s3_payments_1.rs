@@ -870,3 +870,21 @@ fn a_stale_proxy_list_whose_refetch_cannot_be_sent_is_not_asked_every_tick() {
     // The dialog's Refresh is the way out.
     assert!(t.driver.fetch_proxies().is_err());
 }
+
+/// A Saved Messages tags request that never left lands in `Failed`, so the
+/// pump waits for the connection instead of asking at every pass.
+#[test]
+fn a_refused_saved_tags_send_is_not_asked_at_every_pump() {
+    let mut t = Flaky::new();
+    t.sender.refuse(&["getSavedMessagesTags"]);
+    assert!(t.driver.load_saved_tags(0).is_err());
+    assert!(t.driver.session.threads.saved.tags.error().is_some());
+    assert!(t.driver.session.threads.saved.waiting_to_retry());
+    t.sender.refuse(&[]);
+    assert_eq!(t.driver.load_saved_tags(0).unwrap(), None);
+    assert_eq!(t.sender.count("getSavedMessagesTags"), 0);
+    // Back online the failure is forgotten and the next pass asks.
+    t.driver.session.threads.saved.retry_after_reconnect();
+    assert!(t.driver.load_saved_tags(0).unwrap().is_some());
+    assert!(t.driver.session.threads.saved.tags.is_loading());
+}

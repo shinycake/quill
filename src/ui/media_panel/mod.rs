@@ -107,7 +107,7 @@ pub(super) struct PanelKey {
     session_revision: u64,
     recent_emoji: usize,
     premium: bool,
-    category: Option<usize>,
+    category: Option<quill::telegram::EmojiCategorySource>,
     unicode_only: bool,
 }
 
@@ -138,9 +138,10 @@ pub(super) struct MediaPanel {
     pub key: Option<PanelKey>,
     pub active_section: usize,
     pub hovered: Option<FileId>,
-    /// The sticker category chosen in the strip under the search field
-    /// (an index into `Session::stickers.emoji.sticker_categories`).
-    pub category: Option<usize>,
+    /// The sticker category chosen in the strip under the search field,
+    /// by what it searches: a reload of the category list cannot make it
+    /// name another one.
+    pub category: Option<quill::telegram::EmojiCategorySource>,
 }
 
 impl Default for MediaPanel {
@@ -433,7 +434,7 @@ impl QuillApp {
                 .session()
                 .map_or(0, |s| s.settings.media_prefs.recent_emoji.len()),
             premium: self.session().is_some_and(|s| s.my_is_premium()),
-            category: self.pickers.media_panel.category,
+            category: self.pickers.media_panel.category.clone(),
             unicode_only: self.group_title_emoji_active(),
         };
         self.sync_media_panel_search(&query);

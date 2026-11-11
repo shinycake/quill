@@ -186,10 +186,11 @@ impl Session {
         // Phase 6: a failed `getContacts` surfaces a retry in the
         // contacts tab instead of a stuck spinner.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetContacts) {
-            self.users_state.contacts = crate::state::fetch::Fetch::Failed {
-                error: format!("error {}", err.code),
-                stale: None,
-            };
+            self.users_state.contacts.failed(
+                pending.map(|p| p.id),
+                format!("error {}", err.code),
+                true,
+            );
         }
     }
 }

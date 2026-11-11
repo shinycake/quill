@@ -8,9 +8,8 @@ pub struct MediaState {
     pub media_library: MediaLibrary,
     /// TDLib `file.id` → latest `file` / `localFile` snapshot.
     pub files: FileMap,
-    pub disk_holds_auto_downloads: bool,
-    /// Room above the close floor while the disk is low; `None` otherwise.
-    pub disk_room: Option<u64>,
+    /// How the disk stands: a low or full one holds automatic downloads.
+    pub disk: DiskPressure,
     /// Listed downloads the low disk paused, resumed when it is healthy.
     pub disk_paused: HashSet<i32>,
     /// The search for downloads paused by the disk before this TDLib
@@ -18,25 +17,18 @@ pub struct MediaState {
     pub disk_search: DiskSearch,
     /// Downloads that search found, waiting for their resume.
     pub disk_resume_due: Vec<i32>,
-    /// `settings.data_storage.disk_paused` changed and needs saving.
-    pub disk_paused_saved_changed: bool,
+    /// The `settings.data_storage.disk_paused` last written to the
+    /// preferences; the set is saved again when it differs.
+    pub disk_paused_persisted: BTreeSet<(i64, i64)>,
     /// What was asked to download and how each request ended; the status
     /// rows show is `downloads.status(id, &files)`.
     pub downloads: DownloadIntents,
-    /// Automatic downloads of full media in the open chat (MED3), whose
-    /// progress the history draws: their `updateFile`s redraw at once
-    /// (`redraw_need`), by the chat whose window asked for them. Pruned to
-    /// the requested downloads on each pass.
-    pub open_chat_media_downloads: HashMap<i32, ChatId>,
     /// Avatar file id → number of chats showing it (chat-list photos),
     /// kept where those ids are set.
     pub(crate) avatar_file_refs: HashMap<i32, u32>,
-    /// Avatar file ids whose download state may have changed since the
-    /// driver last looked (`take_due_chat_list_photos`).
-    pub(crate) avatar_downloads_due: BTreeSet<i32>,
-    /// Re-check every avatar once (new session, any auth change: requests
-    /// were invalidated and files may have been cleared).
-    pub(crate) avatar_rescan: bool,
+    /// Avatar downloads the driver has not looked at yet
+    /// (`take_due_chat_list_photos`).
+    pub(crate) avatar_due: AvatarDue,
     /// User avatars a view looked up and found missing
     /// (`Session::user_photo_path`), downloaded at the next poll tick
     /// (`take_avatar_claims`): users are many and most are never shown.
@@ -61,6 +53,67 @@ pub struct MediaState {
     pub(crate) profile_thumbs_due: Vec<FileId>,
 }
 
+/// How much room the disk leaves for downloads.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DiskPressure {
+    #[default]
+    Healthy,
+    /// Low: automatic downloads wait. `room` is what is left above the
+    /// close floor, when the free space is known.
+    Low { room: Option<u64> },
+    /// Full: nothing more fits.
+    Full,
+}
+
+impl DiskPressure {
+    /// A low or full disk holds automatic downloads.
+    pub fn holds_auto_downloads(self) -> bool {
+        self != Self::Healthy
+    }
+
+    /// Room above the close floor while the disk is low; `None` otherwise.
+    pub fn room(self) -> Option<u64> {
+        match self {
+            Self::Healthy => None,
+            Self::Low { room } => room,
+            Self::Full => Some(0),
+        }
+    }
+
+    /// The disk is low or full with a known room.
+    pub fn is_pressed(self) -> bool {
+        self.room().is_some()
+    }
+}
+
+/// The avatar downloads to look at: every avatar once (a new session or any
+/// auth change: requests were invalidated and files may have been
+/// cleared), or those whose owner or download state changed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum AvatarDue {
+    Everything,
+    Some(BTreeSet<i32>),
+}
+
+impl AvatarDue {
+    pub(crate) fn insert(&mut self, id: i32) {
+        if let Self::Some(set) = self {
+            set.insert(id);
+        }
+    }
+
+    pub(crate) fn extend(&mut self, ids: impl IntoIterator<Item = i32>) {
+        if let Self::Some(set) = self {
+            set.extend(ids);
+        }
+    }
+
+    /// What is due, leaving nothing.
+    pub(crate) fn take(&mut self) -> Self {
+        std::mem::replace(self, Self::Some(BTreeSet::new()))
+    }
+}
+
 /// The once-per-session search for downloads an earlier TDLib instance's
 /// disk pause left. A failed search goes back to `NotAsked`, so the next
 /// healthy reading asks again.
@@ -82,17 +135,14 @@ impl MediaState {
         Self {
             media_library: MediaLibrary::default(),
             files: FileMap::default(),
-            disk_holds_auto_downloads: false,
-            disk_room: None,
+            disk: DiskPressure::Healthy,
             disk_paused: HashSet::new(),
             disk_search: DiskSearch::NotAsked,
             disk_resume_due: Vec::new(),
-            disk_paused_saved_changed: false,
+            disk_paused_persisted: BTreeSet::new(),
             downloads: DownloadIntents::default(),
-            open_chat_media_downloads: HashMap::new(),
             avatar_file_refs: HashMap::new(),
-            avatar_downloads_due: BTreeSet::new(),
-            avatar_rescan: true,
+            avatar_due: AvatarDue::Everything,
             avatar_claims: Default::default(),
             download_extras: DownloadExtras::default(),
             shared_media: SharedMediaState::default(),

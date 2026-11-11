@@ -415,10 +415,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         // A cached copy stays on screen while it reloads.
-        let chat_list = &mut self.session.chat_list;
-        if chat_list.archive_settings.data().is_none() {
-            chat_list.archive_settings.begin();
-        }
+        self.session.chat_list.archive_settings.begin();
+        self.session.chat_list.archive_settings.sent(extra);
         Ok(Some(extra))
     }
 

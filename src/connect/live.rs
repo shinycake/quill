@@ -266,6 +266,9 @@ fn open_prepared_client(
     // way (seeded from `getAutoDownloadSettingsPresets` on first open
     // when no file exists).
     session.settings.data_storage = load_data_storage_prefs(&prepared.paths);
+    // What the file holds is what was saved: the first pause change is
+    // compared with it, not with an empty set.
+    session.media.disk_paused_persisted = session.settings.data_storage.disk_paused.clone();
     // `parity:data-proxy-web`: web proxy carriers run in the web view
     // helper next to Quill's executable, with this account's web view
     // files under its own folder.

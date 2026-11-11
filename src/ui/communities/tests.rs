@@ -23,7 +23,13 @@ fn a_ban_waits_for_the_member_chats_then_warns_only_about_owned_ones() {
         BanStep::Cancel,
         "no ask in flight and no answer: the wait ends"
     );
-    assert_eq!(ban_step(&Fetch::Loading { stale: None }), BanStep::Wait);
+    assert_eq!(
+        ban_step(&Fetch::Loading {
+            stale: None,
+            request: None
+        }),
+        BanStep::Wait
+    );
     assert_eq!(ban_step(&Fetch::Ready(member_chats(&[]))), BanStep::BanNow);
     assert_eq!(
         ban_step(&Fetch::Ready(member_chats(&[7, 8]))),

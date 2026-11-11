@@ -173,7 +173,7 @@ impl QuillApp {
         let saved = self.session().map(|s| &s.threads.saved);
         let status = saved_chats_status(
             saved.map_or(0, |saved| saved.topic_count),
-            saved.is_some_and(|saved| saved.topics_exhausted),
+            saved.is_some_and(|saved| saved.topics_exhausted()),
         );
         div()
             .flex()

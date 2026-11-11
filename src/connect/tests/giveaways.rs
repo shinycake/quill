@@ -90,7 +90,7 @@ fn the_info_box_asks_tdlib_and_keeps_the_answer() {
             .info
             .as_ref()
             .unwrap()
-            .loading
+            .is_loading()
     );
     feed(
         &mut driver,
@@ -100,9 +100,9 @@ fn the_info_box_asks_tdlib_and_keeps_the_answer() {
             "status":{"@type":"giveawayParticipantStatusParticipating"},"is_ended":false}),
     );
     let lookup = driver.session.payments.giveaway.info.as_ref().unwrap();
-    assert!(!lookup.loading);
+    assert!(!lookup.is_loading());
     assert!(matches!(
-        lookup.info,
+        lookup.info(),
         Some(GiveawayInfoData::Ongoing { .. })
     ));
 
@@ -114,7 +114,7 @@ fn the_info_box_asks_tdlib_and_keeps_the_answer() {
         json!({"@type":"error","@extra":extra.as_extra(),"code":400,"message":"MESSAGE_ID_INVALID"}),
     );
     let lookup = driver.session.payments.giveaway.info.as_ref().unwrap();
-    assert!(!lookup.loading && lookup.info.is_none() && lookup.error.is_some());
+    assert!(!lookup.is_loading() && lookup.info().is_none() && lookup.error().is_some());
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -141,10 +141,10 @@ fn the_info_box_takes_only_its_own_answer() {
     );
     let lookup = driver.session.payments.giveaway.info.as_ref().unwrap();
     assert_eq!(lookup.message_id, 56);
-    assert!(lookup.loading && lookup.info.is_none() && lookup.error.is_none());
+    assert!(lookup.is_loading() && lookup.info().is_none() && lookup.error().is_none());
     feed(&mut driver, &seq, &sink, ongoing(&b));
     let lookup = driver.session.payments.giveaway.info.as_ref().unwrap();
-    assert!(!lookup.loading && lookup.info.is_some());
+    assert!(!lookup.is_loading() && lookup.info().is_some());
     std::fs::remove_dir_all(dir).unwrap();
 }
 

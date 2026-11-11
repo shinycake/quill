@@ -39,6 +39,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             return Err(error);
         }
+        if search {
+            self.session.stickers.gifs.search_sent(extra);
+        }
         Ok(Some(extra))
     }
 

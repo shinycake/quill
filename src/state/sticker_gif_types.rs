@@ -317,7 +317,7 @@ impl GifPanel {
         match &self.saved {
             Fetch::Idle => false,
             Fetch::Ready(()) => true,
-            Fetch::Loading { stale } | Fetch::Failed { stale, .. } => stale.is_some(),
+            Fetch::Loading { stale, .. } | Fetch::Failed { stale, .. } => stale.is_some(),
         }
     }
 
@@ -400,7 +400,10 @@ impl GifPanel {
     pub fn saved_forgotten(&mut self) {
         self.saved = match std::mem::take(&mut self.saved) {
             Fetch::Idle | Fetch::Ready(()) => Fetch::Idle,
-            Fetch::Loading { .. } => Fetch::Loading { stale: None },
+            Fetch::Loading { request, .. } => Fetch::Loading {
+                stale: None,
+                request,
+            },
             Fetch::Failed { error, .. } => Fetch::Failed { error, stale: None },
         };
     }
@@ -410,7 +413,10 @@ impl GifPanel {
     pub fn search_begun(&mut self, query: String) {
         self.list = GifList::Search(GifSearch {
             query,
-            fetch: Fetch::Loading { stale: None },
+            fetch: Fetch::Loading {
+                stale: None,
+                request: None,
+            },
             request: None,
         });
     }

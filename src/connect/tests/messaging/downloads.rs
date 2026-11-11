@@ -474,7 +474,7 @@ fn a_low_disk_pauses_only_the_listed_downloads_that_would_not_fit() {
     driver
         .note_disk(DiskState::Low, Some(CLOSE + 500 * MIB), &FLOORS)
         .unwrap();
-    assert!(driver.session.media.disk_holds_auto_downloads);
+    assert!(driver.session.media.disk.holds_auto_downloads());
     let sent = recorder.snapshot();
     assert_eq!(sent.len(), base + 1, "the 10 MiB file fits: {sent:?}");
     let pause: Value = serde_json::from_str(&sent[base]).unwrap();
@@ -492,7 +492,7 @@ fn a_low_disk_pauses_only_the_listed_downloads_that_would_not_fit() {
     driver
         .note_disk(DiskState::Healthy, Some(CLOSE + 900 * MIB), &FLOORS)
         .unwrap();
-    assert!(!driver.session.media.disk_holds_auto_downloads);
+    assert!(!driver.session.media.disk.holds_auto_downloads());
     assert!(driver.download_fits_disk(FileId(51)));
     let sent = recorder.snapshot();
     assert_eq!(
@@ -918,7 +918,7 @@ fn a_pause_saved_while_the_saved_pause_search_runs_is_kept() {
 fn a_saved_pause_found_on_a_low_disk_waits_for_a_healthy_one() {
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
     let mut session = Session::new(AccountKey::primary(), sink);
-    session.media.disk_room = Some(1);
+    session.media.disk = crate::state::DiskPressure::Low { room: Some(1) };
     session.settings.data_storage.disk_paused.insert((7, 99));
     session.media.disk_search = asked_search(&[(7, 99)]);
     session.apply_disk_paused_found(SEARCH_REQUEST, vec![paused_found(77, 99)]);

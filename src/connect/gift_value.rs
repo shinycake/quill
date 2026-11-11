@@ -3,7 +3,9 @@
 //! `getUpgradedGiftValueInfo`.
 use super::*;
 use crate::ids::RequestId;
-use crate::premium_hub::gift_value::{GiftValueLookup, get_upgraded_gift_value_info};
+use crate::premium_hub::gift_value::{
+    GiftValueLookup, GiftValueStage, get_upgraded_gift_value_info,
+};
 use crate::state::RequestPurpose;
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -22,28 +24,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if let Some(current) = self.session.payments.hub.gift_value.as_mut()
             && current.name == lookup.name
+            && (current.reopen() || current.is_loading())
         {
-            if current.info.is_some() {
-                current.open = true;
-                return Ok(None);
-            }
-            if current.loading {
-                return Ok(None);
-            }
+            return Ok(None);
         }
         let extra = self.session.request(RequestPurpose::GetGiftValueInfo, None);
         let json = get_upgraded_gift_value_info(extra, &lookup.name);
         self.session.payments.hub.gift_value = Some(GiftValueLookup {
-            request: extra.0,
-            loading: true,
+            stage: GiftValueStage::Loading(extra.0),
             ..lookup
         });
         if let Err(err) = self.send_json_request(extra, &json) {
             if let Some(current) = self.session.payments.hub.gift_value.as_mut() {
-                current.loading = false;
                 // The request never left (not connected): say so plainly.
-                current.error =
-                    Some(crate::lang::tr(crate::lang::keys::Q_GIFT_VALUE_NOT_SENT).to_string());
+                current.fail(
+                    extra.0,
+                    crate::lang::tr(crate::lang::keys::Q_GIFT_VALUE_NOT_SENT).to_string(),
+                );
             }
             return Err(err);
         }

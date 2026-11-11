@@ -13,24 +13,63 @@ pub struct GiveawayInfoLookup {
     pub chat_id: i64,
     pub message_id: i64,
     pub summary: GiveawaySummary,
-    /// `None` while loading or after a failed lookup.
-    pub info: Option<GiveawayInfoData>,
-    pub loading: bool,
-    pub error: Option<String>,
+    pub stage: GiveawayInfoStage,
+}
+
+/// Where one giveaway lookup stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GiveawayInfoStage {
     /// The `getGiveawayInfo` this box waits for: another box's answer (one
     /// closed, then another giveaway opened) settles nothing here.
-    pub request: RequestId,
+    Loading(RequestId),
+    Ready(GiveawayInfoData),
+    /// The lookup failed, with the line the box shows.
+    Failed(String),
 }
 
 impl GiveawayInfoLookup {
-    /// `pending` is this box's own lookup: settle it.
-    fn take_answer(&mut self, pending: Option<&PendingRequest>) -> bool {
-        let ours = self.loading
-            && pending.is_some_and(|p| {
-                p.purpose == RequestPurpose::GetGiveawayInfo && p.id == self.request
-            });
+    /// A lookup waiting for `request`.
+    pub fn new(
+        chat_id: i64,
+        message_id: i64,
+        summary: GiveawaySummary,
+        request: RequestId,
+    ) -> Self {
+        Self {
+            chat_id,
+            message_id,
+            summary,
+            stage: GiveawayInfoStage::Loading(request),
+        }
+    }
+
+    pub fn is_loading(&self) -> bool {
+        matches!(self.stage, GiveawayInfoStage::Loading(_))
+    }
+
+    /// The answer, once it came.
+    pub fn info(&self) -> Option<&GiveawayInfoData> {
+        match &self.stage {
+            GiveawayInfoStage::Ready(info) => Some(info),
+            _ => None,
+        }
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        match &self.stage {
+            GiveawayInfoStage::Failed(reason) => Some(reason),
+            _ => None,
+        }
+    }
+
+    /// `pending` is this box's own lookup: settle it with `next`.
+    fn settle(&mut self, pending: Option<&PendingRequest>, next: GiveawayInfoStage) -> bool {
+        let ours = matches!(self.stage, GiveawayInfoStage::Loading(request)
+        if pending.is_some_and(|p| {
+            p.purpose == RequestPurpose::GetGiveawayInfo && p.id == request
+        }));
         if ours {
-            self.loading = false;
+            self.stage = next;
         }
         ours
     }
@@ -175,11 +214,8 @@ impl Session {
         info: GiveawayInfoData,
         pending: Option<&PendingRequest>,
     ) {
-        if let Some(lookup) = self.payments.giveaway.info.as_mut()
-            && lookup.take_answer(pending)
-        {
-            lookup.error = None;
-            lookup.info = Some(info);
+        if let Some(lookup) = self.payments.giveaway.info.as_mut() {
+            lookup.settle(pending, GiveawayInfoStage::Ready(info));
         }
     }
 
@@ -235,11 +271,13 @@ impl Session {
         let state = &mut self.payments.giveaway;
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::GetGiveawayInfo) => {
-                if let Some(lookup) = state.info.as_mut()
-                    && lookup.take_answer(pending)
-                {
-                    lookup.info = None;
-                    lookup.error = Some("This giveaway is not available any more.".into());
+                if let Some(lookup) = state.info.as_mut() {
+                    lookup.settle(
+                        pending,
+                        GiveawayInfoStage::Failed(
+                            "This giveaway is not available any more.".into(),
+                        ),
+                    );
                 }
             }
             Some(RequestPurpose::GetPremiumGiveawayOptions) => {

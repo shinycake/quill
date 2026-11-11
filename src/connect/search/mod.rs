@@ -527,7 +527,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// Open a chat from search via `addRecentlyFoundChat` then `openChat`.
-    /// Flushes the leaving composer's draft before `select_chat` drops `pending_draft`.
+    /// Flushes the leaving composer's draft before `select_chat` drops the waiting save.
     pub fn select_search_chat(
         &mut self,
         chat_id: ChatId,

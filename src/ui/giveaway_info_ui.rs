@@ -90,7 +90,7 @@ pub(super) fn about_for(
     session: Option<&Session>,
     lookup: &GiveawayInfoLookup,
 ) -> Option<AboutText> {
-    let info = lookup.info.as_ref()?;
+    let info = lookup.info()?;
     let boosted = lookup.summary.boosted_chat_id;
     let group = session
         .and_then(|s| s.chats.get(&boosted))
@@ -163,7 +163,7 @@ impl QuillApp {
 
     fn giveaway_info_body(session: Option<&Session>, lookup: &GiveawayInfoLookup) -> AnyElement {
         let mut body = div().flex().flex_col().gap_2();
-        if lookup.loading {
+        if lookup.is_loading() {
             return body
                 .child(
                     div()
@@ -175,8 +175,8 @@ impl QuillApp {
         }
         let Some(text) = about_for(session, lookup) else {
             let reason = lookup
-                .error
-                .clone()
+                .error()
+                .map(str::to_string)
                 .unwrap_or_else(|| tr(keys::Q_MONEY_THIS_GIVEAWAY_IS_NOT_AVAILABLE).into());
             return body
                 .child(div().id("giveaway-info-error").text_sm().child(reason))
@@ -247,7 +247,7 @@ impl QuillApp {
             };
             let title = about_for(session, &lookup)
                 .map_or(tr(keys::Q_MONEY_ABOUT_THIS_GIVEAWAY), |t| t.title);
-            let prize_code = match &lookup.info {
+            let prize_code = match lookup.info() {
                 Some(GiveawayInfoData::Completed { gift_code, .. }) if !gift_code.0.is_empty() => {
                     Some(gift_code.0.clone())
                 }

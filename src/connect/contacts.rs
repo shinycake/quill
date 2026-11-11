@@ -26,18 +26,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.session.users_state.contacts = crate::state::fetch::Fetch::Loading { stale: None };
+        self.session.users_state.contacts.begin();
         let extra = self.session.request(RequestPurpose::GetContacts, None);
         if let Err(err) = self.sender.send_json(&get_contacts(extra)) {
             self.session.requests.take(extra);
             // Nothing is in flight: the tab shows the error and its Retry,
             // not "Loading contacts...".
-            self.session.users_state.contacts = crate::state::fetch::Fetch::Failed {
-                error: "could not send getContacts".to_string(),
-                stale: None,
-            };
+            self.session
+                .users_state
+                .contacts
+                .fail_dropping_data("could not send the request");
             return Err(err);
         }
+        self.session.users_state.contacts.sent(extra);
         Ok(Some(extra))
     }
 
@@ -46,13 +47,18 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// failed waits for Retry; a send that fails ends the loading with
     /// Retry instead of leaving "Loading contacts..." up.
     pub fn refetch_invalidated_contacts(&mut self) {
-        // Only a list a contact change dropped (`Idle`) is asked again; a
-        // failed one waits for Retry.
         if !self.session.users_state.contacts.is_idle() {
             return;
         }
-        // `fetch_contacts` ends its own failed send in `Failed`.
-        let _ = self.fetch_contacts();
+        // A fetch refused before it began (the chats path is not active)
+        // leaves the list idle: it ends in the error line and its Retry
+        // too, not in a tab that stays on "Loading contacts...".
+        if self.fetch_contacts().is_err() && self.session.users_state.contacts.is_idle() {
+            self.session
+                .users_state
+                .contacts
+                .fail_dropping_data("could not send the request");
+        }
     }
 
     /// Phase 6: user-scoped `getUserFullInfo` for the user info panel

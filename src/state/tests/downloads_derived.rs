@@ -329,3 +329,33 @@ fn a_profile_box_saves_on_the_answer_not_on_the_request_leaving_flight() {
     session.requests.take(dropped);
     assert_eq!(saves(&mut session, dropped), SaveOutcome::Unknown);
 }
+
+#[test]
+fn a_pause_is_a_stage_of_the_request_and_the_chat_that_asked_is_its_origin() {
+    use crate::ids::ChatId;
+    let mut d = DownloadIntents::default();
+    d.begin(1, DownloadOrigin::User);
+    d.set_paused(1, true);
+    assert!(d.is_paused(1) && d.is_requested(1) && d.is_user(1));
+    assert_eq!(d.requested_count(), 1);
+    // Asking again keeps the pause of the same origin; a cancel ends it.
+    d.begin(1, DownloadOrigin::User);
+    assert!(d.is_paused(1));
+    d.set_paused(1, false);
+    assert!(!d.is_paused(1) && d.is_requested(1));
+    d.set_paused(1, true);
+    d.cancel(1);
+    assert!(!d.is_requested(1) && !d.is_paused(1));
+    assert_eq!(d.requested_count(), 0);
+
+    // An automatic download takes the chat that asked; another origin keeps
+    // its own, and the chat goes with the request.
+    d.begin(2, DownloadOrigin::Auto);
+    d.note_open_chat(2, ChatId(7));
+    assert_eq!(d.asked_by_chat(2), Some(ChatId(7)));
+    d.begin(3, DownloadOrigin::User);
+    d.note_open_chat(3, ChatId(7));
+    assert_eq!(d.asked_by_chat(3), None);
+    d.settle(2);
+    assert_eq!(d.asked_by_chat(2), None);
+}

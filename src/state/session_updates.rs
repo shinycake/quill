@@ -7,7 +7,7 @@ impl Session {
             self.requests.invalidate_auth();
             // Download requests were dropped and files may be cleared
             // below: every avatar gets one fresh look.
-            self.media.avatar_rescan = true;
+            self.media.avatar_due = AvatarDue::Everything;
         }
         if matches!(
             state,

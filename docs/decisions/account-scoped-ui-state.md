@@ -7270,6 +7270,130 @@ Tests: `an_older_account_request_does_not_settle_a_newer_one`,
 existing ones updated to the new shapes (similar bots now assert that the
 driver, not the UI, marks Loading).
 
+### Sweep fixes (is-03)
+
+Implicit-state entries: each struct's stages (bools, `Option`s used as flags,
+a side list beside a stage) became one value. Baseline lines of the converted
+fields are dropped (220 to 159); three more (`CraftSession::candidates_*`,
+`GifPanel::*`, `GramsHub::*`) went with their structs.
+
+- **Paged lists: `PageStage`** (`src/state/page_stage.rs`). `Idle`,
+  `Loading { request, more }`, `Ready`, `Failed(line)`. The request sits in
+  the stage, so only its own answer or failure acts (a changed filter or tab
+  drops the older page). The resale search (02-067), the Grams history
+  (02-072) and the craft box's "your gifts" list use it, replacing
+  `loading`/`loaded`/`error`/`request_id` kept side by side. A send that never
+  left ends in `Failed`, which the list draws. `loaded()` is true for
+  `Failed`, so a guard that means "nothing to ask" reads `is_ready()`: the
+  Grams tab ask (`set_grams_filter`) went through `loaded()` and sent nothing
+  when the same tab was tapped again after a failure; it asks again now. The
+  craft box's "your gifts" list draws its error with a Retry
+  (`craft-own-retry`) and `preload_craft_lists` asks again from `Failed`
+  (opening the box offline, then reconnecting, no longer leaves it empty).
+  The gifts list (02-064) is a `PageStage` too (`gifts_page`), with the
+  change's refusal in `GiftMutation::Failed`; `gifts_error()` reads both.
+- **`Fetch<T>` and small stage enums.** Archive settings (02-022), contacts
+  (02-029, the invalidation is `Idle`), saved tags and the Grams balance probe
+  are `Fetch`. The saved sublist list is `SavedTopicsLoad` (`Idle`, `Started`,
+  `Retry`, `Exhausted`); the reconnect path calls one
+  `retry_after_reconnect` (05-172, 05-209, 02-059). `SavedTagSearch::loaded`
+  was written and never read, so it is gone (05-210). The award members list is
+  `MembersStage` (03-057, 02-070, 10-028); the gift value lookup is
+  `GiftValueStage { Idle, Loading(id), Failed, Ready { info, open } }`
+  (02-068, 04-044, 10-023; offline, where it cannot be asked, it goes to
+  `Failed` instead of staying on `Loading(0)`); the giveaway info lookup
+  carries its request in `GiveawayInfoStage` (10-021, 05-116 for the
+  lookup). The emoji pack change is `SetMutation { Idle, Changing { request,
+  .. }, Failed }` (02-055): only the answer of its own request settles it, a
+  new change or a new box replaces a failure (`started`, `for_new_box`), and
+  the two hand resets are gone. GIFs are `SavedGifs` and `GifSearch`
+  (02-060), both with the request they wait for in the stage: an older
+  search's page or error, or a list answered after it was dropped, changes
+  nothing.
+- **`Fetch` carries its request.** `Fetch::Loading { stale, request }` with
+  `sent`, `answered` and `failed`: contacts (02-029), archive settings
+  (02-022) and the Saved Messages tags take the answer of the request that
+  asked and drop any other (a contacts answer that lands after a contact
+  change dropped the list no longer brings back what the change removed).
+  `load_saved_tags(0)` begins the fetch, so a send that never left lands in
+  `Failed` and the pump waits for the connection instead of asking at every
+  pump. A refetch of the invalidated contacts that cannot start (chats path
+  not active) shows the error and Retry again.
+- **Matched to what asked.** The gifts list's one change in flight is
+  `GiftMutation::Running { request }`, settled only by its own answer, so a
+  late answer of a reopened list no longer unlocks it (02-064, 10-026). The
+  Fragment export's unlocked step is `ExportSend::Unlocked` in the transfer
+  stage, not a flag the driver takes after each ingest (02-064).
+- **Earn.** The withdraw password step is `Password { error }` or
+  `SendingPassword` (09-X040, 02-050); the setup page's save is a `BoxSend`;
+  the join box parked for the recipients lives inside
+  `Recipients::Loading { join }` and goes with that attempt (02-049, 05-122);
+  toasts, a URL to open and "leave the setup page" are one `EarnEffect` queue
+  (`setup_closed`, 02-050, 05-122); the UI's four boxes are one `EarnBox`
+  opened by `open_earn_box` (09-X041); the link box carries the time it
+  opened, so its first render plays the icon (09-073).
+- **Queues and work.** The poll batch is `Batch { Closed { owed }, Open { dirty } }`:
+  a pass leaves the set only after it ran, so a send error in the media pass
+  no longer loses it (02-040). The composer draft save is `DraftSave { Idle,
+  Waiting { pending, started_ms } }`: the pending save and its quiet-window
+  clock are one value (02-027). `DiskPressure` replaces the held bool beside
+  the room (05-096); the persisted disk pauses are compared with what was last
+  saved, not flagged (05-096); `AvatarDue { Everything, Some(set) }` replaces
+  `avatar_rescan` (05-096, 05-247 in part). The sticker category is chosen by
+  its `EmojiCategorySource`, so a reloaded list cannot name another (10-172).
+  The deep link's `ResolvingInfo` carries the link text, and the flow's
+  origin lives in the flow slot (`DeepLinkFlow::Active { from_agent, state }`,
+  02-042): born with the flow, taken with its state, `Idle` has none, so no
+  terminal state leaves one behind. The draft save is `DraftSave { Idle {
+  last_token }, Waiting { pending, started_ms }, Failed { pending } }`
+  (02-027): the quiet-window id is inside it, and a save that failed to go
+  out is a stage of its own, not `started_ms: None`.
+- **Already fixed on the integration branch.** 02-069, 05-116 (options),
+  10-022 (`GiveawayOptions` is two `Fetch`es), 02-044 (`DiskSearch`),
+  02-057 (`InviteStage`), 02-108 (`ShareLink` per link), 09-074 (sliders
+  keyed by bot, `ensure_setup_sliders`).
+- **Review round.** 05-247: a pause is `Phase::Paused` of the request (not a
+  bool beside the phase) and the chat that asked an automatic download is its
+  origin (`DownloadOrigin::AutoChat`), so `open_chat_media_downloads` is gone
+  and leaves with the request. The `DownloadExtras` index (request id to file
+  id and back) is a lookup of the registry, and `avatar_claims` is the
+  per-frame demand of the rows on screen; neither is a stage. 02-035: the
+  closing set keeps one `Slot` per account (`Closing(client)` or
+  `Unconfirmed`), not an entry list beside an `unconfirmed` set; dropping the
+  set never waits on the dropping thread (`close_all_within` is the one wait,
+  the quit paths call it). `close_held_until` is the deadline of one hold and
+  `restart` is a per-client policy set by the caller and changed by user
+  actions; neither is a stage kept in step with another. 02-113: the
+  provisional engine key is `ConferenceKey::Joining`, not `-1` compared by
+  hand, and a join whose offer failed ends the session's pending join, the
+  crypto, the offer wait and the engine instance in `abandon_conference_join`
+  (the driver tests with the mock engine cover the exits).
+- **Skipped, with the reason.** 05-242: the four values are not one
+  conversation of the main window. `threads.thread` is keyed by its own chat
+  and read by chat windows (`thread_for_chat`), `direct.open` is the
+  conversation remembered for each chat after it is left (tdesktop
+  `activeSubsectionThread`), the Saved sublist belongs to Saved Messages, and
+  `open_topic` is the main window's. One enum on the session would have to
+  drop the others when one window changes, which loses a window's thread. The
+  clash is read in one function (`open_topic_id`, with `open_draft_topic`
+  beside it), pinned by tests. 09-121: the `focused` bool is the per-frame
+  edge memory of "take the keyboard when the box becomes idle", which needs
+  the `Window`; the stage transitions run in the driver without one. It is
+  the UI's memory of what it did with its own widget, not a request stage.
+- **Merged with the integration branch.** Other bundles converted the same
+  fields before this one landed, so the integration branch keeps their value
+  and this bundle's version of these is gone: the paged lists and the gifts
+  change (`PageLoad`, `PageStage` of the premium hub and `ListOp`, not
+  `state::PageStage`/`GiftMutation`), Earn (`EarnEffect`, `PasswordSending`),
+  the draft save (`Debounce<HeldDraft>`), the deep link origin
+  (`DeepLinkFlow` with `start_deep_link`), the GIF panel (`GifList`) and
+  `SetMutation::Running`. What stays from this bundle: `Fetch` carrying its
+  request (contacts, archive settings, saved tags), the gift value and
+  giveaway info stages, the poll batch, the disk and avatar stages, the closing
+  set, the conference key and the craft box's "your gifts" error with its
+  Retry (`craft-own-retry`), which asks again only from that button: the open
+  preload does not re-send a failed list.
+
 ### Sweep fixes (is-01)
 
 Implicit-state entries: each names a struct whose stages were kept in step by
