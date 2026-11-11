@@ -1074,8 +1074,10 @@ mod tests {
 
     #[test]
     fn changing_the_auto_switch_settings_restarts_the_rotation_itself() {
-        let mut state = ProxyState::default();
-        state.rotation = Rotation::Disconnected { since_ms: 5 };
+        let mut state = ProxyState {
+            rotation: Rotation::Disconnected { since_ms: 5 },
+            ..ProxyState::default()
+        };
         state.set_auto_switch(Some(true), Some(30));
         assert!(state.prefs.auto_switch);
         assert_eq!(state.prefs.auto_switch_secs, 30);
