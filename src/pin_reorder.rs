@@ -72,13 +72,19 @@ pub fn merge_order(dragged: &[i64], now: &[i64]) -> Vec<i64> {
         .collect()
 }
 
+/// Which row the reorder is about: held by the pointer, or let go and
+/// sliding into its slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reorder {
+    Dragging(i64),
+    Dropped(i64),
+}
+
 #[derive(Debug, Clone)]
 pub struct PinReorder {
     ids: Vec<i64>,
     heights: HashMap<i64, f32>,
-    dragging: Option<i64>,
-    /// The row that was let go and is sliding into its slot.
-    dropped: Option<i64>,
+    stage: Reorder,
     began: Instant,
     start_y: f32,
     cur_y: f32,
@@ -101,8 +107,7 @@ impl PinReorder {
         Some(Self {
             ids,
             heights,
-            dragging: Some(dragging),
-            dropped: None,
+            stage: Reorder::Dragging(dragging),
             began: now,
             start_y: y,
             cur_y: y,
@@ -115,7 +120,10 @@ impl PinReorder {
     }
 
     pub fn dragging(&self) -> Option<i64> {
-        self.dragging
+        match self.stage {
+            Reorder::Dragging(id) => Some(id),
+            Reorder::Dropped(_) => None,
+        }
     }
 
     fn height(&self, id: i64) -> f32 {
@@ -125,7 +133,7 @@ impl PinReorder {
     /// Pointer moved to `y`: swap past any neighbour whose threshold the
     /// drag crossed (`updateReorderPinned`).
     pub fn drag_to(&mut self, y: f32, now: Instant) {
-        let Some(dragging) = self.dragging else {
+        let Reorder::Dragging(dragging) = self.stage else {
             return;
         };
         self.cur_y = y;
@@ -176,18 +184,17 @@ impl PinReorder {
     /// Pointer released: the dragged row slides into its slot. Returns the
     /// final order to save.
     pub fn release(&mut self, now: Instant) -> Vec<i64> {
-        if let Some(dragging) = self.dragging {
+        if let Reorder::Dragging(dragging) = self.stage {
             let from = self.dragged_offset(dragging);
             self.slides.insert(dragging, Slide { from, at: now });
-            self.dropped = Some(dragging);
-            self.dragging = None;
+            self.stage = Reorder::Dropped(dragging);
         }
         self.ids.clone()
     }
 
     /// Vertical offset (px) to draw `id` at right now.
     pub fn offset(&self, id: i64, now: Instant) -> f32 {
-        if self.dragging == Some(id) {
+        if self.stage == Reorder::Dragging(id) {
             return self.dragged_offset(id);
         }
         self.slides.get(&id).map_or(0.0, |slide| slide.value(now))
@@ -210,11 +217,11 @@ impl PinReorder {
     /// How far `id` is lifted off the list, 0 (flat) to 1 (picked up): it
     /// rises while dragged and sets back down as it slides into its slot.
     pub fn lift(&self, id: i64, now: Instant) -> f32 {
-        if self.dragging == Some(id) {
+        if self.stage == Reorder::Dragging(id) {
             let t = now.saturating_duration_since(self.began).as_secs_f32() / LIFT.as_secs_f32();
             return sine_in_out(t.clamp(0.0, 1.0));
         }
-        if self.dropped == Some(id) {
+        if self.stage == Reorder::Dropped(id) {
             return self.slides.get(&id).map_or(0.0, |slide| {
                 let t = now.saturating_duration_since(slide.at).as_secs_f32() / SLIDE.as_secs_f32();
                 1.0 - sine_in_out(t.clamp(0.0, 1.0))
@@ -225,7 +232,8 @@ impl PinReorder {
 
     /// Still dragging, or a slide is running (the list needs frames).
     pub fn animating(&self, now: Instant) -> bool {
-        self.dragging.is_some() || self.slides.values().any(|slide| !slide.done(now))
+        matches!(self.stage, Reorder::Dragging(_))
+            || self.slides.values().any(|slide| !slide.done(now))
     }
 
     /// Released and every slide finished: the state can be dropped.

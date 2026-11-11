@@ -74,7 +74,9 @@ impl Session {
                     .fail(error_reason(err));
             }
             Some(RequestPurpose::GetProfileShareThemeBackdrops) => {
-                self.users_state.peer_qr.backdrops.fail();
+                if let Some(pending) = pending {
+                    self.users_state.peer_qr.backdrops.fail(pending.id);
+                }
             }
             Some(RequestPurpose::Users(UsersPurpose::GetShareThemeGifts {
                 owner, serial, ..

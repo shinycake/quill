@@ -649,18 +649,39 @@ impl SystemStepState {
     }
 }
 
-/// Whether a `getProxies` is awaited, and which one.
+/// Where the proxy list's `getProxies` is.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ProxyFetch {
+    /// No `getProxies` has been sent yet: the first one goes out.
     #[default]
+    NotAsked,
+    /// The last one answered or failed (a failed one is not retried in a
+    /// tight loop: the box's error line says so).
     Idle,
+    /// The list changed under us (an add / edit / enable / remove
+    /// succeeded, dropping any fetch out, whose answer may predate the
+    /// change): the authoritative list is asked for again.
+    Stale,
     /// This request is the one whose answer replaces the list.
     Loading(RequestId),
+    /// The request could not be sent (or its answer was an error): nothing
+    /// asks again by itself, only the dialog's open / Refresh (`Retry`).
+    Failed,
 }
 
 impl ProxyFetch {
     pub fn loading(self) -> bool {
         matches!(self, Self::Loading(_))
+    }
+
+    /// The list is out of date and no request is on its way for it.
+    pub fn stale(self) -> bool {
+        self == Self::Stale
+    }
+
+    /// A `getProxies` should go out: never asked, or invalidated.
+    pub fn wanted(self) -> bool {
+        matches!(self, Self::NotAsked | Self::Stale)
     }
 
     /// `request` is the fetch the list waits for.
@@ -685,6 +706,40 @@ pub enum LinkCheck {
     Done(PingStatus),
 }
 
+/// The one proxy change (`addProxy`, `editProxy`, `enableProxy`, ...) in
+/// flight; its answer or error is the way out.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ProxyMutation {
+    #[default]
+    Idle,
+    InFlight(RequestId),
+}
+
+impl ProxyMutation {
+    pub fn in_flight(self) -> bool {
+        matches!(self, Self::InFlight(_))
+    }
+
+    /// `request` is the change in flight.
+    pub fn is(self, request: RequestId) -> bool {
+        self == Self::InFlight(request)
+    }
+}
+
+/// Where the auto-switch machine is (tdesktop `ProxyRotationManager`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Rotation {
+    /// The connection is usable (or nothing is rotated): no clock runs.
+    #[default]
+    Watching,
+    /// The connection has been unusable since `since_ms`.
+    Disconnected { since_ms: u64 },
+    /// The timeout passed and the ping of proxy `id` is the probe being
+    /// waited for. Only that ping holds the rotation (the edit box's link
+    /// test, or any other ping, does not).
+    Probing { since_ms: u64, id: i32 },
+}
+
 /// Everything the proxy UI and driver cache (`Session::proxy`).
 #[derive(Debug, Clone, Default)]
 pub struct ProxyState {
@@ -698,11 +753,10 @@ pub struct ProxyState {
     /// failure lands; a mutation's success drops it (its answer may
     /// predate the change).
     pub fetch: ProxyFetch,
-    /// The list changed under us (an add / edit / enable / remove
-    /// succeeded): refetch the authoritative answer.
-    pub stale: bool,
     /// A mutation is in flight.
-    pub mutating: bool,
+    pub mutation: ProxyMutation,
+    /// The box's error line: what the user's own action (a fetch, a change,
+    /// the IPv6 choice) last failed with.
     pub error: Option<String>,
     /// The system proxy step's own outcome (not `error`).
     pub system_step: SystemStepState,
@@ -713,14 +767,8 @@ pub struct ProxyState {
     /// Option `prefer_ipv6` (tdesktop "Try connecting through IPv6").
     pub prefer_ipv6: bool,
     pub prefs: ProxyPrefs,
-    /// First `getProxies` was sent (so a failed one is not retried in a
-    /// tight loop).
-    pub fetch_attempted: bool,
-    /// Auto-switch: when the connection last stopped being usable (ms).
-    pub disconnected_since_ms: Option<u64>,
-    /// The enabled web proxy whose last carrier failed or was refused;
-    /// its row says "not available" until TDLib opens the next one.
-    pub carrier_failed: Option<i32>,
+    /// Auto-switch.
+    pub rotation: Rotation,
     /// The web proxy carriers TDLib opened and what the driver still has
     /// to do about them (`crate::proxy_carrier`).
     pub carriers: crate::proxy_carrier::Carriers,
@@ -729,6 +777,12 @@ pub struct ProxyState {
 impl ProxyState {
     pub fn entries(&self) -> &[ProxyEntry] {
         self.list.as_deref().unwrap_or(&[])
+    }
+
+    /// The list is changing or about to: a mutation is out, or a fetch is
+    /// owed or on its way.
+    pub fn busy(&self) -> bool {
+        self.mutation.in_flight() || self.fetch.loading() || self.fetch.stale()
     }
 
     /// Whether a proxy of `kind` may be switched to: a web proxy only when
@@ -800,18 +854,22 @@ impl ProxyState {
         let entries = self.entries();
         let observing = self.prefs.auto_switch && entries.len() > 1 && self.enabled().is_some();
         if !observing || connected {
-            self.disconnected_since_ms = None;
+            self.rotation = Rotation::Watching;
             return RotationAction::None;
         }
-        let since = *self.disconnected_since_ms.get_or_insert(now_ms);
+        let (since, probing) = match self.rotation {
+            Rotation::Watching => (now_ms, None),
+            Rotation::Disconnected { since_ms } => (since_ms, None),
+            Rotation::Probing { since_ms, id } => (since_ms, Some(id)),
+        };
+        if self.rotation == Rotation::Watching {
+            self.rotation = Rotation::Disconnected { since_ms: since };
+        }
         if now_ms.saturating_sub(since) < u64::from(self.prefs.timeout_secs()) * 1000 {
             return RotationAction::None;
         }
-        if self
-            .pings
-            .values()
-            .any(|p| matches!(p, PingStatus::Checking))
-        {
+        // The probe asked for is still out: wait for its answer.
+        if probing.is_some_and(|id| matches!(self.pings.get(&id), Some(PingStatus::Checking))) {
             return RotationAction::None;
         }
         let entries = self.entries();
@@ -827,12 +885,20 @@ impl ProxyState {
             .find(|p| matches!(self.pings.get(&p.id), Some(PingStatus::Available(_))))
         {
             let id = found.id;
-            self.disconnected_since_ms = Some(now_ms);
+            self.rotation = Rotation::Disconnected { since_ms: now_ms };
             self.pings.remove(&id);
             return RotationAction::Switch(id);
         }
-        if let Some(next) = order.iter().find(|p| !self.pings.contains_key(&p.id)) {
-            return RotationAction::Ping(next.id);
+        if let Some(next) = order
+            .iter()
+            .find(|p| !self.pings.contains_key(&p.id))
+            .map(|p| p.id)
+        {
+            self.rotation = Rotation::Probing {
+                since_ms: since,
+                id: next,
+            };
+            return RotationAction::Ping(next);
         }
         // Every alternative failed: forget the verdicts and look again
         // after another timeout.
@@ -840,7 +906,7 @@ impl ProxyState {
         for id in ids {
             self.pings.remove(&id);
         }
-        self.disconnected_since_ms = Some(now_ms);
+        self.rotation = Rotation::Disconnected { since_ms: now_ms };
         RotationAction::None
     }
 }
@@ -1028,7 +1094,7 @@ mod tests {
         let mut s = state(vec![entry(1, true), entry(2, false)], true);
         s.rotation_step(0, false);
         assert_eq!(s.rotation_step(20_000, true), RotationAction::None);
-        assert_eq!(s.disconnected_since_ms, None);
+        assert_eq!(s.rotation, Rotation::Watching);
         // The clock restarts from the next disconnect.
         assert_eq!(s.rotation_step(21_000, false), RotationAction::None);
         s.prefs.auto_switch = false;
@@ -1050,6 +1116,19 @@ mod tests {
         s.pings.insert(3, PingStatus::Unavailable);
         assert_eq!(s.rotation_step(10_500, false), RotationAction::None);
         assert!(!s.pings.contains_key(&2));
+    }
+
+    #[test]
+    fn a_ping_of_the_edit_box_does_not_hold_the_rotation() {
+        let mut s = state(vec![entry(1, true), entry(2, false)], true);
+        s.rotation_step(0, false);
+        // The link test of the proxy box is out, not the rotation's probe.
+        s.link_check = LinkCheck::Checking(crate::ids::RequestId(5));
+        assert_eq!(s.rotation_step(10_000, false), RotationAction::Ping(2));
+        assert_eq!(s.rotation, Rotation::Probing { since_ms: 0, id: 2 });
+        // Its own probe does hold it.
+        s.pings.insert(2, PingStatus::Checking);
+        assert_eq!(s.rotation_step(10_500, false), RotationAction::None);
     }
 
     #[test]

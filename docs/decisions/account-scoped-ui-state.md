@@ -7171,6 +7171,58 @@ already one value, or are independent, it is skipped and says why.
 | 12-101 | `TrayReads` holds one `Reads<T>` per kind: a path is `Reading { job }` or `Done`. |
 | 12-103 | `SendMenu::list: EffectList { Strip, Expanded }` and `card: Card { None, Shown }`. |
 | (review) | A paged list kept failing its follow-up page: `PageStage::invalidate` keeps the error line of a failed page and only makes the first page due again. `gift_notice` blocks the received gifts' auto-paging like `gifts_error` did. |
+
+### Sweep fixes (is-08)
+
+Forty-two implicit-state entries; each stage that two or more fields kept in
+step by hand is one value now, with the data inside the variants and a way
+out of every stage.
+
+| id | what it is now |
+| --- | --- |
+| 04-017 | Skipped: `ThemeGifts` is already `GiftsStage` (First / FirstFailed / Listed(GiftsRest)); `requested_at` and `serial` are data of the request. |
+| 04-018 | `Backdrops::stage`: `BackdropsStage::{Idle, Loading{id, at}, Ready{at}}`. Only the answer or error of request `id` leaves `Loading`; an answer of another request is dropped. A request that never answers expires after `BACKDROPS_LOAD_SECS`, so the next box asks again. A failure goes to `Idle`. |
+| 04-019 | `PinReorder::stage`: `Reorder::{Dragging(id), Dropped(id)}`. `pin_reorder_archived` was already gone (`PinDrag`). |
+| 04-024 | `PlaybackClock::clock`: `Clock::{Paused{at}, Playing{from, since}}`. An `Ended` stage was not added: the end is the position reaching the duration, read at `now`, and the owner pauses the clock. |
+| 04-023 | `ShuffleState` is one path (`back` up to the current track, `ahead` for what Previous walked over) for one `chat`. A move in another chat starts a fresh round. |
+| 04-028, 07-006 | `PollDraft::options` is `Vec<DraftOption{text, media, correct}>`; the deadline is `Option<PollClose>` (`Period` or `Date`), and `PollSend::deadline` carries the same value; `send_poll` maps it to `open_period` / `close_date`. |
+| 04-037 | `PremiumHub::tx`: `Listing<TxList>` (`Idle` / `Loading{request, append}` / `Ready` / `Failed{append}`), list inside. |
+| 04-038 | `PremiumHub::received`: `Listing<GiftList>`; `gift_mutation`: `GiftMutation::{Idle, Sending, Failed}`. A confirmed mutation invalidates the list (`Idle` with the old list shown), which abandons a page in flight instead of letting it overwrite the fresh list. Starting or ending a mutation does not touch the list's stage (a failed first page stayed `Failed`, not `Idle`, so the tick does not re-send it); `gifts_error()` prefers the mutation's line. |
+| 04-039 | `premium`, `premium_stickers`, `business_features` are `Fetch<_>`; a failed request is `Failed` and the Business screen keeps its fallback rows. |
+| 04-042 | `GramsHub::page`: `Listing<TonList>`; `balance`: `Fetch<i64>` (a failed Settings probe is not asked again by the tick); `peers`: `PeerSync`; the withdraw outcome is `GramWithdraw::{Done(url), TooSmall}` taken once by the UI. |
+| 04-068 | `ProxyFetch::{NotAsked, Idle, Stale, Loading, Failed}` replaces `stale` and `fetch_attempted`; a send or answer error lands in `Failed`, which only the dialog's open / Refresh leaves (the tick no longer re-sends an owed refetch). `ProxyMutation::{Idle, InFlight(id)}` replaces `mutating`, and only the change in flight unlocks. `error` stays the box's line (three sources). |
+| 04-070 | `ProxyState::rotation`: `Rotation::{Watching, Disconnected, Probing{id}}`. Only the rotation's own probe holds it; the edit box's link ping no longer does. |
+| 04-079 | `ProxyState::carrier_failed` is gone: the row asks `Carriers::failed_for(id)`; a refused carrier (no host) already shows through `can_enable`. |
+| 04-072 | `PsaAbout::toast`: `Hidden / Waiting(chat) / Showing`; `save`: `InSync / Unsaved`. With no file path the flag stays `Unsaved`. `wait_for_load` never replaces a `Showing` box. |
+| 04-073 | `PullMachine::stage`: `Idle / Pulling(Pull) / Jumping{pull, until}`. A jump that never lands lets go after `JUMP_HOLD_MS`. The indicator and hint flags are read off their tweens. |
+| 04-033 | `JoinedLines::lines` counts the pushed lines. |
+| 04-034 | Skipped: `MarkupBlocks` and `PreviewBlocks` are memos of one input, private, with `parse` / `update` as the only writers, and fuzz tests compare them with a fresh parse. |
+| 04-031 | `Toggle::{Settled(bool), Easing{target, from, since}}`. |
+| 04-081 | `AccountRegistry::entries`: `AccountEntry::{Listed, Removing(key), WipeOnNextStart}`; `active` is repointed in one place. `accounts.json` keeps its keys (`RegistryFile`). |
+| 04-085 | Skipped: user preferences. `theme`, `day_theme`, `night_theme`, `auto_night` and `follow_omarchy` are separate settings the user edits one at a time; none moves through stages, and the file format and about 150 readers rest on them. |
+| 04-086 | Skipped: `suggest_emoji` (tdesktop's) and `highlight_emoji_words` (Quill's) are two settings under their own keys; the dimmed switch deliberately remembers the choice. |
+| 04-089 | `ChatWindowsState::answer`: `RestoreAnswer::{Unasked, Yes, No}`; a stored `restore` without `asked` reads as `Unasked`. The file keeps `asked` / `restore`. |
+| 04-090 | `Writer::{Idle, Running{in_flight}}` and `Queued::{Ready, Failed}`; `set_writer_running` is the one place the writer starts or stops. |
+| 04-095 | `FirstRun::{NotStarted, Started, Done, Upgraded}` read by the pure `first_run_stage`; `first_run_pending` makes the writes. |
+| 05-011 | `Heartbeat` holds `Beats::{NotRunning, Running{count}}`. |
+| 05-001, 13-060 | `DictManager::download`: `DictDownload::{Idle, Running{download, task}, Failed{code, message}}`; the rows read one `RowDownload`. `Progress` is one `AtomicU8` stage (running, cancelling, finished) that only moves forward: a cancel after the finish is a no-op. |
+| 05-009 | `SpellChecker::words` holds the app words, the ignores and the verdict cache under one lock; a change to the words clears the verdicts in the same step. |
+| 05-024 | `ActiveCall::ready`: `Option<CallReady{params, since}>` replaces `ready` and `ready_at`. |
+| 05-025, 08-082 | `CallRating` and `CallUpload` gain `NotNeeded`; `need_rating`, `need_debug_information` and `need_log` are gone. |
+| 05-028 | `ActiveGroupCall::need_rejoin` is gone; readers use `reconnecting()` (`rejoin != Idle`). |
+| 05-030 | Taken from the integration branch (is-04): `GroupTransport` and `GroupScreenShare` live in `state/group_call_stage.rs`; this bundle's duplicate conversion was dropped in the merge. |
+| 05-029 | As 05-030: the integration branch's `GroupScreenShare`. |
+| 05-032, 05-229 | `ChatOrderSync::batch`: `BatchOrder::{Live, InBatch{resort}}`; the driver's duplicate `batch.open` reads `Session::in_update_batch`. No guard type: both begin and end are the driver's, and an unbalanced end is a no-op. |
+| 05-041 | `ChatSummary::my_member`: `OwnMember::{Unknown, Other(status), Administrator(AdminRights)}`; a new status drops the old rights whole. Read through `member_status()`. |
+| 05-040 | `ChatSummary::my_restriction`: `OwnRestriction::{Unknown, NotRestricted, Restricted}`. |
+| 05-042 | `ConferenceCall::stage`: `ConferenceStage::{Running, Upgrading, Upgraded{from}, SharingLink{from}}`. |
+| 05-037 | `AuthState::change_number`: `ChangeNumber{code, send, check}` with `ChangeStep::{Idle, InFlight(id), Failed}`; a late answer of a superseded send is dropped. A check may still run during a send. `code_sent` takes the `RequestId` itself (an answer with no pending request never reaches it). |
+| 05-038 | `PasswordFlight` gains `Failed(line)`; `password_op_error` is gone. |
+
+Outside the bundle's files: `src/ui/…` readers of the changed fields, the
+tests that set them, and `scripts/implicit-state-baseline.txt` (every
+converted field's line dropped).
+
 ### Sweep fixes (is-01)
 
 Implicit-state entries: each names a struct whose stages were kept in step by

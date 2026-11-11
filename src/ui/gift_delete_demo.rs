@@ -87,7 +87,7 @@ fn seed_channels(session: &mut Session, sink: &Arc<MemorySink>) {
         (ADMIN_CHANNEL, ChannelMemberStatus::Administrator),
     ] {
         if let Some(chat) = session.chats.get_mut(&id) {
-            chat.my_member_status = Some(status);
+            chat.assume_member_status(Some(status));
         }
     }
 }

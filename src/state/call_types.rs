@@ -19,10 +19,9 @@ pub struct ActiveCall {
     /// When the call was created (outgoing) or first rang (incoming) —
     /// drives the "ringing" time on the overlay.
     pub started_at: Instant,
-    /// When `callStateReady` arrived — the call-duration clock starts
-    /// here.
-    pub ready_at: Option<Instant>,
-    pub ready: Option<ReadyParams>,
+    /// The call is ready (`callStateReady`): what it carried and when it
+    /// arrived, where the call-duration clock starts. `None` before.
+    pub ready: Option<CallReady>,
     /// The media transport, its retained connect parameters and its
     /// error, as one value (see `CallTransport`).
     pub transport: CallTransport,
@@ -60,10 +59,19 @@ pub struct ActiveCall {
     pub signal_bars: Option<u8>,
 }
 
+/// What `callStateReady` brought, and when.
+#[derive(Debug, Clone)]
+pub struct CallReady {
+    pub params: Option<ReadyParams>,
+    pub since: Instant,
+}
+
 /// The rating card of an ended call. The card is drawn while it is
 /// `Offered` or `Failed`; `Sending` leaves on the answer to that request.
+/// `NotNeeded`: TDLib did not ask for a rating (`need_rating` false).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallRating {
+    NotNeeded,
     Offered,
     Sending(RequestId),
     Sent,
@@ -79,9 +87,10 @@ impl CallRating {
 
 /// One upload from the call-end card (diagnostics, call log). `Sending`
 /// leaves on the answer to that request, so an answer for another call's
-/// upload never lands here.
+/// upload never lands here. `NotNeeded`: TDLib did not ask for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallUpload {
+    NotNeeded,
     Idle,
     Sending(RequestId),
     Sent,
@@ -97,7 +106,7 @@ impl CallUpload {
     pub fn error(&self) -> Option<&str> {
         match self {
             Self::Failed(error) => Some(error),
-            Self::Idle | Self::Sending(_) | Self::Sent => None,
+            Self::NotNeeded | Self::Idle | Self::Sending(_) | Self::Sent => None,
         }
     }
 }
@@ -117,18 +126,13 @@ pub struct CallSummary {
     pub had_audio: bool,
     /// Human-readable end line (reason-aware).
     pub end_line: String,
-    pub need_rating: bool,
     /// An outgoing call the peer declined before it connected: tdesktop
     /// shows "line busy" with Redial / Cancel.
     pub busy: bool,
-    /// `need_debug_information` / `need_log` are out of this slice
-    /// (no media log exists; debug-info upload is C2) — kept so the
-    /// end screen can say so honestly.
-    pub need_debug_information: bool,
-    pub need_log: bool,
-    /// The rating card's stage; one value so the card comes back when
-    /// the send fails.
+    /// The rating card's stage (`need_rating`); one value so the card comes
+    /// back when the send fails.
     pub rating: CallRating,
+    /// `sendCallDebugInformation` upload stage (`need_debug_information`).
     pub debug_information: CallUpload,
     /// Phase C2i: `sendCallLog` upload stage (`need_log` from
     /// `callStateDiscarded`, schema 1.8.67 :7080).
@@ -271,10 +275,12 @@ impl ActiveCall {
             user_id,
             is_outgoing,
             is_video,
+            ready: matches!(state, CallState::Ready).then(|| CallReady {
+                params: ready,
+                since: Instant::now(),
+            }),
             state,
             started_at: Instant::now(),
-            ready_at: None,
-            ready,
             transport: CallTransport::default(),
             signaling_queue: Vec::new(),
             signaling_dropped: 0,
@@ -324,9 +330,16 @@ impl ActiveCall {
 
     /// Seconds since `callStateReady` (the billable call duration).
     pub fn connected_secs(&self) -> i64 {
-        self.ready_at
-            .map(|t| t.elapsed().as_secs() as i64)
+        self.ready
+            .as_ref()
+            .map(|ready| ready.since.elapsed().as_secs() as i64)
             .unwrap_or(0)
+    }
+
+    /// The parameters `callStateReady` carried (the key emojis, the group
+    /// call support).
+    pub fn ready_params(&self) -> Option<&ReadyParams> {
+        self.ready.as_ref().and_then(|ready| ready.params.as_ref())
     }
 }
 
@@ -368,8 +381,6 @@ pub struct ActiveGroupCall {
     pub is_video_chat: bool,
     pub is_live_story: bool,
     pub is_joined: bool,
-    /// `need_rejoin` arrived (kicked by network loss).
-    pub need_rejoin: bool,
     /// Where Quill's own rejoin after a network loss stands (the
     /// C2d 1:1 reconnect discipline, at most
     /// `MAX_GROUP_CALL_REJOIN_ATTEMPTS`). Reset by a joined
@@ -473,7 +484,6 @@ pub struct ActiveGroupCall {
     /// for a video chat, or a conference this session didn't join.
     pub conference: Option<ConferenceCall>,
 }
-
 /// Quill's own rejoin of a group call that TDLib (or a stream feeder)
 /// says needs one. One value, so "a rejoin is due" and "the banner shows"
 /// cannot drift apart: the driver sends a rejoin only from `Wanted`, and
@@ -637,7 +647,6 @@ impl ActiveGroupCall {
             is_video_chat: false,
             is_live_story: false,
             is_joined: false,
-            need_rejoin: false,
             rejoin: GroupCallRejoin::Idle,
             can_be_managed: false,
             is_owned: false,
@@ -788,12 +797,21 @@ impl CallSummary {
             duration_secs,
             had_audio,
             end_line,
-            need_rating,
-            need_debug_information,
-            need_log,
-            rating: CallRating::Offered,
-            debug_information: CallUpload::Idle,
-            log: CallUpload::Idle,
+            rating: if need_rating {
+                CallRating::Offered
+            } else {
+                CallRating::NotNeeded
+            },
+            debug_information: if need_debug_information {
+                CallUpload::Idle
+            } else {
+                CallUpload::NotNeeded
+            },
+            log: if need_log {
+                CallUpload::Idle
+            } else {
+                CallUpload::NotNeeded
+            },
             final_transport: None,
             reconnect_attempts: 0,
             muted: false,

@@ -109,8 +109,7 @@ fn failed_backdrops_can_be_asked_again() {
         ),
     );
     let backdrops = &f.1.session.users_state.peer_qr.backdrops;
-    assert!(!backdrops.loading);
-    assert_eq!(backdrops.requested_at, None);
+    assert_eq!(backdrops.stage, crate::peer_qr::theme::BackdropsStage::Idle);
     let sent = f.2.snapshot().len();
     f.1.fetch_share_theme_backdrops(NOW + 1).unwrap();
     assert_eq!(f.2.snapshot().len(), sent + 1);

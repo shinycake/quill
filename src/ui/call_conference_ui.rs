@@ -247,7 +247,7 @@ impl QuillApp {
             .and_then(|live| live.driver.session.calls.active_group_call.as_mut())
             .and_then(|call| call.conference.as_mut())
         {
-            conference.link_open = false;
+            conference.close_link();
         }
     }
 }

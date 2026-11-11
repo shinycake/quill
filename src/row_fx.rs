@@ -16,56 +16,69 @@ pub const DURATION: Duration = Duration::from_millis(150);
 
 /// One 0..1 value that eases toward a boolean target.
 #[derive(Debug, Clone, Copy)]
-struct Toggle {
-    target: bool,
-    from: f32,
-    /// When the current ease started; `None` once settled.
-    since: Option<Instant>,
+enum Toggle {
+    /// At the target, no ease running.
+    Settled(bool),
+    /// Easing from `from` toward `target`, since `since`; it collapses to
+    /// `Settled` once [`DURATION`] has passed.
+    Easing {
+        target: bool,
+        from: f32,
+        since: Instant,
+    },
 }
 
 impl Toggle {
     fn snapped(target: bool) -> Self {
-        Self {
-            target,
-            from: if target { 1. } else { 0. },
-            since: None,
+        Self::Settled(target)
+    }
+
+    fn target(&self) -> bool {
+        match self {
+            Self::Settled(target) | Self::Easing { target, .. } => *target,
         }
     }
 
     fn goal(&self) -> f32 {
-        if self.target { 1. } else { 0. }
+        if self.target() { 1. } else { 0. }
     }
 
     fn value(&self, now: Instant) -> f32 {
-        let Some(since) = self.since else {
+        let Self::Easing { from, since, .. } = *self else {
             return self.goal();
         };
         let t = (now.saturating_duration_since(since).as_secs_f32() / DURATION.as_secs_f32())
             .clamp(0., 1.);
         // Ease-out cubic.
         let eased = 1. - (1. - t).powi(3);
-        self.from + (self.goal() - self.from) * eased
+        from + (self.goal() - from) * eased
     }
 
     fn settled(&self, now: Instant) -> bool {
-        self.since
-            .is_none_or(|since| now.saturating_duration_since(since) >= DURATION)
+        match self {
+            Self::Settled(_) => true,
+            Self::Easing { since, .. } => now.saturating_duration_since(*since) >= DURATION,
+        }
     }
 
     /// Move to `target`. `animate` false snaps. Returns the new value.
     fn set(&mut self, target: bool, animate: bool, now: Instant) -> f32 {
-        if target != self.target {
+        if target != self.target() {
             *self = if animate {
-                Self {
+                Self::Easing {
                     target,
                     from: self.value(now),
-                    since: Some(now),
+                    since: now,
                 }
             } else {
                 Self::snapped(target)
             };
         }
-        self.value(now)
+        let value = self.value(now);
+        if self.settled(now) {
+            *self = Self::Settled(self.target());
+        }
+        value
     }
 }
 

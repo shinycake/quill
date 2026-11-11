@@ -139,7 +139,7 @@ fn limit_duration_shows_the_ends_row_and_sends_the_period(cx: &mut TestAppContex
     open(&app, &mut vcx, QuizLock::Free);
     app.update(&mut vcx, |app, cx| {
         let draft = dialog(app).draft(cx);
-        assert_eq!((draft.open_period, draft.close_date), (0, 0));
+        assert_eq!(draft.deadline, None);
     });
     vcx.update(|window, cx| window.click("poll-toggle-duration", cx));
     vcx.run_until_parked();
@@ -152,13 +152,15 @@ fn limit_duration_shows_the_ends_row_and_sends_the_period(cx: &mut TestAppContex
         assert_eq!(dialog.close, PollClose::Period(POLL_DEFAULT_PERIOD_SECS));
         dialog.hide_results_until_closes = true;
         let draft = dialog.draft(cx);
-        assert_eq!(draft.open_period, POLL_DEFAULT_PERIOD_SECS);
-        assert_eq!(draft.close_date, 0);
+        assert_eq!(
+            draft.deadline,
+            Some(PollClose::Period(POLL_DEFAULT_PERIOD_SECS))
+        );
         assert!(draft.hide_results_until_closes);
         // Switching it off again drops the period and the hidden results.
         dialog.limit_duration = false;
         let draft = dialog.draft(cx);
-        assert_eq!((draft.open_period, draft.close_date), (0, 0));
+        assert_eq!(draft.deadline, None);
         assert!(!draft.hide_results_until_closes);
     });
 }
@@ -186,7 +188,7 @@ fn a_custom_deadline_is_picked_in_its_own_box(cx: &mut TestAppContext) {
         };
         assert!((date - now_unix() - POLL_DEFAULT_PERIOD_SECS).abs() < 120);
         let draft = dialog(app).draft(cx);
-        assert_eq!((draft.open_period, draft.close_date), (0, date));
+        assert_eq!(draft.deadline, Some(PollClose::Date(date)));
     });
 }
 

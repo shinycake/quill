@@ -75,8 +75,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(call)
                 if matches!(call.state, CallState::Ready)
                     && call
-                        .ready
-                        .as_ref()
+                        .ready_params()
                         .is_some_and(|ready| ready.is_group_call_supported) =>
             {
                 ConferenceUpgrade {
@@ -380,7 +379,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .filter(|call| !call.invite_link.is_empty())
             .and_then(|call| {
-                let upgrade = call.conference.as_ref()?.upgrade.clone()?;
+                let upgrade = call.conference.as_ref()?.upgrade()?.clone();
                 Some((call.id, call.invite_link.clone(), upgrade))
             });
         let Some((group_call_id, invite_link, upgrade)) = ready else {
@@ -393,9 +392,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_mut()
             .and_then(|call| call.conference.as_mut())
         {
-            conference.upgrade = None;
-            conference.migrated_from = Some(upgrade.call_id);
-            conference.link_open = upgrade.share_link && upgrade.invite.is_empty();
+            let from = upgrade.call_id;
+            conference.stage = if upgrade.share_link && upgrade.invite.is_empty() {
+                crate::state::ConferenceStage::SharingLink { from }
+            } else {
+                crate::state::ConferenceStage::Upgraded { from }
+            };
         }
         let mut result = Ok(());
         let mut invites = ConferenceInviteResults::default();

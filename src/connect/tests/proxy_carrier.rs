@@ -239,7 +239,7 @@ fn a_host_failure_is_reported_once_and_marks_the_row() {
         "webProxyCarrierErrorTerminated"
     );
     assert_eq!(rig.calls(), vec![Call::Close(5, false)]);
-    assert_eq!(rig.driver.session.settings.proxy.carrier_failed, Some(2));
+    assert!(rig.driver.session.settings.proxy.carriers.failed_for(2));
     assert_eq!(rig.phase(5), Some(CarrierPhase::Failed));
 
     // A second failure and late data are dropped.
@@ -254,7 +254,7 @@ fn a_host_failure_is_reported_once_and_marks_the_row() {
     assert!(rig.calls().is_empty());
     rig.open(6, 2);
     assert_eq!(rig.calls(), vec![Call::Open(6)]);
-    assert_eq!(rig.driver.session.settings.proxy.carrier_failed, None);
+    assert!(!rig.driver.session.settings.proxy.carriers.failed_for(2));
 }
 
 #[test]
@@ -285,7 +285,7 @@ fn a_host_that_cannot_start_the_view_reports_why() {
         "webProxyCarrierErrorTerminated"
     );
     assert_eq!(rig.calls(), vec![Call::Open(4), Call::Close(4, false)]);
-    assert_eq!(rig.driver.session.settings.proxy.carrier_failed, Some(1));
+    assert!(rig.driver.session.settings.proxy.carriers.failed_for(1));
 }
 
 #[test]
@@ -318,7 +318,7 @@ fn temporary_carriers_are_refused_even_with_a_host() {
     let reports = rig.sent("reportWebProxyCarrierError");
     assert_eq!(reports[0]["error"]["@type"], "webProxyCarrierErrorRefused");
     assert!(rig.calls().is_empty());
-    assert_eq!(rig.driver.session.settings.proxy.carrier_failed, None);
+    assert!(!rig.driver.session.settings.proxy.carriers.failed_for(1));
 }
 
 #[test]

@@ -8,16 +8,15 @@ AudioEngine::start_failed+error
 AwardMembers::done
 AwardMembers::loading
 AwardMembers::loading+error
-Backdrops::loading
 BackendStatus::failed
 BarFacts::bot_start_pending
 
 CallSnap::connecting
 CallSummary::busy
 
-ChatSummary::my_rights_fetched
 ChatSwipeFacts::is_saved
-ChatWindowsState::asked
+
+ChatSwipeFacts::is_saved
 ChatbotDraft::loaded
 Checklist::others_can_mark_tasks_as_done
 ChecklistDialog::others_can_mark_tasks_as_done
@@ -33,7 +32,6 @@ Drawn::leaving
 DropTopic::load_failed
 FastShareFacts::sent
 FieldResult::finished
-FirstRunPrefs::completed
 FooterMeta::pending
 
 GiftValueLookup::loading
@@ -48,7 +46,6 @@ HistoryState::load_failed
 HistoryState::loaded_complete
 HistoryState::newer_failed
 
-JoinedLines::started
 
 LinuxState::failed
 LiveInput::failed
@@ -82,8 +79,7 @@ Playlist::loaded
 Playlist::loaded+error
 Playlist::loading
 
-PullMachine::expand_pending
-Queued::failed
+
 ReceivedGift::is_saved
 
 RowForum::loaded

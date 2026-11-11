@@ -273,9 +273,13 @@ impl Session {
                 }
             }
             UsersPayload::ProfileShareThemeBackdrops(backdrops) => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetProfileShareThemeBackdrops)
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::GetProfileShareThemeBackdrops
                 {
-                    self.users_state.peer_qr.backdrops.accept(backdrops);
+                    self.users_state
+                        .peer_qr
+                        .backdrops
+                        .accept(pending.id, backdrops);
                 }
             }
             UsersPayload::UserLink(answer) => {

@@ -390,10 +390,12 @@ fn update_chat_member_invalidates_admin_list_and_own_rights() {
     );
     let chat = session.chats.get(&13).unwrap();
     assert_eq!(
-        chat.my_member_status,
+        chat.member_status(),
         Some(ChannelMemberStatus::Administrator)
     );
-    assert_eq!(chat.my_admin_can_promote_members, Some(true));
+    assert!(
+        matches!(chat.my_member, crate::state::OwnMember::Administrator(rights) if rights.promote_members == Some(true))
+    );
     assert!(chat.can_manage_admins());
 }
 
@@ -1125,4 +1127,38 @@ fn a_refused_toggle_keeps_a_value_an_update_changed_meanwhile() {
         ),
     );
     assert_eq!(session.groups.supergroup_anti_spam_enabled.get(&25), None);
+}
+
+#[test]
+fn a_new_status_drops_the_rights_of_the_old_one() {
+    let mut chat = placeholder_chat(ChatId(31));
+    chat.set_member_status(ChannelMemberStatus::Administrator, Some(true));
+    chat.set_admin_can_invite_users(Some(true));
+    assert!(chat.can_invite_users());
+    // Demoted: no administrator right is left to read.
+    chat.set_member_status(ChannelMemberStatus::Member, None);
+    assert!(!chat.can_invite_users());
+    assert_eq!(chat.member_status(), Some(ChannelMemberStatus::Member));
+    // Promoted again without a rights block: the old rights do not return.
+    chat.set_member_status(ChannelMemberStatus::Administrator, None);
+    assert!(!chat.can_invite_users());
+    assert!(chat.channel_admin_can_post(), "a bare administrator posts");
+    // Rights can only be set on an administrator.
+    chat.set_member_status(ChannelMemberStatus::Left, None);
+    chat.set_admin_can_invite_users(Some(true));
+    assert!(!chat.can_invite_users());
+}
+
+#[test]
+fn the_own_restriction_is_unknown_then_one_of_two_answers() {
+    use crate::state::OwnRestriction;
+    let mut chat = placeholder_chat(ChatId(32));
+    assert!(!chat.rights_fetched());
+    assert_eq!(chat.my_restriction, OwnRestriction::Unknown);
+    // The probe found no member record: not restricted, and not asked again.
+    chat.note_no_member_record();
+    assert!(chat.rights_fetched());
+    assert_eq!(chat.restriction(), None);
+    chat.set_my_restriction(None);
+    assert_eq!(chat.my_restriction, OwnRestriction::NotRestricted);
 }

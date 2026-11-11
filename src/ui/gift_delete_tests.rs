@@ -48,7 +48,14 @@ fn select(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, id: &str) {
 fn ids(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Vec<String> {
     app.read_with(vcx, |app, _| {
         app.session()
-            .map(|s| s.payments.hub.gifts.iter().map(|g| g.id.clone()).collect())
+            .map(|s| {
+                s.payments
+                    .hub
+                    .gifts
+                    .iter()
+                    .map(|g| g.id.clone())
+                    .collect()
+            })
             .unwrap_or_default()
     })
 }

@@ -212,7 +212,6 @@ mod tests {
             is_video: false,
             state,
             started_at: std::time::Instant::now(),
-            ready_at: None,
             ready: None,
             transport: transport.map_or_else(Default::default, |state| {
                 CallTransport::reported(state, Default::default()).unwrap_or(

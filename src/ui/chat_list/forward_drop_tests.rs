@@ -195,7 +195,8 @@ fn a_drop_on_a_channel_the_user_cannot_post_in_changes_nothing(cx: &mut TestAppC
                 supergroup_id: 4242,
                 is_channel: true,
             };
-            summary.my_member_status = Some(quill::telegram::envelope::ChannelMemberStatus::Member);
+            summary
+                .assume_member_status(Some(quill::telegram::envelope::ChannelMemberStatus::Member));
         }
     });
     frames(vcx);

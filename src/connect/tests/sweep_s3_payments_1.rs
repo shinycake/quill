@@ -599,7 +599,7 @@ fn a_star_history_or_gifts_first_page_that_cannot_be_sent_shows_its_error() {
 }
 
 #[test]
-fn a_stale_gift_refetch_waits_for_a_page_in_flight_and_is_cleared_by_its_answer() {
+fn an_invalidated_gift_list_is_refetched_and_the_page_it_abandons_is_dropped() {
     let mut t = Flaky::new();
     let owner = crate::telegram::envelope::MessageSender::User { user_id: ME };
     t.driver.open_received_gifts(owner).unwrap();
@@ -829,4 +829,44 @@ fn a_stale_subscriptions_refetch_waits_for_an_appended_page_and_is_kept_when_ref
     assert!(!payments.star_subscriptions.is_stale());
     assert!(payments.star_subscriptions.error().is_some());
     assert!(!payments.star_subscriptions.is_loading());
+}
+
+#[test]
+fn a_gift_mutation_does_not_make_a_failed_first_page_owed_again() {
+    let mut t = Flaky::new();
+    t.sender.refuse(&["getReceivedGifts"]);
+    let owner = crate::telegram::envelope::MessageSender::User { user_id: ME };
+    assert!(t.driver.open_received_gifts(owner).is_err());
+    // The user toggles or sells a gift: the mutation starts and ends.
+    let hub = &mut t.driver.session.payments.hub;
+    hub.gifts_op.begin(crate::ids::RequestId(900));
+    hub.gifts_op.failed(Some(crate::ids::RequestId(900)));
+    // The tick's refresh sends nothing: the failed page is not an
+    // invalidated list.
+    for _ in 0..2 {
+        assert!(
+            t.driver
+                .refresh_received_gifts_if_stale()
+                .unwrap()
+                .is_none()
+        );
+    }
+    assert!(t.driver.session.payments.hub.gifts_page.error().is_some());
+}
+
+#[test]
+fn a_stale_proxy_list_whose_refetch_cannot_be_sent_is_not_asked_every_tick() {
+    use crate::proxy::ProxyFetch;
+    let mut t = Flaky::new();
+    t.sender.refuse(&["getProxies"]);
+    t.driver.session.settings.proxy.fetch = ProxyFetch::Stale;
+    assert!(t.driver.refresh_proxies_if_stale().is_err());
+    assert_eq!(t.driver.session.settings.proxy.fetch, ProxyFetch::Failed);
+    // The ticks that follow send nothing and report nothing.
+    for _ in 0..3 {
+        assert!(matches!(t.driver.refresh_proxies_if_stale(), Ok(None)));
+        assert!(matches!(t.driver.maybe_fetch_proxies(), Ok(None)));
+    }
+    // The dialog's Refresh is the way out.
+    assert!(t.driver.fetch_proxies().is_err());
 }

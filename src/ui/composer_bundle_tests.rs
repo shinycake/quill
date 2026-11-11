@@ -223,8 +223,11 @@ fn archive_and_the_recent_actions_apply_to_the_open_chat(cx: &mut TestAppContext
         assert!(!app.admin_log_by_key(window, cx));
         let session = app.demo_session.as_mut().expect("demo session");
         session.open_chat(CHANNEL);
-        session.chats.get_mut(&CHANNEL.0).unwrap().my_member_status =
-            Some(ChannelMemberStatus::Creator);
+        session
+            .chats
+            .get_mut(&CHANNEL.0)
+            .unwrap()
+            .assume_member_status(Some(ChannelMemberStatus::Creator));
         assert!(app.admin_log_by_key(window, cx));
         assert!(
             app.session()

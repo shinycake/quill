@@ -31,16 +31,54 @@ impl SavedChatWindow {
     }
 }
 
-/// What the file holds: whether the restore question was asked, the
-/// answer, and the windows of the last run.
+/// The answer to "restore the windows from last time?".
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RestoreAnswer {
+    /// The question was not asked yet.
+    #[default]
+    Unasked,
+    Yes,
+    No,
+}
+
+/// What the file holds: the answer to the restore question and the
+/// windows of the last run. The file keeps the keys it always had,
+/// `asked`, `restore` and `windows` (an answer only counts when it was
+/// asked).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(from = "serde_json::Value", into = "serde_json::Value")]
 pub struct ChatWindowsState {
-    #[serde(default)]
-    pub asked: bool,
-    #[serde(default)]
-    pub restore: bool,
-    #[serde(default)]
+    pub answer: RestoreAnswer,
     pub windows: Vec<SavedChatWindow>,
+}
+
+impl From<serde_json::Value> for ChatWindowsState {
+    fn from(file: serde_json::Value) -> Self {
+        let flag = |key: &str| file.get(key).and_then(serde_json::Value::as_bool);
+        let answer = match (
+            flag("asked").unwrap_or(false),
+            flag("restore").unwrap_or(false),
+        ) {
+            (false, _) => RestoreAnswer::Unasked,
+            (true, true) => RestoreAnswer::Yes,
+            (true, false) => RestoreAnswer::No,
+        };
+        let windows = file
+            .get("windows")
+            .and_then(|windows| serde_json::from_value(windows.clone()).ok())
+            .unwrap_or_default();
+        Self { answer, windows }
+    }
+}
+
+impl From<ChatWindowsState> for serde_json::Value {
+    fn from(state: ChatWindowsState) -> Self {
+        serde_json::json!({
+            "asked": state.answer != RestoreAnswer::Unasked,
+            "restore": state.answer == RestoreAnswer::Yes,
+            "windows": state.windows,
+        })
+    }
 }
 
 impl ChatWindowsState {
@@ -67,8 +105,11 @@ impl ChatWindowsState {
 
     /// Record the answer to "restore the windows from last time?".
     pub fn answer(&mut self, restore: bool) {
-        self.asked = true;
-        self.restore = restore;
+        self.answer = if restore {
+            RestoreAnswer::Yes
+        } else {
+            RestoreAnswer::No
+        };
     }
 }
 
@@ -164,6 +205,26 @@ mod tests {
             .sanitized()
             .is_none()
         );
+    }
+
+    #[test]
+    fn the_answer_is_one_value_and_an_unasked_yes_is_not_an_answer() {
+        let read = |json: &str| {
+            serde_json::from_str::<ChatWindowsState>(json)
+                .unwrap()
+                .answer
+        };
+        assert_eq!(read("{}"), RestoreAnswer::Unasked);
+        assert_eq!(read(r#"{"asked":true,"restore":true}"#), RestoreAnswer::Yes);
+        assert_eq!(read(r#"{"asked":true}"#), RestoreAnswer::No);
+        // A stored yes that was never asked for does not restore anything.
+        assert_eq!(read(r#"{"restore":true}"#), RestoreAnswer::Unasked);
+        // The keys of the file stay as they were.
+        let mut state = ChatWindowsState::default();
+        state.answer(true);
+        let written: serde_json::Value = serde_json::to_value(&state).unwrap();
+        assert_eq!(written["asked"], true);
+        assert_eq!(written["restore"], true);
     }
 
     #[test]

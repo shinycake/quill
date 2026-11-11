@@ -383,23 +383,49 @@ pub fn poll_ends_in_label(poll: &Poll, now: i64) -> Option<String> {
     })
 }
 
+/// One option row of a [`PollDraft`]: its text, the picture, clip, sticker
+/// or link attached to it, and whether a quiz marks it correct. One row,
+/// so editing the list can never leave the media or the mark on another
+/// option.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DraftOption {
+    pub text: String,
+    pub media: Option<PollOptionInput>,
+    pub correct: bool,
+}
+
+impl DraftOption {
+    pub fn new(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            ..Self::default()
+        }
+    }
+
+    fn usable(&self) -> bool {
+        !self.text.trim().is_empty()
+    }
+}
+
+impl From<&str> for DraftOption {
+    fn from(text: &str) -> Self {
+        Self::new(text)
+    }
+}
+
 /// A composer poll dialog frozen at "Create poll" (validated before send).
 ///
-/// `quiz_correct` is the 0-based index into the *usable* (non-empty,
-/// dialog-order) options; the dialog maps its marked row to it when
-/// freezing. `country_codes` are the dialog's parsed, uppercased codes.
+/// A quiz's correct answers are the `correct` rows among the *usable*
+/// (non-empty, dialog-order) options. `country_codes` are the dialog's
+/// parsed, uppercased codes.
 #[derive(Debug, Clone, Default)]
 pub struct PollDraft {
     pub question: String,
     pub description: String,
-    pub options: Vec<String>,
-    /// The picture, clip, sticker or link attached to each option, by the
-    /// same index as `options` (may be shorter).
-    pub option_media: Vec<Option<PollOptionInput>>,
+    pub options: Vec<DraftOption>,
     pub is_anonymous: bool,
     pub allows_multiple_answers: bool,
     pub is_quiz: bool,
-    pub quiz_correct: Vec<usize>,
     pub quiz_explanation: String,
     pub allows_revoting: bool,
     pub shuffle_options: bool,
@@ -411,12 +437,10 @@ pub struct PollDraft {
     pub hide_results_until_closes: bool,
     /// B15: `members_only` ("Restrict to Subscribers", channels only).
     pub members_only: bool,
-    /// `open_period`: seconds the poll stays open after it is sent; 0 =
-    /// none. Set by a preset of "Poll ends".
-    pub open_period: i64,
-    /// B15: absolute deadline (`close_date`, unix seconds); 0 = none. Set
-    /// by "Custom"; TDLib takes it or `open_period`, never both.
-    pub close_date: i64,
+    /// When the poll closes: a span after it is sent (`open_period`, a
+    /// preset of "Poll ends") or an absolute moment (`close_date`, B15
+    /// "Custom"). TDLib takes one of them, never both.
+    pub deadline: Option<PollClose>,
     /// `poll_open_period_max` as TDLib reported it (0 = not yet).
     pub close_max: i64,
 }
@@ -424,7 +448,7 @@ pub struct PollDraft {
 impl PollDraft {
     pub fn new() -> Self {
         Self {
-            options: vec![String::new(), String::new()],
+            options: vec![DraftOption::default(), DraftOption::default()],
             is_anonymous: true,
             allows_multiple_answers: false,
             allows_revoting: true,
@@ -436,8 +460,8 @@ impl PollDraft {
     pub fn usable_options(&self) -> Vec<&str> {
         self.options
             .iter()
-            .map(|option| option.trim())
-            .filter(|option| !option.is_empty())
+            .filter(|option| option.usable())
+            .map(|option| option.text.trim())
             .collect()
     }
 
@@ -446,20 +470,21 @@ impl PollDraft {
     pub fn usable_option_media(&self) -> Vec<Option<&PollOptionInput>> {
         self.options
             .iter()
-            .enumerate()
-            .filter(|(_, option)| !option.trim().is_empty())
-            .map(|(index, _)| self.option_media.get(index).and_then(Option::as_ref))
+            .filter(|option| option.usable())
+            .map(|option| option.media.as_ref())
             .collect()
     }
 
-    /// `open_period` in seconds for `inputMessagePoll` (0 = no auto-close).
-    /// Only meaningful when `validate()` is `None`. TDLib accepts either
-    /// `open_period` or `close_date`, so an absolute deadline wins.
-    pub fn open_period_secs(&self) -> i32 {
-        if self.close_date > 0 {
-            return 0;
-        }
-        self.open_period.clamp(0, i64::from(i32::MAX)) as i32
+    /// The 0-based indexes among the usable options that a quiz marks
+    /// correct.
+    pub fn quiz_correct(&self) -> Vec<usize> {
+        self.options
+            .iter()
+            .filter(|option| option.usable())
+            .enumerate()
+            .filter(|(_, option)| option.correct)
+            .map(|(index, _)| index)
+            .collect()
     }
 
     /// `None` when the draft is valid; otherwise the short user-facing reason.
@@ -485,9 +510,7 @@ impl PollDraft {
             return Some("at most 10 options");
         }
         if self.is_quiz {
-            let marked = !self.quiz_correct.is_empty()
-                && self.quiz_correct.iter().all(|index| *index < options.len());
-            if !marked {
+            if self.quiz_correct().is_empty() {
                 return Some("mark the correct option");
             }
             let explanation_len = self.quiz_explanation.chars().count();
@@ -499,19 +522,20 @@ impl PollDraft {
                 return Some("the quiz explanation has too many line breaks (2 max)");
             }
         }
-        if self.close_date > 0 {
-            if self.close_date < now + POLL_DEADLINE_MIN_SECS {
-                return Some("the deadline must be in the future");
+        let close_max = poll_close_max((self.close_max > 0).then_some(self.close_max));
+        match self.deadline {
+            Some(PollClose::Date(date)) if date > 0 => {
+                if date < now + POLL_DEADLINE_MIN_SECS {
+                    return Some("the deadline must be in the future");
+                }
+                if date > now + close_max {
+                    return Some("the deadline is too far ahead");
+                }
             }
-            if self.close_date
-                > now + poll_close_max((self.close_max > 0).then_some(self.close_max))
-            {
-                return Some("the deadline is too far ahead");
+            Some(PollClose::Period(secs)) if secs > close_max => {
+                return Some("the poll stays open too long");
             }
-        } else if self.open_period > 0
-            && self.open_period > poll_close_max((self.close_max > 0).then_some(self.close_max))
-        {
-            return Some("the poll stays open too long");
+            _ => {}
         }
         for code in &self.country_codes {
             if code.len() != 2 || !code.bytes().all(|b| b.is_ascii_uppercase()) {
@@ -867,7 +891,7 @@ mod tests {
         assert_eq!(draft.validate(), Some("add a poll question"));
         draft.question = "pick".to_string();
         assert_eq!(draft.validate(), Some("add at least 2 options"));
-        draft.options = vec!["a".to_string(), "b".to_string()];
+        draft.options = vec!["a".into(), "b".into()];
         assert_eq!(draft.validate(), None);
     }
 
@@ -875,19 +899,26 @@ mod tests {
     fn draft_rejects_long_question_and_too_many_options() {
         let mut draft = PollDraft::new();
         draft.question = "x".repeat(256);
-        draft.options = vec!["a".to_string(), "b".to_string()];
+        draft.options = vec!["a".into(), "b".into()];
         assert_eq!(draft.validate(), Some("the question is too long (255 max)"));
         draft.question = "pick".to_string();
-        draft.options = (0..11).map(|i| format!("opt{i}")).collect();
+        draft.options = (0..11)
+            .map(|i| DraftOption::new(format!("opt{i}")))
+            .collect();
         assert_eq!(draft.validate(), Some("at most 10 options"));
     }
 
     fn quiz_draft() -> PollDraft {
         PollDraft {
             question: "capital of France?".to_string(),
-            options: vec!["Paris".to_string(), "London".to_string()],
+            options: vec![
+                DraftOption {
+                    correct: true,
+                    .."Paris".into()
+                },
+                "London".into(),
+            ],
             is_quiz: true,
-            quiz_correct: vec![0],
             allows_revoting: false,
             ..Default::default()
         }
@@ -897,11 +928,14 @@ mod tests {
     fn quiz_draft_requires_correct_option() {
         let mut draft = quiz_draft();
         assert_eq!(draft.validate(), None);
-        draft.quiz_correct = Vec::new();
+        for option in &mut draft.options {
+            option.correct = false;
+        }
         assert_eq!(draft.validate(), Some("mark the correct option"));
-        // Marked row maps outside the usable options (e.g. the marked row
-        // was emptied after marking).
-        draft.quiz_correct = vec![7];
+        // The marked row was emptied after marking.
+        draft = quiz_draft();
+        draft.options[0].text.clear();
+        draft.options.push("Rome".into());
         assert_eq!(draft.validate(), Some("mark the correct option"));
     }
 
@@ -928,17 +962,15 @@ mod tests {
     fn duration_bounds() {
         let mut draft = quiz_draft();
         draft.is_quiz = false;
-        draft.quiz_correct = Vec::new();
+        draft.options[0].correct = false;
         assert_eq!(draft.validate(), None);
-        assert_eq!(draft.open_period_secs(), 0);
-        draft.open_period = 3 * 3600;
+        draft.deadline = Some(PollClose::Period(3 * 3600));
         assert_eq!(draft.validate(), None);
-        assert_eq!(draft.open_period_secs(), 3 * 3600);
         // TDLib's reported cap wins over the year.
         draft.close_max = 3600;
         assert_eq!(draft.validate(), Some("the poll stays open too long"));
         draft.close_max = 0;
-        draft.open_period = POLL_DEADLINE_MAX_SECS + 1;
+        draft.deadline = Some(PollClose::Period(POLL_DEADLINE_MAX_SECS + 1));
         assert_eq!(draft.validate(), Some("the poll stays open too long"));
     }
 
@@ -960,7 +992,7 @@ mod tests {
     fn country_codes_must_be_iso() {
         let mut draft = quiz_draft();
         draft.is_quiz = false;
-        draft.quiz_correct = Vec::new();
+        draft.options[0].correct = false;
         draft.country_codes = vec!["US".to_string(), "GB".to_string()];
         assert_eq!(draft.validate(), None);
         draft.country_codes = vec!["USA".to_string()];
@@ -1061,23 +1093,22 @@ mod tests {
         let now = 1_000_000;
         let mut draft = quiz_draft();
         draft.is_quiz = false;
-        draft.quiz_correct = Vec::new();
-        draft.close_date = now + 30;
+        draft.options[0].correct = false;
+        draft.deadline = Some(PollClose::Date(now + 30));
         assert_eq!(
             draft.validate_at(now),
             Some("the deadline must be in the future")
         );
-        draft.close_date = now + POLL_DEADLINE_MAX_SECS + 1;
+        draft.deadline = Some(PollClose::Date(now + POLL_DEADLINE_MAX_SECS + 1));
         assert_eq!(
             draft.validate_at(now),
             Some("the deadline is too far ahead")
         );
-        draft.close_date = now + 3600;
+        draft.deadline = Some(PollClose::Date(now + 3600));
         assert_eq!(draft.validate_at(now), None);
-        // An absolute deadline replaces the relative duration.
-        draft.open_period = 5 * 3600;
+        // A span replaces the absolute deadline: one value holds either.
+        draft.deadline = Some(PollClose::Period(5 * 3600));
         assert_eq!(draft.validate_at(now), None);
-        assert_eq!(draft.open_period_secs(), 0);
     }
 
     #[test]
@@ -1088,9 +1119,19 @@ mod tests {
             })
         };
         let draft = PollDraft {
-            options: vec!["a".into(), "  ".into(), "b".into(), "c".into()],
             // The blank second option's media is dropped with it.
-            option_media: vec![link("1"), link("2"), None],
+            options: vec![
+                DraftOption {
+                    media: link("1"),
+                    .."a".into()
+                },
+                DraftOption {
+                    media: link("2"),
+                    .."  ".into()
+                },
+                "b".into(),
+                "c".into(),
+            ],
             ..PollDraft::new()
         };
         assert_eq!(draft.usable_options(), ["a", "b", "c"]);

@@ -322,7 +322,6 @@ fn set_rejoin_state(app: &Entity<QuillApp>, main: &mut VisualTestContext, rejoin
             .and_then(|s| s.calls.active_group_call.as_mut())
         {
             call.is_joined = false;
-            call.need_rejoin = true;
             call.rejoin = rejoin;
         }
         cx.notify();

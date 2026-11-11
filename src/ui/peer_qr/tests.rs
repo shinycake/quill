@@ -257,7 +257,7 @@ fn a_member_who_cannot_change_info_gets_no_colors(cx: &mut TestAppContext) {
             .as_mut()
             .and_then(|session| session.chats.get_mut(&GROUP_CHAT))
         {
-            chat.my_member_status = Some(ChannelMemberStatus::Member);
+            chat.assume_member_status(Some(ChannelMemberStatus::Member));
         }
         app.open_peer_qr_box(QrPeer::Chat(GROUP_CHAT), cx);
     });

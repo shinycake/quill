@@ -223,6 +223,16 @@ impl Carriers {
         Some(carrier.proxy_id)
     }
 
+    /// The carrier of `proxy_id` failed and TDLib has not closed it yet:
+    /// the proxy's row says "not available" until TDLib opens the next one.
+    /// (A carrier refused for lack of a host is `!hosting`, which the row
+    /// reads through `ProxyState::can_enable`.)
+    pub fn failed_for(&self, proxy_id: i32) -> bool {
+        self.open
+            .values()
+            .any(|carrier| carrier.proxy_id == proxy_id && carrier.phase == CarrierPhase::Failed)
+    }
+
     /// Whether TDLib's data for `carrier_id` goes to the page.
     pub fn accepts_data(&self, carrier_id: i32) -> bool {
         self.open

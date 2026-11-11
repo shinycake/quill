@@ -533,7 +533,7 @@ impl QuillApp {
                 prefs.auto_switch_secs = secs;
             }
             // The clock restarts with the new settings.
-            driver.session.settings.proxy.disconnected_since_ms = None;
+            driver.session.settings.proxy.rotation = quill::proxy::Rotation::Watching;
             driver.save_proxy_prefs()
         });
         cx.notify();
@@ -881,8 +881,7 @@ impl QuillApp {
                     quill::proxy_web::WebRowState::for_entry(
                         entry.is_enabled,
                         connected,
-                        state.carrier_failed == Some(entry.id)
-                            || !state.can_enable(entry.proxy.kind),
+                        state.carriers.failed_for(entry.id) || !state.can_enable(entry.proxy.kind),
                     )
                 });
                 rows = rows.child(this.proxy_row(entry, ping, web, cx));

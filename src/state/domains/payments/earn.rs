@@ -407,7 +407,7 @@ impl Session {
     /// The signed-in user created the channel (tdesktop `amCreator`).
     pub fn earn_is_channel_creator(&self, chat_id: i64) -> bool {
         self.chats.get(&chat_id).is_some_and(|chat| {
-            chat.my_member_status == Some(crate::telegram::envelope::ChannelMemberStatus::Creator)
+            chat.member_status() == Some(crate::telegram::envelope::ChannelMemberStatus::Creator)
         })
     }
 

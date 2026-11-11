@@ -187,7 +187,7 @@ impl Session {
             Some(crate::telegram::envelope::MessageSender::Chat { chat_id }) => {
                 self.chats.get(&chat_id).is_some_and(|chat| {
                     chat.is_channel()
-                        && chat.my_member_status
+                        && chat.member_status()
                             == Some(crate::telegram::envelope::ChannelMemberStatus::Creator)
                 })
             }

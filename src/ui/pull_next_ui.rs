@@ -340,7 +340,8 @@ impl QuillApp {
                 if !unread || !active || self.history.pull.window.is_none() {
                     return;
                 }
-                self.history.pull.machine.begin_jump();
+                let now = self.history.pull.now();
+                self.history.pull.machine.begin_jump(now);
                 self.pull_jump_when_ready(next, cx);
             }
             Mode::Topic => {
@@ -358,7 +359,8 @@ impl QuillApp {
                 if !unread || !active || target.topic == Some(next) {
                     return;
                 }
-                self.history.pull.machine.begin_jump();
+                let now = self.history.pull.now();
+                self.history.pull.machine.begin_jump(now);
                 let chat = target.chat;
                 // `crl::on_main`: on the next turn, checked again.
                 let task = self.spawn_screen(cx, async move |this, cx| {

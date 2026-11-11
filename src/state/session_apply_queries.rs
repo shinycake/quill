@@ -205,7 +205,6 @@ impl Session {
                     is_received: false,
                 },
                 started_at: Instant::now(),
-                ready_at: None,
                 ready: None,
                 transport: CallTransport::default(),
                 signaling_queue: Vec::new(),

@@ -48,7 +48,7 @@ pub(super) fn gift_owner_actions(
         )
     };
     let mut col = div().flex().flex_col().gap_2();
-    col = pin_section(col, gift, mine, manage, hub.gifts.as_slice(), busy, cx);
+    col = pin_section(col, gift, mine, manage, &hub.gifts, busy, cx);
     if let Some(cost) = gift.upgrade_cost(mine) {
         col = upgrade_section(
             col,

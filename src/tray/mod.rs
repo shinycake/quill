@@ -176,7 +176,7 @@ fn forum_topics_extra(session: &Session, prefs: &BadgePrefs, archive: bool) -> u
 /// A chat the user left drops out of both lists but keeps its loaded
 /// topics: it counts in neither.
 fn in_list(chat: &ChatSummary, archive: bool) -> bool {
-    let left = chat.my_member_status == Some(ChannelMemberStatus::Left)
+    let left = chat.member_status() == Some(ChannelMemberStatus::Left)
         && !chat.in_main_list
         && !chat.in_archive;
     chat.in_archive == archive && !left

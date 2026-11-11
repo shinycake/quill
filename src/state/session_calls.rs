@@ -35,11 +35,16 @@ impl Session {
             if call.state.is_terminal() {
                 self.end_active_call(call);
             } else {
-                if matches!(call.state, CallState::Ready) && active.ready_at.is_none() {
-                    active.ready_at = Some(Instant::now());
-                }
                 if matches!(call.state, CallState::Ready) {
-                    active.ready = call.ready.clone();
+                    match active.ready.as_mut() {
+                        Some(ready) => ready.params = call.ready.clone(),
+                        None => {
+                            active.ready = Some(CallReady {
+                                params: call.ready.clone(),
+                                since: Instant::now(),
+                            })
+                        }
+                    }
                 }
                 active.is_video = call.is_video;
                 // A hang-up in flight keeps showing: the update is where
@@ -89,9 +94,11 @@ impl Session {
         if call.state.is_terminal() {
             // Another call's card still waiting for its rating stays: a
             // call that ended untracked (a missed one) does not replace it.
-            let holds_rating = self.calls.summary.as_ref().is_some_and(|summary| {
-                summary.call_id != call.id && summary.need_rating && summary.rating.is_open()
-            });
+            let holds_rating = self
+                .calls
+                .summary
+                .as_ref()
+                .is_some_and(|summary| summary.call_id != call.id && summary.rating.is_open());
             if !holds_rating {
                 self.calls.summary = Some(CallSummary::from_terminal(call, 0, false));
             }
@@ -171,10 +178,7 @@ impl Session {
         };
         // "Add People" closes with its call: its search goes too.
         self.calls.add_people_search = ShareSearch::default();
-        let duration_secs = active
-            .ready_at
-            .map(|t| t.elapsed().as_secs() as i64)
-            .unwrap_or(0);
+        let duration_secs = active.connected_secs();
         let mut summary =
             CallSummary::from_terminal(call, duration_secs, active.transport.is_connected());
         summary.final_transport = active.transport.state();
@@ -597,7 +601,6 @@ fn apply_group_call_fields(tracked: &mut ActiveGroupCall, group_call: &ParsedGro
     tracked.scheduled_start_date = 0;
     let was_joined = tracked.is_joined;
     tracked.is_joined = group_call.is_joined;
-    tracked.need_rejoin = group_call.need_rejoin;
     tracked.can_be_managed = group_call.can_be_managed;
     tracked.is_owned = group_call.is_owned;
     tracked.participant_count = group_call.participant_count;

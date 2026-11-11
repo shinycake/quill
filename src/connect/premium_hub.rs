@@ -84,7 +84,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .my_user_id
             .ok_or(ConnectSendError::InvalidRequest)?;
         let offset = if append {
-            self.session.payments.hub.tx_offset.clone()
+            self.session.payments.hub.tx_offset.to_string()
         } else {
             String::new()
         };
@@ -163,7 +163,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .gifts_owner
             .ok_or(ConnectSendError::InvalidRequest)?;
         let offset = if append {
-            self.session.payments.hub.gifts_offset.clone()
+            self.session.payments.hub.gifts_offset.to_string()
         } else {
             String::new()
         };

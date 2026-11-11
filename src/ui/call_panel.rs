@@ -208,8 +208,7 @@ impl QuillApp {
             screen_sharing: call.screen_sharing(),
             can_share_screen: ready && quill::calls::capture::screen::can_share(),
             emojis: call
-                .ready
-                .as_ref()
+                .ready_params()
                 .map(|r| r.emojis.clone())
                 .unwrap_or_default(),
             remote_muted: ready && call.remote_audio_muted,
@@ -221,8 +220,7 @@ impl QuillApp {
             // Not under the lock (`calls::lock_layers`).
             can_add_people: !self.refused_while_locked()
                 && call
-                    .ready
-                    .as_ref()
+                    .ready_params()
                     .is_some_and(|ready| ready.is_group_call_supported),
             joined_line: None,
         })

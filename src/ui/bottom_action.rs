@@ -42,7 +42,7 @@ impl QuillApp {
                 && (session.bots.bot_start_params.contains_key(&chat.id.0) || empty_history),
             channel: matches!(chat.kind, ChatKind::Supergroup { .. }).then(|| ChannelFacts {
                 broadcast: chat.is_channel(),
-                membership: chat.my_member_status,
+                membership: chat.member_status(),
                 join_by_request: self.chat_join_by_request(chat.id),
                 direct_messages: session.direct_messages_role(chat.id).is_some(),
             }),

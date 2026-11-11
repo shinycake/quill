@@ -1,14 +1,22 @@
 //! Chat-list management: pins, open chat, views, ordering.
 use super::*;
 
-/// Whether `Session::main_order` / `archive_order` are stale. While a poll
-/// batch is open (`deferred`), order changes are only recorded; closing the
-/// batch brings the lists up to date once.
+/// Whether a poll batch is open. While it is, order changes are only
+/// recorded; closing the batch brings the lists up to date once.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BatchOrder {
+    /// No batch: order changes bring the lists up to date at once.
+    #[default]
+    Live,
+    /// A batch is open (`begin_update_batch`). `resort`: the lists need a
+    /// full sort (changes made outside the position updates).
+    InBatch { resort: bool },
+}
+
+/// Whether `Session::main_order` / `archive_order` are stale.
 #[derive(Debug, Default)]
 pub(crate) struct ChatOrderSync {
-    /// The lists need a full sort (changes made outside the position updates).
-    pub(crate) dirty: bool,
-    pub(crate) deferred: bool,
+    pub(crate) batch: BatchOrder,
     /// Chats whose main or archive position changed since the last flush.
     pub(crate) moved: HashSet<i64>,
     /// Stored folder tab orders, dropped whenever a folder position changes.
@@ -114,39 +122,48 @@ impl Session {
     }
 
     pub(crate) fn rebuild_main_order(&mut self) {
-        self.chat_order_sync.dirty = true;
-        if !self.chat_order_sync.deferred {
-            self.flush_chat_order();
+        match &mut self.chat_order_sync.batch {
+            BatchOrder::InBatch { resort } => *resort = true,
+            BatchOrder::Live => self.flush_chat_order(true),
         }
     }
 
     /// Open a poll batch: chat-order sorts wait for `end_update_batch`.
     pub fn begin_update_batch(&mut self) {
-        self.chat_order_sync.deferred = true;
+        if self.chat_order_sync.batch == BatchOrder::Live {
+            self.chat_order_sync.batch = BatchOrder::InBatch { resort: false };
+        }
+    }
+
+    /// Whether a poll batch is open.
+    pub fn in_update_batch(&self) -> bool {
+        self.chat_order_sync.batch != BatchOrder::Live
     }
 
     /// Close a poll batch and update the chat lists if anything moved.
     pub fn end_update_batch(&mut self) {
-        self.chat_order_sync.deferred = false;
-        self.flush_chat_order();
+        let resort = matches!(
+            std::mem::take(&mut self.chat_order_sync.batch),
+            BatchOrder::InBatch { resort: true }
+        );
+        self.flush_chat_order(resort);
     }
 
     /// Bring the lists up to date with the positions recorded by
     /// `apply_position_fields`, now or when the open batch closes.
     pub(crate) fn sync_chat_order(&mut self) {
-        if !self.chat_order_sync.deferred {
-            self.flush_chat_order();
+        if self.chat_order_sync.batch == BatchOrder::Live {
+            self.flush_chat_order(false);
         }
     }
 
-    fn flush_chat_order(&mut self) {
-        if !self.chat_order_sync.dirty {
+    fn flush_chat_order(&mut self, resort: bool) {
+        if !resort {
             if !self.chat_order_sync.moved.is_empty() {
                 self.place_moved_chats();
             }
             return;
         }
-        self.chat_order_sync.dirty = false;
         self.chat_order_sync.moved.clear();
         // Sort the `(order, chat_id)` keys TDLib orders by (descending,
         // schema 1.8.67 `chatPosition.order`), never clones of whole

@@ -57,7 +57,6 @@ impl Session {
             group_call_id: call.id,
         });
         call.is_joined
-            || call.need_rejoin
             || call.reconnecting()
             || joining == Some(call.id)
             || self.requests.pending.values().any(|p| p.purpose == purpose)

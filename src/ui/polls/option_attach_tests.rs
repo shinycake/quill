@@ -61,7 +61,7 @@ fn a_link_is_attached_with_done_and_an_empty_one_is_refused(cx: &mut TestAppCont
         // The draft carries it for the second option once it has text.
         let draft = dialog.draft(cx);
         assert_eq!(
-            draft.option_media[1],
+            draft.options[1].media,
             Some(PollOptionInput::Link {
                 url: "https://example.com/tacos".into()
             })
@@ -207,10 +207,10 @@ fn emoji_picked_in_the_panel_go_to_the_option_field_with_a_token(cx: &mut TestAp
         // The option reaches the draft as composer markup with the emoji.
         let draft = dialog.draft(cx);
         assert_eq!(
-            draft.options[1],
+            draft.options[1].text,
             "\u{1F600}![\u{2B50}](tg://emoji?id=5368324170671202286)"
         );
-        assert_eq!(draft.options[0], "");
+        assert_eq!(draft.options[0].text, "");
     });
 }
 

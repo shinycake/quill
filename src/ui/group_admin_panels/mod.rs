@@ -150,7 +150,7 @@ impl QuillApp {
         let session = self.session();
         let is_member = session
             .and_then(|s| s.chats.get(&chat_id.0))
-            .and_then(|chat| chat.my_member_status)
+            .and_then(|chat| chat.member_status())
             .is_some_and(|status| {
                 matches!(
                     status,

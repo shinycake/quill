@@ -415,13 +415,13 @@ fn announcement_labels_are_fetched_once_and_hide_deletes_the_history() {
 
     // A joined channel is not hidden, and a language switch asks again.
     if let Some(chat) = f.driver.session.chats.get_mut(&7) {
-        chat.my_member_status = Some(crate::telegram::envelope::ChannelMemberStatus::Member);
+        chat.assume_member_status(Some(crate::telegram::envelope::ChannelMemberStatus::Member));
     }
     let sent_before = f.sent().len();
     assert!(f.driver.hide_promotion(ChatId(7)).unwrap().is_none());
     assert_eq!(f.sent().len(), sent_before);
     if let Some(chat) = f.driver.session.chats.get_mut(&7) {
-        chat.my_member_status = Some(crate::telegram::envelope::ChannelMemberStatus::Left);
+        chat.assume_member_status(Some(crate::telegram::envelope::ChannelMemberStatus::Left));
     }
     f.driver.switch_language(pack("pt-br", "pt")).unwrap();
     f.driver.pump_psa_labels();

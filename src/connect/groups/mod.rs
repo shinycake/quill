@@ -171,9 +171,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         if self.session.chats.get(&chat_id.0).is_some_and(|chat| {
             if chat.is_channel() {
-                chat.my_member_status.is_some()
+                chat.member_status().is_some()
             } else {
-                chat.my_rights_fetched
+                chat.rights_fetched()
             }
         }) {
             return Ok(());

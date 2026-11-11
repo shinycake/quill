@@ -31,7 +31,7 @@ crate::ui::shell::register_dialogs! {
         3804,
         |app| {
             app.session().is_some_and(|s| {
-                s.payments.hub.grams.open && s.payments.hub.grams.withdraw.is_some()
+                s.payments.hub.grams.open && s.payments.hub.grams.withdraw.as_ref().is_some()
             })
         },
         QuillApp::build_grams_withdraw_dialog,
@@ -53,7 +53,7 @@ pub(super) fn collect_button(cx: &mut Context<QuillApp>) -> Button {
 
 impl QuillApp {
     fn grams_withdraw(&self) -> Option<GramWithdraw> {
-        self.session()?.payments.hub.grams.withdraw.clone()
+        self.session()?.payments.hub.grams.withdraw.as_ref().cloned()
     }
 
     fn clear_grams_withdraw_password(&mut self, window: &mut Window, cx: &mut Context<Self>) {

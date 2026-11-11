@@ -277,7 +277,7 @@ fn a_promotion_shapes_the_menu_like_use_top_promotion(cx: &mut TestAppContext) {
                         supergroup_id: 55,
                         is_channel: true,
                     };
-                    chat.my_member_status = Some(status);
+                    chat.assume_member_status(Some(status));
                 }
                 match p {
                     Some(p) => session.chat_list.promoted_chats.insert(chat_id.0, p),

@@ -39,8 +39,12 @@ impl Rig {
                 .ingest(copy_and_parse(json, &seq, &sink).unwrap())
                 .unwrap();
         }
-        driver.session.chats.get_mut(&13).unwrap().my_member_status =
-            Some(ChannelMemberStatus::Creator);
+        driver
+            .session
+            .chats
+            .get_mut(&13)
+            .unwrap()
+            .assume_member_status(Some(ChannelMemberStatus::Creator));
         driver.session.groups.supergroup_full_infos.insert(
             113,
             SupergroupFullInfoData {

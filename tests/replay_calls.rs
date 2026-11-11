@@ -80,7 +80,7 @@ fn replay_call_signaling_lifecycle() {
     );
     let call = session.calls.active_call.as_ref().expect("call 77 ready");
     assert!(matches!(call.state, CallState::Ready));
-    assert!(call.ready_at.is_some());
+    assert!(call.ready.is_some());
     // Only the tracked call's signaling data is kept (call 78's is
     // dropped — no tracked call with that id).
     assert_eq!(call.signaling_queue.len(), 1);
@@ -102,10 +102,12 @@ fn replay_call_signaling_lifecycle() {
     let summary = session.calls.summary.as_ref().expect("end summary");
     assert_eq!(summary.call_id, 77);
     assert_eq!(summary.end_line, "Call ended");
-    assert!(summary.need_rating);
     assert!(summary.rating.is_open());
-    assert!(!summary.need_debug_information);
-    assert!(!summary.need_log);
+    assert_eq!(
+        summary.debug_information,
+        quill::state::CallUpload::NotNeeded
+    );
+    assert_eq!(summary.log, quill::state::CallUpload::NotNeeded);
 
     // A rejected `createCall` surfaces the error (TDLib's message text
     // is never stored — it can contain secrets).
@@ -244,7 +246,7 @@ fn replay_video_call_signaling() {
     let call = session.calls.active_call.as_ref().expect("call 90 ready");
     assert!(matches!(call.state, CallState::Ready));
     assert!(call.is_video);
-    assert!(call.ready_at.is_some());
+    assert!(call.ready.is_some());
 
     // A second incoming video call while one is active raises the
     // swap prompt, keeping its `is_video`.
@@ -282,7 +284,7 @@ fn replay_video_call_signaling() {
     let summary = session.calls.summary.as_ref().expect("end summary");
     assert_eq!(summary.call_id, 90);
     assert!(summary.is_video);
-    assert!(summary.need_rating);
+    assert!(summary.rating.is_open());
 
     // Incoming video call: `is_video` comes from `updateCall` itself —
     // no inference needed.
@@ -493,7 +495,7 @@ fn replay_group_call_signaling() {
         &[&group_call_json(true, true, true)],
     );
     let call = session.calls.active_group_call.as_ref().expect("rejoining");
-    assert!(call.need_rejoin);
+    assert!(call.reconnecting());
     assert!(call.reconnecting());
     session.clear_group_call_reconnecting();
     assert!(

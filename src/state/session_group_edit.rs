@@ -9,13 +9,13 @@ impl Session {
         match chat.kind {
             ChatKind::Supergroup { supergroup_id, .. } => self
                 .supergroup_own_status(supergroup_id)
-                .or(chat.my_member_status),
+                .or(chat.member_status()),
             ChatKind::BasicGroup { basic_group_id } => self
                 .groups
                 .basic_group_status
                 .get(&basic_group_id)
                 .copied()
-                .or(chat.my_member_status),
+                .or(chat.member_status()),
             _ => None,
         }
     }

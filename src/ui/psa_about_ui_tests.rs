@@ -52,7 +52,7 @@ fn open(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
                 }
             }
             if let Some(chat) = session.chats.get_mut(&id) {
-                chat.my_member_status = Some(ChannelMemberStatus::Left);
+                chat.assume_member_status(Some(ChannelMemberStatus::Left));
             }
         }
     });

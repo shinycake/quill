@@ -20,21 +20,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let backdrops = &mut self.session.users_state.peer_qr.backdrops;
+        let backdrops = &self.session.users_state.peer_qr.backdrops;
         if !backdrops.due(now) {
             return Ok(());
         }
-        backdrops.start(now);
         let extra = self
             .session
             .request(RequestPurpose::GetProfileShareThemeBackdrops, None);
+        self.session.users_state.peer_qr.backdrops.start(extra, now);
         let request = json!({
             "@type": "getProfileShareThemeBackdrops",
             "@extra": extra.as_extra(),
         });
         if let Err(err) = self.sender.send_json(&request.to_string()) {
             self.session.requests.take(extra);
-            self.session.users_state.peer_qr.backdrops.fail();
+            self.session.users_state.peer_qr.backdrops.fail(extra);
             return Err(err);
         }
         Ok(())

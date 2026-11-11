@@ -181,7 +181,7 @@ impl Session {
         };
         let member = self.bot_topics(chat_id).is_some()
             || matches!(
-                chat.my_member_status,
+                chat.member_status(),
                 Some(
                     crate::telegram::envelope::ChannelMemberStatus::Creator
                         | crate::telegram::envelope::ChannelMemberStatus::Administrator

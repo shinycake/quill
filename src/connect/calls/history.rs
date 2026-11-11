@@ -9,9 +9,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .calls
             .summary
             .as_ref()
-            .filter(|summary| {
-                summary.need_debug_information && summary.debug_information.can_send()
-            })
+            .filter(|summary| summary.debug_information.can_send())
             .ok_or(ConnectSendError::InvalidRequest)?;
         Ok(self.call_log_payload(summary).to_string())
     }
@@ -126,7 +124,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .calls
             .summary
             .as_ref()
-            .filter(|s| s.need_log && s.log.can_send())
+            .filter(|s| s.log.can_send())
             .ok_or(ConnectSendError::InvalidRequest)?;
         let log_text = self.call_log_payload(summary).to_string();
         let call_id = summary.call_id;
