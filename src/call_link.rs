@@ -175,6 +175,58 @@ pub struct OfferedCallLink {
     pub live_stream: bool,
 }
 
+/// Where a call link that met a running call is: one stage, since each
+/// follows the last (asked, waiting for the old call to end, offered).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum CallLinkStage {
+    #[default]
+    Idle,
+    /// The question to leave the running call.
+    Confirm(CallLinkConfirm),
+    /// Confirmed; offered once the old call has ended.
+    Leaving(CallLinkLeaving),
+    /// What the offer found, until the UI takes it.
+    Offered(OfferedCallLink),
+}
+
+impl CallLinkStage {
+    pub fn confirm(&self) -> Option<&CallLinkConfirm> {
+        match self {
+            Self::Confirm(confirm) => Some(confirm),
+            _ => None,
+        }
+    }
+
+    /// The question's link; any other stage stays as it is.
+    pub fn take_confirm(&mut self) -> Option<CallLinkConfirm> {
+        match std::mem::take(self) {
+            Self::Confirm(confirm) => Some(confirm),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+
+    /// The offered call, once; any other stage stays as it is.
+    pub fn take_offered(&mut self) -> Option<OfferedCallLink> {
+        match std::mem::take(self) {
+            Self::Offered(offered) => Some(offered),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+
+    /// The link waiting for `call` to end is dropped (its leave failed).
+    pub fn drop_waiting_for(&mut self, call: LeavingCall) {
+        if matches!(self, Self::Leaving(waiting) if waiting.leaving == call) {
+            *self = Self::Idle;
+        }
+    }
+}
+
 /// The invite hash of the call a link offered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingCallLink {

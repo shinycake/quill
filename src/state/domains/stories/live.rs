@@ -414,7 +414,10 @@ impl Session {
             // no picture, is said.
             LiveStoryPurpose::GetStreamer { .. } => {
                 live.streamer.fail(reason.to_string());
-                live.note = Some(format!("Could not load the stream: {reason}"));
+                live.note = Some(crate::lang::tr_with(
+                    crate::lang::keys::Q_OPS_COULD_NOT_LOAD_THE_STREAM,
+                    &[("reason", reason)],
+                ));
             }
             LiveStoryPurpose::GetTopDonors { .. } => live.donors.fail(reason.to_string()),
             LiveStoryPurpose::GetMessageSenders { .. } => {

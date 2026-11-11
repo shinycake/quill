@@ -126,6 +126,7 @@ impl QuillApp {
                 quill::notify_call::CallNotificationAction::Decline => self.hang_up_call(cx),
                 quill::notify_call::CallNotificationAction::Open => {
                     self.call_screen.window_closed_by_user = None;
+                    self.call_screen.window_open_failed = None;
                     cx.activate(true);
                     window.activate_window();
                     if let Some(handle) = self.calls.window {

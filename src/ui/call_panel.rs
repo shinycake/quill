@@ -259,7 +259,12 @@ impl QuillApp {
             .is_some_and(|(_, at)| busy || at.elapsed() < ENDED_LINGER);
         let wanted = call_id.filter(|id| {
             (!ended || lingering)
-                && (self.call_screen.window_closed_by_user != Some(*id) || second.is_some())
+                && window_allowed(
+                    *id,
+                    self.call_screen.window_closed_by_user,
+                    self.call_screen.window_open_failed,
+                    second.is_some(),
+                )
         });
         match (wanted, self.calls.window) {
             (Some(_), Some(handle)) => {
@@ -445,6 +450,7 @@ impl QuillApp {
     /// Bring the call window back (the call bar's click).
     pub(super) fn show_call_window(&mut self, cx: &mut Context<Self>) {
         self.call_screen.window_closed_by_user = None;
+        self.call_screen.window_open_failed = None;
         match self.calls.window {
             Some(handle) => {
                 let _ = handle.update(cx, |_, window, _| window.activate_window());
@@ -932,3 +938,31 @@ impl Render for CallPanel {
 #[cfg(test)]
 #[path = "call_panel_tests.rs"]
 mod tests;
+
+/// Whether the call's window may open: not after you closed it (a second
+/// call ringing reopens it for its Decline and End & Answer), and not for
+/// a call whose window already failed to open.
+pub(super) fn window_allowed(
+    call: i32,
+    closed_by_user: Option<i32>,
+    open_failed: Option<i32>,
+    second_ringing: bool,
+) -> bool {
+    open_failed != Some(call) && (closed_by_user != Some(call) || second_ringing)
+}
+
+#[cfg(test)]
+mod window_allowed_tests {
+    use super::window_allowed;
+
+    #[test]
+    fn a_second_call_reopens_a_closed_window_but_not_a_failed_one() {
+        assert!(window_allowed(1, None, None, false));
+        assert!(!window_allowed(1, Some(1), None, false));
+        assert!(window_allowed(1, Some(1), None, true));
+        assert!(!window_allowed(1, None, Some(1), true));
+        assert!(!window_allowed(1, Some(1), Some(1), true));
+        // Another call's failure does not hold this one back.
+        assert!(window_allowed(2, None, Some(1), false));
+    }
+}

@@ -716,14 +716,6 @@ impl QuillApp {
                 }
             }
         } else {
-            if summary.rating == CallRating::Sent {
-                card = card.child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tr(keys::Q_OPS_THANKS_FOR_YOUR_FEEDBACK)),
-                );
-            }
             card = card.child(
                 Button::new("call-summary-close")
                     .label(tr(keys::GROUP_CALL_CLOSE))

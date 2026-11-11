@@ -64,7 +64,7 @@ impl QuillApp {
         let Some(offered) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.calls.call_link_offered.take())
+            .and_then(|live| live.driver.session.calls.call_link_stage.take_offered())
         else {
             return;
         };
@@ -109,7 +109,7 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let Some(ask) = this
                 .session()
-                .and_then(|session| session.calls.call_link_confirm.clone())
+                .and_then(|session| session.calls.call_link_stage.confirm().cloned())
             else {
                 return dialog.overlay(true).on_close(on_close.clone());
             };
@@ -150,7 +150,7 @@ crate::ui::shell::register_dialogs! {
     /// A call link while another call is on: leave it and join?
     CallLinkLeave => DialogSpec::new(
         2960,
-        |app| app.session().is_some_and(|s| s.calls.call_link_confirm.is_some()),
+        |app| app.session().is_some_and(|s| s.calls.call_link_stage.confirm().is_some()),
         QuillApp::build_call_link_leave_dialog,
     )
     .close(|app, _, cx| app.cancel_call_link_leave(cx)),

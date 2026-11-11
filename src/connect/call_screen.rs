@@ -369,11 +369,11 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Start, follow and stop the shared screen. Called from the driver
     /// pump.
-    pub(crate) fn pump_call_screen(&mut self) {
+    pub(crate) fn pump_call_screen(&mut self, now: std::time::Instant) {
         if !self.call_screen.enabled() {
             return;
         }
-        self.pump_shared_screen();
+        self.pump_shared_screen(now);
         self.pump_system_audio();
     }
 
@@ -431,7 +431,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
-    fn pump_shared_screen(&mut self) {
+    fn pump_shared_screen(&mut self, now: std::time::Instant) {
         let wanted = self.screen_wanted();
         let chosen = self.call_screen.chosen.clone();
         // A different call or source: close the old capture first.
@@ -475,15 +475,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .filter(|engine| engine.is_available())
                 .and_then(|engine| engine.external_frame_sender(target))
             else {
-                if self
-                    .call_screen
-                    .engine_wait
-                    .expired(std::time::Instant::now())
-                {
+                if self.call_screen.engine_wait.expired(now) {
                     self.call_screen.engine_wait = EngineWait::Idle;
                     self.call_screen.chosen = None;
                     self.call_screen.error = Some(
-                        "Screen sharing could not start: the call is not ready for it.".into(),
+                        crate::lang::tr(crate::lang::keys::Q_OPS_SCREEN_SHARING_CALL_NOT_READY)
+                            .into(),
                     );
                     self.stop_sharing_screen();
                 }

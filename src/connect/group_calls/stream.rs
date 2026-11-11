@@ -563,7 +563,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 // The call is gone for good (`GROUPCALL_INVALID`), so no
                 // rejoin is started; the failed join is what the UI shows
                 // (its Join button is the manual retry).
-                call.transport_error = Some("the call has ended".to_string());
+                call.transport_error =
+                    Some(crate::lang::tr(crate::lang::keys::Q_OPS_THE_CALL_HAS_ENDED).to_string());
             }
         }
         if outcome == ReplyOutcome::Rejoin

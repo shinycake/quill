@@ -64,6 +64,7 @@ struct MockInner {
     connected_chats: Vec<i64>,
     /// Test-only: the next `connect_group_call` fails with this code.
     fail_group_connect: Option<i32>,
+    camera_refused: bool,
     fail_group_video_sync: bool,
     /// Test-only: the next `connect_screen_share` fails.
     fail_screen_share_connect: bool,
@@ -139,6 +140,10 @@ impl MockEngine {
 
     pub fn set_devices(&self, devices: Vec<MediaDevice>) {
         self.inner.lock_or_recover().devices = devices;
+    }
+
+    pub fn set_camera_refuses(&self, busy: bool) {
+        self.inner.lock_or_recover().camera_refused = busy;
     }
 
     /// Test-only: make `set_group_muted` fail.
@@ -664,7 +669,7 @@ impl CallEngine for MockEngine {
         group_call_id: i32,
         answer_payload: &str,
         camera: Option<&str>,
-    ) -> Result<(), EngineError> {
+    ) -> Result<Option<EngineError>, EngineError> {
         let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
@@ -691,7 +696,7 @@ impl CallEngine for MockEngine {
         {
             inner.connected_chats.push(chat_id);
         }
-        Ok(())
+        Ok((camera.is_some() && inner.camera_refused).then_some(EngineError::NoCamera))
     }
 
     fn set_engine_event_callback(&mut self, callback: EngineEventCallback) {
@@ -787,6 +792,9 @@ impl CallEngine for MockEngine {
         let mut inner = self.inner.lock_or_recover();
         if !inner.available {
             return Err(EngineError::Unavailable);
+        }
+        if inner.camera_refused && camera.is_some() {
+            return Err(EngineError::NoCamera);
         }
         inner
             .group_camera_changes

@@ -366,7 +366,7 @@ fn run<T: FeedFrame>(
                 let text = err.to_string();
                 failed_run = failed_run.saturating_add(1);
                 if failed_run == FAILED_RUN {
-                    sink.push_event(CaptureEvent::Failed(CaptureError::Device(format!(
+                    sink.push_event(CaptureEvent::Failed(CaptureError::Refused(format!(
                         "The call refused the captured frames ({text})."
                     ))));
                 }
@@ -469,7 +469,7 @@ mod tests {
         assert_eq!(events.len(), 1, "one event for the whole run");
         assert!(matches!(
             &events[0],
-            CaptureEvent::Failed(CaptureError::Device(_))
+            CaptureEvent::Failed(CaptureError::Refused(_))
         ));
         assert_eq!(stats.failed(), 120);
     }

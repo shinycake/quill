@@ -14,7 +14,7 @@ AccountNotice | - | terms, service notices and the frozen notice are the account
 ArchiveSettings | set_archive_settings_open | `chat_list.archive_settings_open`
 BlockFromReplies | close_replies_block | `users_state.replies_block`
 BoostBox | close_boost_box_state | `groups.boost_box`
-CallLinkLeave | cancel_call_link_leave | `calls.call_link_confirm`
+CallLinkLeave | cancel_call_link_leave | `calls.call_link_stage`
 CallSwap | - | a second call prompts only during a call, and a switch closes a client that is in a call (retire_live_to_background)
 ChatExport | - | the box's flag is `dialogs.chat_export_dialog` (screen); the progress box shows an export the account is still running, which comes back with it
 CollectibleInfo | close_collectible_info | `payments.hub.collectible`

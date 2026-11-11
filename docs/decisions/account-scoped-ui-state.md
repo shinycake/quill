@@ -4083,7 +4083,7 @@ and 10 are widget items another fixer owns).
 - **Call rating.** `CallSummary::rating` is `CallRating` (`Offered`,
   `Sending(request)`, `Sent`, `Failed(line)`), replacing `rating_sent`. The
   send moves it to `Sending`; only the matching `ok` reaches `Sent` (the card
-  says thanks) and the matching error reaches `Failed`, which draws the card
+  hides, as tdesktop shows no toast after a rating) and the matching error reaches `Failed`, which draws the card
   again with the error and its retry (02-015, 05-026, 08-081). A busy or swap
   decline's `discardCall` error no longer lands on the active call's banner:
   only the request that owns `HangUp` sets `calls.error` (05-035). Redial and
@@ -4093,8 +4093,13 @@ and 10 are widget items another fixer owns).
   press cannot be answered by the first prompt (08-076).
 - **Group join.** `connect_group` leaves `GroupJoin::Created` for
   `AnswerApplied` once the answer is applied and for `Connected` only after
-  the sound, mute, videos and camera steps worked; a failed step puts it back
-  to `AnswerApplied`, so the retry redoes the steps (01-080). A failed
+  the sound, mute and videos steps worked; a failed step puts it back
+  to `AnswerApplied`, so the retry redoes the steps (01-080). The camera is
+  the last step and not part of the join: `connect_group_call` answers
+  `Ok(Some(error))` for a camera that would not start, the call connects with
+  audio (the microphone starts), and the camera step after the connect
+  retries it and shows its error, as tdesktop keeps the call running when the
+  camera fails (01-080 regression, 02-101). A failed
   `connect_group_call` spends the join answer (`join_payload` is cleared), so
   group-call updates no longer retry it (02-101). A presentation that cannot
   connect is ended on Telegram (02-099). A stream reply of "call left" shows a
@@ -4103,21 +4108,28 @@ and 10 are widget items another fixer owns).
 - **Live story extras.** The streamer, top donors and comment senders are three
   `Fetch` fields on `LiveStoryState`, each asked while idle; a failure stays
   failed until the next Join of the story (02-114).
-- **Call links.** A confirmed link is held as `CallLinkLeaving` (the whole
-  confirm, so a live stream stays one, and the call being left). It ends with a
-  failed hang-up, with another call taking the place, and in the call boxes'
-  farewell; the offered call reaches the UI through `call_link_offered` so a
-  stream opens in its window (01-066, 01-067).
+- **Call links.** One `CallLinkStage` (`Idle`, `Confirm`, `Leaving`,
+  `Offered`) replaces the three fields kept in step. `Leaving` holds the whole
+  confirm (so a live stream stays one) and the call being left. It ends with a
+  hang-up that cannot be sent, a `discardCall` TDLib answers with an error (the
+  hang-up error arm drops it for that call), another call taking the place,
+  and the call boxes' farewell; `Offered` reaches the UI so a stream opens in
+  its window (01-066, 01-067).
 - **Create video chat.** A "join as" answer is dropped when no box waits for
   its request, and a box whose request is no longer the session's closes
   (01-074).
-- **Windows.** A call window that fails to open is remembered through
-  `window_closed_by_user` for that call, like a window the user closed, so the
-  sync does not retry and note it again; the call bar or a ring reopens it
-  (08-034, 10-047). Settings > Calls redraws only when its sessions fetch went
+- **Windows.** A call window that fails to open is remembered per call in
+  `window_open_failed`, apart from `window_closed_by_user`: a second call
+  ringing reopens a window you closed but not one that failed, so the sync
+  does not retry and note it every time; the call bar or a notification's Open
+  tries again (08-034, 10-047). Settings > Calls redraws only when its sessions fetch went
   out (08-033).
 - **Capture.** A run of 50 frames the engine refuses ends the capture with a
-  `Failed` event (01-071). A lost WASAPI output device is reported through
+  `Failed(Refused)` event (01-071); the microphone is then not reopened until
+  the call, the microphone or the mute changes (or the transport goes down
+  and comes back), so the error line does not flicker every 2.5 s. The screen
+  share's wait reads the pump's `now`, and the texts of the ended call, the
+  stream that would not load and the share that could not start are lang keys. A lost WASAPI output device is reported through
   `SystemAudioMix::fail` and the driver turns the audio share off (01-063). A
   chosen screen share waits at most `ENGINE_WAIT` for the engine's frame
   sender, then ends with an error (02-013). A macOS start that times out stops

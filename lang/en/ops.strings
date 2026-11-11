@@ -459,6 +459,7 @@
 "qll_ops_could_not_load_more" = "Couldn't load more";
 "qll_ops_could_not_load_more_actions" = "Couldn't load more actions";
 "qll_ops_could_not_load_that_tab" = "Couldn't load that tab";
+"qll_ops_could_not_load_the_stream" = "Could not load the stream: {reason}";
 "qll_ops_could_not_open_comments" = "Couldn't open comments";
 "qll_ops_could_not_open_shared_media" = "Couldn't open shared media";
 "qll_ops_could_not_open_that_message" = "Couldn't open that message";
@@ -653,6 +654,7 @@
 "qll_ops_incoming_voice_call" = "Incoming voice call";
 "qll_ops_india" = "India";
 "qll_ops_info_2" = "ℹ Info";
+"qll_ops_screen_sharing_call_not_ready" = "Screen sharing could not start: the call is not ready for it.";
 "qll_ops_self_update_not_packaged" = "This copy of Quill cannot update itself. Download new versions from GitHub.";
 "qll_ops_self_update_translocated" = "macOS opened Quill from a temporary copy. Move Quill.app to your Applications folder and open it from there.";
 "qll_ops_self_update_disk_image" = "Quill is running from a disk image. Drag Quill.app to your Applications folder and open it from there.";
@@ -661,6 +663,7 @@
 "qll_ops_self_update_not_writable" = "You do not have permission to change the folder Quill is installed in.";
 "qll_ops_self_update_owned_by_another" = "Another user installed this copy of Quill, so it cannot replace itself.";
 "qll_ops_self_update_checking" = "Checking whether this installation can update itself…";
+"qll_ops_the_call_has_ended" = "The call has ended.";
 "qll_ops_update_signed_differently" = "This copy of Quill is signed differently from the release, so it updates manually. Install the release package from GitHub.";
 "qll_ops_update_failed_verification" = "The downloaded app did not pass verification. Nothing was installed.";
 "qll_ops_invite_links" = "{active} invite links";
@@ -959,7 +962,6 @@
 "qll_ops_terms_of_service" = "Terms of Service";
 "qll_ops_test_microphone" = "Test microphone";
 "qll_ops_text_copied_to_clipboard" = "Text copied to clipboard";
-"qll_ops_thanks_for_your_feedback" = "Thanks for your feedback";
 "qll_ops_the_away_message_stays_off" = "The away message stays off until it has messages.";
 "qll_ops_the_call_ended_before_it" = "The call ended before it could be answered";
 "qll_ops_the_chosen_folder_is_missing" = "The chosen folder is missing, so the default one is used.";

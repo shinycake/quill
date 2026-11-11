@@ -169,9 +169,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }
             }
             let connected = result.is_ok();
+            // A camera that failed to start does not fail the join: the
+            // call is up with audio, and the camera step below retries it
+            // and reports it.
+            let camera_failed = matches!(result, Ok(Some(_)));
             if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
                 match result {
-                    Ok(()) => {
+                    Ok(_) => {
                         call.transport_ready = true;
                         call.transport_error = None;
                     }
@@ -186,7 +190,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.note_stream_rtmp_info(group_call_id, &answer);
             if connected {
                 self.start_stream_feeder(group_call_id);
-                self.group_camera_state.insert(group_call_id, camera);
+                if !camera_failed {
+                    self.group_camera_state.insert(group_call_id, camera);
+                }
             }
         }
         let transport_ready = self

@@ -105,12 +105,9 @@ pub struct CallsState {
     /// A voice chat, video chat or live stream link offered this call;
     /// its invite hash goes out with the join (`crate::call_link`).
     pub call_link: Option<crate::call_link::PendingCallLink>,
-    /// A call link arrived while a call is on: the question to leave it.
-    pub call_link_confirm: Option<crate::call_link::CallLinkConfirm>,
-    /// The confirmed link, offered once the old call has ended.
-    pub call_link_after_leave: Option<crate::call_link::CallLinkLeaving>,
-    /// What that offer found, until the UI takes it.
-    pub call_link_offered: Option<crate::call_link::OfferedCallLink>,
+    /// A call link that arrived while a call is on: the question to leave
+    /// it, the wait for it to end, then what the offer found.
+    pub call_link_stage: crate::call_link::CallLinkStage,
     /// The group call just left with `leaveGroupCall`, until TDLib says
     /// it is no longer joined: a late joined update for it must not take
     /// the slot back.
@@ -219,9 +216,7 @@ impl CallsState {
             group_call_fetch_queue: Vec::new(),
             pending_live_story_join: None,
             call_link: None,
-            call_link_confirm: None,
-            call_link_after_leave: None,
-            call_link_offered: None,
+            call_link_stage: crate::call_link::CallLinkStage::Idle,
             left_group_call: None,
             pending_conference: None,
             call_upgrade: None,

@@ -66,10 +66,10 @@ impl QuillApp {
                 match result {
                     Ok(handle) => app.calls.window = Some(handle.into()),
                     Err(_) => {
-                        // Kept shut for this call, like a window the user
-                        // closed: the next sync does not try (and note) it
-                        // again; the call bar or a ring reopens it.
-                        app.call_screen.window_closed_by_user = Some(call_id);
+                        // Kept shut for this call: the next sync does not
+                        // try (and note) it again, a second call ringing
+                        // included; the call bar reopens it.
+                        app.call_screen.window_open_failed = Some(call_id);
                         app.set_note(StatusNote::error(tr(
                             keys::Q_OPS_COULDNT_OPEN_THE_CALL_WINDOW,
                         )));

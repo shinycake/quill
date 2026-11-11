@@ -318,11 +318,11 @@ impl TgcallsEngine {
         group_call_id: i32,
         answer: &str,
         camera: Option<&str>,
-    ) -> Result<(), EngineError> {
+    ) -> Result<Option<EngineError>, EngineError> {
         let api = self.api;
         let call = self.group_mut(group_call_id)?;
         if call.connected() {
-            return Ok(());
+            return Ok(None);
         }
         if call.join == GroupJoin::Created {
             let answer = text("qc_group_set_join_response", answer)?;
@@ -352,7 +352,7 @@ impl TgcallsEngine {
         group_call_id: i32,
         camera: Option<&str>,
         mode: GroupCallMode,
-    ) -> Result<(), EngineError> {
+    ) -> Result<Option<EngineError>, EngineError> {
         let api = self.api;
         let call = self.group_mut(group_call_id)?;
         call.camera_id = camera.map(str::to_owned);
@@ -366,7 +366,9 @@ impl TgcallsEngine {
         self.apply_group_mute(group_call_id)?;
         self.open_group_sound(group_call_id)?;
         self.sync_group_videos(group_call_id, &sources)?;
-        self.apply_group_camera(group_call_id)
+        // The camera is last and optional: its failure leaves the call
+        // connected with audio and is handed back for the app to report.
+        Ok(self.apply_group_camera(group_call_id).err())
     }
 
     /// Whether the call sends anything: a member's RTC call does.

@@ -273,7 +273,10 @@ fn a_rejoin_replaces_the_instance_and_its_presentation() {
 fn unknown_group_calls_are_refused_and_leave_succeeds() {
     let Some(mut engine) = engine() else { return };
     let missing = Err(EngineError::NoSuchCall(9));
-    assert_eq!(engine.connect_group_call(9, RTC_ANSWER, None), missing);
+    assert_eq!(
+        engine.connect_group_call(9, RTC_ANSWER, None),
+        Err(EngineError::NoSuchCall(9))
+    );
     assert_eq!(engine.sync_group_video(9, &[]), missing);
     assert_eq!(engine.set_group_camera(9, None), missing);
     assert_eq!(engine.set_group_playback(9, None, false), missing);

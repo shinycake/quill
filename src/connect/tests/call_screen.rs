@@ -410,7 +410,7 @@ fn a_lost_output_device_turns_the_audio_share_off_and_keeps_the_screen() {
     let mix = loopbacks.started.lock().unwrap()[0].clone();
     // The loopback's error callback reports the device gone.
     mix.fail("System audio stopped: device lost".into());
-    driver.pump_call_screen();
+    driver.pump_call_screen(std::time::Instant::now());
     assert!(!driver.call_screen().sharing_audio(), "audio is off");
     assert!(!driver.call_screen().with_audio(), "no retry every pump");
     assert!(driver.call_screen().error.is_some());
@@ -520,7 +520,7 @@ fn a_slow_screen_capture_does_not_hold_the_pump() {
     driver.session.calls.active_group_call = Some(sharing_group_call());
     driver.choose_call_screen_source(SourceId("display:1".into()), false);
 
-    driver.pump_call_screen();
+    driver.pump_call_screen(std::time::Instant::now());
 
     assert!(driver.call_screen().opening());
     assert_eq!(driver.call_screen().target(), None);
@@ -548,7 +548,7 @@ fn a_window_hidden_while_its_share_opens_stays_paused() {
     }));
     driver.session.calls.active_group_call = Some(sharing_group_call());
     driver.choose_call_screen_source(SourceId("window:42".into()), false);
-    driver.pump_call_screen();
+    driver.pump_call_screen(std::time::Instant::now());
 
     sink.recv().unwrap().push_event(CaptureEvent::Paused);
     release.send(()).unwrap();

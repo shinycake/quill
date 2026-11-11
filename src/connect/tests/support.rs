@@ -525,10 +525,10 @@ pub(crate) fn pump_until_mic_answers(driver: &mut ConnectDriver<Arc<RecordingSen
 }
 
 pub(crate) fn pump_until_screen_answers(driver: &mut ConnectDriver<Arc<RecordingSender>>) {
-    driver.pump_call_screen();
+    driver.pump_call_screen(std::time::Instant::now());
     while driver.call_screen().opening() {
         std::thread::yield_now();
-        driver.pump_call_screen();
+        driver.pump_call_screen(std::time::Instant::now());
     }
 }
 
