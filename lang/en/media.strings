@@ -789,3 +789,4 @@
 "qll_media_cover_choose" = "Choose video cover";
 "qll_media_cover_preview_loading" = "Reading the video…";
 "qll_media_cover_unreadable" = "Quill could not read this video, so the cover cannot be chosen.";
+"qll_media_cover_waiting_for_video" = "Waiting for the video to finish downloading…";

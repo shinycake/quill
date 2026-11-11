@@ -76,6 +76,9 @@ impl QuillApp {
         // The composer's Post and Save presses, each answered by its own
         // request (`story_composer_stage.rs`).
         self.story_composer_upkeep(cx);
+        // A cover picker opened on a clip still downloading reads it once
+        // it is local (`story_albums/cover_strip.rs`).
+        self.cover_upkeep(cx);
         // Phase 9.5: the viewer cover editor / privacy editor sent a
         // management call. Its own answer (matched by request id) closes
         // the panel on success or leaves it open showing the error; a

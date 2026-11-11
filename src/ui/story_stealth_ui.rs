@@ -58,8 +58,20 @@ struct StealthFacts {
     mode: StoryStealthMode,
     premium: bool,
     periods: StealthPeriods,
-    requested: bool,
-    failure: Option<String>,
+    stage: StealthStage,
+}
+
+impl StealthFacts {
+    fn activating(&self) -> bool {
+        matches!(self.stage, StealthStage::Activating(_))
+    }
+
+    fn failure(&self) -> Option<&str> {
+        match &self.stage {
+            StealthStage::Failed(reason) => Some(reason),
+            _ => None,
+        }
+    }
 }
 
 impl QuillApp {
@@ -71,14 +83,11 @@ impl QuillApp {
             periods: session
                 .map(|s| s.stories.stealth_periods)
                 .unwrap_or_default(),
-            requested: matches!(
-                self.stories.stealth_box.as_ref().map(|b| &b.stage),
-                Some(StealthStage::Activating(_))
-            ),
-            failure: match self.stories.stealth_box.as_ref().map(|b| &b.stage) {
-                Some(StealthStage::Failed(reason)) => Some(reason.clone()),
-                _ => None,
-            },
+            stage: self
+                .stories
+                .stealth_box
+                .as_ref()
+                .map_or(StealthStage::Idle, |b| b.stage.clone()),
         }
     }
 
@@ -136,7 +145,12 @@ impl QuillApp {
             return;
         }
         let facts = self.stealth_facts();
-        match press(facts.mode, now_unix_secs(), facts.premium, facts.requested) {
+        match press(
+            facts.mode,
+            now_unix_secs(),
+            facts.premium,
+            facts.activating(),
+        ) {
             StealthPress::EnabledToast => {
                 self.close_stealth_box();
                 self.show_stealth_toast(StealthToast::activated(facts.periods), cx);
@@ -403,7 +417,7 @@ fn stealth_box_body(facts: &StealthFacts, cx: &mut Context<QuillApp>) -> AnyElem
                 .text_color(cx.theme().muted_foreground)
                 .child(about_text(facts.premium)),
         )
-        .children(facts.failure.clone().map(|reason| {
+        .children(facts.failure().map(str::to_string).map(|reason| {
             div()
                 .id("story-stealth-failure")
                 .debug_selector(|| "story-stealth-failure".into())

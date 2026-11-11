@@ -853,6 +853,9 @@ pub(in crate::ui) mod chrome;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod click_through_tests;
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod cover_wait_tests;
 #[cfg(feature = "demo-capture")]
 mod demo;
 mod ensure_story_download;
