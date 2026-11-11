@@ -98,7 +98,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || set_id <= 0 || installed && archived {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.mask_change_pending() {
+        if self.session.mask_set_change_pending(set_id) {
             return Ok(None);
         }
         self.mask_request(

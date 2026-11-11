@@ -301,7 +301,7 @@ impl QuillApp {
             return false;
         };
         if create.emojis.is_empty() {
-            self.set_note(StatusNote::silent(EMOJI_REQUIRED_NOTE));
+            self.set_note(StatusNote::info(EMOJI_REQUIRED_NOTE));
             cx.notify();
             return false;
         }
@@ -507,7 +507,7 @@ impl QuillApp {
             .and_then(|s| s.owned_sticker_set_count(set_id))
             .unwrap_or(0);
         if count >= kind.owned_limit() {
-            self.set_note(StatusNote::silent(full_note(kind)));
+            self.set_note(StatusNote::info(full_note(kind)));
             cx.notify();
             return;
         }
@@ -522,7 +522,7 @@ impl QuillApp {
                 .iter()
                 .any(|s| s.file_id == item.file_id || (item.id != 0 && s.id == item.id))
         }) {
-            self.set_note(StatusNote::silent(already_note(kind)));
+            self.set_note(StatusNote::info(already_note(kind)));
             cx.notify();
             return;
         }

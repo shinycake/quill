@@ -9,4 +9,7 @@ pub(crate) struct StickersManagerUi {
     pub(in crate::ui) stickers: ManagerEdits,
     pub(in crate::ui) masks: ManagerEdits,
     pub(in crate::ui) scroll: ScrollHandle,
+    /// The tab the composer's sticker panel was on when the box opened: the
+    /// box browses the same session lists, and puts it back on close.
+    pub(in crate::ui) composer_tab: quill::state::StickerTab,
 }

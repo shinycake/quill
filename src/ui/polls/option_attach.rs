@@ -65,6 +65,24 @@ impl QuillApp {
         }
     }
 
+    /// Where the slot named `id` is now: its row may have moved or gone.
+    fn target_of_attach(&self, id: u64) -> Option<AttachTarget> {
+        let row = self
+            .chat_ui
+            .poll_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.attach.iter().position(|attach| attach.id == id));
+        match row {
+            Some(index) => Some(AttachTarget::Row(index)),
+            None => self
+                .message_ui
+                .poll_add_option
+                .as_ref()
+                .filter(|panel| panel.attach.id == id)
+                .map(|_| AttachTarget::Added),
+        }
+    }
+
     /// Every media slot being written, rows first.
     fn attach_slots(&mut self) -> Vec<&mut OptionAttach> {
         let mut slots: Vec<&mut OptionAttach> = Vec::new();
@@ -322,6 +340,10 @@ impl QuillApp {
         if let Some(attach) = self.attach_mut(target) {
             attach.menu_open = false;
         }
+        // The row may move while the file panel is open: ask for its slot.
+        let Some(slot) = self.attach_ref(target).map(|attach| attach.id) else {
+            return;
+        };
         let picker = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -335,7 +357,12 @@ impl QuillApp {
             let Some(path) = paths.into_iter().next() else {
                 return;
             };
-            let _ = this.update(cx, |this, cx| this.take_poll_option_file(target, path, cx));
+            let _ = this.update(cx, |this, cx| {
+                // Gone (its row was removed, the box closed): nothing to attach to.
+                if let Some(target) = this.target_of_attach(slot) {
+                    this.take_poll_option_file(target, path, cx);
+                }
+            });
         })
         .detach();
     }

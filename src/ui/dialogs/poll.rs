@@ -30,8 +30,11 @@ impl OptionMediaSlot {
 
 /// The media of one option being written (a row of the new poll, or the
 /// option added to an open poll), and the little UI around it.
-#[derive(Default)]
 pub(crate) struct OptionAttach {
+    /// Names this slot for as long as it lives: a row's index changes when
+    /// an earlier row is removed, so an answer that comes later (the file
+    /// panel) is matched by this instead.
+    pub(crate) id: u64,
     pub(crate) media: OptionMediaSlot,
     /// The attach menu is open.
     pub(crate) menu_open: bool,
@@ -43,6 +46,21 @@ pub(crate) struct OptionAttach {
     pub(crate) emoji_wait: bool,
     /// A frame of a picked video, drawn while it is attached.
     pub(crate) preview: Option<std::path::PathBuf>,
+}
+
+impl Default for OptionAttach {
+    fn default() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        Self {
+            id: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            media: OptionMediaSlot::default(),
+            menu_open: false,
+            link_input: None,
+            sticker_wait: false,
+            emoji_wait: false,
+            preview: None,
+        }
+    }
 }
 
 /// What the box was opened with: tdesktop's `chosen`/`disabled` flags.

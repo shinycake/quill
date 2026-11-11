@@ -166,6 +166,10 @@ impl QuillApp {
     pub(super) fn open_archived_stickers(&mut self, cx: &mut Context<Self>) {
         self.settings.sticker_settings_open = true;
         self.open_box(DialogKind::ArchivedStickers);
+        self.settings.sticker_manager.composer_tab = self
+            .session()
+            .map(|s| s.stickers.stickers.tab)
+            .unwrap_or_default();
         self.settings.sticker_manager.stickers.clear();
         self.settings
             .sticker_manager
@@ -202,6 +206,10 @@ impl QuillApp {
             live.driver.close_sticker_panel();
         } else if let Some(session) = self.demo_session.as_mut() {
             session.stickers.stickers.close();
+        }
+        let composer_tab = self.settings.sticker_manager.composer_tab;
+        if let Some(session) = self.session_mut() {
+            session.stickers.stickers.tab = composer_tab;
         }
         cx.notify();
     }

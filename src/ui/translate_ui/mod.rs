@@ -165,7 +165,13 @@ pub(super) struct TranslateScreen {
     asked: Vec<(MessageId, &'static str)>,
 }
 
-impl super::on_screen::Farewell for TranslateScreen {}
+/// The dialog's `translateText` job is dropped from the old client's
+/// session (it counts toward the pump's in-flight cap and keeps its result).
+impl super::on_screen::Farewell for TranslateScreen {
+    fn farewell(app: &mut QuillApp, _: &mut Window, cx: &mut Context<QuillApp>) {
+        app.close_translate_dialog(cx);
+    }
+}
 
 impl QuillApp {
     // ---------------------------------------------------------------------

@@ -186,7 +186,7 @@ impl QuillApp {
         // The slot holds one toast: a toast it held for another call (that
         // one ended between two polls) goes down before it is overwritten.
         if let Some((old_account, old_call)) = self.calls.notified.take()
-            && (old_account, old_call) != (account.clone(), call_id)
+            && (old_account != account || old_call != call_id)
             && quill::notify::current_backend() == quill::notify::NotifyBackend::Native
         {
             cx.dismiss_system_notification(&quill::notify_call::call_notification_tag(
