@@ -395,6 +395,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if market.buy.as_ref().is_some_and(|buy| buy.sending) {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // A craft in flight is not orphaned by a new session: its outcome
+        // opens the result box of the session that sent it (`craft_request`).
+        if market.craft.as_ref().is_some_and(|craft| craft.crafting) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         market.remember_title(gift_id, &title);
         market.craft = Some(CraftSession::new(primary));
         let _ = self.preload_craft_lists();

@@ -468,10 +468,10 @@ fn craft_loads_both_lists_and_crafts() {
     assert_eq!(craft.result, Some(CraftResult::Fail));
 }
 
-/// A craft box opened after the one that crafted closed shows nothing of
-/// the old craft's answer, and keeps its own guard.
+/// A craft in flight is not orphaned: a new craft box is refused until its
+/// answer lands, and the answer belongs to the session that sent it.
 #[test]
-fn a_craft_answer_belongs_to_the_box_that_sent_it() {
+fn a_new_craft_session_does_not_orphan_a_craft_in_flight() {
     let mut f = Fixture::new();
     f.driver
         .open_gift_craft(CraftGift::parse_received(&received(1)).unwrap())
@@ -486,16 +486,18 @@ fn a_craft_answer_belongs_to_the_box_that_sent_it() {
         assert!(craft.add(second));
     }
     f.driver.craft_gift().unwrap();
-    let old = f.last("craftGift");
-    f.driver
-        .open_gift_craft(CraftGift::parse_received(&received(3)).unwrap())
-        .unwrap();
-    let mut answer = json!({"@type": "craftGiftResultFail"});
-    answer["@extra"] = old["@extra"].clone();
-    f.ingest(&answer.to_string());
+    assert!(
+        f.driver
+            .open_gift_craft(CraftGift::parse_received(&received(3)).unwrap())
+            .is_err(),
+        "the forge is still out"
+    );
     let craft = f.driver.session.payments.gift_market.craft.clone().unwrap();
-    assert_eq!(craft.result, None, "the old craft's answer");
-    assert_eq!(craft.slots[0].received_gift_id, "r3");
+    assert!(craft.crafting);
+    assert_eq!(craft.slots[0].received_gift_id, "r1");
+    f.answer("craftGift", json!({"@type": "craftGiftResultFail"}));
+    let craft = f.driver.session.payments.gift_market.craft.clone().unwrap();
+    assert_eq!(craft.result, Some(CraftResult::Fail), "its outcome landed");
 }
 
 #[test]
