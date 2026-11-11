@@ -8043,3 +8043,46 @@ whose variants carry the data, with a way out of every stage.
 - **A refused refetch of a stale proxy list** lands in
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
+
+### Sweep fixes (r2-25)
+
+Round 2, files `composer_sends`, `composer_state`, `composer_suggest`,
+`connect_ui`, `contacts`, `contacts_import`, `context_menu_keys`,
+`crash_notice`, `custom_emoji_card`, `deep_link_routes`, `deep_links`,
+`direct_messages_admin`, `disk_state`, `downloads`, `draft_timer`, `drafts`,
+`drop_zones`, `early_connect`.
+
+| id | what changed |
+| --- | --- |
+| 09-001 | The emoji suggest rows and the highlight live in `SuggestStage::Live { query, built, rows }`; `SuggestUi::active()` borrows them. `query`, `active`, `selected`, `built_*` are no longer separate fields. |
+| 09-002 | The secret-chat inline-bot confirmation is account-wide state (`OnScreen::inline_bot`, `InlineBotUi`), not a per-window `ComposerUi` flag, so a chat window does not ask again. |
+| 09-003 | `TraySend::Held` names the renders it waits on and holds only while one still renders in the tray (`send_is_held`). `release_idle_hold` and the manual resets are gone; a failed render of a waited render drops it. |
+| 09-004 | `updateMessageSendFailed` names its slot (`messages.failed_sends`); the UI drops that slot's `DraftClear` so a later ack cannot take it. |
+| 09-006, 09-065, 09-068 | `Cell` take and put back (`with_vec`, `EditorBlocks`, `early_connect::FIRST`) replace the `RefCell` borrows. |
+| 09-007 | Skipped as a second stage, and made one value with one writer: `MenuFocusStage` keeps the focus to give back (no menu holds it); whether a menu is open is read from the menus every frame and the stage changes only in `MenuFocus::settle`. |
+| 09-008 | The frame end (`menu_frame_end`) closes a submenu whose parent row was not drawn; the key handler no longer repairs it. |
+| 09-009 | `ScreenWorkers` replaces the `screen_preparing` counter: each worker owns an `Arc` claim for as long as it runs. |
+| 09-010 | `ConnectStage::Connecting { _task }` owns the connect task; a restart, an adopted client or a wipe (`cancel_connecting`) replaces the stage and ends it. `ConnectStage::Idle` is the stage with nothing in flight. The generation compare in the task is gone. |
+| 09-011 | `ImportStage { Showing, Choosing { picker task }, Reading { read task } }` replaces `state` + `pick` + the box id: closing or choosing again drops the tasks. |
+| 09-013, 09-022, 09-023, 09-058 | `dialog_body::once_body` hands the dialog body to the kit's `Fn` closure through a `Cell`. |
+| 09-018, 09-019 | `CustomEmojiCard::Asked { request }` is settled by the answer or refusal of that request (`CustomEmojiAnswers`, by `RequestId`); `Shown { preview, _timer }` owns its timer. A failed send asks nothing. |
+| 09-020 | `NoticeGate::{Unseen { root, crash }, Shown}` hands the crash over once. |
+| 09-021 | The deep-link origin window is `DeepLinkFlow::window` in the session; the UI keeps only `InviteBox`, the generation its invite box is up for. |
+| 09-059 | `direct.kicked` is `Fetch<bool>`; a refused check shows "Couldn't check the member. Try again." and asks again when picked. |
+| 09-060 | `DiskUi::seen` is one `Seen { free, unwritable }` replaced by each reading. |
+| 09-061 | The disk poll `Task` is held in `DiskUi`. |
+| 09-062 | `DownloadRowKind { Active, Failed, Recent }` replaces `(active, failed)`. |
+| 09-063 | `DraftTimer::Armed { token, due, _task }` holds its task; the leaving client's held draft is sent in `take_live`. |
+| 09-064 | `take_live` sends the held draft of the client leaving the screen, so the one timer only commits the client on screen. |
+| 09-066 | `FileDrag::Probing { paths, _probe }` owns its probe task; a drag that ends or is replaced drops it. |
+| 09-067 | `ArchiveJob::Building { slot, _task }`: a zip for another chat is replaced by the drop in the open chat. |
+
+- **Left as they are, on purpose.** `DiskUi::screen_refused` and
+  `start_refused` are two clients' refusals (the screen's, the background
+  accounts'), each cleared by its own retry, not stages of one thing.
+  `ComposerUi::mention_selected` is an index into a menu derived from the text
+  on every frame. The `RefCell<Parsed>` of `rich_draft/preview.rs` is read in
+  render only and belongs to that file's bundle.
+- **Behaviour that changed.** Tapping a custom emoji again while its card shows
+  restarts the card's timer without asking again. A custom emoji whose pack
+  lookup is refused shows no card instead of waiting for good.
