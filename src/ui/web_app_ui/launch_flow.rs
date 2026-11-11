@@ -184,6 +184,30 @@ mod tests {
     }
 
     #[test]
+    fn a_wait_started_over_an_open_box_takes_its_place() {
+        let mut flow = LaunchFlow::default();
+        flow.ask(WebAppConfirm::OpenTerms {
+            then: waiting(0, 7).then,
+            request_write: false,
+            allow_write: false,
+        });
+        flow.search(waiting(3, 7));
+        assert!(flow.confirm().is_none(), "the older box is gone");
+        assert!(flow.take_search_for(id(3)).is_some());
+        flow.search(waiting(4, 7));
+        flow.ask(WebAppConfirm::OpenTerms {
+            then: waiting(0, 8).then,
+            request_write: false,
+            allow_write: false,
+        });
+        assert!(
+            flow.take_search_for(id(4)).is_none(),
+            "the wait it replaced"
+        );
+        assert!(flow.confirm().is_some());
+    }
+
+    #[test]
     fn closing_the_box_leaves_a_pending_answer() {
         let mut flow = LaunchFlow::default();
         flow.fetch_attach_bot(waiting(1, 7));

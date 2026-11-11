@@ -111,12 +111,90 @@ fn a_refused_selection_translation_shows_failed_not_loading(cx: &mut TestAppCont
     app.update_in(&mut vcx, |app, window, cx| {
         app.open_translate_selection(CHANNEL, "hola".into(), window, cx);
         assert_eq!(app.dialog_translation(), None, "nothing asked of the demo");
-        if let Some(dialog) = app.translate.dialog.as_mut() {
-            dialog.ask = super::TranslateAsk::Refused;
+        if let Some(shown) = app
+            .translate
+            .dialog
+            .as_mut()
+            .and_then(|dialog| dialog.current_box_mut())
+        {
+            shown.ask = super::TranslateAsk::Refused;
         }
         assert!(matches!(
             app.dialog_translation(),
             Some(Translation::Failed(_))
         ));
     });
+}
+
+/// The chooser opens over the box and goes back to it; a pick shows the box
+/// again in the new language. A chooser with no box under it closes.
+#[gpui_kit::test]
+fn the_chooser_returns_to_the_box_it_opened_over(cx: &mut TestAppContext) {
+    use super::TranslateStage;
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.open_translate_selection(CHANNEL, "hola".into(), window, cx);
+        let Some(dialog) = app.translate.dialog.as_mut() else {
+            panic!("the box opened");
+        };
+        dialog.open_chooser();
+        assert!(matches!(
+            dialog.stage,
+            TranslateStage::Choosing { under: Some(_) }
+        ));
+        assert!(dialog.back_to_box());
+        assert!(matches!(dialog.stage, TranslateStage::Box(_)));
+        dialog.open_chooser();
+        assert!(dialog.pick("ar"));
+        assert!(matches!(dialog.stage, TranslateStage::Box(_)));
+        assert_eq!(dialog.to, "ar");
+
+        app.open_translate_chooser("en", window, cx);
+        let Some(dialog) = app.translate.dialog.as_mut() else {
+            panic!("the chooser opened");
+        };
+        assert!(!dialog.back_to_box(), "nothing under it");
+        assert!(!dialog.pick("de"), "a pick ends a chooser with no box");
+    });
+}
+
+/// A toast leaves when its own timer fires, and not before; a newer toast
+/// replaces it (its timer goes with it).
+#[gpui_kit::test]
+fn a_toast_leaves_with_its_own_timer(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update(&mut vcx, |app, cx| {
+        app.show_translate_toast(
+            CHANNEL,
+            "one".into(),
+            "Undo",
+            super::ToastAction::ShowBar,
+            cx,
+        );
+        assert!(app.translate.toast.is_some());
+    });
+    vcx.executor().advance_clock(super::TOAST_DURATION / 2);
+    vcx.run_until_parked();
+    app.update(&mut vcx, |app, cx| {
+        assert!(app.translate.toast.is_some(), "not yet");
+        app.show_translate_toast(
+            CHANNEL,
+            "two".into(),
+            "Undo",
+            super::ToastAction::ShowBar,
+            cx,
+        );
+    });
+    vcx.executor()
+        .advance_clock(super::TOAST_DURATION / 2 + std::time::Duration::from_millis(1));
+    vcx.run_until_parked();
+    app.update(&mut vcx, |app, _| {
+        assert!(
+            app.translate.toast.is_some(),
+            "the replaced toast's timer did not clear the newer one"
+        );
+    });
+    vcx.executor().advance_clock(super::TOAST_DURATION);
+    vcx.run_until_parked();
+    app.update(&mut vcx, |app, _| assert!(app.translate.toast.is_none()));
 }

@@ -402,7 +402,10 @@ impl PaymentsState {
     }
 
     /// How `invoice`'s last finished payment ended.
-    pub fn outcome_of(&self, invoice: &crate::payment_invoice::InputInvoice) -> Option<PaymentVerdict> {
+    pub fn outcome_of(
+        &self,
+        invoice: &crate::payment_invoice::InputInvoice,
+    ) -> Option<PaymentVerdict> {
         self.outcomes
             .iter()
             .find(|outcome| &outcome.invoice == invoice)

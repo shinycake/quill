@@ -41,7 +41,7 @@ use quill_webview_protocol::{
     BottomButton, HelperEvent, HostCommand, MenuItem, Popup, PopupButton, ShellEvent, decode,
     encode,
 };
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::process::{Child, Command, Stdio};
 use std::rc::Rc;
@@ -942,12 +942,9 @@ impl QuillApp {
                 .overlay(true)
                 .title(super::shell::dialog_title(title))
                 .content(super::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
+                    let body = Rc::new(Cell::new(Some(body)));
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))

@@ -153,9 +153,8 @@ impl QuillApp {
             .translate
             .toast
             .as_ref()
-            .filter(|toast| toast.chat_id == chat_id)?
-            .clone();
-        let action = toast.action;
+            .filter(|toast| toast.chat_id == chat_id)?;
+        let (text, label, action) = (toast.text.clone(), toast.label, toast.action);
         Some(
             div()
                 .id("translate-toast")
@@ -169,10 +168,10 @@ impl QuillApp {
                 .border_b_1()
                 .border_color(cx.theme().border)
                 .bg(bg_canvas())
-                .child(div().flex_1().min_w_0().text_sm().child(toast.text.clone()))
+                .child(div().flex_1().min_w_0().text_sm().child(text))
                 .child(
                     Button::new("translate-toast-action")
-                        .label(toast.label)
+                        .label(label)
                         .ghost()
                         .small()
                         .text_color(accent())
@@ -201,27 +200,22 @@ impl QuillApp {
         action: ToastAction,
         cx: &mut Context<Self>,
     ) {
-        self.translate.toast_seq += 1;
-        let id = self.translate.toast_seq;
+        // The toast owns its timer: a newer toast, a click or an account
+        // switch drops the toast and with it the timer.
+        let timer = self.spawn_screen(cx, async move |this, cx| {
+            cx.background_executor().timer(TOAST_DURATION).await;
+            let _ = this.update(cx, |this, cx| {
+                this.translate.toast = None;
+                cx.notify();
+            });
+        });
         self.translate.toast = Some(TranslateToast {
             chat_id,
             text,
             label,
             action,
-            id,
+            _timer: timer,
         });
-        // The toast is the screen's: a timer from an account switched away
-        // must not clear the next account's toast with the same id.
-        self.spawn_screen(cx, async move |this, cx| {
-            cx.background_executor().timer(TOAST_DURATION).await;
-            let _ = this.update(cx, |this, cx| {
-                if this.translate.toast.as_ref().is_some_and(|t| t.id == id) {
-                    this.translate.toast = None;
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
         cx.notify();
     }
 

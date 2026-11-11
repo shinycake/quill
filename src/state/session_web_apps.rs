@@ -53,10 +53,7 @@ impl Session {
                 if let (Some(p), Some(RequestPurpose::Bots(BotsPurpose::SearchWebApp { .. }))) =
                     (pending, purpose)
                 {
-                    self.bots
-                        .web_apps
-                        .found
-                        .push(WebAnswer::new(p.id, Ok(app)));
+                    self.bots.web_apps.found.push(WebAnswer::new(p.id, Ok(app)));
                 }
             }
             BotsPayload::AttachmentMenuBot(bot) => {
