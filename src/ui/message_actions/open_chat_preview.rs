@@ -2,6 +2,7 @@
 //! row (slice CL); closing it lives in `close_chat_preview.rs`.
 
 use super::*;
+use crate::ui::chat_list_state::ChatPeek;
 
 impl QuillApp {
     /// Slice CL: start a long press on a chat-list row — after
@@ -14,14 +15,14 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let started = Instant::now();
-        self.chat_list.preview_press = Some((chat_id, started));
+        self.chat_list.peek = ChatPeek::Pressing { chat_id, started };
         self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(Self::CHAT_PREVIEW_LONG_PRESS)
                 .await;
             let _ = this.update(cx, |this, cx| {
                 // Still the same press (no release, no newer press)?
-                if this.chat_list.preview_press == Some((chat_id, started)) {
+                if this.chat_list.peek.pressing() == Some((chat_id, started)) {
                     this.open_chat_preview(chat_id, anchor, cx);
                 }
             });
@@ -39,7 +40,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.chat_list.menu = None;
-        self.chat_list.preview = Some(ChatPreviewState { chat_id, anchor });
+        self.chat_list.peek = ChatPeek::Open(ChatPreviewState { chat_id, anchor });
         // Live fetch for unopened chats; already-loaded history renders
         // immediately. Demo/no-driver sessions skip the network.
         if let Some(live) = self.live.as_mut() {

@@ -3,7 +3,7 @@
 //! of milliseconds for a large picture.
 #![deny(clippy::indexing_slicing)]
 
-use super::{CustomTheme, QuillApp, file_palette};
+use super::{CustomTheme, CustomThemes, QuillApp, file_palette};
 use gpui_kit::*;
 use quill::app_theme::{Palette, ThemeId, store};
 use std::path::Path;
@@ -36,23 +36,23 @@ impl QuillApp {
     /// time; empty until then. A file that cannot be read is left out.
     pub(crate) fn custom_themes(&mut self, cx: &mut Context<Self>) -> &[CustomTheme] {
         let themes = &mut self.preferences.app_theme;
-        if themes.custom.is_none() && themes.custom_read.is_none() {
+        if matches!(themes.custom, CustomThemes::Unread) {
             let dir = Self::themes_dir();
             let read = cx.background_spawn(async move { read_custom_themes(&dir) });
-            themes.custom_read = Some(cx.spawn(async move |this, cx| {
-                let read = read.await;
-                let _ = this.update(cx, |this, cx| {
-                    this.preferences.app_theme.custom = Some(read);
-                    this.preferences.app_theme.custom_read = None;
-                    cx.notify();
-                });
-            }));
+            themes.custom = CustomThemes::Reading {
+                _task: cx.spawn(async move |this, cx| {
+                    let read = read.await;
+                    let _ = this.update(cx, |this, cx| {
+                        this.preferences.app_theme.custom = CustomThemes::Read(read);
+                        cx.notify();
+                    });
+                }),
+            };
         }
-        self.preferences
-            .app_theme
-            .custom
-            .as_deref()
-            .unwrap_or_default()
+        match &self.preferences.app_theme.custom {
+            CustomThemes::Read(themes) => themes,
+            CustomThemes::Unread | CustomThemes::Reading { .. } => &[],
+        }
     }
 
     /// A custom theme's palette, read once per theme. While a theme is read

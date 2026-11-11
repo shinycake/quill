@@ -72,7 +72,7 @@ impl QuillApp {
     pub(in crate::ui) fn set_chat_list_view(&mut self, filter: ChatListFilter, tab: Option<i32>) {
         if self.chat_list.filter != filter || self.folders.tab != tab {
             self.chat_list.selected.clear();
-            self.chat_list.pin_reorder = None;
+            self.chat_list.pin.end();
         }
         self.chat_list.filter = filter;
         self.folders.tab = tab;

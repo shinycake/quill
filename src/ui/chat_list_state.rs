@@ -20,6 +20,106 @@ pub(crate) struct PinDrag {
     pub(super) reorder: quill::pin_reorder::PinReorder,
 }
 
+/// The pinned-row gesture: a press that may become a drag, then the drag
+/// (and its release slide). One value, so a press and a drag are never
+/// kept in step by hand.
+#[derive(Default)]
+pub(crate) enum PinGesture {
+    #[default]
+    Idle,
+    /// Where the press on a pinned row went down, so the dragged row
+    /// starts under the pointer instead of where the drag threshold fired.
+    Pressed {
+        chat: i64,
+        y: f32,
+    },
+    Dragging(PinDrag),
+}
+
+impl PinGesture {
+    pub(super) fn drag(&self) -> Option<&PinDrag> {
+        match self {
+            Self::Dragging(drag) => Some(drag),
+            _ => None,
+        }
+    }
+
+    pub(super) fn drag_mut(&mut self) -> Option<&mut PinDrag> {
+        match self {
+            Self::Dragging(drag) => Some(drag),
+            _ => None,
+        }
+    }
+
+    /// A press went down on `chat`. A release slide in progress goes on.
+    pub(super) fn press(&mut self, chat: i64, y: f32) {
+        if !matches!(self, Self::Dragging(_)) {
+            *self = Self::Pressed { chat, y };
+        }
+    }
+
+    /// Where the press on `chat` went down, taking it.
+    pub(super) fn take_press(&mut self, chat: i64) -> Option<f32> {
+        match *self {
+            Self::Pressed { chat: pressed, y } if pressed == chat => {
+                *self = Self::Idle;
+                Some(y)
+            }
+            _ => None,
+        }
+    }
+
+    /// End the gesture, unsaved. Whether a drag was running.
+    pub(super) fn end(&mut self) -> bool {
+        matches!(std::mem::take(self), Self::Dragging(_))
+    }
+}
+
+/// The peek preview of a chat-list row: a long press in progress, then the
+/// open preview. One value: the press ends when the preview opens.
+#[derive(Clone, Copy, Default)]
+pub(crate) enum ChatPeek {
+    #[default]
+    Idle,
+    /// A press on this row since `started`; held long enough, it opens.
+    Pressing {
+        chat_id: ChatId,
+        started: Instant,
+    },
+    Open(ChatPreviewState),
+}
+
+impl ChatPeek {
+    pub(super) fn open(&self) -> Option<ChatPreviewState> {
+        match *self {
+            Self::Open(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    pub(super) fn pressing(&self) -> Option<(ChatId, Instant)> {
+        match *self {
+            Self::Pressing { chat_id, started } => Some((chat_id, started)),
+            _ => None,
+        }
+    }
+
+    /// The press ended (release, drag, jump); an open preview stays.
+    pub(super) fn end_press(&mut self) {
+        if matches!(self, Self::Pressing { .. }) {
+            *self = Self::Idle;
+        }
+    }
+
+    pub(super) fn is_active(&self) -> bool {
+        !matches!(self, Self::Idle)
+    }
+
+    pub(super) fn close(&mut self) {
+        *self = Self::Idle;
+    }
+}
+
 pub(crate) struct ChatListUi {
     /// kit Phase 3: chat-list virtualization — scroll handle owned by the
     /// app so scroll position survives re-renders (scroll restoration).
@@ -43,18 +143,12 @@ pub(crate) struct ChatListUi {
     pub(super) archive_menu: Option<Point<Pixels>>,
     /// Contacts tab, stories menu, suggestions and search tabs.
     pub(super) global: super::chatlist_global::ChatlistGlobal,
-    /// Pinned-chat drag in progress (or its release slide), with the
-    /// pinned list it reorders.
-    pub(super) pin_reorder: Option<PinDrag>,
-    /// Where the last press on a pinned row went down, so the dragged row
-    /// starts under the pointer instead of where the drag threshold fired.
-    pub(super) pin_press: Option<(i64, f32)>,
-    /// Slice CL: the open peek preview — hovered/press-and-hold chat,
-    /// or `None`. Transient; never an open chat.
-    pub(super) preview: Option<ChatPreviewState>,
-    /// Slice CL: an in-progress long press on a chat-list row — the
-    /// row's chat id + press start, for the peek preview.
-    pub(super) preview_press: Option<(ChatId, Instant)>,
+    /// Pinned-chat press, drag in progress (or its release slide), with
+    /// the pinned list it reorders.
+    pub(super) pin: PinGesture,
+    /// Slice CL: the peek preview — a long press on a row, then the open
+    /// preview. Transient; never an open chat.
+    pub(super) peek: ChatPeek,
     /// Slice CL3: multi-select mode — checked chat ids. Non-empty while
     /// selecting; rows toggle the check instead of opening the chat and
     /// the select bar offers the bulk actions.
@@ -114,10 +208,8 @@ impl ChatListUi {
             menu: None,
             archive_menu: None,
             global,
-            pin_reorder: None,
-            pin_press: None,
-            preview: None,
-            preview_press: None,
+            pin: PinGesture::Idle,
+            peek: ChatPeek::Idle,
             selected: HashSet::new(),
             filter: ChatListFilter::All,
             archive_hint_open: false,

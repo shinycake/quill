@@ -197,11 +197,11 @@ impl QuillApp {
             )
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(|this, _, _, _| this.chat_list.preview_press = None),
+                cx.listener(|this, _, _, _| this.chat_list.peek.end_press()),
             )
             .on_mouse_up_out(
                 MouseButton::Left,
-                cx.listener(|this, _, _, _| this.chat_list.preview_press = None),
+                cx.listener(|this, _, _, _| this.chat_list.peek.end_press()),
             )
             .child(avatar)
             .child(
@@ -304,7 +304,7 @@ impl QuillApp {
                         drag.moved = true;
                     }
                     if drag.moved {
-                        this.chat_list.preview_press = None;
+                        this.chat_list.peek.end_press();
                         let scroll = &this.search_ui.top_scroll;
                         let floor = -scroll.max_offset().x;
                         let x = (drag.start_scroll + delta).clamp(floor, px(0.));
