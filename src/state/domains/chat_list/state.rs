@@ -108,12 +108,12 @@ pub struct ChatListState {
     /// The same for `loadChats(chatListArchive)`.
     pub(crate) archive_retry: Option<(std::time::Instant, std::time::Duration)>,
     /// Slice CL2: archive auto-settings from `getArchiveChatListSettings`
-    /// (schema 1.8.67, line 13421). `None` until the first fetch; the
+    /// (schema 1.8.67, line 13421). Idle until the first fetch; the
     /// archive-settings panel fetches on open (TGX
-    /// `SettingsArchiveChatListController` does the same).
-    pub archive_chat_list_settings: Option<ArchiveChatListSettings>,
-    /// Slice CL2: the archive-settings panel is fetching its truth.
-    pub archive_settings_loading: bool,
+    /// `SettingsArchiveChatListController` does the same). A cached copy
+    /// stays readable (`Fetch::data`) while it reloads or after a reload
+    /// fails.
+    pub archive_settings: crate::state::fetch::Fetch<ArchiveChatListSettings>,
     /// Slice CL2: the archive-settings panel is open.
     pub archive_settings_open: bool,
     /// Whether "Archive and mute" is offered (server option, seen on).
@@ -232,8 +232,7 @@ impl ChatListState {
             archive_chats_exhausted: false,
             chats_retry: None,
             archive_retry: None,
-            archive_chat_list_settings: None,
-            archive_settings_loading: false,
+            archive_settings: crate::state::fetch::Fetch::Idle,
             archive_settings_open: false,
             archive_mute: Default::default(),
             chat_preview_fetch: HashMap::new(),

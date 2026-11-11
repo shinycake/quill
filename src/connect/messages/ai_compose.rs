@@ -2,7 +2,7 @@
 //! text composition style requests (TDLib 1.8.69).
 use super::*;
 use crate::ai_compose::AiRequest;
-use crate::state::{AiComposePurpose, ExampleAnswer, StyleLookup};
+use crate::state::{AiComposePurpose, ExampleAnswer, StyleLookup, StyleReply};
 use crate::telegram::requests::{
     StyleByName, create_text_composition_style, edit_text_composition_style,
     get_text_composition_style_example, text_composition_style_by_name,
@@ -115,7 +115,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// `createTextCompositionStyle`; the new style lands in
-    /// `AiComposeState::style_edit` and the front of the style list.
+    /// `AiComposeState::style_edit` (under the returned request) and the
+    /// front of the style list.
     pub fn create_text_composition_style(
         &mut self,
         title: &str,
@@ -129,7 +130,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.send_ai_compose(AiComposePurpose::CreateStyle, None, |extra| {
             create_text_composition_style(extra, title, custom_emoji_id, prompt, show_creator)
         })?;
-        self.session.messages.ai_compose.wait_for_style_save(extra);
         Ok(extra)
     }
 
@@ -148,7 +148,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.send_ai_compose(AiComposePurpose::EditStyle, None, |extra| {
             edit_text_composition_style(extra, name, title, custom_emoji_id, prompt, show_creator)
         })?;
-        self.session.messages.ai_compose.wait_for_style_save(extra);
         Ok(extra)
     }
 
@@ -193,7 +192,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.messages.ai_compose.style_lookup = Some(StyleLookup {
             token,
             name: name.to_string(),
-            outcome: None,
+            outcome: StyleReply::Running,
         });
         Ok(extra)
     }
@@ -220,7 +219,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.messages.ai_compose.example = Some(ExampleAnswer {
             token,
             style_name: name.to_string(),
-            outcome: None,
+            outcome: StyleReply::Running,
         });
         Ok(extra)
     }

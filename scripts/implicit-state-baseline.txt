@@ -26,7 +26,6 @@ CallSummary::busy
 CallUi::window_opening
 CameraDraft::starting
 Ceremony::finished
-ChatListState::archive_settings_loading
 ChatSummary::my_rights_fetched
 ChatSwipeFacts::is_saved
 ChatWindowsState::asked
@@ -149,7 +148,6 @@ Queued::failed
 QuickRepliesState::shortcuts_requested
 QuickRepliesState::shortcuts_requested+error
 ReceivedGift::is_saved
-Relay::started
 ResaleBuy::sending
 ResaleSearch::loaded
 ResaleSearch::loading
@@ -193,7 +191,6 @@ StickerPanel::suggest_waiting_for_sets
 StickerSetView::files_requested
 StorageScroll::pending
 StreamFacts::transport_failed
-StyleExamples::loading
 Tempo::done
 Tempo::inner_done
 ThreadView::reading_started

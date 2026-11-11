@@ -58,17 +58,16 @@ pub fn run(args: &Value) -> Result<ToolOutput, ToolError> {
     }
     let ctx = Ctx::active()?;
     let current = grants::for_account(&ctx.account);
-    let mut granted_chat = None;
-    let (ask, what) = if wants_contacts {
+    let request = if wants_contacts {
         if current.contacts {
             return Ok(already("the contact list"));
         }
-        (Ask::Contacts, "the contact list".to_string())
+        Request::Contacts
     } else if wants_all {
         if current.all_chats.is_some_and(|s| s.allows(scope)) {
             return Ok(already("all chats"));
         }
-        (Ask::AllChats { scope }, "all chats".to_string())
+        Request::AllChats
     } else {
         let found = lookup(&ctx, args, Reach::Any)?;
         if current
@@ -82,33 +81,33 @@ pub fn run(args: &Value) -> Result<ToolOutput, ToolError> {
             Some(Value::String(name)) => format!("\"{}\"", name.trim()),
             _ => format!("chat {}", found.chat_id),
         };
-        granted_chat = Some((found.chat_id, found.title.clone()));
-        (
-            Ask::Chat {
-                chat_id: found.chat_id,
-                title: found.title,
-                secret: found.class == ChatClass::Secret,
-                scope,
-            },
+        Request::Chat {
+            chat_id: found.chat_id,
+            title: found.title,
+            secret: found.class == ChatClass::Secret,
             what,
-        )
+        }
     };
+    let what = request.what();
+    let ask = request.ask(scope);
     let agent = super::current_agent();
     let (id, rx) = prompts::file(ctx.account.clone(), agent, ask, reason).ok_or_else(|| {
         ToolError::new("Several requests are already waiting for the user in Quill. Wait for those answers, then retry.")
     })?;
     match prompts::wait(id, &rx, ANSWER_WAIT) {
-        Some(Decision::Allowed) => Ok(match granted_chat {
-            Some((chat_id, title)) => ToolOutput {
+        Some(Decision::Allowed) => Ok(match request {
+            Request::Chat { chat_id, title, .. } => ToolOutput {
                 text: format!(
                     "The user allowed \"{title}\" (chat {chat_id}, {}). Go ahead.",
                     scope.as_str()
                 ),
                 data: json!({"granted": true, "scope": scope.as_str(), "chat": {"id": chat_id, "title": title}}),
+                images: Vec::new(),
             },
-            None => ToolOutput {
+            Request::Contacts | Request::AllChats => ToolOutput {
                 text: format!("The user allowed {what} ({}). Go ahead.", scope.as_str()),
                 data: json!({"granted": true, "scope": scope.as_str()}),
+                images: Vec::new(),
             },
         }),
         Some(Decision::Denied) => Ok(ToolOutput {
@@ -116,6 +115,7 @@ pub fn run(args: &Value) -> Result<ToolOutput, ToolError> {
                 "The user declined access to {what}. Do not ask again for the same thing in this task."
             ),
             data: json!({"granted": false}),
+            images: Vec::new(),
         }),
         None => Err(ToolError::new(format!(
             "The user did not answer within {} seconds, so the request was withdrawn. Tell the user Quill is asking for {what}, then call request_access again.",
@@ -124,9 +124,52 @@ pub fn run(args: &Value) -> Result<ToolOutput, ToolError> {
     }
 }
 
+/// What the agent asked for: one value that gives both the prompt the user
+/// sees and the words the agent hears back.
+enum Request {
+    Contacts,
+    AllChats,
+    Chat {
+        chat_id: i64,
+        title: String,
+        secret: bool,
+        /// How the agent named the chat, until the user allows it.
+        what: String,
+    },
+}
+
+impl Request {
+    fn what(&self) -> String {
+        match self {
+            Self::Contacts => "the contact list".to_string(),
+            Self::AllChats => "all chats".to_string(),
+            Self::Chat { what, .. } => what.clone(),
+        }
+    }
+
+    fn ask(&self, scope: Scope) -> Ask {
+        match self {
+            Self::Contacts => Ask::Contacts,
+            Self::AllChats => Ask::AllChats { scope },
+            Self::Chat {
+                chat_id,
+                title,
+                secret,
+                ..
+            } => Ask::Chat {
+                chat_id: *chat_id,
+                title: title.clone(),
+                secret: *secret,
+                scope,
+            },
+        }
+    }
+}
+
 fn already(what: &str) -> ToolOutput {
     ToolOutput {
         text: format!("Agents already have {what} at that scope. No need to ask."),
         data: json!({"granted": true, "already": true}),
+        images: Vec::new(),
     }
 }

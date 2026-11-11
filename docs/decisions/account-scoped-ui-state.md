@@ -6827,3 +6827,59 @@ hand. The shape is gone (one enum or `Fetch<T>` per stage), not commented.
 | 09-032 | `GifPanel::saved: SavedGifs { Unloaded, Loading, Ready{stale}, Failed }` replaces the list, `loaded`, `loading`, `failed` and `stale`. The search flags are a second flow and stay on the baseline. |
 | 09-X016, 09-027 | `DeviceLink { Idle{notice}, Scanning, Confirm, Linking }`; the answer is applied only in `Linking`. |
 | 09-039, 11-p5-006 | `NewContactStage { Form, Sending{request,name}, NotJoined{name} }`. |
+
+### Sweep fixes (is-01)
+
+Implicit-state entries: each names a struct whose stages were kept in step by
+hand. The stages are one value now; the baseline lines of the converted
+fields are dropped (`Relay::started`, `StyleExamples::loading`,
+`ChatListState::archive_settings_loading`).
+
+| id | What it is now |
+| --- | --- |
+| 01-001 | The webview carrier loop owns `Phase { LockingDown, Loading, Closing { at, wait_for_browser }, Gone }`; `armed` stays only as the copy the web view's callbacks read. `Relay::closing_at` is gone. |
+| 01-002 | `Relay` holds one `Document { started, finished, page: Page }`, `Page { Silent, BridgeUp, Talking, Listening { in_flight } }` plus `TalkingUnbridged` and `ListeningUnbridged` for a page heard before the new document's hello; replaced whole by `load_started`. A late `Receiving` from the previous document waits for the hello (as `bridge_seen && receiving` did) before anything is delivered. |
+| 01-004 | The mini-app helper shell is `Stage { Booting(queue), Ready, Capturing { at } }`; a top-level navigation back to the shell page (`ShellNavigated`) starts it over at `Booting`; a full queue says so in the debug log. |
+| 01-028 | `access.rs` keeps the lock flag, the lock count and the switch generation in one `Gate` under one lock. |
+| 01-027 | `activity.rs` keeps the connections, their `Stage { Live, Revoked }` and the refused agents in one `Roster`. |
+| 01-007 | Skipped: the `alive` bool is gone already; liveness is read off `Waiting::{Open, Dead}` under the one pending lock. |
+| 04-002 | `Link::gateway` is one `Gateway { None, Unresolved(ip), Resolved(ip, hardware) }` (the `gateway` and `gateway_hardware` pair is gone); `Path::settled` and `carried` read that stage and no longer compare against the tracker's neighbours. `Tracker::neighbours` is `[Neighbour; 2]` (`Unasked`, `Asking(gateway)`), only which gateway was already asked. `link::Resolving` is a per-IP-version try-lock guard, not a stage. |
+| 01-010 | `agent/subscription.rs`: `Subscription` (`None`, `Watching { token }`) replaces the 0 sentinel at its three call sites. |
+| 01-021 | `request_access` builds one `Request { Contacts, AllChats, Chat }` that yields the prompt and the answer text. |
+| 01-019 | `CallScope::begin(start, agent)` saves the previous call and agent and restores them on drop. |
+| 01-043 | Screenshots travel in `ToolOutput::images`; the thread-local side channel is gone, and a lock still drops them. |
+| 01-041 | Skipped: the command already has one `Stage { Queued, Running, Injected, GaveUp, GaveUpAfterInjecting }` under one lock; `cancelled()` reads it. |
+| 01-042 | `DriverClock { drive, real_input }` holds `Option<Instant>`s; no 0 sentinel. |
+| 01-059 | The input guard is one thread-local `Guard { mode, refusals, step, open }`. |
+| 01-057 | `Facts::hold` is `Hold { None, Paused { reason, since_ms }, Stopped }` (a Stop ends a pause, a pause cannot start under a Stop), and `Session::run` is `Run { Running, Ended { at_ms } }`. |
+| 01-047, 07-029 | `StyleExamples` holds `ExampleFetch { Idle, Asked { token, at } }`; `loaded(token)` and `failed(token)` act only for the request awaited. The preview keeps the example shown. |
+| 05-097 | The lookup and example answers are `StyleReply { Running, Answered }`; `styles_received` had no reader and is gone; a save answer carries its request. |
+| 07-033 | `StyleSave::Sent { request }` lives in the editor and is matched to the answer's request; the session only holds the newest answer. A late limit error of a save whose editor was left now toasts the limit as well. |
+| 01-049 | `EmojiPlays` is one `HashMap<MessageKey, Play { generation, state: Played or Replaying }>`. |
+| 01-048 | `ChatListState::archive_settings` is `Fetch<ArchiveChatListSettings>`; a failed reload is `Failed` with the cached copy still readable. |
+| 01-050, 02-123 | `BoostPhase::Working(BoostWork)` with `Slots`, `SlotsReady(slots)` and `Boosting { reassign }`; `reassigning`, `groups.boost_intent` and `boost_slots_by_chat` are gone, so closing the box or an error ends the wait. A Boost press with no open box, or while working, sends nothing. |
+| 08-016 | Same change. The status and details caches are data, not a stage, and stay. |
+| 01-068 | Skipped: `CallLinkStage` already holds the confirm, leaving and offered stages; `calls.call_link` is the invite hash used by the later join, not a stage. |
+| 01-073 | `MicProcessor::denoise` is `Denoise { Off, On(state) }`. |
+| 01-070 | `FeederMode { Forwarding, Paused, Stopped }` in one atomic; a stopped feeder never forwards again. The sink's own `closed` flag belongs to the queue. |
+| 01-069 | `Health { Stopped, Running, Failed }` shared with the stream callback (`MicHealth`), replacing the error slot. |
+| 01-060 | The PipeWire handler has `StreamPhase { Connecting, Streaming, Paused }`. |
+| 14-076 | The macOS scanner is stopped when `events` is `None`; `stopped` is gone. |
+| 01-062 | `CaptureStage { Running, Stopped }` on the Windows capture's shared state, used by `stop` and `end`; `stop` is safe to repeat. |
+| 04-077 | `CarrierStage { Starting, Ready, Failed, Closing }` in one atomic, each transition one step. |
+| 04-078 | `Folder { NotConfigured, Claimed(generation), RetryAfter(time) }`. |
+| 01-061 | `ShareVisibility` in `screen.rs` is the one transition the X11, macOS and Windows loops use. |
+| 01-084 | `StreamsSync { Idle, Asking { request, waiters } }`: a time waiter cannot outlive its request. |
+| 01-082 | `GroupJoin` carries the mode (`AnswerApplied { mode }`, `Connected { mode }`), and `PresentationStage { Offered, Connected }`. `camera_id` is what is wanted and `camera` is the source running: two things, kept. |
+| 01-078 | Presentation stage as above. The two offer maps hold different values (a call's, a screen's), so they stay two. |
+| 06-029 | Skipped: `is_joined` and `need_rejoin` are TDLib's own `groupCall` fields; `group_call_joined_or_joining` is the one place that derives the stage. |
+| 01-075 | `Conference` keeps `Link { Unattached { pending, unsent }, Attached { handle, pending }, Closed }` behind the media lock. |
+| 01-076, 01-081 | `P2pStage { Waiting { pending_signaling }, Live { handle } }`; the hung-up stage is the call leaving the table. |
+| 01-077 | `CallMediaConfig::video` is `VideoSource { Off, Camera(device), Screen }`, so the camera and a screen share cannot both be set. The native camera and screen handles stay on the call (resources, not choices). |
+
+One shared-file change: `session_apply_error.rs` restores the archive settings
+through `Fetch::data_mut` (the rollback has to follow the field's new type).
+
+Not compiled here: the Windows, macOS and Linux-only capture files
+(`screen_win`, `screen_mac`, `ble_macos`) were changed by reading, and the
+tgcalls tests need the native library, which this machine did not run.

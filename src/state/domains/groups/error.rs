@@ -583,11 +583,6 @@ impl Session {
                 )),
             );
         }
-        // Slice G2: the slots half of a boost failed — the chain
-        // cannot continue; drop the intent.
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBoostSlotsForBoost) {
-            self.groups.boost_intent = None;
-        }
         // A failed slots read or `boostChat` returns the boost box to its
         // counters with the reason (tdesktop shows the error as a toast).
         if matches!(
@@ -601,7 +596,6 @@ impl Session {
                 .filter(|state| state.chat_id == chat_id.0)
         {
             state.phase = crate::boost_box::BoostPhase::Main;
-            state.reassigning = None;
             state.note = Some(call_request_error_line(err, "Could not boost"));
         }
     }

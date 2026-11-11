@@ -436,13 +436,28 @@ pub fn reassign_done_text(count: usize, groups: usize, channels: usize) -> Strin
     }
 }
 
+/// What a box that is working waits for. Closing the box, or an error, ends
+/// it (the box goes back to `Main` or is gone), so a late answer finds
+/// nothing waiting.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BoostWork {
+    /// The Boost press asked for the boost slots and waits for them.
+    Slots,
+    /// The slots arrived; the driver reads them next (a free slot boosts,
+    /// else the box shows what to do).
+    SlotsReady(Vec<ParsedBoostSlot>),
+    /// `boostChat` is out; `reassign` is what a reassignment moves, for the
+    /// toast, and is dropped with the stage.
+    Boosting { reassign: Option<ReassignSummary> },
+}
+
 /// Where the open box stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BoostPhase {
     /// Counters, features and the button.
     Main,
     /// A request is out (slots, or `boostChat`).
-    Working,
+    Working(BoostWork),
     /// Pick the boosts to move here.
     Reassign {
         slots: Vec<ParsedBoostSlot>,
@@ -468,7 +483,6 @@ pub struct BoostBoxState {
     pub phase: BoostPhase,
     /// A line under the counters: the last result or error.
     pub note: Option<String>,
-    pub reassigning: Option<ReassignSummary>,
 }
 
 impl BoostBoxState {
@@ -478,15 +492,22 @@ impl BoostBoxState {
             group,
             phase: BoostPhase::Main,
             note: None,
-            reassigning: None,
         }
+    }
+
+    /// Whether the box waits for the boost slots or has them to read.
+    pub fn awaiting_slots(&self) -> bool {
+        matches!(
+            self.phase,
+            BoostPhase::Working(BoostWork::Slots | BoostWork::SlotsReady(_))
+        )
     }
 
     /// Show what the Boost button decided. `Boost` keeps the box working
     /// until `boostChat` answers.
     pub fn apply_decision(&mut self, decision: BoostDecision) {
         self.phase = match decision {
-            BoostDecision::Boost(_) => BoostPhase::Working,
+            BoostDecision::Boost(_) => BoostPhase::Working(BoostWork::Boosting { reassign: None }),
             BoostDecision::Reassign(slots) => BoostPhase::Reassign {
                 slots,
                 selected: Vec::new(),
@@ -841,7 +862,10 @@ mod tests {
         assert!(state.reassign_selection(NOW).is_empty());
         let mut state = state;
         state.apply_decision(BoostDecision::Boost(3));
-        assert_eq!(state.phase, BoostPhase::Working);
+        assert_eq!(
+            state.phase,
+            BoostPhase::Working(BoostWork::Boosting { reassign: None })
+        );
     }
 
     #[test]

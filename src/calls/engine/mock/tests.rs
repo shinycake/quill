@@ -253,7 +253,8 @@ fn retained_call_media_preserves_screen_share_across_reconnect() {
     };
     // Fresh connect: no prior entry, share starts off.
     let fresh = retained_call_media(&params, None);
-    assert!(!fresh.screen_share_on);
+    assert!(!fresh.video.screen());
+    assert_eq!(fresh.video.camera(), Some("cam-1"));
     assert_eq!(fresh.mic.as_deref(), Some("mic-1"));
     // Mid-call the user starts sharing, then the transport drops
     // and `connect` re-runs with the same retained params: the
@@ -261,15 +262,19 @@ fn retained_call_media_preserves_screen_share_across_reconnect() {
     // screen-only (`camera.is_some() && !screen_share_on` stays
     // false for the camera).
     let mut sharing = fresh;
-    sharing.screen_share_on = true;
-    sharing.camera = None;
+    sharing.video = VideoSource::Screen;
     let reconnected = retained_call_media(&params, Some(&sharing));
-    assert!(reconnected.screen_share_on);
+    assert!(reconnected.video.screen());
+    assert_eq!(
+        reconnected.video.camera(),
+        None,
+        "the share replaces the camera"
+    );
     // Stopping share before the drop must not stick the flag on
     // either.
     let mut stopped = sharing;
-    stopped.screen_share_on = false;
-    assert!(!retained_call_media(&params, Some(&stopped)).screen_share_on);
+    stopped.video = VideoSource::Off;
+    assert!(!retained_call_media(&params, Some(&stopped)).video.screen());
 }
 
 /// Phase C2e: validates the toggle contract the UI will drive.
