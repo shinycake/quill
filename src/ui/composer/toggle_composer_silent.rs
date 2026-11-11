@@ -498,9 +498,15 @@ impl QuillApp {
         } else if let Some(live) = self.live.as_mut()
             && let Some(chat_id) = live.driver.session.open_chat
         {
+            let sent = send(live, chat_id, &text);
+            if sent.is_ok() {
+                self.chat_ui.ai_ask = super::AiAsk::Asked {
+                    markup: text.clone(),
+                };
+            }
             self.screen.connection.set_note_for(
                 &self.screen.windows,
-                match send(live, chat_id, &text) {
+                match sent {
                     Ok(_) => StatusNote::silent(working_note),
                     Err(_) => StatusNote::info(tr(keys::Q_CHAT_AI_TOOLS_UNAVAILABLE_HERE)),
                 },

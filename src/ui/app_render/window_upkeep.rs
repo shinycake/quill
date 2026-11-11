@@ -28,7 +28,12 @@ impl QuillApp {
         // own bar (the driver asks once per message).
         self.fetch_missing_reply_target();
         // What was open for a chat the view no longer shows goes.
-        self.sync_chat_ui();
+        self.sync_chat_ui(cx);
+        // An edit TDLib answered leaves edit mode (or goes on, on an error).
+        self.settle_edit_send(window, cx);
+        self.settle_sent_text(window, cx);
+        // A forced reply for the chat this window shows arms its composer.
+        self.arm_force_reply_here(window, cx);
         // The histories every window still reads stay whole.
         self.sync_history_holds();
         // The inline results button's round trip back to its chat.
@@ -236,36 +241,71 @@ impl QuillApp {
     }
 
     /// An AI answer for the composer of the chat this window shows
-    /// replaces the draft (`msg-richtext-ai-tools`). An answer for a chat
-    /// no window shows is dropped; one for another window's chat waits for
-    /// that window's frame. Rich answers are written back as editor markup,
+    /// replaces the draft (`msg-richtext-ai-tools`). The answer goes to the
+    /// window that asked; one for another window waits for that window's
+    /// frame, and one whose window closed is dropped. Rich answers are written back as editor markup,
     /// inline formatting included, so the rich send path rebuilds the whole
     /// message.
-    fn apply_ai_composer_answer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn apply_ai_composer_answer(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(session) = self.session_mut() else {
             return;
         };
         let open_chat = session.open_chat;
-        let ours = |chat: ChatId, session: &quill::state::Session| {
-            open_chat == Some(chat) || !session.chat_is_shown(chat)
+        // The window that asked takes the answer, whichever windows show
+        // the same chat; one whose window closed since has no taker.
+        let here = session.view_in_place();
+        let ours = |window: Option<ChatId>, session: &quill::state::Session| {
+            window == here || window.is_some_and(|chat| !session.window_chats.contains(&chat))
         };
         let ai_text = match session.messages.ai_composer_text.as_ref() {
-            Some((chat, _)) if ours(*chat, session) => session.messages.ai_composer_text.take(),
+            Some((window, ..)) if ours(*window, session) => {
+                session.messages.ai_composer_text.take()
+            }
             _ => None,
-        };
+        }
+        .filter(|(window, ..)| *window == here);
         let ai_blocks = match session.messages.ai_composer_blocks.as_ref() {
-            Some((chat, _, _)) if ours(*chat, session) => {
+            Some((window, ..)) if ours(*window, session) => {
                 session.messages.ai_composer_blocks.take()
             }
             _ => None,
-        };
-        if let Some((chat_id, text)) = ai_text
+        }
+        .filter(|(window, ..)| *window == here);
+        // The answer is for the draft that was asked about: text typed
+        // since, a message sent meanwhile or an edit begun after the ask
+        // keeps the field as it is.
+        let for_here = ai_text
+            .as_ref()
+            .is_some_and(|(_, c, _)| open_chat == Some(*c))
+            || ai_blocks
+                .as_ref()
+                .is_some_and(|(_, c, _, _)| open_chat == Some(*c));
+        if !for_here {
+            return;
+        }
+        let asked = std::mem::take(&mut self.chat_ui.ai_ask);
+        let still_asked = matches!(
+            &asked,
+            crate::ui::composer::AiAsk::Asked { markup }
+                if !self.chat_ui.is_editing() && *markup == self.composer_markup(cx)
+        );
+        if !still_asked {
+            self.set_note(StatusNote::info(tr(
+                keys::Q_CHAT_THE_DRAFT_CHANGED_THE_AI_ANSWER,
+            )));
+            return;
+        }
+        if let Some((_, chat_id, text)) = ai_text
             && open_chat == Some(chat_id)
         {
             self.set_composer_markup(&text, window, cx);
             self.set_note(StatusNote::silent(tr(keys::Q_REST_AI_UPDATED_THE_DRAFT)));
         }
-        if let Some((chat_id, rich, note)) = ai_blocks
+        if let Some((_, chat_id, rich, note)) = ai_blocks
             && open_chat == Some(chat_id)
         {
             let text = quill::rich::RichDraft::from_message(&rich.blocks)

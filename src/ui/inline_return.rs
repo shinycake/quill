@@ -12,7 +12,8 @@ use quill::inline_grid::switch_inline_query;
 use quill::telegram::envelope::ChatKind;
 
 /// Where a round trip stands. Every stage ends: the bot's switch-inline
-/// button takes it back, and a lookup that fails
+/// button takes it back, leaving the bot's chat after the start ends it
+/// ([`QuillApp::flush_inline_return`]), and a lookup that fails
 /// ([`QuillApp::cancel_inline_opening`]), another link that ends anywhere but
 /// the bot's chat ([`QuillApp::cancel_inline_opening_unless_chat`]) or another
 /// account on screen drops it.
@@ -205,12 +206,16 @@ impl QuillApp {
         let InlineStage::Started { baseline } = ret.stage else {
             return;
         };
-        let Some(open) = self.open_chat_id() else {
+        // The trip lives while the user stays in the bot's chat: leaving it
+        // (another chat, the origin by hand, no chat) ends it, so a message
+        // of the bot much later never jumps back to a chat long left.
+        let in_bot_chat = self
+            .open_chat_id()
+            .filter(|open| self.is_private_chat_with(*open, ret.bot_id));
+        let Some(open) = in_bot_chat else {
+            self.composer_ui.inline_return = None;
             return;
         };
-        if !self.is_private_chat_with(open, ret.bot_id) {
-            return;
-        }
         let query = self
             .session()
             .and_then(|session| session.histories.get(&open.0))

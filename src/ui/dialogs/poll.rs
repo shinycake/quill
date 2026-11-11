@@ -136,6 +136,9 @@ pub struct PollDialog {
     /// The custom deadline box, while it is open.
     pub(crate) deadline_box: Option<DeadlineBox>,
     pub(crate) confirming_discard: bool,
+    /// A bot's one-time keyboard whose Poll button opened this box: it
+    /// goes when the poll is sent, not when the box opens.
+    pub(crate) dismiss_keyboard_on_send: Option<(ChatId, MessageId)>,
     baseline: Option<PollToggles>,
 }
 
@@ -214,6 +217,7 @@ impl PollDialog {
             close: PollClose::Period(POLL_DEFAULT_PERIOD_SECS),
             deadline_box: None,
             confirming_discard: false,
+            dismiss_keyboard_on_send: None,
             baseline: None,
         };
         dialog.baseline = Some(dialog.toggles());

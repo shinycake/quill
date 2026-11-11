@@ -121,7 +121,8 @@ impl QuillApp {
                     .and_then(|_| driver.fetch_chat_invite_link_counts(chat_id))
                     .map(|_| ()),
                 GroupSettingsView::JoinRequests => {
-                    driver.fetch_chat_join_requests(chat_id).map(|_| ())
+                    driver.ask_join_requests(chat_id, "", true);
+                    Ok(())
                 }
                 GroupSettingsView::Administrators => {
                     driver.fetch_chat_administrators(chat_id).map(|_| ())

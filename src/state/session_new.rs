@@ -38,6 +38,7 @@ impl Session {
             threads: Box::new(ThreadsState::new()),
             view_generation: ViewGeneration(1),
             requests: RequestRegistry::default(),
+            acks: RequestAcks::default(),
             shutdown: ShutdownPhase::Running,
             last_seq: 0,
             bots: Box::new(BotsState::new()),

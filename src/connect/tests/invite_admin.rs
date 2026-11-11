@@ -681,3 +681,49 @@ fn a_fetch_that_cannot_be_sent_is_a_failed_page_with_a_retry() {
             .is_some()
     );
 }
+
+#[test]
+fn a_join_request_ask_that_cannot_go_out_fails_instead_of_loading() {
+    // Not connected: the send is refused.
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let session = crate::state::Session::new(crate::ids::AccountKey::primary(), sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder, test_credentials(), prepared);
+    driver.ask_join_requests(ChatId(13), "", true);
+    assert!(matches!(
+        driver.session.groups.join_requests.get(&13),
+        Some(JoinRequestFetch::Failed(_))
+    ));
+    driver.ask_join_requests(ChatId(13), "an", false);
+    assert!(matches!(
+        driver.session.groups.join_requests.get(&13),
+        Some(JoinRequestFetch::Failed(_))
+    ));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_join_request_ask_without_the_right_to_invite_fails_and_a_sent_one_loads() {
+    // A plain member cannot see the requests: nothing is sent, the box says so.
+    let mut member = Rig::new(false, MEMBER);
+    member.driver.ask_join_requests(ChatId(13), "", true);
+    assert!(matches!(
+        member.driver.session.groups.join_requests.get(&13),
+        Some(JoinRequestFetch::Failed(_))
+    ));
+    assert!(
+        member
+            .recorder
+            .snapshot()
+            .iter()
+            .all(|r| !r.contains("getChatJoinRequests"))
+    );
+    // An administrator's ask is sent and loads.
+    let mut admin = Rig::new(false, ADMIN);
+    admin.driver.ask_join_requests(ChatId(13), "", true);
+    assert!(matches!(
+        admin.driver.session.groups.join_requests.get(&13),
+        Some(JoinRequestFetch::Loading)
+    ));
+}

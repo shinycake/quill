@@ -524,3 +524,24 @@ fn a_forward_answer_keeps_a_newer_selection(cx: &mut TestAppContext) {
         assert!(app.share.forward_result.is_some(), "the answer still shows");
     });
 }
+
+/// Sweep 09-X001: the secret-chat inline-bot alert is the chat's: another
+/// chat's value starts without it, so its confirm cannot insert the query
+/// there.
+#[gpui_kit::test]
+fn another_chat_drops_the_secret_inline_bot_alert(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let other = other_chat(&app, &mut vcx);
+    open(&app, &mut vcx, CHAT);
+    app.update(&mut vcx, |app, _| {
+        app.chat_ui.pending_inline_bot_alert = Some("@bot query".into());
+    });
+    open(&app, &mut vcx, other);
+    assert!(
+        app.read_with(&vcx, |app, _| app
+            .chat_ui
+            .pending_inline_bot_alert
+            .is_none()),
+        "the alert stayed with the chat it was raised in"
+    );
+}

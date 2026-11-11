@@ -80,9 +80,6 @@ pub(crate) struct ComposerUi {
     /// A rich draft's discard and Premium boxes and the rich paste notice
     /// (`rich_draft`).
     pub(super) rich_draft: super::rich_draft::RichDraftUi,
-    /// Chat whose draft should be cleared after `updateMessageSendSucceeded`
-    /// if the composer is still empty, and the text that send took.
-    pub(super) clear_draft_on_success: Option<DraftClear>,
     /// A topic or thread switch asked for the new slot's draft to be put
     /// in the composer on the next frame (`restore_draft_if_pending`).
     pub(super) draft_restore_pending: bool,
@@ -104,10 +101,6 @@ pub(crate) struct ComposerUi {
     pub(super) code_language: Option<super::composer_shortcuts::CodeLanguageDialog>,
     /// Cross-fade timeline of the round Send / Record / Save button.
     pub(super) send_morph: std::cell::Cell<Option<quill::send_button::SendMorph>>,
-    /// Phase S2: pending inline-bot warning for a `SwitchInline` press in
-    /// a secret chat (TGX `SecretChatContextBotAlert`) — the stashed
-    /// query is inserted on Confirm.
-    pub(super) pending_inline_bot_alert: Option<String>,
     /// Phase S2: the inline-bot warning has been confirmed once this
     /// session (TGX `TUTORIAL_INLINE_SEARCH_SECRECY`, which persists;
     /// Quill keeps it per session — documented divergence).
@@ -145,7 +138,6 @@ impl ComposerUi {
             send_effect_once: 0,
             send_menu: Default::default(),
             rich_draft: Default::default(),
-            clear_draft_on_success: None,
             draft_restore_pending: false,
             remote_draft_seen: 0,
             shown_draft: None,
@@ -154,7 +146,6 @@ impl ComposerUi {
             date_dialog: None,
             code_language: None,
             send_morph: Default::default(),
-            pending_inline_bot_alert: None,
             inline_bot_alert_shown: false,
             drop_paths: Vec::new(),
             drop_state: None,

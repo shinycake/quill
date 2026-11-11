@@ -153,7 +153,10 @@ fn enter_sends_the_command_alone_and_keeps_the_rest_of_the_field(cx: &mut TestAp
     assert_eq!(sent.last().map(String::as_str), Some("/start@weatherbot"));
     app.read_with(vcx, |app, _| {
         assert_eq!(app.pending_attachments().len(), 1, "the tray is untouched");
-        assert!(app.composer_ui.clear_draft_on_success.is_none());
+        assert!(
+            app.send_slot()
+                .is_some_and(|slot| !app.composer_sends.has_draft_clear(&slot))
+        );
     });
     // What followed the caret stays, the caret at its end, and it is saved
     // as the chat's draft.

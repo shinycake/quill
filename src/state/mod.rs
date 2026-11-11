@@ -57,6 +57,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 mod account_notices;
+mod acks;
 mod business_bot_bar;
 mod call_types;
 mod chat_activity;
@@ -179,6 +180,7 @@ mod updates_sync;
 mod web_app_types;
 
 pub use account_notices::*;
+pub use acks::{Answer, RequestAcks};
 pub use call_types::*;
 pub use chat_activity::*;
 pub use chat_types::*;

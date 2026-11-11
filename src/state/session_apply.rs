@@ -32,6 +32,12 @@ impl Session {
                 seq: Some(owned.seq),
                 note: "stale-account-generation",
             });
+            // The surface awaiting it must not wait for good: the answer
+            // belongs to an account that is gone, so it did not take.
+            self.acks.settle(
+                pending.id,
+                Answer::Failed("The account changed before TDLib answered".into()),
+            );
             return;
         }
         // A box that waits on this request saves on its answer, not on the
@@ -41,6 +47,13 @@ impl Session {
             && !matches!(owned.envelope.payload, EnvelopePayload::Error(_))
         {
             self.users_state.saves.answered(id);
+        }
+        if let Some(pending) = pending.as_ref() {
+            let answer = match &owned.envelope.payload {
+                EnvelopePayload::Error(err) => Answer::Failed(error_reason(err)),
+                _ => Answer::Done,
+            };
+            self.acks.settle(pending.id, answer);
         }
         self.apply_payload_in_asking_view(
             owned.envelope.payload,

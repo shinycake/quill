@@ -42,11 +42,23 @@ impl QuillApp {
         // to whatever the window shows by then.
         let window_chat = self.windows.scope;
         let asked_in = self.send_slot();
+        let asked_edit = self.chat_ui.edit_id();
         self.spawn_screen(cx, async move |this, cx| {
             if let (Ok(Ok(Some(paths))), Some(asked_in)) = (picker.await, asked_in) {
                 let _ = this.update(cx, |this, cx| {
                     this.in_window_scope(window_chat, cx, |this, cx| {
-                        this.attach_picked_in(&asked_in, paths, as_files, cx)
+                        // Asked in an edit that is over, or answered in one
+                        // started since: the files are not the tray's.
+                        let stale = match asked_edit {
+                            Some(_) => this.chat_ui.edit_id() != asked_edit,
+                            None => {
+                                this.chat_ui.is_editing()
+                                    && this.send_slot().as_ref() == Some(&asked_in)
+                            }
+                        };
+                        if !stale {
+                            this.attach_picked_in(&asked_in, paths, as_files, cx)
+                        }
                     })
                 });
             }

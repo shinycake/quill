@@ -43,6 +43,19 @@ struct Basis {
     blocked: Vec<String>,
 }
 
+/// "Suggest Emoji" on one word: waiting for its keyword answer, or not.
+/// It leaves `Waiting` on the answer, on a lookup that gave up (a note
+/// says so) and when the word is edited.
+#[derive(Default, Clone, PartialEq, Eq, Debug)]
+pub(in crate::ui) enum AskedWord {
+    #[default]
+    Idle,
+    Waiting {
+        range: Range<usize>,
+        word: String,
+    },
+}
+
 #[derive(Default)]
 pub(super) struct EmojiWordsUi {
     basis: Basis,
@@ -56,7 +69,7 @@ pub(super) struct EmojiWordsUi {
     /// its word does, highlighted or not.
     pub pinned: bool,
     /// "Suggest Emoji" on a word whose keyword answer is on its way.
-    pub asked: Option<(Range<usize>, String)>,
+    pub asked: AskedWord,
     /// Words closed with Esc: not highlighted again in this session.
     ignored: HashSet<String>,
     /// Where the word's bar was painted, so moving the pointer from the
@@ -225,10 +238,10 @@ impl QuillApp {
         }) {
             ui.unhover();
         }
-        if ui.asked.as_ref().is_some_and(|(range, word)| {
-            text.get(range.clone()).map(str::to_lowercase).as_deref() != Some(word)
-        }) {
-            ui.asked = None;
+        if matches!(&ui.asked, AskedWord::Waiting { range, word }
+            if text.get(range.clone()).map(str::to_lowercase).as_deref() != Some(word.as_str()))
+        {
+            ui.asked = AskedWord::Idle;
         }
         ui.basis = Basis {
             text: rope,

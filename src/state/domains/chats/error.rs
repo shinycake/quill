@@ -42,9 +42,6 @@ impl Session {
                 | RequestPurpose::DeleteDefaultBackground
                 | RequestPurpose::RemoveInstalledBackground
                 | RequestPurpose::SetDefaultBackgroundLocal
-                | RequestPurpose::SetChatBackground
-                | RequestPurpose::DeleteChatBackground
-                | RequestPurpose::SetChatTheme
                 | RequestPurpose::GetBackgroundUrl,
             ) => {
                 self.chats_state.background_error = Some(error_reason(err));
@@ -57,6 +54,14 @@ impl Session {
                         .restore_deleted_default_background(pending.id);
                 }
             }
+            // The chat look dialog settles each of its requests on its own
+            // answer (`Session::acks`); the error is not the Appearance
+            // page's.
+            Some(
+                RequestPurpose::SetChatBackground
+                | RequestPurpose::DeleteChatBackground
+                | RequestPurpose::SetChatTheme,
+            ) => {}
             // Slice CL3: refused report / block surfaces in the
             // status note — never shown as success.
             Some(RequestPurpose::ReportChat) => {

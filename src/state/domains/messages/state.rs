@@ -48,15 +48,17 @@ pub struct MessagesState {
     pub message_link_error: Option<String>,
     /// Slice msg-richtext-ai-tools: one-shot `fixTextWithAi` /
     /// `composeTextWithAi` answer for the open chat's composer. The UI
-    /// drains it (replacing the draft) on the next frame; the chat id
-    /// guards against applying to a chat the user has since left.
-    pub ai_composer_text: Option<(ChatId, String)>,
+    /// drains it (replacing the draft) on the next frame. The first id is
+    /// the window that asked (`None`: the main window): only that window
+    /// takes the answer, even when another shows the same chat; the chat
+    /// id guards against applying to a chat the window has since left.
+    pub ai_composer_text: Option<(Option<ChatId>, ChatId, String)>,
     /// Slice msg-richtext-ai-tools: one-shot `composeRichMessageWithAi`
     /// / `createRichMessageWithAi` / `fixRichMessageWithAi` answer for
     /// the open chat's composer. Same drain contract as
     /// `ai_composer_text`. The UI writes the blocks back as editor markup
     /// (`blocks_to_markup`); the note distinguishes create / fix / rewrite.
-    pub ai_composer_blocks: Option<(ChatId, RichMessageContent, &'static str)>,
+    pub ai_composer_blocks: Option<(Option<ChatId>, ChatId, RichMessageContent, &'static str)>,
     /// Slice msg-richtext-ai-tools: one-shot; set when an AI request
     /// errors. The UI drains it into the status note so the click never
     /// silently does nothing.

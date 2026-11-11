@@ -760,50 +760,51 @@ fn a_late_background_search_answer_never_lands_under_another_link() {
 }
 
 #[test]
-fn chat_look_requests_count_acks_and_surface_errors() {
+fn chat_look_requests_settle_per_request_and_keep_the_wallpaper_error_out() {
+    use crate::state::Answer;
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    for purpose in [
+    let purposes = [
         RequestPurpose::SetChatTheme,
         RequestPurpose::SetChatBackground,
         RequestPurpose::DeleteChatBackground,
-    ] {
+    ];
+    let mut ids = Vec::new();
+    for purpose in purposes {
         let extra = session.request(purpose, Some(ChatId(7)));
-        apply_json(
-            &mut session,
-            &seq,
-            &sink,
-            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
-        );
+        session.acks.expect(extra);
+        ids.push(extra);
     }
-    assert_eq!(session.chats_state.chat_look_oks, 3);
-    assert!(session.chats_state.background_error.is_none());
-
-    for purpose in [
-        RequestPurpose::SetChatTheme,
-        RequestPurpose::SetChatBackground,
-        RequestPurpose::DeleteChatBackground,
-    ] {
-        session.chats_state.background_error = None;
-        let extra = session.request(purpose, Some(ChatId(7)));
-        apply_json(
-            &mut session,
-            &seq,
-            &sink,
-            &format!(
+    // One answer settles one request, in either order.
+    for (i, extra) in ids.iter().enumerate().rev() {
+        let json = if i == 1 {
+            format!(
                 r#"{{"@type":"error","@extra":"{}","code":400,"message":"BACKGROUND_INVALID"}}"#,
                 extra.0
-            ),
-        );
-        assert!(
-            session.chats_state.background_error.is_some(),
-            "{purpose:?}"
-        );
+            )
+        } else {
+            format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0)
+        };
+        apply_json(&mut session, &seq, &sink, &json);
     }
-    assert_eq!(
-        session.chats_state.chat_look_oks, 3,
-        "errors are not acknowledgements"
+    let acks = &mut session.acks;
+    assert_eq!(acks.take(ids[0]), Some(Answer::Done));
+    assert!(matches!(acks.take(ids[1]), Some(Answer::Failed(_))));
+    assert_eq!(acks.take(ids[2]), Some(Answer::Done));
+    assert!(
+        session.chats_state.background_error.is_none(),
+        "the chat look's error is not the wallpaper pages'"
     );
+
+    // An answer of a request no dialog waits for is not kept.
+    let stray = session.request(RequestPurpose::SetChatTheme, Some(ChatId(7)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, stray.0),
+    );
+    assert_eq!(session.acks.take(stray), None);
 }
 
 #[test]

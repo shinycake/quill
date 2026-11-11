@@ -562,6 +562,7 @@ impl QuillApp {
             .reply_for_send(cx)
             .and_then(|reply| reply.send_reply(chat_id));
         let options = self.composer_post_options();
+        let typed = self.composer_markup(cx);
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -569,13 +570,16 @@ impl QuillApp {
             .driver
             .send_rich_snapshot(chat_id, &blocks, reply_to, &options)
         {
-            Ok(_) => {
+            Ok(request) => {
+                // The field is cleared as the send starts; a refusal gives
+                // the text back (`settle_sent_text`).
+                self.remember_sent_text(request, typed);
                 self.finish_pending_send();
                 self.chat_ui.schedule_popup_open = false;
                 self.chat_ui.set_reply(None);
                 self.chat_ui.rich_editor_open = false;
                 self.clear_suggest_bar_after_send(chat_id);
-                self.composer_ui.clear_draft_on_success = Some(DraftClear::whole_composer(chat_id));
+                self.expect_draft_clear(DraftClear::whole_composer(chat_id));
                 self.composer
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 self.forget_local_draft(chat_id);
@@ -977,6 +981,8 @@ pub(super) use command_menu::CommandMenu;
 mod copy_inline_text;
 mod field_placeholder;
 mod send_bot_command;
+mod sent_text;
+pub(in crate::ui) use sent_text::{AiAsk, SentText};
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod send_options_to_tests;

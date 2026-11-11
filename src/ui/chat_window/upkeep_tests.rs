@@ -103,9 +103,17 @@ fn a_topic_switch_in_a_forum_window_leaves_the_old_topics_text(cx: &mut TestAppC
 fn an_ai_answer_for_a_chat_window_lands_in_its_composer(cx: &mut TestAppContext) {
     let h = new_app(cx);
     let chat_window = h.open_in_new_window(OTHER, cx);
+    // The window's draft was asked about (Fix): the answer replaces it.
+    let composer = h.window_composer(OTHER, cx);
+    in_window(&h, chat_window, Some(OTHER), cx, |app, window, cx| {
+        composer.update(cx, |field, cx| field.set_value("fixd text", window, cx));
+        app.chat_ui.ai_ask = crate::ui::composer::AiAsk::Asked {
+            markup: "fixd text".into(),
+        };
+    });
     h.app.update(cx, |app, _| {
         if let Some(session) = app.session_mut() {
-            session.messages.ai_composer_text = Some((OTHER, "fixed text".into()));
+            session.messages.ai_composer_text = Some((Some(OTHER), OTHER, "fixed text".into()));
         }
     });
     // The main window's frame leaves another window's answer alone.
@@ -117,6 +125,38 @@ fn an_ai_answer_for_a_chat_window_lands_in_its_composer(cx: &mut TestAppContext)
         composer.read_with(cx, |field, _| field.value().to_string()),
         "fixed text"
     );
+}
+
+/// Sweep 08-134: an answer belongs to the window that asked, not to any
+/// window that shows the same chat.
+#[gpui_kit::test]
+fn an_ai_answer_goes_to_the_window_that_asked(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    let chat_window = h.open_in_new_window(OTHER, cx);
+    let composer = h.window_composer(OTHER, cx);
+    in_window(&h, chat_window, Some(OTHER), cx, |app, window, cx| {
+        composer.update(cx, |field, cx| field.set_value("fixd text", window, cx));
+        app.chat_ui.ai_ask = crate::ui::composer::AiAsk::Asked {
+            markup: "fixd text".into(),
+        };
+    });
+    // The main window asked (for the same chat): the chat window's frame
+    // does not take the answer.
+    h.app.update(cx, |app, _| {
+        if let Some(session) = app.session_mut() {
+            session.messages.ai_composer_text = Some((None, OTHER, "fixed text".into()));
+        }
+    });
+    draw(chat_window, cx);
+    let composer = h.window_composer(OTHER, cx);
+    assert_eq!(
+        composer.read_with(cx, |field, _| field.value().to_string()),
+        "fixd text"
+    );
+    assert!(h.app.read_with(cx, |app, _| {
+        app.session()
+            .is_some_and(|session| session.messages.ai_composer_text.is_some())
+    }));
 }
 
 #[gpui_kit::test]

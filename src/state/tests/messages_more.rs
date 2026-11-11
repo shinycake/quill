@@ -433,8 +433,8 @@ fn b1_force_reply_arms_pending_target() {
         r#"{"@type":"updateNewMessage","message":{"id":306,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupForceReply","input_field_placeholder":""},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#,
     );
     assert_eq!(
-        session.bots.pending_force_reply,
-        Some(ForceReplyTarget {
+        session.bots.pending_force_replies.get(&ChatId(21)),
+        Some(&ForceReplyTarget {
             chat_id: ChatId(21),
             message_id: MessageId(306),
         })
@@ -447,8 +447,8 @@ fn b1_force_reply_arms_pending_target() {
         r#"{"@type":"updateNewMessage","message":{"id":307,"chat_id":21,"is_outgoing":true,"reply_markup":{"@type":"replyMarkupForceReply","input_field_placeholder":""},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"y","entities":[]}}}}"#,
     );
     assert_eq!(
-        session.bots.pending_force_reply,
-        Some(ForceReplyTarget {
+        session.bots.pending_force_replies.get(&ChatId(21)),
+        Some(&ForceReplyTarget {
             chat_id: ChatId(21),
             message_id: MessageId(306),
         })
@@ -461,8 +461,8 @@ fn b1_force_reply_arms_pending_target() {
         r#"{"@type":"updateNewMessage","message":{"id":308,"chat_id":21,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"z","entities":[]}}}}"#,
     );
     assert_eq!(
-        session.bots.pending_force_reply,
-        Some(ForceReplyTarget {
+        session.bots.pending_force_replies.get(&ChatId(21)),
+        Some(&ForceReplyTarget {
             chat_id: ChatId(21),
             message_id: MessageId(306),
         })
@@ -782,4 +782,69 @@ fn has_scheduled_messages_tracks_chat_and_update() {
         r#"{"@type":"updateChatHasScheduledMessages","chat_id":15,"has_scheduled_messages":true}"#,
     );
     assert!(session.chat_has_scheduled_messages(ChatId(15)));
+}
+
+const FORCE_21: &str = r#"{"@type":"updateNewMessage","message":{"id":306,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupForceReply","input_field_placeholder":""},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}}}"#;
+
+#[test]
+fn waiting_force_reply_in_unshown_chat_is_not_ready() {
+    // A target for a chat no window shows waits without asking for a
+    // render (the poll loop would redraw the window on every batch).
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    apply_json(&mut session, &seq, &sink, FORCE_21);
+    assert!(!session.bots.pending_force_replies.is_empty());
+    assert!(!session.force_reply_ready());
+    // Shown and loaded: a render has something to hand out.
+    session.open_chat = Some(ChatId(21));
+    assert!(session.force_reply_ready());
+}
+
+#[test]
+fn later_markup_message_drops_the_waiting_force_reply() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    apply_json(&mut session, &seq, &sink, FORCE_21);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewMessage","message":{"id":307,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupRemoveKeyboard","is_personal":false},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"y","entities":[]}}}}"#,
+    );
+    assert!(session.bots.pending_force_replies.is_empty());
+}
+
+#[test]
+fn a_later_inline_keyboard_keeps_the_waiting_force_reply() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    apply_json(&mut session, &seq, &sink, FORCE_21);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewMessage","message":{"id":307,"chat_id":21,"is_outgoing":false,"reply_markup":{"@type":"replyMarkupInlineKeyboard","rows":[[{"@type":"inlineKeyboardButton","text":"Go","type":{"@type":"inlineKeyboardButtonTypeCallback","data":"AA=="}}]]},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"y","entities":[]}}}}"#,
+    );
+    assert!(!session.bots.pending_force_replies.is_empty());
+}
+
+#[test]
+fn an_answer_for_a_gone_account_settles_the_awaited_request_as_failed() {
+    // The answer of a request from before a logout is dropped, but the
+    // surface waiting on it (an edit, an Apply) must hear that it failed.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    let id = session.request(RequestPurpose::LoadChats, None);
+    session.acks.expect(id);
+    session.account_generation.bump();
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, id.0),
+    );
+    assert!(matches!(
+        session.acks.take(id),
+        Some(crate::state::Answer::Failed(_))
+    ));
 }

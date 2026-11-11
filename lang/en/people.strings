@@ -303,7 +303,6 @@
 "qll_people_could_not_promote_member" = "could not promote member";
 "qll_people_could_not_refresh_administrators" = "Couldn't refresh administrators";
 "qll_people_could_not_refresh_invite_links" = "Couldn't refresh invite links";
-"qll_people_could_not_refresh_join_requests" = "Couldn't refresh join requests";
 "qll_people_could_not_rename_the_tag" = "Couldn't rename the tag";
 "qll_people_could_not_revoke_invite_link" = "Couldn't revoke invite link";
 "qll_people_could_not_save_invite_link" = "Couldn't save invite link";

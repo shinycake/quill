@@ -65,3 +65,37 @@ fn another_link_ending_in_a_different_chat_ends_the_round_trip(cx: &mut TestAppC
         "a link that ended in another chat leaves nothing waiting"
     );
 }
+
+/// Sweep 10-140: once the start went, the trip lives while the user stays in
+/// the bot's chat; leaving it ends the trip.
+#[gpui_kit::test]
+fn leaving_the_bots_chat_after_the_start_ends_the_round_trip(cx: &mut TestAppContext) {
+    use super::{InlineReturn, InlineStage};
+    let (app, mut vcx) = open(cx);
+    // Chat 11 is the private chat with user 11, standing in for the bot's.
+    const BOT_CHAT: ChatId = ChatId(11);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.select_listed_chat(BOT_CHAT, window, cx);
+        let account = app.session().map(|s| s.account.clone()).expect("account");
+        app.composer_ui.inline_return = Some(InlineReturn {
+            account,
+            origin: ChatId(12),
+            bot_id: 11,
+            username: "somebot".into(),
+            stage: InlineStage::Started { baseline: 0 },
+        });
+        app.flush_inline_return(window, cx);
+    });
+    assert!(
+        waiting(&app, &vcx),
+        "still in the bot's chat: the trip waits"
+    );
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.select_listed_chat(ChatId(13), window, cx);
+        app.flush_inline_return(window, cx);
+    });
+    assert!(
+        !waiting(&app, &vcx),
+        "another chat ended it: a later message of the bot goes nowhere"
+    );
+}

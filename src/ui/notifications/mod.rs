@@ -446,7 +446,7 @@ impl QuillApp {
         }
         // A forced reply arms the composer at the next render
         // (`flush_notifications`): draw it now, whatever the updates were.
-        let deliver = live.driver.session.bots.pending_force_reply.is_some();
+        let deliver = live.driver.session.force_reply_ready();
         // Parity slice: the selected folder tab may have been deleted or
         // removed remotely (`updateChatFolders`); fall back to Main.
         if let Some(folder_id) = self.screen.folders.tab
@@ -588,22 +588,8 @@ impl QuillApp {
         // main-only: an account switch is the app's.
         self.flush_background_accounts(window, cx);
         self.answer_call_picks(window, cx);
-        // B1: force-reply — an incoming message demanded a reply; drain
-        // from the live or demo session and arm the composer.
-        let force_target = self
-            .live
-            .as_mut()
-            .and_then(|live| live.driver.session.bots.pending_force_reply.take())
-            .or_else(|| {
-                self.demo_session
-                    .as_mut()
-                    .and_then(|session| session.bots.pending_force_reply.take())
-            });
-        // main-only: a forced reply arms the main window's composer; one for
-        // a chat window's chat is not routed there yet.
-        if let Some(target) = force_target {
-            self.drain_force_reply(target, window, cx);
-        }
+        // B1: a forced reply arms the composer of the window showing its
+        // chat, on that window's own frame (`arm_force_reply_here`).
         // main-only: notifications are the app's.
         self.deliver_notifications(Some(window), cx);
     }

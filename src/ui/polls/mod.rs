@@ -673,8 +673,15 @@ impl QuillApp {
             let result = live.driver.send_poll_draft(chat_id, &draft, reply_to);
             match result {
                 Ok(_) => {
-                    self.chat_ui.poll_dialog = None;
+                    let keyboard = self
+                        .chat_ui
+                        .poll_dialog
+                        .take()
+                        .and_then(|dialog| dialog.dismiss_keyboard_on_send);
                     self.chat_ui.set_reply(None);
+                    if let Some((keyboard_chat, message_id)) = keyboard {
+                        self.dismiss_custom_keyboard(keyboard_chat, message_id, cx);
+                    }
                     self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_SENDING_POLL)));
                 }
                 Err(_) => {

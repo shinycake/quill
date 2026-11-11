@@ -630,3 +630,418 @@ fn cx_update_clear_edit(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
     });
     frames(cx);
 }
+
+fn photo_in_tray(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
+    use quill::composer::{AttachmentKind, ComposerAttachment};
+    app.update(cx, |app, _| {
+        app.update_pending_attachments(|tray| {
+            tray.push(ComposerAttachment {
+                path: std::env::temp_dir().join("sweep-tray.jpg"),
+                kind: AttachmentKind::Photo,
+                file_name: "sweep-tray.jpg".into(),
+                spoiler: false,
+                extras: Default::default(),
+            })
+        });
+    });
+}
+
+fn field(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> String {
+    app.read_with(cx, |app, cx| app.composer.read(cx).value().to_string())
+}
+
+/// Sweep 08-128: Edit does not throw away the tray the user built.
+#[gpui_kit::test]
+fn an_edit_is_refused_while_a_tray_waits(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat(&app, vcx, GROUP);
+    photo_in_tray(&app, vcx);
+    begin_edit(&app, vcx);
+    assert!(!editing(&app, vcx), "the edit did not start");
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.pending_attachments().len(), 1, "the tray stays");
+    });
+}
+
+/// Sweep 08-129: a cancelled edit and a new one on the same message are
+/// two edits, so a picker's answer for the first is told apart.
+#[gpui_kit::test]
+fn a_cancelled_edit_and_a_new_one_are_two_edits(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    begin_edit(&app, vcx);
+    let first = app.read_with(vcx, |app, _| app.chat_ui.edit_id());
+    assert!(first.is_some());
+    vcx.update(|window, cx| app.update(cx, |app, cx| app.clear_edit(window, cx)));
+    assert_eq!(app.read_with(vcx, |app, _| app.chat_ui.edit_id()), None);
+    begin_edit(&app, vcx);
+    let second = app.read_with(vcx, |app, _| app.chat_ui.edit_id());
+    assert!(second.is_some());
+    assert_ne!(first, second);
+}
+
+/// Sweep 08-131: an edit that was sent stays open until TDLib answers; an
+/// error returns it to editing with the edited text in the field, an `ok`
+/// leaves edit mode.
+#[gpui_kit::test]
+fn an_edit_leaves_edit_mode_only_on_its_answer(cx: &mut TestAppContext) {
+    use quill::ids::RequestId;
+    use quill::state::Answer;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    begin_edit(&app, vcx);
+    set_field(&app, vcx, "the edited text");
+    app.update(vcx, |app, _| app.chat_ui.mark_edit_sending(RequestId(5)));
+    assert_eq!(
+        app.read_with(vcx, |app, _| app.chat_ui.edit_sending()),
+        Some(RequestId(5))
+    );
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.apply_edit_answer(
+                &Answer::Failed("MESSAGE_EDIT_TIME_EXPIRED".into()),
+                window,
+                cx,
+            )
+        })
+    });
+    assert!(editing(&app, vcx), "an error keeps the edit open");
+    assert_eq!(field(&app, vcx), "the edited text", "the text is not lost");
+    assert_eq!(
+        app.read_with(vcx, |app, _| app.chat_ui.edit_sending()),
+        None
+    );
+    app.update(vcx, |app, _| app.chat_ui.mark_edit_sending(RequestId(6)));
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.apply_edit_answer(&Answer::Done, window, cx)
+        })
+    });
+    assert!(!editing(&app, vcx), "the answer ends the edit");
+    assert_ne!(field(&app, vcx), "the edited text", "the draft is back");
+}
+
+/// Sweep 08-135: a rich send that TDLib refuses gives its text back.
+#[gpui_kit::test]
+fn a_refused_rich_send_gives_the_text_back(cx: &mut TestAppContext) {
+    use crate::ui::composer::SentText;
+    use quill::ids::RequestId;
+    use quill::state::Answer;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let sent = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.update(vcx, |app, _| {
+            app.chat_ui.sent_text = SentText::Sent {
+                request: RequestId(9),
+                markup: "# Title\nbody".into(),
+            };
+        });
+    };
+    sent(&app, vcx);
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.apply_sent_text_answer(&Answer::Failed("FLOOD".into()), window, cx)
+        })
+    });
+    assert_eq!(field(&app, vcx), "# Title\nbody");
+    assert!(app.read_with(vcx, |app, _| app.chat_ui.rich_editor_open));
+    assert_eq!(
+        app.read_with(vcx, |app, _| app.chat_ui.sent_text.clone()),
+        SentText::None
+    );
+    // An accepted send lets the text go; text typed since is not replaced.
+    set_field(&app, vcx, "");
+    sent(&app, vcx);
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.apply_sent_text_answer(&Answer::Done, window, cx)
+        })
+    });
+    assert_eq!(field(&app, vcx), "");
+    set_field(&app, vcx, "typed meanwhile");
+    sent(&app, vcx);
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.apply_sent_text_answer(&Answer::Failed("FLOOD".into()), window, cx)
+        })
+    });
+    assert_eq!(field(&app, vcx), "typed meanwhile");
+}
+
+/// Sweep 08-149/150: a refused rich send keeps no draft clear, so a later
+/// send of the chat cannot delete the text it gave back. A refused inline
+/// pick (10-116) gives the `@bot query` back too.
+#[gpui_kit::test]
+fn a_refused_send_drops_its_draft_clear_and_gives_back_the_text(cx: &mut TestAppContext) {
+    use crate::ui::composer::SentText;
+    use crate::ui::composer_state::DraftClear;
+    use quill::ids::RequestId;
+    use quill::state::Answer;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat(&app, vcx, GROUP);
+    let clear_waits = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.send_slot()
+                .is_some_and(|slot| app.composer_sends.has_draft_clear(&slot))
+        })
+    };
+    app.update(vcx, |app, _| {
+        app.expect_draft_clear(DraftClear::whole_composer(GROUP));
+        app.chat_ui.sent_text = SentText::Sent {
+            request: RequestId(9),
+            markup: "rich".into(),
+        };
+    });
+    assert!(clear_waits(&app, vcx));
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.apply_sent_text_answer(&Answer::Failed("FLOOD".into()), window, cx)
+        })
+    });
+    assert!(!clear_waits(&app, vcx), "the refused send's clear is gone");
+    // The inline pick: the query returns on an error answer, not on Done.
+    set_field(&app, vcx, "");
+    app.update(vcx, |app, _| {
+        app.chat_ui.sent_text = SentText::InlinePick {
+            request: RequestId(10),
+            markup: "@bot cats".into(),
+        };
+    });
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.apply_sent_text_answer(&Answer::Failed("QUERY_ID_INVALID".into()), window, cx)
+        })
+    });
+    assert_eq!(field(&app, vcx), "@bot cats");
+    assert!(!app.read_with(vcx, |app, _| app.chat_ui.rich_editor_open));
+}
+
+/// Sweep 08-134: an AI answer replaces the draft it was asked about, not
+/// text typed since.
+#[gpui_kit::test]
+fn an_ai_answer_applies_only_to_the_draft_it_was_asked_about(cx: &mut TestAppContext) {
+    use crate::ui::composer::AiAsk;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat(&app, vcx, GROUP);
+    let answer = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, text: &str| {
+        app.update(vcx, |app, _| {
+            if let Some(session) = app.demo_session.as_mut() {
+                session.messages.ai_composer_text = Some((None, GROUP, text.to_string()));
+            }
+        });
+        vcx.update(|window, cx| app.update(cx, |app, cx| app.apply_ai_composer_answer(window, cx)));
+    };
+    set_field(&app, vcx, "teh draft");
+    app.update(vcx, |app, _| {
+        app.chat_ui.ai_ask = AiAsk::Asked {
+            markup: "teh draft".into(),
+        };
+    });
+    answer(&app, vcx, "the draft");
+    assert_eq!(field(&app, vcx), "the draft", "the asked draft is replaced");
+    // Asked about "the draft", then the user typed on before the answer.
+    app.update(vcx, |app, _| {
+        app.chat_ui.ai_ask = AiAsk::Asked {
+            markup: "the draft".into(),
+        };
+    });
+    set_field(&app, vcx, "the draft and more");
+    answer(&app, vcx, "better draft");
+    assert_eq!(
+        field(&app, vcx),
+        "the draft and more",
+        "typed text survives"
+    );
+}
+
+/// Sweep 10-115: a window reads its own bot, not the one another window's
+/// trigger put in the session's single slot.
+#[gpui_kit::test]
+fn a_window_reads_its_own_inline_bot(cx: &mut TestAppContext) {
+    use quill::state::InlineBotResolve;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolved {
+                username: "botb".into(),
+                user_id: 2,
+                is_inline: Some(true),
+            });
+        }
+        app.chat_ui.inline_bot = Some(InlineBotResolve::Resolved {
+            username: "bota".into(),
+            user_id: 1,
+            is_inline: Some(true),
+        });
+    });
+    app.read_with(vcx, |app, _| {
+        assert!(matches!(
+            app.inline_bot_for("bota"),
+            Some(InlineBotResolve::Resolved { user_id: 1, .. })
+        ));
+        assert!(matches!(
+            app.inline_bot_for("botb"),
+            Some(InlineBotResolve::Resolved { user_id: 2, .. })
+        ));
+        assert!(
+            app.inline_bot_for("botc").is_none(),
+            "unknown: not resolved"
+        );
+    });
+}
+
+/// Sweep 10-115: window A copies the session slot while it is still
+/// `Resolving`, then window B's lookup replaces the slot. A must not keep
+/// the stale `Resolving` (it would wait for an answer that never comes): it
+/// reads nothing for its bot, so it asks again.
+#[gpui_kit::test]
+fn a_resolving_slot_replaced_by_another_window_is_not_kept(cx: &mut TestAppContext) {
+    use quill::state::InlineBotResolve;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolving {
+                username: "bota".into(),
+                generation: 1,
+            });
+        }
+        app.capture_inline_bot("bota");
+        if let Some(session) = app.demo_session.as_mut() {
+            session.bots.inline_bot_resolve = Some(InlineBotResolve::Resolved {
+                username: "botb".into(),
+                user_id: 2,
+                is_inline: Some(true),
+            });
+        }
+        assert!(app.chat_ui.inline_bot.is_none());
+        assert!(app.inline_bot_for("bota").is_none());
+    });
+}
+
+fn apply_json(app: &mut QuillApp, json: &str) {
+    let last = app
+        .demo_session
+        .as_ref()
+        .map_or(0, |session| session.last_seq);
+    app.demo_ui
+        .seq
+        .fetch_max(last, std::sync::atomic::Ordering::Relaxed);
+    let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> = app.demo_ui.sink.clone();
+    let owned = quill::telegram::client::copy_and_parse(json, &app.demo_ui.seq, &sink)
+        .expect("a valid update");
+    if let Some(session) = app.demo_session.as_mut() {
+        session.apply(owned);
+    }
+}
+
+/// A group where the viewer is a plain member and a 30 s slow-mode wait is
+/// running (25 s left).
+fn waiting_group(app: &mut QuillApp) -> ChatId {
+    const ID: i64 = 7702;
+    for json in [
+        format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{ID},"title":"Slow Club","type":{{"@type":"chatTypeSupergroup","supergroup_id":{ID},"is_channel":false}},"unread_count":0}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateChatPosition","chat_id":{ID},"position":{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"1","is_pinned":false}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateSupergroup","supergroup":{{"@type":"supergroup","id":{ID},"is_forum":false,"member_count":3,"status":{{"@type":"chatMemberStatusMember"}}}}}}"#
+        ),
+        format!(
+            r#"{{"@type":"updateSupergroupFullInfo","supergroup_id":{ID},"supergroup_full_info":{{"@type":"supergroupFullInfo","description":"","member_count":3,"slow_mode_delay":30,"slow_mode_delay_expires_in":25,"linked_chat_id":0}}}}"#
+        ),
+    ] {
+        apply_json(app, &json);
+    }
+    ChatId(ID)
+}
+
+/// Sweep 09-015: a one-time keyboard goes only when its button's text did.
+#[gpui_kit::test]
+fn a_one_time_keyboard_goes_only_when_its_text_went(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat(&app, vcx, GROUP);
+    let dismissed = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext, chat: ChatId| {
+        app.read_with(vcx, |app, _| {
+            app.message_ui.dismissed_keyboards.contains(&(chat.0, 1))
+        })
+    };
+    // Held back by slow mode: the keyboard stays for another press.
+    let slow = app.update(vcx, |app, _| waiting_group(app));
+    open_chat(&app, vcx, slow);
+    app.update(vcx, |app, cx| {
+        app.press_custom_keyboard_text(slow, MessageId(1), "Yes", true, cx)
+    });
+    assert!(!dismissed(&app, vcx, slow), "the text was held back");
+    // Sent: the keyboard goes.
+    open_chat(&app, vcx, GROUP);
+    app.update(vcx, |app, cx| {
+        app.press_custom_keyboard_text(GROUP, MessageId(1), "Yes", true, cx)
+    });
+    assert!(
+        dismissed(&app, vcx, GROUP),
+        "the text went, the keyboard goes"
+    );
+}
+
+/// Sweep 08-132: a command a gate refuses reports `Refused`, so the menu
+/// keeps the typed token in the field; one that goes reports `Sent`.
+#[gpui_kit::test]
+fn a_menu_command_says_whether_it_went(cx: &mut TestAppContext) {
+    use crate::ui::composer::send_bot_command::MenuSend;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let slow = app.update(vcx, |app, _| waiting_group(app));
+    open_chat(&app, vcx, slow);
+    let refused = app.update(vcx, |app, cx| app.send_menu_command("/start", cx));
+    assert_eq!(refused, MenuSend::Refused, "slow mode holds it back");
+    open_chat(&app, vcx, GROUP);
+    let sent = app.update(vcx, |app, cx| app.send_menu_command("/start", cx));
+    assert_eq!(sent, MenuSend::Sent);
+}
+
+/// Sweep 09-112: a forced reply waits for the window that shows its chat.
+#[gpui_kit::test]
+fn a_forced_reply_waits_for_its_chat(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat(&app, vcx, GROUP);
+    app.update(vcx, |app, _| {
+        apply_json(
+            app,
+            r#"{"@type":"updateNewMessage","message":{"id":88,"chat_id":71,"sender_id":{"@type":"messageSenderUser","user_id":71},"is_outgoing":false,"date":1700000088,"reply_markup":{"@type":"replyMarkupForceReply","input_field_placeholder":"Name?"},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"What is your name?","entities":[]}}}}"#,
+        );
+    });
+    let waiting = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.session()
+                .is_some_and(|s| s.bots.pending_force_replies.contains_key(&KEYBOARD_BOT))
+        })
+    };
+    assert!(waiting(&app, vcx), "armed for chat 71");
+    // Another chat is open: nothing is armed there, the target waits.
+    vcx.update(|window, cx| app.update(cx, |app, cx| app.arm_force_reply_here(window, cx)));
+    assert!(
+        app.read_with(vcx, |app, _| app
+            .chat_ui
+            .reply()
+            .is_none_or(|r| r.chat_id != KEYBOARD_BOT)),
+        "not armed in the other chat"
+    );
+    assert!(waiting(&app, vcx), "still waiting for its own chat");
+    // Its chat opens: the composer replies to the message.
+    open_chat(&app, vcx, KEYBOARD_BOT);
+    vcx.update(|window, cx| app.update(cx, |app, cx| app.arm_force_reply_here(window, cx)));
+    assert!(!waiting(&app, vcx), "taken once armed");
+    let reply = app.read_with(vcx, |app, _| {
+        app.chat_ui.reply().map(|r| (r.chat_id, r.message_id))
+    });
+    assert_eq!(reply, Some((KEYBOARD_BOT, MessageId(88))));
+}

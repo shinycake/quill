@@ -434,15 +434,12 @@ impl QuillApp {
         let Some(action) = button_action(button) else {
             return;
         };
-        let Some((bot_id, username)) =
-            self.session()
-                .and_then(|session| match session.bots.inline_bot_resolve.as_ref() {
-                    Some(InlineBotResolve::Resolved {
-                        user_id, username, ..
-                    }) => Some((*user_id, username.clone())),
-                    _ => None,
-                })
-        else {
+        let Some((bot_id, username)) = (match self.inline_bot_of_trigger(cx) {
+            Some(InlineBotResolve::Resolved {
+                user_id, username, ..
+            }) => Some((*user_id, username.clone())),
+            _ => None,
+        }) else {
             return;
         };
         self.chat_ui.inline_results_open = false;

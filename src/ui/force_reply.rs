@@ -25,22 +25,38 @@ use gpui_kit::*;
 use quill::force_reply::active_force_reply;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr};
-use quill::state::ForceReplyTarget;
 use quill::telegram::envelope::{ReplyKeyboard, ReplyMarkup};
 impl QuillApp {
-    /// Drain one armed force-reply target: arm the composer reply-to +
-    /// focus (B1 behavior), then dismiss the chat's custom keyboard when
-    /// the arming markup was a standalone `replyMarkupForceReply` (TGX
-    /// `processForceReply` sends `DeleteChatReplyMarkup` on arrival). A
-    /// show-keyboard carrying the `force_reply` flag keeps its keyboard.
-    /// Called from `flush_notifications`, which runs at the top of
-    /// `render`.
-    pub(crate) fn drain_force_reply(
-        &mut self,
-        target: ForceReplyTarget,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    /// A window's frame: arm the force-reply waiting for the chat this
+    /// window shows (one per chat, `pending_force_replies`): the composer
+    /// gets the reply-to and focus (B1 behavior), then the chat's custom
+    /// keyboard is dismissed when the arming markup was a standalone
+    /// `replyMarkupForceReply` (TGX `processForceReply` sends
+    /// `DeleteChatReplyMarkup` on arrival; a show-keyboard carrying the
+    /// `force_reply` flag keeps its keyboard). A target for a chat no window
+    /// shows waits; one whose message is not in memory yet waits too.
+    pub(crate) fn arm_force_reply_here(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(chat_id) = self.open_chat_id() else {
+            return;
+        };
+        let Some(target) = self
+            .session()
+            .and_then(|session| session.bots.pending_force_replies.get(&chat_id))
+            .copied()
+        else {
+            return;
+        };
+        let present = self.session().is_some_and(|session| {
+            session
+                .reply_target(target.chat_id, target.message_id)
+                .is_some()
+        });
+        if !present {
+            return;
+        }
+        if let Some(session) = self.session_mut() {
+            session.bots.pending_force_replies.remove(&chat_id);
+        }
         self.apply_force_reply(target, window, cx);
         let standalone = self
             .session()

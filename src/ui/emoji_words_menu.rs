@@ -10,6 +10,7 @@ use std::ops::Range;
 
 use super::actions::{EmojiWordBlock, EmojiWordSuggest, EmojiWordsOff};
 use super::app::QuillApp;
+use super::emoji_words_ui::AskedWord;
 use super::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -102,32 +103,50 @@ impl QuillApp {
             return;
         }
         let normalized = normalize_query(&action.word);
-        if let Some(live) = self.live.as_mut() {
-            let _ = live
+        let sent = match self.live.as_mut() {
+            Some(live) => live
                 .driver
-                .lookup_emoji_keywords(std::iter::once(normalized.as_str()));
+                .lookup_emoji_keywords(std::iter::once(normalized.as_str()))
+                .is_ok(),
+            None => true,
+        };
+        if !sent {
+            // Not signed in, or the request could not go: say so now.
+            self.set_note(StatusNote::info(tr(keys::Q_CHAT_EMOJI_WORD_LOOKUP_FAILED)));
+            cx.notify();
+            return;
         }
-        self.composer_ui.emoji_words.asked = Some((action.start..action.end, normalized));
+        self.composer_ui.emoji_words.asked = AskedWord::Waiting {
+            range: action.start..action.end,
+            word: normalized,
+        };
         self.answer_asked_word(cx);
     }
 
     /// Open the bar for the word "Suggest Emoji" asked about once its
     /// keyword answer is in; a note when it has no emoji.
     pub(super) fn answer_asked_word(&mut self, cx: &mut Context<Self>) {
-        let Some((range, normalized)) = self.composer_ui.emoji_words.asked.clone() else {
+        let AskedWord::Waiting {
+            range,
+            word: normalized,
+        } = self.composer_ui.emoji_words.asked.clone()
+        else {
             return;
         };
-        let answered = self.session().is_none_or(|s| {
-            s.stickers
-                .emoji
-                .keyword_lookups
-                .answer(&normalized)
-                .is_some()
-        });
+        let lookups = self.session().map(|s| &s.stickers.emoji.keyword_lookups);
+        let answered = lookups.is_none_or(|l| l.answer(&normalized).is_some());
         if !answered {
+            // Out of attempts: it will not answer, so stop waiting and say so
+            // instead of opening the bar unprompted if a later lookup of the
+            // word lands.
+            if lookups.is_some_and(|l| l.gave_up(&normalized)) {
+                self.composer_ui.emoji_words.asked = AskedWord::Idle;
+                self.set_note(StatusNote::info(tr(keys::Q_CHAT_EMOJI_WORD_LOOKUP_FAILED)));
+                cx.notify();
+            }
             return;
         }
-        self.composer_ui.emoji_words.asked = None;
+        self.composer_ui.emoji_words.asked = AskedWord::Idle;
         let word = Highlight {
             range,
             normalized,

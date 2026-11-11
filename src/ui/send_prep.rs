@@ -450,9 +450,11 @@ impl QuillApp {
         self.chat_ui.schedule_popup_open = false;
         self.chat_ui.set_reply(None);
         self.clear_suggest_bar_after_send(chat_id);
-        self.composer_ui.clear_draft_on_success = plan
-            .clears_draft_on_ack(left)
-            .then(|| DraftClear::of_text(chat_id, &origin.markup));
+        self.composer_sends.set_draft_clear(
+            &origin.slot,
+            plan.clears_draft_on_ack(left)
+                .then(|| DraftClear::of_text(chat_id, &origin.markup)),
+        );
         if plan.clear_text {
             // `left`: the unsent parts of a split text, else nothing.
             if left.is_empty() {

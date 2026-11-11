@@ -60,10 +60,6 @@ pub struct ChatsState {
     pub background_url: Option<String>,
     /// One-shot: a wallpaper request failed; shown in Appearance.
     pub background_error: Option<String>,
-    /// Acknowledged (`ok`) chat-look requests (`setChatTheme`,
-    /// `setChatBackground`, `deleteChatBackground`); the chat colors dialog
-    /// waits for them before it closes.
-    pub chat_look_oks: u32,
     /// `updateChatOnlineMemberCount`, keyed by chat id.
     pub chat_online_counts: HashMap<i64, i32>,
     /// Slice CL1: one-shot error from a refused chat-list action
@@ -146,7 +142,6 @@ impl ChatsState {
             background_search: BackgroundSearch::Idle,
             background_url: None,
             background_error: None,
-            chat_look_oks: 0,
             chat_online_counts: HashMap::new(),
             chat_action_error: None,
             appearance_error: None,

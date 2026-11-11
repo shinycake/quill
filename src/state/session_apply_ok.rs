@@ -48,11 +48,6 @@ impl Session {
         self.apply_communities_ok(pending);
         self.settle_permissions_save(pending);
         match pending.map(|p| p.purpose) {
-            Some(
-                RequestPurpose::SetChatTheme
-                | RequestPurpose::SetChatBackground
-                | RequestPurpose::DeleteChatBackground,
-            ) => self.chats_state.chat_look_oks = self.chats_state.chat_look_oks.wrapping_add(1),
             Some(RequestPurpose::Messages(MessagesPurpose::EditMessageSchedulingState {
                 message_id,
                 scheduling,

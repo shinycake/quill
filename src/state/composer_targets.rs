@@ -37,6 +37,18 @@ pub enum ComposerReplyFetch {
 }
 
 impl Session {
+    /// Whether a waiting force reply can arm now: its chat is shown by a
+    /// window and its message is loaded. Only then does a render have
+    /// something to hand out.
+    pub fn force_reply_ready(&self) -> bool {
+        self.bots.pending_force_replies.values().any(|target| {
+            self.chat_is_shown(target.chat_id)
+                && self
+                    .reply_target(target.chat_id, target.message_id)
+                    .is_some()
+        })
+    }
+
     /// The message a reply points at, looked up where the composer is: the
     /// chat history, the open thread, the open topic's history, or the copy
     /// fetched for the bar.
