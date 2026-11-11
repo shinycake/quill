@@ -55,13 +55,20 @@ enum Host {
     Shown(Option<ChatId>),
 }
 
-/// What an ask waits for: the requests in flight when it was made (the
-/// answer that sets its flag is one of them). Later requests are no part of
-/// it, so unrelated traffic neither ends nor holds the ask.
+/// What an ask waits for: the requests in flight once the code that made
+/// it has run (the answer that sets its flag is one of them). Later
+/// requests are no part of it, so unrelated traffic neither ends nor holds
+/// the ask.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub(in crate::ui) enum AskWaits {
     /// A demo stages its answers by hand: nothing to wait on, never expires.
     Demo,
+    /// A live client's ask whose requests are not read yet. A box is asked
+    /// for before the request whose answer opens it is sent
+    /// ([`QuillApp::open_box`]), so the requests are read by the next
+    /// dialog sync, when that request is out
+    /// ([`ChatWindows::read_ask_waits`]). Until then it does not settle.
+    Unread,
     /// A live client: the ask ends once none of these is in flight and the
     /// flag is still clear.
     Requests(Vec<RequestId>),
@@ -72,7 +79,7 @@ impl AskWaits {
     /// which are still out). A demo's ask never settles by itself.
     pub(in crate::ui) fn settled(&self, in_flight: impl Fn(RequestId) -> bool) -> bool {
         match self {
-            Self::Demo => false,
+            Self::Demo | Self::Unread => false,
             Self::Requests(ids) => !ids.iter().any(|id| in_flight(*id)),
         }
     }
@@ -140,10 +147,11 @@ impl QuillApp {
         self.windows.open_box_in(kind, here, waits);
     }
 
-    /// What an ask made now waits for: the requests in flight.
+    /// What an ask made now waits for: a live client's requests, read once
+    /// the asking code has sent its own ([`AskWaits::Unread`]).
     pub(in crate::ui) fn ask_waits(&self) -> AskWaits {
         match self.live.as_ref() {
-            Some(live) => AskWaits::Requests(live.driver.session.requests.pending_ids()),
+            Some(_) => AskWaits::Unread,
             None => AskWaits::Demo,
         }
     }
@@ -324,6 +332,32 @@ impl ChatWindows {
                 Host::Shown(_) => None,
             })
             .collect()
+    }
+
+    /// Whether an ask still waits for its requests to be read.
+    pub(in crate::ui) fn has_unread_asks(&self) -> bool {
+        self.dialogs.hosts.values().any(|owner| {
+            matches!(
+                owner,
+                Host::Asked {
+                    waits: AskWaits::Unread,
+                    ..
+                }
+            )
+        })
+    }
+
+    /// The asks made since the last dialog sync wait for `pending`, the
+    /// requests in flight now: the code that asked has run, so the request
+    /// whose answer opens the box is among them.
+    pub(in crate::ui) fn read_ask_waits(&mut self, pending: &[RequestId]) {
+        for owner in self.dialogs.hosts.values_mut() {
+            if let Host::Asked { waits, .. } = owner
+                && *waits == AskWaits::Unread
+            {
+                *waits = AskWaits::Requests(pending.to_vec());
+            }
+        }
     }
 
     /// The ask for `kind` ended with no box: its request settled (answered

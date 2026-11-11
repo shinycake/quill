@@ -92,8 +92,9 @@ impl QuillApp {
         if !matches!(live.driver.session.auth, AuthorizationState::Ready) {
             return;
         }
-        // What a box opened by this step waits for: the requests now out.
-        let waits = AskWaits::Requests(live.driver.session.requests.pending_ids());
+        // What a box opened by this step waits for: the requests out once
+        // the step has sent its own (read by the next dialog sync).
+        let waits = AskWaits::Unread;
         // One flow at a time: a link waits while the previous one is being
         // resolved. An invite preview waiting for the user's answer gives
         // way to a new link: its box closes, as it is modal only in its

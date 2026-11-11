@@ -237,15 +237,15 @@ impl QuillApp {
         };
         cx.notify();
     }
-    /// The link flow ends (the app locked, the account changed): a link
-    /// attempt that is still out goes with it, and its answer is matched to
-    /// no asker.
+    /// The link flow ends with its account (a switch, or no client): a
+    /// link attempt that is still out goes with it, and its answer is
+    /// matched to no asker.
     pub(super) fn clear_device_qr(&mut self) {
         self.privacy.device_link = DeviceLink::default();
     }
 
-    /// The Devices page was left: a scan or a consent ends, a link that is
-    /// out stays, so its answer still reaches the user.
+    /// The Devices page was left, or the app locked: a scan or a consent
+    /// ends, a link that is out stays, so its answer still reaches the user.
     pub(super) fn leave_device_link(&mut self) {
         if !matches!(self.privacy.device_link, DeviceLink::Linking(_)) {
             self.privacy.device_link = DeviceLink::default();

@@ -29,8 +29,8 @@ pub(crate) enum MicTestRun {
     Off,
     Opening(u64),
     On(MicTest),
-    /// The device failed while the test ran; the reason shows until the
-    /// next click on Stop test.
+    /// The device failed while the test ran: the test is over, the reason
+    /// shows, and the next click starts a new test.
     Failed(String),
 }
 
@@ -100,7 +100,10 @@ impl QuillApp {
     /// The "Test microphone" row for Settings > Calls: a button, and the
     /// meter while the test runs.
     pub(super) fn mic_test_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let testing = !matches!(self.call_boxes.mic_test, MicTestRun::Off);
+        let testing = matches!(
+            self.call_boxes.mic_test,
+            MicTestRun::Opening(_) | MicTestRun::On(_)
+        );
         let test = match &self.call_boxes.mic_test {
             MicTestRun::On(test) => Some(test),
             _ => None,
@@ -171,9 +174,13 @@ impl QuillApp {
         .into_any_element()
     }
 
-    /// Start or stop the microphone test; a click while it opens stops it.
+    /// Start or stop the microphone test; a click while it opens stops it,
+    /// and one after the device failed starts over.
     pub(super) fn toggle_mic_test(&mut self, cx: &mut Context<Self>) {
-        if matches!(self.call_boxes.mic_test, MicTestRun::Off) {
+        if matches!(
+            self.call_boxes.mic_test,
+            MicTestRun::Off | MicTestRun::Failed(_)
+        ) {
             self.open_mic_test(cx);
         } else {
             self.call_boxes.mic_test = MicTestRun::Off;

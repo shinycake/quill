@@ -60,7 +60,10 @@ fn settings_with_a_microphone(
 
 fn testing(app: &Entity<QuillApp>, vcx: &VisualTestContext) -> bool {
     app.read_with(vcx, |app, _| {
-        !matches!(app.call_boxes.mic_test, MicTestRun::Off)
+        matches!(
+            app.call_boxes.mic_test,
+            MicTestRun::Opening(_) | MicTestRun::On(_)
+        )
     })
 }
 
@@ -125,6 +128,14 @@ fn a_device_that_fails_ends_the_test_in_failed(cx: &mut TestAppContext) {
     });
     assert_eq!(reason.as_deref(), Some("device lost"));
     assert_eq!(open.load(Ordering::SeqCst), 0, "the device was closed");
+    assert!(!testing(&app, &vcx), "a failed test is over");
+    // The button reads "Test microphone" again: one click starts over.
     app.update(&mut vcx, |app, cx| app.toggle_mic_test(cx));
-    assert!(!testing(&app, &vcx), "Stop test leaves the failure");
+    assert!(
+        app.read_with(&vcx, |app, _| matches!(
+            app.call_boxes.mic_test,
+            MicTestRun::Opening(_)
+        )),
+        "a click after the failure starts a new test"
+    );
 }

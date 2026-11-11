@@ -468,6 +468,14 @@ impl QuillShell {
         // opened nothing): the ask ends here, so a later open of the kind
         // is not pinned to it. A demo stages its answers by hand.
         app.update(cx, |app, _| {
+            // An ask made since the last sync reads its requests now: the
+            // code that asked has run, so its own request is out.
+            if app.windows.has_unread_asks()
+                && let Some(live) = app.live.as_ref()
+            {
+                let pending = live.driver.session.requests.pending_ids();
+                app.windows.read_ask_waits(&pending);
+            }
             for (kind, waits) in app.windows.asked_dialogs() {
                 let settled = app.live.as_ref().is_some_and(|live| {
                     waits.settled(|id| live.driver.session.requests.get(id).is_some())
