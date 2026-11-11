@@ -515,6 +515,44 @@ fn cl2_create_private_chat_refusal_opens_nothing() {
 }
 
 #[test]
+fn r2_35_create_private_chat_is_deduped_by_user_not_by_purpose() {
+    // A creation for another user in flight must not swallow the Saved
+    // Messages request; only a second request for the same user is deduped.
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = ViewCtlSender::new();
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    ready_private_chat(&mut driver, &seq, &dyn_sink);
+    driver.session.my_user_id = Some(777);
+
+    let other = driver
+        .create_private_chat_for(555)
+        .expect("send")
+        .expect("request sent");
+    let own = driver
+        .create_private_chat_with_self()
+        .expect("send")
+        .expect("the own chat is asked while another user's is in flight");
+    assert_ne!(other, own);
+    assert!(
+        driver.create_private_chat_for(555).expect("send").is_none(),
+        "the same user is not asked twice"
+    );
+    assert!(
+        driver
+            .create_private_chat_with_self()
+            .expect("send")
+            .is_none(),
+        "the own chat is not asked twice"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn cl1_remove_chat_from_list_sends_delete_history() {
     // Slice CL1: chat-list "Delete chat" is `deleteChatHistory`
     // with `remove_from_chat_list: true` (Telegram X

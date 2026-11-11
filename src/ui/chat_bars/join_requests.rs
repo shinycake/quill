@@ -1,6 +1,7 @@
 //! Join requests: the bar above the chat and the requests dialog.
 use super::*;
 use crate::ui::status_note::StatusNote;
+use std::cell::Cell;
 
 impl QuillApp {
     pub(super) fn join_requests_bar(
@@ -116,9 +117,8 @@ impl QuillApp {
             .map(|dialog| dialog.search.read(cx).value().trim().to_string())
             .unwrap_or_default();
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.groups.join_requests.remove(&chat_id.0);
+            live.driver.retry_join_requests(chat_id, &query);
         }
-        self.ask_join_requests(chat_id, &query, true);
         cx.notify();
     }
 
@@ -434,12 +434,9 @@ impl QuillApp {
                 .width(px(540.))
                 .title(crate::ui::shell::dialog_title(title))
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
+                    let body = Rc::new(Cell::new(Some(body)));
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))

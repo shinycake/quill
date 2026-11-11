@@ -10,7 +10,6 @@ purpose:ConnectDriver::clear_recently_found_chats 1
 purpose:ConnectDriver::composer_suggestions_idle 2
 purpose:ConnectDriver::create_forum_topic 1
 purpose:ConnectDriver::create_forum_topic_with_icon 1
-purpose:ConnectDriver::create_private_chat_for 1
 purpose:ConnectDriver::custom_emoji_lookup_idle 1
 purpose:ConnectDriver::delete_saved_topic_history 1
 purpose:ConnectDriver::earn_in_flight 1

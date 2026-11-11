@@ -15,7 +15,7 @@ use quill::composer::{SendKeyMode, should_send_on_enter};
 use quill::drop_modes::DragState;
 use quill::drop_topic::topics_for;
 use quill::forward_drag::ForwardDrag;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -184,6 +184,19 @@ impl QuillApp {
             .is_some_and(|session| session.threads.forum_topics_failed(waiting.chat_id.0))
     }
 
+    /// Retry from the chooser's error line: the load goes out again (a
+    /// failed list holds no topics, so the driver sends it) and the box
+    /// reads "Loading" until it answers or fails.
+    fn retry_drop_topic(&mut self, cx: &mut Context<Self>) {
+        let Some(chat_id) = self.chat_list.drop_topic.as_ref().map(|w| w.chat_id) else {
+            return;
+        };
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.load_forum_topics(chat_id);
+        }
+        cx.notify();
+    }
+
     fn close_drop_topic(&mut self, cx: &mut Context<Self>) {
         if self.chat_list.drop_topic.take().is_some() {
             cx.notify();
@@ -331,6 +344,14 @@ impl QuillApp {
                     tr(keys::CONTACTS_LOADING)
                 };
                 list = list.child(div().text_sm().text_color(text_muted()).child(text));
+                if this.drop_topic_failed() {
+                    list = list.child(
+                        Button::new("drop-topic-retry")
+                            .label(tr(keys::Q_MEDIA_RETRY))
+                            .small()
+                            .on_click(cx.listener(|this, _, _, cx| this.retry_drop_topic(cx))),
+                    );
+                }
             }
             for choice in choices {
                 let topic = choice.topic;
@@ -371,13 +392,9 @@ impl QuillApp {
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(keys::FORWARD_CHOOSE)))
                 .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
+                    let body = Rc::new(Cell::new(Some(body)));
                     move |content, _, _| {
-                        content.child(
-                            body.borrow_mut()
-                                .take()
-                                .unwrap_or_else(|| div().into_any_element()),
-                        )
+                        content.child(body.take().unwrap_or_else(|| div().into_any_element()))
                     }
                 }))
                 .footer(footer)

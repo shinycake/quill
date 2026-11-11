@@ -1,7 +1,6 @@
 //! Chat list: rows, filter, menus, pinning, preview and side tabs.
 #![deny(clippy::indexing_slicing)]
 
-use super::app::ChatListFilter;
 use super::chat_row::ChatListItem;
 use super::chat_row::ChatPreviewState;
 use super::*;
@@ -149,6 +148,24 @@ impl PinStage {
         }
     }
 
+    /// One frame of the drag's upkeep: it ends itself when its window lost
+    /// focus (the release never comes) and settles when its slide is done.
+    /// True while rows still slide and frames must keep coming.
+    pub(super) fn advance(&mut self, now: Instant, window_active: bool) -> bool {
+        let Some(drag) = self.drag() else {
+            return false;
+        };
+        if !window_active {
+            self.end_drag();
+            false
+        } else if drag.reorder.settled(now) {
+            self.settle();
+            false
+        } else {
+            true
+        }
+    }
+
     /// The press point for `chat`, consumed by the drag that starts from it.
     pub(super) fn take_press(&mut self, chat: i64) -> Option<f32> {
         match *self {
@@ -201,10 +218,10 @@ pub(crate) struct ChatListUi {
     /// the select bar offers the bulk actions.
     pub(super) selected: HashSet<i64>,
     /// Slice CL2: chat-list category filter (TGX `ChatFilter` unread /
-    /// archive categories, `MainController` pager categories). `All` is
-    /// the unfiltered list; `Unread` filters to unread chats;
-    /// `Archived` shows only the archive.
-    pub(super) filter: ChatListFilter,
+    /// archive categories, `MainController` pager categories) and the
+    /// selected folder tab, one value. `All` is the unfiltered list;
+    /// `Unread` filters to unread chats; `Archived` shows only the archive.
+    pub(super) view: super::chat_list::ChatListView,
     /// The Downloads panel beside the conversation is open. Here, not in
     /// the `Session`, so it starts closed when an account comes back on
     /// screen.
@@ -258,7 +275,7 @@ impl ChatListUi {
             pin: PinStage::Idle,
             peek: PeekPreview::Idle,
             selected: HashSet::new(),
-            filter: ChatListFilter::All,
+            view: Default::default(),
             archive_hint_open: false,
             my_chats_open: None,
             tab: SidebarTab::Chats,

@@ -314,6 +314,8 @@ impl QuillApp {
         if self.pane_mode() != PaneMode::Ready {
             return;
         }
+        // The results take the place of the rows.
+        self.chat_list.leave_rows();
         if let Some(live) = self.live.as_mut() {
             match live.driver.open_search() {
                 Ok(Some(_)) => self.set_note(StatusNote::silent(tr(keys::Q_CHAT_SEARCHING_2))),

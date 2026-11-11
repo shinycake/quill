@@ -533,7 +533,7 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return false;
         };
-        let pinned = session.pinned_chat_ids(self.chat_list.filter == ChatListFilter::Archived);
+        let pinned = session.pinned_chat_ids(self.chat_list.view.filter() == ChatListFilter::Archived);
         let chats = visible_pinned(&self.listed_chat_ids(), &pinned);
         let Some(&chat_id) = chats.get(index) else {
             return false;
@@ -626,7 +626,7 @@ impl QuillApp {
             .into_iter()
             .map(quill::folder_order::FolderTab::folder_id)
             .collect();
-        let Some(target) = near_folder(&tabs, self.folders.tab, forward) else {
+        let Some(target) = near_folder(&tabs, self.chat_list.view.folder(), forward) else {
             return false;
         };
         self.open_folder_tab(target, cx);

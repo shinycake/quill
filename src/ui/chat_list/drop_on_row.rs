@@ -31,17 +31,15 @@ const FREEZE_TIMEOUT: Duration = Duration::from_millis(2000);
 /// The drag over the list.
 #[derive(Default)]
 pub(in crate::ui) struct DropOnRow {
-    /// The row the drag is over and can drop on.
-    hover: Option<ChatId>,
-    /// What is being dragged over the list.
+    /// What is being dragged over the list, and the row it is over.
     seen: Dragged,
     /// The list order held while a drag hovers.
     freeze: Freeze,
-    /// A screenshot demo's fixed drag (no live drag exists there).
-    preview: bool,
 }
 
 /// The drag seen last: files, or messages out of a history (never both).
+/// Each variant carries the row it is over, so a lit row without a drag
+/// cannot exist.
 #[derive(Default)]
 enum Dragged {
     #[default]
@@ -53,48 +51,86 @@ enum Dragged {
         drag: ForwardDrag,
         /// Its pointer is inside the list (`_dragInScroll`).
         in_list: bool,
+        /// The row it is over and can drop on.
+        hover: Option<ChatId>,
+    },
+    /// A screenshot demo's fixed drag (no live drag exists there).
+    #[cfg(feature = "demo-capture")]
+    Staged(Box<Dragged>),
+}
+
+/// A file drag over the list, after its paths were probed.
+enum FileDrag {
+    /// Nothing in the paths can be sent: no row takes the drop.
+    Unsendable { paths: Vec<PathBuf> },
+    /// What the paths hold, when anything in them can be sent.
+    Sendable {
+        paths: Vec<PathBuf>,
+        kind: DragState,
+        over: Over,
     },
 }
 
-/// A file drag over the list.
-#[derive(Default)]
-struct FileDrag {
-    /// Where the pointer was at the last update. Platforms resend updates
-    /// while it rests, so only a different point restarts the wait.
-    position: Option<Point<Pixels>>,
-    /// The dragged paths seen last.
-    paths: Vec<PathBuf>,
-    /// What they hold, when anything in them can be sent.
-    kind: Option<DragState>,
-    /// The one-second wait that opens the row's chat; replacing or dropping
-    /// it cancels it.
-    rest: Option<Task<()>>,
+/// Where a sendable file drag is on the list.
+enum Over {
+    Off,
+    /// On a row, and can drop on it.
+    Row {
+        chat: ChatId,
+        /// Where the pointer was at the last update. Platforms resend
+        /// updates while it rests, so only a different point restarts the
+        /// wait.
+        position: Point<Pixels>,
+        /// The one-second wait that opens the row's chat; replacing or
+        /// dropping it cancels it. `None` once it ran.
+        wait: Option<Task<()>>,
+    },
 }
 
 impl FileDrag {
-    fn has_state(&self) -> bool {
-        self.kind.is_some() || self.rest.is_some() || !self.paths.is_empty()
+    fn paths(&self) -> &[PathBuf] {
+        match self {
+            Self::Unsendable { paths } | Self::Sendable { paths, .. } => paths,
+        }
+    }
+
+    fn over(&self) -> &Over {
+        match self {
+            Self::Unsendable { .. } => &Over::Off,
+            Self::Sendable { over, .. } => over,
+        }
     }
 }
 
-/// The list order: free, or held on each chat's position when the drag
-/// arrived, until two seconds after the last update.
+impl Over {
+    fn chat(&self) -> Option<ChatId> {
+        match self {
+            Self::Off => None,
+            Self::Row { chat, .. } => Some(*chat),
+        }
+    }
+}
+
+/// The list order: free, held on each chat's position when the drag
+/// arrived until two seconds after the last update, or released while the
+/// drag goes on and the last timer still runs.
 #[derive(Default)]
 enum Freeze {
     #[default]
     Thawed,
-    Frozen {
-        /// Empty once the freeze ended while its timer still runs.
+    Held {
         order: HashMap<i64, usize>,
         _timer: Task<()>,
     },
+    /// The order is let go; the timer that did it stays with the value.
+    Released { _timer: Task<()> },
 }
 
 impl Freeze {
     fn order(&self) -> Option<&HashMap<i64, usize>> {
         match self {
-            Self::Thawed => None,
-            Self::Frozen { order, .. } => Some(order),
+            Self::Held { order, .. } => Some(order),
+            Self::Thawed | Self::Released { .. } => None,
         }
     }
 
@@ -102,10 +138,47 @@ impl Freeze {
         self.order().is_some_and(|order| !order.is_empty())
     }
 
-    /// The order is released; a running timer stays.
+    /// The order is released; the running timer stays with the value.
     fn release_order(&mut self) {
-        if let Self::Frozen { order, .. } = self {
-            order.clear();
+        if let Self::Held { _timer, .. } = std::mem::take(self) {
+            *self = Self::Released { _timer };
+        }
+    }
+}
+
+impl Dragged {
+    /// The drag a screenshot demo staged, or the live one.
+    fn live(&self) -> &Dragged {
+        match self {
+            #[cfg(feature = "demo-capture")]
+            Self::Staged(inner) => inner.live(),
+            other => other,
+        }
+    }
+
+    fn staged(&self) -> bool {
+        match self {
+            #[cfg(feature = "demo-capture")]
+            Self::Staged(_) => true,
+            _ => false,
+        }
+    }
+
+    /// The row the drag is over and can drop on.
+    fn hover(&self) -> Option<ChatId> {
+        match self.live() {
+            Dragged::Files(files) => files.over().chat(),
+            Dragged::Forward { hover, .. } => *hover,
+            _ => None,
+        }
+    }
+
+    /// The drag leaves the row it lit.
+    fn unlight(&mut self) {
+        match self {
+            Dragged::Files(FileDrag::Sendable { over, .. }) => *over = Over::Off,
+            Dragged::Forward { hover, .. } => *hover = None,
+            _ => {}
         }
     }
 }
@@ -113,47 +186,30 @@ impl Freeze {
 impl DropOnRow {
     fn same_paths(&self, paths: &[PathBuf]) -> bool {
         match &self.seen {
-            Dragged::Files(files) => files.paths == paths,
+            Dragged::Files(files) => files.paths() == paths,
             _ => paths.is_empty(),
-        }
-    }
-
-    /// Work on the file drag, which a file drag over the list starts.
-    fn with_files<R>(&mut self, work: impl FnOnce(&mut FileDrag) -> R) -> R {
-        if !matches!(self.seen, Dragged::Files(_)) {
-            self.seen = Dragged::Files(FileDrag::default());
-        }
-        match &mut self.seen {
-            Dragged::Files(files) => work(files),
-            Dragged::Nothing | Dragged::Forward { .. } => work(&mut FileDrag::default()),
         }
     }
 
     /// What the dragged files hold, when anything in them can be sent.
     fn file_kind(&self) -> Option<DragState> {
         match &self.seen {
-            Dragged::Files(files) => files.kind,
+            Dragged::Files(FileDrag::Sendable { kind, .. }) => Some(*kind),
             _ => None,
         }
     }
 
-    /// The wait for the row's chat ends.
-    fn stop_rest(&mut self) {
-        if let Dragged::Files(files) = &mut self.seen {
-            files.rest = None;
-        }
+    fn hover(&self) -> Option<ChatId> {
+        self.seen.hover()
     }
 
     fn is_forward(&self) -> bool {
-        matches!(self.seen, Dragged::Forward { .. })
+        matches!(self.seen.live(), Dragged::Forward { .. })
     }
 
     /// Back to idle: nothing lit, no wait, no freeze.
     fn clear(&mut self) {
-        *self = Self {
-            preview: self.preview,
-            ..Self::default()
-        };
+        *self = Self::default();
     }
 
     /// The drag is over (cancelled with no exit event, or dropped
@@ -163,18 +219,17 @@ impl DropOnRow {
     fn drag_ended(&mut self) {
         let mut freeze = std::mem::take(&mut self.freeze);
         freeze.release_order();
-        self.clear();
-        self.freeze = freeze;
+        *self = Self {
+            freeze,
+            ..Self::default()
+        };
     }
 
     /// A forward drag came over the list: it replaces any file drag seen
-    /// before, with its one-second wait (forward drags never open a chat by
-    /// resting, `_dragForward`).
+    /// before, with its one-second wait and its lit row (forward drags never
+    /// open a chat by resting, `_dragForward`).
     fn forward_takes_over(&mut self) {
-        if let Dragged::Files(files) = &self.seen {
-            if files.has_state() {
-                self.hover = None;
-            }
+        if matches!(self.seen, Dragged::Files(_)) {
             self.seen = Dragged::Nothing;
         }
     }
@@ -201,7 +256,7 @@ impl QuillApp {
     /// Whether the row of `chat_id` is the drop target of a live file drag.
     pub(in crate::ui) fn drop_hover_row(&self, chat_id: ChatId, cx: &App) -> bool {
         let state = &self.chat_list.drop_on_row;
-        state.hover == Some(chat_id) && (state.preview || cx.has_active_drag())
+        state.hover() == Some(chat_id) && (state.seen.staged() || cx.has_active_drag())
     }
 
     /// Keeps the rows in the order they had when a file drag arrived, while
@@ -215,8 +270,10 @@ impl QuillApp {
     /// The file drag left the row or the window, or ended.
     pub(in crate::ui) fn drag_left(&mut self, cx: &mut Context<Self>) {
         let state = &mut self.chat_list.drop_on_row;
-        let files_state = matches!(&state.seen, Dragged::Files(files) if files.has_state());
-        if state.hover.is_some() || state.freeze.is_held() || files_state {
+        if state.hover().is_some()
+            || state.freeze.is_held()
+            || matches!(state.seen, Dragged::Files(_))
+        {
             state.clear();
             cx.notify();
         }
@@ -240,9 +297,9 @@ impl QuillApp {
             state.seen = Dragged::Nothing;
         }
         if !over {
-            if self.chat_list.drop_on_row.hover == Some(chat_id) {
-                self.chat_list.drop_on_row.hover = None;
-                self.chat_list.drop_on_row.stop_rest();
+            let state = &mut self.chat_list.drop_on_row;
+            if state.hover() == Some(chat_id) {
+                state.seen.unlight();
                 cx.notify();
             }
             return;
@@ -252,32 +309,31 @@ impl QuillApp {
         }
         self.freeze_list(window, cx);
         let state = &mut self.chat_list.drop_on_row;
+        let lit = state.hover().is_some();
         if let Some(paths) = fresh {
             let entries: Vec<DragEntry> = paths.iter().map(|path| DragEntry::probe(path)).collect();
-            state.with_files(|files| {
-                files.kind = classify(&entries);
-                files.paths = paths;
+            state.seen = Dragged::Files(match classify(&entries) {
+                Some(kind) => FileDrag::Sendable {
+                    paths,
+                    kind,
+                    over: Over::Off,
+                },
+                None => FileDrag::Unsendable { paths },
             });
         }
-        if state.file_kind().is_none() {
-            if state.hover.take().is_some() {
-                state.stop_rest();
+        let Dragged::Files(FileDrag::Sendable { over, .. }) = &mut state.seen else {
+            // Nothing in the drag can be sent: no row is lit.
+            if lit {
                 cx.notify();
             }
             return;
-        }
-        let moved = state.with_files(|files| {
-            let same = files.position == Some(position);
-            files.position = Some(position);
-            !same
-        });
-        if state.hover == Some(chat_id) && !moved {
+        };
+        let (was_on_row, moved) = match over {
+            Over::Row { chat, position: seen, .. } => (*chat == chat_id, *seen != position),
+            Over::Off => (false, true),
+        };
+        if was_on_row && !moved {
             return;
-        }
-        let entered = state.hover != Some(chat_id);
-        state.hover = Some(chat_id);
-        if entered {
-            cx.notify();
         }
         // A new row or a real move restarts the wait.
         let rest = self.spawn_scoped_in(window, cx, async move |this, cx| {
@@ -286,9 +342,18 @@ impl QuillApp {
                 this.choose_row_by_drag(chat_id, window, cx);
             });
         });
-        self.chat_list
-            .drop_on_row
-            .with_files(|files| files.rest = Some(rest));
+        if let Dragged::Files(FileDrag::Sendable { over, .. }) =
+            &mut self.chat_list.drop_on_row.seen
+        {
+            *over = Over::Row {
+                chat: chat_id,
+                position,
+                wait: Some(rest),
+            };
+        }
+        if !was_on_row {
+            cx.notify();
+        }
     }
 
     /// Messages dragged out of a history moved over the list at `position`
@@ -312,26 +377,34 @@ impl QuillApp {
         state.forward_takes_over();
         let unchanged = matches!(
             &state.seen,
-            Dragged::Forward { drag: seen, in_list: was } if seen.same(drag) && *was == in_list
+            Dragged::Forward { drag: seen, in_list: was, .. } if seen.same(drag) && *was == in_list
         );
         if !unchanged {
+            // The lit row stays lit across a changed pointer position.
+            let hover = match &state.seen {
+                Dragged::Forward { hover, .. } => *hover,
+                _ => None,
+            };
             state.seen = Dragged::Forward {
                 drag: drag.clone(),
                 in_list,
+                hover,
             };
             cx.notify();
         }
         if !over || self.rows_selecting() {
-            if self.chat_list.drop_on_row.hover == Some(chat_id) {
-                self.chat_list.drop_on_row.hover = None;
+            let state = &mut self.chat_list.drop_on_row;
+            if state.hover() == Some(chat_id) {
+                state.seen.unlight();
                 cx.notify();
             }
             return;
         }
         self.freeze_list(window, cx);
-        let state = &mut self.chat_list.drop_on_row;
-        if state.hover != Some(chat_id) {
-            state.hover = Some(chat_id);
+        if let Dragged::Forward { hover, .. } = &mut self.chat_list.drop_on_row.seen
+            && *hover != Some(chat_id)
+        {
+            *hover = Some(chat_id);
             cx.notify();
         }
     }
@@ -361,8 +434,8 @@ impl QuillApp {
     /// drag is inside the list (`showDragForwardInfo`); never in one column.
     pub(in crate::ui) fn forward_banner_shown(&self, cx: &App) -> bool {
         let state = &self.chat_list.drop_on_row;
-        matches!(state.seen, Dragged::Forward { in_list: true, .. })
-            && (state.preview || cx.has_active_drag())
+        matches!(state.seen.live(), Dragged::Forward { in_list: true, .. })
+            && (state.seen.staged() || cx.has_active_drag())
             && list_accepts(self.shell_layout().one_column)
     }
 
@@ -448,7 +521,7 @@ impl QuillApp {
     /// Freezes the list order at what is shown now, for two more seconds.
     fn freeze_list(&mut self, window: &Window, cx: &mut Context<Self>) {
         let held = match &mut self.chat_list.drop_on_row.freeze {
-            Freeze::Frozen { order, .. } if !order.is_empty() => Some(std::mem::take(order)),
+            Freeze::Held { order, .. } if !order.is_empty() => Some(std::mem::take(order)),
             _ => None,
         };
         let order = held.unwrap_or_else(|| {
@@ -476,7 +549,7 @@ impl QuillApp {
                 cx.notify();
             });
         });
-        self.chat_list.drop_on_row.freeze = Freeze::Frozen {
+        self.chat_list.drop_on_row.freeze = Freeze::Held {
             order,
             _timer: timer,
         };
@@ -485,8 +558,14 @@ impl QuillApp {
     /// The pointer rested on the row: its chat opens, the drag goes on.
     fn choose_row_by_drag(&mut self, chat_id: ChatId, window: &mut Window, cx: &mut Context<Self>) {
         let state = &mut self.chat_list.drop_on_row;
-        state.stop_rest();
-        if state.hover != Some(chat_id) || state.is_forward() || !cx.has_active_drag() {
+        if let Dragged::Files(FileDrag::Sendable {
+            over: Over::Row { wait, .. },
+            ..
+        }) = &mut state.seen
+        {
+            *wait = None;
+        }
+        if state.hover() != Some(chat_id) || state.is_forward() || !cx.has_active_drag() {
             return;
         }
         self.select_listed_chat(chat_id, window, cx);
@@ -503,7 +582,7 @@ impl QuillApp {
     ) {
         let state = &mut self.chat_list.drop_on_row;
         // The lit row is the one that takes the drop.
-        let drag = state.file_kind().filter(|_| state.hover == Some(chat_id));
+        let drag = state.file_kind().filter(|_| state.hover() == Some(chat_id));
         state.clear();
         cx.notify();
         let Some(drag) = drag else {
@@ -640,9 +719,16 @@ crate::ui::screenshot_demo::register_demos![
 #[cfg(feature = "demo-capture")]
 impl QuillApp {
     fn demo_drop_on_row(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        let state = &mut self.chat_list.drop_on_row;
-        state.hover = Some(ChatId(12));
-        state.preview = true;
+        self.chat_list.drop_on_row.seen =
+            Dragged::Staged(Box::new(Dragged::Files(FileDrag::Sendable {
+                paths: Vec::new(),
+                kind: DragState::Files,
+                over: Over::Row {
+                    chat: ChatId(12),
+                    position: Point::default(),
+                    wait: None,
+                },
+            })));
     }
 
     /// The video of the own album (message 812 of chat 11), picked up by its
@@ -659,15 +745,14 @@ impl QuillApp {
         let drag = self.session().and_then(|session| {
             super::super::forward_drag_source::drag_for(session, chat, id, &[])
         });
-        let state = &mut self.chat_list.drop_on_row;
-        state.hover = Some(ChatId(12));
         if let Some(drag) = drag {
-            state.seen = Dragged::Forward {
-                drag,
-                in_list: true,
-            };
+            self.chat_list.drop_on_row.seen =
+                Dragged::Staged(Box::new(Dragged::Forward {
+                    drag,
+                    in_list: true,
+                    hover: Some(ChatId(12)),
+                }));
         }
-        state.preview = true;
     }
 
     /// Two selected messages of chat 11 carried over the row of chat 12.
@@ -689,21 +774,21 @@ impl QuillApp {
             );
             self.share.forward = crate::ui::forward_stage::ForwardStage::Selecting(draft);
         }
-        let state = &mut self.chat_list.drop_on_row;
-        state.hover = Some(ChatId(12));
         if let Some(drag) = drag {
-            state.seen = Dragged::Forward {
-                drag,
-                in_list: true,
-            };
+            self.chat_list.drop_on_row.seen =
+                Dragged::Staged(Box::new(Dragged::Forward {
+                    drag,
+                    in_list: true,
+                    hover: Some(ChatId(12)),
+                }));
         }
-        state.preview = true;
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Dragged, DropOnRow, FileDrag, sort_frozen};
+    use super::{Dragged, DropOnRow, FileDrag, Freeze, Over, sort_frozen};
+    use gpui_kit::gpui::{point, px};
     use gpui_kit::Task;
     use quill::drop_modes::DragState;
     use quill::ids::ChatId;
@@ -712,12 +797,14 @@ mod tests {
 
     fn over_a_file_drag() -> DropOnRow {
         DropOnRow {
-            hover: Some(ChatId(1)),
-            seen: Dragged::Files(FileDrag {
+            seen: Dragged::Files(FileDrag::Sendable {
                 paths: vec![PathBuf::from("a")],
-                kind: Some(DragState::Folder),
-                rest: Some(Task::ready(())),
-                ..FileDrag::default()
+                kind: DragState::Folder,
+                over: Over::Row {
+                    chat: ChatId(1),
+                    position: point(px(1.), px(2.)),
+                    wait: Some(Task::ready(())),
+                },
             }),
             ..DropOnRow::default()
         }
@@ -731,7 +818,7 @@ mod tests {
             matches!(state.seen, Dragged::Nothing),
             "no timer opens the chat"
         );
-        assert!(state.file_kind().is_none() && state.hover.is_none());
+        assert!(state.file_kind().is_none() && state.hover().is_none());
         assert!(state.same_paths(&[]));
     }
 
@@ -742,7 +829,7 @@ mod tests {
         assert!(!state.same_paths(&[PathBuf::from("a")]));
         assert!(
             state.file_kind().is_none()
-                && state.hover.is_none()
+                && state.hover().is_none()
                 && matches!(state.seen, Dragged::Nothing)
         );
     }
@@ -758,6 +845,18 @@ mod tests {
         sort_frozen(&mut rows, &frozen, |id| *id);
         let expected: Vec<i64> = (0..N).chain([N + 1, N]).collect();
         assert_eq!(rows, expected);
+    }
+
+    #[test]
+    fn a_released_freeze_holds_no_order_and_keeps_its_timer_in_the_value() {
+        let mut freeze = Freeze::Held {
+            order: HashMap::from([(1, 0)]),
+            _timer: Task::ready(()),
+        };
+        assert!(freeze.is_held());
+        freeze.release_order();
+        assert!(!freeze.is_held() && freeze.order().is_none());
+        assert!(matches!(freeze, Freeze::Released { .. }));
     }
 
     #[test]

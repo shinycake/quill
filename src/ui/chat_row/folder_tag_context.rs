@@ -97,7 +97,7 @@ impl QuillApp {
                     Some(forum) => forum.unread_topics > 0,
                     None => chat_unread_indicator(chat).is_some(),
                 };
-                let fx = self.chat_list.row_fx.borrow_mut().observe(
+                let fx = self.chat_list.observe_row(
                     chat.id.0,
                     online,
                     has_badge,
@@ -170,7 +170,7 @@ impl QuillApp {
                     chat,
                     selected,
                     &folder_tags.names,
-                    self.folders.tab,
+                    self.chat_list.view.folder(),
                     folder_tags.show,
                     photo.as_deref(),
                     draggable,

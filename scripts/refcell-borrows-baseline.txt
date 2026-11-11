@@ -83,7 +83,6 @@ QuillApp::build_deep_link_invite_dialog::body.borrow_mut 1
 QuillApp::build_deep_link_share_dialog::body.borrow_mut 1
 QuillApp::build_direct_confirm_dialog::body.borrow_mut 1
 QuillApp::build_direct_messages_dialog::body.borrow_mut 1
-QuillApp::build_drop_topic_dialog::body.borrow_mut 1
 QuillApp::build_earn_withdraw_dialog::body.borrow_mut 1
 QuillApp::build_edit_profile_dialog::body.borrow_mut 1
 QuillApp::build_emoji_sets_dialog::body.borrow_mut 1
@@ -105,7 +104,6 @@ QuillApp::build_group_history_box::body.borrow_mut 1
 QuillApp::build_group_settings_dialog::body.borrow_mut 1
 QuillApp::build_import_contacts_dialog::body.borrow_mut 1
 QuillApp::build_invite_link_custom_dialog::field.borrow_mut 1
-QuillApp::build_join_requests_dialog::body.borrow_mut 1
 QuillApp::build_jump_date_dialog::body.borrow_mut 1
 QuillApp::build_live_delete_dialog::body.borrow_mut 1
 QuillApp::build_live_stars_dialog::body.borrow_mut 1
@@ -168,7 +166,6 @@ QuillApp::build_web_app_confirm_dialog::body.borrow_mut 1
 QuillApp::build_websites_dialog::body.borrow_mut 1
 QuillApp::build_welcome_dialog::body.borrow_mut 1
 QuillApp::chat_frame_starts::slot.borrow 1
-QuillApp::chat_list_item_element::row_fx.borrow_mut 1
 QuillApp::choose_send_effect::cells.borrow 1
 QuillApp::close_kit_dialog_if_done::dialogs_closed.borrow_mut 1
 QuillApp::close_main_window_dialogs::dialogs_closed.borrow_mut 1
@@ -219,7 +216,6 @@ QuillApp::selection_row::selection.borrow_mut 1
 QuillApp::send_fly_overlay::fly.borrow 1
 QuillApp::send_fly_overlay::fly.borrow_mut 1
 QuillApp::shortcuts_reference::bindings.borrow 1
-QuillApp::sidebar_chats::row_fx.borrow_mut 1
 QuillApp::spawn_system_unlock_wait::held.borrow_mut 1
 QuillApp::spawn_system_unlock_wait::master.borrow_mut 1
 QuillApp::status_toast_in::toasts.borrow_mut 1

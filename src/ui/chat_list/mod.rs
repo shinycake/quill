@@ -311,8 +311,8 @@ impl QuillApp {
     /// (banner ✕). Selecting a folder tab or the Unread/Archived tabs
     /// also exits it — they overwrite `chat_filter`.
     pub(super) fn exit_community_chat_list_mode(&mut self, cx: &mut Context<Self>) {
-        if matches!(self.chat_list.filter, ChatListFilter::Community(_)) {
-            self.set_chat_list_view(ChatListFilter::All, self.folders.tab);
+        if matches!(self.chat_list.view.filter(), ChatListFilter::Community(_)) {
+            self.set_chat_list_view(ChatListFilter::All, self.chat_list.view.folder());
             cx.notify();
         }
     }
@@ -368,7 +368,7 @@ impl QuillApp {
         // "Tabs on the left": the folders live in the column beside the
         // list, so only the community banner stays here.
         let tabs = (!self.folder_rail_active()).then(|| self.folder_tabs(cx));
-        if let ChatListFilter::Community(community_id) = self.chat_list.filter {
+        if let ChatListFilter::Community(community_id) = self.chat_list.view.filter() {
             div()
                 .flex()
                 .flex_col()
@@ -555,7 +555,7 @@ impl QuillApp {
     }
 
     pub(super) fn open_contacts_tab(&mut self, cx: &mut Context<Self>) {
-        self.chat_list.tab = SidebarTab::Contacts;
+        self.chat_list.show_tab(SidebarTab::Contacts);
         // Slice A6: the sync toggle gates the `getContacts` refresh —
         // with sync off the tab shows the last loaded snapshot.
         let sync_on = self
@@ -581,7 +581,7 @@ impl QuillApp {
     /// server-side call history plus both call privacy settings. Demo
     /// mode injects synthetic data instead (screenshot proof).
     pub(super) fn open_calls_tab(&mut self, cx: &mut Context<Self>) {
-        self.chat_list.tab = SidebarTab::Calls;
+        self.chat_list.show_tab(SidebarTab::Calls);
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.fetch_call_history() {
                 self.screen.connection.set_note_for(
@@ -629,9 +629,6 @@ impl QuillApp {
         // The view moved on under the drag (a folder, the archive): its
         // pinned list is off screen, so the drag goes, unsaved.
         if !self.pinned_list_shown(drag.archived) {
-            if self.chat_list.pin.end_drag() {
-                self.notify_sidebar(cx);
-            }
             return;
         }
         if let Some(pin) = self.chat_list.pin.drag_mut()
@@ -646,7 +643,7 @@ impl QuillApp {
             let ids = session.pinned_chat_ids(drag.archived);
             let names = quill::folder_limits::tag_names(&session.chat_list.chat_folders);
             let tags = session.chat_list.are_folder_tags_enabled;
-            let viewing = self.folders.tab;
+            let viewing = self.chat_list.view.folder();
             let setting = self.appearance.preview_lines;
             let heights = ids
                 .iter()
@@ -660,20 +657,18 @@ impl QuillApp {
                 })
                 .collect();
             let press = self.chat_list.pin.take_press(drag.chat_id.0).unwrap_or(y);
-            self.chat_list.pin =
-                quill::pin_reorder::PinReorder::begin(ids, heights, drag.chat_id.0, press, now)
-                    .map_or(crate::ui::chat_list_state::PinStage::Idle, |mut reorder| {
-                        reorder.drag_to(y, now);
-                        crate::ui::chat_list_state::PinStage::Dragging(
-                            crate::ui::chat_list_state::PinDrag {
-                                archived: drag.archived,
-                                reorder,
-                                next_press: None,
-                            },
-                        )
-                    });
-            // A reorder is not a long press: no peek preview over the drag.
-            self.chat_list.peek = crate::ui::chat_list_state::PeekPreview::Idle;
+            let stage = quill::pin_reorder::PinReorder::begin(ids, heights, drag.chat_id.0, press, now)
+                .map_or(crate::ui::chat_list_state::PinStage::Idle, |mut reorder| {
+                    reorder.drag_to(y, now);
+                    crate::ui::chat_list_state::PinStage::Dragging(
+                        crate::ui::chat_list_state::PinDrag {
+                            archived: drag.archived,
+                            reorder,
+                            next_press: None,
+                        },
+                    )
+                });
+            self.chat_list.begin_pin_drag(stage);
         }
         self.notify_sidebar(cx);
     }
@@ -841,6 +836,8 @@ pub(in crate::ui) use drop_on_row::DropOnRow;
 pub(in crate::ui) use drop_topic::DropTopic;
 mod header_fit;
 mod listed;
+mod view;
+pub(in crate::ui) use view::ChatListView;
 mod select_bar;
 mod sidebar;
 mod step_open;
