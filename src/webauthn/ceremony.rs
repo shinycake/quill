@@ -189,14 +189,7 @@ impl Ceremony {
         loop {
             match self.events.try_recv() {
                 Ok(event) => {
-                    if matches!(
-                        event,
-                        CeremonyEvent::Registered(_)
-                            | CeremonyEvent::SignedIn(_)
-                            | CeremonyEvent::Failed(_)
-                    ) {
-                        self.finished = true;
-                    }
+                    self.note(&event);
                     out.push(event);
                 }
                 Err(TryRecvError::Empty) => break,
@@ -212,6 +205,30 @@ impl Ceremony {
             }
         }
         out
+    }
+
+    /// Wait for the worker's next word, then everything that came with it.
+    /// For tests: no polling and no clock, the worker's channel wakes it.
+    #[cfg(test)]
+    pub(crate) fn wait(&mut self) -> Vec<CeremonyEvent> {
+        match self.events.recv() {
+            Ok(event) => {
+                self.note(&event);
+                let mut out = vec![event];
+                out.extend(self.poll());
+                out
+            }
+            Err(_) => self.poll(),
+        }
+    }
+
+    fn note(&mut self, event: &CeremonyEvent) {
+        if matches!(
+            event,
+            CeremonyEvent::Registered(_) | CeremonyEvent::SignedIn(_) | CeremonyEvent::Failed(_)
+        ) {
+            self.finished = true;
+        }
     }
 
     /// The PIN the user typed, for the next attempt.
@@ -292,6 +309,9 @@ impl Link {
     /// Ask for the PIN and wait for it (no deadline: the dialog waits for
     /// the user, as tdesktop's PIN box does).
     fn ask_pin(&self, invalid: bool) -> Result<Zeroizing<String>, CeremonyError> {
+        // A PIN sent while none was asked answers nothing: only one typed
+        // after this ask's event counts.
+        while self.pins.try_recv().is_ok() {}
         let _ = self.events.send(CeremonyEvent::NeedPin { invalid });
         loop {
             if self.cancelled() {

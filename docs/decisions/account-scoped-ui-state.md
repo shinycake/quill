@@ -3769,3 +3769,24 @@ seam.
   - None of them waits on time.
   - No test for 13, 17, 18 and 20. They need a live connection or a
     native window that the offline harness lacks.
+
+### Sweep fixes (r2-42)
+
+| id | what | fix |
+| --- | --- | --- |
+| 14-021 | widget canvas read/put_image added to an unchecked position | saturating i64 positions, checked `w*h*4`, and `put_image` skips a size its pixel buffer cannot hold |
+| 14-022 | `wait_for_cancelable_child` left a child unreaped on a `try_wait` error or a poisoned slot | the child is killed and reaped on the error; a poisoned lock is recovered, not abandoned |
+| 14-072 | `BgraPool` `released` bool beside `buffers` | one enum, `Recycling(buffers)` or `Released`; released holds none by construction |
+| 14-073 | NV12 rotation-0 arm split by zero-byte chunks for width 0 | an empty plane returns before the split |
+| 14-029 | `State::tap` plus `AudioShared::detached` kept in step | the sound's life is the queue value (`Open` or `Detached`); a held tap always has an open queue, so `tap` is data only |
+| 14-051 | an unreadable trust file read as empty and written over | `Trust::Read` or `Trust::Unreadable`; unreadable is never saved over, and the next change reads it again and merges |
+| 14-035 | a PIN sent while none was asked answered the next ask | `ask_pin` drops stale PINs before it sends `NeedPin` |
+| 14-065 | unchecked `Instant + timeout` | `checked_add` with a fallback |
+| 14-038 | `Initiator::ephemeral` as a "first message sent" flag | typestate: `initial_message` consumes the `Initiator` and returns `AwaitingResponse`, the only holder of `process_response` |
+| 14-023 | passkey flow tests waited on the wall clock | `Ceremony::wait` blocks on the worker's channel, the flow reads `Environment::now` (a manual clock in tests), the probe test uses a zero probe |
+
+- **Tests.** `a_pin_sent_while_none_was_asked_does_not_answer_the_next_ask`,
+  `an_unreadable_file_is_never_saved_over`,
+  `load_tells_a_missing_file_from_a_corrupt_one`,
+  `a_zero_width_picture_turns_to_nothing`, the canvas edge tests, and
+  `the_code_expires_with_the_request` on the manual clock.

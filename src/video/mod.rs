@@ -394,9 +394,7 @@ fn wait_for_cancelable_child(
     // extraction (viewer closed/stepped). The worker polls
     // `try_wait` instead of blocking in `wait` so it never holds
     // the slot lock while the UI killer needs it.
-    if let Ok(mut guard) = slot.lock() {
-        *guard = Some(child);
-    }
+    *slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(child);
     if cancelled.load(Ordering::SeqCst) {
         // The UI abandoned the run between spawn and publish and
         // already took the (empty) slot: kill our own child instead
@@ -410,9 +408,9 @@ fn wait_for_cancelable_child(
         return Err("ffmpeg extraction was cancelled".to_string());
     }
     loop {
-        let mut guard = slot
-            .lock()
-            .map_err(|_| "extraction slot poisoned".to_string())?;
+        // A poisoned lock still guards the child: take it back rather than
+        // leave ffmpeg running unreaped.
+        let mut guard = slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let Some(child) = guard.as_mut() else {
             // Slot emptied by the UI killer: it took the child and
             // is killing/reaping it — report cancellation. (The UI
@@ -420,9 +418,19 @@ fn wait_for_cancelable_child(
             // an error.)
             return Err("ffmpeg extraction was cancelled".to_string());
         };
-        if let Some(status) = child.try_wait().map_err(|err| err.to_string())? {
-            guard.take();
-            return Ok(status);
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                guard.take();
+                return Ok(status);
+            }
+            Ok(None) => {}
+            Err(err) => {
+                if let Some(mut child) = guard.take() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+                return Err(err.to_string());
+            }
         }
         drop(guard);
         std::thread::sleep(std::time::Duration::from_millis(50));

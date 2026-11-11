@@ -88,6 +88,16 @@ fn rotate_90_maps_the_left_column_to_the_top_row() {
     assert_eq!(out, [px(3), px(1), px(4), px(2)].concat());
 }
 
+/// A picture with no columns has nothing to turn (it used to split the
+/// output into chunks of zero bytes).
+#[test]
+fn a_zero_width_picture_turns_to_nothing() {
+    for rotation in [0, 90, 180, 270] {
+        let (out, ..) = rotate_bgra(&[], 0, 4, 0, rotation, &BgraPool::default());
+        assert!(out.is_empty(), "rotation {rotation}");
+    }
+}
+
 /// A player's BGRA pictures are turned into the buffers its images hand
 /// back, instead of a new one per picture.
 #[test]

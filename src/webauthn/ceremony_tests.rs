@@ -313,3 +313,28 @@ fn a_system_ceremony_reports_its_result() {
     ceremony.cancel();
     assert!(ceremony.poll().is_empty());
 }
+
+#[test]
+fn a_pin_sent_while_none_was_asked_does_not_answer_the_next_ask() {
+    let (event_tx, events) = channel();
+    let (pins, pin_rx) = channel();
+    let (_commands, command_rx) = channel();
+    let link = Link {
+        events: event_tx,
+        pins: pin_rx,
+        commands: command_rx,
+        cancel: Arc::new(AtomicBool::new(false)),
+    };
+    assert!(pins.send(Zeroizing::new("stale".into())).is_ok());
+    drop(pins);
+    // The sender is gone after the stale PIN: a stale one would be returned.
+    assert_eq!(
+        link.ask_pin(false).err(),
+        Some(CeremonyError::Cancelled),
+        "the stale PIN is dropped, then no one is left to answer"
+    );
+    assert_eq!(
+        events.try_recv().ok(),
+        Some(CeremonyEvent::NeedPin { invalid: false })
+    );
+}

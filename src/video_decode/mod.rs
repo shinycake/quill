@@ -348,8 +348,6 @@ struct AudioShared {
     /// generation it belongs to, in one word so that neither is read
     /// without the other ([`PlayedMark`]).
     played: AtomicU64,
-    /// The output let go of the tap: sound is decoded for nobody.
-    detached: AtomicBool,
     starved: AtomicBool,
 }
 
@@ -376,8 +374,22 @@ impl PlayedMark {
     }
 }
 
+/// The sound's life, in one value: queued for an output, or let go by it
+/// (the tap was dropped) so that sound is decoded for nobody. A tap that is
+/// out always has an `Open` queue; only its drop moves it to `Detached`.
+enum AudioQueue {
+    Open(Chunks),
+    Detached,
+}
+
+impl Default for AudioQueue {
+    fn default() -> Self {
+        Self::Open(Chunks::default())
+    }
+}
+
 #[derive(Default)]
-struct AudioQueue {
+struct Chunks {
     chunks: VecDeque<AudioChunk>,
     /// Interleaved samples queued.
     buffered: usize,
@@ -385,23 +397,31 @@ struct AudioQueue {
 
 impl AudioShared {
     fn buffered_secs(&self) -> f64 {
-        let buffered = lock(&self.queue).buffered;
+        let buffered = match &*lock(&self.queue) {
+            AudioQueue::Open(open) => open.buffered,
+            AudioQueue::Detached => 0,
+        };
         buffered as f64 / f64::from(self.channels.max(1)) / f64::from(self.rate.max(1))
     }
 
     fn push(&self, chunk: AudioChunk) {
-        if chunk.samples.is_empty() || self.detached.load(Ordering::Relaxed) {
+        if chunk.samples.is_empty() {
             return;
         }
-        let mut queue = lock(&self.queue);
-        queue.buffered += chunk.samples.len();
-        queue.chunks.push_back(chunk);
+        if let AudioQueue::Open(open) = &mut *lock(&self.queue) {
+            open.buffered += chunk.samples.len();
+            open.chunks.push_back(chunk);
+        }
+    }
+
+    fn is_detached(&self) -> bool {
+        matches!(*lock(&self.queue), AudioQueue::Detached)
     }
 
     fn reset(&self, secs: f64) {
-        let mut queue = lock(&self.queue);
-        queue.chunks.clear();
-        queue.buffered = 0;
+        if let AudioQueue::Open(open) = &mut *lock(&self.queue) {
+            *open = Chunks::default();
+        }
         self.origin.store(secs.to_bits(), Ordering::Release);
         let generation = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
         self.played
@@ -409,7 +429,10 @@ impl AudioShared {
     }
 
     fn drained(&self) -> bool {
-        lock(&self.queue).chunks.is_empty()
+        match &*lock(&self.queue) {
+            AudioQueue::Open(open) => open.chunks.is_empty(),
+            AudioQueue::Detached => true,
+        }
     }
 
     /// Where the output is, if it has played anything since the last seek.
@@ -485,14 +508,17 @@ impl AudioTap {
             let next = {
                 let mut queue = lock(&self.shared.queue);
                 // A seek between the check above and here: start over.
-                if self.shared.generation.load(Ordering::Acquire) != self.generation {
-                    None
-                } else {
-                    let chunk = queue.chunks.pop_front();
-                    if let Some(chunk) = &chunk {
-                        queue.buffered = queue.buffered.saturating_sub(chunk.samples.len());
+                match &mut *queue {
+                    AudioQueue::Open(open)
+                        if self.shared.generation.load(Ordering::Acquire) == self.generation =>
+                    {
+                        let chunk = open.chunks.pop_front();
+                        if let Some(chunk) = &chunk {
+                            open.buffered = open.buffered.saturating_sub(chunk.samples.len());
+                        }
+                        chunk
                     }
-                    chunk
+                    _ => None,
                 }
             };
             match next {
@@ -583,8 +609,7 @@ impl AudioTap {
 
 impl Drop for AudioTap {
     fn drop(&mut self) {
-        self.shared.detached.store(true, Ordering::Relaxed);
-        lock(&self.shared.queue).chunks.clear();
+        *lock(&self.shared.queue) = AudioQueue::Detached;
         // Through the state lock, as in `next_sample`: a decode thread that
         // saw the sound attached is then already waiting, and gets the wake.
         drop(lock(&self.wake.state));
@@ -782,7 +807,7 @@ impl Player {
         lock(&self.shared.state)
             .audio
             .clone()
-            .filter(|audio| !audio.detached.load(Ordering::Relaxed))
+            .filter(|audio| !audio.is_detached())
     }
 
     /// Whether the soundtrack is playing out (it is the clock).
