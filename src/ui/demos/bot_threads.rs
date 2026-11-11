@@ -40,6 +40,7 @@ impl QuillApp {
             self.demo_ui.sink.clone();
         let user = r#"{"@type":"updateUser","user":{"id":21,"first_name":"Demo","type":{"@type":"userTypeBot","can_be_edited":false,"can_join_groups":false,"can_read_all_group_messages":false,"has_main_web_app":false,"has_topics":true,"has_topic_sidebar":false,"allows_users_to_create_topics":true,"can_manage_bots":false,"is_inline":false,"inline_query_placeholder":"","supports_guest_queries":false,"is_guard":false,"need_location":false,"can_connect_to_business":false,"can_be_added_to_attachment_menu":false,"active_user_count":0}}}"#;
         let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(BOT)));
+        session.threads.forum_topics.begin(BOT, extra);
         let topic = |id: i32, name: &str, color: i32| {
             format!(
                 r#"{{"info":{{"@type":"forumTopicInfo","chat_id":{BOT},"forum_topic_id":{id},"name":"{name}","icon":{{"@type":"forumTopicIcon","color":{color},"custom_emoji_id":"0"}},"is_general":false,"is_closed":false,"is_hidden":false,"is_outgoing":true}},"order":"{id}","is_pinned":false,"unread_count":0,"last_read_inbox_message_id":0,"notification_settings":{{"@type":"chatNotificationSettings","use_default_mute_for":true,"mute_for":0}}}}"#
