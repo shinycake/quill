@@ -82,7 +82,7 @@ enum Share {
     /// source than `active.source` switches on the next pump. `audio_note`
     /// is why the system audio stopped while the screen goes on.
     Running {
-        active: ActiveScreen,
+        active: Box<ActiveScreen>,
         pick: Pick,
         audio_note: Option<String>,
     },
@@ -347,7 +347,7 @@ impl CallScreen {
             audio: self.with_audio(),
         };
         self.share = Share::Running {
-            active: ActiveScreen {
+            active: Box::new(ActiveScreen {
                 target,
                 source,
                 sink,
@@ -358,7 +358,7 @@ impl CallScreen {
                 audio: None,
                 capture,
                 run: DeviceRun::Opening,
-            },
+            }),
             pick,
             audio_note: None,
         };
