@@ -38,13 +38,27 @@ pub enum GraphFetch {
     Failed(String),
 }
 
-/// Fetch state of a `getMessageStatistics` answer.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// Fetch state of a `getMessageStatistics` answer. Only the answer or the
+/// error of the request it waits for moves it.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageStatsFetch {
-    #[default]
-    Loading,
+    /// The request waited for; `None` until it is sent.
+    Loading(Option<RequestId>),
     Loaded(MessageStatisticsView),
     Failed(String),
+}
+
+impl Default for MessageStatsFetch {
+    fn default() -> Self {
+        Self::Loading(None)
+    }
+}
+
+impl MessageStatsFetch {
+    /// Whether `request` is the one this fetch waits for.
+    pub(crate) fn waits_for(&self, request: Option<RequestId>) -> bool {
+        matches!((self, request), (Self::Loading(Some(waiting)), Some(id)) if *waiting == id)
+    }
 }
 
 /// The public forwards received so far.
@@ -294,9 +308,12 @@ impl StatsState {
         &mut self,
         chat_id: i64,
         message_id: i64,
+        request: Option<RequestId>,
         statistics: MessageStatisticsView,
     ) {
-        if let Some(state) = self.message_mut(chat_id, message_id) {
+        if let Some(state) = self.message_mut(chat_id, message_id)
+            && state.statistics.waits_for(request)
+        {
             state.statistics = MessageStatsFetch::Loaded(statistics);
         }
     }
@@ -322,9 +339,29 @@ impl StatsState {
         }
     }
 
-    pub(crate) fn fail_message_statistics(&mut self, chat_id: i64, message_id: i64, error: String) {
-        if let Some(state) = self.message_mut(chat_id, message_id) {
+    pub(crate) fn fail_message_statistics(
+        &mut self,
+        chat_id: i64,
+        message_id: i64,
+        request: Option<RequestId>,
+        error: String,
+    ) {
+        if let Some(state) = self.message_mut(chat_id, message_id)
+            && state.statistics.waits_for(request)
+        {
             state.statistics = MessageStatsFetch::Failed(error);
+        }
+    }
+
+    /// The statistics request went out under `request`.
+    pub(crate) fn message_statistics_requested(
+        &mut self,
+        chat_id: i64,
+        message_id: i64,
+        request: RequestId,
+    ) {
+        if let Some(state) = self.message_mut(chat_id, message_id) {
+            state.statistics = MessageStatsFetch::Loading(Some(request));
         }
     }
 

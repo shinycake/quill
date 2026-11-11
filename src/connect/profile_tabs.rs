@@ -148,7 +148,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.fail_profile_tab(
                 chat_id,
                 tab,
-                Some(generation),
+                generation,
                 "Could not send the request.".to_string(),
             );
         }

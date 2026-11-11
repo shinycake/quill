@@ -200,11 +200,12 @@ impl Session {
                     // reopened is dropped whole, so it neither shows alone
                     // nor lands ahead of the new first page.
                     let generation = pending.and_then(|p| p.search_generation);
-                    if !self.media.shared_media.accepts_profile(
-                        chat_id,
-                        SharedMediaTab::Stories,
-                        generation,
-                    ) && generation.is_some()
+                    if let Some(generation) = generation
+                        && !self.media.shared_media.accepts(
+                            chat_id,
+                            SharedMediaTab::Stories,
+                            generation,
+                        )
                     {
                         self.clear_story_page_op(pending);
                         return;

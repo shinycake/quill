@@ -352,9 +352,12 @@ impl Session {
                     message_id,
                 })) = pending.map(|p| p.purpose)
                 {
-                    self.groups
-                        .stats
-                        .accept_message_statistics(chat_id, message_id, statistics);
+                    self.groups.stats.accept_message_statistics(
+                        chat_id,
+                        message_id,
+                        pending.map(|p| p.id),
+                        statistics,
+                    );
                 }
             }
             GroupsPayload::StatisticalGraph { graph } => {

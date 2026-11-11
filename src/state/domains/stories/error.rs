@@ -167,11 +167,12 @@ impl Session {
                 // too: it fails instead of loading forever.
                 if purpose == RequestPurpose::GetChatPostedToChatPageStories
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                    && let Some(generation) = pending.and_then(|p| p.search_generation)
                 {
                     self.fail_profile_tab(
                         chat_id,
                         SharedMediaTab::Stories,
-                        pending.and_then(|p| p.search_generation),
+                        generation,
                         crate::state::request_errors::call_request_error_line(
                             err,
                             "Could not load this tab",

@@ -204,6 +204,7 @@ impl Session {
             })) => self.groups.stats.fail_message_statistics(
                 chat_id,
                 message_id,
+                pending.map(|p| p.id),
                 call_request_error_line(err, "Could not load statistics"),
             ),
             Some(RequestPurpose::Groups(GroupsPurpose::GetMessagePublicForwards {

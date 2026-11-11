@@ -172,22 +172,6 @@ pub struct ProfilePage {
 }
 
 impl SharedMediaState {
-    /// Whether an answer for `tab` of `chat_id` belongs to the open gallery:
-    /// the chat matches and, when the request carried a stamp, the tab still
-    /// waits on it. A request without a stamp (the stories page's own) only
-    /// has the chat to match.
-    pub(crate) fn accepts_profile(
-        &self,
-        chat_id: ChatId,
-        tab: SharedMediaTab,
-        generation: Option<u64>,
-    ) -> bool {
-        match generation {
-            Some(generation) => self.accepts(chat_id, tab, generation),
-            None => self.chat_id == Some(chat_id),
-        }
-    }
-
     /// Split (`true`) or merge Media into Photos and Videos. Returns the
     /// tab the gallery should now show when the active one went away, and
     /// whether it still has to be fetched.
@@ -246,10 +230,10 @@ impl SharedMediaState {
         &mut self,
         chat_id: ChatId,
         tab: SharedMediaTab,
-        generation: Option<u64>,
+        generation: u64,
         page: ProfilePage,
     ) -> bool {
-        if !self.accepts_profile(chat_id, tab, generation) {
+        if !self.accepts(chat_id, tab, generation) {
             return false;
         }
         let ProfilePage {
@@ -283,10 +267,10 @@ impl SharedMediaState {
         &mut self,
         chat_id: ChatId,
         tab: SharedMediaTab,
-        generation: Option<u64>,
+        generation: u64,
         error: String,
     ) -> bool {
-        if !self.accepts_profile(chat_id, tab, generation) {
+        if !self.accepts(chat_id, tab, generation) {
             return false;
         }
         let state = self.tab_state(tab);
@@ -569,17 +553,22 @@ impl Session {
         self.want_profile_thumbs(thumbs);
         let has_more = (items.len() as i32) < total_count;
         self.set_profile_count(chat_id, COUNT_KEY_STORIES, total_count);
-        self.media.shared_media.accept_profile(
-            chat_id,
-            SharedMediaTab::Stories,
-            generation,
-            ProfilePage {
-                items,
-                total_count,
-                has_more,
-                append: false,
-            },
-        );
+        // Only the gallery's own request (it carries the tab's stamp) fills
+        // the tab: a page the stories page asked for has no stamp and never
+        // answers a tab that waits for its own.
+        if let Some(generation) = generation {
+            self.media.shared_media.accept_profile(
+                chat_id,
+                SharedMediaTab::Stories,
+                generation,
+                ProfilePage {
+                    items,
+                    total_count,
+                    has_more,
+                    append: false,
+                },
+            );
+        }
     }
 
     /// A `receivedGifts` page asked for by the gallery's Gifts tab.
@@ -604,7 +593,7 @@ impl Session {
         let accepted = self.media.shared_media.accept_profile(
             chat_id,
             SharedMediaTab::Gifts,
-            Some(generation),
+            generation,
             ProfilePage {
                 items,
                 total_count: page.total_count,
@@ -668,7 +657,7 @@ impl Session {
         &mut self,
         chat_id: ChatId,
         tab: SharedMediaTab,
-        generation: Option<u64>,
+        generation: u64,
         error: String,
     ) {
         // The count stays unknown: the tab is kept for its Retry.
@@ -862,11 +851,11 @@ mod tests {
             file: FileId(0),
         };
         let tab = SharedMediaTab::Gifts;
-        gallery.begin_profile_fetch(tab);
+        let stamp = gallery.begin_profile_fetch(tab);
         gallery.accept_profile(
             ChatId(1),
             tab,
-            None,
+            stamp,
             ProfilePage {
                 items: vec![row("a")],
                 total_count: 2,
@@ -880,7 +869,7 @@ mod tests {
         gallery.accept_profile(
             ChatId(1),
             tab,
-            None,
+            stamp,
             ProfilePage {
                 items: vec![row("b")],
                 total_count: 2,
@@ -891,12 +880,12 @@ mod tests {
         assert_eq!(gallery.tabs[tab.index()].items.len(), 2);
         assert!(!gallery.tabs[tab.index()].can_load_more());
         // A late failure keeps the list; another chat's answer is ignored.
-        gallery.fail_profile(ChatId(1), tab, None, "boom".into());
+        gallery.fail_profile(ChatId(1), tab, stamp, "boom".into());
         assert!(gallery.tabs[tab.index()].status.is_ready());
         gallery.accept_profile(
             ChatId(2),
             tab,
-            None,
+            stamp,
             ProfilePage {
                 items: vec![],
                 total_count: 0,
@@ -927,7 +916,7 @@ mod tests {
         gallery.accept_profile(
             ChatId(1),
             tab,
-            Some(first),
+            first,
             ProfilePage {
                 items: vec![row],
                 total_count: 5,
@@ -935,8 +924,8 @@ mod tests {
                 append: false,
             },
         );
-        let more = gallery.begin_profile_more(tab);
-        assert_eq!(more, Some(first));
+        let more = gallery.begin_profile_more(tab).unwrap_or_default();
+        assert_eq!(more, first);
         gallery.close();
         gallery.open_for(ChatId(1));
         let fresh = gallery.begin_profile_fetch(tab);
@@ -960,7 +949,7 @@ mod tests {
         assert!(gallery.accept_profile(
             ChatId(1),
             tab,
-            Some(fresh),
+            fresh,
             ProfilePage {
                 items: vec![],
                 total_count: 5,

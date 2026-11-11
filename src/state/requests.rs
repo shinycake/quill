@@ -996,6 +996,21 @@ impl RequestRegistry {
         })
     }
 
+    /// The in-flight request for a purpose/chat/story triple.
+    pub fn request_for_story_in_flight(
+        &self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+        story_id: i32,
+    ) -> Option<RequestId> {
+        self.pending
+            .values()
+            .find(|p| {
+                p.purpose == purpose && p.chat_id == Some(chat_id) && p.story_id == Some(story_id)
+            })
+            .map(|p| p.id)
+    }
+
     /// Phase 9.7: an in-flight request for a purpose/chat/album triple
     /// (`GetStoryAlbumStories` per album).
     pub fn has_purpose_for_story_album(
