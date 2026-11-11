@@ -166,8 +166,11 @@ impl Shown {
         self.stage == Stage::Replying
     }
 
-    fn unlink(&mut self) {
+    /// Read, closed or replaced: no longer counted, and its window fades
+    /// out (the stage and the fade change together, here only).
+    fn unlink(&mut self, now: Instant) {
         self.stage = Stage::Unlinked;
+        self.popup.hide(false, now);
     }
 
     fn start_reply(&mut self) {
@@ -350,8 +353,7 @@ impl QuillApp {
             .iter_mut()
             .filter(|s| s.key == key && s.stage == Stage::Live)
         {
-            shown.unlink();
-            shown.popup.hide(false, now);
+            shown.unlink(now);
         }
         windows.queue.push(
             key,
@@ -384,8 +386,7 @@ impl QuillApp {
             .iter_mut()
             .filter(|s| s.key == key && !s.unlinked())
         {
-            shown.unlink();
-            shown.popup.hide(false, now);
+            shown.unlink(now);
             changed = true;
         }
         if changed {
@@ -399,8 +400,7 @@ impl QuillApp {
         let windows = &mut self.delivery.windows;
         windows.queue.clear();
         for shown in windows.shown.iter_mut().filter(|s| !s.unlinked()) {
-            shown.unlink();
-            shown.popup.hide(false, now);
+            shown.unlink(now);
         }
         self.notify_show_next(cx);
     }
@@ -618,8 +618,7 @@ impl QuillApp {
                 continue;
             }
             if allow == 0 {
-                shown.unlink();
-                shown.popup.hide(false, now);
+                shown.unlink(now);
             } else {
                 allow -= 1;
             }
@@ -751,8 +750,7 @@ impl QuillApp {
             .iter_mut()
             .find(|s| s.id == id && !s.unlinked())
         {
-            shown.unlink();
-            shown.popup.hide(false, now);
+            shown.unlink(now);
             self.notify_show_next(cx);
         }
     }
