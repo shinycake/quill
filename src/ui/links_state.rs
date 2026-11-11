@@ -102,8 +102,18 @@ impl ResolvedLink {
     }
 }
 
-/// Where the deep-link flow in progress stands in this window's UI, with the
-/// chat window it was asked from (`None`: the main window).
+/// Who started the flow in progress: the chat window it was asked from
+/// (`None`: the main window) and whether a step the agent UI driver
+/// injected asked (the UI re-checks what an agent's flow opens). It lives and
+/// dies with the running flow.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct FlowOrigin {
+    pub(super) window: Option<ChatId>,
+    pub(super) by_agent: bool,
+}
+
+/// Where the deep-link flow in progress stands in this window's UI, with
+/// its origin.
 #[derive(Default)]
 pub(super) enum LinkFlow {
     #[default]
@@ -111,34 +121,36 @@ pub(super) enum LinkFlow {
     /// The session resolves the link. The origin is taken with the flow's
     /// state at each pump and put back only while the flow goes on, so every
     /// terminal state leaves none behind.
-    Running { from: Option<ChatId> },
+    Running { origin: FlowOrigin },
     /// An invite preview waits for the user's answer (`DeepLinkInvite`).
     Asking { invite: quill::state::DeepLinkState },
 }
 
 impl LinkFlow {
     /// A flow asked from `from` starts; an unanswered invite gives way to it.
-    pub(super) fn start(&mut self, from: Option<ChatId>) {
-        *self = Self::Running { from };
+    pub(super) fn start(&mut self, origin: FlowOrigin) {
+        *self = Self::Running { origin };
     }
 
     /// The origin of the running flow, which is no longer running: a step
     /// that goes on puts it back with [`Self::resume`].
-    pub(super) fn take_origin(&mut self) -> Option<ChatId> {
+    pub(super) fn take_origin(&mut self) -> Option<FlowOrigin> {
         match self {
-            Self::Running { from } => {
-                let from = *from;
+            Self::Running { origin } => {
+                let origin = *origin;
                 *self = Self::Idle;
-                from
+                Some(origin)
             }
             Self::Idle | Self::Asking { .. } => None,
         }
     }
 
-    /// The flow goes on from `from`; an invite being asked stays.
-    pub(super) fn resume(&mut self, from: Option<ChatId>) {
+    /// The flow goes on with its origin; an invite being asked stays.
+    pub(super) fn resume(&mut self, origin: Option<FlowOrigin>) {
         if !matches!(self, Self::Asking { .. }) {
-            *self = Self::Running { from };
+            *self = Self::Running {
+                origin: origin.unwrap_or_default(),
+            };
         }
     }
 
@@ -243,11 +255,15 @@ mod tests {
     #[core::prelude::v1::test]
     fn the_origin_is_taken_with_the_step_and_put_back_while_the_flow_goes_on() {
         let mut flow = LinkFlow::default();
-        flow.start(Some(ChatId(7)));
-        assert_eq!(flow.take_origin(), Some(ChatId(7)));
+        let origin = FlowOrigin {
+            window: Some(ChatId(7)),
+            by_agent: true,
+        };
+        flow.start(origin);
+        assert_eq!(flow.take_origin(), Some(origin));
         assert_eq!(flow.take_origin(), None, "a terminal step leaves none");
-        flow.resume(Some(ChatId(7)));
-        assert_eq!(flow.take_origin(), Some(ChatId(7)));
+        flow.resume(Some(origin));
+        assert_eq!(flow.take_origin(), Some(origin), "an agent's flow stays its");
     }
 
     #[core::prelude::v1::test]
@@ -255,9 +271,9 @@ mod tests {
         let mut flow = LinkFlow::default();
         flow.ask(invite());
         assert_eq!(flow.take_origin(), None);
-        flow.resume(Some(ChatId(1)));
+        flow.resume(None);
         assert!(flow.invite().is_some(), "the pump does not drop the invite");
-        flow.start(None);
+        flow.start(FlowOrigin::default());
         assert!(flow.invite().is_none(), "a new flow replaces it");
         flow.ask(invite());
         assert!(flow.take_invite().is_some());

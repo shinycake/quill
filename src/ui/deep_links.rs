@@ -8,7 +8,7 @@
 //! (same take-once pattern as `pending_story_open`).
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
-use super::links_state::{PendingOpen, QueuedLink, ResolvedLink, ResolvedStep};
+use super::links_state::{FlowOrigin, PendingOpen, QueuedLink, ResolvedLink, ResolvedStep};
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -107,30 +107,30 @@ impl QuillApp {
             if invite_waits {
                 live.driver.session.chats_state.deep_link = None;
             }
-            self.screen.links.flow.start(queued.window);
-            let _ = live
-                .driver
-                .request_deep_link_info_from(&queued.link, queued.by_agent);
+            self.screen.links.flow.start(FlowOrigin {
+                window: queued.window,
+                by_agent: queued.by_agent,
+            });
+            let _ = live.driver.request_deep_link_info(&queued.link);
         }
         // Consume terminal states once, retaining the invite preview until a decision.
         let state = live.driver.session.chats_state.deep_link.take();
         // The flow's origin is taken with its state and put back only while
         // the flow goes on, so every terminal state (and no flow at all,
         // after an error or a closed box) leaves none behind.
-        let from_agent = std::mem::take(&mut live.driver.session.chats_state.deep_link_from_agent)
-            && state.is_some();
-        let from_window = self
+        let origin = self
             .screen
             .links
             .flow
             .take_origin()
             .filter(|_| state.is_some());
+        let from_agent = origin.is_some_and(|origin| origin.by_agent);
+        let from_window = origin.and_then(|origin| origin.window);
         if !deep_link_step_redraws(state.as_ref(), self.screen.links.flow.invite()) {
             // Nothing new (this runs on every poll): put the state back and
             // don't redraw.
             live.driver.session.chats_state.deep_link = state;
-            live.driver.session.chats_state.deep_link_from_agent = from_agent;
-            self.screen.links.flow.resume(from_window);
+            self.screen.links.flow.resume(origin);
             return;
         }
         match state {
@@ -138,8 +138,7 @@ impl QuillApp {
             | Some(DeepLinkState::ResolvingInfo { .. })
             | Some(DeepLinkState::ResolvingChat { .. }) => {
                 live.driver.session.chats_state.deep_link = state;
-                live.driver.session.chats_state.deep_link_from_agent = from_agent;
-                self.screen.links.flow.resume(from_window);
+                self.screen.links.flow.resume(origin);
             }
             Some(DeepLinkState::Info {
                 text,
@@ -158,8 +157,7 @@ impl QuillApp {
                             .open_box_in(DialogKind::DeepLinkInfo, from_window);
                     }
                     (false, Some(action)) => {
-                        live.driver.session.chats_state.deep_link_from_agent = from_agent;
-                        self.screen.links.flow.resume(from_window);
+                        self.screen.links.flow.resume(origin);
                         let _ = live.driver.continue_deep_link(action);
                     }
                     // Unknown link: TDLib's info text is the confirmation
@@ -220,8 +218,7 @@ impl QuillApp {
             }
             // TDLib has no type for it: `getDeepLinkInfo` explains it.
             Some(DeepLinkState::Unknown { link }) => {
-                live.driver.session.chats_state.deep_link_from_agent = from_agent;
-                self.screen.links.flow.resume(from_window);
+                self.screen.links.flow.resume(origin);
                 let _ = live.driver.request_deep_link_text(&link);
             }
         }
@@ -295,8 +292,7 @@ impl QuillApp {
     /// the window of the click, or the window an answer's request carried;
     /// none for a mini app's link, which the main window takes). The
     /// origin rides with the link (`QueuedLink`): a later link replaces
-    /// it whole, and the flow keeps its own in the session
-    /// (`ChatsState::deep_link_from_agent`).
+    /// it whole, and the running flow keeps its own (`LinkFlow`).
     pub(super) fn queue_deep_link(&mut self, link: String) {
         self.pending_deep_link = Some(QueuedLink {
             link,
@@ -319,7 +315,10 @@ impl QuillApp {
         let live = self.live.as_mut()?;
         let sent = live.driver.resolve_deep_link(action).is_ok();
         if sent {
-            self.screen.links.flow.start(window);
+            self.screen.links.flow.start(FlowOrigin {
+                window,
+                by_agent: guard::injecting(),
+            });
         }
         Some(sent)
     }
@@ -610,7 +609,10 @@ impl QuillApp {
                                 // window is set whatever the send returns.
                                 let from = this.asking_window().flatten();
                                 if let Some(live) = this.live.as_mut() {
-                                    this.screen.links.flow.start(from);
+                                    this.screen.links.flow.start(FlowOrigin {
+                                        window: from,
+                                        by_agent: guard::injecting(),
+                                    });
                                     let _ = live.driver.confirm_deep_link_invite(generation);
                                 }
                             }

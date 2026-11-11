@@ -648,7 +648,7 @@ fn bot_links_resolve_the_bot_with_search_public_chat() {
 /// the flow, so the agent's chat open is still checked when it lands; a
 /// fresh `resolve_deep_link` is the running handler's.
 #[test]
-fn a_flow_keeps_its_origin_when_another_link_arrives() {
+fn a_flow_in_progress_wins_over_another_link() {
     let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
     let recorder = Arc::new(RecordingSender::new());
@@ -656,18 +656,16 @@ fn a_flow_keeps_its_origin_when_another_link_arrives() {
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
 
     let extra = driver
-        .request_deep_link_info_from("https://t.me/agentpick", true)
+        .request_deep_link_info("https://t.me/agentpick")
         .unwrap()
         .unwrap();
-    assert!(driver.session.chats_state.deep_link_from_agent);
-    // The user's link waits: the flow in progress wins and keeps its origin.
+    // The later link waits: the flow in progress wins.
     assert_eq!(
         driver
-            .request_deep_link_info_from("https://t.me/userpick", false)
+            .request_deep_link_info("https://t.me/userpick")
             .unwrap(),
         None
     );
-    assert!(driver.session.chats_state.deep_link_from_agent);
     feed(
         &mut driver,
         &seq,
@@ -679,18 +677,5 @@ fn a_flow_keeps_its_origin_when_another_link_arrives() {
         driver.session.chats_state.deep_link,
         Some(DeepLinkState::ChatReady { chat_id, .. }) if chat_id.0 == 77
     ));
-    assert!(driver.session.chats_state.deep_link_from_agent);
-
-    // A fresh flow started outside an injected step is the user's.
-    driver.session.chats_state.deep_link = None;
-    driver
-        .resolve_deep_link(DeepLinkAction::OpenUsername {
-            domain: "userpick".into(),
-            start_param: None,
-            post: None,
-            story_id: None,
-        })
-        .unwrap();
-    assert!(!driver.session.chats_state.deep_link_from_agent);
     std::fs::remove_dir_all(dir).unwrap();
 }

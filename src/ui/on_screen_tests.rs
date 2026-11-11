@@ -242,14 +242,12 @@ fn a_switch_ends_the_link_flow_the_account_was_running(cx: &mut TestAppContext) 
             is_channel: false,
             generation: 3,
         });
-        session.chats_state.deep_link_from_agent = true;
     });
     switch(&app, &mut vcx, "other");
     frames(&mut vcx);
     app.read_with(&vcx, |app, _| {
         let session = app.session().expect("a session");
         assert!(session.chats_state.deep_link.is_none(), "the flow ended");
-        assert!(!session.chats_state.deep_link_from_agent);
         assert!(app.links.flow.invite().is_none());
     });
     switch(&app, &mut vcx, &AccountKey::primary().0);

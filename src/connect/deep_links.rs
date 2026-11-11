@@ -237,22 +237,11 @@ pub fn detect_deep_link_arg(args: &[String]) -> Option<String> {
 impl<S: JsonSender> ConnectDriver<S> {
     /// `parity:platform-deep-links`: `getDeepLinkInfo` for a launch link.
     /// Generation-guarded like `resolve_inline_bot`; a flow already in
-    /// progress wins (one launch link at a time), a finished one is replaced. The flow is the running
-    /// handler's: an agent's step while the UI driver injects, else the
-    /// user's.
+    /// progress wins (one launch link at a time), a finished one is replaced.
+    /// Who started the flow is the UI's to keep (`LinkFlow`).
     pub fn request_deep_link_info(
         &mut self,
         link: &str,
-    ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.request_deep_link_info_from(link, crate::agent::ui_driver::guard::injecting())
-    }
-
-    /// [`Self::request_deep_link_info`] for a link queued earlier, with the
-    /// origin it was queued with (`from_agent`).
-    pub fn request_deep_link_info_from(
-        &mut self,
-        link: &str,
-        from_agent: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -272,7 +261,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         self.session.chats_state.deep_link = None;
-        self.session.chats_state.deep_link_from_agent = from_agent;
         // Like tdesktop's `openLocalUrl`, route the link by its shape
         // locally. `getDeepLinkInfo` only knows server-side deep links
         // (it answers 404 for `resolve?domain=` and `t.me/<user>`).
@@ -356,7 +344,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if slot != generation {
             return Ok(None);
         }
-        self.session.chats_state.deep_link_from_agent = crate::agent::ui_driver::guard::injecting();
         let extra = self.session.request(
             RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { generation }),
             None,
@@ -388,10 +375,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         action: DeepLinkAction,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if self.chats_path_active() {
-            self.session.chats_state.deep_link_from_agent =
-                crate::agent::ui_driver::guard::injecting();
-        }
         self.continue_deep_link(action)
     }
 
