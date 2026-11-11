@@ -140,8 +140,6 @@ QuillApp::build_start_files_dialog::body.borrow_mut 1
 QuillApp::build_status_time_dialog::body.borrow_mut 1
 QuillApp::build_sticker_set_dialog::body.borrow_mut 1
 QuillApp::build_stickers_manager_dialog::body.borrow_mut 1
-QuillApp::build_subscriptions_dialog::body.borrow_mut 1
-QuillApp::build_story_stealth_dialog::body.borrow_mut 1
 QuillApp::build_suggest_price_dialog::body.borrow_mut 1
 QuillApp::build_suggest_time_dialog::body.borrow_mut 1
 QuillApp::build_text_box::body.borrow_mut 1

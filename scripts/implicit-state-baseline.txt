@@ -18,9 +18,6 @@ DragSelect::pending
 
 DestRow::saved
 DragSelect::pending
-FastShareFacts::sent
-FieldResult::finished
-Drawn::leaving
 FooterMeta::pending
 
 GiveawaySummary::finished

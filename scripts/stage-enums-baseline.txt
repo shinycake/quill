@@ -77,7 +77,6 @@ bare:ListStatus::Loading 1
 bare:Lookup::Pending 1
 bare:Lookup::Waiting 1
 bare:MediaFile::Downloading 1
-bare:MediaSave::Saving 1
 bare:MembersStage::Loading 1
 bare:MenuSend::Sent 1
 bare:MessageStatsFetch::Loading 1
@@ -194,7 +193,6 @@ unkeyed:DeleteEdit::Pending 1
 unkeyed:DemandStage::Asked 1
 unkeyed:DeviceRun::Running 1
 unkeyed:Dnd::Refreshing 1
-unkeyed:EditorStage::Reading 1
 unkeyed:Encoding::Running 1
 unkeyed:ExtractionStage::Running 1
 unkeyed:FileDrag::Probing 1
