@@ -238,19 +238,76 @@ pub enum PasskeyAdd {
     Added,
 }
 
+/// The passkey list as last fetched. The list the screen shows stays
+/// through every stage, so it does not blank out under "Loading..." or an
+/// error line. Each stage that asked remembers when (`at`, the 5 s throttle
+/// of tdesktop `requestList`).
+#[derive(Debug, Clone, Default)]
+pub enum PasskeyList {
+    /// Never asked.
+    #[default]
+    Unknown,
+    /// A removal or an add made it out of date: the driver asks again at
+    /// once.
+    Stale(Vec<Passkey>),
+    /// `getLoginPasskeys` is on its way (tdesktop `listKnown` is false).
+    Asking { at: Instant, shown: Vec<Passkey> },
+    /// An answer arrived since the last change (tdesktop `listKnown`).
+    Known { at: Instant, list: Vec<Passkey> },
+    /// The ask failed (`PasskeysState::error` says why); it is tried again
+    /// with the next look after the throttle.
+    Failed { at: Instant, shown: Vec<Passkey> },
+}
+
+impl PasskeyList {
+    /// The passkeys to show, in the server's order.
+    pub fn shown(&self) -> &[Passkey] {
+        match self {
+            Self::Unknown => &[],
+            Self::Stale(list) | Self::Known { list, .. } => list,
+            Self::Asking { shown, .. } | Self::Failed { shown, .. } => shown,
+        }
+    }
+
+    fn shown_mut(&mut self) -> Option<&mut Vec<Passkey>> {
+        match self {
+            Self::Unknown => None,
+            Self::Stale(list) | Self::Known { list, .. } => Some(list),
+            Self::Asking { shown, .. } | Self::Failed { shown, .. } => Some(shown),
+        }
+    }
+
+    fn take_shown(&mut self) -> Vec<Passkey> {
+        match std::mem::take(self) {
+            Self::Unknown => Vec::new(),
+            Self::Stale(list) | Self::Known { list, .. } => list,
+            Self::Asking { shown, .. } | Self::Failed { shown, .. } => shown,
+        }
+    }
+
+    fn asked_at(&self) -> Option<Instant> {
+        match self {
+            Self::Unknown | Self::Stale(_) => None,
+            Self::Asking { at, .. } | Self::Known { at, .. } | Self::Failed { at, .. } => Some(*at),
+        }
+    }
+}
+
+/// A `removeLoginPasskey` in flight: the passkey and the request whose
+/// answer settles it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Removal {
+    pub passkey_id: String,
+    pub request: RequestId,
+}
+
 /// The account's passkeys as last fetched (tdesktop `Data::Passkeys`).
 #[derive(Debug, Clone, Default)]
 pub struct PasskeysState {
-    /// The passkeys of the last answer, in the server's order.
-    pub list: Vec<Passkey>,
-    /// An answer arrived since the last change (tdesktop `listKnown`).
-    pub known: bool,
-    /// When the last list request went out.
-    pub requested_at: Option<Instant>,
-    /// A removal succeeded: the driver asks for the list again.
-    pub stale: bool,
-    /// The passkey a `removeLoginPasskey` is in flight for.
-    pub removing: Option<String>,
+    /// The passkey list and where its fetch stands.
+    pub list: PasskeyList,
+    /// The removal in flight; one at a time.
+    pub removing: Option<Removal>,
     /// Why the last fetch or removal failed; cleared on the next try.
     pub error: Option<String>,
     /// The server lets the app show passkeys (`settings_display_passkeys`
@@ -270,10 +327,46 @@ impl PasskeysState {
     /// Whether a look at the list should fetch it again (tdesktop
     /// `requestList`: never asked, or asked more than 5 s ago).
     pub fn wants_fetch(&self, now: Instant) -> bool {
-        self.stale
+        matches!(self.list, PasskeyList::Stale(_))
             || self
-                .requested_at
+                .list
+                .asked_at()
                 .is_none_or(|at| now.saturating_duration_since(at) > LIST_FRESH_FOR)
+    }
+
+    /// The passkeys to show.
+    pub fn passkeys(&self) -> &[Passkey] {
+        self.list.shown()
+    }
+
+    /// A removal or an add made the list out of date.
+    pub fn is_stale(&self) -> bool {
+        matches!(self.list, PasskeyList::Stale(_))
+    }
+
+    /// An answer arrived since the last change (tdesktop `listKnown`).
+    pub fn is_known(&self) -> bool {
+        matches!(self.list, PasskeyList::Known { .. })
+    }
+
+    /// `getLoginPasskeys` went out at `now`: the list on screen stays, the
+    /// last error is gone.
+    pub fn list_asked(&mut self, now: Instant) {
+        let shown = self.list.take_shown();
+        self.list = PasskeyList::Asking { at: now, shown };
+        self.error = None;
+    }
+
+    /// The list ask of `generation` failed. One asked before the last
+    /// removal says nothing about the list now.
+    pub fn list_failed(&mut self, generation: u32, error: String) {
+        if generation != self.generation {
+            return;
+        }
+        let at = self.list.asked_at().unwrap_or_else(Instant::now);
+        let shown = self.list.take_shown();
+        self.list = PasskeyList::Failed { at, shown };
+        self.error = Some(error);
     }
 
     /// The list answer arrived. One asked before the last removal
@@ -283,30 +376,29 @@ impl PasskeysState {
         if generation != self.generation {
             return;
         }
-        self.list = list;
-        self.known = true;
-        self.stale = false;
+        let at = self.list.asked_at().unwrap_or_else(Instant::now);
+        self.list = PasskeyList::Known { at, list };
+        self.error = None;
     }
 
     /// `removeLoginPasskey` succeeded: drop the passkey and ask again
     /// (tdesktop forgets the list and reloads it).
     pub fn finish_remove(&mut self, passkey_id: &str) {
-        self.list.retain(|p| p.id != passkey_id);
+        let mut list = self.list.take_shown();
+        list.retain(|p| p.id != passkey_id);
+        self.list = PasskeyList::Stale(list);
         self.removing = None;
         self.error = None;
-        self.known = false;
-        self.stale = true;
-        self.requested_at = None;
         self.generation = self.generation.wrapping_add(1);
     }
 
     pub fn find(&self, passkey_id: &str) -> Option<&Passkey> {
-        self.list.iter().find(|p| p.id == passkey_id)
+        self.passkeys().iter().find(|p| p.id == passkey_id)
     }
 
     /// Custom emoji ids of the software icons in the list.
     pub fn icon_ids(&self) -> impl Iterator<Item = i64> + '_ {
-        self.list
+        self.passkeys()
             .iter()
             .map(|p| p.software_icon_custom_emoji_id)
             .filter(|id| *id != 0)
@@ -316,7 +408,7 @@ impl PasskeysState {
     /// the server allows it, and the app can create passkeys or the
     /// account already has some.
     pub fn row_shown(&self) -> bool {
-        self.display_allowed && (webauthn_supported() || !self.list.is_empty())
+        self.display_allowed && (webauthn_supported() || !self.passkeys().is_empty())
     }
 
     /// Whether the QR sign-in screen shows "Log in using passkey" (tdesktop
@@ -327,10 +419,10 @@ impl PasskeysState {
 
     /// The value on the right of the row.
     pub fn row_label(&self) -> RowLabel {
-        if !self.known {
+        if !self.is_known() {
             return RowLabel::Loading;
         }
-        match self.list.as_slice() {
+        match self.passkeys() {
             [] => RowLabel::Off,
             [one] => RowLabel::Name(one.name.clone()),
             many => RowLabel::Count(many.len()),
@@ -340,9 +432,9 @@ impl PasskeysState {
     /// Where a click on the row goes (tdesktop: nothing while loading,
     /// the "Protect your account" box without passkeys, else the list).
     pub fn row_target(&self) -> Option<RowTarget> {
-        if !self.known {
+        if !self.is_known() {
             None
-        } else if self.list.is_empty() {
+        } else if self.passkeys().is_empty() {
             Some(RowTarget::About)
         } else {
             Some(RowTarget::List)
@@ -352,14 +444,21 @@ impl PasskeysState {
     /// Whether "Create Passkey" works (tdesktop `canRegister`: WebAuthn,
     /// and fewer passkeys than `passkeys_account_passkeys_max`).
     pub fn can_register(&self) -> bool {
-        webauthn_supported() && self.list.len() < self.max_passkeys.unwrap_or(DEFAULT_MAX_PASSKEYS)
+        webauthn_supported()
+            && self.passkeys().len() < self.max_passkeys.unwrap_or(DEFAULT_MAX_PASSKEYS)
     }
 
     /// The new passkey from `addLoginPasskey` joins the list (tdesktop
     /// appends it) and the registration is over.
     pub fn accept_added(&mut self, passkey: Passkey) {
-        self.list.retain(|p| p.id != passkey.id);
-        self.list.push(passkey);
+        // A list never asked for becomes one that asks again.
+        if matches!(self.list, PasskeyList::Unknown) {
+            self.list = PasskeyList::Stale(Vec::new());
+        }
+        if let Some(list) = self.list.shown_mut() {
+            list.retain(|p| p.id != passkey.id);
+            list.push(passkey);
+        }
         self.add = PasskeyAdd::Added;
         self.error = None;
     }

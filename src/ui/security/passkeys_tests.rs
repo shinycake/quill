@@ -49,7 +49,7 @@ fn passkey_ids(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Vec<Strin
             .map(|s| {
                 s.settings
                     .passkeys
-                    .list
+                    .passkeys()
                     .iter()
                     .map(|p| p.id.clone())
                     .collect()

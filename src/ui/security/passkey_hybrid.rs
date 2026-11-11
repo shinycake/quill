@@ -164,7 +164,7 @@ impl QuillApp {
                     .passkeys
                     .ceremony
                     .as_ref()
-                    .and_then(|ui| ui.qr.as_ref())
+                    .and_then(|ui| ui.qr())
                     .map(|qr| (Arc::clone(&qr.image), qr.side))
                     .filter(|_| bluetooth);
                 let (title, about) = match mode {
@@ -236,7 +236,7 @@ impl QuillApp {
             .passkeys
             .ceremony
             .as_ref()
-            .and_then(|ui| ui.ceremony.as_ref())
+            .and_then(|ui| ui.worker())
         {
             ceremony.use_security_key();
         }

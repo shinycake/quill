@@ -26,9 +26,6 @@ impl Session {
                 // and not one asked before a removal.
                 if let Some(PasskeysPurpose::List(generation)) = purpose {
                     self.settings.passkeys.accept_list(list, generation);
-                    if generation == self.settings.passkeys.generation {
-                        self.settings.passkeys.error = None;
-                    }
                 }
             }
             PasskeysPayload::Added(passkey) => {
@@ -62,9 +59,9 @@ impl Session {
     /// `getAuthenticationPasskeyParameters` answered: the sign-in ceremony
     /// can start. tdesktop ignores options it cannot read; Quill says so
     /// under the link.
-    pub(crate) fn apply_passkey_login_parameters(&mut self, json: &str) {
+    pub(crate) fn apply_passkey_login_parameters(&mut self, id: Option<RequestId>, json: &str) {
         let login = &mut self.settings.passkeys.login;
-        if !login.accept_parameters(json, Instant::now()) {
+        if !login.accept_parameters(id, json, Instant::now()) {
             crate::webauthn::log("unreadable sign-in options");
             login.fail(crate::passkeys::login::UNREADABLE_OPTIONS.into());
         }
@@ -72,21 +69,25 @@ impl Session {
 
     pub(crate) fn apply_passkeys_ok(&mut self, pending: Option<&PendingRequest>) {
         match passkeys_purpose(pending.map(|p| p.purpose)) {
-            Some(PasskeysPurpose::Remove) => {}
+            Some(PasskeysPurpose::Remove) => {
+                // Only the removal in flight settles it.
+                let id = pending.map(|p| p.id);
+                let passkeys = &mut self.settings.passkeys;
+                if let Some(removal) = passkeys.removing.take_if(|r| Some(r.request) == id) {
+                    passkeys.finish_remove(&removal.passkey_id);
+                }
+                return;
+            }
             Some(PasskeysPurpose::CheckLogin) => {
                 // The authorization state moves on by itself (to Ready, or
                 // to the password screen after SESSION_PASSWORD_NEEDED).
-                let login = &mut self.settings.passkeys.login;
-                login.checking = false;
-                login.pending = None;
-                login.error = None;
+                self.settings
+                    .passkeys
+                    .login
+                    .finish_check(pending.map(|p| p.id));
                 return;
             }
             _ => return,
-        }
-        let passkeys = &mut self.settings.passkeys;
-        if let Some(id) = passkeys.removing.take() {
-            passkeys.finish_remove(&id);
         }
     }
 
@@ -102,15 +103,18 @@ impl Session {
             Some(PasskeysPurpose::List(generation)) => {
                 // Retrying is the user's next look, not every ingest. A look
                 // older than a removal says nothing about the list now.
-                if generation == passkeys.generation {
-                    passkeys.stale = false;
-                    passkeys.error = Some(sessions_error_line("load the passkeys", err));
-                }
+                passkeys.list_failed(generation, sessions_error_line("load the passkeys", err));
                 true
             }
             Some(PasskeysPurpose::Remove) => {
-                passkeys.removing = None;
-                passkeys.error = Some(sessions_error_line("delete the passkey", err));
+                // Only the removal in flight fails.
+                if passkeys
+                    .removing
+                    .take_if(|r| Some(r.request) == id)
+                    .is_some()
+                {
+                    passkeys.error = Some(sessions_error_line("delete the passkey", err));
+                }
                 true
             }
             Some(PasskeysPurpose::Parameters) => {
@@ -126,12 +130,16 @@ impl Session {
                 }
                 true
             }
-            Some(PasskeysPurpose::LoginConfig) => true,
+            Some(PasskeysPurpose::LoginConfig) => {
+                passkeys.login.config.fail(login_error_text(err));
+                true
+            }
             Some(PasskeysPurpose::LoginParameters | PasskeysPurpose::CheckLogin) => {
                 // tdesktop `FinishPasskeyLogin`'s fail: forget the options
-                // and show the server's error type.
+                // and show the server's error type. Only the request the
+                // sign-in waits for fails it.
                 crate::webauthn::log(&format!("sign-in step failed: {}", err.code));
-                passkeys.login.fail(login_error_text(err));
+                passkeys.login.fail_request(id, login_error_text(err));
                 true
             }
             None => false,

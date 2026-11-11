@@ -254,7 +254,7 @@ impl Session {
                 ))) => self.apply_passkey_parameters(pending.map(|p| p.id), &text),
                 Some(RequestPurpose::Settings(SettingsPurpose::Passkeys(
                     crate::passkeys::PasskeysPurpose::LoginParameters,
-                ))) => self.apply_passkey_login_parameters(&text),
+                ))) => self.apply_passkey_login_parameters(pending.map(|p| p.id), &text),
                 Some(RequestPurpose::Bots(purpose @ BotsPurpose::GetBotEditText { .. })) => {
                     self.apply_owned_bot_text(purpose, text, pending);
                 }

@@ -3,7 +3,7 @@
 //! feature for gpui-kit's test support). No security key or account is
 //! touched: the sheets are shown without a worker and its events are fed
 //! by hand.
-use super::super::passkey_ceremony::CeremonySheet;
+use super::super::passkey_ceremony::{CeremonySheet, CeremonyUi};
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -47,7 +47,11 @@ fn shown_dialog(shell: &Entity<QuillShell>, vcx: &mut VisualTestContext) -> Opti
 
 fn sheet(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<CeremonySheet> {
     app.read_with(vcx, |app, _| {
-        app.privacy.passkeys.ceremony.as_ref().map(|ui| ui.sheet)
+        app.privacy
+            .passkeys
+            .ceremony
+            .as_ref()
+            .map(CeremonyUi::sheet)
     })
 }
 

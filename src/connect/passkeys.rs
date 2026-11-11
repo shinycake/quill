@@ -4,8 +4,8 @@
 use super::*;
 use crate::ids::RequestId;
 use crate::passkeys::{
-    PasskeyAdd, PasskeysPurpose, add_login_passkey, get_login_passkeys, get_passkey_parameters,
-    remove_login_passkey,
+    PasskeyAdd, PasskeysPurpose, Removal, add_login_passkey, get_login_passkeys,
+    get_passkey_parameters, remove_login_passkey,
 };
 use crate::state::{RequestPurpose, SettingsPurpose};
 use crate::webauthn::Registration;
@@ -46,9 +46,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Only a look that went out counts: a failed send leaves the list
         // stale and the throttle open for the next try, and the answer
         // (not the send) clears the stale mark.
-        let state = &mut self.session.settings.passkeys;
-        state.requested_at = Some(Instant::now());
-        state.error = None;
+        self.session.settings.passkeys.list_asked(Instant::now());
         Ok(Some(sent))
     }
 
@@ -62,14 +60,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(purpose(PasskeysPurpose::Remove), None);
+        let sent = self.send_json_request(extra, &remove_login_passkey(extra, passkey_id))?;
+        // Only a removal that went out is waited for.
         let state = &mut self.session.settings.passkeys;
-        state.removing = Some(passkey_id.to_string());
+        state.removing = Some(Removal {
+            passkey_id: passkey_id.to_string(),
+            request: sent,
+        });
         state.error = None;
-        let sent = self.send_json_request(extra, &remove_login_passkey(extra, passkey_id));
-        if sent.is_err() {
-            self.session.settings.passkeys.removing = None;
-        }
-        sent
+        Ok(sent)
     }
 
     /// "Create Passkey" (tdesktop `Passkeys::initRegistration`): the
@@ -149,7 +148,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// it stale, and ask for the software icons nobody has resolved yet.
     pub(crate) fn after_passkeys_ingest(&mut self) {
         self.maybe_request_login_config();
-        if self.session.settings.passkeys.stale {
+        self.drop_lost_passkey_login();
+        if self.session.settings.passkeys.is_stale() {
             let _ = self.request_passkeys();
         }
         let _ = self.maybe_resolve_passkey_icons();
