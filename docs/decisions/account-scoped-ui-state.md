@@ -8078,3 +8078,19 @@ profile_tabs, ton_wallet}.rs`, `connect/core/{mod, pumps}.rs`,
   id inside the shared `ListOp`, used by other lists), 02-050 and 02-096
   (whole-dialog enums over the send-gift and hub dialogs; no bug beyond what
   is listed above).
+
+### Sweep fixes (r2-03b)
+
+Round 2, the entries left in the files r2-03 touched
+(`connect/{call_screen, gift_manage, premium_hub, ton_wallet}.rs`,
+`connect/core/mod.rs`, `connect/group_calls/live_story.rs`).
+
+| id | result |
+|---|---|
+| 02-014 | What Telegram was told about a group share's pause is `GroupScreenShare::Sharing { paused }`; `ActiveGroupCall::screen_share_paused` is gone. `ActiveScreen::paused` stays: it is the capture's own state (the window is hidden), also used by 1:1 calls that have no pause on the server; the told mark is written only from the edge that sends and its revert. |
+| 02-013, 02-015, 02-016, 02-018, 02-029, 02-033, 02-034, 02-035, 02-045, 05-030, 02-046, 02-067, 02-068, 02-074, 02-087, 02-108, 07-013 | Already fixed by r2-03 (see its entry); each re-read against the current code. |
+| 02-017 | The 10 s engine wait was already in `next_deadline`. `CallAudio::until_reopen` now reports the level tap's 5 s reopen too; it is `None` once the wait is over, so a failed tap that no call wants cannot spin the loop. |
+| 02-048 | `ListOp<K>` carries the kind of the change in flight (`Mutating(request, kind)`); the hub's is `ListOp<GiftMutation>` and `Delete(id)` rides in it. `GiftManageState::deleting` is gone; `changed(request)` gives the kind only to the change that is in flight, so a late answer of another request deletes nothing. |
+| 02-049 | `Session::restart_gifts_list(collection)` resets the hub's list and the per-list management state (`show_collection`) together; opening an owner and switching tabs both call it. |
+| 02-050 | A `sendGift` out keeps its selected gift when the box closes, so reopening for the same recipient shows that send (the box's `open`, the recipient and the `SendStage` are separate facts by design: the answer of a closed box becomes a notice). |
+| 02-096 | `gifts_open` is gone (the dialog is open while `gifts_owner` is set); `stars_open` and `tx_selected` are one `StarsBox { Closed, List, Details(id) }` whose selection cannot outlive the box. |

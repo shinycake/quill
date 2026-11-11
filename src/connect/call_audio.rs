@@ -125,7 +125,9 @@ impl CallAudio {
             return None;
         };
         let waited = now.saturating_duration_since(*at);
-        (waited < REOPEN_AFTER).then(|| REOPEN_AFTER - waited)
+        REOPEN_AFTER
+            .checked_sub(waited)
+            .filter(|left| !left.is_zero())
     }
 
     /// The latest level and whether you count as speaking.

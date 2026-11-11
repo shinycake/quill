@@ -87,7 +87,8 @@ fn gift_mutation_ok_marks_the_list_stale_and_errors_release_the_lock() {
         RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { saved: false }),
         None,
     );
-    session.payments.hub.gifts_op = crate::state::fetch::ListOp::Mutating(extra, Default::default());
+    session.payments.hub.gifts_op =
+        crate::state::fetch::ListOp::Mutating(extra, Default::default());
     apply_json(
         &mut session,
         &seq,
@@ -104,7 +105,8 @@ fn gift_mutation_ok_marks_the_list_stale_and_errors_release_the_lock() {
         .gift_view
         .confirm_convert(Some("g1".into()));
     let extra = session.request(RequestPurpose::SellGift, None);
-    session.payments.hub.gifts_op = crate::state::fetch::ListOp::Mutating(extra, Default::default());
+    session.payments.hub.gifts_op =
+        crate::state::fetch::ListOp::Mutating(extra, Default::default());
     apply_json(
         &mut session,
         &seq,

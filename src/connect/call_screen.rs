@@ -119,6 +119,8 @@ struct ActiveScreen {
     sender: Arc<dyn ExternalFrameSender>,
     preview: Arc<PreviewSlot>,
     last_preview: u64,
+    /// The shared window is hidden: frames stop. What a group call told
+    /// Telegram is `GroupScreenShare::Sharing { paused }`.
     paused: bool,
     /// The system audio shared with it, while running.
     audio: Option<SharedAudio>,
