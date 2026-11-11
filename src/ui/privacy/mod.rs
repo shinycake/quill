@@ -821,8 +821,6 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
             keep_chats_from_folders_archived: true,
         },
     ));
-    session.calls.privacy_allow_calls = Some(PrivacyWho::Contacts);
-    session.calls.privacy_p2p = Some(PrivacyWho::Everybody);
     session.settings.blocked_senders = Fetch::Ready(vec![63]);
     session.settings.blocked_total = 1;
     session.users_state.contacts = quill::state::fetch::Fetch::Ready(vec![61, 62, 63]);
