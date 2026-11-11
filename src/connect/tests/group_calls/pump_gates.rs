@@ -47,8 +47,8 @@ fn a_rejoin_subscribes_its_new_instance_with_nothing_changed() {
     let (dir, mut driver, _recorder, handle, sink, seq) = in_call_with_a_camera();
     let syncs = handle.group_video_syncs().len();
     let call = driver.session.calls.group_call_mut(555).expect("tracked");
-    call.transport_ready = false;
-    call.join_payload = "rejoin-answer".to_string();
+    call.transport.reset();
+    call.transport.store_answer("rejoin-answer".to_string());
 
     ingest_call_json(&mut driver, &seq, &sink, UNRELATED);
 

@@ -22,13 +22,66 @@ use cpal::{
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+/// Where the microphone stands. The stream's error callback runs on the
+/// audio thread and moves it to `Failed`; the owner starts and stops it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Health {
+    Stopped,
+    Running,
+    /// The stream ended (device unplugged, …); dropouts and reroutes only
+    /// go to the debug log. Kept until the next start.
+    Failed(String),
+}
+
+/// A [`Health`] shared between the microphone and its stream's callback,
+/// and with an owner that hands the microphone to another thread.
+#[derive(Debug, Clone)]
+pub struct MicHealth(Arc<Mutex<Health>>);
+
+impl MicHealth {
+    fn new() -> Self {
+        Self(Arc::new(Mutex::new(Health::Stopped)))
+    }
+
+    /// The error that stopped the stream, if any.
+    pub fn error(&self) -> Option<String> {
+        match &*self.0.lock_or_recover() {
+            Health::Failed(text) => Some(text.clone()),
+            Health::Stopped | Health::Running => None,
+        }
+    }
+
+    /// A new start forgets the last failure.
+    fn reset(&self) {
+        *self.0.lock_or_recover() = Health::Stopped;
+    }
+
+    fn running(&self) {
+        *self.0.lock_or_recover() = Health::Running;
+    }
+
+    /// The first failure stays.
+    fn failed(&self, text: &str) {
+        let mut health = self.0.lock_or_recover();
+        if !matches!(*health, Health::Failed(_)) {
+            *health = Health::Failed(text.to_string());
+        }
+    }
+
+    fn stopped(&self) {
+        let mut health = self.0.lock_or_recover();
+        if *health == Health::Running {
+            *health = Health::Stopped;
+        }
+    }
+}
+
 /// A cpal microphone feeding a [`FrameSink`].
 pub struct CpalMic {
     controls: Arc<MicControls>,
+    /// Kept alive while the microphone runs; dropping it closes the device.
     stream: Option<Stream>,
-    /// Set by the stream's error callback when the stream ends (device
-    /// unplugged, …); dropouts and reroutes only go to the debug log.
-    error: Arc<Mutex<Option<String>>>,
+    health: MicHealth,
 }
 
 impl CpalMic {
@@ -36,19 +89,19 @@ impl CpalMic {
         Self {
             controls,
             stream: None,
-            error: Arc::new(Mutex::new(None)),
+            health: MicHealth::new(),
         }
     }
 
     /// The error that stopped the stream, if any.
     pub fn error(&self) -> Option<String> {
-        self.error.lock_or_recover().clone()
+        self.health.error()
     }
 
-    /// Where the stream reports that error, for an owner that hands the
+    /// Where the stream reports its health, for an owner that hands the
     /// microphone to another thread.
-    pub fn error_slot(&self) -> Arc<Mutex<Option<String>>> {
-        self.error.clone()
+    pub fn health(&self) -> MicHealth {
+        self.health.clone()
     }
 }
 
@@ -59,7 +112,7 @@ impl MicCapture for CpalMic {
         sink: FrameSink<AudioFrame>,
     ) -> Result<(), CaptureError> {
         self.stop();
-        *self.error.lock_or_recover() = None;
+        self.health.reset();
         let host = cpal::default_host();
         let device = find_input(&host, device).ok_or(CaptureError::NoDevice)?;
         let supported = input_config(&device)?;
@@ -73,7 +126,7 @@ impl MicCapture for CpalMic {
             rate,
         };
         let on_error = {
-            let error = self.error.clone();
+            let health = self.health.clone();
             // An xrun or a reroute to the new default device leaves the
             // stream running; failing the call microphone for one would
             // stop it and reopen it seconds later.
@@ -83,7 +136,7 @@ impl MicCapture for CpalMic {
                     return;
                 };
                 let text = format!("Microphone stopped: {err}");
-                error.lock_or_recover().get_or_insert_with(|| text.clone());
+                health.failed(&text);
                 let failure = if crate::voice_input::is_permission_error(&err) {
                     CaptureError::Permission(crate::voice_input::friendly_error(&err))
                 } else {
@@ -105,12 +158,14 @@ impl MicCapture for CpalMic {
         }?;
         stream.play().map_err(|err| classify(&err))?;
         self.stream = Some(stream);
+        self.health.running();
         Ok(())
     }
 
     fn stop(&mut self) {
         // Dropping the stream closes the device.
         self.stream = None;
+        self.health.stopped();
     }
 }
 

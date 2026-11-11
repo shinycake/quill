@@ -64,7 +64,7 @@ impl QuillApp {
     ) {
         let query = self
             .session()
-            .and_then(|session| session.groups.event_log_queries.get(&chat_id.0).cloned())
+            .map(|session| session.groups.event_log_query(chat_id.0).to_string())
             .unwrap_or_default();
         if let Some(search) = self.admin.event_log_search.as_mut() {
             search.shows = Some(chat_id);
@@ -137,7 +137,7 @@ impl QuillApp {
             .unwrap_or_default();
         let current = self
             .session()
-            .and_then(|session| session.groups.event_log_queries.get(&chat_id.0).cloned())
+            .map(|session| session.groups.event_log_query(chat_id.0).to_string())
             .unwrap_or_default();
         if query == current {
             return;
@@ -296,17 +296,9 @@ impl QuillApp {
             return None;
         }
         let groups = &session.groups;
-        let fetch = groups.event_logs.get(&chat_id.0).cloned();
-        let query = groups
-            .event_log_queries
-            .get(&chat_id.0)
-            .cloned()
-            .unwrap_or_default();
-        let filtered = groups.event_log_filters.contains_key(&chat_id.0)
-            || groups
-                .event_log_users
-                .get(&chat_id.0)
-                .is_some_and(|users| !users.is_empty());
+        let fetch = groups.event_log_fetch(chat_id.0).cloned();
+        let query = groups.event_log_query(chat_id.0).to_string();
+        let filtered = groups.event_log_filtered(chat_id.0);
         let is_channel = session
             .chats
             .get(&chat_id.0)
@@ -358,7 +350,7 @@ impl QuillApp {
         );
 
         let content = match fetch {
-            None | Some(ChatEventLogFetch::Loading) => {
+            None | Some(ChatEventLogFetch::Idle | ChatEventLogFetch::Loading) => {
                 self.event_log_reset_list();
                 self.event_log_centered(
                     div()

@@ -35,10 +35,18 @@ pub enum RichHtmlOutcome {
     Cancelled,
 }
 
+/// Where an export stands: the worker is running, or it left how it ended.
+/// The worker publishes `Done` once; a worker that dies leaves `Done(Failed)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RichHtmlStage {
+    Running,
+    Done(RichHtmlOutcome),
+}
+
 pub struct RichHtmlExport {
     pub link: WorkerLink,
     pub request: RichHtmlRequest,
-    outcome: Arc<Mutex<Option<RichHtmlOutcome>>>,
+    stage: Arc<Mutex<RichHtmlStage>>,
 }
 
 impl RichHtmlExport {
@@ -50,11 +58,11 @@ impl RichHtmlExport {
         leftovers: Option<crate::export::leftovers::Leftovers>,
     ) -> io::Result<Self> {
         let (link, mut tdlib) = WorkerLink::pair(leftovers);
-        let outcome = Arc::new(Mutex::new(None));
-        let worker_outcome = outcome.clone();
+        let stage = Arc::new(Mutex::new(RichHtmlStage::Running));
+        let worker_stage = stage.clone();
         let worker_request = request.clone();
         crate::thread_guard::spawn_guarded("quill-rich-html", move || {
-            let slot = OutcomeSlot(worker_outcome);
+            let slot = OutcomeSlot(worker_stage);
             let date = |unix: i64| {
                 let time = crate::local_time::civil_local(unix);
                 format!(
@@ -74,13 +82,16 @@ impl RichHtmlExport {
         Ok(Self {
             link,
             request,
-            outcome,
+            stage,
         })
     }
 
     /// How it ended, once it has.
     pub fn outcome(&self) -> Option<RichHtmlOutcome> {
-        self.outcome.lock_or_recover().clone()
+        match &*self.stage.lock_or_recover() {
+            RichHtmlStage::Running => None,
+            RichHtmlStage::Done(outcome) => Some(outcome.clone()),
+        }
     }
 
     /// Whether this export saves `message_id` of `chat_id`.
@@ -93,31 +104,33 @@ impl RichHtmlExport {
 /// which only a panic does (`spawn_guarded` catches it), it records
 /// `Failed`, so the export never looks like it is still running and the
 /// same message can be saved again.
-struct OutcomeSlot(Arc<Mutex<Option<RichHtmlOutcome>>>);
+struct OutcomeSlot(Arc<Mutex<RichHtmlStage>>);
 
 impl OutcomeSlot {
     fn set(self, outcome: RichHtmlOutcome) {
-        *self.0.lock_or_recover() = Some(outcome);
+        *self.0.lock_or_recover() = RichHtmlStage::Done(outcome);
     }
 }
 
 impl Drop for OutcomeSlot {
     fn drop(&mut self) {
-        self.0
-            .lock_or_recover()
-            .get_or_insert(RichHtmlOutcome::Failed);
+        let mut stage = self.0.lock_or_recover();
+        if *stage == RichHtmlStage::Running {
+            *stage = RichHtmlStage::Done(RichHtmlOutcome::Failed);
+        }
+        drop(stage);
         crate::wake::UPDATES.poke();
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{OutcomeSlot, RichHtmlOutcome};
+    use super::{OutcomeSlot, RichHtmlOutcome, RichHtmlStage};
     use std::sync::{Arc, Mutex};
 
     #[test]
     fn a_panicking_worker_still_ends_as_failed() {
-        let outcome = Arc::new(Mutex::new(None));
+        let outcome = Arc::new(Mutex::new(RichHtmlStage::Running));
         let slot = OutcomeSlot(outcome.clone());
         let joined = std::thread::spawn(move || {
             let _slot = slot;
@@ -125,13 +138,19 @@ mod tests {
         })
         .join();
         assert!(joined.is_err());
-        assert_eq!(*outcome.lock().unwrap(), Some(RichHtmlOutcome::Failed));
+        assert_eq!(
+            *outcome.lock().unwrap(),
+            RichHtmlStage::Done(RichHtmlOutcome::Failed)
+        );
     }
 
     #[test]
     fn a_set_outcome_is_kept() {
-        let outcome = Arc::new(Mutex::new(None));
+        let outcome = Arc::new(Mutex::new(RichHtmlStage::Running));
         OutcomeSlot(outcome.clone()).set(RichHtmlOutcome::Cancelled);
-        assert_eq!(*outcome.lock().unwrap(), Some(RichHtmlOutcome::Cancelled));
+        assert_eq!(
+            *outcome.lock().unwrap(),
+            RichHtmlStage::Done(RichHtmlOutcome::Cancelled)
+        );
     }
 }

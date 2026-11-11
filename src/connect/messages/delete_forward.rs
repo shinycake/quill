@@ -175,14 +175,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             from_topic: draft.from_topic,
             requested: draft.message_ids.len(),
         };
-        // Several destinations (share box) are in flight at once: the first
-        // takes the main slot, the rest queue behind it.
-        let queued = self.session.messages.in_flight_forward.is_some();
-        if queued {
-            self.session.messages.queued_forward_flights.push(flight);
-        } else {
-            self.session.messages.in_flight_forward = Some(flight);
-        }
+        // Several destinations (share box) are in flight at once.
+        self.session.messages.forward_flights.push(flight);
         // The topic was bound when the drop picked it, not when Send runs.
         let json = forward_messages_to_topic(
             extra,
@@ -197,14 +191,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                if queued {
-                    self.session
-                        .messages
-                        .queued_forward_flights
-                        .retain(|f| f.extra != extra);
-                } else {
-                    self.session.messages.in_flight_forward = None;
-                }
+                self.session
+                    .messages
+                    .forward_flights
+                    .retain(|f| f.extra != extra);
                 Err(err)
             }
         }

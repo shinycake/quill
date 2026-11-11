@@ -295,10 +295,10 @@ fn without_a_folder_of_its_own_no_carrier_opens() {
     std::fs::remove_file(&root).unwrap();
     // Not tried again on every open: the next claim waits out the backoff,
     // and an open before then is refused although a claim would now work.
-    assert!(host.claim_after >= Some(failed_at + CLAIM_BACKOFF));
-    host.claim_after = Some(Instant::now() + LONGER_THAN_ANY_TEST);
+    assert!(matches!(host.folder, Folder::RetryAfter(after) if after >= failed_at + CLAIM_BACKOFF));
+    host.folder = Folder::RetryAfter(Instant::now() + LONGER_THAN_ANY_TEST);
     assert_eq!(host.open(&request(6)), Err(CarrierError::Terminated));
-    host.claim_after = Some(Instant::now());
+    host.folder = Folder::RetryAfter(Instant::now());
     assert_eq!(host.open(&request(6)), Ok(()));
     let folder = host.data_folder().map(Path::to_path_buf).unwrap();
     assert!(folder.starts_with(&root) && folder.is_dir());

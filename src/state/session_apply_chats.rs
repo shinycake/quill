@@ -435,7 +435,7 @@ impl Session {
                         // The list is still on its way: its answer is the
                         // whole list, this link included once the server
                         // has it. Nothing is invented from one entry.
-                        InviteLinkFetch::Loading => {}
+                        InviteLinkFetch::Loading(_) => {}
                         // A failed list is dropped so the next fetch asks
                         // again, instead of showing one link as the list.
                         InviteLinkFetch::Failed(_) => {

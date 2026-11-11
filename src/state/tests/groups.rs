@@ -164,11 +164,11 @@ fn a_list_error_does_not_cover_a_loaded_list() {
         session.groups.invite_links.get(&13),
         Some(InviteLinkFetch::Loaded(_))
     ));
+    let asked = session.request(RequestPurpose::GetChatInviteLinks, Some(ChatId(13)));
     session
         .groups
         .invite_links
-        .insert(13, InviteLinkFetch::Loading);
-    let asked = session.request(RequestPurpose::GetChatInviteLinks, Some(ChatId(13)));
+        .insert(13, InviteLinkFetch::Loading(asked));
     apply_json(&mut session, &seq, &sink, &error(asked));
     assert!(matches!(
         session.groups.invite_links.get(&13),
@@ -862,7 +862,13 @@ fn a_join_request_hidden_by_a_search_does_not_bump_the_total() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatJoinRequests, Some(ChatId(13)));
-    session.groups.join_request_queries.insert(13, "x".into());
+    session.groups.join_requests.insert(
+        13,
+        JoinRequestFetch::Loading {
+            query: "x".into(),
+            request: extra,
+        },
+    );
     apply_json(
         &mut session,
         &seq,

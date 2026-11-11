@@ -78,8 +78,7 @@ impl QuillApp {
         self.open_box(DialogKind::Ownership);
         if let Some(live) = self.live.as_mut() {
             let session = &mut live.driver.session;
-            session.groups.ownership.transfer_error = None;
-            session.groups.ownership.transferred = None;
+            session.groups.ownership.transfer.forget_settled();
             // Asked once per dialog so a stale answer never decides.
             session
                 .groups
@@ -143,7 +142,12 @@ impl QuillApp {
             dialog.stage = stage;
         }
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.groups.ownership.transfer_error = None;
+            live.driver
+                .session
+                .groups
+                .ownership
+                .transfer
+                .forget_settled();
         }
         cx.notify();
     }
@@ -205,7 +209,7 @@ impl QuillApp {
         let Some(done) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.groups.ownership.transferred.take())
+            .and_then(|live| live.driver.session.groups.ownership.transfer.take_done())
         else {
             return false;
         };
@@ -430,11 +434,13 @@ impl QuillApp {
                     let name = this.contact_display_name(user_id);
                     let back = OwnershipStage::Pick { leave_after };
                     let blocked = ownership
-                        .can_transfer
+                        .check
+                        .data()
+                        .copied()
                         .and_then(transfer_block_reason)
-                        .or_else(|| ownership.check_error.clone());
-                    let ready = ownership.can_transfer == Some(CanTransferOwnershipResult::Ok);
-                    let in_flight = ownership.transfer_in_flight.is_some();
+                        .or_else(|| ownership.check.error().map(str::to_string));
+                    let ready = ownership.check.data() == Some(&CanTransferOwnershipResult::Ok);
+                    let in_flight = ownership.transfer.sending().is_some();
                     if let Some(reason) = blocked {
                         body = body
                             .child(
@@ -477,7 +483,7 @@ impl QuillApp {
                                     .content_type(InputContentType::Password),
                             );
                     }
-                    if let Some(error) = ownership.transfer_error.clone() {
+                    if let Some(error) = ownership.transfer.error().map(str::to_string) {
                         body =
                             body.child(div().text_sm().text_color(cx.theme().danger).child(error));
                     }

@@ -71,7 +71,7 @@ impl Fixture {
     }
 
     fn shown_events(&self) -> Option<Vec<i64>> {
-        match self.driver.session.groups.event_logs.get(&CHANNEL.0)? {
+        match self.driver.session.groups.event_log_fetch(CHANNEL.0)? {
             ChatEventLogFetch::Loaded(page) => Some(page.events.iter().map(|e| e.id).collect()),
             _ => None,
         }
