@@ -117,6 +117,10 @@ fn join_as_answer_fills_options_and_preselects_the_saved_default() {
         }),
         None,
     );
+    if let Some(call) = session.calls.active_group_call.as_mut() {
+        call.join_as_options.begin();
+        call.join_as_options.sent(extra);
+    }
     apply_json(
         &mut session,
         &seq,
@@ -603,6 +607,9 @@ fn join_as_failure_leaves_the_picker_out_and_is_not_asked_again() {
         }),
         None,
     );
+    if let Some(call) = session.calls.active_group_call.as_mut() {
+        call.join_as_options.sent(extra);
+    }
     apply_json(
         &mut session,
         &seq,

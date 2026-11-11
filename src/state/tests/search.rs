@@ -747,6 +747,9 @@ fn pinned_list_fills_newest_first_and_drops_unpins() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetPinnedMessages, Some(ChatId(16)));
+    let pinned = session.messages.pinned_messages.entry(16).or_default();
+    pinned.begin();
+    pinned.sent(extra);
     apply_json(
         &mut session,
         &seq,

@@ -580,6 +580,9 @@ fn folder_link_chats_are_cached_per_folder() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request_for_folder(RequestPurpose::GetChatsForFolderInviteLink, 3);
+    let share = session.chat_list.folder_shares.entry(3).or_default();
+    share.chats.begin();
+    share.chats.sent(extra);
     apply_json(
         &mut session,
         &seq,

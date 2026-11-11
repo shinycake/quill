@@ -200,6 +200,8 @@ fn sound_list_refetch_prunes_file_ids() {
     session.settings.sound_file_ids.insert(91, 7); // dropped from the list
     session.settings.sound_file_ids.insert(92, 8); // still saved
     let extra = session.request(RequestPurpose::GetSavedNotificationSounds, None);
+    session.settings.saved_sounds.begin();
+    session.settings.saved_sounds.sent(extra);
     let sound_file = r#"{"@type":"file","id":92,"size":12,"expected_size":12,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":12}}"#;
     apply_json(
         &mut session,

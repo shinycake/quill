@@ -395,6 +395,8 @@ fn story_manage_state_transitions() {
     assert!(error.contains("Story update failed"), "{error}");
 
     let extra = session.request(RequestPurpose::GetChatsToPostStories, None);
+    session.stories.post_as.begin();
+    session.stories.post_as.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -567,6 +569,7 @@ fn set_account_ttl_ok_stores_confirmed_days() {
         RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days: 365 }),
         None,
     );
+    session.settings.account_ttl.sent(extra);
     apply_json(
         &mut session,
         &seq,

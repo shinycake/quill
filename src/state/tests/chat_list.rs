@@ -492,6 +492,13 @@ fn folder_chats_to_leave_cached_per_folder() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request_for_folder(RequestPurpose::GetChatFolderChatsToLeave, 3);
+    let to_leave = session
+        .chat_list
+        .folder_chats_to_leave
+        .entry(3)
+        .or_default();
+    to_leave.begin();
+    to_leave.sent(extra);
     let json = format!(
         r#"{{"@type":"chats","@extra":"{}","total_count":2,"chat_ids":[5,6]}}"#,
         extra.0
