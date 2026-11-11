@@ -246,11 +246,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let stage = EditorStage::reading();
-        let serial = match stage {
-            EditorStage::Reading { serial } => serial,
-            _ => 0,
-        };
+        let (stage, serial) = EditorStage::reading();
         self.composer_ui.send_box.video_editor = Some(VideoEditorDialog {
             target,
             source: source.clone(),

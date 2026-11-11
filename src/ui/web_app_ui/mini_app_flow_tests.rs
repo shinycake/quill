@@ -74,7 +74,6 @@ fn open_window(app: &mut QuillApp, cx: &mut gpui_kit::App) -> mpsc::Receiver<Hos
         popups: Default::default(),
         popup_seq: 0,
         write_access: crate::ui::web_app_ui::launch_flow::WriteAccess::Idle,
-        data_sent: crate::ui::web_app_ui::launch_flow::DataSend::Unsent,
         privacy_policy_url: None,
         in_attachment_menu: false,
         emoji: Default::default(),
@@ -344,5 +343,46 @@ fn the_mini_app_poll_keeps_the_window_its_flow_started_in(cx: &mut TestAppContex
             app.mini_apps.from_window, None,
             "a flow the main window started"
         );
+    });
+}
+
+/// A write-access answer moves the window only when it is the answer to the
+/// request the window waits on; the consent popup then leads to a second
+/// request with its own answer.
+#[gpui_kit::test]
+fn a_write_access_answer_must_be_for_the_request_the_window_waits_on(cx: &mut TestAppContext) {
+    use crate::ui::web_app_ui::launch_flow::WriteAccess;
+    use quill::ids::RequestId;
+    use quill::state::{WriteAccessResult, WriteAnswer};
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let received = open_window(app, cx);
+        let state = |app: &QuillApp| app.mini_apps.window.as_ref().map(|w| w.write_access);
+        app.with_window(|w| w.write_access = WriteAccess::Checking(RequestId(5)));
+        // Another request's answer, and another bot's: dropped.
+        let other = WriteAnswer::new(RequestId(6), BOT, WriteAccessResult::Denied);
+        app.finish_write_access(other, cx);
+        let bot = WriteAnswer::new(RequestId(5), BOT + 1, WriteAccessResult::Denied);
+        app.finish_write_access(bot, cx);
+        assert_eq!(state(app), Some(WriteAccess::Checking(RequestId(5))));
+        // Its own answer asks the person.
+        let consent = WriteAnswer::new(RequestId(5), BOT, WriteAccessResult::NeedsConsent);
+        app.finish_write_access(consent, cx);
+        assert_eq!(state(app), Some(WriteAccess::Asking));
+        prompt(&received);
+        // A late answer does nothing while the person decides.
+        app.finish_write_access(consent, cx);
+        assert_eq!(state(app), Some(WriteAccess::Asking));
+        // The grant being asked for answers only to its own request.
+        app.with_window(|w| w.write_access = WriteAccess::Allowing(RequestId(7)));
+        let late = WriteAnswer::new(RequestId(5), BOT, WriteAccessResult::Granted);
+        app.finish_write_access(late, cx);
+        assert_eq!(state(app), Some(WriteAccess::Allowing(RequestId(7))));
+        let granted = WriteAnswer::new(RequestId(7), BOT, WriteAccessResult::Granted);
+        app.finish_write_access(granted, cx);
+        assert_eq!(state(app), Some(WriteAccess::Idle));
+        let (event, data) = reply(&received);
+        assert_eq!(event, "write_access_requested");
+        assert_eq!(data["status"], "allowed");
     });
 }

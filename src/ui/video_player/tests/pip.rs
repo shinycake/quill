@@ -353,3 +353,34 @@ fn view_player(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<Vi
     let (_, view) = pip_of(app, vcx);
     pip_player(&view, vcx)
 }
+
+#[gpui_kit::test]
+fn opening_the_window_clears_the_now_playing_entry_of_the_viewer_clip(cx: &mut TestAppContext) {
+    let script = Rc::new(RefCell::new(Script {
+        ready: true,
+        picture: true,
+        ..Script::default()
+    }));
+    // The entry is seeded as the clip is handed over: the viewer's own
+    // tick went with the player, so the hand-over clears it.
+    let (app, mut vcx, _player) = open_pip_on(
+        cx,
+        &script,
+        |_| {
+            quill::media_session::seed_entry(quill::media_session::NowPlaying {
+                title: "clip".into(),
+                artist: String::new(),
+                duration_secs: 10.0,
+                position_secs: 0.0,
+                playing: true,
+                rate: 1.0,
+                can_next: false,
+                can_previous: false,
+            })
+        },
+        MessageId(204),
+        0,
+    );
+    let _ = (&app, &mut vcx);
+    assert!(!quill::media_session::shows_entry());
+}

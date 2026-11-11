@@ -41,7 +41,7 @@ pub(crate) use open::open_pip_window;
 #[cfg(feature = "demo-capture")]
 pub(crate) use place::tests::take_frames;
 
-use super::super::{PlayState, VideoPlayer};
+use super::super::{PlayState, VideoPlayer, WeakVideoPlayer};
 use super::WaitingGate;
 use gpui_kit::component::Root;
 use gpui_kit::component::slider::{SliderEvent, SliderState, SliderValue};
@@ -180,14 +180,6 @@ enum LineDrag {
     Volume,
 }
 
-/// Whether the owner was told the live feed was left
-/// (`LivePip::feed_left`), once per player.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum FeedLeft {
-    Unasked,
-    Told,
-}
-
 /// The window sliding to a snap position (`moveAnimated`).
 #[derive(Clone, Copy, Debug)]
 struct Slide {
@@ -228,8 +220,10 @@ pub(crate) struct VideoPip {
     last_volume: f32,
     waiting: WaitingGate,
     live: Option<LivePip>,
-    /// The owner was told the live feed was left (`LivePip::feed_left`).
-    feed_left: FeedLeft,
+    /// The player whose left feed the owner was told about
+    /// (`LivePip::feed_left`): once per player, so a swapped-in player is a
+    /// different one and is told again without anything resetting this.
+    told_for: Option<WeakVideoPlayer>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -332,7 +326,7 @@ impl VideoPip {
             last_volume: if last_volume > 0.0 { last_volume } else { 1.0 },
             waiting: WaitingGate::default(),
             live,
-            feed_left: FeedLeft::Unasked,
+            told_for: None,
             _subscriptions: subscriptions,
         }
     }
@@ -364,7 +358,6 @@ impl VideoPip {
         player.clear_watchers();
         player.watch(cx.entity_id());
         self.player = Some(player);
-        self.feed_left = FeedLeft::Unasked;
         cx.notify();
         Some(old)
     }

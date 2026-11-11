@@ -84,7 +84,7 @@ impl QuillApp {
         // opened again from the chat): the same player goes on
         // (tdesktop `continueStreaming`).
         if let Some(player) = self.take_pip_player_for(item, cx) {
-            self.adopt_viewer_player(item, path, player, cx);
+            self.adopt_viewer_player(item, player, cx);
             return;
         }
         // A clip with sound ends Picture-in-Picture (tdesktop

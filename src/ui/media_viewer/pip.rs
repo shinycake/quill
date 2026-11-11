@@ -62,6 +62,11 @@ impl QuillApp {
         let Some(player) = self.viewer.clip.take_player() else {
             return;
         };
+        // The viewer's media-session tick went with the player; the window
+        // publishes nothing, so a stale Now Playing entry would stay.
+        if self.active_playback_id().is_none() {
+            quill::media_session::publish(None);
+        }
         let clip = ClipRef {
             message_id: item.message_id,
             offset: self.viewer.state.current_offset(),
@@ -260,7 +265,6 @@ impl QuillApp {
     pub(super) fn adopt_viewer_player(
         &mut self,
         item: &MediaViewerItem,
-        _path: &std::path::Path,
         player: VideoPlayer,
         cx: &mut Context<Self>,
     ) {

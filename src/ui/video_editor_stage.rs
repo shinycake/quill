@@ -33,10 +33,10 @@ pub(super) enum EditorStage {
 }
 
 impl EditorStage {
-    pub(super) fn reading() -> Self {
-        Self::Reading {
-            serial: next_editor_serial(),
-        }
+    /// A probe starts: the stage and the serial its answer must carry.
+    pub(super) fn reading() -> (Self, u64) {
+        let serial = next_editor_serial();
+        (Self::Reading { serial }, serial)
     }
 }
 

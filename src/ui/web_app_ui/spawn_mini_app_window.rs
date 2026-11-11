@@ -121,7 +121,6 @@ impl QuillApp {
             popups: HashMap::new(),
             popup_seq: 0,
             write_access: launch_flow::WriteAccess::Idle,
-            data_sent: launch_flow::DataSend::Unsent,
             privacy_policy_url,
             in_attachment_menu,
             emoji: Default::default(),
@@ -267,8 +266,8 @@ impl QuillApp {
                 }
             }
         }
-        if let Some((bot_id, result)) = write_access {
-            self.finish_write_access(bot_id, result, cx);
+        if let Some(answer) = write_access {
+            self.finish_write_access(answer, cx);
         }
         for reply in custom_replies {
             if let Some(window) = self.mini_apps.window.as_mut() {
@@ -385,21 +384,20 @@ impl QuillApp {
         }
     }
 
-    pub(super) fn finish_write_access(
-        &mut self,
-        bot_id: i64,
-        result: WriteAccessResult,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn finish_write_access(&mut self, answer: WriteAnswer, cx: &mut Context<Self>) {
         let Some(window) = self.mini_apps.window.as_mut() else {
             return;
         };
-        if window.launch.bot_user_id != bot_id
-            || window.write_access != launch_flow::WriteAccess::Asking
-        {
+        // Only the answer to the request this window is waiting on counts.
+        let waiting = match window.write_access {
+            launch_flow::WriteAccess::Checking(id) | launch_flow::WriteAccess::Allowing(id) => id,
+            launch_flow::WriteAccess::Idle | launch_flow::WriteAccess::Asking => return,
+        };
+        if window.launch.bot_user_id != answer.bot_user_id || waiting != answer.request {
             return;
         }
-        match result {
+        let checking = matches!(window.write_access, launch_flow::WriteAccess::Checking(_));
+        match answer.result {
             WriteAccessResult::Allowed | WriteAccessResult::Granted => {
                 window.write_access = launch_flow::WriteAccess::Idle;
                 window.emit(BridgeReply::write_access_requested(true));
@@ -408,7 +406,13 @@ impl QuillApp {
                 window.write_access = launch_flow::WriteAccess::Idle;
                 window.emit(BridgeReply::write_access_requested(false));
             }
+            // Only a check can ask the person; a refused grant is a no.
+            WriteAccessResult::NeedsConsent if !checking => {
+                window.write_access = launch_flow::WriteAccess::Idle;
+                window.emit(BridgeReply::write_access_requested(false));
+            }
             WriteAccessResult::NeedsConsent => {
+                window.write_access = launch_flow::WriteAccess::Asking;
                 let name = window.launch.bot_name.clone();
                 window.show_popup(
                     PopupPurpose::WriteAccess,
@@ -553,14 +557,13 @@ impl QuillApp {
     }
 
     pub(super) fn handle_web_app_event(&mut self, event: WebAppEvent, cx: &mut Context<Self>) {
-        let Some((bot_id, bot_name, source, data_sent, waiting_write_access)) =
+        let Some((bot_id, bot_name, source, waiting_write_access)) =
             self.mini_apps.window.as_ref().map(|window| {
                 (
                     window.launch.bot_user_id,
                     window.launch.bot_name.clone(),
                     window.launch.source.clone(),
-                    window.data_sent == launch_flow::DataSend::Sent,
-                    window.write_access == launch_flow::WriteAccess::Asking,
+                    window.write_access != launch_flow::WriteAccess::Idle,
                 )
             })
         else {
@@ -571,10 +574,10 @@ impl QuillApp {
             WebAppEvent::Haptic => {}
             WebAppEvent::Close => self.close_mini_app_window(cx),
             WebAppEvent::DataSend { data } => {
-                if !source.allows_data_send() || data_sent {
+                // The window closes below, so an app sends once.
+                if !source.allows_data_send() {
                     return;
                 }
-                self.with_window(|window| window.data_sent = launch_flow::DataSend::Sent);
                 let button_text = match &source {
                     LaunchSource::KeyboardButton { button_text } => button_text.clone(),
                     _ => String::new(),
@@ -669,17 +672,16 @@ impl QuillApp {
                     });
                     return;
                 }
-                self.with_window(|window| window.write_access = launch_flow::WriteAccess::Asking);
                 let sent = self
                     .live
                     .as_mut()
                     .map(|live| live.driver.can_bot_send_messages(bot_id));
-                if !matches!(sent, Some(Ok(_))) {
-                    self.with_window(|window| {
-                        window.write_access = launch_flow::WriteAccess::Idle;
-                        window.emit(BridgeReply::write_access_requested(false));
-                    });
-                }
+                self.with_window(|window| match sent {
+                    Some(Ok(request)) => {
+                        window.write_access = launch_flow::WriteAccess::Checking(request)
+                    }
+                    _ => window.emit(BridgeReply::write_access_requested(false)),
+                });
             }
             WebAppEvent::RequestPhone => self.request_mini_app_phone(),
             WebAppEvent::RequestEmojiStatusAccess => self.request_emoji_status_access(cx),
@@ -828,12 +830,15 @@ impl QuillApp {
                                     .map(|live| live.driver.allow_bot_to_send_messages(bot_id))
                             })
                             .flatten();
-                        if !matches!(sent, Some(Ok(_))) {
-                            self.with_window(|window| {
+                        self.with_window(|window| match sent {
+                            Some(Ok(request)) => {
+                                window.write_access = launch_flow::WriteAccess::Allowing(request)
+                            }
+                            _ => {
                                 window.write_access = launch_flow::WriteAccess::Idle;
                                 window.emit(BridgeReply::write_access_requested(false));
-                            });
-                        }
+                            }
+                        });
                     }
                     PopupPurpose::Clipboard { req_id } => {
                         let text = (button == "allow")

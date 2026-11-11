@@ -223,7 +223,8 @@ impl CoverBubble {
     }
 
     /// The head was let go: the picture flies into the bubble, or the
-    /// bubble just shows with reduced motion.
+    /// bubble just shows with reduced motion, at full strength at once
+    /// (`Shown`, no ease-in).
     fn captured(&mut self, now: Instant, reduce_motion: bool) {
         *self = if reduce_motion {
             Self::Shown(now)

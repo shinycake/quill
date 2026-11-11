@@ -217,6 +217,15 @@ enum Handshake {
     Failed = 3,
 }
 
+/// What the encoder thread does to follow the capture's pause.
+#[cfg(feature = "ui")]
+enum PauseStep {
+    /// Flush the file so it can be played.
+    Flush,
+    /// Carry on encoding.
+    Resume,
+}
+
 #[cfg(feature = "ui")]
 impl Handshake {
     fn from_u8(value: u8) -> Self {
@@ -257,6 +266,31 @@ impl Control {
         if !self.advance(Handshake::PauseAsked, Handshake::Recording) {
             self.advance(Handshake::Flushed, Handshake::Recording);
         }
+    }
+
+    /// The encoder thread's side of the handshake, once per loop: follow
+    /// the capture into or out of a pause (`paused` is what the thread has
+    /// done so far), and answer a pause with `Flushed`. A resume and a new
+    /// pause inside one receive timeout leave the thread already paused
+    /// with the stage back at `PauseAsked`; it still has to answer.
+    fn follow_pause<E>(
+        &self,
+        paused: &mut bool,
+        mut act: impl FnMut(PauseStep) -> Result<(), E>,
+    ) -> Result<(), E> {
+        let want = matches!(self.stage(), Handshake::PauseAsked | Handshake::Flushed);
+        if want != *paused {
+            *paused = want;
+            act(if want {
+                PauseStep::Flush
+            } else {
+                PauseStep::Resume
+            })?;
+        }
+        if *paused {
+            self.advance(Handshake::PauseAsked, Handshake::Flushed);
+        }
+        Ok(())
     }
 
     /// The encoder ended with a failure.
@@ -345,17 +379,13 @@ impl VoiceCapture {
                             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
                             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                         };
-                        let want =
-                            matches!(control.stage(), Handshake::PauseAsked | Handshake::Flushed);
-                        if want != paused {
-                            paused = want;
-                            if paused {
-                                encoder.pause()?;
-                                control.advance(Handshake::PauseAsked, Handshake::Flushed);
-                            } else {
+                        control.follow_pause(&mut paused, |step| match step {
+                            PauseStep::Flush => encoder.pause(),
+                            PauseStep::Resume => {
                                 encoder.resume();
+                                Ok(())
                             }
-                        }
+                        })?;
                         let Some(chunk) = chunk.filter(|_| !paused) else {
                             continue;
                         };
@@ -749,6 +779,38 @@ pub fn voice_file_ready(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "ui")]
+    #[test]
+    fn a_pause_inside_one_timeout_after_a_resume_is_still_flushed() {
+        let control = Control::default();
+        let (mut paused, mut flushes, mut resumes) = (false, 0, 0);
+        let mut step = |control: &Control, paused: &mut bool| {
+            control
+                .follow_pause(paused, |s| {
+                    match s {
+                        PauseStep::Flush => flushes += 1,
+                        PauseStep::Resume => resumes += 1,
+                    }
+                    Ok::<(), String>(())
+                })
+                .unwrap_or_default();
+        };
+        control.ask_pause();
+        step(&control, &mut paused);
+        assert_eq!(control.stage(), Handshake::Flushed);
+        // Resume and pause again before the thread looks.
+        control.ask_resume();
+        control.ask_pause();
+        assert_eq!(control.stage(), Handshake::PauseAsked);
+        step(&control, &mut paused);
+        assert_eq!(control.stage(), Handshake::Flushed);
+        // A real resume still resumes.
+        control.ask_resume();
+        step(&control, &mut paused);
+        assert_eq!(control.stage(), Handshake::Recording);
+        assert_eq!((flushes, resumes), (1, 1));
+    }
 
     #[test]
     fn waveform_5bit_roundtrip_matches_tdesktop_packing() {

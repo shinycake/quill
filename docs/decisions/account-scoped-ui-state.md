@@ -6803,7 +6803,12 @@ options is now one value. Behaviour is the same unless said below.
   newer launch replaces an older wait, and an answer for another bot is
   dropped. The window has `HelperState`, `WriteAccess` and `DataSend`
   (14-038); `closing_confirmation` is the app's own setting and is in the
-  allow list. The emoji-status lookup is matched by the request id it sent,
+  allow list. `WriteAccess { Idle, Checking(req), Asking, Allowing(req) }`
+  holds the request each wait is for, and the session's answer now carries
+  its `RequestId` (`WriteAnswer`), so only the answer to that request moves
+  the window; a refused or failed send leaves `Idle`. `DataSend` is gone:
+  the window closes in the same handler that sends the data, so the window
+  itself is the once-only guard. The emoji-status lookup is matched by the request id it sent,
   not by the purpose, so another batch's lookup no longer keeps it alive
   (14-036). The invoice watch is `Attempt { None, Sending, Failed, Pending }`
   (14-037).
@@ -6811,15 +6816,22 @@ options is now one value. Behaviour is the same unless said below.
   holds the info, the strip's selection, the player, the note and the serial
   of the probe or encode in flight (14-005). The strip drag is
   `StripGesture { Idle, Held { grab, shift, seek } }` and the cover bubble is
-  `CoverBubble` (14-006).
+  `CoverBubble` (14-006); with reduced motion the bubble now shows at full
+  strength at once (`Shown`, no ease-in). `EditorStage::reading()` returns
+  the serial with the stage.
 - **Players.** The live feed's off-screen policy is `Sight { InView, Unseen,
   Quiet }` (14-016). `ControlsFade` has `Mode { Window, Full { shown_until }
   }` (14-017). The PiP window has `Gesture { Idle { dragged }, Pressed,
   Dragging }`, `LineDrag` and `FeedLeft` (14-019). A player's life is
-  `Life { Awake { awaiting }, Failed, Asleep }` (14-027); the loop's seek is
-  `LoopSeek` (14-029). The cover avatar is `Cover { None, Playing, Failed }`
+  `Life { Awake { awaiting }, Failed, Asleep }` (14-027); the loop's seek is a
+  `Stage::Landing(state)` of the transport machine itself (14-029), so a
+  sleep, pause or failure replaces it and nothing resets it by hand; a
+  swapped-in PiP player is told about a left feed because the told marker
+  is the player it was told for, not a flag (`told_for`, 14-019). The cover avatar is `Cover { None, Playing, Failed }`
   and no longer retries a failed file on every frame (14-015).
-- **Viewer.** `ViewerClip { None, Playing, Gif, Failed }` holds the item, the
+- **Viewer.** Handing the clip to Picture-in-Picture clears the OS Now
+  Playing entry when no audio is playing, since the viewer's tick goes with
+  the player. `ViewerClip { None, Playing, Gif, Failed }` holds the item, the
   player, the media-session tick (a stored task, so it ends with the clip)
   and the error (14-031); the dead `video_path` is gone, and `video_layer`
   stays a separate drawing entity reused across clips. A photo turn is
@@ -6839,7 +6851,8 @@ options is now one value. Behaviour is the same unless said below.
   Seeking, Ended, Failed, Stopped }`, so a seek on a failed clip tries the
   file again (14-062); the player's picture stage is `Presenting`
   (14-063, 14-072). The voice pause handshake is one atomic with a `Failed`
-  stage (14-070) and a capture is `Source { Live, Fixture, Closed }`
+  stage (14-070); the encoder thread answers a pause with `Flushed` even
+  when a resume and a new pause both fit inside one receive timeout and a capture is `Source { Live, Fixture, Closed }`
   (14-071). A passkey ceremony is `CeremonyState`, CTAPHID reassembly is
   `Assembly { Idle, Reading }` and the Windows cancellation is
   `Cancellation { Idle, InFlight, Cancelled }` (14-073, 14-074, 14-075).

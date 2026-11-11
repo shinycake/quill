@@ -115,19 +115,19 @@ pub(super) enum HelperState {
     Wedged,
 }
 
-/// The app's "allow messaging" request: none, or one waiting for the
-/// answer or the person's popup. A second one is refused while it waits.
+/// The app's "allow messaging" request: none, or one on its way. A second
+/// one is refused while one waits. Each wait holds the request it is for,
+/// and only that request's answer moves it; the person's popup is the way
+/// out of `Asking`, and a closing window drops the lot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum WriteAccess {
     Idle,
+    /// `canBotSendMessages` is out.
+    Checking(quill::ids::RequestId),
+    /// The person has the consent popup.
     Asking,
-}
-
-/// The one `web_app_data_send` an app may make.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum DataSend {
-    Unsent,
-    Sent,
+    /// `allowBotToSendMessages` is out, after the person said yes.
+    Allowing(quill::ids::RequestId),
 }
 
 #[cfg(test)]

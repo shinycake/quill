@@ -29,7 +29,7 @@ use quill::deep_link_types::is_telegram_link;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::link_policy::{OpenDecision, open_decision};
-use quill::state::{DeepLinkAction, WebAppOpenResult, WriteAccessResult};
+use quill::state::{DeepLinkAction, WebAppOpenResult, WriteAccessResult, WriteAnswer};
 use quill::telegram::envelope::{AttachChatKind, AttachmentMenuBot, ChatKind, MessageSender};
 use quill::text::LinkTarget;
 use quill::web_app::bridge::{
@@ -162,7 +162,6 @@ pub(super) struct MiniAppWindow {
     popups: HashMap<String, PopupPurpose>,
     popup_seq: u64,
     write_access: launch_flow::WriteAccess,
-    data_sent: launch_flow::DataSend,
     privacy_policy_url: Option<String>,
     in_attachment_menu: bool,
     emoji: emoji_status::EmojiStatusFlow,
