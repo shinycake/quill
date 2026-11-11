@@ -386,13 +386,12 @@ pub enum GifList {
     Search(GifSearch),
 }
 
-/// A GIF search: its query, where it stands, and the page request it waits
-/// for (none before the first one goes out).
+/// A GIF search: its query, where it stands (the page request it waits for
+/// is in `fetch`), and what it found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GifSearch {
     pub query: String,
     pub fetch: Fetch<()>,
-    pub request: Option<crate::ids::RequestId>,
     /// Slice S9: GIF search via the animation search bot
     /// (`getInlineQueryResults`; schema 1.8.67, lines 6483, 13019). First
     /// page replaces; later pages append, deduped by file id.
@@ -533,7 +532,6 @@ impl GifPanel {
                 stale: None,
                 request: None,
             },
-            request: None,
             results: Vec::new(),
             next_offset: String::new(),
             asked_offset: String::new(),
@@ -616,28 +614,26 @@ impl GifPanel {
     pub fn search_asked(&mut self) {
         if let GifList::Search(search) = &mut self.list {
             search.fetch.begin();
-            search.request = None;
         }
     }
 
     /// The page request `request` went out for the search.
     pub fn search_sent(&mut self, request: crate::ids::RequestId) {
         if let GifList::Search(search) = &mut self.list {
-            search.request = Some(request);
+            search.fetch.sent(request);
         }
     }
 
     /// Whether `request` is the page the search waits for.
     pub fn search_waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
         matches!(&self.list, GifList::Search(search)
-            if request.is_some() && search.request == request)
+            if request.is_some_and(|request| search.fetch.waits_for(request)))
     }
 
     /// A search page answered (the caller checked [`Self::search_waits_for`]).
     pub fn search_answered(&mut self) {
         if let GifList::Search(search) = &mut self.list {
             search.fetch.succeed(());
-            search.request = None;
         }
     }
 
@@ -645,7 +641,6 @@ impl GifPanel {
     pub fn search_failed_now(&mut self) {
         if let GifList::Search(search) = &mut self.list {
             search.fetch.fail(GIF_FAILED);
-            search.request = None;
         }
     }
 

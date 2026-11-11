@@ -70,9 +70,13 @@ impl ViewBook {
     /// A thread's rows are viewed as reported from the start: no stage is
     /// kept and reports count at once.
     pub fn restart_reported(&mut self) {
+        let on_screen = match &mut self.phase {
+            Phase::Reported { on_screen, .. } => std::mem::take(on_screen),
+            Phase::Newest(_) => BTreeSet::new(),
+        };
         self.phase = Phase::Reported {
             stages: Stages::new(),
-            on_screen: BTreeSet::new(),
+            on_screen,
         };
     }
 
