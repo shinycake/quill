@@ -105,7 +105,7 @@ impl Render for QuillApp {
         self.sync_video_avatar(active, window.scale_factor(), cx);
         self.sync_userpic_videos(active, window.scale_factor(), history_drawn);
         self.viewer_follow_window_fullscreen(window);
-        self.frame.media_roots_frame.borrow_mut().take();
+        self.frame.media_roots_frame.set(None);
         let opening = self.viewer.state.is_open().then_some(self.viewer.open_gen);
         let cover = self.frame.viewer_cover.get();
         self.frame

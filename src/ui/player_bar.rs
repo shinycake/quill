@@ -43,9 +43,6 @@ pub(super) struct TrackMeta {
 /// Player-bar state that outlives a chat switch.
 #[derive(Default)]
 pub(super) struct PlayerBarState {
-    /// Chat the active track belongs to (may differ from the open chat).
-    pub(super) chat: Option<ChatId>,
-    pub(super) meta: Option<TrackMeta>,
     /// The bar's own progress slider (the row has another one), one for
     /// each window that draws the bar (`None`: the main window). A slider
     /// keeps the geometry of its last paint and maps a press through it,
@@ -100,7 +97,12 @@ fn random_below(n: usize) -> usize {
 
 impl QuillApp {
     /// Title and subtitle for a message, from the chat history.
-    fn track_meta_for(&self, chat: ChatId, id: MessageId, kind: PlaybackKind) -> TrackMeta {
+    pub(super) fn track_meta_for(
+        &self,
+        chat: ChatId,
+        id: MessageId,
+        kind: PlaybackKind,
+    ) -> TrackMeta {
         let message = self.session().and_then(|session| {
             session
                 .histories
@@ -164,17 +166,9 @@ impl QuillApp {
         }
     }
 
-    /// Remember which chat and message the bar is about; called when a track
-    /// starts.
-    pub(super) fn note_track_started(
-        &mut self,
-        kind: PlaybackKind,
-        chat: ChatId,
-        id: MessageId,
-        cx: &mut Context<Self>,
-    ) {
-        self.playback.player.chat = Some(chat);
-        self.playback.player.meta = Some(self.track_meta_for(chat, id, kind));
+    /// The bar is about a new track (its chat and text are the track's own,
+    /// set with it); called when a track starts.
+    pub(super) fn note_track_started(&mut self, cx: &mut Context<Self>) {
         // Each window makes its slider for the new track when it draws.
         self.playback.player.sliders.clear();
         cx.notify();
@@ -254,7 +248,7 @@ impl QuillApp {
         if self.active_playback_kind() != PlaybackKind::Audio || self.playing_saved_track() {
             return (false, false);
         }
-        let Some(chat) = self.playback.player.chat else {
+        let Some(chat) = self.playback.active.chat() else {
             return (false, false);
         };
         let len = self.playlist_audio_ids(chat).len();
@@ -285,7 +279,7 @@ impl QuillApp {
 
     /// The message to play after the active one, per the playlist rules.
     fn playlist_neighbor(&mut self, step: Step, auto: bool) -> Option<(ChatId, MessageId)> {
-        let chat = self.playback.player.chat?;
+        let chat = self.playback.active.chat()?;
         let current = self.active_playback_id()?;
         let next = match self.active_playback_kind() {
             PlaybackKind::Voice => {
@@ -438,7 +432,13 @@ impl QuillApp {
             media_session::publish(None);
             return;
         };
-        let meta = match (&self.playback.player.meta, self.playback.player.chat) {
+        let meta = match (
+            self.playback
+                .active
+                .track()
+                .and_then(|track| track.meta.as_ref()),
+            self.playback.active.chat(),
+        ) {
             (Some(meta), _) => meta.clone(),
             (None, Some(chat)) => self.track_meta_for(chat, id, self.active_playback_kind()),
             (None, None) => TrackMeta {
@@ -476,7 +476,8 @@ impl QuillApp {
             }
             return;
         }
-        let (Some(chat), Some(id)) = (self.playback.player.chat, self.active_playback_id()) else {
+        let (Some(chat), Some(id)) = (self.playback.active.chat(), self.active_playback_id())
+        else {
             return;
         };
         if self.open_chat_id() == Some(chat) {
@@ -505,7 +506,13 @@ impl QuillApp {
         let duration = self.playback.track_duration()?;
         let position = self.active_position_secs()?;
         let kind = self.active_playback_kind();
-        let meta = match (&self.playback.player.meta, self.playback.player.chat) {
+        let meta = match (
+            self.playback
+                .active
+                .track()
+                .and_then(|track| track.meta.as_ref()),
+            self.playback.active.chat(),
+        ) {
             (Some(meta), _) => meta.clone(),
             (None, Some(chat)) => self.track_meta_for(chat, id, kind),
             (None, None) => TrackMeta {
@@ -519,7 +526,7 @@ impl QuillApp {
         };
         let playing = self.is_playing();
         let slider = self.player_bar_slider(cx);
-        let elapsed = self.playback.scrub.preview().unwrap_or(position);
+        let elapsed = self.playback.scrub().preview().unwrap_or(position);
         let time = format!(
             "{} / {}",
             format_voice_duration(elapsed as i32),
@@ -532,10 +539,10 @@ impl QuillApp {
         };
         let hover = self
             .playback
-            .seek_hover
+            .seek_hover()
             .filter(|hover| hover.site == SeekSite::PlayerBar)
             .map(|hover| hover.at);
-        let dragging = self.playback.scrub.is_dragging();
+        let dragging = self.playback.scrub().is_dragging();
         let music = kind == PlaybackKind::Audio;
         let (can_previous, can_next) = self.playlist_can_move();
         let (repeat, order) = (self.playback.player.repeat, self.playback.player.order);
@@ -590,8 +597,8 @@ impl QuillApp {
         // prunes it for a chat without a grant.
         let chat_tag = self
             .playback
-            .player
-            .chat
+            .active
+            .chat()
             .map(|chat| quill::agent::ui_driver::redact::chat_tag(chat.0));
         Some(
             div()

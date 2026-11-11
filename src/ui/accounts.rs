@@ -174,6 +174,7 @@ impl QuillApp {
     /// Slice parity:auth-multi-account: close the dialog and drop its
     /// working state (pending remove confirm, error, add-name input).
     pub(crate) fn close_accounts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // box-host: this closes the box, nothing opens
         self.account.accounts.dialog = AccountsDialog::Closed;
         self.account
             .accounts
