@@ -206,9 +206,17 @@ pub enum LocalFileState {
         downloaded_size: i64,
     },
     /// Fully on disk and readable.
-    Complete { path: String, downloaded_size: i64 },
+    Complete {
+        path: String,
+        can_download: bool,
+        downloaded_size: i64,
+    },
     /// Fully on disk and being sent (`remoteFile.is_uploading_active`).
-    Uploading { path: String, downloaded_size: i64 },
+    Uploading {
+        path: String,
+        can_download: bool,
+        downloaded_size: i64,
+    },
 }
 
 impl Default for LocalFileState {
@@ -235,6 +243,7 @@ impl LocalFileState {
         if is_downloading_completed {
             Self::Complete {
                 path,
+                can_download: can_be_downloaded,
                 downloaded_size,
             }
         } else if is_downloading_active {
@@ -261,9 +270,11 @@ impl LocalFileState {
         match self {
             Self::Complete {
                 path,
+                can_download,
                 downloaded_size,
             } => Self::Uploading {
                 path,
+                can_download,
                 downloaded_size,
             },
             other => other,
@@ -284,8 +295,9 @@ impl LocalFileState {
         match self {
             Self::Absent { can_download }
             | Self::Partial { can_download, .. }
-            | Self::Downloading { can_download, .. } => *can_download,
-            Self::Complete { .. } | Self::Uploading { .. } => false,
+            | Self::Downloading { can_download, .. }
+            | Self::Complete { can_download, .. }
+            | Self::Uploading { can_download, .. } => *can_download,
         }
     }
 

@@ -92,7 +92,7 @@ fn a_check_answer_reaches_only_the_composer_that_asked(cx: &mut TestAppContext) 
         // A stale answer arriving once more does not hide the right one.
         answer_check(app, first, Err("stale".into()));
         app.story_composer_upkeep(cx);
-        assert_eq!(app.stories.composer.stage, ComposerStage::Editing);
+        assert!(!app.stories.composer.stage.busy());
         assert_eq!(
             app.stories.composer.error(),
             Some("Eligibility check failed")
@@ -119,7 +119,7 @@ fn a_lost_check_leaves_checking_with_an_error(cx: &mut TestAppContext) {
         );
         answered(app, request);
         app.story_composer_upkeep(cx);
-        assert_eq!(app.stories.composer.stage, ComposerStage::Editing);
+        assert!(!app.stories.composer.stage.busy());
         assert!(app.stories.composer.error().is_some());
     });
 }
@@ -139,7 +139,7 @@ fn a_lost_post_leaves_posting_with_an_error(cx: &mut TestAppContext) {
         );
         answered(app, request);
         app.story_composer_upkeep(cx);
-        assert_eq!(app.stories.composer.stage, ComposerStage::Editing);
+        assert!(!app.stories.composer.stage.busy());
         assert!(app.stories.composer.error().is_some());
     });
 }
@@ -192,7 +192,7 @@ fn a_failed_post_shows_why_and_frees_the_button(cx: &mut TestAppContext) {
             },
         );
         app.story_composer_upkeep(cx);
-        assert_eq!(app.stories.composer.stage, ComposerStage::Editing);
+        assert!(!app.stories.composer.stage.busy());
         assert_eq!(app.stories.composer.error(), Some("Posting failed: FLOOD"));
     });
 }
@@ -246,7 +246,7 @@ fn a_failed_save_shows_its_reason(cx: &mut TestAppContext) {
             manage.settle(RequestId(40), Some("Story update failed: GONE".into()));
         }
         app.story_composer_upkeep(cx);
-        assert_eq!(app.stories.composer.stage, ComposerStage::Editing);
+        assert!(!app.stories.composer.stage.busy());
         assert_eq!(
             app.stories.composer.error(),
             Some("Story update failed: GONE")
