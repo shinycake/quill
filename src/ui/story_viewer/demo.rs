@@ -189,7 +189,12 @@ fn demo_viewers(loading: bool) -> quill::state::StoryViewersState {
             row(MAYA + 1, 44, None),
         ],
         next_offset: "more".to_string(),
-        loading,
-        error: None,
+        page: if loading {
+            quill::state::ViewersPage::Loading {
+                request: quill::ids::RequestId(0),
+            }
+        } else {
+            quill::state::ViewersPage::Idle
+        },
     }
 }

@@ -324,8 +324,7 @@ fn a_failed_story_statistics_page_has_a_retry(cx: &mut TestAppContext) {
                 forwards: Vec::new(),
                 forwards_total: 0,
                 forwards_next_offset: String::new(),
-                forwards_loading: false,
-                forwards_error: None,
+                forwards_page: Default::default(),
             });
             session.groups.stats.set_page(CHANNEL, StatsPage::Story(5));
         }

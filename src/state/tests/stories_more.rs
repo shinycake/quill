@@ -6,12 +6,12 @@ use super::*;
 fn story_report_flow_through_option_and_text_steps() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.begin_story_report(12, 6);
+    let extra = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
+    session.begin_story_report(12, 6, extra);
     assert!(matches!(
         session.stories.report.as_ref().unwrap().stage,
-        StoryReportStage::Checking
+        StoryReportStage::Checking { .. }
     ));
-    let extra = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
     apply_json(
         &mut session,
         &seq,
@@ -28,8 +28,8 @@ fn story_report_flow_through_option_and_text_steps() {
         }
         other => panic!("unexpected {other:?}"),
     }
-    session.story_report_sending(12, 6);
     let extra2 = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
+    session.story_report_sending(12, 6, extra2);
     apply_json(
         &mut session,
         &seq,
@@ -44,6 +44,7 @@ fn story_report_flow_through_option_and_text_steps() {
         StoryReportStage::TextRequired { ref option_id, .. } if option_id == "aGk="
     ));
     let extra3 = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
+    session.story_report_sending(12, 6, extra3);
     apply_json(
         &mut session,
         &seq,
@@ -76,8 +77,8 @@ fn story_report_flow_through_option_and_text_steps() {
 fn story_report_empty_options_means_reported() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.begin_story_report(12, 6);
     let extra = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
+    session.begin_story_report(12, 6, extra);
     apply_json(
         &mut session,
         &seq,
@@ -96,18 +97,64 @@ fn story_report_empty_options_means_reported() {
 #[test]
 fn story_report_send_failure_ends_flow() {
     let (mut session, _sink) = session();
-    session.begin_story_report(12, 6);
+    // The first request never went out: the flow is made already failed.
     session.fail_story_report_send(12, 6, "could not report story".into());
+    let flow = session.stories.report.as_ref().unwrap();
+    assert!(flow.is_for(12, 6));
+    assert!(matches!(flow.stage, StoryReportStage::Failed(_)));
+}
+
+/// An answer to a report request the flow no longer waits for (the box was
+/// closed and reopened, a step was repeated) moves nothing; the answer to
+/// the current request does (sweep 05-280).
+#[test]
+fn a_report_answer_moves_only_the_flow_waiting_for_it() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let first = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
+    session.begin_story_report(12, 6, first);
+    // Closed and reopened on the same story before the first answer.
+    session.clear_story_report();
+    let second = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
+    session.begin_story_report(12, 6, second);
+    let picker = |request: crate::ids::RequestId| {
+        format!(
+            r#"{{"@type":"reportStoryResultOptionRequired","@extra":"{}","title":"Why?","options":[{{"@type":"reportOption","id":"aGk=","text":"Spam"}}]}}"#,
+            request.0
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &picker(first));
+    assert_eq!(
+        session.stories.report.as_ref().unwrap().stage,
+        StoryReportStage::Checking { request: second },
+        "the old answer left the new flow waiting"
+    );
+    apply_json(&mut session, &seq, &sink, &picker(second));
+    assert!(matches!(
+        session.stories.report.as_ref().unwrap().stage,
+        StoryReportStage::PickOption { .. }
+    ));
+    // The step goes out; a late answer to the earlier step cannot mark a
+    // failed report as Reported, or reopen the picker.
+    let third = session.request_for_story(RequestPurpose::ReportStory, ChatId(12), 6);
+    session.story_report_sending(12, 6, third);
+    let failed = format!(
+        r#"{{"@type":"error","@extra":"{}","code":400,"message":"x"}}"#,
+        third.0
+    );
+    apply_json(&mut session, &seq, &sink, &failed);
     assert!(matches!(
         session.stories.report.as_ref().unwrap().stage,
         StoryReportStage::Failed(_)
     ));
-    // A different story's flow is untouched.
-    session.begin_story_report(12, 7);
-    session.fail_story_report_send(12, 6, "could not report story".into());
+    let late_ok = format!(
+        r#"{{"@type":"reportStoryResultOk","@extra":"{}"}}"#,
+        second.0
+    );
+    apply_json(&mut session, &seq, &sink, &late_ok);
     assert!(matches!(
         session.stories.report.as_ref().unwrap().stage,
-        StoryReportStage::Checking
+        StoryReportStage::Failed(_)
     ));
 }
 
@@ -193,11 +240,14 @@ fn story_post_outcome_transitions() {
             extra.0
         ),
     );
+    let check = extra;
     let eligibility = session
         .stories
         .post
-        .eligibility
-        .clone()
+        .check
+        .answer_to(check)
+        .cloned()
+        .and_then(Result::ok)
         .expect("eligibility stored");
     assert!(!eligibility.can_post());
     assert!(eligibility.user_message().contains("2h 30m"));
@@ -209,7 +259,17 @@ fn story_post_outcome_transitions() {
         &sink,
         r#"{"@type":"canPostStoryResultOk","story_count":1}"#,
     );
-    assert!(!session.stories.post.eligibility.clone().unwrap().can_post());
+    assert!(
+        !session
+            .stories
+            .post
+            .check
+            .answer_to(check)
+            .cloned()
+            .and_then(Result::ok)
+            .expect("the stray result left the answer alone")
+            .can_post()
+    );
 
     // `postStory` answer → Posting with the temporary story id.
     let extra = session.request(RequestPurpose::PostStory, None);
@@ -222,9 +282,13 @@ fn story_post_outcome_transitions() {
             extra.0
         ),
     );
+    let posted = extra;
     assert_eq!(
-        session.stories.post.outcome,
-        StoryPostOutcome::Posting { story_id: 8 }
+        session.stories.post.outcomes.get(posted).cloned(),
+        Some(StoryPostOutcome::Posting {
+            request: posted,
+            story_id: 8
+        })
     );
 
     // `updateStoryPostSucceeded` with a matching old_story_id →
@@ -235,7 +299,10 @@ fn story_post_outcome_transitions() {
         &sink,
         r#"{"@type":"updateStoryPostSucceeded","story":{"@type":"story","id":9,"poster_chat_id":777,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}},"old_story_id":8}"#,
     );
-    assert_eq!(session.stories.post.outcome, StoryPostOutcome::Succeeded);
+    assert_eq!(
+        session.stories.post.outcomes.get(posted).cloned(),
+        Some(StoryPostOutcome::Succeeded { request: posted })
+    );
     assert!(session.stories.stories.contains_key(&(777, 9)));
 
     // Failed path: new pending post, then `updateStoryPostFailed`.
@@ -256,8 +323,8 @@ fn story_post_outcome_transitions() {
         r#"{"@type":"updateStoryPostFailed","story":{"@type":"story","id":10,"poster_chat_id":777,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}},"error":{"@type":"error","code":400,"message":"x"},"error_type":{"@type":"canPostStoryResultOk"}}"#,
     );
     assert!(matches!(
-        session.stories.post.outcome,
-        StoryPostOutcome::Failed(_)
+        session.stories.post.outcomes.get(extra),
+        Some(StoryPostOutcome::Failed { .. })
     ));
 
     // A raw `error` answer on `postStory` → Failed; on `canPostStory`
@@ -273,8 +340,8 @@ fn story_post_outcome_transitions() {
         ),
     );
     assert!(matches!(
-        session.stories.post.outcome,
-        StoryPostOutcome::Failed(_)
+        session.stories.post.outcomes.get(extra),
+        Some(StoryPostOutcome::Failed { .. })
     ));
     let extra = session.request(RequestPurpose::CheckCanPostStory, None);
     apply_json(
@@ -286,7 +353,10 @@ fn story_post_outcome_transitions() {
             extra.0
         ),
     );
-    assert!(session.stories.post.check_error.is_some());
+    assert!(matches!(
+        session.stories.post.check.answer_to(extra),
+        Some(Err(_))
+    ));
 }
 
 #[test]
@@ -306,7 +376,7 @@ fn story_manage_state_transitions() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!session.stories.manage.pending);
+    assert!(!session.stories.manage.is_pending());
     assert_eq!(session.stories.manage.error, None);
 
     let extra = session.request(RequestPurpose::EditStoryCover, None);
@@ -320,7 +390,7 @@ fn story_manage_state_transitions() {
             extra.0
         ),
     );
-    assert!(!session.stories.manage.pending);
+    assert!(!session.stories.manage.is_pending());
     let error = session.stories.manage.error.clone().expect("manage error");
     assert!(error.contains("Story update failed"), "{error}");
 
@@ -351,7 +421,7 @@ fn story_manage_state_transitions() {
     let error = session
         .stories
         .post
-        .check_error
+        .post_as_error
         .clone()
         .expect("post-as error");
     assert!(error.contains("Could not load"), "{error}");
@@ -380,8 +450,11 @@ fn story_post_second_answer_without_pending_is_absorbed() {
         ),
     );
     assert_eq!(
-        session.stories.post.outcome,
-        StoryPostOutcome::Posting { story_id: 8 }
+        session.stories.post.outcomes.get(extra).cloned(),
+        Some(StoryPostOutcome::Posting {
+            request: extra,
+            story_id: 8
+        })
     );
     assert!(!session.requests.has_purpose(RequestPurpose::PostStory));
 
@@ -394,8 +467,11 @@ fn story_post_second_answer_without_pending_is_absorbed() {
         r#"{"@type":"story","id":8,"poster_chat_id":777,"date":1,"content":{"@type":"storyContentUnsupported"},"caption":{"@type":"formattedText","text":"","entities":[]}}"#,
     );
     assert_eq!(
-        session.stories.post.outcome,
-        StoryPostOutcome::Posting { story_id: 8 }
+        session.stories.post.outcomes.get(extra).cloned(),
+        Some(StoryPostOutcome::Posting {
+            request: extra,
+            story_id: 8
+        })
     );
     assert!(!session.requests.has_purpose(RequestPurpose::PostStory));
     assert!(session.stories.stories.contains_key(&(777, 8)));
@@ -597,7 +673,7 @@ fn b14_close_friends_load_and_save_round_trip() {
         ),
     );
     assert_eq!(session.stories.close_friends.ids(), Some(&vec![31, 33]));
-    assert!(session.stories.page_op.is_none());
+    assert!(session.stories.page_ops.is_empty());
 
     // `setCloseFriends` applies the staged ids on `ok`.
     session.stories.close_friends_pending = Some(vec![33]);
@@ -635,7 +711,7 @@ fn b14_close_friends_error_drops_staged_ids() {
     assert_eq!(session.stories.close_friends.ids(), Some(&vec![31]));
     assert!(session.stories.close_friends_pending.is_none());
     assert!(matches!(
-        session.stories.page_op.as_ref().map(|op| &op.state),
+        session.stories.page_ops.latest().map(|op| &op.state),
         Some(crate::story_page::StoryPageOpState::Failed(_))
     ));
 }
@@ -657,7 +733,7 @@ fn b14_hide_and_profile_ops_finish_on_ok() {
             &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
         );
         assert_eq!(
-            session.stories.page_op.as_ref().map(|op| &op.state),
+            session.stories.page_ops.latest().map(|op| &op.state),
             Some(&crate::story_page::StoryPageOpState::Succeeded)
         );
     }
@@ -685,9 +761,13 @@ fn a_stale_answer_does_not_settle_the_op_tracked_now() {
         ),
     );
     assert_eq!(
-        session.stories.page_op.as_ref().map(|op| &op.state),
+        session.stories.page_ops.get(second).map(|op| &op.state),
         Some(&crate::story_page::StoryPageOpState::Sending)
     );
+    assert!(matches!(
+        session.stories.page_ops.get(first).map(|op| &op.state),
+        Some(crate::story_page::StoryPageOpState::Failed(_))
+    ));
 }
 
 /// A failed edit is about the story it edited, and only the answer to the
@@ -723,7 +803,7 @@ fn a_story_edit_answer_settles_only_its_own_call_and_story() {
             second.0
         ),
     );
-    assert!(!session.stories.manage.pending);
+    assert!(!session.stories.manage.is_pending());
     assert!(session.stories.manage.error_for(11, 6).is_some());
     assert_eq!(
         session.stories.manage.error_for(11, 7),
@@ -808,4 +888,21 @@ fn close_friends_load_failure_survives_a_later_story_page_op() {
         session.stories.close_friends,
         CloseFriendsList::Loading { .. }
     ));
+}
+
+/// An account going away answers no more calls: a story management call on
+/// its way reads as lost (its sender leaves its stage), not in flight.
+#[test]
+fn an_account_going_away_ends_the_management_calls_on_their_way() {
+    let (mut session, _sink) = session();
+    session.stories.manage.start(RequestId(30), ChatId(5), 3);
+    assert_eq!(
+        session.stories.manage.outcome(RequestId(30)),
+        StoryManageOutcome::InFlight
+    );
+    session.settle_account_requests();
+    assert_eq!(
+        session.stories.manage.outcome(RequestId(30)),
+        StoryManageOutcome::Lost
+    );
 }

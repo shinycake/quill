@@ -55,10 +55,66 @@ pub(crate) struct StoryViewerUi {
     /// close-friends list): only its status line shows under the story.
     pub(super) page_op: Option<quill::ids::RequestId>,
     pub(super) share_open: bool,
+    /// The copy of the story's file to Downloads (`save_story_media`).
     pub(super) notice: Option<String>,
     /// The ⋯ menu is open: the story holds still under it, and its entries
     /// act on the story it was opened for (`MenuAct` carries it).
     pub(super) menu_open: bool,
+}
+
+/// One story's file being copied to Downloads on a background thread
+/// (`StoryUi::media_saves`, one per story item). `Saving` ends with the
+/// copy's result, which waits in `Done` for the story it was for, so
+/// stepping away and back still shows it. Saving again is allowed once it
+/// is `Done`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum MediaSave {
+    Saving,
+    Done(String),
+}
+
+/// A panel the viewer draws over its story. One is open at a time:
+/// opening one closes the rest (`StoryViewerUi::close_other_panels`), so they
+/// never stack and push the story out of its frame, or fight over the one
+/// search field they share.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ViewerPanel {
+    Viewers,
+    Stats,
+    Report,
+    Share,
+    Cover,
+    Privacy,
+    CloseFriends,
+}
+
+impl StoryViewerUi {
+    /// `keep` is being opened: every other panel closes. A call a closed
+    /// panel already sent (`cover_request`, `privacy_request`, a saving
+    /// close-friends list) stays tracked, so its answer still settles.
+    pub(super) fn close_other_panels(&mut self, keep: ViewerPanel) {
+        if keep != ViewerPanel::Viewers {
+            self.viewers_open = false;
+        }
+        if keep != ViewerPanel::Stats {
+            self.stats_open = false;
+        }
+        if keep != ViewerPanel::Report {
+            self.report_open = false;
+        }
+        if keep != ViewerPanel::Share {
+            self.share_open = false;
+        }
+        if keep != ViewerPanel::Cover {
+            self.cover = None;
+        }
+        if keep != ViewerPanel::Privacy {
+            self.privacy_edit = None;
+        }
+        if keep != ViewerPanel::CloseFriends {
+            self.close_friends = quill::story_extras::CloseFriendsStage::Closed;
+        }
+    }
 }
 
 pub(crate) struct StoryUi {
@@ -95,7 +151,7 @@ pub(crate) struct StoryUi {
     pub(super) page: Option<StoryPage>,
     /// Phase 9.3: story posting composer state (pure) + its caption /
     /// user-search inputs.
-    pub(super) composer: StoryComposer,
+    pub(super) composer: Box<StoryComposer>,
     pub(super) composer_caption: Entity<TextareaState>,
     pub(super) composer_user_search: Entity<TextareaState>,
     /// Phase 9.4: story areas — link URL + suggested-reaction emoji
@@ -118,6 +174,10 @@ pub(crate) struct StoryUi {
     /// viewer is open (`viewer_ui_mut`), dropped by every close
     /// (`release_story_viewer`).
     open: Option<StoryViewerUi>,
+    /// The Save media copies, by the story they are for: they outlive a
+    /// step to another story (a second press for the same story waits for
+    /// the first), and the results are dropped with the viewer.
+    pub(super) media_saves: std::collections::HashMap<(quill::ids::ChatId, i32), MediaSave>,
     /// What reads see while the viewer is closed: always empty, since only
     /// `viewer_ui` (shared) hands it out.
     closed: StoryViewerUi,
@@ -160,6 +220,10 @@ impl StoryUi {
     /// The viewer closed: what it had open goes, as one value.
     pub(super) fn drop_viewer_ui(&mut self) {
         self.open = None;
+        // Finished results go with the viewer; a copy still running stays
+        // so a reopened viewer does not start a second one.
+        self.media_saves
+            .retain(|_, save| matches!(save, MediaSave::Saving));
     }
 
     /// The viewer moved on from the story it showed: what was open over
@@ -250,7 +314,7 @@ impl StoryUi {
             found_asked: Default::default(),
             report_text_input: story_report_text_input,
             page: None,
-            composer: StoryComposer::default(),
+            composer: Box::default(),
             composer_caption: story_composer_caption,
             composer_user_search: story_composer_user_search,
             composer_link: story_composer_link,
@@ -267,6 +331,7 @@ impl StoryUi {
             tick_active: false,
             emoji_warm: None,
             open: None,
+            media_saves: std::collections::HashMap::new(),
             closed: StoryViewerUi::default(),
         }
     }
