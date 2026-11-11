@@ -662,7 +662,7 @@ impl QuillApp {
             return false;
         };
         let size = window.viewport_size();
-        self.chat_list.peek = crate::ui::chat_list_state::PeekPreview::Idle;
+        self.chat_list.peek.close();
         self.chat_list.menu = Some(ChatMenuState::at(
             chat_id,
             point(size.width - px(220.), px(64.)),

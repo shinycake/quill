@@ -10,7 +10,6 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use std::collections::HashSet;
 use std::rc::Rc;
-use std::time::Instant;
 
 /// A pinned-chat drag (or its release slide) and the pinned list it
 /// reorders: the main list's, or the archive's. One value, so the list
@@ -24,19 +23,21 @@ pub(crate) struct PinDrag {
 }
 
 /// The peek preview of a chat-list row: a long press in progress (the
-/// row's chat and when it went down, so the timer that opens it can tell it
-/// is still the same press) or the open panel. One value: opening replaces
-/// the press, a release or a close ends either.
-#[derive(Clone, Copy, Default, PartialEq)]
+/// row's chat and the timer that opens it, which the stage owns: a release,
+/// a newer press or a close drops it) or the open panel. One value:
+/// opening replaces the press, a release or a close ends either.
+#[derive(Default)]
 pub(crate) enum PeekPreview {
     #[default]
     Idle,
     /// A press on a row; `over` is the panel still showing under it (a new
     /// press leaves an open panel until its own opens).
     Pressing {
+        /// The row the press went down on (tests read it).
+        #[allow(dead_code, reason = "read by tests through `pressing`")]
         chat: ChatId,
-        started: Instant,
         over: Option<ChatPreviewState>,
+        _timer: Task<()>,
     },
     Open(ChatPreviewState),
 }
@@ -53,18 +54,12 @@ impl PeekPreview {
     }
 
     /// A new press on `chat`; an open panel stays under it.
-    pub(super) fn press(&mut self, chat: ChatId, started: Instant) {
+    pub(super) fn press(&mut self, chat: ChatId, timer: Task<()>) {
         *self = Self::Pressing {
             chat,
-            started,
             over: self.open(),
+            _timer: timer,
         };
-    }
-
-    /// Whether this is still the press `press` started (no release, no
-    /// newer press).
-    pub(super) fn is_press(&self, chat: ChatId, started: Instant) -> bool {
-        matches!(*self, Self::Pressing { chat: c, started: s, .. } if c == chat && s == started)
     }
 
     /// The chat being long-pressed, if a press is in progress.
@@ -81,6 +76,12 @@ impl PeekPreview {
         if let Self::Pressing { over, .. } = *self {
             *self = over.map_or(Self::Idle, Self::Open);
         }
+    }
+
+    /// The panel closes and any press ends (its timer is dropped with it).
+    /// `true` when something was showing or pressed.
+    pub(super) fn close(&mut self) -> bool {
+        !std::mem::take(self).is_idle()
     }
 
     /// Nothing is showing and no press is waiting.
@@ -277,12 +278,12 @@ impl super::on_screen::Farewell for ChatListUi {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     #[core::prelude::v1::test]
     fn a_release_ends_a_press_but_leaves_an_open_peek() {
-        let started = Instant::now();
         let mut peek = PeekPreview::Idle;
-        peek.press(ChatId(5), started);
+        peek.press(ChatId(5), Task::ready(()));
         assert_eq!(peek.pressing(), Some(ChatId(5)));
         peek.cancel_press();
         assert!(peek.is_idle());
@@ -294,7 +295,7 @@ mod tests {
         assert!(peek.open().is_some(), "an open panel stays");
         assert!(!peek.is_idle());
         // A new press leaves the open panel under it; its release restores it.
-        peek.press(ChatId(6), started);
+        peek.press(ChatId(6), Task::ready(()));
         assert!(peek.open().is_some() && peek.pressing() == Some(ChatId(6)));
         peek.cancel_press();
         assert!(matches!(peek, PeekPreview::Open(_)));

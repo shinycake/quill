@@ -673,7 +673,7 @@ impl QuillApp {
                         )
                     });
             // A reorder is not a long press: no peek preview over the drag.
-            self.chat_list.peek = crate::ui::chat_list_state::PeekPreview::Idle;
+            self.chat_list.peek.close();
         }
         self.notify_sidebar(cx);
     }

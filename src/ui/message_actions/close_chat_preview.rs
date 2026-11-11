@@ -10,8 +10,7 @@ impl QuillApp {
     /// that ends the long press, or Escape). Also cancels a pending
     /// long press.
     pub(in crate::ui) fn close_chat_preview(&mut self, cx: &mut Context<Self>) {
-        if !self.chat_list.peek.is_idle() {
-            self.chat_list.peek = crate::ui::chat_list_state::PeekPreview::Idle;
+        if self.chat_list.peek.close() {
             cx.notify();
         }
     }
