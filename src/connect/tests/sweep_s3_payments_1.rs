@@ -35,6 +35,15 @@ impl FlakySender {
             .find(|value| value["@type"] == type_name)
     }
 
+    /// The `n`th (oldest first) request of `type_name`.
+    pub(crate) fn nth(&self, type_name: &str, n: usize) -> Option<Value> {
+        let sent = self.sent.lock().ok()?;
+        sent.iter()
+            .filter_map(|json| serde_json::from_str::<Value>(json).ok())
+            .filter(|value| value["@type"] == type_name)
+            .nth(n)
+    }
+
     pub(crate) fn count(&self, type_name: &str) -> usize {
         let Ok(sent) = self.sent.lock() else {
             return 0;
@@ -102,6 +111,12 @@ impl Flaky {
     pub(crate) fn feed(&mut self, json: Value) {
         let parsed = copy_and_parse(&json.to_string(), &self.seq, &self.sink).unwrap();
         self.driver.ingest(parsed).unwrap();
+    }
+
+    /// Answer the `n`th request of `request`, newest or not.
+    pub(crate) fn answer_nth(&mut self, request: &str, n: usize, mut body: Value) {
+        body["@extra"] = self.sender.nth(request, n).unwrap()["@extra"].clone();
+        self.feed(body);
     }
 
     /// Answer the latest request of `request`.

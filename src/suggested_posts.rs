@@ -12,7 +12,7 @@
 //! `telegram::requests::suggested_posts`, the driver in
 //! `connect::suggested_posts`, the screens in `ui::suggested_posts_ui`.
 
-use crate::ids::{ChatId, MessageId};
+use crate::ids::{ChatId, MessageId, RequestId};
 use crate::local_time::{CivilTime, hhmm, month_name};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
@@ -664,6 +664,29 @@ pub struct SuggestBar {
     /// "Edit Message" of this suggestion: saving the edit sends a new
     /// message that replies to it, with these terms.
     pub edit_of: Option<MessageId>,
+    /// Where the edit's send stands: the bar stays up until the send
+    /// answers, so a refusal leaves the terms to send again.
+    pub send: BarSend,
+}
+
+/// The send of a bar's edit.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BarSend {
+    #[default]
+    Idle,
+    /// Sent under this request; its answer takes the bar down, its error
+    /// returns the bar to `Idle`.
+    Sending(RequestId),
+}
+
+impl BarSend {
+    pub fn is_sending(self) -> bool {
+        matches!(self, Self::Sending(_))
+    }
+
+    pub fn waits_for(self, request: Option<RequestId>) -> bool {
+        matches!(self, Self::Sending(waiting) if Some(waiting) == request)
+    }
 }
 
 impl SuggestBar {
@@ -672,6 +695,7 @@ impl SuggestBar {
             terms,
             mode: SuggestMode::New,
             edit_of: None,
+            send: BarSend::Idle,
         }
     }
 
@@ -701,6 +725,17 @@ pub struct SuggestedPostsState {
 }
 
 impl SuggestedPostsState {
+    /// An approve or decline answered (or failed): its post is free again.
+    /// An offer's answer is not that request's.
+    pub fn settle_busy(&mut self, purpose: SuggestedPostPurpose) {
+        if matches!(
+            purpose,
+            SuggestedPostPurpose::Approve { .. } | SuggestedPostPurpose::Decline { .. }
+        ) {
+            self.busy.remove(&purpose.key());
+        }
+    }
+
     pub fn bar(&self, chat_id: ChatId) -> Option<&SuggestBar> {
         self.bars.get(&chat_id.0)
     }

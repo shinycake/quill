@@ -292,6 +292,7 @@ impl QuillApp {
     fn close_programs_box(&mut self, cx: &mut Context<Self>) {
         if let Some(earn) = self.earn_mut() {
             earn.programs_box = None;
+            earn.resolve = quill::earn::Resolve::Idle;
         }
         cx.notify();
     }
@@ -583,8 +584,8 @@ impl QuillApp {
                         .label(tr(keys::Q_MONEY_JOIN_PROGRAM))
                         .primary()
                         .w_full()
-                        .loading(join.joining)
-                        .disabled(join.joining)
+                        .loading(join.stage.is_joining())
+                        .disabled(join.stage.is_joining())
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.earn_call(
                                 tr(keys::Q_MONEY_COULDNT_JOIN_THE_PROGRAM),

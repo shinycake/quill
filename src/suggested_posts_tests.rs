@@ -346,6 +346,7 @@ fn draft_sync_keeps_edits() {
             terms,
             mode: SuggestMode::Change,
             edit_of: Some(MessageId(3)),
+            send: Default::default(),
         },
     );
     state.sync_draft(chat, None);

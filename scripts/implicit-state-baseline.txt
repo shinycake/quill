@@ -104,7 +104,6 @@ InviteLinkMembersState::loading+error
 InvoiceWatch::failed
 InvoiceWatch::pending
 InvoiceWatch::sending
-JoinBox::joining
 JoinedLines::started
 LanguageLinkLookup::loading
 LanguageLinkLookup::loading+error
