@@ -620,16 +620,17 @@ impl VoiceCapture {
             .clock()
             .map_or(Duration::ZERO, |clock| clock.elapsed_at(Instant::now()));
         let worker = self.stop_mic();
+        let ending = match (&self.source, worker) {
+            (Source::Fixture { seconds, .. }, _) => Ending::Fixture(*seconds),
+            (Source::Live(_) | Source::Closed, Some(worker)) => Ending::Encoder(worker),
+            (Source::Live(_) | Source::Closed, None) => Ending::NoEncoder,
+        };
         VoiceFinish {
             path: std::mem::take(&mut self.path),
-            fixture: match self.source {
-                Source::Fixture { seconds, .. } => Some(seconds),
-                Source::Live(_) | Source::Closed => None,
-            },
+            ending,
             levels: self.levels.clone(),
             bars: std::mem::take(&mut self.bars),
             wall,
-            worker,
         }
     }
 
@@ -693,38 +694,50 @@ fn join_worker(_worker: Option<Worker>) -> Option<Result<u64, String>> {
 /// thread.
 pub struct VoiceFinish {
     path: PathBuf,
-    /// A screenshot fixture's length: its file is kept whatever the encoder
-    /// says.
-    fixture: Option<i32>,
+    ending: Ending,
     levels: Arc<Mutex<Vec<u8>>>,
     bars: Vec<u8>,
     wall: Duration,
-    worker: Option<Worker>,
+}
+
+/// What ends a closed capture's file.
+enum Ending {
+    /// A screenshot fixture of this length: its file is kept whatever the
+    /// encoder says.
+    Fixture(i32),
+    /// The microphone's encoder thread, to join.
+    Encoder(Worker),
+    /// There is no encoder to ask (no microphone build).
+    NoEncoder,
 }
 
 impl VoiceFinish {
     /// Join the encoder and keep the file when it holds audio.
     pub fn complete(mut self) -> Result<VoiceDraft, String> {
-        let samples = join_worker(self.worker.take());
+        let (fixture, samples) = match std::mem::replace(&mut self.ending, Ending::NoEncoder) {
+            Ending::Fixture(seconds) => (Some(seconds), None),
+            Ending::Encoder(worker) => (None, join_worker(Some(worker))),
+            Ending::NoEncoder => (None, None),
+        };
         let len = fs::metadata(&self.path).map(|m| m.len()).unwrap_or(0);
         let encoded = match samples {
             Some(Err(ref reason)) => Err(reason.clone()),
             Some(Ok(0)) => Err(crate::media_tools::no_audio_message(false)),
-            _ if self.fixture.is_some() => Ok(()),
+            _ if fixture.is_some() => Ok(()),
             _ if len == 0 || !self.path.is_file() => {
                 Err(crate::media_tools::no_audio_message(false))
             }
             _ => Ok(()),
         };
         if let Err(reason) = encoded {
-            if self.fixture.is_none() {
+            if fixture.is_none() {
                 let _ = fs::remove_file(&self.path);
             }
             return Err(reason);
         }
         // The encoded sample count is exact; the wall clock only stands in
         // for fixtures.
-        let duration_secs = match (self.fixture, samples) {
+        let duration_secs = match (fixture, samples) {
             (Some(fixed), _) => fixed,
             (None, Some(Ok(total))) => (total as f64 / 48_000.0).round() as i32,
             _ => self.wall.as_secs_f64().round() as i32,

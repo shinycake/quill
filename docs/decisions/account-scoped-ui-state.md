@@ -8073,7 +8073,7 @@ accent, the tone upload, the tray worker, video crop and voice capture.
 | 07-017 | `ToneUpload::Uploading { request, .. }`; the answer and the error settle only the matching request, a new upload starts only from `Idle`. |
 | 07-020 | The tray worker's `stopped` flag is set by a drop guard owned by the worker, so a panic or a thread that never started reads as stopped and `poll` restarts the item. |
 | 14-034 | `Crop::mirrored` clamps first and subtracts with `saturating_sub`. |
-| 14-084 | `RunClock` lives in `Live` / `Fixture`; `Live::pause`, `resume` and `preview_ready` move the clock, the encoder handshake and the microphone in one place. |
+| 14-084 | `RunClock` lives in `Live` / `Fixture`; `Live::pause`, `resume` and `preview_ready` move the clock, the encoder handshake and the microphone in one place. A closed capture's `VoiceFinish` holds one `Ending { Fixture, Encoder, NoEncoder }` instead of a `fixture` and a `worker` option. |
 
 Tests added: `activity` (only a done write is undone; flags round trip),
 `events` (closing a client; waiter test without a sleep), `chats`

@@ -425,18 +425,18 @@ pub fn revoke(id: u64) {
     connection.stage = Stage::Revoked;
     let agent = connection.shown.agent.clone();
     let process = connection.process;
-    let at = match roster.refused.iter().position(|r| r.agent == agent) {
-        Some(at) => at,
+    let known = roster.refused.iter().position(|r| r.agent == agent);
+    let entry = match known {
+        Some(at) => roster.refused.get_mut(at),
         None => {
             roster.refused.push(Refused {
                 agent,
                 processes: Vec::new(),
             });
-            roster.refused.len() - 1
+            roster.refused.last_mut()
         }
     };
-    if let Some(process) = process
-        && let Some(entry) = roster.refused.get_mut(at)
+    if let (Some(entry), Some(process)) = (entry, process)
         && !entry.processes.contains(&process)
     {
         entry.processes.push(process);
