@@ -684,6 +684,7 @@ impl QuillApp {
                 // otherwise Reply switches to it and focuses the composer.
                 if let Some(key) = self.notify_key(id) {
                     let outcome = self.send_inline_reply(&key.0, key.1, &text, cx);
+                    self.keep_unsent_reply(&key.0, key.1, text, outcome);
                     let on_screen = self.session().is_some_and(|s| s.account == key.0);
                     if outcome.opens_chat(on_screen) {
                         self.push_notification_click(&key, NotificationAction::Reply, cx);
