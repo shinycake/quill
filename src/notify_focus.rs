@@ -16,16 +16,45 @@
 //! in-process read is cheap). The parsers are pure and tested.
 #![deny(clippy::indexing_slicing)]
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use crate::locks::LockExt;
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// How long one answer is trusted. tdesktop re-queries macOS every few
 /// seconds as well (`kQuerySettingsEachMs`).
 const FRESH_MS: u64 = 5_000;
 
-static DND: AtomicBool = AtomicBool::new(false);
-static CHECKED_AT_MS: AtomicU64 = AtomicU64::new(0);
-static REFRESHING: AtomicBool = AtomicBool::new(false);
+/// The Do Not Disturb probe: never asked, an answer and when it was read,
+/// or a read on a worker (the older answer stays meanwhile). A read leaves
+/// `Refreshing` by landing its answer or, when it dies, by putting back
+/// what was there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Dnd {
+    Unknown,
+    Known { on: bool, at_ms: u64 },
+    Refreshing { last: Option<(bool, u64)> },
+}
+
+impl Dnd {
+    /// The last answer; `false` until the first lands.
+    fn on(self) -> bool {
+        match self {
+            Self::Unknown => false,
+            Self::Known { on, .. } => on,
+            Self::Refreshing { last } => last.is_some_and(|(on, _)| on),
+        }
+    }
+
+    /// Settled again with the older answer, if there was one.
+    fn settled(last: Option<(bool, u64)>) -> Self {
+        match last {
+            Some((on, at_ms)) => Self::Known { on, at_ms },
+            None => Self::Unknown,
+        }
+    }
+}
+
+static DND: Mutex<Dnd> = Mutex::new(Dnd::Unknown);
 
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -34,12 +63,25 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// Ends a refresh: the next stale read may start another.
-struct RefreshDone;
+/// Puts the older answer back when a refresh dies; a refresh that lands
+/// its answer disarms it.
+struct RefreshGuard {
+    last: Option<(bool, u64)>,
+    landed: Option<bool>,
+}
 
-impl Drop for RefreshDone {
+impl Drop for RefreshGuard {
     fn drop(&mut self) {
-        REFRESHING.store(false, Ordering::Release);
+        let mut state = DND.lock_or_recover();
+        if matches!(*state, Dnd::Refreshing { .. }) {
+            *state = match self.landed {
+                Some(on) => Dnd::Known {
+                    on,
+                    at_ms: now_ms(),
+                },
+                None => Dnd::settled(self.last),
+            };
+        }
     }
 }
 
@@ -47,29 +89,52 @@ impl Drop for RefreshDone {
 /// answer; `false` until the first refresh lands). Never waits on another
 /// thread; on macOS a stale answer is re-read in place (cheap, in-process).
 pub fn dnd_active() -> bool {
-    let checked = CHECKED_AT_MS.load(Ordering::Relaxed);
-    // macOS answers in-process from cfprefsd in well under a millisecond, and
-    // callers only ask when an alert is pending, so a stale answer (Focus
-    // toggled while Quill sat idle) is refreshed before it is used.
-    #[cfg(target_os = "macos")]
-    if now_ms().saturating_sub(checked) > FRESH_MS {
-        let dnd = query_os_dnd();
-        DND.store(dnd, Ordering::Relaxed);
-        CHECKED_AT_MS.store(now_ms(), Ordering::Relaxed);
-        return dnd;
-    }
-    if now_ms().saturating_sub(checked) > FRESH_MS && !REFRESHING.swap(true, Ordering::AcqRel) {
-        let spawned = crate::thread_guard::spawn_guarded("quill-dnd", || {
-            // Clears the flag even when the query panics.
-            let _refresh = RefreshDone;
-            DND.store(query_os_dnd(), Ordering::Relaxed);
-            CHECKED_AT_MS.store(now_ms(), Ordering::Relaxed);
+    let now = now_ms();
+    let (answer, start) = {
+        let mut state = DND.lock_or_recover();
+        let current = *state;
+        let stale = match current {
+            Dnd::Unknown => true,
+            Dnd::Known { at_ms, .. } => now.saturating_sub(at_ms) > FRESH_MS,
+            Dnd::Refreshing { .. } => false,
+        };
+        // macOS answers in-process from cfprefsd in well under a millisecond, and
+        // callers only ask when an alert is pending, so a stale answer (Focus
+        // toggled while Quill sat idle) is refreshed before it is used.
+        #[cfg(target_os = "macos")]
+        if stale {
+            drop(state);
+            let on = query_os_dnd();
+            *DND.lock_or_recover() = Dnd::Known {
+                on,
+                at_ms: now_ms(),
+            };
+            return on;
+        }
+        if stale {
+            let last = match current {
+                Dnd::Known { on, at_ms } => Some((on, at_ms)),
+                _ => None,
+            };
+            *state = Dnd::Refreshing { last };
+            (current.on(), Some(last))
+        } else {
+            (current.on(), None)
+        }
+    };
+    if let Some(last) = start {
+        let spawned = crate::thread_guard::spawn_guarded("quill-dnd", move || {
+            let mut guard = RefreshGuard { last, landed: None };
+            guard.landed = Some(query_os_dnd());
         });
         if spawned.is_err() {
-            REFRESHING.store(false, Ordering::Release);
+            let mut state = DND.lock_or_recover();
+            if matches!(*state, Dnd::Refreshing { .. }) {
+                *state = Dnd::settled(last);
+            }
         }
     }
-    DND.load(Ordering::Relaxed)
+    answer
 }
 
 /// Whether anything needs the Do Not Disturb answer: only an alert that is

@@ -17,10 +17,13 @@ use std::collections::{HashMap, VecDeque};
 /// A message: chat id and message id.
 pub type MessageKey = (i64, i64);
 
-/// Messages remembered, at most. Past it the oldest is
+/// Messages remembered in each stage, at most. Past it the oldest is
 /// forgotten; a forgotten message at worst plays or skips its effect once
 /// more.
-const MAX_KEYS: usize = 32_768;
+const MAX_KEYS: usize = 16_384;
+/// The most messages held across both stages: what two sets of `MAX_KEYS`
+/// held before they were one.
+const MAX_HELD: usize = MAX_KEYS * 2;
 
 /// How a message with an effect reached the session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,7 +73,7 @@ impl BoundedStages {
             return;
         }
         self.order.push_back(key);
-        while self.stages.len() > MAX_KEYS {
+        while self.stages.len() > MAX_HELD {
             let Some(oldest) = self.order.pop_front() else {
                 break;
             };
@@ -78,7 +81,7 @@ impl BoundedStages {
         }
         // Removed keys leave their place in `order`: shed them when they
         // outnumber the live ones.
-        if self.order.len() > MAX_KEYS * 2 {
+        if self.order.len() > MAX_HELD * 2 {
             let stages = &self.stages;
             self.order.retain(|key| stages.contains_key(key));
         }
@@ -132,7 +135,7 @@ impl EffectWatch {
 
 #[cfg(test)]
 mod tests {
-    use super::{EffectArrival, EffectWatch, MAX_KEYS};
+    use super::{EffectArrival, EffectWatch, MAX_HELD, MAX_KEYS};
 
     #[test]
     fn only_messages_sent_here_and_unread_incoming_ones_start_unwatched() {
@@ -199,7 +202,7 @@ mod tests {
             watch.note((2, id), EffectArrival::SentHere);
             watch.mark_watched((3, id));
         }
-        assert!(watch.messages.stages.len() <= MAX_KEYS);
+        assert!(watch.messages.stages.len() <= MAX_HELD);
     }
 
     #[test]

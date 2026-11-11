@@ -24,7 +24,7 @@ use std::ffi::c_int;
 use std::os::fd::IntoRawFd;
 use std::path::Path;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicUsize, Ordering};
 
 const SIGNALS: [c_int; 5] = [
     libc::SIGSEGV,
@@ -44,8 +44,13 @@ const WAIT_STEP_NANOS: libc::c_long = 50_000_000;
 const WAIT_STEPS: u32 = 40;
 
 static CRASH_FD: AtomicI32 = AtomicI32::new(-1);
-static IN_HANDLER: AtomicBool = AtomicBool::new(false);
-static REPORT_DONE: AtomicBool = AtomicBool::new(false);
+/// The report of the first faulting thread: [`REPORT_IDLE`] until a thread
+/// takes it, [`REPORT_WRITING`] while it writes, [`REPORT_WRITTEN`] after.
+/// One value, so "taken" and "written" cannot disagree.
+static REPORT: AtomicU8 = AtomicU8::new(REPORT_IDLE);
+const REPORT_IDLE: u8 = 0;
+const REPORT_WRITING: u8 = 1;
+const REPORT_WRITTEN: u8 = 2;
 static INSTALLED: AtomicBool = AtomicBool::new(false);
 /// The `sa_sigaction` value and `sa_flags` each signal had before ours, in
 /// `SIGNALS` order; zero is `SIG_DFL`.
@@ -163,7 +168,15 @@ fn install_one(index: usize, signal: c_int) {
 // Cannot unwind: it has no panicking operations (no indexing, no unwrap, no
 // allocation), and an unwind out of `extern "C"` aborts.
 extern "C" fn on_signal(signal: c_int, info: *mut libc::siginfo_t, context: *mut libc::c_void) {
-    if IN_HANDLER.swap(true, Ordering::SeqCst) {
+    if REPORT
+        .compare_exchange(
+            REPORT_IDLE,
+            REPORT_WRITING,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        )
+        .is_err()
+    {
         // Another thread is writing the report; dying now would cut it off.
         wait_for_report();
     } else {
@@ -171,7 +184,7 @@ extern "C" fn on_signal(signal: c_int, info: *mut libc::siginfo_t, context: *mut
         if fd >= 0 {
             write_report(fd, signal, fault_address(info), context);
         }
-        REPORT_DONE.store(true, Ordering::SeqCst);
+        REPORT.store(REPORT_WRITTEN, Ordering::SeqCst);
     }
     chain_to_previous(signal, info, context);
     // SAFETY: restoring the default action is a plain libc call.
@@ -192,7 +205,7 @@ fn wait_for_report() {
         tv_nsec: WAIT_STEP_NANOS,
     };
     for _ in 0..WAIT_STEPS {
-        if REPORT_DONE.load(Ordering::SeqCst) {
+        if REPORT.load(Ordering::SeqCst) == REPORT_WRITTEN {
             return;
         }
         // SAFETY: `pause` is a valid timespec; the remainder is not wanted.

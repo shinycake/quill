@@ -133,7 +133,7 @@ fn a_picked_photo_opens_the_crop_and_lands_on_the_new_group(cx: &mut TestAppCont
 
 #[gpui_kit::test]
 fn cancel_closes_the_box_while_the_create_request_is_out(cx: &mut TestAppContext) {
-    use quill::new_chat::{NewChatBack, NewChatStage};
+    use quill::new_chat::{CreateProgress, NewChatBack, NewChatStage};
     use quill::state::RequestPurpose;
     let (app, shell, mut vcx) = open_demo(cx, "ready-new-channel");
     let vcx = &mut vcx;
@@ -147,6 +147,7 @@ fn cancel_closes_the_box_while_the_create_request_is_out(cx: &mut TestAppContext
             dialog.stage = NewChatStage::Creating {
                 request,
                 back: NewChatBack::Info,
+                progress: CreateProgress::InFlight,
             };
         }
         assert!(app.new_chat_view().is_some_and(|view| view.busy));
@@ -162,7 +163,7 @@ fn cancel_closes_the_box_while_the_create_request_is_out(cx: &mut TestAppContext
 /// the creation row), instead of leaving a hidden dialog behind.
 #[gpui_kit::test]
 fn a_made_group_takes_its_dialog_away(cx: &mut TestAppContext) {
-    use quill::new_chat::{CreationOutcome, NewChatBack, NewChatStage};
+    use quill::new_chat::{CreateProgress, CreationOutcome, NewChatBack, NewChatStage};
     use quill::state::{NewChatCreation, RequestPurpose};
     let (app, shell, mut vcx) = open_demo(cx, "ready-new-group");
     let vcx = &mut vcx;
@@ -182,6 +183,7 @@ fn a_made_group_takes_its_dialog_away(cx: &mut TestAppContext) {
             dialog.stage = NewChatStage::Creating {
                 request,
                 back: NewChatBack::Info,
+                progress: CreateProgress::InFlight,
             };
         }
     });

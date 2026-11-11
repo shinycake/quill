@@ -25,8 +25,8 @@ use quill::group_type::{GroupTypeData, USERNAME_MAX, plan_group_type_save};
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::new_chat::{
-    NewChatBack, NewChatInvalid, NewChatKind, NewChatStage, NewChatStep, NewChatView,
-    plan_new_chat, view,
+    CreateProgress, NewChatBack, NewChatInvalid, NewChatKind, NewChatStage, NewChatStep,
+    NewChatView, TypeSaveStage, plan_new_chat, view,
 };
 
 /// The description shows three lines and grows to eight.
@@ -61,11 +61,16 @@ impl QuillApp {
     /// What the open New Group / New Channel dialog shows.
     pub(crate) fn new_chat_view(&self) -> Option<NewChatView> {
         let dialog = self.admin.create_chat_dialog.as_ref()?;
-        let facts = self
-            .session()
-            .map(|session| session.new_chat_facts(&dialog.stage))
-            .unwrap_or_default();
-        Some(view(dialog.kind, &dialog.stage, &facts))
+        let settled = self.settled_new_chat_stage(&dialog.stage);
+        Some(view(dialog.kind, &settled))
+    }
+
+    /// `stage` with the session's answers to its requests folded in.
+    fn settled_new_chat_stage(&self, stage: &NewChatStage) -> NewChatStage {
+        match self.session() {
+            Some(session) => session.settled_new_chat(stage),
+            None => stage.clone(),
+        }
     }
 
     fn new_chat_step(&self) -> Option<NewChatStep> {
@@ -219,6 +224,15 @@ impl QuillApp {
     /// Poll drain: a plain group that was made ends its dialog, which
     /// takes its creation row with it.
     pub(in crate::ui) fn drain_new_chat_done(&mut self, cx: &mut Context<Self>) -> bool {
+        // The answers the stage waits for are taken into it here.
+        let settled = self
+            .admin
+            .create_chat_dialog
+            .as_ref()
+            .map(|dialog| self.settled_new_chat_stage(&dialog.stage));
+        if let (Some(settled), Some(dialog)) = (settled, self.admin.create_chat_dialog.as_mut()) {
+            dialog.stage = settled;
+        }
         if !matches!(self.new_chat_step(), Some(NewChatStep::Done(_))) {
             return false;
         }
@@ -332,7 +346,14 @@ impl QuillApp {
         };
         match live.driver.create_new_chat(&request, photo) {
             Ok(Some(request)) => {
-                self.set_new_chat_stage(NewChatStage::Creating { request, back }, cx);
+                self.set_new_chat_stage(
+                    NewChatStage::Creating {
+                        request,
+                        back,
+                        progress: CreateProgress::InFlight,
+                    },
+                    cx,
+                );
             }
             Ok(None) => {}
             Err(err) => {
@@ -374,7 +395,7 @@ impl QuillApp {
                 self.set_new_chat_stage(
                     NewChatStage::Type {
                         chat,
-                        saving: Some(sent),
+                        save: TypeSaveStage::Saving(sent),
                     },
                     cx,
                 );
@@ -392,48 +413,32 @@ impl QuillApp {
     /// A typed link hides the refusal of the last Save; a Save still out
     /// stays, so its answer moves the step on.
     pub(super) fn new_chat_link_edited(&mut self) {
-        let out = match self.admin.create_chat_dialog.as_ref().map(|d| &d.stage) {
-            Some(NewChatStage::Type {
-                saving: Some(sent), ..
-            }) => self
-                .session()
-                .is_some_and(|session| sent.iter().any(|id| session.requests.get(*id).is_some())),
-            _ => false,
-        };
-        if !out
-            && let Some(dialog) = self.admin.create_chat_dialog.as_mut()
-            && let NewChatStage::Type { saving, .. } = &mut dialog.stage
+        let settled = self
+            .admin
+            .create_chat_dialog
+            .as_ref()
+            .map(|dialog| self.settled_new_chat_stage(&dialog.stage));
+        if let (Some(mut settled), Some(dialog)) = (settled, self.admin.create_chat_dialog.as_mut())
         {
-            *saving = None;
+            if let NewChatStage::Type { save, .. } = &mut settled
+                && matches!(save, TypeSaveStage::Refused(_))
+            {
+                *save = TypeSaveStage::Editing;
+            }
+            dialog.stage = settled;
         }
     }
 
     /// Why TDLib refused the type step's link.
     pub(super) fn new_chat_username_failure(&self) -> Option<String> {
         let dialog = self.new_chat_dialog()?;
-        let NewChatStage::Type {
-            chat,
-            saving: Some(sent),
-        } = &dialog.stage
-        else {
-            return None;
-        };
-        let session = self.session()?;
-        if !session.new_chat_facts(&dialog.stage).type_failed {
-            return None;
+        match self.settled_new_chat_stage(&dialog.stage) {
+            NewChatStage::Type {
+                save: TypeSaveStage::Refused(reason),
+                ..
+            } => Some(reason),
+            _ => None,
         }
-        session
-            .groups
-            .info_edit_errors
-            .get(&chat.0)
-            .map(|error| error.reason.clone())
-            .or_else(|| {
-                session
-                    .groups
-                    .new_chats
-                    .type_save_failure(sent)
-                    .map(str::to_string)
-            })
     }
 
     /// The subscribers step's Add (tdesktop `inviteSelectedUsers`).
