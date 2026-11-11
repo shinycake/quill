@@ -40,7 +40,15 @@ const BADGE_PADDING: f64 = 4.;
 struct Slide {
     from: f64,
     to: f64,
-    started: Option<Instant>,
+    run: SlideRun,
+}
+
+/// Whether a slide is moving.
+#[derive(Clone, Copy, Debug)]
+enum SlideRun {
+    Still,
+    /// Moving since this instant.
+    Since(Instant),
 }
 
 impl Slide {
@@ -48,12 +56,12 @@ impl Slide {
         Self {
             from: value,
             to: value,
-            started: None,
+            run: SlideRun::Still,
         }
     }
 
     fn value(&self, now: Instant) -> f64 {
-        let Some(started) = self.started else {
+        let SlideRun::Since(started) = self.run else {
             return self.to;
         };
         let t = (now.saturating_duration_since(started).as_secs_f64() / ANIMATION.as_secs_f64())
@@ -64,8 +72,10 @@ impl Slide {
     }
 
     fn animating(&self, now: Instant) -> bool {
-        self.started
-            .is_some_and(|started| now.saturating_duration_since(started) < ANIMATION)
+        match self.run {
+            SlideRun::Since(started) => now.saturating_duration_since(started) < ANIMATION,
+            SlideRun::Still => false,
+        }
     }
 
     fn go(&mut self, to: f64, now: Instant, animate: bool) {
@@ -74,7 +84,11 @@ impl Slide {
         }
         self.from = if animate { self.value(now) } else { to };
         self.to = to;
-        self.started = animate.then_some(now);
+        self.run = if animate {
+            SlideRun::Since(now)
+        } else {
+            SlideRun::Still
+        };
     }
 }
 
