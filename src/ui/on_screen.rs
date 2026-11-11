@@ -244,7 +244,6 @@ impl OnScreen {
     pub(super) fn new(
         epoch: ScreenEpoch,
         chat_prefs: &ChatPrefs,
-        connect_status: super::connect_ui::ConnectUiStatus,
         status_note: String,
         window: &mut Window,
         cx: &mut Context<QuillApp>,
@@ -378,7 +377,7 @@ impl OnScreen {
             account_boxes: super::account_state::AccountBoxes::new(window, cx),
             auth_ui: super::auth_state::AuthUi::new(window, cx),
             agent_ui: super::agent_state::AgentUi::new(),
-            connection: super::connection_state::ConnectionUi::new(connect_status, status_note),
+            connection: super::connection_state::ConnectionUi::new(status_note),
             windows: super::chat_window::ChatWindows::new(),
         }
     }
@@ -421,14 +420,10 @@ impl QuillApp {
     pub(in crate::ui) fn replace_screen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.set_window_scope(None);
         let epoch = self.screen.epoch.next();
-        // The status is the connection's, which the switch sets again right
-        // after (`adopt_live`, `start_connection`); a fresh default would
-        // show the synthetic pane for a frame.
-        let status = self.connection.status.clone();
         // So is the status line's note: a restart set "Connecting" before
         // the deferred replacement runs (`screen_leaves_later`).
         let note = self.connection.note().text().to_string();
-        self.screen = OnScreen::new(epoch, &self.chat_prefs, status, note, window, cx);
+        self.screen = OnScreen::new(epoch, &self.chat_prefs, note, window, cx);
         // The side column slides out drawing the panels it last had, which
         // name the old account's users and chats.
         self.frame.panels = super::panel_reveal::PanelReveal::new(std::time::Instant::now());

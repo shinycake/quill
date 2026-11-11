@@ -24,16 +24,57 @@ use std::time::Duration;
 pub(crate) const UNDO_DURATION: Duration = Duration::from_millis(3000);
 const UNDO_COUNTDOWN_FPS: u32 = 4;
 
+/// Tells one answered row's undo from every other (an answer given at the
+/// same instant, or the same row answered again, is a different one), so its
+/// timer sends only its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct UndoId(u64);
+
+impl UndoId {
+    fn next() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        Self(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    }
+}
+
 /// An answered row waiting out its undo time.
 pub(crate) struct UndoAction {
+    pub(crate) id: UndoId,
     pub(crate) chat_id: i64,
     pub(crate) approve: bool,
+    /// When the countdown the bar shows began.
     pub(crate) started: Instant,
     /// Wakes the app when the time is up; dropping it cancels the wake.
     pub(crate) _timer: Option<Task<()>>,
 }
 
 impl UndoAction {
+    #[cfg(test)]
+    pub(crate) fn new(
+        chat_id: i64,
+        approve: bool,
+        started: Instant,
+        timer: Option<Task<()>>,
+    ) -> Self {
+        Self::with_id(UndoId::next(), chat_id, approve, started, timer)
+    }
+
+    fn with_id(
+        id: UndoId,
+        chat_id: i64,
+        approve: bool,
+        started: Instant,
+        timer: Option<Task<()>>,
+    ) -> Self {
+        Self {
+            id,
+            chat_id,
+            approve,
+            started,
+            _timer: timer,
+        }
+    }
+
     /// Whole seconds left, as the countdown shows them (rounded up).
     pub(crate) fn seconds_left(&self, now: Instant) -> u64 {
         let left = UNDO_DURATION.saturating_sub(now.saturating_duration_since(self.started));
@@ -77,17 +118,19 @@ impl QuillApp {
         let community_id = *community_id;
         let previous = undo.take();
         let started = Instant::now();
+        let id = UndoId::next();
         let timer = self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(UNDO_DURATION).await;
-            let _ = this.update(cx, |app, cx| app.finish_community_undo(started, cx));
+            let _ = this.update(cx, |app, cx| app.finish_community_undo(id, cx));
         });
         if let Some(CommunityBox::Requests { undo, .. }) = self.admin.community.flow.open.as_mut() {
-            *undo = Some(UndoAction {
+            *undo = Some(UndoAction::with_id(
+                id,
                 chat_id,
                 approve,
                 started,
-                _timer: Some(timer),
-            });
+                Some(timer),
+            ));
         }
         if let Some(previous) = previous {
             self.perform_request_action(community_id, previous, cx);
@@ -95,18 +138,15 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// The undo time of the answer given at `started` is up: send it,
-    /// unless it was undone or replaced since.
-    fn finish_community_undo(&mut self, started: Instant, cx: &mut Context<Self>) {
+    /// The undo time of the answer `id` is up: send it, unless it was undone
+    /// or replaced since.
+    fn finish_community_undo(&mut self, id: UndoId, cx: &mut Context<Self>) {
         let Some(CommunityBox::Requests { community_id, undo }) =
             self.admin.community.flow.open.as_mut()
         else {
             return;
         };
-        if !undo
-            .as_ref()
-            .is_some_and(|action| action.started == started)
-        {
+        if !undo.as_ref().is_some_and(|action| action.id == id) {
             return;
         }
         let community_id = *community_id;

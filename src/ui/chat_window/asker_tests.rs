@@ -14,6 +14,7 @@
 #![cfg(feature = "demo-capture")]
 
 use super::tests::{Harness, OPEN, OTHER, new_app};
+use crate::ui::links_state::ResolvedStep;
 use crate::ui::recording_state::CaptureFor;
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::test::TestWindowExt as _;
@@ -132,10 +133,13 @@ fn a_link_clicked_in_a_chat_window_does_not_wait_for_the_main_window(cx: &mut Te
     let chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, cx| {
         app.set_window_scope(None);
-        app.links.pending_deep_link_ui = Some(DeepLinkUi::ConferenceCall {
-            link: "https://t.me/call/abc".into(),
-        });
-        app.hold_resolved_link(Some(OTHER), cx);
+        app.hold_resolved_link(
+            ResolvedStep::Ui(DeepLinkUi::ConferenceCall {
+                link: "https://t.me/call/abc".into(),
+            }),
+            Some(OTHER),
+            cx,
+        );
         assert_eq!(app.resolved_link_frame(), Some(OTHER));
     });
     for _ in 0..2 {
@@ -144,7 +148,7 @@ fn a_link_clicked_in_a_chat_window_does_not_wait_for_the_main_window(cx: &mut Te
     let in_chat_window = chat_window_shell(&h, cx);
     assert_eq!(shown(&in_chat_window, cx), Some(DialogKind::ConferenceLink));
     h.app.read_with(cx, |app, _| {
-        assert!(app.links.pending_deep_link_ui.is_none(), "it ran once");
+        assert!(app.links.resolved.is_none(), "it ran once");
     });
 }
 
@@ -157,50 +161,67 @@ fn a_resolved_link_runs_in_the_frame_it_belongs_to(cx: &mut TestAppContext) {
     let _chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, cx| {
         app.set_window_scope(None);
-        app.links.pending_deep_link_ui = Some(DeepLinkUi::ConferenceCall {
-            link: "https://t.me/call/abc".into(),
-        });
-        app.hold_resolved_link(Some(OTHER), cx);
+        app.hold_resolved_link(
+            ResolvedStep::Ui(DeepLinkUi::ConferenceCall {
+                link: "https://t.me/call/abc".into(),
+            }),
+            Some(OTHER),
+            cx,
+        );
     });
     draw(h.main, cx);
     h.app.update(cx, |app, cx| {
         assert!(
-            app.links.pending_deep_link_ui.is_some(),
+            app.links.resolved.is_some(),
             "the main frame leaves the chat window's link"
         );
-        app.links.pending_deep_link_ui = Some(DeepLinkUi::Settings(SettingsTarget::Language));
-        app.hold_resolved_link(Some(OTHER), cx);
+        app.hold_resolved_link(
+            ResolvedStep::Ui(DeepLinkUi::Settings(SettingsTarget::Language)),
+            Some(OTHER),
+            cx,
+        );
         assert_eq!(
             app.resolved_link_frame(),
             None,
             "a settings page is the main window's"
         );
-        app.links.pending_deep_link_ui = Some(DeepLinkUi::Settings(SettingsTarget::QrCode));
+        app.hold_resolved_link(
+            ResolvedStep::Ui(DeepLinkUi::Settings(SettingsTarget::QrCode)),
+            Some(OTHER),
+            cx,
+        );
         assert_eq!(
             app.resolved_link_frame(),
             Some(OTHER),
             "a box shows where it was clicked"
         );
-        app.links.pending_deep_link_ui = None;
-        app.links.pending_deep_link_open = Some(crate::ui::links_state::PendingOpen::user(
-            OPEN,
-            quill::state::DeepLinkAction::ShareDraft { text: "hi".into() },
-        ));
+        app.hold_resolved_link(
+            ResolvedStep::Open(crate::ui::links_state::PendingOpen::user(
+                OPEN,
+                quill::state::DeepLinkAction::ShareDraft { text: "hi".into() },
+            )),
+            Some(OTHER),
+            cx,
+        );
         assert_eq!(
             app.resolved_link_frame(),
             None,
             "a chat with no window of its own opens in the main window"
         );
-        app.links.pending_deep_link_open = Some(crate::ui::links_state::PendingOpen::user(
-            OTHER,
-            quill::state::DeepLinkAction::ShareDraft { text: "hi".into() },
-        ));
+        app.hold_resolved_link(
+            ResolvedStep::Open(crate::ui::links_state::PendingOpen::user(
+                OTHER,
+                quill::state::DeepLinkAction::ShareDraft { text: "hi".into() },
+            )),
+            Some(OTHER),
+            cx,
+        );
         assert_eq!(
             app.resolved_link_frame(),
             Some(OTHER),
             "a windowed chat goes there"
         );
-        app.links.pending_deep_link_open = None;
+        app.links.resolved = None;
     });
 }
 
@@ -214,10 +235,12 @@ fn a_share_pick_is_the_windows_that_picked(cx: &mut TestAppContext) {
         app.note_window_press(Some(OTHER));
         app.share.link_text = Some("https://example.com".into());
         app.choose_share_chat(OTHER, cx);
-        assert_eq!(app.links.pending_flow_window, Some(OTHER));
+        assert_eq!(
+            app.links.resolved.as_ref().and_then(|link| link.window),
+            Some(OTHER)
+        );
         assert_eq!(app.resolved_link_frame(), Some(OTHER));
-        app.links.pending_deep_link_open = None;
-        app.links.pending_flow_window = None;
+        app.links.resolved = None;
     });
 }
 
@@ -305,7 +328,7 @@ fn the_custom_emoji_card_shows_where_the_emoji_was_tapped(cx: &mut TestAppContex
     let _chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, cx| {
         app.set_window_scope(Some(OTHER));
-        app.message_ui.custom_emoji_tapped = Some(77);
+        app.note_custom_emoji_tap(77);
         if let Some(session) = app.demo_session.as_mut() {
             session.stickers.custom_emoji_preview = Some(quill::state::CustomEmojiPreview {
                 emoji_id: 77,

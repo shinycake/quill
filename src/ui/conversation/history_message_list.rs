@@ -18,7 +18,7 @@ struct ThreadWindow {
     older: quill::state::OlderEnd,
 }
 
-/// The reader's scroll goal in this render (`HistoryUi::scroll_goal`).
+/// The reader's scroll goal in this render (`HistoryUi::aim`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GoalNow {
     /// None, or its rows are not in yet.
@@ -148,9 +148,7 @@ impl QuillApp {
         };
         // Rows of the same window keep the view where it is; a new window
         // lands instead (`rows_replaced`).
-        let same_window = self.history.key == Some(history_key)
-            && self.history.window_epoch == window_epoch
-            && !self.history.anchor_pending;
+        let same_window = self.history.anchor.is_placed_for(history_key, window_epoch);
         // A goal the reader asked for that these rows reach: it places the
         // view, so nothing is held.
         let goal = self.scroll_goal_now(thread_window.as_ref());
@@ -176,7 +174,7 @@ impl QuillApp {
             // so remeasure rows whose inputs changed. File readiness affects
             // any media row, so a change there remeasures every row.
             let media_signature = self.history_media_signature();
-            if self.history.key == Some(history_key)
+            if self.history.anchor.key() == Some(history_key)
                 && count == self.history.rows.len()
                 && count == self.history.scroller.read(cx).item_count()
             {
@@ -202,24 +200,19 @@ impl QuillApp {
                 }
             }
             self.history.media_signature = media_signature;
-            if self.history.key != Some(history_key) || self.history.window_epoch != window_epoch {
-                // A new or replaced window anchors once its rows are in.
-                self.history.window_epoch = window_epoch;
-                self.history.anchor_pending = true;
+            let same_chat = self.history.anchor.key() == Some(history_key);
+            // A new or replaced window anchors once its rows are in.
+            if self.history.anchor.sync(history_key, window_epoch) && same_chat {
                 // The window of a chat already open was replaced (jump to
                 // the latest, a date jump): the position left behind is not
                 // where the reader goes back to.
-                if self.history.key == Some(history_key) {
-                    self.history.scroll_memory.forget(history_key);
-                }
+                self.history.scroll_memory.forget(history_key);
             }
-            if self.history.key != Some(history_key) {
+            if !same_chat {
                 // New chat/topic (or first render): reset; the anchor below
-                // picks the position.
-                self.history.key = Some(history_key);
-                // Message ids are chat-local: a stale highlight id in the new
-                // chat must not suppress its search-jump scroll.
-                self.history.last_highlight = None;
+                // picks the position. Message ids are chat-local, so the
+                // anchor starts with no landed jump: a stale highlight id in
+                // the new chat must not suppress its search-jump scroll.
                 self.history.scroll_date = Default::default();
                 self.history.scroll_top_probe.set(None);
                 // The painted row range is the old history's: the page
@@ -317,7 +310,7 @@ impl QuillApp {
             self.history.chrome_epoch = mark.epoch;
             self.history.chrome_seen = mark.revision;
             if let Ok(mut due) = self.history.chrome_due.try_borrow_mut() {
-                due.clear();
+                due.take();
             }
             self.history.row_stats.note_built(rows_started);
             self.history.row_stats.messages_cloned += cloned;
@@ -346,7 +339,9 @@ impl QuillApp {
         self.land_new_jump(jump, cx);
         match goal {
             GoalNow::Due => self.reach_scroll_goal(cx),
-            GoalNow::Stale => self.history.scroll_goal = None,
+            GoalNow::Stale => {
+                self.history.aim.take_goal();
+            }
             GoalNow::Waiting => {}
         }
         // Read by the next render's view hold and by the landing.
@@ -383,7 +378,7 @@ impl QuillApp {
         self.players.inline_videos.begin_render(
             self.windows.scope,
             target,
-            self.history.pane_width.get(),
+            self.history.measure.get().pane(),
             cx,
         );
         self.begin_widget_pass(target, cx);
@@ -855,7 +850,7 @@ impl QuillApp {
     /// Where the reader's scroll goal stands with the rows this render
     /// shows.
     fn scroll_goal_now(&self, thread: Option<&ThreadWindow>) -> GoalNow {
-        match (self.history.scroll_goal, thread) {
+        match (self.history.aim.goal(), thread) {
             (None, _) => GoalNow::Waiting,
             (Some(ScrollGoal::ThreadRoot), Some(thread))
                 if thread.older == quill::state::OlderEnd::Complete =>
@@ -873,7 +868,7 @@ impl QuillApp {
         if self.history.rows.is_empty() {
             return;
         }
-        let Some(goal) = self.history.scroll_goal.take() else {
+        let Some(goal) = self.history.aim.take_goal() else {
             return;
         };
         self.end_landing();
@@ -900,8 +895,8 @@ impl QuillApp {
         self.history_a11y_rows_changed(cx);
         // A new or replaced window: start at the saved position, else the
         // jump target, else the "Unread messages" divider, else the bottom.
-        if self.history.anchor_pending && !self.history.rows.is_empty() {
-            self.history.anchor_pending = false;
+        if self.history.anchor.is_anchoring() && !self.history.rows.is_empty() {
+            self.history.anchor.placed();
             self.anchor_opened_history(history_key, jump, cx);
         }
         self.land_new_jump(jump, cx);
@@ -911,10 +906,10 @@ impl QuillApp {
     /// the middle of the view once per jump. Jumps are told apart by their
     /// serial, so the same message asked for again lands again.
     fn land_new_jump(&mut self, jump: Option<(u64, MessageId)>, cx: &mut Context<Self>) {
-        if jump == self.history.last_highlight {
+        if jump == self.history.anchor.landed() {
             return;
         }
-        self.history.last_highlight = jump;
+        self.history.anchor.set_landed(jump);
         if let Some((_, target)) = jump {
             self.start_landing(super::landing::LandingGoal::Message(target), cx);
         }

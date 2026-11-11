@@ -126,11 +126,12 @@ impl QuillApp {
 crate::ui::screenshot_demo::register_demos![
     crate::ui::screenshot_demo::DemoSpec::signed_out("wait-qr-passkey", || {
         (
-            crate::ui::connect_ui::ConnectUiStatus::DemoWaitPhone,
+            crate::ui::connect_ui::ConnectStage::Shown(
+                AuthorizationState::WaitOtherDeviceConfirmation {
+                    link: "tg://login?token=AQID".into(),
+                },
+            ),
             tr(keys::Q_PREFS_SCREENSHOT_DEMO_QR_SIGN_IN).into(),
-            AuthorizationState::WaitOtherDeviceConfirmation {
-                link: "tg://login?token=AQID".into(),
-            },
         )
     })
     .setup(QuillApp::demo_passkey_login),

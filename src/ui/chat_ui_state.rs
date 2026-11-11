@@ -158,20 +158,10 @@ pub(crate) struct ChatUi {
     /// The bot command list above the composer: closed, opened by a typed
     /// `/` token, or opened by the bot's Menu button.
     pub(super) command_menu: super::composer::CommandMenu,
-    /// Bots slice: `@botname query` inline-mode results dropdown above
-    /// the composer. `inline_results_selected` is the highlighted row
-    /// (Up/Down/Enter). `inline_query_armed` is the `(username, query)` a
-    /// debounce timer is currently armed for — `poll_live` re-runs the
-    /// inline progress check after every batch of session updates, and the
-    /// armed identity keeps it from spawning a duplicate timer per poll.
-    pub(super) inline_results_open: bool,
-    pub(super) inline_results_selected: usize,
-    pub(super) inline_query_armed: Option<(String, String)>,
-    /// The trigger's query waits for the session: the bot is being
-    /// resolved, or an older query of this chat and bot is in flight.
-    /// `progress_inline_mode` sends it when updates land, in whichever
-    /// window this value is in.
-    pub(super) inline_query_waiting: bool,
+    /// Bots slice: `@botname query` inline-mode results dropdown above the
+    /// composer: closed, or open with its highlighted row and what its
+    /// query waits for (the 100ms debounce timer of TGX, or the session).
+    pub(super) inline: super::inline_stage::InlineMode,
     /// This window's copy of the session's resolution of the trigger's bot
     /// (the session has one slot any window's trigger replaces).
     pub(super) inline_bot: Option<quill::state::InlineBotResolve>,
@@ -228,11 +218,11 @@ pub(crate) struct ChatUi {
     /// M1: the scheduled-messages dialog (view/delete). Here so that a
     /// chat change closes it: its rows act on the chat shown.
     pub(super) scheduled_dialog_open: bool,
-    /// M1: the schedule picker popup above the composer.
-    pub(super) schedule_popup_open: bool,
-    /// The date+time picker behind the schedule popup (created when the
-    /// popup opens, see `open_schedule_picker`). Its Reschedule target is
-    /// a message id of this chat, so the picker goes with the chat.
+    /// M1: the schedule picker popup above the composer: `Some` while it is
+    /// open, with the date+time picker it holds (created when the popup
+    /// opens, see `open_schedule_picker`). Its Reschedule target is a message
+    /// id of this chat, so the picker goes with the chat. The share box's
+    /// schedule step is a picker of its own target in the same slot.
     pub(super) schedule_picker: Option<super::scheduled::SchedulePicker>,
     /// Phase 4.2: poll creation dialog (open above the composer). Here so
     /// that a chat change closes it: Create posts to the chat shown.

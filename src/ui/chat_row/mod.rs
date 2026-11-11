@@ -554,7 +554,7 @@ pub(super) fn session_chat_row(
         .on_mouse_up(
             MouseButton::Left,
             cx.listener(move |this, _, _, _| {
-                this.chat_list.preview_press = None;
+                this.chat_list.peek.cancel_press();
             }),
         )
         // Release outside the row (e.g. press, drag off, let go) also
@@ -562,7 +562,7 @@ pub(super) fn session_chat_row(
         .on_mouse_up_out(
             MouseButton::Left,
             cx.listener(move |this, _, _, _| {
-                this.chat_list.preview_press = None;
+                this.chat_list.peek.cancel_press();
             }),
         )
         .child(
@@ -870,7 +870,7 @@ pub(super) fn session_chat_row(
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, event: &MouseDownEvent, _, _| {
-                        this.chat_list.pin_press = Some((id.0, f32::from(event.position.y)));
+                        this.chat_list.pin.press(id.0, f32::from(event.position.y));
                     }),
                 )
                 .on_drop(cx.listener(move |this, _: &PinnedChatDrag, _, cx| {

@@ -83,8 +83,9 @@ impl QuillApp {
         }
         self.open_sessions(cx);
         if std::env::var_os("QUILL_DEMO_DEVICE_LINK").is_some() {
-            self.privacy.device_login_qr =
-                Some(zeroize::Zeroizing::new("tg://login?token=AQID".into()));
+            self.privacy.device_link = crate::ui::device_qr::DeviceLink::Confirm(
+                zeroize::Zeroizing::new("tg://login?token=AQID".into()),
+            );
         }
         self.set_note(StatusNote::silent("screenshot demo — active sessions"));
     }

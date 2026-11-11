@@ -144,9 +144,7 @@ fn a_press_on_the_chip_still_starts_the_long_press_peek(cx: &mut TestAppContext)
         gpui_kit::MouseButton::Left,
         gpui_kit::Modifiers::default(),
     );
-    let pressed = app.update(vcx, |app, _| {
-        app.chat_list.preview_press.map(|(chat, _)| chat)
-    });
+    let pressed = app.update(vcx, |app, _| app.chat_list.peek.pressing());
     assert_eq!(pressed, Some(ChatId(71)));
 }
 

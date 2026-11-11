@@ -55,7 +55,7 @@ fn preview_row_menu_opens_the_chat(cx: &mut TestAppContext) {
     });
     assert_ne!(open, other);
     app.update(vcx, |app, cx| {
-        app.chat_list.preview = Some(ChatPreviewState {
+        app.chat_list.peek = crate::ui::chat_list_state::PeekPreview::Open(ChatPreviewState {
             chat_id: other,
             anchor: point(px(300.), px(300.)),
         });
@@ -80,7 +80,7 @@ fn preview_row_menu_opens_the_chat(cx: &mut TestAppContext) {
     vcx.simulate_click(item, Modifiers::default());
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
-        assert!(app.chat_list.preview.is_none(), "the preview closes");
+        assert!(app.chat_list.peek.is_idle(), "the preview closes");
         assert_eq!(app.session().and_then(|s| s.open_chat), Some(other));
     });
 }

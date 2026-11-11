@@ -20,7 +20,6 @@ CameraDraft::starting
 
 ChatSummary::my_rights_fetched
 ChatSwipeFacts::is_saved
-ChatUi::inline_query_waiting
 ChatWindowsState::asked
 ChatbotDraft::loaded
 Checklist::others_can_mark_tasks_as_done
@@ -51,7 +50,6 @@ HeaderFacts::is_saved_messages
 HistoryState::load_failed
 HistoryState::loaded_complete
 HistoryState::newer_failed
-HistoryUi::anchor_pending
 InlineMembersUi::admins_asked
 
 JoinedLines::started

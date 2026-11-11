@@ -19,6 +19,7 @@ use super::actions::{
     ToggleLinkPreview,
 };
 use super::app::QuillApp;
+use super::composer_sends::SendOnce;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::schedule::ScheduleKind;
@@ -68,7 +69,7 @@ impl QuillApp {
         {
             return false;
         }
-        self.submit_from_send_button(window, cx);
+        self.submit_from_send_button(SendOnce::default(), window, cx);
         true
     }
 
@@ -86,9 +87,11 @@ impl QuillApp {
         {
             return false;
         }
-        self.composer_ui.send_silent_once = true;
-        self.submit_from_send_button(window, cx);
-        self.composer_ui.send_silent_once = false;
+        let once = SendOnce {
+            silent: true,
+            ..Default::default()
+        };
+        self.submit_from_send_button(once, window, cx);
         true
     }
 

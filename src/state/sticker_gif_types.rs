@@ -356,8 +356,9 @@ impl GifPanel {
     }
 
     /// `getSavedAnimations` answered.
+    /// A `stale` mark made while the request was out stays: the answer may
+    /// predate the change, so the list is asked for again.
     pub fn saved_answered(&mut self, animations: Vec<AnimationItem>) {
-        self.stale = false;
         self.animations = animations;
         self.saved.succeed(());
     }
@@ -365,7 +366,6 @@ impl GifPanel {
     /// `getSavedAnimations` failed, or could not be sent: counted as loaded,
     /// so nothing asks again until the panel is opened.
     pub fn saved_failed(&mut self) {
-        self.stale = false;
         self.saved = Fetch::Failed {
             error: GIF_FAILED.to_string(),
             stale: Some(()),

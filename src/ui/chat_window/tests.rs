@@ -592,12 +592,20 @@ fn a_window_a_switch_closed_reports_nothing_afterwards(cx: &mut TestAppContext) 
                 .and_then(|open| open.view.upgrade())
         })
         .expect("the window's view");
-    let closed_by_switch = h.app.update(cx, |app, cx| {
+    let kept = h.app.update(cx, |app, cx| {
         app.close_chat_windows_for_switch(cx);
-        // Before the deferred close report runs.
-        view.read(cx).is_closed()
+        assert!(!app.windows.lists_view(view.entity_id()), "unlisted");
+        app.windows.closed.len()
     });
-    assert!(closed_by_switch, "the late report has nothing left to do");
+    // The late report, before the platform's own removal runs.
+    view.update(cx, |view, cx| view.closing(true, None, cx));
+    h.app.read_with(cx, |app, _| {
+        assert_eq!(
+            app.windows.closed.len(),
+            kept,
+            "the late report has nothing left to do"
+        );
+    });
 }
 
 #[gpui_kit::test]
@@ -985,7 +993,7 @@ fn a_pending_chrome_notify_clears_when_the_window_lost_its_view(cx: &mut TestApp
         .app
         .read_with(cx, |app, _| app.windows.slot_for(OTHER))
         .expect("slot");
-    slot.borrow().history.chrome_notify_pending.set(true);
+    slot.borrow().history.chrome_due.borrow_mut().note(3);
     // The window is live, but its session view is gone.
     h.app.update(cx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
@@ -997,7 +1005,7 @@ fn a_pending_chrome_notify_clears_when_the_window_lost_its_view(cx: &mut TestApp
         app.finish_chrome_notify(Some(OTHER), cx);
     });
     assert!(
-        !slot.borrow().history.chrome_notify_pending.get(),
+        !slot.borrow().history.chrome_due.borrow().is_notifying(),
         "the flag cannot stick"
     );
 }
@@ -1208,7 +1216,7 @@ fn a_held_send_whose_chat_window_closed_says_it_did_not_go(cx: &mut TestAppConte
                     .open(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
                 app.photo_editor_mut(PhotoEditor::rotate, cx);
                 app.save_photo_editor(window, cx);
-                app.submit_composer(String::new(), window, cx);
+                app.submit_composer(String::new(), Default::default(), window, cx);
                 app.open_photo_editor(0, cx);
             });
         });

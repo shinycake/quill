@@ -43,12 +43,7 @@ fn a_failed_member_chats_ask_bans_without_the_warning() {
 #[test]
 fn an_answer_counts_down_three_seconds() {
     let started = Instant::now();
-    let undo = UndoAction {
-        chat_id: 7,
-        approve: true,
-        started,
-        _timer: None,
-    };
+    let undo = UndoAction::new(7, true, started, None);
     assert_eq!(undo.seconds_left(started), 3);
     assert_eq!(undo.seconds_left(started + Duration::from_millis(1_200)), 2);
     assert_eq!(
@@ -85,12 +80,7 @@ fn joined_chats_come_first_and_bots_are_never_just_viewable() {
 }
 
 fn waiting(chat_id: i64) -> UndoAction {
-    UndoAction {
-        chat_id,
-        approve: true,
-        started: Instant::now(),
-        _timer: None,
-    }
+    UndoAction::new(chat_id, true, Instant::now(), None)
 }
 
 #[test]

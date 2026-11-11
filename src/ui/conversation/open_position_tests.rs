@@ -216,7 +216,7 @@ impl Sim {
     /// A landing is still bringing the history to its goal.
     fn landing(&mut self) -> bool {
         self.app
-            .update(&mut self.vcx, |app, _| app.history.landing.is_some())
+            .update(&mut self.vcx, |app, _| app.history.aim.landing().is_some())
     }
 
     /// The reader presses the jump-down button.

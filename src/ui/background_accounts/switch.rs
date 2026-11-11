@@ -3,7 +3,7 @@
 //! when it already runs there, comes forward with its session as it is.
 
 use super::*;
-use crate::ui::connect_ui::{ConnectUiStatus, live_status_for};
+use crate::ui::connect_ui::{ConnectStage, live_status_for};
 use crate::ui::status_note::StatusNote;
 
 impl QuillApp {
@@ -82,11 +82,10 @@ impl QuillApp {
     /// counters are there at once.
     pub(in crate::ui) fn adopt_live(&mut self, mut live: LiveConnect, cx: &mut Context<Self>) {
         self.connect.generation += 1;
-        self.connection.status = ConnectUiStatus::Live;
         self.connection.presence.reset();
         let auth = live.driver.session.auth.clone();
         self.set_note(StatusNote::silent(live_status_for(&auth)));
-        self.auth_demo.demo_state = auth;
+        self.auth_demo.stage = ConnectStage::Shown(auth);
         live.attach_call_engine(&DiscardSink);
         // The auto-switch runs on screen; its settings are the app's.
         live.driver.reload_proxy_prefs();

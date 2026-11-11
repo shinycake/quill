@@ -213,7 +213,7 @@ fn a_send_during_the_render_waits_and_sends_the_edited_photo(cx: &mut TestAppCon
     app.update_in(&mut vcx, |app, window, cx| {
         app.photo_editor_mut(PhotoEditor::rotate, cx);
         app.save_photo_editor(window, cx);
-        app.submit_composer(String::new(), window, cx);
+        app.submit_composer(String::new(), Default::default(), window, cx);
         // Held: nothing went, and the tray still has the photo.
         assert_eq!(app.pending_attachments().len(), 1);
     });
@@ -277,7 +277,7 @@ fn an_edit_lands_on_its_photo_after_an_earlier_card_is_removed(cx: &mut TestAppC
         app.photo_editor_mut(PhotoEditor::rotate, cx);
         app.save_photo_editor(window, cx);
         app.remove_attachment(0, cx);
-        app.submit_composer(String::new(), window, cx);
+        app.submit_composer(String::new(), Default::default(), window, cx);
     });
     assert_eq!(newest_sent_photo(&app, &mut vcx), sent_before, "held");
     vcx.run_until_parked();
@@ -316,7 +316,7 @@ fn a_held_send_whose_chat_closed_says_it_did_not_go(cx: &mut TestAppContext) {
     let first_chat = app.update_in(&mut vcx, |app, window, cx| {
         app.photo_editor_mut(PhotoEditor::rotate, cx);
         app.save_photo_editor(window, cx);
-        app.submit_composer(String::new(), window, cx);
+        app.submit_composer(String::new(), Default::default(), window, cx);
         let session = app.demo_session.as_mut().expect("demo session");
         let open = session.open_chat.expect("an open chat");
         let other = session
@@ -357,11 +357,11 @@ fn send_with_a_deferred_open(cx: &mut TestAppContext, name: &str, send_first: bo
         app.photo_editor_mut(PhotoEditor::rotate, cx);
         app.save_photo_editor(window, cx);
         if send_first {
-            app.submit_composer(String::new(), window, cx);
+            app.submit_composer(String::new(), Default::default(), window, cx);
             app.open_photo_editor(0, cx);
         } else {
             app.open_photo_editor(0, cx);
-            app.submit_composer(String::new(), window, cx);
+            app.submit_composer(String::new(), Default::default(), window, cx);
         }
     });
     vcx.run_until_parked();
@@ -486,7 +486,7 @@ fn the_held_send_going_out_closes_an_editor_open_on_its_tray(cx: &mut TestAppCon
             .open(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
         app.photo_editor_mut(PhotoEditor::rotate, cx);
         app.save_photo_editor(window, cx);
-        app.submit_composer(String::new(), window, cx);
+        app.submit_composer(String::new(), Default::default(), window, cx);
         let item = app.tray_item(1).expect("the second card");
         let pixels = image::open(&second).expect("decodes").to_rgba8();
         app.viewer
@@ -529,7 +529,7 @@ fn a_tap_while_a_send_waits_opens_no_editor(cx: &mut TestAppContext) {
             .open(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
         app.photo_editor_mut(PhotoEditor::rotate, cx);
         app.save_photo_editor(window, cx);
-        app.submit_composer(String::new(), window, cx);
+        app.submit_composer(String::new(), Default::default(), window, cx);
         app.open_photo_editor(1, cx);
         assert!(app.viewer.photo_editor.deferred().is_none());
         assert_eq!(
@@ -570,7 +570,7 @@ fn a_send_cancels_a_tap_on_a_rendering_card(cx: &mut TestAppContext) {
         app.update_pending_attachments(|tray| tray[1].extras.photo_render = Some(u64::MAX))
             .expect("an open chat");
         app.open_photo_editor(0, cx);
-        app.submit_composer(String::new(), window, cx);
+        app.submit_composer(String::new(), Default::default(), window, cx);
     });
     vcx.run_until_parked();
     app.update_in(&mut vcx, |app, _, _| {

@@ -48,7 +48,7 @@ fn a_paid_chat_asks_once_then_sends_with_the_price(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
         charge_in_chat(app, 25);
-        assert!(app.paid_send_waits(ChatId(11), "hello", cx));
+        assert!(app.paid_send_waits(ChatId(11), "hello", Default::default(), cx));
     });
     app.read_with(vcx, |app, _| {
         let confirm = &app.paid_messages.confirm.as_ref().expect("asks first").ask;
@@ -63,14 +63,14 @@ fn a_paid_chat_asks_once_then_sends_with_the_price(cx: &mut TestAppContext) {
         app.paid_messages.confirm = None;
     });
     app.update_in(vcx, |app, _, cx| {
-        assert!(!app.paid_send_waits(ChatId(11), "again", cx));
+        assert!(!app.paid_send_waits(ChatId(11), "again", Default::default(), cx));
     });
     // A lower price is covered, a higher one asks again.
     app.update_in(vcx, |app, _, cx| {
         charge_in_chat(app, 10);
-        assert!(!app.paid_send_waits(ChatId(11), "x", cx));
+        assert!(!app.paid_send_waits(ChatId(11), "x", Default::default(), cx));
         charge_in_chat(app, 30);
-        assert!(app.paid_send_waits(ChatId(11), "x", cx));
+        assert!(app.paid_send_waits(ChatId(11), "x", Default::default(), cx));
     });
 }
 
@@ -83,18 +83,18 @@ fn dont_ask_again_stays_with_its_confirmation(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
         charge_in_chat(app, 25);
-        assert!(app.paid_send_waits(ChatId(11), "hello", cx));
+        assert!(app.paid_send_waits(ChatId(11), "hello", Default::default(), cx));
         app.paid_messages.confirm_trust = Some((11, 25));
         assert!(app.paid_confirm_trusted());
         app.cancel_paid_confirm(cx);
         assert!(app.paid_messages.confirm_trust.is_none());
-        assert!(app.paid_send_waits(ChatId(11), "hello", cx));
+        assert!(app.paid_send_waits(ChatId(11), "hello", Default::default(), cx));
         assert!(!app.paid_confirm_trusted(), "the next box opens unticked");
         // Ticked for 25, then the price on screen becomes 30.
         app.paid_messages.confirm_trust = Some((11, 25));
         app.paid_messages.confirm = None;
         charge_in_chat(app, 30);
-        assert!(app.paid_send_waits(ChatId(11), "hello", cx));
+        assert!(app.paid_send_waits(ChatId(11), "hello", Default::default(), cx));
         app.paid_messages.confirm_trust = Some((11, 25));
         assert!(
             !app.paid_confirm_trusted(),
@@ -110,7 +110,7 @@ fn free_chats_never_wait(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, _, cx| {
         let session = app.demo_session.as_mut().unwrap();
         session.open_chat(ChatId(11));
-        assert!(!app.paid_send_waits(ChatId(11), "hi", cx));
+        assert!(!app.paid_send_waits(ChatId(11), "hi", Default::default(), cx));
         assert!(app.paid_messages.confirm.is_none());
     });
 }

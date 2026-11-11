@@ -46,23 +46,34 @@ pub(super) enum LookTarget {
     Chat(i64),
 }
 
+/// The wallpaper choice of the dialog: one value, so picking one drops the
+/// others.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) enum WallpaperChoice {
+    /// Leave the chat's own wallpaper as it is.
+    #[default]
+    Keep,
+    /// An installed background picked for the chat.
+    Installed(i64),
+    /// An image file picked for the chat (tdesktop `uploadForPeer`).
+    File(PathBuf),
+    /// Remove the chat's own wallpaper.
+    Remove,
+}
+
 /// The dialog's pending choices; nothing is sent until Apply.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ChatLookDialog {
     pub target: LookTarget,
     /// The emoji theme that will be applied (`None` = no theme).
     pub theme: Option<String>,
-    /// An installed background picked for the chat.
-    pub background: Option<i64>,
-    /// An image file picked for the chat (tdesktop `uploadForPeer`).
-    pub file: Option<PathBuf>,
+    /// What the chat's own wallpaper becomes on Apply.
+    pub wallpaper: WallpaperChoice,
     /// Dark-mode dimming of a photo wallpaper, 0-100
     /// (`setChatBackground.dark_theme_dimming`).
     pub dimming: i32,
     /// The dimming slider (`None` in tests).
     pub dimming_slider: Option<Entity<SliderState>>,
-    /// Remove the chat's own wallpaper.
-    pub remove_wallpaper: bool,
     /// Also set the wallpaper for the other person (Premium only).
     pub both: bool,
     /// Where Apply stands: the dialog stays open until every change it sent
@@ -102,19 +113,19 @@ pub(super) fn plan_changes(
         changes.push(LookChange::Theme(pending.theme.clone().unwrap_or_default()));
     }
     let dimming = pending.dimming.clamp(0, 100);
-    if let Some(path) = &pending.file {
-        changes.push(LookChange::WallpaperFile {
+    match (&pending.wallpaper, own) {
+        (WallpaperChoice::File(path), _) => changes.push(LookChange::WallpaperFile {
             path: path.clone(),
             dimming,
-        });
-    } else if let Some(id) = pending.background {
-        changes.push(LookChange::Wallpaper { id, dimming });
-    } else if pending.remove_wallpaper && own.is_some() {
-        changes.push(LookChange::RemoveWallpaper);
-    } else if let Some((id, current)) = own
-        && current != dimming
-    {
-        changes.push(LookChange::Wallpaper { id, dimming });
+        }),
+        (WallpaperChoice::Installed(id), _) => {
+            changes.push(LookChange::Wallpaper { id: *id, dimming });
+        }
+        (WallpaperChoice::Remove, Some(_)) => changes.push(LookChange::RemoveWallpaper),
+        (_, Some((id, current))) if current != dimming => {
+            changes.push(LookChange::Wallpaper { id, dimming });
+        }
+        _ => {}
     }
     changes
 }
@@ -172,11 +183,9 @@ impl QuillApp {
         self.dialogs.chat_look_dialog = Some(ChatLookDialog {
             target: LookTarget::Chat(chat_id),
             theme,
-            background: None,
-            file: None,
+            wallpaper: WallpaperChoice::Keep,
             dimming,
             dimming_slider: Some(slider),
-            remove_wallpaper: false,
             both: false,
             stage: LookStage::Editing,
         });
@@ -225,9 +234,7 @@ impl QuillApp {
                         .as_mut()
                         .filter(|d| d.target == asked)
                     {
-                        d.file = Some(path);
-                        d.background = None;
-                        d.remove_wallpaper = false;
+                        d.wallpaper = WallpaperChoice::File(path);
                     }
                     cx.notify();
                 });
@@ -602,7 +609,7 @@ impl QuillApp {
                 self.wallpaper_tile(
                     ("chat-look-wallpaper", id as u64),
                     background,
-                    dialog.background == Some(id),
+                    dialog.wallpaper == WallpaperChoice::Installed(id),
                     cx,
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -622,9 +629,7 @@ impl QuillApp {
                         live.driver.download_background_file(&bg);
                     }
                     if let Some(d) = this.dialogs.chat_look_dialog.as_mut() {
-                        d.background = Some(id);
-                        d.file = None;
-                        d.remove_wallpaper = false;
+                        d.wallpaper = WallpaperChoice::Installed(id);
                     }
                     cx.notify();
                 })),
@@ -670,13 +675,13 @@ impl QuillApp {
                     let outgoing_fill =
                         pending_theme.map(|t| OutgoingFill::from_theme(t.settings(dark), dark));
                     let mut wallpaper = None;
-                    if let Some(path) = &state.file {
+                    if let WallpaperChoice::File(path) = &state.wallpaper {
                         wallpaper = Some(super::wallpaper::Wallpaper::Image {
                             path: path.clone(),
                             blurred: false,
                             tiled: false,
                         });
-                    } else if let Some(id) = state.background {
+                    } else if let WallpaperChoice::Installed(id) = state.wallpaper {
                         wallpaper = session.and_then(|s| {
                             let bg = s
                                 .chats_state
@@ -687,7 +692,7 @@ impl QuillApp {
                                 .find(|b| b.id == id)?;
                             session_wallpaper(s, bg)
                         });
-                    } else if !state.remove_wallpaper
+                    } else if state.wallpaper != WallpaperChoice::Remove
                         && let Some(s) = session
                         && let Some(bg) = s
                             .chats_state
@@ -774,7 +779,7 @@ impl QuillApp {
                             action_row(
                                 "chat-look-remove-wallpaper",
                                 Some(gpui_kit::assets::IconName::Trash),
-                                if state.remove_wallpaper {
+                                if state.wallpaper == WallpaperChoice::Remove {
                                     tr(keys::Q_MISC_WALLPAPER_WILL_BE_REMOVED)
                                 } else {
                                     tr(keys::Q_MISC_REMOVE_THIS_CHATS_WALLPAPER)
@@ -784,9 +789,11 @@ impl QuillApp {
                             )
                             .on_click(cx.listener(|this, _, _, cx| {
                                 if let Some(d) = this.dialogs.chat_look_dialog.as_mut() {
-                                    d.remove_wallpaper = !d.remove_wallpaper;
-                                    d.background = None;
-                                    d.file = None;
+                                    d.wallpaper = if d.wallpaper == WallpaperChoice::Remove {
+                                        WallpaperChoice::Keep
+                                    } else {
+                                        WallpaperChoice::Remove
+                                    };
                                 }
                                 cx.notify();
                             })),
@@ -859,8 +866,8 @@ crate::ui::shell::register_dialogs! {
 #[cfg(test)]
 mod tests {
     use super::{
-        ChatLookDialog, LookChange, LookStage, LookTarget, chat_look_allowed, is_wallpaper_image,
-        plan_changes,
+        ChatLookDialog, LookChange, LookStage, LookTarget, WallpaperChoice, chat_look_allowed,
+        is_wallpaper_image, plan_changes,
     };
     use std::path::Path;
 
@@ -868,11 +875,9 @@ mod tests {
         ChatLookDialog {
             target: LookTarget::Chat(1),
             theme: None,
-            background: None,
-            file: None,
+            wallpaper: WallpaperChoice::Keep,
             dimming: 0,
             dimming_slider: None,
-            remove_wallpaper: false,
             both: false,
             stage: LookStage::Editing,
         }
@@ -898,7 +903,7 @@ mod tests {
     fn theme_and_wallpaper_changes_are_planned_separately() {
         let mut pending = dialog();
         pending.theme = Some("🌷".into());
-        pending.background = Some(9);
+        pending.wallpaper = WallpaperChoice::Installed(9);
         assert_eq!(
             plan_changes(None, None, &pending),
             vec![
@@ -908,7 +913,7 @@ mod tests {
         );
         // Dropping the theme sends Telegram's empty name.
         let mut remove = dialog();
-        remove.remove_wallpaper = true;
+        remove.wallpaper = WallpaperChoice::Remove;
         assert_eq!(
             plan_changes(Some("🌷"), Some((5, 0)), &remove),
             vec![
@@ -923,7 +928,7 @@ mod tests {
     #[test]
     fn a_file_or_a_new_dimming_sets_the_chat_wallpaper() {
         let mut file = dialog();
-        file.file = Some("/a/b.jpg".into());
+        file.wallpaper = WallpaperChoice::File("/a/b.jpg".into());
         file.dimming = 140;
         assert_eq!(
             plan_changes(None, Some((5, 0)), &file),

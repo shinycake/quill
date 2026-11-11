@@ -33,7 +33,7 @@ fn new_app(cx: &mut TestAppContext, premium: bool) -> (Entity<QuillApp>, VisualT
         let chat = demo_private_chat(session)?;
         app.open_chat_look_dialog(chat, cx);
         let dialog = app.dialogs.chat_look_dialog.as_mut()?;
-        dialog.background = Some(901);
+        dialog.wallpaper = crate::ui::chat_look_ui::WallpaperChoice::Installed(901);
         Some(chat)
     });
     frames(&mut vcx);
@@ -138,7 +138,7 @@ fn a_theme_alone_keeps_one_apply(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
         if let Some(dialog) = app.dialogs.chat_look_dialog.as_mut() {
-            dialog.background = None;
+            dialog.wallpaper = crate::ui::chat_look_ui::WallpaperChoice::Keep;
         }
         cx.notify();
     });

@@ -2,7 +2,7 @@ use super::closing_tests::{Fake, account};
 use super::deleting_tests::{credentials, isolate, temp_root};
 use super::tests::new_app;
 use crate::ui::app::QuillApp;
-use crate::ui::connect_ui::ConnectUiStatus;
+use crate::ui::connect_ui::ConnectStage;
 use gpui_kit::{Entity, TestAppContext, VisualTestContext};
 use quill::connect::ConnectBlocker;
 use quill::disk_guard::FLOORS;
@@ -148,7 +148,7 @@ fn a_connection_prepared_before_the_disk_filled_opens_nothing(cx: &mut TestAppCo
     });
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
-        assert!(app.connection.status == ConnectUiStatus::Live);
+        assert!(app.auth_demo.stage == ConnectStage::Connecting);
         assert!(app.live.is_none());
         assert!(app.disk.is_full());
     });

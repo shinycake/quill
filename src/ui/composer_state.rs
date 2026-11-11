@@ -49,7 +49,8 @@ pub(super) type ShownDraft = (ChatId, DraftTopic, Option<ChatDraft>);
 /// drafts arriving for other chats. A topic or thread switch asks for the
 /// new slot's draft from code that has no window (`Restoring`); the next
 /// frame runs it, and `restore_open_draft` then records what it showed. The
-/// request carries what was shown, so a remote draft arriving meanwhile
+/// request names the slot it asked for and is dropped when another is open
+/// by then. It carries what was shown, so a remote draft arriving meanwhile
 /// still compares against it, and a restore that does nothing (editing, a
 /// dirty draft) leaves the old value as it was.
 #[derive(Clone, Debug, Default)]
@@ -59,6 +60,8 @@ pub(super) enum DraftLoad {
     Shown(ShownDraft),
     Restoring {
         before: Option<ShownDraft>,
+        /// The slot that asked: the restore runs only while it is open.
+        slot: Option<(ChatId, DraftTopic)>,
     },
 }
 
@@ -67,7 +70,7 @@ impl DraftLoad {
     /// A pending restore stays pending.
     pub(super) fn replace_shown(&mut self, now: ShownDraft) -> Option<ShownDraft> {
         match self {
-            Self::Restoring { before } => before.replace(now),
+            Self::Restoring { before, .. } => before.replace(now),
             Self::Unshown => {
                 *self = Self::Shown(now);
                 None
@@ -82,23 +85,24 @@ impl DraftLoad {
     }
 
     /// Ask for the open slot's draft on the next frame.
-    pub(super) fn request_restore(&mut self) {
-        if !matches!(self, Self::Restoring { .. }) {
-            let before = match std::mem::take(self) {
-                Self::Shown(shown) => Some(shown),
-                Self::Unshown | Self::Restoring { .. } => None,
-            };
-            *self = Self::Restoring { before };
-        }
+    pub(super) fn request_restore(&mut self, slot: Option<(ChatId, DraftTopic)>) {
+        let before = match std::mem::take(self) {
+            Self::Shown(shown) => Some(shown),
+            Self::Restoring { before, .. } => before,
+            Self::Unshown => None,
+        };
+        *self = Self::Restoring { before, slot };
     }
 
     /// Run a requested restore once: the request is spent, what was shown
-    /// before stays until the restore replaces it.
-    pub(super) fn take_restore(&mut self) -> bool {
+    /// before stays until the restore replaces it. False when another slot
+    /// than the one that asked is open (its restore is for a view that is
+    /// gone).
+    pub(super) fn take_restore(&mut self, open: Option<(ChatId, DraftTopic)>) -> bool {
         match std::mem::take(self) {
-            Self::Restoring { before } => {
+            Self::Restoring { before, slot } => {
                 self.set_shown(before);
-                true
+                slot == open
             }
             other => {
                 *self = other;
@@ -114,9 +118,6 @@ pub(crate) struct ComposerUi {
     /// Composer `#hashtag` / `:emoji` autocomplete popup.
     pub(super) suggest: super::composer_suggest::SuggestUi,
     pub(super) emoji_words: super::emoji_words_ui::EmojiWordsUi,
-    /// Debounces the `getInlineQueryResults` dispatch (100ms quiet
-    /// window, TGX); the dropdown itself is the chat's (`ChatUi`).
-    pub(super) inline_query_token: u64,
     /// Scroll position of the inline results panel (`inline_grid.rs`).
     pub(super) inline_scroll: gpui_kit::ScrollHandle,
     /// The chat an inline results button left, to come back to
@@ -130,14 +131,7 @@ pub(crate) struct ComposerUi {
     pub(super) preview_timer: Option<(String, gpui_kit::Task<()>)>,
     /// The composer text before the last keystroke, for "Replace emoji
     /// automatically" (it only reacts to one typed character).
-    pub(super) prev_text: gpui_kit::SharedString,
-    /// A typed markdown replacement Backspace can still take back.
-    pub(super) markdown_revert: Option<super::composer_field::MarkdownRevert>,
-    /// "Silent send" shortcut: the next send alone goes without sound.
-    pub(super) send_silent_once: bool,
-    /// "Send with Effect": the next send alone carries this effect
-    /// (`messageSendOptions.effect_id`); zero for none.
-    pub(super) send_effect_once: i64,
+    pub(super) echo: super::composer_field::FieldEcho,
     /// The send button's options menu and its effect picker
     /// (`send_effects`).
     pub(super) send_menu: super::send_effects::SendMenuUi,
@@ -163,9 +157,10 @@ pub(crate) struct ComposerUi {
     pub(super) file_drag: super::drop_zones::FileDrag,
     /// The folder being zipped for "Send as archive" (`drop_zones`).
     pub(super) archive: super::drop_zones::ArchiveJob,
-    /// Phase A1: the open chat whose slow-mode countdown is ticking
-    /// (`Some` exactly while the 1s tick task runs). Mirrors `voice_tick`.
-    pub(super) slow_mode_tick_chat: Option<ChatId>,
+    /// Phase A1: the open chat whose slow-mode countdown is ticking, with
+    /// the 1s tick task that drives it. Replacing or clearing it drops the
+    /// task. Mirrors `voice_tick`.
+    pub(super) slow_mode_tick: Option<(ChatId, gpui_kit::Task<()>)>,
     /// The attachment tray's file checks, price box and video editor.
     pub(super) send_box: super::send_box_state::SendBoxUi,
     pub(super) text_limit: super::composer_ui::TextLimitMemo,
@@ -179,14 +174,10 @@ impl ComposerUi {
             mention_selected: 0,
             suggest: super::composer_suggest::SuggestUi::default(),
             emoji_words: Default::default(),
-            inline_query_token: 0,
             inline_scroll: gpui_kit::ScrollHandle::new(),
             inline_return: None,
             preview_timer: None,
-            prev_text: gpui_kit::SharedString::default(),
-            markdown_revert: None,
-            send_silent_once: false,
-            send_effect_once: 0,
+            echo: Default::default(),
             send_menu: Default::default(),
             rich_draft: Default::default(),
             remote_draft_seen: 0,
@@ -195,7 +186,7 @@ impl ComposerUi {
             inline_bot_alert_shown: false,
             file_drag: super::drop_zones::FileDrag::Idle,
             archive: Default::default(),
-            slow_mode_tick_chat: None,
+            slow_mode_tick: None,
             send_box: super::send_box_state::SendBoxUi::new(),
             text_limit: Default::default(),
             spelling: Default::default(),

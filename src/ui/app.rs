@@ -1,6 +1,6 @@
 //! QuillApp struct definition and core app queries.
 
-use super::connect_ui::ConnectUiStatus;
+use super::connect_ui::ConnectStage;
 use super::demo::demo_media_allowlist;
 use super::synthetic::SyntheticChat;
 use gpui_kit::component::menu::AppMenuBar;
@@ -177,7 +177,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_ref() {
             session.auth.clone()
         } else {
-            self.auth_demo.demo_state.clone()
+            self.auth_demo.stage.auth()
         }
     }
 
@@ -229,10 +229,8 @@ impl QuillApp {
         {
             return PaneMode::Ready;
         }
-        match self.connection.status {
-            ConnectUiStatus::NeedCredentials
-                if self.live.is_none() && !self.auth_demo.demo_inputs =>
-            {
+        match self.auth_demo.stage {
+            ConnectStage::NeedCredentials if self.live.is_none() && !self.auth_demo.demo_inputs => {
                 PaneMode::Synthetic
             }
             _ => PaneMode::Connecting,

@@ -3,6 +3,7 @@
 
 use super::app::QuillApp;
 use super::signin_ui::PhoneStep;
+use crate::ui::connect_ui::ConnectStage;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
@@ -15,7 +16,7 @@ impl QuillApp {
         if self.live.is_some() {
             return;
         }
-        self.auth_demo.demo_state = match &self.auth_demo.demo_state {
+        self.auth_demo.stage = ConnectStage::Shown(match &self.auth_demo.stage.auth() {
             AuthorizationState::WaitPhoneNumber => AuthorizationState::WaitCode {
                 code_length: Some(5),
                 delivery: Default::default(),
@@ -31,7 +32,7 @@ impl QuillApp {
             AuthorizationState::WaitPremiumPurchase { .. } => AuthorizationState::Ready,
             AuthorizationState::Ready => AuthorizationState::WaitPhoneNumber,
             other => other.clone(),
-        };
+        });
         cx.notify();
     }
 

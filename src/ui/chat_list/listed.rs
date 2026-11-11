@@ -72,7 +72,7 @@ impl QuillApp {
     pub(in crate::ui) fn set_chat_list_view(&mut self, filter: ChatListFilter, tab: Option<i32>) {
         if self.chat_list.filter != filter || self.folders.tab != tab {
             self.chat_list.selected.clear();
-            self.chat_list.pin_reorder = None;
+            self.chat_list.pin.end_drag();
         }
         self.chat_list.filter = filter;
         self.folders.tab = tab;
@@ -141,13 +141,13 @@ impl QuillApp {
         self.checked_among(rows).next().is_some()
     }
 
-    /// Frame upkeep: once no checked chat is in the list any more (the
-    /// last one archived or left, from another device too), the checks go
-    /// and with them multi-select mode. Otherwise a check that only left
-    /// the list came back with it ("1 selected", row clicks ticking).
+    /// Frame upkeep: a checked chat that left the list (archived or left,
+    /// from another device too) is forgotten at once, and with the last one
+    /// goes multi-select mode. Otherwise a check that only left the list
+    /// came back with it ("1 selected", row clicks ticking).
     pub(in crate::ui) fn end_selection_left_list(&mut self) {
-        if !self.chat_list.selected.is_empty() && self.selected_chat_ids().is_empty() {
-            self.chat_list.selected.clear();
+        if !self.chat_list.selected.is_empty() {
+            self.drop_unlisted_selection();
         }
     }
 

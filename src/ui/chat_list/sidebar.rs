@@ -120,7 +120,7 @@ impl QuillApp {
         // Contacts, Calls or search in their place: the release can never
         // reach them, so the drag ends now, unsaved (round 18 B #2).
         if self.chat_list.tab != SidebarTab::Chats || self.search_is_open() {
-            self.chat_list.pin_reorder = None;
+            self.chat_list.pin.end_drag();
             // The rows laid out by the last chats render are not on screen
             // now: key stepping and file drags must not use that list.
             self.chat_list.items.clear();
@@ -261,7 +261,7 @@ impl QuillApp {
             // A live pinned drag shows its swapped order (tdesktop moves
             // rows while dragging); stable, so unpinned rows keep their
             // place.
-            if let Some(drag) = self.chat_list.pin_reorder.as_ref()
+            if let Some(drag) = self.chat_list.pin.drag()
                 && !drag.archived
                 && let reorder = &drag.reorder
                 && reorder.dragging().is_some()
@@ -311,7 +311,7 @@ impl QuillApp {
         // more" button: paging is automatic, not user-triggered.
         if folder.is_none() && matches!(filter, ChatListFilter::Archived | ChatListFilter::Unread) {
             if filter != ChatListFilter::Unread
-                && let Some(drag) = self.chat_list.pin_reorder.as_ref()
+                && let Some(drag) = self.chat_list.pin.drag()
                 && drag.archived
                 && let reorder = &drag.reorder
                 && reorder.dragging().is_some()
@@ -336,17 +336,12 @@ impl QuillApp {
         }
         // Pinned-drag animation: keep frames coming while rows slide, drop
         // the state once everything settled.
-        if let Some(reorder) = self
-            .chat_list
-            .pin_reorder
-            .as_ref()
-            .map(|drag| &drag.reorder)
-        {
+        if let Some(reorder) = self.chat_list.pin.drag().map(|drag| &drag.reorder) {
             let now = std::time::Instant::now();
             // A deactivated window never gets the release: the drag ends
             // there, unsaved, instead of redrawing at 60 Hz for good.
             if reorder.settled(now) || !self.frame.window_active.get() {
-                self.chat_list.pin_reorder = None;
+                self.chat_list.pin.end_drag();
             } else {
                 self.request_animation_tick(60, cx);
             }
@@ -484,8 +479,8 @@ impl QuillApp {
         );
         let reordering = self
             .chat_list
-            .pin_reorder
-            .as_ref()
+            .pin
+            .drag()
             .is_some_and(|drag| drag.reorder.dragging().is_some());
         div()
             .id("chat-rows")

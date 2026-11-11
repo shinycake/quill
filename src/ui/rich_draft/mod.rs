@@ -19,6 +19,7 @@ mod demo;
 mod tests;
 
 use super::app::QuillApp;
+use crate::ui::composer_sends::SendOnce;
 use crate::ui::message_text::rich_block_element;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
@@ -184,7 +185,8 @@ impl QuillApp {
         }
         self.chat_ui.rich_editor_open = true;
         self.set_composer_markup(&rich.markup(), window, cx);
-        self.composer_ui.prev_text = self.composer.read(cx).value();
+        let value = self.composer.read(cx).value();
+        self.composer_ui.echo.set(value);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
         cx.notify();
@@ -216,7 +218,7 @@ impl QuillApp {
             // them; a draft that could not be saved stays as text.
             if self.stored_rich_draft() == Some(&rich) {
                 self.set_composer_markup("", window, cx);
-                self.composer_ui.prev_text = SharedString::default();
+                self.composer_ui.echo.set(SharedString::default());
                 cx.notify();
                 return;
             }
@@ -248,6 +250,7 @@ impl QuillApp {
     /// the press.
     pub(in crate::ui) fn submit_rich_draft(
         &mut self,
+        once: SendOnce,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -261,11 +264,11 @@ impl QuillApp {
         }
         let premium = self.session().is_some_and(Session::my_is_premium);
         if premium {
-            self.submit_rich_composer(rich.blocks(), window, cx);
+            self.submit_rich_composer(rich.blocks(), once, window, cx);
         } else if rich.uses_premium_formatting() {
             self.refuse_rich_send(&rich, window, cx);
         } else if let Some(plain) = rich.plain_markup() {
-            self.send_rich_draft_plain(plain, window, cx);
+            self.send_rich_draft_plain(plain, once, window, cx);
         }
         true
     }
@@ -301,12 +304,13 @@ impl QuillApp {
     fn send_rich_draft_plain(
         &mut self,
         plain: String,
+        once: SendOnce,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.chat_ui.rich_editor_open = false;
         self.set_composer_markup(&plain, window, cx);
-        self.submit_composer(plain.clone(), window, cx);
+        self.submit_composer(plain.clone(), once, window, cx);
         // A refused send leaves the draft: the field it hides goes back
         // to empty.
         if self.shown_rich_draft().is_some() && self.composer_markup(cx) == plain {

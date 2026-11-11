@@ -185,7 +185,7 @@ fn a_switch_closes_boxes_holding_the_old_accounts_ids(cx: &mut TestAppContext) {
         HeldBox {
             dialog: "ClearCalls",
             field: "chat_list",
-            open: |app| app.chat_list.global.clear_calls_open,
+            open: |app| app.chat_list.global.clear_calls.is_some(),
         },
         HeldBox {
             dialog: "BlockBar",
@@ -216,7 +216,7 @@ fn a_switch_closes_boxes_holding_the_old_accounts_ids(cx: &mut TestAppContext) {
             keep: Default::default(),
         });
         app.privacy.sessions_confirm = Some(SessionsConfirm::TerminateAll);
-        app.chat_list.global.clear_calls_open = true;
+        app.chat_list.global.clear_calls = Some(Default::default());
         app.dialogs.block_bar_dialog = Some(BlockBarDialog {
             chat_id: CHAT,
             user_id: 5,

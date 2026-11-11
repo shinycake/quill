@@ -20,9 +20,8 @@ pub(crate) struct PrivacyState {
     pub(super) blocked_asked: super::scroll_load::Asked,
     /// Slice S3: two-step Unblock confirm on the Privacy screen.
     pub(super) unblock_confirm: Option<i64>,
-    pub(super) device_qr_scanner: Option<super::device_qr::DeviceQrScanner>,
-    pub(super) device_login_qr: Option<zeroize::Zeroizing<String>>,
-    pub(super) device_link_notice: Option<&'static str>,
+    /// Linking another device by its login QR (`device_qr`).
+    pub(super) device_link: super::device_qr::DeviceLink,
     /// Slice A3: pending terminate confirmation on the sessions overlay
     /// (TGX `TerminateSessionQuestion` / `TerminateIncompleteSessionQuestion`
     /// / `AreYouSureSessions`).
@@ -63,9 +62,7 @@ impl PrivacyState {
             blocked_scroll: ScrollHandle::new(),
             blocked_asked: Default::default(),
             unblock_confirm: None,
-            device_qr_scanner: None,
-            device_login_qr: None,
-            device_link_notice: None,
+            device_link: Default::default(),
             sessions_confirm: None,
             websites_open: false,
             websites_confirm: None,

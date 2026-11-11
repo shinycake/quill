@@ -8,7 +8,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::dialogs::contacts::AddContactDialog;
+use super::dialogs::contacts::{AddContactDialog, NewContactStage};
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
@@ -66,7 +66,7 @@ impl QuillApp {
         };
         // A second press while this box's import is out waits for its
         // answer: the box keeps the request it applies.
-        if dialog.sent_request.is_some() {
+        if matches!(dialog.stage, NewContactStage::Sending { .. }) {
             return;
         }
         let first = dialog.first_name_input.read(cx).value().to_string();
@@ -93,9 +93,13 @@ impl QuillApp {
                 if let Some(dialog) = self.screen.dialogs.add_contact_dialog.as_mut()
                     && (request.is_some() || demo)
                 {
-                    dialog.sent_name = Some(first);
-                    dialog.sent_request = request;
-                    dialog.not_joined = demo;
+                    dialog.stage = match request {
+                        Some(request) => NewContactStage::Sending {
+                            request,
+                            name: first,
+                        },
+                        None => NewContactStage::NotJoined { name: first },
+                    };
                 }
             }
             Err(err) => self.set_note(StatusNote::error(user_error_for(
@@ -114,7 +118,10 @@ impl QuillApp {
             .dialogs
             .add_contact_dialog
             .as_ref()
-            .and_then(|dialog| dialog.sent_request);
+            .and_then(|dialog| match dialog.stage {
+                NewContactStage::Sending { request, .. } => Some(request),
+                _ => None,
+            });
         let outcome = self
             .live
             .as_mut()
@@ -122,11 +129,12 @@ impl QuillApp {
             .filter(|(request, _)| Some(*request) == sent)
             .map(|(_, outcome)| outcome);
         // Answered: Create may send again (after "not joined" or a failure).
-        if outcome.is_some()
-            && let Some(dialog) = self.dialogs.add_contact_dialog.as_mut()
-        {
-            dialog.sent_request = None;
-        }
+        let answered = self
+            .dialogs
+            .add_contact_dialog
+            .as_mut()
+            .filter(|_| outcome.is_some())
+            .map(|dialog| std::mem::replace(&mut dialog.stage, NewContactStage::Form));
         match outcome {
             None => {}
             Some(NewContactOutcome::Joined(_)) => {
@@ -134,8 +142,10 @@ impl QuillApp {
                 cx.notify();
             }
             Some(NewContactOutcome::NotJoined) => {
-                if let Some(dialog) = self.dialogs.add_contact_dialog.as_mut() {
-                    dialog.not_joined = true;
+                if let Some(dialog) = self.dialogs.add_contact_dialog.as_mut()
+                    && let Some(NewContactStage::Sending { name, .. }) = answered
+                {
+                    dialog.stage = NewContactStage::NotJoined { name };
                 }
                 cx.notify();
             }
@@ -178,8 +188,8 @@ impl QuillApp {
                     .child(div().text_xs().text_color(muted).child(label))
                     .child(Textarea::new(input).aria_label(label).h(px(40.)))
             };
-            let (body, footer) = if state.not_joined {
-                let name = state.sent_name.clone().unwrap_or_default();
+            let (body, footer) = if let NewContactStage::NotJoined { name } = &state.stage {
+                let name = name.clone();
                 let body = div()
                     .id("new-contact-not-joined")
                     .role(Role::Label)
@@ -191,9 +201,7 @@ impl QuillApp {
                         .label(tr(keys::TRY_OTHER_CONTACT))
                         .on_click(cx.listener(|this, _, _, cx| {
                             if let Some(dialog) = this.dialogs.add_contact_dialog.as_mut() {
-                                dialog.not_joined = false;
-                                dialog.sent_name = None;
-                                dialog.sent_request = None;
+                                dialog.stage = NewContactStage::Form;
                             }
                             cx.notify();
                         })),

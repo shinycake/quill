@@ -36,11 +36,11 @@ fn user(session: &mut Session, id: i64, first: &str, last: &str, was_online: i64
 
 fn contact(session: &mut Session, id: i64, first: &str, last: &str, was_online: i64) {
     user(session, id, first, last, was_online, "userTypeRegular");
-    session
-        .users_state
-        .contacts
-        .get_or_insert_with(Vec::new)
-        .push(id);
+    let contacts = &mut session.users_state.contacts;
+    contacts.insert_data_if_missing(Vec::new);
+    if let Some(ids) = contacts.data_mut() {
+        ids.push(id);
+    }
 }
 
 fn ids(rows: &[AddPeopleRow]) -> Vec<i64> {
@@ -59,7 +59,7 @@ fn seeded() -> Session {
     contact(&mut session, 52, "Yael", "Dagan", 600);
     user(&mut session, 53, "Helper", "Bot", 0, "userTypeBot");
     user(&mut session, 54, "", "", 0, "userTypeDeleted");
-    if let Some(contacts) = session.users_state.contacts.as_mut() {
+    if let Some(contacts) = session.users_state.contacts.data_mut() {
         contacts.extend([53, 54]);
     }
     apply(
@@ -167,7 +167,7 @@ fn the_empty_texts_follow_the_contacts_and_the_search() {
     let empty =
         |session: &Session, query: &str| session.add_people_view(PEER, &[], &[], query).empty;
     assert_eq!(empty(&session, ""), Some(AddPeopleEmpty::ContactsLoading));
-    session.users_state.contacts = Some(Vec::new());
+    session.users_state.contacts = crate::state::fetch::Fetch::Ready(Vec::new());
     assert_eq!(empty(&session, ""), Some(AddPeopleEmpty::NoContacts));
     assert_eq!(empty(&session, "zed"), Some(AddPeopleEmpty::NoResults));
     session
@@ -242,7 +242,7 @@ fn server_results_never_repeat_a_contact_the_query_left_out() {
 #[test]
 fn the_other_side_is_listed_already_in_even_when_not_a_contact() {
     let mut session = seeded();
-    session.users_state.contacts = Some(vec![50, 51]);
+    session.users_state.contacts = crate::state::fetch::Fetch::Ready(vec![50, 51]);
     let view = session.add_people_view(PEER, &[], &[], "");
     assert_eq!(ids(&view.rows), [PEER, 51, 50]);
     let peer = view.rows.first().expect("peer row");

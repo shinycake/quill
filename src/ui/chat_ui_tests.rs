@@ -310,7 +310,7 @@ fn another_chat_drops_the_reschedule_picker_and_the_scheduled_list(cx: &mut Test
     });
     frames(&mut vcx);
     app.read_with(&vcx, |app, _| {
-        assert!(app.chat_ui.schedule_picker.is_some() && app.chat_ui.schedule_popup_open);
+        assert!(app.chat_ui.schedule_picker.is_some());
     });
     open(&app, &mut vcx, other);
     app.read_with(&vcx, |app, _| {
@@ -318,7 +318,6 @@ fn another_chat_drops_the_reschedule_picker_and_the_scheduled_list(cx: &mut Test
             app.chat_ui.schedule_picker.is_none(),
             "the picker was the last chat's"
         );
-        assert!(!app.chat_ui.schedule_popup_open);
         assert!(
             !app.chat_ui.scheduled_dialog_open,
             "the list was the last chat's"

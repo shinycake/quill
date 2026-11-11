@@ -303,7 +303,7 @@ impl QuillApp {
         self.in_window_scope(window, cx, |this, cx| {
             // Record where the reader is now: the saved position follows
             // every scroll, not only the next full render.
-            if let Some(key) = this.history.key {
+            if let Some(key) = this.history.anchor.key() {
                 this.remember_scroll(key, cx);
             }
             this.preload_history_by_scroll(cx);

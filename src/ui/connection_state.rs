@@ -1,7 +1,6 @@
 //! Connection status, the status line and presence sync.
 #![deny(clippy::indexing_slicing)]
 
-use super::connect_ui::ConnectUiStatus;
 use super::status_note::{NoteKind, StatusNote};
 use super::toast_queue::ToastQueue;
 use std::time::Instant;
@@ -10,14 +9,10 @@ use std::time::Instant;
 /// status note and the toasts, presence sync. A field of `OnScreen`; the
 /// connection count itself is the app's ([`ConnectGeneration`]).
 pub(crate) struct ConnectionUi {
-    pub(super) status: ConnectUiStatus,
-    /// The current note. Private: every write names its kind through
-    /// `set_note`, so a toast never depends on the words.
-    note: StatusNote,
-    /// The toasts on screen and waiting, with the visible one's timer.
+    /// The current note, the toasts on screen and waiting, and the visible
+    /// one's timer. Every note write names its kind through `set_note`, so
+    /// a toast never depends on the words.
     pub(super) toasts: ToastQueue,
-    /// The deadline a wake-up is already scheduled for.
-    pub(super) toast_wake: Option<Instant>,
     /// The last status note printed by `QUILL_TRACE_STATUS`.
     pub(super) status_traced: String,
     /// Batch 4: the last `online` value sent to TDLib.
@@ -25,12 +20,9 @@ pub(crate) struct ConnectionUi {
 }
 
 impl ConnectionUi {
-    pub(super) fn new(connect_status: ConnectUiStatus, status_note: String) -> Self {
+    pub(super) fn new(status_note: String) -> Self {
         Self {
-            status: connect_status,
-            note: StatusNote::new(NoteKind::Silent, status_note),
-            toasts: ToastQueue::default(),
-            toast_wake: None,
+            toasts: ToastQueue::with_note(StatusNote::new(NoteKind::Silent, status_note)),
             status_traced: String::new(),
             presence: Default::default(),
         }
@@ -61,43 +53,34 @@ impl ConnectionUi {
     }
 
     pub(super) fn set_note_in(&mut self, host: Option<quill::ids::ChatId>, note: StatusNote) {
-        if note.kind() == NoteKind::Silent && self.note.is_toast() {
-            return;
-        }
-        self.toasts.push_in(note.clone(), host, Instant::now());
-        self.note = note;
+        self.toasts.set_note_in(note, host, Instant::now());
     }
 
     /// The current note.
     pub(super) fn note(&self) -> &StatusNote {
-        &self.note
+        self.toasts.note()
     }
 
     /// The current note's text.
     pub(super) fn status_note(&self) -> &str {
-        self.note.text()
+        self.toasts.note().text()
     }
 
     /// Drops the current note.
     pub(super) fn clear_note(&mut self) {
-        self.note = StatusNote::default();
-        self.toasts = ToastQueue::default();
+        self.toasts.clear_note();
     }
 
     /// Drops queued toasts without touching the current note: the footer
     /// line shows that note while there is no session.
     pub(super) fn drop_toasts(&mut self) {
-        self.toasts = ToastQueue::default();
-        self.toast_wake = None;
+        self.toasts.drop_toasts();
     }
 
     /// Advances the toast timers to `now`, and drops the current note once
     /// its toast is over so the same message set again shows again.
     pub(super) fn advance_toasts(&mut self, now: Instant) {
-        self.toasts.tick(now);
-        if self.note.is_toast() && !self.toasts.holds(&self.note) {
-            self.note = StatusNote::default();
-        }
+        self.toasts.advance(now);
     }
 }
 
@@ -179,7 +162,7 @@ mod tests {
     }
 
     fn connection() -> ConnectionUi {
-        ConnectionUi::new(super::ConnectUiStatus::Live, String::new())
+        ConnectionUi::new(String::new())
     }
 
     #[test]

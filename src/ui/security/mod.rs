@@ -147,7 +147,7 @@ impl QuillApp {
             others.sort_by_key(|a| std::cmp::Reverse(a.last_active_date));
 
             let mut body = div().flex().flex_col().gap_4();
-            if let Some(notice) = this.privacy.device_link_notice {
+            if let Some(notice) = this.privacy.device_link.notice() {
                 body = body.child(
                     div()
                         .id("device-link-notice")
@@ -157,7 +157,7 @@ impl QuillApp {
                         .child(notice),
                 );
             }
-            if this.privacy.device_login_qr.is_some() {
+            if this.privacy.device_link.is_confirming() {
                 body = body.child(
                     this.setting_spot(
                         &["devices.link_device"],
@@ -197,7 +197,7 @@ impl QuillApp {
                         cx,
                     ),
                 );
-            } else if this.privacy.device_qr_scanner.is_some() {
+            } else if this.privacy.device_link.is_scanning() {
                 body = body.child(
                     this.setting_spot(
                         &["devices.link_device"],
@@ -211,7 +211,7 @@ impl QuillApp {
                         cx,
                     ),
                 );
-            } else {
+            } else if !this.privacy.device_link.is_busy() {
                 // Cross-platform: paste the `tg://login?token=...` link that
                 // a QR reader shows for the other device's code.
                 let mut row = div().flex().flex_wrap().gap_2();

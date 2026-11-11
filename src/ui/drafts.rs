@@ -151,12 +151,18 @@ impl QuillApp {
     /// frame (the input needs `&mut Window`, which topic and thread
     /// switches triggered from menus don't have).
     pub(super) fn request_draft_restore(&mut self) {
-        self.composer_ui.draft_load.request_restore();
+        let slot = self
+            .open_chat_id()
+            .map(|chat| (chat, self.open_draft_topic(chat)));
+        self.composer_ui.draft_load.request_restore(slot);
     }
 
     /// Frame upkeep: run a requested restore.
     pub(super) fn restore_draft_if_pending(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.composer_ui.draft_load.take_restore() {
+        let open = self
+            .open_chat_id()
+            .map(|chat| (chat, self.open_draft_topic(chat)));
+        if self.composer_ui.draft_load.take_restore(open) {
             self.restore_open_draft(window, cx);
         }
     }
@@ -359,7 +365,7 @@ impl QuillApp {
         self.set_composer_markup(&text, window, cx);
         // `set_value` emits no Change: re-check the restored draft.
         let text = self.composer.read(cx).value();
-        self.composer_ui.prev_text = text.clone();
+        self.composer_ui.echo.set(text.clone());
         self.sync_spellcheck(&text, cx);
         self.sync_suggest_menu(false, cx);
     }

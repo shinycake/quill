@@ -651,7 +651,7 @@ fn bot_links_resolve_the_bot_with_search_public_chat() {
 /// the flow, so the agent's chat open is still checked when it lands; a
 /// fresh `resolve_deep_link` is the running handler's.
 #[test]
-fn a_flow_keeps_its_origin_when_another_link_arrives() {
+fn a_flow_in_progress_wins_over_another_link() {
     let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
     let recorder = Arc::new(RecordingSender::new());
@@ -659,7 +659,7 @@ fn a_flow_keeps_its_origin_when_another_link_arrives() {
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
 
     let extra = driver
-        .request_deep_link_info_from("https://t.me/agentpick", true)
+        .request_deep_link_info("https://t.me/agentpick")
         .unwrap()
         .unwrap();
     assert!(
@@ -673,7 +673,7 @@ fn a_flow_keeps_its_origin_when_another_link_arrives() {
     // The user's link waits: the flow in progress wins and keeps its origin.
     assert_eq!(
         driver
-            .request_deep_link_info_from("https://t.me/userpick", false)
+            .request_deep_link_info("https://t.me/userpick")
             .unwrap(),
         None
     );

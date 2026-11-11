@@ -122,7 +122,7 @@ fn apply_json(app: &mut QuillApp, json: &str, cx: &mut Context<QuillApp>) {
         return;
     };
     let need = quill::state::redraw_need(session, &envelope);
-    let seq = session.last_seq + 1;
+    let seq = app.demo_ui.next_seq(session.last_seq);
     session.apply(OwnedEnvelope {
         seq,
         client_id: None,

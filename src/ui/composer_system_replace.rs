@@ -95,6 +95,7 @@ impl QuillApp {
         self.replace_composer_text(edit.range.clone(), &edit.with, window, cx);
         self.composer
             .update(cx, |input, cx| input.set_selected_range(caret, cx));
-        self.composer_ui.prev_text = self.composer.read(cx).value();
+        let value = self.composer.read(cx).value();
+        self.composer_ui.echo.set(value);
     }
 }

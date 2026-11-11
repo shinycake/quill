@@ -209,7 +209,7 @@ impl QuillApp {
             .children(self.conference_link_row(call, cx));
         let contacts = self
             .session()
-            .and_then(|s| s.users_state.contacts.clone())
+            .and_then(|s| s.users_state.contacts.data().cloned())
             .unwrap_or_default();
         let mut rows = div()
             .id("group-call-invite-rows")

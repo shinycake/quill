@@ -172,13 +172,16 @@ impl QuillApp {
         };
         // An open already waiting for its chat is not replaced: the box
         // stays, and the pick works once that open has gone through.
-        if self.links.pending_deep_link_open.is_some() {
+        if self.links.resolved.is_some() {
             return;
         }
-        self.links.pending_deep_link_open = Some(super::links_state::PendingOpen::user(
-            chat_id,
-            DeepLinkAction::ShareDraft { text },
-        ));
+        self.links.resolved = Some(super::links_state::ResolvedLink {
+            window: None,
+            step: super::links_state::ResolvedStep::Open(super::links_state::PendingOpen::user(
+                chat_id,
+                DeepLinkAction::ShareDraft { text },
+            )),
+        });
         self.group_call_boxes.close_call_box();
         self.raise_main_window_later(cx);
         cx.notify();

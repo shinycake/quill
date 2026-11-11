@@ -9,6 +9,7 @@ use super::history_state::ScrollGoal;
 use super::message_text::kit_avatar_element;
 use super::nested_click::SwallowPress;
 use super::*;
+use crate::ui::history_state::ScrollAim;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
@@ -224,7 +225,7 @@ impl QuillApp {
         }
         // "Jump to root" pages older replies until the root is in; the
         // history list scrolls there (`ScrollGoal::ThreadRoot`).
-        if self.screen.history.scroll_goal == Some(ScrollGoal::ThreadRoot) {
+        if self.screen.history.aim.goal() == Some(ScrollGoal::ThreadRoot) {
             let complete = live
                 .driver
                 .session
@@ -261,7 +262,7 @@ impl QuillApp {
             return;
         };
         let back = live.driver.close_thread();
-        self.history.scroll_goal = None;
+        self.history.aim.take_goal();
         match back {
             // Another chat: the post the thread was opened from rides with
             // the open, to the window that shows that chat.
@@ -304,7 +305,7 @@ impl QuillApp {
             .map(|thread| MessageId(thread.thread_id));
         live.driver.session.close_thread();
         self.request_draft_restore();
-        self.history.scroll_goal = None;
+        self.history.aim.take_goal();
         if let Some(root) = root {
             self.jump_to_replied_message(root, cx);
         }
@@ -314,7 +315,7 @@ impl QuillApp {
     /// Scroll to the thread's root post, loading older replies first when
     /// they are not all loaded yet.
     pub(super) fn jump_to_thread_root(&mut self, cx: &mut Context<Self>) {
-        self.history.scroll_goal = Some(ScrollGoal::ThreadRoot);
+        self.history.aim = ScrollAim::Goal(ScrollGoal::ThreadRoot);
         cx.notify();
     }
 
