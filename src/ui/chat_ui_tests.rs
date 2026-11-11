@@ -524,3 +524,19 @@ fn a_forward_answer_keeps_a_newer_selection(cx: &mut TestAppContext) {
         assert!(app.share.forward_result.is_some(), "the answer still shows");
     });
 }
+
+/// The pinned-messages list opened in one chat is not open in the chat
+/// clicked next, nor waits to pop open in a later one (sweep 10-107).
+#[gpui_kit::test]
+fn another_chat_closes_the_pinned_list(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let other = other_chat(&app, &mut vcx);
+    open(&app, &mut vcx, CHAT);
+    app.update(&mut vcx, |app, cx| {
+        app.chat_ui.pinned_list_open = true;
+        cx.notify();
+    });
+    open(&app, &mut vcx, other);
+    let still_open = app.read_with(&vcx, |app, _| app.chat_ui.pinned_list_open);
+    assert!(!still_open, "the pinned list is the chat's");
+}

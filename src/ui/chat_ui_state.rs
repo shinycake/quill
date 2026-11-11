@@ -66,6 +66,37 @@ enum QuotePicker {
 }
 
 /// One view's state for the chat it shows.
+/// Where the keyboard and the screen reader rest in the open chat's history.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum A11yFocus {
+    #[default]
+    None,
+    /// The "Unread messages" bar.
+    Bar,
+    Row(MessageId),
+}
+
+impl A11yFocus {
+    /// The focused message row, if a row has it.
+    pub(crate) fn row(self) -> Option<MessageId> {
+        match self {
+            Self::Row(id) => Some(id),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn is_bar(self) -> bool {
+        self == Self::Bar
+    }
+
+    /// Selection let go of its row: the unread bar keeps its focus.
+    pub(crate) fn clear_row(&mut self) {
+        if matches!(self, Self::Row(_)) {
+            *self = Self::None;
+        }
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct ChatUi {
     /// Which value this is; new with each one made.
@@ -119,8 +150,13 @@ pub(crate) struct ChatUi {
     pub(super) pending_stop_poll: Option<(ChatId, MessageId, bool)>,
     /// Last row clicked in selection mode: the Shift+click range anchor.
     pub(super) selection_anchor: Option<MessageId>,
-    /// The row keyboard selection acts on (Ctrl+Space, Up / Down).
-    pub(super) selection_focus: Option<MessageId>,
+    /// The chat's pinned-messages list (the bar's list button): open for
+    /// this chat only, so another chat opened next starts with it closed.
+    pub(super) pinned_list_open: bool,
+    /// What keyboard selection and the screen reader's focus rest on in
+    /// this chat: a row (Ctrl+Space, Up / Down) or the unread bar. One
+    /// value of the chat, so another chat starts with none.
+    pub(super) focus: A11yFocus,
     /// Scheduled messages ticked in the scheduled-messages dialog (send
     /// now, reschedule or delete together).
     pub(super) scheduled_selected: Vec<MessageId>,

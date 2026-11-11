@@ -126,7 +126,7 @@ fn confirm_hide_pinned(
                 if let Some(key) = this.pinned_key(chat_id) {
                     this.history.hidden_pinned.insert(key, newest);
                 }
-                this.history.pinned_list_open = false;
+                this.chat_ui.pinned_list_open = false;
                 cx.notify();
             });
         },

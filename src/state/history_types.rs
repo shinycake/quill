@@ -541,8 +541,11 @@ pub struct HistoryState {
     pub view_generation: ViewGeneration,
     /// Message ids TDLib has accepted for `viewMessages` this open generation.
     pub viewed: HashSet<i64>,
-    /// In-flight `viewMessages` ids. Cleared on send failure or TDLib error so we can retry.
-    pub viewing: HashSet<i64>,
+    /// In-flight `viewMessages` ids, by the request that sent them: an
+    /// answer settles the ids of its own request only (`commit_viewed`,
+    /// `abort_viewing`), whatever else is in flight, and a re-open of the
+    /// chat drops them all, so an answer from before it settles nothing.
+    pub viewing: HashMap<RequestId, BTreeSet<i64>>,
     /// Ids the UI reported as shown (`ConnectDriver::view_messages`) that
     /// have not been sent to `viewMessages` yet.
     pub visible: BTreeSet<i64>,
@@ -590,6 +593,19 @@ pub struct HistoryState {
 }
 
 impl HistoryState {
+    /// `id` is in a `viewMessages` still on its way.
+    pub fn is_viewing(&self, id: i64) -> bool {
+        self.viewing.values().any(|ids| ids.contains(&id))
+    }
+
+    /// Let go of `id` in every `viewMessages` on its way: it is read, or
+    /// due again.
+    pub(crate) fn forget_viewing(&mut self, id: i64) {
+        for ids in self.viewing.values_mut() {
+            ids.remove(&id);
+        }
+    }
+
     pub fn ordered(&self) -> Vec<&HistoryMessage> {
         self.messages.values().collect()
     }

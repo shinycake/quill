@@ -188,7 +188,7 @@ impl QuillApp {
         let right = if count == 1 {
             pinned_bar_close_button(can_pin, chat_id, message_id, newest, cx)
         } else {
-            pinned_bar_list_button(self.history.pinned_list_open, cx)
+            pinned_bar_list_button(self.chat_ui.pinned_list_open, cx)
         };
         // Stepping to another pinned message swaps the text the way
         // tdesktop's `MessageBar` does: the old lines slide out towards the
@@ -326,7 +326,7 @@ impl QuillApp {
                     if let Some(key) = this.pinned_key(chat_id) {
                         this.history.pinned_cursor.insert(key, index);
                     }
-                    this.history.pinned_list_open = false;
+                    this.chat_ui.pinned_list_open = false;
                     cx.notify();
                 }));
             // Telegram Desktop's "Go To Message" on a pinned row.
@@ -349,7 +349,7 @@ impl QuillApp {
                                 if let Some(key) = this.pinned_key(chat_id) {
                                     this.history.pinned_cursor.insert(key, index);
                                 }
-                                this.history.pinned_list_open = false;
+                                this.chat_ui.pinned_list_open = false;
                                 cx.notify();
                             });
                         }),
@@ -371,7 +371,7 @@ impl QuillApp {
                         tr(keys::CONTEXT_UNPIN_FROM_TOP),
                         move |cx| {
                             let _ = app.update(cx, |this, cx| {
-                                this.history.pinned_list_open = false;
+                                this.chat_ui.pinned_list_open = false;
                                 this.unpin_all_messages(chat_id, cx);
                             });
                         },
@@ -498,7 +498,7 @@ fn pinned_bar_list_button(open: bool, cx: &mut Context<QuillApp>) -> AnyElement 
         .tooltip(tr(keys::Q_CHAT_PINNED_MESSAGES))
         .accessibility_label(tr(keys::Q_CHAT_PINNED_MESSAGES))
         .on_click(cx.listener(|this, _, _, cx| {
-            this.history.pinned_list_open = !this.history.pinned_list_open;
+            this.chat_ui.pinned_list_open = !this.chat_ui.pinned_list_open;
             cx.notify();
         }))
         .into_any_element()

@@ -4077,3 +4077,73 @@ and 10 are widget items another fixer owns).
   (`cancel_inline_opening_unless_chat`, an invite preview, a text or typed
   link), or when another account is on screen (10-119). No timer: a lookup
   that never answers is the deep-link flow's own concern.
+
+### Sweep fixes (s3-stories)
+
+- **One story-page op per request.** `StoriesState::page_ops` (`StoryPageOps`)
+  tracks every story-page call by its `RequestId`, with the chat page it is
+  for, in place of the one `page_op` slot. A read (paging the archive, the
+  posted list) and a mutation (delete, rename, pin) no longer replace each
+  other, so a failed delete shows while the archive loads and the loading
+  state of one chat's page is not another's (02-198, 02-199, 13-135). A send
+  that fails fails its own op (`fail_story_page_send`); closing the page
+  forgets its calls (`leave_story_page`) and an account going away clears
+  them, so a lost request cannot say "Sending" for good (05-281).
+- **The page waits for the answer.** `StoryPage::wait` (`PageWait`:
+  `Creating`, `SavingPicker`, `Deleting`) holds the one mutation the page
+  waits on; `story_page_upkeep` applies its follow-up when that request
+  succeeds. The picker and the typed album name stay until the album is made
+  or the add is saved, the album view stays until the delete is answered, and a
+  failure leaves all three with the error on the status line (13-129, 13-130,
+  13-131). A second mutation of the page is not sent while one is in flight
+  (a second Create, a second pin overwriting the first, 13-129, 13-132).
+  The delete's second click is part of the view (`AlbumView::Album { delete }`),
+  so Back, the picker and an answer disarm it (13-133).
+- **Composer stage per request.** `StoryComposer::stage` (`ComposerStage`)
+  replaces `check_sent`, `post_sent` and `save_sent`. `Checking`, `Posting`
+  and `Saving` carry the request they sent and leave with the answer to that
+  request; `Posted` keeps Post off so the media is not posted twice
+  (05-160, 13-138, 13-139, 06-010). `StoryPostState` keeps `canPostStory`
+  answers and `postStory` outcomes with their request ids (`StoryCheck`,
+  `StoryPostOutcome`), and `check_can_post_story` always sends so the composer
+  has its own id. `StoryManageState` tracks each editStory, cover and privacy
+  call by request (`in_flight`, `settled`), so the cover picker, the privacy
+  editor and the composer each read the answer to their own call whatever call
+  took the status slot; a failed cover or privacy save shows under its story
+  (13-123, 06-010).
+- **Answers matched to what asked.** The viewers list (`ViewersPage`), the
+  report flow (`StoryReportStage::Checking`/`Sending { request }`), the
+  insights' public forwards (`ForwardsPage`) apply an answer only for the
+  request they wait for, and the dedupe checks look at the panel's own stage,
+  not at a request left in the registry by a panel since closed (05-278,
+  05-280, 03-007). A first forwards page replaces the rows. `viewMessages`
+  answers settle their own ids only (`HistoryState::viewing` is
+  `RequestId -> ids`, 05-178).
+- **Refused stories are asked again.** A 400 from `getStory` marks the story
+  missing as before (the error carries no message to tell "chat not found"
+  from "story not found"), but the mark goes when the story arrives, when its
+  poster chat becomes known, and on a new Ready (05-163).
+- **Viewer.** A story opened over the open viewer goes through the same
+  `replace_story_item` as a step, so the reply and live comment draft are
+  cleared (13-090). The text reply is cleared and its row closed only when the
+  reply went out, and slow mode holds it like a sticker (13-091). The live
+  Stars flow is one value (`StarsFlow`: `Idle`, `Box`, `TopUp`); the top-up
+  carries the waiting comment and a refused top-up leaves the flow (13-092).
+  Opening a panel closes the others (`StoryViewerUi::close_other_panels`,
+  `ViewerPanel`, 13-125). The close-friends editor is `CloseFriendsStage`
+  (`Closed`, `Editing`, `Saving { request }`) and Saving leaves with the answer
+  to its call, also when the list was never loaded (13-141). Save media copies
+  on a background task (`MediaSave`) and gives its result under the story it
+  was for (13-142). The Stealth Mode box tracks its request
+  (`StealthStage::Activating`) and shows a refusal with the button to ask
+  again (`StoriesState::stealth_refusal`, 13-128). The cover picker's clip is
+  `CoverStage` (`WaitingForClip`, `Probing`, `Ready`, `Unreadable`) and a clip
+  that finishes downloading is picked up (13-121). The strip's wheel decides its
+  axis per notch (13-146).
+- **Per chat.** The screen-reader focus (`A11yFocus`: none, the unread bar, a
+  row) and the pinned-messages list are `ChatUi` values, so another chat
+  replaces them (10-100, 10-107).
+- **Not done as the register says.** 13-125 keeps the panels' data in their own
+  fields (`cover`, `privacy_edit`, the close-friends stage, four flags) and
+  closes the rest through one seam instead of storing a single `ViewerPanel`
+  value (about 150 readers); the seam is the only place that opens a panel.

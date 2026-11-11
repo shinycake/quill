@@ -11,7 +11,7 @@ use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Focusable, TestAppContext, VisualTestContext, px, size};
-use quill::ids::MessageId;
+use quill::ids::{ChatId, MessageId};
 
 #[test]
 fn keys_step_like_telegram_desktop() {
@@ -145,7 +145,7 @@ fn focus_entering_the_history_picks_a_message_and_arrows_move_it(cx: &mut TestAp
 
     // The focused message has a spoken name ending in its delivery state.
     let name = app.read_with(vcx, |app, _| {
-        let focus = app.chat_ui.selection_focus.expect("a focused message");
+        let focus = app.chat_ui.focus.row().expect("a focused message");
         let row = app
             .history
             .rows
@@ -214,4 +214,31 @@ fn new_messages_in_a_chat_that_shows_some_move_nothing(cx: &mut TestAppContext) 
     // A rebuild (a new message arriving) leaves the focus where it was.
     app.update(vcx, |app, cx| app.history_a11y_rows_changed(cx));
     assert_eq!(focused(&app, vcx), before);
+}
+
+/// The unread bar's focus belongs to its chat: another chat opened next
+/// does not start with its own bar read as focused, and Space is not
+/// refused for it (sweep 10-100).
+#[gpui_kit::test]
+fn the_bar_focus_does_not_follow_into_another_chat(cx: &mut TestAppContext) {
+    use crate::ui::chat_ui_state::A11yFocus;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.chat_ui.focus = A11yFocus::Bar;
+        let current = app.session().and_then(|s| s.open_chat);
+        let other = app.session().and_then(|s| {
+            s.chats
+                .keys()
+                .copied()
+                .find(|id| Some(ChatId(*id)) != current)
+        });
+        if let (Some(other), Some(session)) = (other, app.demo_session.as_mut()) {
+            session.open_chat = Some(ChatId(other));
+        }
+        app.sync_chat_ui();
+        assert_eq!(app.chat_ui.focus, A11yFocus::None, "the new chat's own");
+        assert!(!app.chat_ui.focus.is_bar());
+        cx.notify();
+    });
 }

@@ -582,10 +582,10 @@ impl Session {
         {
             self.accept_sponsored_hidden(chat_id);
         }
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::ViewMessages)
-            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+        if let Some(viewed) = pending.filter(|p| p.purpose == RequestPurpose::ViewMessages)
+            && let Some(chat_id) = viewed.chat_id
         {
-            self.commit_viewed(chat_id);
+            self.commit_viewed(chat_id, viewed.id);
         }
         // Phase D3b: `setChatMemberStatus` confirmed. TDLib sends
         // `updateChatMember` to bots only (td_api.tl), so the change
