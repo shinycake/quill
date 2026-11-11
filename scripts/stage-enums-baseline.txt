@@ -32,7 +32,6 @@ bare:CarrierStage::Starting 1
 bare:CeremonySheet::Connecting 1
 bare:CeremonySheet::Probing 1
 bare:ChatEventLogFetch::Loading 1
-bare:Clip::Writing 1
 bare:ClipState::Opening 1
 bare:CloseFriendsStage::Loading 1
 bare:CloseProgress::Pending 1
