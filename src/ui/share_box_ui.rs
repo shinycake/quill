@@ -167,7 +167,7 @@ impl QuillApp {
             if let Some(result) = self
                 .demo_session
                 .as_mut()
-                .and_then(|session| session.messages.last_forward.take())
+                .and_then(|session| session.messages.forwards.take_result())
             {
                 self.present_forward_result(result, cx);
             }
@@ -304,7 +304,7 @@ impl QuillApp {
             if let Some(result) = self
                 .demo_session
                 .as_mut()
-                .and_then(|session| session.messages.last_forward.take())
+                .and_then(|session| session.messages.forwards.take_result())
             {
                 self.present_forward_result(result, cx);
             }

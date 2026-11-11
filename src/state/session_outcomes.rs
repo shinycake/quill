@@ -29,7 +29,7 @@ impl Session {
         let messages = &mut self.messages;
         messages.message_link_result = None;
         messages.message_link_error.clear();
-        messages.last_forward = None;
+        messages.forwards.clear_results();
         messages.recognize_speech_error.clear();
         messages.ai_error.clear();
         messages.resend_error.clear();

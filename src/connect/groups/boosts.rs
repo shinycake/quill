@@ -259,10 +259,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session
-            .groups
-            .unrestrict_boost_pending
-            .insert(chat_id.0, count);
+        self.session.groups.unrestrict_boost_saves.insert(
+            chat_id.0,
+            crate::state::UnrestrictSave {
+                request: extra,
+                value: count,
+            },
+        );
         Ok(Some(extra))
     }
 }

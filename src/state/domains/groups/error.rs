@@ -124,8 +124,15 @@ impl Session {
             // The unrestrict-boosts value was never applied; drop it so the
             // slider shows the stored one again.
             Some(RequestPurpose::SetSupergroupUnrestrictBoostCount) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.groups.unrestrict_boost_pending.remove(&chat_id.0);
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && self
+                        .groups
+                        .unrestrict_boost_saves
+                        .get(&chat_id.0)
+                        .is_some_and(|save| save.request == pending.id)
+                {
+                    self.groups.unrestrict_boost_saves.remove(&chat_id.0);
                 }
                 self.chats_state
                     .chat_action_error

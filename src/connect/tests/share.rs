@@ -84,8 +84,8 @@ fn forwarding_to_two_chats_keeps_both_results_and_options() {
     let first = driver
         .session
         .messages
-        .last_forward
-        .take()
+        .forwards
+        .take_result()
         .expect("bob result");
     assert_eq!(first.dest_title, "Bob");
     assert_eq!(first.from_chat_id, ChatId(7));
@@ -93,13 +93,12 @@ fn forwarding_to_two_chats_keeps_both_results_and_options() {
     let second = driver
         .session
         .messages
-        .last_forward
-        .take()
+        .forwards
+        .take_result()
         .expect("cy result");
     assert_eq!(second.dest_title, "Cy");
     assert_eq!(second.from_chat_id, ChatId(7));
-    assert!(driver.session.messages.queued_forward_flights.is_empty());
-    assert!(driver.session.messages.in_flight_forward.is_none());
+    assert!(!driver.session.messages.forwards.in_flight());
     let _ = std::fs::remove_dir_all(dir);
 }
 

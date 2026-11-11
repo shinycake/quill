@@ -73,6 +73,7 @@ mod conference_invite;
 mod domains;
 pub mod fetch;
 mod folder_order_cache;
+mod forwards;
 mod history_calendar;
 mod history_prune;
 mod history_trim;
@@ -197,6 +198,7 @@ pub use conference::*;
 pub use conference_add_people::*;
 pub use conference_invite::*;
 pub use domains::*;
+pub use forwards::Forwards;
 pub use history_calendar::*;
 pub use history_prune::*;
 pub use history_trim::{

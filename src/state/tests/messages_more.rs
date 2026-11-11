@@ -62,7 +62,7 @@ fn forward_messages_result_upserts_dest_and_labels_origin() {
             .all(|c| c.supported())
     );
     let extra = session.request(RequestPurpose::ForwardMessages, Some(ChatId(12)));
-    session.messages.in_flight_forward = Some(ForwardFlight {
+    session.messages.forwards.begin(ForwardFlight {
         extra,
         dest_chat_id: ChatId(12),
         from_chat_id: ChatId(11),
@@ -80,8 +80,8 @@ fn forward_messages_result_upserts_dest_and_labels_origin() {
     );
     let result = session
         .messages
-        .last_forward
-        .as_ref()
+        .forwards
+        .latest_result()
         .expect("forward result");
     assert_eq!(result.dest_chat_id, ChatId(12));
     assert_eq!(result.dest_title, "Bob");
@@ -885,4 +885,36 @@ fn force_replies_of_two_chats_in_one_batch_both_wait_for_their_windows() {
             message_id: MessageId(402),
         })
     );
+}
+
+/// Two forwards that finish before the UI polls each keep their outcome.
+#[test]
+fn forward_outcomes_queue_until_the_ui_takes_them() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let mut asked = Vec::new();
+    for dest in [12, 13] {
+        let extra = session.request(RequestPurpose::ForwardMessages, Some(ChatId(dest)));
+        session.messages.forwards.begin(ForwardFlight {
+            extra,
+            dest_chat_id: ChatId(dest),
+            from_chat_id: ChatId(11),
+            from_topic: Default::default(),
+            requested: 1,
+        });
+        asked.push(extra);
+    }
+    for extra in &asked {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(r#"{{"@type":"error","@extra":"{}","code":400,"message":"x"}}"#, extra.0),
+        );
+    }
+    assert!(!session.messages.forwards.in_flight());
+    let dests: Vec<_> = std::iter::from_fn(|| session.messages.forwards.take_result())
+        .map(|result| result.dest_chat_id)
+        .collect();
+    assert_eq!(dests, [ChatId(12), ChatId(13)]);
 }

@@ -63,6 +63,13 @@ impl GroupsState {
     }
 }
 
+/// A "boosts needed to bypass restrictions" value on its way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnrestrictSave {
+    pub request: RequestId,
+    pub value: i32,
+}
+
 pub struct GroupsState {
     /// Transfer-ownership gate, transfer progress and the "next owner" lookup.
     pub ownership: OwnershipState,
@@ -196,9 +203,9 @@ pub struct GroupsState {
     /// `getChatBoostFeatures` level tables, keyed by chat id (the table
     /// differs for channels and groups).
     pub chat_boost_features: HashMap<i64, ParsedBoostFeatures>,
-    /// "Boosts needed to bypass restrictions" values sent and not yet
-    /// acknowledged, keyed by chat id.
-    pub unrestrict_boost_pending: HashMap<i64, i32>,
+    /// "Boosts needed to bypass restrictions" saves in flight, keyed by chat
+    /// id: the request and the value it sent. Its answer settles it.
+    pub unrestrict_boost_saves: HashMap<i64, UnrestrictSave>,
     /// TDLib option `supergroup_size_max` (0 until it arrives): the
     /// permissions box offers a broadcast group near it.
     pub supergroup_size_max: i32,
@@ -393,7 +400,7 @@ impl GroupsState {
             chat_boost_status: HashMap::new(),
             chat_boost_details: HashMap::new(),
             chat_boost_features: HashMap::new(),
-            unrestrict_boost_pending: HashMap::new(),
+            unrestrict_boost_saves: HashMap::new(),
             supergroup_size_max: 0,
             subscription_star_max: None,
             stars_usd_rate: None,

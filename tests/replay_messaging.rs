@@ -462,13 +462,16 @@ fn replay_forward_messages_result_and_attribution() {
         ],
     );
     let extra = session.request(RequestPurpose::ForwardMessages, Some(quill::ids::ChatId(8)));
-    session.messages.in_flight_forward = Some(quill::state::ForwardFlight {
-        extra,
-        dest_chat_id: quill::ids::ChatId(8),
-        from_chat_id: quill::ids::ChatId(7),
-        from_topic: quill::ids::TopicId::None,
-        requested: 1,
-    });
+    session
+        .messages
+        .forwards
+        .begin(quill::state::ForwardFlight {
+            extra,
+            dest_chat_id: quill::ids::ChatId(8),
+            from_chat_id: quill::ids::ChatId(7),
+            from_topic: quill::ids::TopicId::None,
+            requested: 1,
+        });
     apply_all_seq(
         &mut session,
         &sink,
@@ -480,8 +483,8 @@ fn replay_forward_messages_result_and_attribution() {
     );
     let result = session
         .messages
-        .last_forward
-        .as_ref()
+        .forwards
+        .latest_result()
         .expect("forward result");
     assert_eq!(result.dest_title, "Bob");
     assert_eq!(result.forwarded_ids, vec![quill::ids::MessageId(80)]);
