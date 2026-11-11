@@ -125,7 +125,7 @@ impl QuillApp {
                 let tray_ready = quill::tray::tray_available();
                 let tray_options = self.tray_options(tray_ready);
                 let tray =
-                    quill::tray::tray_setting_switches(tray_ready, self.appearance.show_tray_icon);
+                    quill::tray::tray_setting_switches(tray_ready, self.appearance.work_mode.has_tray());
                 let autostart = self.general_autostart_section(cx);
                 let autostart = self.setting_stand_in(
                     !tray_options.tray_icon,

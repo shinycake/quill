@@ -31,7 +31,7 @@ impl QuillApp {
         let in_use = session
             .and_then(|s| s.chats_state.default_backgrounds.get(&dark))
             .map(|b| b.id)
-            .filter(|_| self.appearance.telegram_wallpaper);
+            .filter(|_| self.appearance.wallpaper.is_telegram());
         let error = session.and_then(|s| s.chats_state.background_error.clone());
         let muted = cx.theme().muted_foreground;
         let mut grid = div().flex().flex_wrap().gap_2();
@@ -115,7 +115,7 @@ impl QuillApp {
             ),
         );
         // tdesktop shows "Tile background" only for photo wallpapers.
-        let tile_shown = self.appearance.telegram_wallpaper
+        let tile_shown = self.appearance.wallpaper.is_telegram()
             && matches!(
                 self.account_telegram_wallpaper(dark),
                 Some(Wallpaper::Image { .. })

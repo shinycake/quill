@@ -4,9 +4,9 @@
 //! tdesktop stores one tri-state: window and tray, tray only, window only.
 //! The settings page shows it as two switches, "Show tray icon" and "Show
 //! taskbar icon", which are never both off: turning off one forces the other
-//! back on. Quill stores the two switches (`show_tray_icon`,
-//! `show_taskbar_icon`) and derives the mode, so older prefs files keep
-//! working. Which switches exist depends on the platform:
+//! back on. Quill keeps the one [`WorkMode`] and writes it under the two
+//! switches' keys (`show_tray_icon`, `show_taskbar_icon`), so older prefs
+//! files keep working. Which switches exist depends on the platform:
 //!
 //! | platform | tray icon | taskbar icon | monochrome icon |
 //! |----------|-----------|--------------|-----------------|
@@ -15,11 +15,41 @@
 //! | Linux    | if a StatusNotifier host exists | X11 only (`_NET_WM_STATE_SKIP_TASKBAR`) | only with a `-symbolic` theme icon, which Quill does not ship |
 
 /// tdesktop `WorkMode`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(from = "TraySwitches", into = "TraySwitches")]
 pub enum WorkMode {
+    #[default]
     WindowAndTray,
     TrayOnly,
     WindowOnly,
+}
+
+/// The two keys a [`WorkMode`] is saved as.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct TraySwitches {
+    #[serde(default = "on")]
+    show_tray_icon: bool,
+    #[serde(default = "on")]
+    show_taskbar_icon: bool,
+}
+
+fn on() -> bool {
+    true
+}
+
+impl From<TraySwitches> for WorkMode {
+    fn from(switches: TraySwitches) -> Self {
+        Self::from_switches(switches.show_tray_icon, switches.show_taskbar_icon)
+    }
+}
+
+impl From<WorkMode> for TraySwitches {
+    fn from(mode: WorkMode) -> Self {
+        Self {
+            show_tray_icon: mode.has_tray(),
+            show_taskbar_icon: mode.has_taskbar(),
+        }
+    }
 }
 
 impl WorkMode {
@@ -107,23 +137,20 @@ pub fn options(
     }
 }
 
-/// The `(tray, taskbar)` pair after a switch change.
-pub type Switches = (bool, bool);
-
 /// "Show tray icon" changed. Turning it off forces the taskbar icon on.
-pub fn toggle_tray((_, taskbar): Switches, on: bool) -> Switches {
-    (on, taskbar || !on)
+pub fn toggle_tray(mode: WorkMode, on: bool) -> WorkMode {
+    WorkMode::from_switches(on, mode.has_taskbar() || !on)
 }
 
 /// "Show taskbar icon" changed. Turning it off forces the tray icon on.
-pub fn toggle_taskbar((tray, _): Switches, on: bool) -> Switches {
-    (tray || !on, on)
+pub fn toggle_taskbar(mode: WorkMode, on: bool) -> WorkMode {
+    WorkMode::from_switches(mode.has_tray() || !on, on)
 }
 
 /// Whether the main window leaves the taskbar: only when the user asked and
 /// the tray icon can bring it back.
-pub fn skip_taskbar((tray, taskbar): Switches) -> bool {
-    tray && !taskbar
+pub fn skip_taskbar(mode: WorkMode) -> bool {
+    mode == WorkMode::TrayOnly
 }
 
 #[cfg(test)]
@@ -142,30 +169,30 @@ mod tests {
 
     #[test]
     fn never_both_off() {
-        assert_eq!(toggle_tray((true, true), false), (false, true));
-        assert_eq!(toggle_tray((true, false), false), (false, true));
-        assert_eq!(toggle_tray((false, true), true), (true, true));
-        assert_eq!(toggle_taskbar((true, true), false), (true, false));
-        assert_eq!(toggle_taskbar((false, true), false), (true, false));
-        assert_eq!(toggle_taskbar((true, false), true), (true, true));
+        assert_eq!(toggle_tray(W::WindowAndTray, false), W::WindowOnly);
+        assert_eq!(toggle_tray(W::TrayOnly, false), W::WindowOnly);
+        assert_eq!(toggle_tray(W::WindowOnly, true), W::WindowAndTray);
+        assert_eq!(toggle_taskbar(W::WindowAndTray, false), W::TrayOnly);
+        assert_eq!(toggle_taskbar(W::WindowOnly, false), W::TrayOnly);
+        assert_eq!(toggle_taskbar(W::TrayOnly, true), W::WindowAndTray);
     }
 
     #[test]
     fn work_mode_transitions() {
-        let mut s = (true, true);
-        s = toggle_taskbar(s, false);
-        assert_eq!(W::from_switches(s.0, s.1), W::TrayOnly);
-        s = toggle_tray(s, false);
-        assert_eq!(W::from_switches(s.0, s.1), W::WindowOnly);
-        s = toggle_tray(s, true);
-        assert_eq!(W::from_switches(s.0, s.1), W::WindowAndTray);
+        let mut mode = W::WindowAndTray;
+        mode = toggle_taskbar(mode, false);
+        assert_eq!(mode, W::TrayOnly);
+        mode = toggle_tray(mode, false);
+        assert_eq!(mode, W::WindowOnly);
+        mode = toggle_tray(mode, true);
+        assert_eq!(mode, W::WindowAndTray);
     }
 
     #[test]
     fn taskbar_is_skipped_only_with_a_tray() {
-        assert!(skip_taskbar((true, false)));
-        assert!(!skip_taskbar((false, false)));
-        assert!(!skip_taskbar((true, true)));
+        assert!(skip_taskbar(W::TrayOnly));
+        assert!(!skip_taskbar(W::WindowOnly));
+        assert!(!skip_taskbar(W::WindowAndTray));
     }
 
     #[test]

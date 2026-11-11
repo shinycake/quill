@@ -262,8 +262,7 @@ impl QuillApp {
     /// instead of a preset color.
     fn wallpaper_applied(&mut self, cx: &mut Context<Self>) {
         self.set_appearance(cx, |a| {
-            a.telegram_wallpaper = true;
-            a.wallpaper_rgb = None;
+            a.wallpaper = quill::settings::WallpaperSource::Telegram;
         });
     }
 

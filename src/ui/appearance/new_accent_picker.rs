@@ -75,10 +75,7 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn appearance_wallpaper_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let current = self
-            .appearance
-            .wallpaper_rgb
-            .filter(|_| !self.appearance.telegram_wallpaper);
+        let current = self.appearance.wallpaper.color();
         let mut row = div()
             .flex()
             .gap_2()
@@ -90,8 +87,7 @@ impl QuillApp {
                 cx,
                 |this, cx| {
                     this.set_appearance(cx, |a| {
-                        a.wallpaper_rgb = None;
-                        a.telegram_wallpaper = false;
+                        a.wallpaper = quill::settings::WallpaperSource::Theme;
                     })
                 },
             ));
@@ -104,8 +100,7 @@ impl QuillApp {
                 cx,
                 move |this, cx| {
                     this.set_appearance(cx, |a| {
-                        a.wallpaper_rgb = Some(color);
-                        a.telegram_wallpaper = false;
+                        a.wallpaper = quill::settings::WallpaperSource::Color(color);
                     })
                 },
             ));
