@@ -15,6 +15,56 @@ use std::time::Instant;
 /// A pinned-chat drag (or its release slide) and the pinned list it
 /// reorders: the main list's, or the archive's. One value, so the list
 /// can never be kept apart from the drag by hand.
+/// What the chat list shows (see `ChatListUi::view`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum ChatListView {
+    #[default]
+    Main,
+    /// A folder tab (`updateChatFolders` id).
+    Folder(i32),
+    /// The unread chats of the main list, or of the open folder.
+    Unread { folder: Option<i32> },
+    /// The archive alone (global: it leaves any folder).
+    Archived,
+    /// A community's chats (`parity:communities-chatlist-mode`).
+    Community(i64),
+}
+
+impl ChatListView {
+    /// The view for a category and a folder tab; the archive and a
+    /// community are global and drop the folder.
+    pub(super) fn new(filter: ChatListFilter, folder: Option<i32>) -> Self {
+        match filter {
+            ChatListFilter::All => folder.map_or(Self::Main, Self::Folder),
+            ChatListFilter::Unread => Self::Unread { folder },
+            ChatListFilter::Archived => Self::Archived,
+            ChatListFilter::Community(id) => Self::Community(id),
+        }
+    }
+
+    pub(super) fn filter(self) -> ChatListFilter {
+        match self {
+            Self::Main | Self::Folder(_) => ChatListFilter::All,
+            Self::Unread { .. } => ChatListFilter::Unread,
+            Self::Archived => ChatListFilter::Archived,
+            Self::Community(id) => ChatListFilter::Community(id),
+        }
+    }
+
+    /// The open folder tab, if any.
+    pub(super) fn folder(self) -> Option<i32> {
+        match self {
+            Self::Folder(id) | Self::Unread { folder: Some(id) } => Some(id),
+            _ => None,
+        }
+    }
+
+    /// The same category without its folder tab.
+    pub(super) fn without_folder(self) -> Self {
+        Self::new(self.filter(), None)
+    }
+}
+
 /// The chat list's context menu, one at a time: opening one replaces
 /// whatever menu was open, so no opener has to close the others.
 #[derive(Clone, Copy, Debug, Default)]
@@ -246,11 +296,11 @@ pub(crate) struct ChatListUi {
     /// selecting; rows toggle the check instead of opening the chat and
     /// the select bar offers the bulk actions.
     pub(super) selected: HashSet<i64>,
-    /// Slice CL2: chat-list category filter (TGX `ChatFilter` unread /
-    /// archive categories, `MainController` pager categories). `All` is
-    /// the unfiltered list; `Unread` filters to unread chats;
-    /// `Archived` shows only the archive.
-    pub(super) filter: ChatListFilter,
+    /// What the list shows: the main list, a folder tab, the Unread
+    /// category (of the main list or of a folder), the archive or a
+    /// community (TGX `ChatFilter` categories, `MainController` pager).
+    /// One value, so a folder and a category never disagree.
+    pub(super) view: ChatListView,
     /// The Downloads panel beside the conversation is open. Here, not in
     /// the `Session`, so it starts closed when an account comes back on
     /// screen.
@@ -303,7 +353,7 @@ impl ChatListUi {
             pin: PinStage::Idle,
             peek: PeekPreview::Idle,
             selected: HashSet::new(),
-            filter: ChatListFilter::All,
+            view: ChatListView::Main,
             archive_hint_open: false,
             my_chats_open: None,
             tab: SidebarTab::Chats,

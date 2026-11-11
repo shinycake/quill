@@ -170,7 +170,7 @@ impl QuillApp {
                     chat,
                     selected,
                     &folder_tags.names,
-                    self.folders.tab,
+                    self.chat_list.view.folder(),
                     folder_tags.show,
                     photo.as_deref(),
                     draggable,

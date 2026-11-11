@@ -358,7 +358,7 @@ fn changing_the_filter_collapses_the_strip(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     expand_now(&app, vcx);
     app.update(vcx, |app, cx| {
-        app.chat_list.filter = crate::ui::app::ChatListFilter::Unread;
+        app.chat_list.view = crate::ui::chat_list_state::ChatListView::Unread { folder: None };
         app.notify_sidebar(cx);
     });
     frames(vcx);
@@ -372,7 +372,7 @@ fn the_archive_shows_no_strip(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     expand_now(&app, vcx);
     app.update(vcx, |app, cx| {
-        app.chat_list.filter = crate::ui::app::ChatListFilter::Archived;
+        app.chat_list.view = crate::ui::chat_list_state::ChatListView::Archived;
         app.notify_sidebar(cx);
     });
     frames(vcx);

@@ -4,9 +4,6 @@
 use super::*;
 
 pub(crate) struct FolderUi {
-    /// Phase 7.1: selected folder tab (`None` = Main). Folder membership
-    /// comes from chat positions (`chatListFolder`); the tab only filters.
-    pub(super) tab: Option<i32>,
     pub(super) editor: Option<FolderEditorDialog>,
     pub(super) delete_confirm: Option<FolderDeleteConfirm>,
     /// Share Folder (invite links) dialog.
@@ -32,7 +29,6 @@ pub(crate) struct FolderUi {
 impl FolderUi {
     pub(super) fn new() -> Self {
         Self {
-            tab: None,
             editor: None,
             delete_confirm: None,
             share: None,

@@ -177,8 +177,8 @@ impl QuillApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
-        let folder = self.folders.tab;
-        let filter = self.chat_list.filter;
+        let folder = self.chat_list.view.folder();
+        let filter = self.chat_list.view.filter();
         // Parity slice: folder names + tags flag for chat-row chips.
         let folder_tags = self.folder_tag_context();
         let mut chats: Vec<&ChatSummary> = self.listed_main_chats();

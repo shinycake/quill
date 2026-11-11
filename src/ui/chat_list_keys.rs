@@ -605,14 +605,14 @@ impl QuillApp {
         // `Widget::escape`: leave the opened folder (Quill's archive view)
         // or community, else go back to the open chat, else to the first
         // folder.
-        if self.chat_list.filter == ChatListFilter::Archived {
-            self.set_chat_list_view(ChatListFilter::All, self.folders.tab);
+        if self.chat_list.view.filter() == ChatListFilter::Archived {
+            self.set_chat_list_view(ChatListFilter::All, self.chat_list.view.folder());
             cx.notify();
-        } else if matches!(self.chat_list.filter, ChatListFilter::Community(_)) {
+        } else if matches!(self.chat_list.view.filter(), ChatListFilter::Community(_)) {
             self.exit_community_chat_list_mode(cx);
         } else if open.is_some() {
             self.focus_opened_chat(window, cx);
-        } else if self.folders.tab.is_some() {
+        } else if self.chat_list.view.folder().is_some() {
             self.open_folder_tab(None, cx);
         }
     }

@@ -272,7 +272,8 @@ impl QuillApp {
     /// Ask for the open shared folder's new chats (the driver keeps to the
     /// update period). Called when a folder opens and from the poll loop.
     pub(super) fn poll_folder_new_chats(&mut self) {
-        let (Some(folder_id), Some(live)) = (self.folders.tab, self.live.as_mut()) else {
+        let (Some(folder_id), Some(live)) = (self.chat_list.view.folder(), self.live.as_mut())
+        else {
             return;
         };
         let _ = live.driver.fetch_folder_new_chats(folder_id);
@@ -280,7 +281,7 @@ impl QuillApp {
 
     /// The bar above the list of a shared folder with new chats.
     pub(super) fn folder_new_chats_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let folder_id = self.folders.tab?;
+        let folder_id = self.chat_list.view.folder()?;
         let new_chats = &self.session()?.chat_list.folder_new_chats;
         if new_chats.get(&folder_id).is_none_or(Vec::is_empty) {
             return None;
@@ -294,7 +295,7 @@ impl QuillApp {
     /// The outer function repeats this body's first check; keep the two in step.
     #[inline(never)]
     fn folder_new_chats_bar_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let folder_id = self.folders.tab?;
+        let folder_id = self.chat_list.view.folder()?;
         let count = self
             .session()?
             .chat_list

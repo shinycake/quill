@@ -290,7 +290,7 @@ impl QuillApp {
         (
             self.connection.note().clone(),
             self.auth_ui.login_prevented.is_some(),
-            self.folders.tab,
+            self.chat_list.view.folder(),
             self.connection_lost(),
         )
     }
@@ -446,7 +446,7 @@ impl QuillApp {
         let deliver = live.driver.session.force_reply_ready();
         // Parity slice: the selected folder tab may have been deleted or
         // removed remotely (`updateChatFolders`); fall back to Main.
-        if let Some(folder_id) = self.screen.folders.tab
+        if let Some(folder_id) = self.screen.chat_list.view.folder()
             && !live
                 .driver
                 .session
@@ -457,7 +457,7 @@ impl QuillApp {
         {
             // (Same rule as `set_chat_list_view`; `live` is borrowed here.)
             self.screen.chat_list.selected.clear();
-            self.screen.folders.tab = None;
+            self.screen.chat_list.view = self.screen.chat_list.view.without_folder();
         }
         let err = live.driver.session.auth_state.last_auth_error;
         let new_auth = live.driver.session.auth.clone();

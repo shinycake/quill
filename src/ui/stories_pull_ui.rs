@@ -52,8 +52,8 @@ impl QuillApp {
     /// both are in hand.
     pub(super) fn follow_story_pull(&mut self, cx: &mut Context<Self>) {
         let context: PullContext = (
-            self.folders.tab,
-            self.chat_list.filter,
+            self.chat_list.view.folder(),
+            self.chat_list.view.filter(),
             self.open_chat_id(),
             self.search_is_open(),
         );
@@ -100,7 +100,8 @@ impl QuillApp {
     /// archive (tdesktop shows the archive's hidden stories there; Quill
     /// shows none).
     pub(super) fn story_strip_available(&self) -> bool {
-        !self.stories.strip.tiles.is_empty() && self.chat_list.filter != ChatListFilter::Archived
+        !self.stories.strip.tiles.is_empty()
+            && self.chat_list.view.filter() != ChatListFilter::Archived
     }
 
     /// The compact stack's opacity: full while the strip is collapsed (fading

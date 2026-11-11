@@ -311,8 +311,8 @@ impl QuillApp {
     /// (banner ✕). Selecting a folder tab or the Unread/Archived tabs
     /// also exits it — they overwrite `chat_filter`.
     pub(super) fn exit_community_chat_list_mode(&mut self, cx: &mut Context<Self>) {
-        if matches!(self.chat_list.filter, ChatListFilter::Community(_)) {
-            self.set_chat_list_view(ChatListFilter::All, self.folders.tab);
+        if matches!(self.chat_list.view.filter(), ChatListFilter::Community(_)) {
+            self.set_chat_list_view(ChatListFilter::All, self.chat_list.view.folder());
             cx.notify();
         }
     }
@@ -368,7 +368,7 @@ impl QuillApp {
         // "Tabs on the left": the folders live in the column beside the
         // list, so only the community banner stays here.
         let tabs = (!self.folder_rail_active()).then(|| self.folder_tabs(cx));
-        if let ChatListFilter::Community(community_id) = self.chat_list.filter {
+        if let ChatListFilter::Community(community_id) = self.chat_list.view.filter() {
             div()
                 .flex()
                 .flex_col()
@@ -646,7 +646,7 @@ impl QuillApp {
             let ids = session.pinned_chat_ids(drag.archived);
             let names = quill::folder_limits::tag_names(&session.chat_list.chat_folders);
             let tags = session.chat_list.are_folder_tags_enabled;
-            let viewing = self.folders.tab;
+            let viewing = self.chat_list.view.folder();
             let setting = self.appearance.preview_lines;
             let heights = ids
                 .iter()
