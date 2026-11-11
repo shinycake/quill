@@ -12,8 +12,8 @@ use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::composer::{
-    CLEAR_COVER_LABEL, ComposerEdit, EDIT_MEDIA_INVALID_FILE, EditMediaTool, cover_send_path,
-    session_allows_cover,
+    CLEAR_COVER_LABEL, ComposerEdit, EDIT_MEDIA_INVALID_FILE, EditImageFetch, EditMediaTool,
+    cover_send_path, session_allows_cover,
 };
 use quill::lang::{keys, tr, tr_with};
 use std::path::{Path, PathBuf};
@@ -173,7 +173,8 @@ impl QuillApp {
         );
     }
 
-    /// The photo isn't on disk yet: ask TDLib for it, then try again.
+    /// The photo isn't on disk yet: ask TDLib for it; the editor opens
+    /// when it lands (`edit_image_upkeep`), or a note says it failed.
     fn request_edit_image_download(&mut self, cx: &mut Context<Self>) {
         let file_id = self.chat_ui.pending_edit().and_then(|edit| {
             let message = self
@@ -187,13 +188,62 @@ impl QuillApp {
                 _ => None,
             }
         });
-        if let (Some(file_id), Some(live)) = (file_id, self.live.as_mut()) {
-            let _ = live.driver.ensure_media_files(&[file_id]);
+        let asked = match (file_id, self.live.as_mut()) {
+            (Some(file_id), Some(live)) => live
+                .driver
+                .download_file(file_id, 8)
+                .map(|request| (file_id, request))
+                .ok(),
+            _ => None,
+        };
+        match asked {
+            Some((file_id, request)) => {
+                if let Some(edit) = self.chat_ui.pending_edit_mut() {
+                    edit.media_edit.image = EditImageFetch::Downloading { file_id, request };
+                }
+                self.set_note(StatusNote::silent(tr(keys::Q_MISC_DOWNLOADING)));
+            }
+            None => self.set_note(StatusNote::error(tr(
+                keys::Q_OPS_COULD_NOT_DOWNLOAD_PLEASE_TRY,
+            ))),
         }
-        self.set_note(StatusNote::silent(tr(
-            keys::Q_MISC_DOWNLOADING_CHOOSE_EDIT_IMAGE_AGAIN,
-        )));
         cx.notify();
+    }
+
+    /// Each window's frame: the photo "Edit Image" waited for has landed
+    /// (open the editor on it) or its download ended without a file (say
+    /// so). The wait is part of the edit, so ending the edit drops it.
+    pub(in crate::ui) fn edit_image_upkeep(&mut self, cx: &mut Context<Self>) {
+        let Some(edit) = self.chat_ui.pending_edit() else {
+            return;
+        };
+        let EditImageFetch::Downloading { file_id, .. } = edit.media_edit.image else {
+            return;
+        };
+        let landed = self
+            .menu_media_local(edit.chat_id, edit.message_id)
+            .is_some();
+        let failed = !landed
+            && self.session().is_some_and(|session| {
+                session
+                    .media
+                    .downloads
+                    .ended_without_file(file_id.0, &session.media.files)
+            });
+        if !landed && !failed {
+            return;
+        }
+        if let Some(edit) = self.chat_ui.pending_edit_mut() {
+            edit.media_edit.image = EditImageFetch::Idle;
+        }
+        if landed {
+            self.begin_edit_image(cx);
+        } else {
+            self.set_note(StatusNote::error(tr(
+                keys::Q_OPS_COULD_NOT_DOWNLOAD_PLEASE_TRY,
+            )));
+            cx.notify();
+        }
     }
 
     /// The photo editor's "Done" for a message edit: stage the edited PNG

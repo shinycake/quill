@@ -26,6 +26,7 @@ pub(crate) use layer::LayerFade;
 
 use super::app::QuillApp;
 use super::chat_theme::text_muted;
+use super::earn_state::EarnLayer;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -253,13 +254,10 @@ impl QuillApp {
         let current = self.session().and_then(|s| s.users_state.open_info_panel);
         match current {
             Some(InfoPanelTarget::Earn(open)) if open != panel => {
-                self.earn.back.push(InfoPanelTarget::Earn(open));
+                self.earn.layer.push_back(InfoPanelTarget::Earn(open));
             }
             Some(InfoPanelTarget::Earn(_)) => {}
-            other => {
-                self.earn.back.clear();
-                self.earn.restore = other;
-            }
+            other => self.earn.layer = EarnLayer::opened_over(other),
         }
         if self.live.is_some()
             && let Some(earn) = self.earn_mut()
@@ -285,7 +283,7 @@ impl QuillApp {
 
     /// The back arrow of an earn page.
     pub(super) fn earn_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        match self.earn.back.pop() {
+        match self.earn.layer.pop_back() {
             Some(target) => self.open_info_panel_target(target, window, cx),
             None => self.close_earn_layer(cx),
         }
@@ -356,7 +354,7 @@ impl QuillApp {
             )
         {
             // tdesktop `showBackFromStack` after saving or ending.
-            match self.earn.back.pop() {
+            match self.earn.layer.pop_back() {
                 Some(target) => {
                     if let Some(live) = self.live.as_mut() {
                         live.driver.set_info_panel(Some(target));

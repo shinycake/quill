@@ -62,6 +62,101 @@ impl TxBox {
     }
 }
 
+/// The "Learn more" box of the Monetization page and its TON easter egg
+/// (tdesktop counts diamonds); closing the box drops the count.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct LearnBox {
+    pub(super) diamonds: u32,
+}
+
+/// The earn layer over the window: closed, or open with the pages it
+/// stacked, the info panel it covered and its fade. One value, so leaving
+/// the layer drops all three together.
+pub(crate) enum EarnLayer {
+    Closed,
+    Open {
+        /// The earn pages the open one was opened from, inside the layer
+        /// (tdesktop's back arrow).
+        back: Vec<InfoPanelTarget>,
+        /// The info panel the layer covered; it comes back when the layer
+        /// closes.
+        restore: Option<InfoPanelTarget>,
+        /// The layer's fade in and out; `None` once settled open.
+        fade: Option<super::earn::LayerFade>,
+    },
+}
+
+impl EarnLayer {
+    /// A layer opened over `restore` with nothing stacked.
+    pub(super) fn opened_over(restore: Option<InfoPanelTarget>) -> Self {
+        Self::Open {
+            back: Vec::new(),
+            restore,
+            fade: None,
+        }
+    }
+
+    pub(super) fn has_back(&self) -> bool {
+        matches!(self, Self::Open { back, .. } if !back.is_empty())
+    }
+
+    pub(super) fn push_back(&mut self, target: InfoPanelTarget) {
+        match self {
+            Self::Open { back, .. } => back.push(target),
+            Self::Closed => {
+                *self = Self::Open {
+                    back: vec![target],
+                    restore: None,
+                    fade: None,
+                };
+            }
+        }
+    }
+
+    pub(super) fn pop_back(&mut self) -> Option<InfoPanelTarget> {
+        match self {
+            Self::Open { back, .. } => back.pop(),
+            Self::Closed => None,
+        }
+    }
+
+    pub(super) fn fade(&self) -> Option<&super::earn::LayerFade> {
+        match self {
+            Self::Open { fade, .. } => fade.as_ref(),
+            Self::Closed => None,
+        }
+    }
+
+    pub(super) fn take_fade(&mut self) -> Option<super::earn::LayerFade> {
+        match self {
+            Self::Open { fade, .. } => fade.take(),
+            Self::Closed => None,
+        }
+    }
+
+    /// Set the fade; a fade on a closed layer opens it.
+    pub(super) fn set_fade(&mut self, new: super::earn::LayerFade) {
+        match self {
+            Self::Open { fade, .. } => *fade = Some(new),
+            Self::Closed => {
+                *self = Self::Open {
+                    back: Vec::new(),
+                    restore: None,
+                    fade: Some(new),
+                };
+            }
+        }
+    }
+
+    /// Close the layer, giving back the panel it covered.
+    pub(super) fn close(&mut self) -> Option<InfoPanelTarget> {
+        match std::mem::replace(self, Self::Closed) {
+            Self::Open { restore, .. } => restore,
+            Self::Closed => None,
+        }
+    }
+}
+
 pub(crate) struct EarnUi {
     /// The Stars to withdraw (tdesktop `AddInputFieldForCredits`).
     pub(super) amount: Entity<InputState>,
@@ -70,18 +165,11 @@ pub(crate) struct EarnUi {
     /// The withdrawal amount last put in `amount`, per page peer, so a
     /// new balance refills it once.
     pub(super) prefilled: Option<(EarnPeer, i64)>,
-    /// The earn pages the open one was opened from, inside the layer
-    /// (tdesktop's back arrow).
-    pub(super) back: Vec<InfoPanelTarget>,
-    /// The info panel the layer covered; it comes back when the layer
-    /// closes.
-    pub(super) restore: Option<InfoPanelTarget>,
-    /// The layer's fade in and out.
-    pub(super) fade: Option<super::earn::LayerFade>,
-    /// The "Learn more" box of the Monetization page.
-    pub(super) learn: bool,
-    /// The learn box's TON easter egg (tdesktop counts diamonds).
-    pub(super) diamonds: u32,
+    /// The layer over the window: its back stack, the panel it covered and
+    /// its fade.
+    pub(super) layer: EarnLayer,
+    /// The "Learn more" box of the Monetization page, while open.
+    pub(super) learn: Option<LearnBox>,
     /// A history row's details box: a TON row's details, or a Stars row's
     /// receipt.
     pub(super) tx_box: TxBox,
@@ -130,11 +218,8 @@ impl EarnUi {
                     .submit_on_enter(true)
             }),
             prefilled: None,
-            back: Vec::new(),
-            restore: None,
-            fade: None,
-            learn: false,
-            diamonds: 0,
+            layer: EarnLayer::Closed,
+            learn: None,
             tx_box: TxBox::None,
             ask_boost: None,
             sliders: None,

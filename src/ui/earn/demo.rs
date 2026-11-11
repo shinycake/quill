@@ -93,7 +93,7 @@ impl QuillApp {
 
     fn demo_earn_learn(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.demo_earn_monetization(window, cx);
-        self.earn.learn = true;
+        self.earn.learn = Some(Default::default());
     }
 
     fn demo_earn_bot_stars(&mut self, window: &mut Window, cx: &mut Context<Self>) {

@@ -63,22 +63,20 @@ impl QuillApp {
 
     /// Fade the layer in, unless it is already up.
     pub(super) fn show_earn_layer(&mut self) {
-        if !self.earn_layer_open() {
-            // A layer that was replaced without closing starts afresh.
-            self.earn.fade = None;
-        }
         let now = Instant::now();
         let animate = self.frame.window_active.get();
-        match self.earn.fade.take() {
-            Some(open @ LayerFade::Open { .. }) => self.earn.fade = Some(open),
+        match self.earn.layer.take_fade() {
+            Some(open @ LayerFade::Open { .. }) => self.earn.layer.set_fade(open),
             Some(LayerFade::Closing { mut glide, closes }) => {
                 glide.go(1., OPEN_FADE, animate, now);
-                self.earn.fade = Some(LayerFade::Open { glide, closes });
+                self.earn.layer.set_fade(LayerFade::Open { glide, closes });
             }
             None => {
                 let mut glide = Glide::settled(0., now, ease_out_circ);
                 glide.go(1., OPEN_FADE, animate, now);
-                self.earn.fade = Some(LayerFade::Open { glide, closes: 0 });
+                self.earn
+                    .layer
+                    .set_fade(LayerFade::Open { glide, closes: 0 });
             }
         }
     }
@@ -86,12 +84,10 @@ impl QuillApp {
     /// Put back what the info panel showed before the layer, or nothing.
     /// Needs no window, so the poll loop can call it.
     pub(in crate::ui) fn drop_earn_layer(&mut self, cx: &mut Context<Self>) {
-        self.earn.fade = None;
-        self.earn.back.clear();
+        let restore = self.earn.layer.close();
         if let Some(earn) = self.earn_mut() {
             earn.recipients.drop_parked();
         }
-        let restore = self.earn.restore.take();
         if let Some(live) = self.live.as_mut() {
             // A withdrawal still checking has no box to cancel it from.
             live.driver.cancel_withdrawal();
@@ -107,20 +103,20 @@ impl QuillApp {
     pub(in crate::ui) fn close_earn_layer(&mut self, cx: &mut Context<Self>) {
         let animate = self.frame.window_active.get();
         let now = Instant::now();
-        let (mut glide, close_id) = match self.earn.fade.take() {
+        let (mut glide, close_id) = match self.earn.layer.take_fade() {
             None => {
                 self.drop_earn_layer(cx);
                 return;
             }
             Some(closing @ LayerFade::Closing { .. }) => {
-                self.earn.fade = Some(closing);
+                self.earn.layer.set_fade(closing);
                 return;
             }
             Some(LayerFade::Open { glide, closes }) => (glide, closes.wrapping_add(1)),
         };
         glide.go(0., CLOSE_FADE, animate, now);
         let animating = glide.animating(now);
-        self.earn.fade = Some(LayerFade::Closing {
+        self.earn.layer.set_fade(LayerFade::Closing {
             glide,
             closes: close_id,
         });
@@ -131,7 +127,7 @@ impl QuillApp {
         self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(CLOSE_FADE).await;
             this.update(cx, |this, cx| {
-                if this.earn.fade.as_ref().is_some_and(
+                if this.earn.layer.fade().is_some_and(
                     |fade| matches!(fade, LayerFade::Closing { closes, .. } if *closes == close_id),
                 ) {
                     this.drop_earn_layer(cx);
@@ -146,7 +142,7 @@ impl QuillApp {
     /// Escape: back to the page this one was opened from, or close
     /// (tdesktop `WrapWidget::keyPressEvent`).
     pub(in crate::ui) fn earn_layer_escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.earn.back.is_empty() {
+        if !self.earn.layer.has_back() {
             self.close_earn_layer(cx);
         } else {
             self.earn_back(window, cx);
@@ -181,13 +177,13 @@ impl QuillApp {
         let now = Instant::now();
         let shown = self
             .earn
-            .fade
-            .as_ref()
+            .layer
+            .fade()
             .map_or(1., |fade| fade.glide().value(now).clamp(0., 1.));
         if self
             .earn
-            .fade
-            .as_ref()
+            .layer
+            .fade()
             .is_some_and(|fade| fade.glide().animating(now))
         {
             self.request_animation_tick(60, cx);
@@ -203,7 +199,7 @@ impl QuillApp {
             .gap_1()
             .h(px(TOP_BAR_HEIGHT))
             .px_2();
-        if !self.earn.back.is_empty() {
+        if self.earn.layer.has_back() {
             bar = bar.child(
                 Button::new("earn-back")
                     .debug_selector(|| "earn-back".into())

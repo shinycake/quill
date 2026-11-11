@@ -37,6 +37,20 @@ impl EditMediaTool {
     }
 }
 
+/// Where "Edit Image" stands for a photo of the message being edited.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum EditImageFetch {
+    /// Nothing asked.
+    #[default]
+    Idle,
+    /// The photo is being downloaded; the editor opens when it lands
+    /// (`request` is `None` when TDLib was already fetching it).
+    Downloading {
+        file_id: FileId,
+        request: Option<crate::ids::RequestId>,
+    },
+}
+
 /// tdesktop `lng_context_clear_cover`.
 pub const CLEAR_COVER_LABEL: &str = "Clear Cover";
 
