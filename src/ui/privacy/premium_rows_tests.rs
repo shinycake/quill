@@ -239,3 +239,50 @@ fn premium_unlocks_voice_message_choices(cx: &mut TestAppContext) {
     choose(&app, vcx, key, PrivacyWho::Nobody);
     assert_eq!(rule_who(&app, vcx, key), Some(PrivacyWho::Nobody));
 }
+
+/// Adding to an exception list while the rule is not loaded sends nothing,
+/// so the picker stays open instead of closing on an edit that was ignored.
+#[gpui_kit::test]
+fn the_exception_picker_closes_only_when_the_edit_went_out(cx: &mut TestAppContext) {
+    use crate::ui::privacy::PrivacyExceptionKind;
+    use crate::ui::privacy_layer::ExceptionPicker;
+    let (app, _shell, mut vcx) = new_app(cx, true);
+    let vcx = &mut vcx;
+    let key = PrivacySettingKey::ShowStatus;
+    let target = PrivacyEditorTarget::Rule(key);
+    let add = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.update(vcx, |app, cx| {
+            app.privacy
+                .layer
+                .open_exceptions(target, PrivacyExceptionKind::Always);
+            app.privacy
+                .layer
+                .open_exception_picker(ExceptionPicker::Contacts);
+            app.edit_exception(target, PrivacyExceptionKind::Always, 7, true, cx);
+        });
+        app.read_with(vcx, |app, _| {
+            app.privacy.layer.exception_picker() != ExceptionPicker::Closed
+        })
+    };
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session
+                .settings
+                .privacy
+                .insert(key, PrivacyKeyState::Failed);
+        }
+    });
+    assert!(add(&app, vcx), "a failed rule ignores the edit");
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session
+                .settings
+                .privacy
+                .insert(key, PrivacyKeyState::Ready(PrivacyRuleDetail::default()));
+        }
+    });
+    assert!(
+        !add(&app, vcx),
+        "a ready rule takes it and the picker closes"
+    );
+}

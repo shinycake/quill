@@ -4,6 +4,7 @@
 //! tdesktop's boxes do. The answer closes it with its toast; a refusal
 //! puts the box back with the reason; closing it stops the wait.
 use super::*;
+use crate::ui::dialogs::ContactSave;
 use crate::ui::status_note::StatusNote;
 use quill::ids::RequestId;
 use quill::lang::{keys, tr};
@@ -40,8 +41,36 @@ impl QuillApp {
     /// Open the profile box on `dialog`: the box and the window that shows
     /// it are set together, so one cannot be left without the other.
     pub(in crate::ui) fn open_profile_dialog(&mut self, dialog: ProfileDialog) {
+        // A box replaced while it saves no longer waits for its request.
+        self.forget_profile_waits();
         self.dialogs.profile_dialog = Some(dialog);
         self.open_box(DialogKind::ProfilePanel);
+    }
+
+    /// The box goes: close it, with whatever it waited on forgotten. The one
+    /// way a profile box is dropped (also when another replaces it).
+    pub(in crate::ui) fn drop_profile_dialog(&mut self) {
+        self.forget_profile_waits();
+        self.forget_box_send();
+        self.dialogs.profile_dialog = None;
+    }
+
+    /// The box is closed or replaced: a request it waits on is dropped. A
+    /// `Saving` stage stops its watch; an Edit contact's pending `addContact`
+    /// discards its answer if it has already landed.
+    fn forget_profile_waits(&mut self) {
+        self.forget_profile_saving();
+        let Some(ProfileDialog::EditContact(EditContactDialog {
+            save: ContactSave::Saving(request),
+            ..
+        })) = &self.dialogs.profile_dialog
+        else {
+            return;
+        };
+        let request = *request;
+        if let Some(session) = self.session_mut() {
+            session.chat_list.dialog_answers.take(request);
+        }
     }
 
     /// The box is closed or replaced: its request is no longer waited on.
@@ -133,6 +162,7 @@ impl QuillApp {
             });
         }
         let (title, body, _) = parts?;
+        let body = block_while_saving(body);
         let footer = Button::new("profile-saving")
             .label(tr(keys::Q_MEDIA_SAVING))
             .disabled(true);
@@ -142,4 +172,14 @@ impl QuillApp {
             div().flex().gap_2().child(footer).into_any_element(),
         ))
     }
+}
+
+/// A saving box keeps its rows but takes no click: another box opened from
+/// one of them would replace the box whose request is still out.
+pub(super) fn block_while_saving(body: AnyElement) -> AnyElement {
+    div()
+        .relative()
+        .child(body)
+        .child(div().absolute().top_0().left_0().size_full().occlude())
+        .into_any_element()
 }
