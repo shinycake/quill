@@ -162,6 +162,7 @@ mod tone_upload;
 mod translate;
 mod update_batch;
 mod voice_restricted;
+mod storage_refused;
 mod web_apps;
 mod widgets;
 

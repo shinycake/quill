@@ -891,7 +891,7 @@ impl QuillApp {
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(dialog) = this.folders.share.as_mut() {
-                            dialog.view = FolderShareView::list();
+                            dialog.view = dialog.view.cancelled_form();
                         }
                         cx.notify();
                     })),
@@ -933,7 +933,21 @@ mod invite;
 #[cfg(test)]
 mod tests {
     use super::{chats_count_label, folder_can_be_shared, short_link};
+    use crate::ui::dialogs::folder::{FolderShareView, LinkOp};
+    use quill::ids::RequestId;
     use quill::telegram::envelope::ChatFolderSpec;
+
+    #[test]
+    fn cancelling_the_form_keeps_the_save_it_sent() {
+        let mut form = FolderShareView::edit(Some("https://t.me/addlist/a".into()));
+        form.set_op(LinkOp::Saving(RequestId(4)));
+        let list = form.cancelled_form();
+        assert!(matches!(list, FolderShareView::List { .. }));
+        assert_eq!(list.op(), &LinkOp::Saving(RequestId(4)));
+        assert!(list.is_busy(), "edit and delete wait for the answer");
+        form.set_op(LinkOp::Failed("no".into()));
+        assert_eq!(form.cancelled_form().op(), &LinkOp::Idle);
+    }
 
     #[test]
     fn only_plain_folders_can_be_shared() {
