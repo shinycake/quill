@@ -63,7 +63,7 @@ pub(super) fn with_options(mut schema: Value) -> Value {
 /// slot reserved for it, or why none is taken although one was asked for.
 /// Dropping a `Reserved` gives the slot back, so every early return does.
 pub(super) enum Asked {
-    NotAsked,
+    Off,
     Reserved {
         options: ShotOptions,
         slot: shot::Slot,
@@ -76,7 +76,7 @@ impl Asked {
     pub fn options(&self) -> Option<ShotOptions> {
         match self {
             Asked::Reserved { options, .. } => Some(*options),
-            Asked::NotAsked | Asked::Skipped(_) => None,
+            Asked::Off | Asked::Skipped(_) => None,
         }
     }
 
@@ -90,7 +90,7 @@ impl Asked {
                 }
                 None
             }
-            Asked::NotAsked => None,
+            Asked::Off => None,
             Asked::Skipped(note) => Some(note),
         }
     }
@@ -104,7 +104,7 @@ pub(super) fn asked(args: &Value) -> Asked {
         .and_then(Value::as_bool)
         .unwrap_or(false);
     if !wanted {
-        return Asked::NotAsked;
+        return Asked::Off;
     }
     match shot::reserve() {
         Ok(slot) => Asked::Reserved {

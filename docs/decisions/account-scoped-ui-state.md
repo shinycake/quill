@@ -3930,7 +3930,7 @@ roundtrip test reads the stage.
 **The send-gift lists are one stage each (dodge).** `SendGiftState` kept
 `gifts_loading`, `gifts_loaded` and `gifts_request`, and `premium_loaded`
 with `premium_request`, in step by hand. Each list is now one
-`GiftListFetch` (`NotAsked`, `Asking(id)`, `Answered`, `Failed`).
+`GiftListFetch` (`Off`, `Asking(id)`, `Answered`, `Failed`).
 `asked_gifts` / `asked_premium` match the id in `Asking`. A Premium
 options request that fails to send now ends as `Failed` instead of
 staying unanswered. "No gifts are available" shows only after an answer,
@@ -4681,7 +4681,7 @@ Media and players. Entry ids in brackets; a skipped entry says why.
   reading (02-140; the low-disk and saved-pause loops follow the same
   order). The saved-pause search is `DiskSearch::{NotAsked, Asked { request,
   keys }, Done}`: set after the send succeeded, its answer matched by
-  request id, and a failed search goes back to `NotAsked`; so does a lost
+  request id, and a failed search goes back to `Off`; so does a lost
   one, because the search is swept like the other dedupe-guarded lookups
   and the sweep settles it through the error arm (05-082).
 - **Quick reaction.** `setDefaultReactionType` carries
@@ -6547,7 +6547,7 @@ Twenty-two S4 entries; each was proved against the code first.
   (03-010; the `close_friends_pending` field is gone). The viewers panel and
   the public story search keep their page in one `PageFetch` (`Idle`,
   `Loading(request)`, `Failed(text)`); the story forwards list keeps it in
-  `ForwardsPage` (`NotAsked`, `Loading { request, offset }`, `Ready`,
+  `ForwardsPage` (`Off`, `Loading { request, offset }`, `Ready`,
   `Failed`), which also knows whether the first page was ever asked and makes
   a first page replace the rows (03-007). Either way an answer or an error
   lands only when it is the request the page waits for, so a stale one from
@@ -6556,7 +6556,7 @@ Twenty-two S4 entries; each was proved against the code first.
   next one back. `StoryViewersState`, `StoryInsightsState` and
   `StorySearchState` drop their `loading`/`error` pairs (baseline lines
   removed). A reopened insights panel that replaced another story's starts
-  at `NotAsked` and asks its first forwards page again. A search page the
+  at `Off` and asks its first forwards page again. A search page the
   sender refuses leaves the pages already found and a retryable error
   instead of clearing the panel (03-008).
 - **Viewers panel (13-145).** The spinner shows only for `Loading`; a failed
@@ -8052,7 +8052,7 @@ with no entry left; each id below is fixed or proven not to be a bug.
 
 | id | what |
 | --- | --- |
-| 01-014, 01-015 | `Asked` is one enum (`NotAsked`, `Reserved{options, slot}`, `Skipped(note)`). `shot::Slot` gives itself back to the limiter on `Drop`; `keep()` is for a picture that was taken, so every early return releases it. |
+| 01-014, 01-015 | `Asked` is one enum (`Off`, `Reserved{options, slot}`, `Skipped(note)`). `shot::Slot` gives itself back to the limiter on `Drop`; `keep()` is for a picture that was taken, so every early return releases it. |
 | 01-017 | Skipped: the composer clears only the text the send delivered, and the match on chat and text is that guard, not a correlation. A retyped identical text was delivered too. An id would have nothing stored on the window side to match against. |
 | 01-018 | `pin_uploads` runs at the paced-queue turn inside `common::send` and before the direct `td_call` writes: it refuses the data folder again and rewrites each local path to the file it resolves to now. |
 | 01-019 | `set_draft` reads the chat's draft first and refuses to replace or clear a different non-empty one unless `replace_existing` is true. |
