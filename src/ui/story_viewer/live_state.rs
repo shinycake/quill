@@ -12,7 +12,7 @@ use crate::ui::video_player::VideoPlayer;
 use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::*;
-use quill::ids::ChatId;
+use quill::ids::{ChatId, RequestId};
 use quill::live_story::{STAR_EFFECT_MS, level_for_stars, pin_finish, star_effect_shift};
 use quill::telegram::envelope::{GroupCallMessageLevel, MessageSender, ParsedGroupCallMessage};
 use std::time::{Duration, Instant};
@@ -136,8 +136,13 @@ pub(in crate::ui) type LiveTarget = (ChatId, i32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::ui) enum LiveJoin {
     Idle,
-    /// The join is out; the call is not seen tracked yet.
-    Joining(LiveTarget),
+    /// The join is out; the call is not seen tracked yet. `request` is the
+    /// `getGroupCall` that makes the tracker (`None`: no driver, as in the
+    /// demo): when it is gone and no tracker came, the join failed.
+    Joining {
+        target: LiveTarget,
+        request: Option<RequestId>,
+    },
     /// Joined: the call was seen tracked since the join, so its end is
     /// noticed.
     Joined(LiveTarget),
@@ -150,7 +155,7 @@ impl LiveStoryUi {
     /// The live story the viewer joined.
     pub(in crate::ui) fn watching(&self) -> Option<LiveTarget> {
         match self.join {
-            LiveJoin::Joining(target) | LiveJoin::Joined(target) => Some(target),
+            LiveJoin::Joining { target, .. } | LiveJoin::Joined(target) => Some(target),
             _ => None,
         }
     }
@@ -166,8 +171,20 @@ impl LiveStoryUi {
         matches!(self.join, LiveJoin::Joined(_))
     }
 
-    pub(in crate::ui) fn start_watching(&mut self, target: LiveTarget) {
-        self.join = LiveJoin::Joining(target);
+    pub(in crate::ui) fn start_watching(&mut self, target: LiveTarget, request: Option<RequestId>) {
+        self.join = LiveJoin::Joining { target, request };
+    }
+
+    /// The story whose join waits for the tracker, and the request that
+    /// makes it.
+    pub(super) fn joining(&self) -> Option<(LiveTarget, RequestId)> {
+        match self.join {
+            LiveJoin::Joining {
+                target,
+                request: Some(request),
+            } => Some((target, request)),
+            _ => None,
+        }
     }
 
     pub(super) fn refuse(&mut self, target: LiveTarget) {
@@ -182,14 +199,17 @@ impl LiveStoryUi {
     }
 
     pub(super) fn mark_call_seen(&mut self) {
-        if let LiveJoin::Joining(target) = self.join {
+        if let LiveJoin::Joining { target, .. } = self.join {
             self.join = LiveJoin::Joined(target);
         }
     }
 
     pub(super) fn forget_call_seen(&mut self) {
         if let LiveJoin::Joined(target) = self.join {
-            self.join = LiveJoin::Joining(target);
+            self.join = LiveJoin::Joining {
+                target,
+                request: None,
+            };
         }
     }
 }

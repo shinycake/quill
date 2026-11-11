@@ -59,9 +59,9 @@ impl QuillApp {
         if let Some(target) = target
             && self.stories.live.join == LiveJoin::Idle
         {
-            self.stories.live.start_watching(target);
-            self.join_watched_live_story(cx);
+            self.join_watched_live_story(target, cx);
         }
+        self.check_live_join_lost(cx);
         self.check_story_ended_before_call(cx);
         self.check_live_story_ended(cx);
     }
@@ -90,22 +90,47 @@ impl QuillApp {
         }
     }
 
-    pub(super) fn join_watched_live_story(&mut self, cx: &mut Context<Self>) {
-        let Some((chat_id, story_id)) = self.stories.live.watching() else {
-            return;
-        };
+    fn join_watched_live_story(&mut self, target: (ChatId, i32), cx: &mut Context<Self>) {
+        let (chat_id, story_id) = target;
         let Some(live) = self.live.as_mut() else {
+            self.stories.live.start_watching(target, None);
+            cx.notify();
             return;
         };
-        if let Err(err) = live.driver.join_live_story(chat_id, story_id) {
-            // Not watching: the viewer shows its "Join live" button instead
-            // of an opening spinner nothing will end.
-            self.stories.live.refuse((chat_id, story_id));
-            self.set_note(crate::ui::calls::join_error_note(
-                err,
-                keys::Q_MEDIA_COULD_NOT_JOIN_THE_LIVE,
-            ));
+        match live.driver.join_live_story(chat_id, story_id) {
+            Ok(request) => self.stories.live.start_watching(target, Some(request)),
+            Err(err) => {
+                // Not watching: the viewer shows its "Join live" button
+                // instead of an opening spinner nothing will end.
+                self.stories.live.refuse(target);
+                self.set_note(crate::ui::calls::join_error_note(
+                    err,
+                    keys::Q_MEDIA_COULD_NOT_JOIN_THE_LIVE,
+                ));
+            }
         }
+        cx.notify();
+    }
+
+    /// The join's `getGroupCall` is gone and no tracker came out of it (it
+    /// failed, or the driver dropped the join): refused, so the viewer
+    /// shows "Join live" instead of the opening spinner.
+    fn check_live_join_lost(&mut self, cx: &mut Context<Self>) {
+        let Some((target, request)) = self.stories.live.joining() else {
+            return;
+        };
+        let Some(live) = self.live.as_ref() else {
+            return;
+        };
+        let session = &live.driver.session;
+        if session.requests.get(request).is_some()
+            || session.live_call().is_some()
+            || session.calls.pending_live_story_join.is_some()
+        {
+            return;
+        }
+        self.stories.live.refuse(target);
+        self.set_note(StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_JOIN_THE_LIVE)));
         cx.notify();
     }
 

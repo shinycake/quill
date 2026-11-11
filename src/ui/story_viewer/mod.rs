@@ -100,8 +100,10 @@ impl QuillApp {
     ) {
         if let Some(live) = self.live.as_mut() {
             let joined = live.driver.join_live_story(chat_id, story_id);
-            if joined.is_ok() {
-                self.stories.live.start_watching((chat_id, story_id));
+            if let Ok(request) = joined {
+                self.stories
+                    .live
+                    .start_watching((chat_id, story_id), Some(request));
             }
             self.screen.connection.set_note_for(
                 &self.screen.windows,
