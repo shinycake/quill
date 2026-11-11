@@ -78,9 +78,8 @@ pub(super) enum WordBar {
         range: Range<usize>,
         word: String,
         /// The keyword lookup in flight for the word, the one whose
-        /// answer or failure settles this stage (`None` while none is:
-        /// the next pass picks up the retry).
-        request: Option<RequestId>,
+        /// answer or failure settles this stage (a retry replaces it).
+        request: RequestId,
     },
     Hover(OpenBar),
     Pinned(OpenBar),

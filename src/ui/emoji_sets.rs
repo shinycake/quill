@@ -332,13 +332,11 @@ impl QuillApp {
         let session = self.session();
         let no_panel = quill::emoji::EmojiPanel::default();
         let panel = session.map_or(&no_panel, |s| &s.stickers.emoji);
-        let loading = session.is_some_and(|s| {
-            s.requests.has_purpose(match panel.tab {
-                EmojiSetTab::Installed => quill::state::RequestPurpose::GetInstalledEmojiSets,
-                EmojiSetTab::Trending => quill::state::RequestPurpose::GetTrendingEmojiSets,
-                EmojiSetTab::Search => quill::state::RequestPurpose::SearchEmojiSets,
-            })
-        });
+        let loading = match panel.tab {
+            EmojiSetTab::Installed => panel.lists.installed.is_loading(),
+            EmojiSetTab::Trending => panel.lists.trending.is_loading(),
+            EmojiSetTab::Search => panel.lists.search.is_loading(),
+        };
         let owner = cx.entity().downgrade();
         let tabs = TabBar::new("emoji-sets-tabs")
             .underline()

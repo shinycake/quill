@@ -19,6 +19,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::emoji::keyword_lookup::{keyword_emoji, normalize_query};
 use quill::emoji_words::Highlight;
+use quill::ids::RequestId;
 use quill::lang::{keys, tr, tr_with};
 use quill::spellcheck::word_at;
 
@@ -118,49 +119,80 @@ impl QuillApp {
         }
         let ui = &mut self.screen.composer_ui;
         ui.emoji_words.unhover(&mut ui.suggest);
-        let request = self
-            .session()
-            .and_then(|s| s.stickers.emoji.keyword_lookups.request_for(&normalized));
-        self.composer_ui.emoji_words.bar = WordBar::Asking {
-            range: action.start..action.end,
-            word: normalized,
-            request,
-        };
-        self.answer_asked_word(cx);
+        let lookups = self.session().map(|s| &s.stickers.emoji.keyword_lookups);
+        let request = lookups.and_then(|l| l.request_for(&normalized));
+        let cached = lookups.is_none_or(|l| l.answer(&normalized).is_some());
+        let range = action.start..action.end;
+        match request {
+            Some(request) if !cached => {
+                self.composer_ui.emoji_words.bar = WordBar::Asking {
+                    range,
+                    word: normalized,
+                    request,
+                };
+                cx.notify();
+            }
+            // The answer is already in, or no session asks: open at once.
+            _ if cached => self.open_asked_word(range, normalized, cx),
+            // Turned away (too many lookups in flight): say so now.
+            _ => {
+                self.set_note(StatusNote::info(tr(keys::Q_CHAT_EMOJI_WORD_LOOKUP_FAILED)));
+                cx.notify();
+            }
+        }
     }
 
-    /// Open the bar for the word "Suggest Emoji" asked about once its
-    /// keyword answer is in; a note when it has no emoji.
+    /// Settle the bar of the word "Suggest Emoji" asked about when the
+    /// lookup it waits for ends: its answer opens the bar; its failure
+    /// follows the retry, asks once more, or gives up with a note. Only
+    /// that request settles it, so a later lookup of the same word cannot
+    /// open the bar unprompted.
     pub(super) fn answer_asked_word(&mut self, cx: &mut Context<Self>) {
         let WordBar::Asking {
             range,
             word: normalized,
-            ..
+            request,
         } = &self.composer_ui.emoji_words.bar
         else {
             return;
         };
-        let (range, normalized) = (range.clone(), normalized.clone());
-        let lookups = self.session().map(|s| &s.stickers.emoji.keyword_lookups);
-        let answered = lookups.is_none_or(|l| l.answer(&normalized).is_some());
-        if !answered {
-            // Out of attempts: it will not answer, so stop waiting and say so
-            // instead of opening the bar unprompted if a later lookup of the
-            // word lands.
-            if lookups.is_some_and(|l| l.gave_up(&normalized)) {
-                self.composer_ui.emoji_words.bar = WordBar::Closed;
-                self.set_note(StatusNote::info(tr(keys::Q_CHAT_EMOJI_WORD_LOOKUP_FAILED)));
-                cx.notify();
-                return;
+        let (range, normalized, request) = (range.clone(), normalized.clone(), *request);
+        let settle = match self.session().map(|s| &s.stickers.emoji.keyword_lookups) {
+            None => Settle::Open,
+            Some(l) => settle_asked_word(l, &normalized, request),
+        };
+        let next = match settle {
+            Settle::Wait(next) => next,
+            Settle::Open => return self.open_asked_word(range, normalized, cx),
+            Settle::Again => {
+                if let Some(live) = self.live.as_mut() {
+                    let _ = live
+                        .driver
+                        .lookup_emoji_keywords(std::iter::once(normalized.as_str()));
+                }
+                match self
+                    .session()
+                    .and_then(|s| s.stickers.emoji.keyword_lookups.request_for(&normalized))
+                {
+                    Some(next) => next,
+                    None => return self.give_up_asked_word(cx),
+                }
             }
-            // The lookup it waited for failed and a retry may be on its
-            // way: wait for that one.
-            let next = lookups.and_then(|l| l.request_for(&normalized));
-            if let WordBar::Asking { request, .. } = &mut self.composer_ui.emoji_words.bar {
-                *request = next;
-            }
-            return;
+            Settle::GiveUp => return self.give_up_asked_word(cx),
+        };
+        if let WordBar::Asking { request, .. } = &mut self.composer_ui.emoji_words.bar {
+            *request = next;
         }
+    }
+
+    fn give_up_asked_word(&mut self, cx: &mut Context<Self>) {
+        self.composer_ui.emoji_words.bar = WordBar::Closed;
+        self.set_note(StatusNote::info(tr(keys::Q_CHAT_EMOJI_WORD_LOOKUP_FAILED)));
+        cx.notify();
+    }
+
+    /// Show the bar of `normalized` over `range`; a note when it has no emoji.
+    fn open_asked_word(&mut self, range: Range<usize>, normalized: String, cx: &mut Context<Self>) {
         self.composer_ui.emoji_words.bar = WordBar::Closed;
         let word = Highlight {
             range,
@@ -270,5 +302,35 @@ impl QuillApp {
                 .child(div().flex().flex_wrap().gap_1().children(chips))
                 .into_any_element(),
         )
+    }
+}
+
+/// What a word bar waiting on a keyword lookup does next.
+enum Settle {
+    /// Keep waiting, on this request.
+    Wait(RequestId),
+    Open,
+    /// Its request failed with attempts left and no retry out: ask again.
+    Again,
+    /// The lookups ran out of attempts: stop waiting and say so.
+    GiveUp,
+}
+
+fn settle_asked_word(
+    lookups: &quill::emoji::keyword_lookup::KeywordLookups,
+    word: &str,
+    request: RequestId,
+) -> Settle {
+    use quill::emoji::keyword_lookup::Outcome;
+    if lookups.waits_for(request) {
+        return Settle::Wait(request);
+    }
+    if lookups.outcome(request) == Some(Outcome::Answered) {
+        return Settle::Open;
+    }
+    match lookups.request_for(word) {
+        Some(retry) => Settle::Wait(retry),
+        None if lookups.gave_up(word) => Settle::GiveUp,
+        None => Settle::Again,
     }
 }

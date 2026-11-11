@@ -414,6 +414,45 @@ fn turning_suggestions_off_from_the_menu_says_where_to_turn_them_on(cx: &mut Tes
     assert_eq!(note, tr(keys::Q_CHAT_EMOJI_WORDS_OFF_NOTE));
 }
 
+/// Sweep 09-093: the bar settles by its own lookup. Its request failed and a
+/// later lookup of the same word answered: the bar does not open for that
+/// one; while its own request is out it keeps waiting, and its own answer
+/// opens it.
+#[gpui_kit::test]
+fn suggest_emoji_settles_by_its_own_request(cx: &mut TestAppContext) {
+    use crate::ui::emoji_words_ui::WordBar;
+    use quill::ids::RequestId;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        let Some(session) = app.demo_session.as_mut() else {
+            return;
+        };
+        let lookups = &mut session.stickers.emoji.keyword_lookups;
+        lookups.sent(RequestId(1), "pizza".to_string());
+        app.composer_ui.emoji_words.bar = WordBar::Asking {
+            range: 0..5,
+            word: "pizza".to_string(),
+            request: RequestId(1),
+        };
+        app.answer_asked_word(cx);
+        assert!(matches!(
+            app.composer_ui.emoji_words.bar,
+            WordBar::Asking { request: RequestId(1), .. }
+        ));
+        // Its request fails, and another lookup of the word answers.
+        let Some(session) = app.demo_session.as_mut() else {
+            return;
+        };
+        let lookups = &mut session.stickers.emoji.keyword_lookups;
+        lookups.failed(RequestId(1));
+        lookups.sent(RequestId(2), "pizza".to_string());
+        lookups.answered(RequestId(2), Vec::new());
+        app.answer_asked_word(cx);
+        assert!(matches!(app.composer_ui.emoji_words.bar, WordBar::Closed));
+    });
+}
+
 /// Sweep 09-082: "Suggest Emoji" stops waiting, with a note, when its keyword
 /// lookup has given up.
 #[gpui_kit::test]
@@ -434,7 +473,7 @@ fn suggest_emoji_says_so_when_the_lookup_fails(cx: &mut TestAppContext) {
         app.composer_ui.emoji_words.bar = WordBar::Asking {
             range: 0..4,
             word: "zzzz".to_string(),
-            request: None,
+            request: RequestId(2),
         };
         app.answer_asked_word(cx);
         assert!(matches!(app.composer_ui.emoji_words.bar, WordBar::Closed));

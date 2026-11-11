@@ -8,7 +8,7 @@
 //! ranks them the way `EmojiKeywords::LangPack::query` does.
 #![deny(clippy::indexing_slicing)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use crate::ids::RequestId;
 use crate::telegram::envelope_emoji::EmojiKeyword;
@@ -21,6 +21,15 @@ pub const IN_FLIGHT_CAP: usize = 8;
 /// Failed requests for one query before it is left alone for the session
 /// (offline, or the keyword pack would not load).
 const ATTEMPTS: u8 = 2;
+/// Request outcomes kept for readers that waited on one.
+const ENDED_KEPT: usize = 64;
+
+/// How a keyword request ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    Answered,
+    Failed,
+}
 
 /// `searchEmojis` answers by lowercased query.
 #[derive(Debug, Clone, Default)]
@@ -28,6 +37,9 @@ pub struct KeywordLookups {
     answers: HashMap<String, (u64, Vec<EmojiKeyword>)>,
     in_flight: HashMap<RequestId, String>,
     failures: HashMap<String, u8>,
+    /// How the last requests ended, so a reader that waited for one asks
+    /// what became of that request and not of its word.
+    ended: VecDeque<(RequestId, Outcome)>,
     /// Bumped on every answer or failure, so readers can tell when to
     /// look again (and ask again for what the cap turned away).
     pub generation: u64,
@@ -68,6 +80,20 @@ impl KeywordLookups {
         self.in_flight.contains_key(&id)
     }
 
+    /// How request `id` ended, while it is among the last ones.
+    pub fn outcome(&self, id: RequestId) -> Option<Outcome> {
+        self.ended
+            .iter()
+            .find_map(|(ended, outcome)| (*ended == id).then_some(*outcome))
+    }
+
+    fn end(&mut self, id: RequestId, outcome: Outcome) {
+        if self.ended.len() >= ENDED_KEPT {
+            self.ended.pop_front();
+        }
+        self.ended.push_back((id, outcome));
+    }
+
     pub fn sent(&mut self, id: RequestId, query: String) {
         self.in_flight.insert(id, query);
     }
@@ -79,6 +105,7 @@ impl KeywordLookups {
             return;
         };
         *self.failures.entry(query).or_default() += 1;
+        self.end(id, Outcome::Failed);
         self.generation += 1;
     }
 
@@ -87,6 +114,7 @@ impl KeywordLookups {
         let Some(query) = self.in_flight.remove(&id) else {
             return;
         };
+        self.end(id, Outcome::Answered);
         if self.answers.len() >= ANSWER_CAP {
             let mut ages: Vec<u64> = self.answers.values().map(|(age, _)| *age).collect();
             ages.sort_unstable();
