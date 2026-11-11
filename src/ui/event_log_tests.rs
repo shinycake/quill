@@ -141,13 +141,13 @@ fn the_box_for_another_chat_replaces_the_invite_pages(cx: &mut TestAppContext) {
     let other = ChatId(CHANNEL.0 + 1);
     app.update_in(&mut vcx, |app, _, cx| {
         app.open_group_settings_view(CHANNEL, GroupSettingsView::InviteLinks, cx);
-        if let Some(dialog) = app.admin.group_settings_dialog.as_mut() {
-            dialog.revoked_open = true;
-            dialog.details_link = Some("https://t.me/+a".into());
-        }
         let Some(session) = app.session_mut() else {
             panic!("the demo session");
         };
+        session.groups.revoked_invite_links.insert(
+            CHANNEL.0,
+            quill::state::InviteLinkFetch::Loading(quill::ids::RequestId(3)),
+        );
         session.groups.invite_pages.set_admin_links(
             CHANNEL.0,
             quill::state::AdminLinksState {
@@ -167,8 +167,10 @@ fn the_box_for_another_chat_replaces_the_invite_pages(cx: &mut TestAppContext) {
         app.open_group_settings_view(CHANNEL, GroupSettingsView::InviteLinks, cx);
         let pages = app.session().map(|s| s.groups.invite_pages.chat());
         assert_eq!(pages, Some(None), "no page of either chat is left");
-        let dialog = app.admin.group_settings_dialog.as_ref().expect("the box");
-        assert!(!dialog.revoked_open && dialog.details_link.is_none());
+        assert!(
+            !app.revoked_links_open(CHANNEL),
+            "the revoked list is closed in a new box"
+        );
     });
 }
 

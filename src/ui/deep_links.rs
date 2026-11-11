@@ -48,6 +48,12 @@ impl QuillApp {
     /// terminal session state into the next step: follow-up request,
     /// info dialog, or a deferred chat open for render.
     pub(super) fn pump_deep_link(&mut self, cx: &mut Context<Self>) {
+        // A link that waited in the OS inbox behind the one a step took
+        // comes in once the slot is free: the link pump sleeps instead of
+        // polling for it, and this is where it is told.
+        if self.pending_deep_link.is_none() && quill::deep_link_inbox::has_pending_links() {
+            quill::wake::LINKS.poke();
+        }
         self.pump_start_files(cx);
         // A link that arrives while Quill is locked waits for the unlock,
         // as tdesktop's start links do (`checkStartUrls`): nothing it

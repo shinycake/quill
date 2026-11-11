@@ -750,16 +750,17 @@ impl QuillApp {
         bot_id: i64,
         parameter: String,
         cx: &mut Context<Self>,
-    ) {
-        let note = self.live.as_mut().map(|live| {
-            match live
-                .driver
+    ) -> bool {
+        let sent = self.live.as_mut().map(|live| {
+            live.driver
                 .send_bot_start_message(chat_id, bot_id, &parameter)
-            {
-                Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_STARTING_BOT)),
-                Ok(None) => StatusNote::silent(tr(keys::Q_MEDIA_REQUEST_ALREADY_IN_FLIGHT)),
-                Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
-            }
+        });
+        // Whether the start is on its way (sent, or already out).
+        let went = matches!(sent, Some(Ok(_)));
+        let note = sent.map(|sent| match sent {
+            Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_STARTING_BOT)),
+            Ok(None) => StatusNote::silent(tr(keys::Q_MEDIA_REQUEST_ALREADY_IN_FLIGHT)),
+            Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
         });
         self.set_status_note(
             note.unwrap_or_else(|| {
@@ -767,6 +768,7 @@ impl QuillApp {
             }),
             cx,
         );
+        went
     }
 
     /// Slice B2: fetch `getBotSimilarBots` for the open bot profile; the

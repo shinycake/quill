@@ -218,8 +218,6 @@ pub(crate) struct PlaybackUi {
     /// GIFs that autoplayed once, by chat: leaving a chat resets only
     /// its own, so another window's GIF does not start over.
     pub(super) autoplayed_gifs: std::collections::HashSet<ChatMessage>,
-    /// The GIF decodes running, by chat message (one per GIF at a time).
-    pub(super) gif_decodes: HashMap<ChatMessage, GifDecode>,
     /// A linked `?t=` media timestamp waiting for its message to load
     /// (chat, message, seconds, when to give up).
     pub(super) pending_media_seek: Option<(ChatId, quill::ids::MessageId, i32, std::time::Instant)>,
@@ -235,21 +233,57 @@ pub(crate) struct PlayingGif {
     pub(super) message: ChatMessage,
 }
 
+/// The decode of a GIF running off the UI thread. The stage that holds it
+/// owns it: dropping the stage drops the task (its landing never runs) and
+/// tells the decoder to end before its next frame.
+pub(crate) struct GifRun {
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    _task: gpui_kit::Task<()>,
+}
+
+impl GifRun {
+    pub(super) fn new(
+        cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        task: gpui_kit::Task<()>,
+    ) -> Self {
+        Self {
+            cancel,
+            _task: task,
+        }
+    }
+
+    /// Whether the decoder was told to stop.
+    #[cfg(test)]
+    pub(super) fn cancelled(&self) -> bool {
+        self.cancel.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+impl Drop for GifRun {
+    fn drop(&mut self) {
+        self.cancel
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 /// The looping GIF of the history, one value. It leaves for `Idle` on
 /// `stop_animation_playback` (a stop, another playback, a closed window or
-/// chat), which drops the clip with it.
-#[derive(Clone, Default)]
+/// chat, the screen going away), which drops the clip and the decode with
+/// it.
+#[derive(Default)]
 pub(crate) enum GifPlayback {
     #[default]
     Idle,
     /// Chosen; the first picture is still being decoded.
-    Waiting(PlayingGif),
+    Waiting { playing: PlayingGif, run: GifRun },
     /// Playing: the held pictures (`gif_clip`), shared with the history row
-    /// (and its animation layer) that draws them.
+    /// (and its animation layer) that draws them. `run` is the decode still
+    /// producing the rest of them.
     Playing {
         playing: PlayingGif,
         clip: std::sync::Arc<super::gif_clip::GifClip>,
         started: Instant,
+        run: Option<GifRun>,
     },
 }
 
@@ -257,7 +291,7 @@ impl GifPlayback {
     pub(super) fn playing(&self) -> Option<PlayingGif> {
         match self {
             Self::Idle => None,
-            Self::Waiting(playing) | Self::Playing { playing, .. } => Some(*playing),
+            Self::Waiting { playing, .. } | Self::Playing { playing, .. } => Some(*playing),
         }
     }
 
@@ -268,18 +302,50 @@ impl GifPlayback {
         }
     }
 
-    /// The first picture is in: the chosen GIF plays from `started`.
+    /// The first picture is in: the chosen GIF plays from `started`, its
+    /// decode still running.
     pub(super) fn begin_clip(
         &mut self,
         clip: std::sync::Arc<super::gif_clip::GifClip>,
         started: Instant,
     ) {
-        if let Self::Waiting(playing) = *self {
-            *self = Self::Playing {
+        *self = match std::mem::take(self) {
+            Self::Waiting { playing, run } => Self::Playing {
                 playing,
                 clip,
                 started,
-            };
+                run: Some(run),
+            },
+            other => other,
+        };
+    }
+
+    /// The decode ended: the pictures it made are all there is.
+    pub(super) fn decode_ended(&mut self) {
+        if let Self::Playing { run, .. } = self {
+            *run = None;
+        }
+    }
+
+    /// A chosen GIF whose decode never ends, for tests.
+    #[cfg(test)]
+    pub(crate) fn waiting_in_tests(playing: PlayingGif) -> Self {
+        Self::Waiting {
+            playing,
+            run: GifRun::new(
+                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                gpui_kit::Task::ready(()),
+            ),
+        }
+    }
+
+    /// The decode of the chosen GIF is in `run`.
+    #[cfg(test)]
+    pub(super) fn run(&self) -> Option<&GifRun> {
+        match self {
+            Self::Waiting { run, .. } => Some(run),
+            Self::Playing { run, .. } => run.as_ref(),
+            Self::Idle => None,
         }
     }
 }
@@ -325,19 +391,9 @@ impl PlaybackUi {
             positions: HashMap::new(),
             animation: GifPlayback::Idle,
             autoplayed_gifs: Default::default(),
-            gif_decodes: HashMap::new(),
             pending_media_seek: None,
         }
     }
-}
-
-/// A GIF decode running for a message.
-pub(crate) struct GifDecode {
-    /// Set when playback stops; the decode then ends before its next frame.
-    pub(super) cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// The clip, once its first picture is in: a replay while the rest
-    /// still decodes plays it at once.
-    pub(super) first: Option<std::sync::Arc<super::gif_clip::GifClip>>,
 }
 
 impl PlaybackUi {

@@ -148,6 +148,7 @@ impl super::ChatWindows {
     pub(in crate::ui) fn take_slot_inline_return(
         &self,
         bot_id: i64,
+        account: &quill::ids::AccountKey,
     ) -> Option<super::super::inline_return::InlineReturn> {
         self.slots().find_map(|slot| {
             let mut slot = slot.try_borrow_mut().ok()?;
@@ -155,7 +156,7 @@ impl super::ChatWindows {
                 .composer_ui
                 .inline_return
                 .as_ref()
-                .is_some_and(|ret| ret.waits_for_start(bot_id));
+                .is_some_and(|ret| ret.waits_for_start(bot_id) && ret.is_of(account));
             waits
                 .then(|| slot.composer_ui.inline_return.take())
                 .flatten()

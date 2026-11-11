@@ -340,8 +340,11 @@ struct State {
     /// The window's display scale (device pixels per point); 0 until the
     /// first frame reports it.
     scale: f32,
-    /// The timer that releases players off screen for [`RELEASE_AFTER`].
-    release_timer: Option<Task<()>>,
+    /// The timer that releases players off screen for [`RELEASE_AFTER`],
+    /// with when it is due: a timer past its due time is spent even when
+    /// its own clearing was skipped (a re-entrant borrow), so it is armed
+    /// again.
+    release_timer: Option<(Instant, Task<()>)>,
     /// Clips asked for by a click (autoplay off, data saver, or not
     /// downloaded yet).
     on_demand: HashMap<Key, demand::OnDemand>,
@@ -549,10 +552,16 @@ impl InlineVideos {
 
     /// Sweep again once an off-screen player is due for release.
     fn arm_release(self: &Rc<Self>, cx: &mut App) {
-        if self
-            .with(|state| state.release_timer.is_some())
-            .unwrap_or(true)
-        {
+        let now = cx.background_executor().now();
+        let armed = self
+            .with(|state| {
+                state
+                    .release_timer
+                    .as_ref()
+                    .is_some_and(|(due, _)| *due > now)
+            })
+            .unwrap_or(true);
+        if armed {
             return;
         }
         let weak = Rc::downgrade(self);
@@ -564,7 +573,7 @@ impl InlineVideos {
             videos.with(|state| state.release_timer = None);
             cx.update(|cx| videos.sweep(Sweep::Timer, cx));
         });
-        self.with(|state| state.release_timer = Some(timer));
+        self.with(|state| state.release_timer = Some((now + RELEASE_AFTER, timer)));
     }
 
     /// The main window's display scale (device pixels per point), at the

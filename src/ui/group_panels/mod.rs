@@ -263,7 +263,7 @@ impl QuillApp {
         self.common_groups.close();
         self.forget_emoji_access_shown();
         // The members block belongs to the panel that closed.
-        self.inline_members.reset(None);
+        self.inline_members.reset();
         cx.notify();
     }
 

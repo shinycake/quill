@@ -10,7 +10,7 @@
 
 use super::app::QuillApp;
 use super::chat_theme::{danger, text_muted, warning};
-use super::paid_messages_state::{ComposerPaidConfirm, RemoveFeeBox};
+use super::paid_messages_state::{ComposerPaidConfirm, PaidConfirmStage, RemoveFeeBox};
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::composer_sends::SendOnce;
 use crate::ui::status_note::StatusNote;
@@ -65,19 +65,21 @@ impl QuillApp {
             return false;
         };
         let messages = self.pending_attachments().len().max(1) as i64;
-        self.paid_messages.confirm = Some(ComposerPaidConfirm {
-            ask: PaidConfirm {
-                chat_id: chat_id.0,
-                name,
-                per_message: stars,
-                messages,
-                text: text.to_string(),
+        self.paid_messages.confirm = PaidConfirmStage::Composer {
+            confirm: ComposerPaidConfirm {
+                ask: PaidConfirm {
+                    chat_id: chat_id.0,
+                    name,
+                    per_message: stars,
+                    messages,
+                    text: text.to_string(),
+                },
+                slot,
+                once,
             },
-            slot,
-            once,
-        });
+            trust: false,
+        };
         self.open_box(DialogKind::PaidSendConfirm);
-        self.paid_messages.confirm_trust = None;
         if let Some(live) = self.live.as_mut() {
             // The balance for the Pay check.
             let _ = live.driver.maybe_fetch_star_transactions();
@@ -90,7 +92,7 @@ impl QuillApp {
     /// a send the guard holds (a sticker, GIF, voice note, forward...).
     /// The flag is true for a held send.
     pub(super) fn paid_confirm_view(&self) -> Option<(PaidConfirm, bool)> {
-        if let Some(pending) = self.paid_messages.confirm.as_ref() {
+        if let Some(pending) = self.paid_messages.confirm.composer() {
             return Some((pending.ask.clone(), false));
         }
         let held = self.live.as_ref()?.driver.held_paid_send()?;
@@ -112,18 +114,35 @@ impl QuillApp {
 
     /// "Don't ask me again" is ticked on the confirmation on screen.
     pub(super) fn paid_confirm_trusted(&self) -> bool {
-        self.paid_messages.confirm_trust.is_some_and(|key| {
-            self.paid_confirm_view()
-                .is_some_and(|(confirm, _)| (confirm.chat_id, confirm.per_message) == key)
-        })
+        match &self.paid_messages.confirm {
+            PaidConfirmStage::Composer { trust, .. } => *trust,
+            PaidConfirmStage::Held { trusted } => self
+                .paid_confirm_view()
+                .is_some_and(|(confirm, _)| (confirm.chat_id, confirm.per_message) == *trusted),
+            PaidConfirmStage::None => false,
+        }
+    }
+
+    /// The tick of "Don't ask me again" on the confirmation on screen.
+    pub(super) fn set_paid_confirm_trust(&mut self, on: bool, price: (i64, i64)) {
+        match &mut self.paid_messages.confirm {
+            PaidConfirmStage::Composer { trust, .. } => *trust = on,
+            held @ (PaidConfirmStage::None | PaidConfirmStage::Held { .. }) => {
+                *held = if on {
+                    PaidConfirmStage::Held { trusted: price }
+                } else {
+                    PaidConfirmStage::None
+                };
+            }
+        }
     }
 
     /// Cancel: a composer send keeps its text; a held send is dropped.
     pub(super) fn cancel_paid_confirm(&mut self, cx: &mut Context<Self>) {
-        self.paid_messages.confirm_trust = None;
-        if self.paid_messages.confirm.take().is_none()
-            && let Some(live) = self.live.as_mut()
-        {
+        let composer = std::mem::replace(&mut self.paid_messages.confirm, PaidConfirmStage::None)
+            .composer()
+            .is_some();
+        if !composer && let Some(live) = self.live.as_mut() {
             live.driver.discard_paid_send();
         }
         cx.notify();
@@ -134,12 +153,15 @@ impl QuillApp {
     /// released as it is.
     pub(super) fn confirm_paid_send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let remember = self.paid_confirm_trusted();
-        self.paid_messages.confirm_trust = None;
-        let Some(ComposerPaidConfirm {
-            ask: confirm,
-            slot,
-            once,
-        }) = self.paid_messages.confirm.take()
+        let PaidConfirmStage::Composer {
+            confirm:
+                ComposerPaidConfirm {
+                    ask: confirm,
+                    slot,
+                    once,
+                },
+            ..
+        } = std::mem::replace(&mut self.paid_messages.confirm, PaidConfirmStage::None)
         else {
             if let Some(live) = self.live.as_mut()
                 && live.driver.held_paid_send().is_some()
@@ -290,7 +312,7 @@ impl QuillApp {
                 .payments
                 .paid_messages
                 .save
-                .forget_failure(quill::paid_messages::PaidTarget::User(user_id));
+                .forget_finished(quill::paid_messages::PaidTarget::User(user_id));
         }
         self.paid_messages.remove_fee = Some(RemoveFeeBox {
             user_id,
@@ -395,7 +417,7 @@ impl QuillApp {
                         .label(tr(keys::LAUNCH_EXE_DONT_ASK))
                         .checked(this.paid_confirm_trusted())
                         .on_click(cx.listener(move |this, &on: &bool, _, cx| {
-                            this.paid_messages.confirm_trust = on.then_some(trust_key);
+                            this.set_paid_confirm_trust(on, trust_key);
                             cx.notify();
                         })),
                 )

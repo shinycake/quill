@@ -493,44 +493,6 @@ pub enum AdminListFetch {
     Failed(String),
 }
 
-/// Phase D3b: fetch state for one chat's `getSupergroupMembers` result
-/// (schema 1.8.67, line 15238) backing the promote member picker. Same
-/// Loading-guard convention.
-#[derive(Debug, Clone, PartialEq)]
-pub enum SupergroupMembersFetch {
-    Loading,
-    Loaded {
-        members: Vec<ParsedChatMember>,
-        total_count: i32,
-    },
-    /// TDLib refused the request.
-    Failed(String),
-    /// The request never left: the path was inactive or the sender closed.
-    /// Drawn like `Failed` with Retry, but it says nothing about whether the
-    /// viewer may see the members (so no administrators fallback).
-    NotSent(String),
-}
-
-/// Where the next page of a member list stands.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum MoreMembers {
-    #[default]
-    Idle,
-    /// A next page is out as this request.
-    Asking(RequestId),
-    /// The last next page failed; the panel asks again at its next scroll.
-    Failed,
-}
-
-/// How one member list was asked: the first-page request (`None` when the
-/// list was filled without one), the query, and the next page.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct MemberAsk {
-    pub first: Option<RequestId>,
-    pub query: String,
-    pub more: MoreMembers,
-}
-
 /// B4: one `getPollVoters` page (schema 1.8.67, line 12941) backing the
 /// poll-voters dialog. Same Loading-guard convention; a failed first page
 /// lands in `Failed`, a failed "load more" keeps the loaded page.

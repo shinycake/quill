@@ -453,8 +453,8 @@ impl QuillShell {
         if app.update(cx, |app, _| {
             app.main_window
                 .dialogs_closed
-                .borrow_mut()
-                .remove(&window_id)
+                .try_borrow_mut()
+                .is_ok_and(|mut closed| closed.remove(&window_id))
         }) {
             self.open_dialog = None;
         }
@@ -624,10 +624,9 @@ impl QuillApp {
         }
         if !QuillShell::dialog_is_open(self, kind) {
             window.close_dialog(cx);
-            self.main_window
-                .dialogs_closed
-                .borrow_mut()
-                .insert(window.window_handle().window_id());
+            if let Ok(mut closed) = self.main_window.dialogs_closed.try_borrow_mut() {
+                closed.insert(window.window_handle().window_id());
+            }
         }
     }
 

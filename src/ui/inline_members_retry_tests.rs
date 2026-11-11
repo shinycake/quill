@@ -2,12 +2,10 @@
 //! one is not (round 12, area B, finding 6).
 
 use crate::ui::app::QuillApp;
-use crate::ui::inline_members_state::{AdminsFallback, Paging};
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, px, size};
-use quill::ids::ChatId;
-use quill::state::{InfoPanelTarget, MemberListFilter};
+use quill::state::{InfoPanelTarget, MemberListFilter, MoreMembers};
 use quill::telegram::envelope::ChatKind;
 
 fn demo(cx: &mut TestAppContext) -> Entity<QuillApp> {
@@ -52,64 +50,79 @@ fn open_group_panel(app: &Entity<QuillApp>, cx: &mut TestAppContext) -> i64 {
 fn a_failed_page_is_asked_for_again_at_the_next_scroll(cx: &mut TestAppContext) {
     let app = demo(cx);
     let chat = open_group_panel(&app, cx);
-    let failed_offset = |app: &Entity<QuillApp>, cx: &mut TestAppContext| {
-        app.read_with(cx, |app, _| app.inline_members.paging.blocked())
+    let key = (chat, MemberListFilter::Recent);
+    let set = |app: &Entity<QuillApp>, cx: &mut TestAppContext, more: MoreMembers| {
+        app.update(cx, |app, _| {
+            if let Some(session) = app.session_mut() {
+                session.groups.member_asks.entry(key).or_default().more = more;
+            }
+        })
     };
-    app.update(cx, |app, cx| {
-        app.inline_members.paging = Paging::Asked { offset: 20 };
-        if let Some(session) = app.session_mut() {
-            session
-                .groups
-                .member_asks
-                .entry((chat, MemberListFilter::Recent))
-                .or_default()
-                .more = quill::state::MoreMembers::Failed;
-        }
-        // A frame looks again: it does not ask a failing server in a loop.
-        app.maybe_load_more_inline(false, cx);
-    });
-    assert_eq!(failed_offset(&app, cx), Some(20));
+    let blocked = |app: &Entity<QuillApp>, cx: &mut TestAppContext| {
+        app.read_with(cx, |app, _| {
+            app.session()
+                .and_then(|s| s.groups.member_more_blocked(key))
+        })
+    };
+    set(&app, cx, MoreMembers::Failed { offset: 20 });
+    // A frame looks again: it does not ask a failing server in a loop.
+    app.update(cx, |app, cx| app.maybe_load_more_inline(false, cx));
+    assert_eq!(blocked(&app, cx), Some(20));
     app.update(cx, |app, cx| app.maybe_load_more_inline(true, cx));
-    assert_eq!(failed_offset(&app, cx), None, "the scroll may ask again");
+    assert_eq!(blocked(&app, cx), None, "the scroll may ask again");
 
     // A page that came back empty stays where it stopped.
-    app.update(cx, |app, cx| {
-        app.inline_members.paging = Paging::Asked { offset: 20 };
-        app.maybe_load_more_inline(true, cx);
-    });
-    assert_eq!(failed_offset(&app, cx), Some(20));
+    set(&app, cx, MoreMembers::Settled { offset: 20 });
+    app.update(cx, |app, cx| app.maybe_load_more_inline(true, cx));
+    assert_eq!(blocked(&app, cx), Some(20));
 }
 
 /// Recent members failed, so the block falls back to the administrators.
-/// That fallback is asked once per open, not on every frame, so a list that
-/// fails too does not loop; Retry asks again (round 12, area B2, finding 1).
+/// That fallback is asked while the cache has no entry for it, so a list
+/// that fails too does not loop; Retry (the list going stale) drops the
+/// failed entry and asks again.
 #[gpui_kit::test]
 fn the_administrators_fallback_is_asked_once_until_retry(cx: &mut TestAppContext) {
     let app = demo(cx);
     let chat = open_group_panel(&app, cx);
-    let asked = |app: &Entity<QuillApp>, cx: &mut TestAppContext| {
+    let admins = (chat, MemberListFilter::Administrators);
+    let held = |app: &Entity<QuillApp>, cx: &mut TestAppContext| {
         app.read_with(cx, |app, _| {
-            app.inline_members.admins != AdminsFallback::NotAsked
+            app.session()
+                .is_some_and(|s| s.groups.supergroup_members.contains_key(&admins))
         })
     };
     app.update(cx, |app, cx| {
         if let Some(session) = app.session_mut() {
-            for filter in [MemberListFilter::Recent, MemberListFilter::Administrators] {
-                session.groups.supergroup_members.insert(
-                    (chat, filter),
-                    quill::state::SupergroupMembersFetch::Failed("CHANNEL_PRIVATE".into()),
-                );
-            }
+            session.groups.supergroup_members.insert(
+                (chat, MemberListFilter::Recent),
+                quill::state::SupergroupMembersFetch::Failed("CHANNEL_PRIVATE".into()),
+            );
         }
         app.maybe_load_more_inline(false, cx);
     });
-    assert!(asked(&app, cx), "the fallback was asked");
+    // A demo has no connection to ask with: nothing is held yet.
+    assert!(!held(&app, cx), "nothing was sent, so nothing is held");
     app.update(cx, |app, cx| {
-        app.inline_members.admins = AdminsFallback::Asked(ChatId(chat));
+        if let Some(session) = app.session_mut() {
+            session.groups.supergroup_members.insert(
+                admins,
+                quill::state::SupergroupMembersFetch::Failed("CHANNEL_PRIVATE".into()),
+            );
+        }
         app.maybe_load_more_inline(false, cx);
+    });
+    assert!(
+        held(&app, cx),
+        "a failed list is not asked again by a frame"
+    );
+    app.update(cx, |app, cx| {
+        if let Some(session) = app.session_mut() {
+            session.groups.members_added(chat);
+        }
         app.inline_members_stale(&[chat], cx);
     });
-    assert!(!asked(&app, cx), "Retry may ask again");
+    assert!(!held(&app, cx), "Retry drops the failed list to ask again");
 }
 
 /// A failed page of an earlier visit does not stay latched when the panel
@@ -122,17 +135,43 @@ fn the_block_starts_over_each_time_the_panel_opens(cx: &mut TestAppContext) {
         app.session().and_then(|s| s.users_state.open_info_panel)
     });
     let target = target.expect("the open group panel");
+    let chat = app.read_with(cx, |app, _| {
+        app.session()
+            .and_then(|s| match s.users_state.open_info_panel {
+                Some(InfoPanelTarget::Supergroup(_)) => {
+                    s.chats.values().find_map(|c| match c.kind {
+                        ChatKind::Supergroup { .. } => Some(c.id.0),
+                        _ => None,
+                    })
+                }
+                _ => None,
+            })
+    });
+    let chat = chat.expect("the open group");
+    let key = (chat, MemberListFilter::Recent);
     let stale = |app: &Entity<QuillApp>, cx: &mut TestAppContext| {
         app.update(cx, |app, _| {
-            app.inline_members.paging = Paging::Failed { offset: 40 };
-            app.inline_members.admins = AdminsFallback::Asked(ChatId(1));
+            if let Some(session) = app.session_mut() {
+                session.groups.member_asks.entry(key).or_default().more =
+                    MoreMembers::Failed { offset: 40 };
+                session.groups.supergroup_members.insert(
+                    (chat, MemberListFilter::Administrators),
+                    quill::state::SupergroupMembersFetch::Failed("gone".into()),
+                );
+            }
             app.inline_members.shown = 120;
         });
     };
     let fresh = |app: &Entity<QuillApp>, cx: &mut TestAppContext| {
         app.read_with(cx, |app, _| {
-            assert_eq!(app.inline_members.paging, Paging::Idle);
-            assert_eq!(app.inline_members.admins, AdminsFallback::NotAsked);
+            let session = app.session().expect("the demo session");
+            assert_eq!(session.groups.member_more_blocked(key), None);
+            assert!(
+                !session
+                    .groups
+                    .supergroup_members
+                    .contains_key(&(chat, MemberListFilter::Administrators))
+            );
             assert_eq!(app.inline_members.shown, quill::inline_members::ROWS_STEP);
         });
     };
@@ -140,8 +179,9 @@ fn the_block_starts_over_each_time_the_panel_opens(cx: &mut TestAppContext) {
     app.update(cx, |app, cx| {
         app.close_info_panel(cx);
     });
-    fresh(&app, cx);
-    app.read_with(cx, |app, _| assert_eq!(app.inline_members.chat, None));
+    app.read_with(cx, |app, _| {
+        assert_eq!(app.inline_members.shown, quill::inline_members::ROWS_STEP)
+    });
 
     // Opening the same panel again starts over too.
     stale(&app, cx);
@@ -151,7 +191,6 @@ fn the_block_starts_over_each_time_the_panel_opens(cx: &mut TestAppContext) {
         })
         .expect("the window is open");
     fresh(&app, cx);
-    app.read_with(cx, |app, _| assert!(app.inline_members.chat.is_some()));
 }
 
 /// A send the app refused locally says nothing about whether the viewer may

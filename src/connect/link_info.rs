@@ -85,11 +85,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetLanguagePackInfo, None);
-        self.session.settings.language_link =
-            Some(LanguageLinkLookup::looking_up(id.to_string(), extra));
+        let before = self
+            .session
+            .settings
+            .language_link
+            .replace(LanguageLinkLookup::looking_up(id.to_string(), extra));
         let result = self.send_json_request(extra, &get_language_pack_info(extra, id));
         if result.is_err() {
-            self.session.settings.language_link = None;
+            // The lookup never left: the box that was open stays.
+            self.session.settings.language_link = before;
         }
         result
     }

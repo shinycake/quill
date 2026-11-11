@@ -122,7 +122,7 @@ impl QuillApp {
         }
         if lists
             .iter()
-            .any(|list| matches!(list, Some(SupergroupMembersFetch::Loading)))
+            .any(|list| matches!(list, Some(SupergroupMembersFetch::Loading { .. })))
         {
             return PoolView::Loading;
         }

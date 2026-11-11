@@ -89,7 +89,7 @@ fn a_main_window_chat_change_leaves_a_chat_windows_gif(cx: &mut TestAppContext) 
         message: ChatMessage::new(OTHER, MessageId(7)),
     };
     in_window(&h, chat_window, Some(OTHER), cx, |app, _, _| {
-        app.playback.animation = crate::ui::playback_state::GifPlayback::Waiting(gif);
+        app.playback.animation = crate::ui::playback_state::GifPlayback::waiting_in_tests(gif);
         app.playback
             .autoplayed_gifs
             .insert(ChatMessage::new(OTHER, MessageId(7)));
@@ -111,10 +111,11 @@ fn a_main_window_chat_change_leaves_a_chat_windows_gif(cx: &mut TestAppContext) 
     });
     // The main window's own GIF stops with its chat.
     in_window(&h, h.main, None, cx, |app, window, cx| {
-        app.playback.animation = crate::ui::playback_state::GifPlayback::Waiting(PlayingGif {
-            window: None,
-            message: ChatMessage::new(ChatId(13), MessageId(5)),
-        });
+        app.playback.animation =
+            crate::ui::playback_state::GifPlayback::waiting_in_tests(PlayingGif {
+                window: None,
+                message: ChatMessage::new(ChatId(13), MessageId(5)),
+            });
         app.select_listed_chat(OPEN, window, cx);
         assert_eq!(app.playback.animation.playing(), None);
     });

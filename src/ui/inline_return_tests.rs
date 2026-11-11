@@ -102,6 +102,54 @@ fn leaving_the_bots_chat_after_the_start_ends_the_round_trip(cx: &mut TestAppCon
     );
 }
 
+/// A lookup nobody answered gives the trip up at its deadline, and a start
+/// that could not be sent never makes it `Started` (sweep r2-29, 10-104).
+#[gpui_kit::test]
+fn an_unanswered_lookup_and_a_refused_start_end_the_round_trip(cx: &mut TestAppContext) {
+    use super::{InlineReturn, InlineStage};
+    let (app, mut vcx) = open(cx);
+    let opening = |app: &QuillApp, until| {
+        let account = app.session().map(|s| s.account.clone()).expect("account");
+        InlineReturn {
+            account,
+            origin: ChatId(12),
+            bot_id: 11,
+            username: "somebot".into(),
+            stage: InlineStage::Opening {
+                parameter: "param".into(),
+                until,
+            },
+        }
+    };
+    let now = std::time::Instant::now();
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.composer_ui.inline_return =
+            Some(opening(app, now + std::time::Duration::from_secs(60)));
+        app.flush_inline_return(window, cx);
+    });
+    assert!(
+        waiting(&app, &vcx),
+        "within its time the lookup is waited for"
+    );
+    app.update_in(&mut vcx, |app, window, cx| {
+        let past = now
+            .checked_sub(std::time::Duration::from_secs(1))
+            .expect("an earlier instant");
+        app.composer_ui.inline_return = Some(opening(app, past));
+        app.flush_inline_return(window, cx);
+    });
+    assert!(!waiting(&app, &vcx), "an unanswered lookup is given up");
+
+    // The bot's chat opens, but the start cannot be sent (a demo has no
+    // connection): the trip ends instead of waiting for an own message.
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.composer_ui.inline_return =
+            Some(opening(app, now + std::time::Duration::from_secs(60)));
+        assert!(app.take_inline_start(ChatId(11), cx));
+    });
+    assert!(!waiting(&app, &vcx), "a refused start leaves no trip");
+}
+
 fn apply_json(app: &mut QuillApp, json: &str) {
     let last = app
         .demo_session
@@ -162,10 +210,15 @@ fn an_old_bot_message_loaded_after_the_start_does_not_bring_the_user_back(cx: &m
         // the steps must not find the trip outside the bot's chat.
         app.demo_session.as_mut().expect("a demo session").open =
             quill::state::OpenView::of(Some(ChatId(bot_chat)));
-        assert!(
-            app.take_inline_start(ChatId(bot_chat), cx),
-            "the start goes"
-        );
+        // A demo cannot send the start (a refused one ends the trip,
+        // tested above): the trip is put where a sent start leaves it, with
+        // no history loaded.
+        let _ = cx;
+        if let Some(ret) = app.composer_ui.inline_return.as_mut() {
+            ret.stage = super::InlineStage::Started {
+                baseline: super::Baseline::OwnStart,
+            };
+        }
     });
     // Its history loads: an old answer of the bot, then the user's own
     // start.
