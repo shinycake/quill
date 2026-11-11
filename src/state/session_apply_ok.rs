@@ -810,6 +810,18 @@ impl Session {
                     user.is_contact = false;
                 }
             }
+            Some(RequestPurpose::BlockSenderFromReplies) => {
+                use crate::message_menu_origin::RepliesBlockStage::Submitting;
+                let asked = pending.map(|p| p.id);
+                let box_is_for_it = self
+                    .users_state
+                    .replies_block
+                    .as_ref()
+                    .is_some_and(|b| Some(b.stage) == asked.map(Submitting));
+                if box_is_for_it && let Some(block) = self.users_state.replies_block.take() {
+                    self.users_state.replies_blocked.push(block.name);
+                }
+            }
             Some(RequestPurpose::ImportContacts) => {
                 self.users_state.contacts = None;
                 self.users_state.contacts_error = false;

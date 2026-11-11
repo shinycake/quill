@@ -74,7 +74,7 @@ impl QuillApp {
         position: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        self.message_ui.menu = None;
+        self.close_message_menu();
         self.chat_list.menu = None;
         self.chat_list.archive_menu = None;
         self.folders.tab_menu = Some(FolderTabMenu {

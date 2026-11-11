@@ -363,7 +363,7 @@ impl QuillApp {
                             }
                         }
                     }
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 },
             ));
@@ -634,7 +634,7 @@ crate::ui::shell::register_dialogs! {
         QuillApp::build_message_report_dialog,
     )
     .per_window()
-    .close(|app, _, cx| app.close_message_report(cx)),
+    .close(|app, window, cx| app.close_message_report(window, cx)),
 }
 
 mod delete_member_reaction;

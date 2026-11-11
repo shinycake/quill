@@ -114,6 +114,9 @@ impl QuillApp {
             self.set_note(StatusNote::error(err));
             progressed = true;
         }
+        if self.drain_replies_blocked() {
+            progressed = true;
+        }
         // MED2 fix-up: a refused `recognizeSpeech` surfaces in the status
         // note instead of silently doing nothing after
         // "transcription requested".

@@ -104,10 +104,33 @@ def writer_problems(files, entries):
     return out
 
 
+MENU_CLOSE = re.compile(r"\bmessage_ui\.menu\s*=\s*None\b")
+
+
+def menu_close_problems(files):
+    """The message menu closes through `close_message_menu` only: it also
+    drops the reaction strip's request (`reset_message_reactions`), which a
+    bare `message_ui.menu = None` leaves for a late answer to land on."""
+    out = []
+    for path, text in sorted(files.items()):
+        if "/demos/" in path:
+            continue
+        body = strip_test_mods(text)
+        for match in MENU_CLOSE.finditer(body):
+            if enclosing_fn(body, match.start()) == "close_message_menu":
+                continue
+            line = body.count("\n", 0, match.start()) + 1
+            out.append(
+                f"{path}:{line}: `message_ui.menu = None` skips the reaction reset; "
+                "call `close_message_menu()`"
+            )
+    return out
+
+
 def problems():
     files = {}
     for path in sources():
         with open(path, encoding="utf-8") as f:
             files[path] = f.read()
     entries = listed()
-    return writer_problems(files, entries), len(entries)
+    return writer_problems(files, entries) + menu_close_problems(files), len(entries)

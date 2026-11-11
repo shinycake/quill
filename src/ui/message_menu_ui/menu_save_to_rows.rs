@@ -65,7 +65,7 @@ impl QuillApp {
                                 keys::Q_CHAT_DEMO_SAVING_TO_THE_PROFILE,
                             )));
                         }
-                        this.message_ui.menu = None;
+                        this.close_message_menu();
                         cx.notify();
                     }
                 },
@@ -104,7 +104,7 @@ impl QuillApp {
                             keys::Q_CHAT_DEMO_SAVED_MESSAGES_NEEDS_LIVE,
                         )));
                     }
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 },
             ));
@@ -119,7 +119,7 @@ impl QuillApp {
             cx,
             move |this, _, cx| {
                 this.save_message_media_as(chat_id, message_id, cx);
-                this.message_ui.menu = None;
+                this.close_message_menu();
                 cx.notify();
             },
         ));
@@ -468,7 +468,7 @@ impl QuillApp {
                         )
                     })
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        this.message_ui.menu = None;
+                        this.close_message_menu();
                         this.open_avatar_profile(sender, window, cx);
                     }))
                     .into_any_element(),
@@ -659,7 +659,7 @@ impl QuillApp {
         message_ids: Vec<MessageId>,
         cx: &mut Context<Self>,
     ) {
-        self.message_ui.menu = None;
+        self.close_message_menu();
         // The flow is the session's: one report at a time, so a box another
         // window still shows for the one this replaces goes.
         self.end_report_boxes(cx);
@@ -690,8 +690,17 @@ impl QuillApp {
         self.in_every_window(cx, |this, _| this.message_ui.menu_ui.report_open = false);
     }
 
-    pub(in crate::ui) fn close_message_report(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn close_message_report(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.end_report_boxes(cx);
+        // The details text belongs to the flow that ends here.
+        self.message_ui
+            .menu_ui
+            .report_text
+            .update(cx, |input, cx| input.set_value("", window, cx));
         if let Some(live) = self.live.as_mut() {
             live.driver.session.clear_message_report();
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -803,8 +812,8 @@ impl QuillApp {
         cx: &mut App,
     ) -> Dialog {
         let on_close =
-            QuillShell::on_close_kind(app, shell, DialogKind::MessageReport, |this, _, cx| {
-                this.close_message_report(cx);
+            QuillShell::on_close_kind(app, shell, DialogKind::MessageReport, |this, window, cx| {
+                this.close_message_report(window, cx);
             });
         app.update(cx, |this, cx| {
             let dialog = dialog.overlay(true);
@@ -824,7 +833,7 @@ impl QuillApp {
                     .label(label)
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.close_message_report(cx);
+                        this.close_message_report(window, cx);
                         this.close_kit_dialog_if_done(DialogKind::MessageReport, window, cx);
                     }))
             };

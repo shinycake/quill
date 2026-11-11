@@ -121,6 +121,14 @@ impl Session {
                 ));
             }
             Some(RequestPurpose::BlockSenderFromReplies) => {
+                if let Some(block) = self.users_state.replies_block.as_mut()
+                    && pending.is_some_and(|p| {
+                        block.stage
+                            == crate::message_menu_origin::RepliesBlockStage::Submitting(p.id)
+                    })
+                {
+                    block.stage = crate::message_menu_origin::RepliesBlockStage::Editing;
+                }
                 self.chats_state.chat_action_error = Some(
                     crate::lang::tr(crate::lang::keys::Q_CHAT_COULDNT_BLOCK_THE_SENDER_TRY_AGAIN)
                         .to_string(),

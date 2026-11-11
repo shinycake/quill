@@ -39,6 +39,9 @@ pub struct UsersState {
     pub contacts_notice: Option<String>,
     /// The open "Block {name}" box for a reply in the Replies chat.
     pub replies_block: Option<crate::message_menu_origin::RepliesBlock>,
+    /// Short names of senders the server blocked from the Replies chat,
+    /// waiting for the screen's "blocked" note (drained once).
+    pub replies_blocked: Vec<String>,
     /// The option `replies_bot_chat_id`: the Replies chat (it differs on
     /// the test environment).
     pub replies_bot_chat_id: Option<i64>,
@@ -164,6 +167,7 @@ impl UsersState {
             contacts_error: false,
             contacts_notice: None,
             replies_block: None,
+            replies_blocked: Vec::new(),
             replies_bot_chat_id: None,
             user_full_infos: UserFullInfos::default(),
             userpic_full_info_asked: Default::default(),

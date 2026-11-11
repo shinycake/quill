@@ -408,13 +408,13 @@ impl QuillApp {
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
-        option_index: usize,
+        option_id: &str,
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
             let result = live
                 .driver
-                .send_poll_answer(chat_id, message_id, option_index);
+                .send_poll_answer_for_option(chat_id, message_id, option_id);
             self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_MEDIA_VOTING)),
                 Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_VOTE)),
@@ -423,7 +423,7 @@ impl QuillApp {
             return;
         }
         if self.demo_session.is_some() {
-            self.apply_demo_poll_vote(chat_id, message_id, option_index);
+            self.apply_demo_poll_vote(chat_id, message_id, option_id);
             self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_VOTE_UPDATED_DEMO)));
             cx.notify();
         }

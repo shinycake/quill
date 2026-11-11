@@ -157,7 +157,12 @@ fn checklist_task_row(
         );
     }
     let mut row = div()
-        .id(("checklist-task", message_id.0 as u64 * 64 + task_id as u64))
+        .id((
+            "checklist-task",
+            (message_id.0 as u64)
+                .wrapping_mul(64)
+                .wrapping_add(task_id as u64),
+        ))
         .flex()
         .items_center()
         .gap_2()

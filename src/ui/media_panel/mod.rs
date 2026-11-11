@@ -309,7 +309,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.message_ui.menu = None;
+        self.close_message_menu();
         self.pickers.reaction_search_input.update(cx, |input, cx| {
             input.set_value("", window, cx);
             input.focus(window, cx);

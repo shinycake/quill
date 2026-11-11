@@ -26,6 +26,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        self.session.messages.full_rich_loads.insert(
+            ChatMessage::new(chat_id, message_id),
+            crate::state::fetch::Fetch::Loading { stale: None },
+        );
         Ok(extra)
     }
 

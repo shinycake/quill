@@ -99,6 +99,10 @@ pub struct MessagesState {
     /// error fell into the `_ => {}` swallower and the user saw
     /// "transcription requested" followed by silence.
     pub recognize_speech_error: Notes,
+    /// "Load full message" of a partial rich message, per message: loading
+    /// from the send until the answer (which removes the entry, the message
+    /// is full now) or the error (`Failed`, tap again to retry).
+    pub full_rich_loads: HashMap<crate::ids::ChatMessage, crate::state::fetch::Fetch<()>>,
     /// M1 fix-up: one-shot; set when a `resendMessages` request errors.
     /// The UI drains it into the status note — previously the error fell
     /// into the `_ => {}` swallower and the user saw "retrying send…"
@@ -211,6 +215,7 @@ impl MessagesState {
             composer_previews: Default::default(),
             composer_preview_urls: HashMap::new(),
             recognize_speech_error: Notes::default(),
+            full_rich_loads: HashMap::new(),
             resend_error: Notes::default(),
             send_permission_error: Notes::default(),
             flood_notice: Notes::default(),

@@ -723,6 +723,7 @@ impl QuillApp {
                             MessageId(0),
                             &page.rich,
                             &std::collections::HashSet::new(),
+                            false,
                             // Settings → Appearance: message font size.
                             self.msg_font(),
                             cx,

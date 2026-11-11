@@ -7,7 +7,10 @@ use crate::telegram::envelope::MediaPayload;
 fn sound_download_error_drops_pending_playback() {
     let (mut session, _sink) = session();
     session.settings.sound_file_ids.insert(91, 7);
-    session.settings.pending_sound_downloads.insert(7);
+    session
+        .settings
+        .pending_sound_downloads
+        .insert(7, std::time::Instant::now());
     session.upsert_file(
         ParsedFile {
             id: FileId(91),
@@ -24,10 +27,23 @@ fn sound_download_error_drops_pending_playback() {
         },
         true,
     );
-    assert!(!session.settings.pending_sound_downloads.contains(&7));
+    assert!(!session.settings.pending_sound_downloads.contains_key(&7));
     assert!(session.settings.pending_sound_plays.is_empty());
     // The file→sound mapping itself stays (the list refetch prunes it).
     assert_eq!(session.settings.sound_file_ids.get(&91), Some(&7));
+}
+
+#[test]
+fn a_sound_preview_that_finishes_long_after_is_not_played() {
+    let (mut session, _sink) = session();
+    let asked = std::time::Instant::now();
+    session.settings.pending_sound_downloads.insert(7, asked);
+    session.settings.pending_sound_downloads.insert(8, asked);
+    let soon = asked + crate::state::SOUND_PREVIEW_WINDOW;
+    let late = soon + std::time::Duration::from_secs(1);
+    assert!(session.settings.take_sound_preview(7, soon));
+    assert!(!session.settings.take_sound_preview(8, late));
+    assert!(session.settings.pending_sound_downloads.is_empty());
 }
 
 #[test]

@@ -187,10 +187,11 @@ pub struct SettingsState {
     /// Parity slice: downloaded-file id → notification sound id, for files
     /// fetched as notification sounds.
     pub sound_file_ids: HashMap<i32, i64>,
-    /// Parity slice: sound ids with playback requested whose file is not
-    /// local yet. When the file completes, its path lands in
-    /// `pending_sound_plays`.
-    pub pending_sound_downloads: HashSet<i64>,
+    /// Parity slice: sound ids with a preview requested whose file is not
+    /// local yet, and when it was asked. When the file completes within
+    /// `SOUND_PREVIEW_WINDOW`, its path lands in `pending_sound_plays`; a
+    /// later completion is not a preview anyone is waiting for.
+    pub pending_sound_downloads: HashMap<i64, std::time::Instant>,
     /// Parity slice: local sound-file paths the UI should play, drained by
     /// `flush_notifications`. The reducer never spawns processes.
     pub pending_sound_plays: Vec<std::path::PathBuf>,
@@ -362,7 +363,7 @@ impl SettingsState {
             websites_error: None,
             websites_stale: false,
             sound_file_ids: HashMap::new(),
-            pending_sound_downloads: HashSet::new(),
+            pending_sound_downloads: HashMap::new(),
             pending_sound_plays: Vec::new(),
             privacy: HashMap::new(),
             read_date_show: None,
@@ -395,4 +396,18 @@ fn dedup_ids(mut list: Vec<i64>, more: Vec<i64>) -> Vec<i64> {
         }
     }
     list
+}
+
+/// How long a previewed sound's download is still worth playing (the user
+/// pressed play on the picker and waits for it).
+pub const SOUND_PREVIEW_WINDOW: std::time::Duration = std::time::Duration::from_secs(15);
+
+impl SettingsState {
+    /// A preview download finished at `now`: whether it is still wanted.
+    /// Either way the request is over.
+    pub fn take_sound_preview(&mut self, sound_id: i64, now: std::time::Instant) -> bool {
+        self.pending_sound_downloads
+            .remove(&sound_id)
+            .is_some_and(|asked| now.saturating_duration_since(asked) <= SOUND_PREVIEW_WINDOW)
+    }
 }

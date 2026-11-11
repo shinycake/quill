@@ -113,9 +113,13 @@ impl QuillApp {
             return;
         }
         let mut open = Vec::new();
+        // "Mark as read" sends read receipts: under the lock it waits,
+        // queued, for the unlock (the next poll runs it).
+        let mut held = Vec::new();
         for click in clicks {
             let chat_id = click.chat_id;
             match click.action {
+                NotificationAction::MarkRead if self.refused_while_locked() => held.push(click),
                 NotificationAction::MarkRead => self.mark_read_from_notification(chat_id, cx),
                 NotificationAction::Reply => {
                     if !self.send_typed_notification_reply(&click.account, chat_id, cx) {
@@ -124,6 +128,9 @@ impl QuillApp {
                 }
                 NotificationAction::Open => open.push(click),
             }
+        }
+        if !held.is_empty() {
+            self.delivery.notify_clicks.lock_or_recover().extend(held);
         }
         if open.is_empty() {
             return;

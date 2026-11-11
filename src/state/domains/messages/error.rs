@@ -35,6 +35,22 @@ impl Session {
         ) {
             self.note_premium_limit(err, pending);
         }
+        if let Some(RequestPurpose::Messages(MessagesPurpose::GetFullRichMessage {
+            chat_id,
+            message_id,
+        })) = pending.map(|p| p.purpose)
+        {
+            self.messages.full_rich_loads.insert(
+                crate::ids::ChatMessage::new(chat_id, message_id),
+                crate::state::fetch::Fetch::Failed {
+                    error: format!("could not load the full message (error {})", err.code),
+                    stale: None,
+                },
+            );
+            self.chats_state.chat_action_error = Some(
+                crate::lang::tr(crate::lang::keys::Q_MISC_COULD_NOT_LOAD_FULL_MESSAGE).to_string(),
+            );
+        }
         if let Some(RequestPurpose::Messages(MessagesPurpose::GetMessageAvailableReactions {
             message_id,
         })) = pending.map(|p| p.purpose)

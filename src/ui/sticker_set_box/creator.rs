@@ -542,7 +542,7 @@ impl QuillApp {
                 keys::Q_MEDIA_DEMO_STICKERS_ARE_ADDED_WITH,
             )));
         }
-        self.message_ui.menu = None;
+        self.close_message_menu();
         cx.notify();
     }
 

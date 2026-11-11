@@ -66,6 +66,28 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_poll_option_ids(chat_id, message_id, option_ids)
     }
 
+    /// A tap on the option with this id: the index is looked up in the poll
+    /// as it is now, so an option added or moved after the row was drawn
+    /// cannot send the vote to a neighbour.
+    pub fn send_poll_answer_for_option(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        option_id: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        let index = self
+            .session
+            .loaded_message(chat_id, message_id)
+            .and_then(|message| match &message.content {
+                MessageContent::Poll(poll) => {
+                    poll.poll.options.iter().position(|o| o.id == option_id)
+                }
+                _ => None,
+            })
+            .ok_or(ConnectSendError::InvalidRequest)?;
+        self.send_poll_answer(chat_id, message_id, index)
+    }
+
     /// The menu's "Retract vote": `setPollAnswer` with no options, only
     /// when `poll::can_retract_vote` allows it (open, not a quiz, revoting
     /// on, a vote exists).

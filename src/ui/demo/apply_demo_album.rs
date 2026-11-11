@@ -513,7 +513,7 @@ impl QuillApp {
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
-        option_index: usize,
+        option_id: &str,
     ) {
         let Some(session) = self.demo_session.as_mut() else {
             return;
@@ -526,7 +526,10 @@ impl QuillApp {
                 MessageContent::Poll(poll) => Some(poll.poll.clone()),
                 _ => None,
             })
-            .and_then(|poll| quill::poll::poll_answer_for_tap(&poll, option_index));
+            .and_then(|poll| {
+                let index = poll.options.iter().position(|o| o.id == option_id)?;
+                quill::poll::poll_answer_for_tap(&poll, index)
+            });
         let Some(answer) = answer else {
             return;
         };

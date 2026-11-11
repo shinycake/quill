@@ -173,6 +173,15 @@ pub struct RepliesBlock {
     pub report_spam: bool,
     pub delete_message: bool,
     pub delete_all: bool,
+    pub stage: RepliesBlockStage,
+}
+
+/// Where the Block box is: the user's choices, or the request out. The
+/// answer closes it (ok) or brings it back to `Editing` (error).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepliesBlockStage {
+    Editing,
+    Submitting(crate::ids::RequestId),
 }
 
 impl RepliesBlock {
@@ -185,6 +194,7 @@ impl RepliesBlock {
             report_spam: true,
             delete_message: true,
             delete_all: true,
+            stage: RepliesBlockStage::Editing,
         }
     }
 }

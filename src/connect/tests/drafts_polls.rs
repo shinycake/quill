@@ -571,6 +571,19 @@ fn driver_poll_answer_rejects_unsupported_chat() {
 }
 
 #[test]
+fn driver_poll_answer_by_option_id_votes_for_that_option() {
+    let (dir, mut driver, recorder, _sink, _dyn_sink, _seq) = poll_driver();
+    assert_invalid(driver.send_poll_answer_for_option(ChatId(7), MessageId(106), "gone"));
+    driver
+        .send_poll_answer_for_option(ChatId(7), MessageId(106), "b")
+        .unwrap();
+    let sent = recorder.snapshot().last().cloned().expect("setPollAnswer");
+    let v: Value = serde_json::from_str(&sent).unwrap();
+    assert_eq!(v["option_ids"], serde_json::json!([1]));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn driver_poll_answer_guards_message_poll_and_index() {
     let (dir, mut driver, recorder, sink, _dyn_sink, _seq) = poll_driver();
     // Missing message.

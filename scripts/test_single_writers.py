@@ -42,5 +42,18 @@ class OneWriter(unittest.TestCase):
         self.assertTrue(any("has no `fn replace_chat_ui`" in line for line in found))
 
 
+class MenuClose(unittest.TestCase):
+    def test_a_bare_close_fails(self):
+        found = sw.menu_close_problems({"src/ui/x.rs": "fn go(&mut self) { this.message_ui.menu = None; }"})
+        self.assertEqual(len(found), 1)
+
+    def test_the_closer_and_a_demo_pass(self):
+        files = {
+            "src/ui/context_menu_keys.rs": "fn close_message_menu(&mut self) { self.message_ui.menu = None; }",
+            "src/ui/demos/m.rs": "fn d(&mut self) { self.message_ui.menu = None; }",
+        }
+        self.assertEqual(sw.menu_close_problems(files), [])
+
+
 if __name__ == "__main__":
     unittest.main()

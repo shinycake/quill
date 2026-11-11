@@ -115,7 +115,7 @@ impl QuillApp {
                 .aria_label(tr(keys::PAID_REACTION_TITLE))
                 .child(div().text_size(px(22.)).child("\u{2B50}"))
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     this.open_paid_box(chat_id, message_id, cx);
                 }))
                 .into_any_element(),

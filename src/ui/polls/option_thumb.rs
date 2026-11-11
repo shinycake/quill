@@ -164,7 +164,12 @@ pub(in crate::ui) fn option_thumb(
     };
     let playable = matches!(thumb.kind, ThumbKind::Video | ThumbKind::Animation);
     let mut square = div()
-        .id(("poll-option-thumb", message_id.0 as u64 * 64 + index as u64))
+        .id((
+            "poll-option-thumb",
+            (message_id.0 as u64)
+                .wrapping_mul(64)
+                .wrapping_add(index as u64),
+        ))
         .relative()
         .flex_none()
         .size(side)

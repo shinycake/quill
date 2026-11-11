@@ -99,7 +99,7 @@ impl QuillApp {
                 cx,
                 move |this, _, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(phone.clone()));
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 },
             ));
@@ -142,7 +142,7 @@ impl QuillApp {
                 cx,
                 move |this, _, cx| {
                     this.retract_poll_vote(chat_id, message_id, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 },
             ));
@@ -169,7 +169,7 @@ impl QuillApp {
             cx,
             move |this, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-                this.message_ui.menu = None;
+                this.close_message_menu();
                 cx.notify();
             },
         ));
@@ -185,7 +185,7 @@ impl QuillApp {
                 cx,
                 move |this, _, cx| {
                     this.copy_item_link(chat_id, message_id, &link_item, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 },
             ));
@@ -202,7 +202,7 @@ impl QuillApp {
                 cx,
                 move |this, _, cx| {
                     this.delete_poll_option_item(chat_id, message_id, &option_id, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 },
             ));
@@ -227,7 +227,7 @@ impl QuillApp {
                     &self.frame.menu.items,
                     cx,
                     move |this, window, cx| {
-                        this.message_ui.menu = None;
+                        this.close_message_menu();
                         if let MessageSender::User { user_id } = author {
                             this.open_user_panel(user_id, window, cx);
                         }
@@ -288,7 +288,7 @@ impl QuillApp {
                     window,
                     cx,
                 );
-                this.message_ui.menu = None;
+                this.close_message_menu();
                 cx.notify();
             },
         )
@@ -327,7 +327,7 @@ impl QuillApp {
                     &self.frame.menu.items,
                     cx,
                     move |this, window, cx| {
-                        this.message_ui.menu = None;
+                        this.close_message_menu();
                         this.open_user_panel(user_id, window, cx);
                     },
                 ))

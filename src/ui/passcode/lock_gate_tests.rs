@@ -119,3 +119,32 @@ fn a_link_resolved_while_locked_opens_after_the_unlock(cx: &mut TestAppContext) 
         );
     });
 }
+
+#[gpui_kit::test]
+fn a_mark_as_read_click_waits_for_the_unlock(cx: &mut TestAppContext) {
+    use quill::notify::NotificationAction;
+    use quill::notify_accounts::ChatClick;
+    let (app, mut vcx) = open_chat(cx);
+    let click = |app: &QuillApp| ChatClick {
+        account: app.session().expect("session").account.clone(),
+        chat_id: OTHER,
+        action: NotificationAction::MarkRead,
+    };
+    lock(&app, &mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        let click = click(app);
+        app.delivery.notify_clicks.lock().unwrap().push(click);
+        app.drain_background_clicks(cx);
+        assert_eq!(
+            app.delivery.notify_clicks.lock().unwrap().len(),
+            1,
+            "no read receipt under the lock; the click stays queued"
+        );
+        app.set_locked(false, cx);
+        app.drain_background_clicks(cx);
+        assert!(
+            app.delivery.notify_clicks.lock().unwrap().is_empty(),
+            "unlocked, it runs"
+        );
+    });
+}

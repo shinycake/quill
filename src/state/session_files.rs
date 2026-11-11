@@ -47,7 +47,10 @@ impl Session {
         let sound_id = self.settings.sound_file_ids.get(&file.id.0).copied();
         if let Some(sound_id) = sound_id {
             if let Some(path) = file.usable_path() {
-                if self.settings.pending_sound_downloads.remove(&sound_id) {
+                if self
+                    .settings
+                    .take_sound_preview(sound_id, std::time::Instant::now())
+                {
                     // Parity slice: a completed notification-sound download
                     // with playback requested → hand the path to the UI for
                     // the in-process player. The reducer never spawns processes.

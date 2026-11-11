@@ -498,7 +498,7 @@ impl QuillApp {
             .aria_label(label)
             .child(self.reaction_glyph(&choice, STRIP_GLYPH))
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.message_ui.menu = None;
+                this.close_message_menu();
                 this.toggle_reaction(chat_id, message_id, choice.clone(), cx);
             }))
             .test_support()

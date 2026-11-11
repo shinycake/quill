@@ -3,7 +3,7 @@ use super::composer::ai_rich_draft_note;
 use super::*;
 use crate::composer::DraftSaveClock;
 use crate::credentials::TelegramCredentials;
-use crate::ids::{ChatId, MessageId, RequestId};
+use crate::ids::{ChatId, ChatMessage, MessageId, RequestId};
 use crate::state::{
     ComposerLinkPreview, InstantViewPage, LinkPreviewFetch, RequestPurpose, Session, ShutdownPhase,
 };
@@ -537,12 +537,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         // M2: full rich blocks replace the partial message's blocks in
         // history. Only `RichMessage` rows are touched — an unrelated
         // response can never clobber a different content kind.
+        let full_rich_key = full_rich_answer.as_ref().map(|(chat, id, _)| (*chat, *id));
         if let Some((chat_id, message_id, rich)) = full_rich_answer
             && let Some(history) = self.session.histories.get_mut(&chat_id.0)
             && let Some(message) = history.messages.get_mut(&message_id.0)
             && let MessageContent::RichMessage(existing) = &mut message.content
         {
             *existing = rich;
+        }
+        if let Some((chat_id, message_id)) = full_rich_key {
+            self.session
+                .messages
+                .full_rich_loads
+                .remove(&ChatMessage::new(chat_id, message_id));
         }
         // M1: stash the `getMessageLink` answer for the UI clipboard drain.
         if let Some((link, is_public)) = message_link_answer {

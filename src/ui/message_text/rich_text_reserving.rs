@@ -523,7 +523,7 @@ pub(in crate::ui) fn link_preview_card(
             let side = px(fit.clamp(1, 72) as f32);
             for (index, thumb_photo) in thumbnails.iter().enumerate() {
                 strip = strip.child(preview_thumb(
-                    row_id * 100 + index as u64,
+                    row_id.wrapping_mul(100).wrapping_add(index as u64),
                     thumb_photo,
                     ThumbFrame::Fixed(side, side),
                     files,
@@ -724,6 +724,8 @@ pub(in crate::ui) fn message_rich_block(
     message_id: MessageId,
     rich: &quill::telegram::envelope::RichMessageContent,
     revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    // Whether "Load full message" of this message is out (the button waits).
+    loading_full: bool,
     // Settings → Appearance: message font size.
     font: Pixels,
     cx: &mut Context<QuillApp>,
@@ -744,8 +746,13 @@ pub(in crate::ui) fn message_rich_block(
     if !rich.is_full {
         stack = stack.child(
             Button::new(format!("rich-load-full-{row_id}"))
-                .label(tr(keys::Q_MISC_LOAD_FULL_MESSAGE))
+                .label(tr(if loading_full {
+                    keys::Q_MISC_LOADING_FULL_MESSAGE
+                } else {
+                    keys::Q_MISC_LOAD_FULL_MESSAGE
+                }))
                 .ghost()
+                .disabled(loading_full)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if let Some(live) = this.live.as_mut() {
                         match live.driver.fetch_full_rich_message(chat_id, message_id) {
