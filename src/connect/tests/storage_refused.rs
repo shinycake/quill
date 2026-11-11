@@ -29,7 +29,15 @@ fn refused_driver() -> (
 fn a_refused_presets_ask_fails_with_a_retry_not_an_empty_page() {
     let (dir, mut driver, _) = refused_driver();
     assert!(driver.fetch_auto_download_presets().is_err());
-    assert!(driver.session.settings.data_storage.seeded.failure().is_some());
+    assert!(
+        driver
+            .session
+            .settings
+            .data_storage
+            .seeded
+            .failure()
+            .is_some()
+    );
     assert_eq!(
         driver.session.settings.data_storage.seeded,
         PresetsSeed::Failed("Couldn't load auto-download settings.".into())

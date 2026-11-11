@@ -259,8 +259,7 @@ impl QuillApp {
         // clicked before the first one answered) is dropped: it never
         // drives this launch, and the flow keeps waiting for its own.
         for (asked, result) in attach_bots {
-            let Some(Awaited { then, window, .. }) =
-                self.mini_apps.flow.take_attach_bot_for(asked)
+            let Some(Awaited { then, window, .. }) = self.mini_apps.flow.take_attach_bot_for(asked)
             else {
                 continue;
             };

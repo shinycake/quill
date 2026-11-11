@@ -51,8 +51,10 @@ impl Session {
                 }
             }
             BotsPayload::FoundWebApp(app) => {
-                if let (Some(pending), Some(RequestPurpose::Bots(BotsPurpose::SearchWebApp { .. }))) =
-                    (pending, purpose)
+                if let (
+                    Some(pending),
+                    Some(RequestPurpose::Bots(BotsPurpose::SearchWebApp { .. })),
+                ) = (pending, purpose)
                 {
                     self.bots.web_apps.found.push((pending.id, Ok(app)));
                 }

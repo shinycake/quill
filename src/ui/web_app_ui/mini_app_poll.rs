@@ -34,32 +34,26 @@ impl QuillApp {
         let task = self.spawn_screen(cx, async move |this, cx| {
             let executor = cx.background_executor().clone();
             let hold = backlog_hold(&executor);
-            run_poll_loop(
-                executor,
-                &quill::wake::MINI_APPS,
-                POLL_PACE,
-                hold,
-                || {
-                    this.update(cx, |this, cx| {
-                        let keep = this.mini_apps.generation == generation
-                            && this.as_asked_by(this.mini_apps.from_window, |this| {
-                                this.poll_mini_apps(cx)
-                            });
-                        if keep {
-                            return Some(PassEnd {
-                                work_left: false,
-                                due: this.mini_app_watch_due(),
-                            });
-                        }
-                        if this.mini_apps.generation == generation {
-                            this.mini_apps.poll = None;
-                        }
-                        None
-                    })
-                    .ok()
-                    .flatten()
-                },
-            )
+            run_poll_loop(executor, &quill::wake::MINI_APPS, POLL_PACE, hold, || {
+                this.update(cx, |this, cx| {
+                    let keep = this.mini_apps.generation == generation
+                        && this.as_asked_by(this.mini_apps.from_window, |this| {
+                            this.poll_mini_apps(cx)
+                        });
+                    if keep {
+                        return Some(PassEnd {
+                            work_left: false,
+                            due: this.mini_app_watch_due(),
+                        });
+                    }
+                    if this.mini_apps.generation == generation {
+                        this.mini_apps.poll = None;
+                    }
+                    None
+                })
+                .ok()
+                .flatten()
+            })
             .await;
         });
         self.mini_apps.poll = Some(task);

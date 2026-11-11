@@ -303,11 +303,11 @@ impl QuillApp {
                     .on_mouse_up(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseUpEvent, window, cx| {
-                            if this
-                                .chat_ui
-                                .swipe_reply
-                                .release_on(row_chat, row_msg, event.position.x)
-                            {
+                            if this.chat_ui.swipe_reply.release_on(
+                                row_chat,
+                                row_msg,
+                                event.position.x,
+                            ) {
                                 this.begin_reply_from_message(row_chat, row_msg, window, cx);
                             }
                             // Double-click runs the quick action setting

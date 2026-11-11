@@ -130,9 +130,9 @@ impl HelperState {
     /// (zero once it is); `None` for a helper that is ready or wedged.
     pub(super) fn start_due_in(self, now: std::time::Instant) -> Option<std::time::Duration> {
         match self {
-            Self::Starting { since } => Some(
-                HELPER_START_TIMEOUT.saturating_sub(now.saturating_duration_since(since)),
-            ),
+            Self::Starting { since } => {
+                Some(HELPER_START_TIMEOUT.saturating_sub(now.saturating_duration_since(since)))
+            }
             Self::Ready | Self::Wedged => None,
         }
     }

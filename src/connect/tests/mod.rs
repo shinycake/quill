@@ -139,6 +139,7 @@ mod sticker_categories;
 mod sticker_creator;
 mod sticker_manager;
 mod sticker_tabs;
+mod storage_refused;
 mod stories;
 mod story_fetch_retry;
 mod story_insights;
@@ -162,7 +163,6 @@ mod tone_upload;
 mod translate;
 mod update_batch;
 mod voice_restricted;
-mod storage_refused;
 mod web_apps;
 mod widgets;
 

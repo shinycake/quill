@@ -121,7 +121,9 @@ impl QuillApp {
             self.chat_ui.scheduled_deletes = pending;
             return;
         };
-        let refused = take_refused(&mut pending, |request| live.driver.session.acks.take(request));
+        let refused = take_refused(&mut pending, |request| {
+            live.driver.session.acks.take(request)
+        });
         self.chat_ui.scheduled_deletes = pending;
         if refused.is_empty() {
             return;
