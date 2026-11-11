@@ -171,12 +171,14 @@ impl QuillApp {
 
     /// The reply typed into `account`'s notification for the chat that
     /// could not be sent goes into the composer of the chat the click
-    /// opened, once that chat shows in the window in place.
+    /// opened, once that chat shows in the window in place. Without a
+    /// `window` (the chat's own window, whose frame is not at hand) the
+    /// text waits in that window's state for its next frame.
     pub(in crate::ui) fn compose_unsent_reply(
         &mut self,
         account: &AccountKey,
         chat_id: ChatId,
-        window: &mut Window,
+        window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) {
         if self.open_chat_id() != Some(chat_id) {
@@ -195,7 +197,7 @@ impl QuillApp {
                 compose: Some(text),
                 ..Default::default()
             },
-            Some(window),
+            window,
             cx,
         );
     }
