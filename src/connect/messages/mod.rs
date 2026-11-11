@@ -62,13 +62,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        // R5: a failed first page waits for the explicit Retry row
+        // R5: a failed page, first or older, waits for the explicit Retry
         // (`retry_history`) instead of re-sending on every render.
         if self
             .session
             .histories
             .get(&chat_id.0)
-            .is_some_and(|h| h.load_failed() && h.messages.is_empty())
+            .is_some_and(|h| h.load_failed())
         {
             return Ok(None);
         }
@@ -191,6 +191,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         Ok(Some(extra))
+    }
+
+    /// The Retry strip at the newer end: ask for the failed newer page again.
+    pub fn retry_history_newer(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        let Some(chat_id) = self.session.open_chat_id() else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if let Some(history) = self.session.histories.get_mut(&chat_id.0) {
+            history.clear_newer_failed();
+        }
+        self.fetch_history_newer_for(chat_id)
     }
 
     /// Jump the open chat to its latest messages: replace a window that

@@ -121,23 +121,39 @@ impl ProfilePhoto {
 }
 
 /// The next page of a loaded photo list.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum PhotoPage {
     /// No page is out.
     #[default]
     Idle,
     /// This request asks for the next page; only its answer extends the list.
     Asking(RequestId),
+    /// The page failed. Nothing asks again on its own; the viewer retries
+    /// on the person's next step ([`PhotoPage::retry`]).
+    Failed(String),
 }
 
 impl PhotoPage {
-    pub fn asking(self) -> bool {
+    pub fn asking(&self) -> bool {
         matches!(self, PhotoPage::Asking(_))
     }
 
+    /// Whether the viewer may ask for the next page on its own.
+    pub fn askable(&self) -> bool {
+        matches!(self, PhotoPage::Idle)
+    }
+
     /// `request` is the page this list waits for.
-    pub fn answers(self, request: RequestId) -> bool {
-        self == PhotoPage::Asking(request)
+    pub fn answers(&self, request: RequestId) -> bool {
+        *self == PhotoPage::Asking(request)
+    }
+
+    /// An explicit action (a step in the viewer) lets a failed page be asked
+    /// again.
+    pub fn retry(&mut self) {
+        if matches!(self, PhotoPage::Failed(_)) {
+            *self = PhotoPage::Idle;
+        }
     }
 }
 

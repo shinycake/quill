@@ -240,6 +240,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.fetch_topic_history()
     }
 
+    /// The Retry strip at an open topic's newer end.
+    pub fn retry_topic_newer(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if let (Some(chat_id), Some(topic)) =
+            (self.session.open_chat_id(), self.session.open_forum_topic())
+            && let Some(history) = self
+                .session
+                .threads
+                .topic_histories
+                .get_mut(&(chat_id.0, topic))
+        {
+            history.retry_newer();
+        }
+        self.fetch_topic_history_newer()
+    }
+
     /// The same Retry for a topic that has rows: its failed older page is
     /// asked for again.
     pub fn retry_topic_older(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
