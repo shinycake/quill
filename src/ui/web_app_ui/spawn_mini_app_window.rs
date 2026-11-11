@@ -146,9 +146,14 @@ impl QuillApp {
             return;
         };
         let launch_id = window.launch.launch_id;
+        let phone = window.phone.waiting_on();
         drop(window);
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.close_web_app(launch_id);
+            // The phone flow went with the window: nobody takes its answer.
+            if let Some(request) = phone {
+                live.driver.session.acks.forget(request);
+            }
             live.driver
                 .session
                 .bots
@@ -170,9 +175,13 @@ impl QuillApp {
         }
         let window = self.mini_apps.window.take()?;
         let launch_id = window.launch.launch_id;
+        let phone = window.phone.waiting_on();
         let gone = window.close_with_notice();
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.close_web_app(launch_id);
+            if let Some(request) = phone {
+                live.driver.session.acks.forget(request);
+            }
             live.driver
                 .session
                 .bots

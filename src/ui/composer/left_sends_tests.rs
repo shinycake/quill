@@ -13,6 +13,7 @@ fn send(request: u64) -> LeftSend {
             draft: DraftTopic::Chat.key(7),
         },
         markup: format!("text {request}"),
+        rich: true,
     }
 }
 

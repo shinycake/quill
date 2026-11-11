@@ -50,6 +50,8 @@ pub(in crate::ui) struct LeftSend {
     pub(in crate::ui) request: RequestId,
     pub(in crate::ui) slot: super::super::composer_sends::SendSlot,
     pub(in crate::ui) markup: String,
+    /// A rich send (it set the slot's draft clear), not an inline pick.
+    pub(in crate::ui) rich: bool,
 }
 
 /// The draft the last AI composer action was asked about.
@@ -88,18 +90,18 @@ impl QuillApp {
     /// The chat view in place is replaced while a rich send waits: the send
     /// goes on waiting on its own, off the view (`settle_left_sends`).
     pub(in crate::ui) fn leave_sent_text(&mut self, old: SentText) {
-        let (request, markup, slot) = match old {
+        let (request, markup, slot, rich) = match old {
             SentText::None => return,
             SentText::Sent {
                 request,
                 markup,
                 slot,
-            }
-            | SentText::InlinePick {
+            } => (request, markup, slot, true),
+            SentText::InlinePick {
                 request,
                 markup,
                 slot,
-            } => (request, markup, slot),
+            } => (request, markup, slot, false),
         };
         let Some(slot) = slot else {
             if let Some(live) = self.live.as_mut() {
@@ -111,6 +113,7 @@ impl QuillApp {
             request,
             slot,
             markup,
+            rich,
         });
         if let (Some(old), Some(live)) = (overflow, self.live.as_mut()) {
             live.driver.session.acks.forget(old.request);
@@ -145,6 +148,11 @@ impl QuillApp {
         for (send, answer) in answered {
             if matches!(answer, quill::state::Answer::Done) {
                 continue;
+            }
+            // The refused send never became a message: the ack of a later
+            // send of this chat must not clear the text given back here.
+            if send.rich {
+                self.composer_sends.set_draft_clear(&send.slot, None);
             }
             let chat_id = ChatId(send.slot.draft.chat_id);
             self.save_chat_draft(
