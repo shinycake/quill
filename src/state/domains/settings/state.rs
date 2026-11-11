@@ -242,9 +242,9 @@ pub struct SettingsState {
     /// Parity slice: `getSavedNotificationSounds` cache (titles / durations
     /// for the sound picker; `sound` files download on demand).
     ///
-    /// `Loading` with no request in flight means the list changed since
-    /// the last fetch (`updateSavedNotificationSounds`, an upload, a
-    /// removal): the driver refetches on the next ingest. A failed fetch
+    /// `Stale` means the list changed since the last fetch
+    /// (`updateSavedNotificationSounds`, an upload, a removal): the driver
+    /// refetches on the next ingest. A failed fetch
     /// waits for the next change.
     pub saved_sounds: Fetch<Vec<NotificationSound>>,
     /// "Upload Sound": the file in flight, or how it ended until the

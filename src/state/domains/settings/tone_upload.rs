@@ -10,16 +10,13 @@ impl Session {
     pub(crate) fn mark_saved_sounds_stale(&mut self) {
         self.requests
             .take_purpose(RequestPurpose::GetSavedNotificationSounds);
-        self.settings.saved_sounds.begin();
+        self.settings.saved_sounds.owe_refetch();
     }
 
     /// The saved-sound list is owed a fetch: it changed, and no request
-    /// for it is out.
+    /// for it is out (`Fetch::Stale`).
     pub fn saved_sounds_owed(&self) -> bool {
-        self.settings.saved_sounds.is_loading()
-            && !self
-                .requests
-                .has_purpose(RequestPurpose::GetSavedNotificationSounds)
+        self.settings.saved_sounds.is_stale()
     }
 
     /// `notificationSound`: the new sound joins the front of the list

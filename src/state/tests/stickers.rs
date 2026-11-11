@@ -236,8 +236,7 @@ fn a_sound_list_answer_older_than_the_stale_mark_is_dropped() {
         ),
     );
     assert!(
-        session.settings.saved_sounds.is_loading()
-            && session.settings.saved_sounds.data().is_none(),
+        session.settings.saved_sounds.is_stale() && session.settings.saved_sounds.data().is_none(),
         "the older answer must not clear the mark"
     );
     assert!(

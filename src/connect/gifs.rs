@@ -85,7 +85,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.cancel_gif_search_requests();
         self.session.stickers.gifs.search_mode = false;
         self.session.stickers.gifs.search.cancel();
-        self.session.stickers.gifs.saved.begin();
+        // The tab refetches whenever it shows.
+        self.session.stickers.gifs.saved.owe_refetch();
         self.maybe_refresh_saved_animations()
     }
 

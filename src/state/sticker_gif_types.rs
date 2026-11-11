@@ -219,8 +219,8 @@ pub struct StickerPanel {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GifPanel {
     pub open: bool,
-    /// The saved list: one value for its fetch. `Loading` with no request
-    /// in flight means a refetch is wanted (an `updateSavedAnimations`
+    /// The saved list: one value for its fetch. `Stale` means a refetch is
+    /// wanted (an `updateSavedAnimations`
     /// arrived, a save or remove took, the panel was reopened after a
     /// failure): the driver sends it once the panel is open. A failed
     /// fetch is not asked again until the panel is reopened.
@@ -287,7 +287,7 @@ impl GifPanel {
             self.saved,
             crate::state::fetch::Fetch::Ready(_) | crate::state::fetch::Fetch::Failed { .. }
         ) {
-            self.saved.begin();
+            self.saved.owe_refetch();
         }
     }
 }

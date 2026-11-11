@@ -18,6 +18,9 @@ pub enum Fetch<T> {
     Ready(T),
     /// The latest request failed; `stale` is the last answer, if any.
     Failed { error: String, stale: Option<T> },
+    /// The answer is out of date and a refetch is owed, but no request is
+    /// out yet; `stale` is the last answer, which shows meanwhile.
+    Stale { stale: Option<T> },
 }
 
 impl<T> Fetch<T> {
@@ -49,7 +52,9 @@ impl<T> Fetch<T> {
         match self {
             Self::Idle => None,
             Self::Ready(value) => Some(value),
-            Self::Loading { stale } | Self::Failed { stale, .. } => stale.as_ref(),
+            Self::Loading { stale } | Self::Failed { stale, .. } | Self::Stale { stale } => {
+                stale.as_ref()
+            }
         }
     }
 
@@ -57,7 +62,9 @@ impl<T> Fetch<T> {
         match self {
             Self::Idle => None,
             Self::Ready(value) => Some(value),
-            Self::Loading { stale } | Self::Failed { stale, .. } => stale.as_mut(),
+            Self::Loading { stale } | Self::Failed { stale, .. } | Self::Stale { stale } => {
+                stale.as_mut()
+            }
         }
     }
 
@@ -66,7 +73,7 @@ impl<T> Fetch<T> {
         match std::mem::take(self) {
             Self::Idle => None,
             Self::Ready(value) => Some(value),
-            Self::Loading { stale } | Self::Failed { stale, .. } => stale,
+            Self::Loading { stale } | Self::Failed { stale, .. } | Self::Stale { stale } => stale,
         }
     }
 
@@ -85,8 +92,30 @@ impl<T> Fetch<T> {
                 error,
                 stale: Some(make()),
             },
+            Self::Stale { .. } => Self::Stale {
+                stale: Some(make()),
+            },
             Self::Idle | Self::Ready(_) => Self::Ready(make()),
         };
+    }
+
+    /// The answer is out of date: a refetch is owed, whatever the state was
+    /// (a request in flight predates the change and is not waited for). The
+    /// last answer stays visible.
+    pub fn owe_refetch(&mut self) {
+        let stale = self.take_data();
+        *self = Self::Stale { stale };
+    }
+
+    /// A refetch is owed and no request is out for it.
+    pub fn is_stale(&self) -> bool {
+        matches!(self, Self::Stale { .. })
+    }
+
+    /// Whether a request should go out now: never asked, or a refetch is
+    /// owed. A request in flight, an answer and a failure wait.
+    pub fn wants_fetch(&self) -> bool {
+        matches!(self, Self::Idle | Self::Stale { .. })
     }
 
     /// A request goes out. The last answer stays visible, the last error is

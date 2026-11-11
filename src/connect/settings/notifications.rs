@@ -252,7 +252,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Asked when never asked, or owed again; a failed fetch waits for
         // the next change of the list.
         let saved = &self.session.settings.saved_sounds;
-        if !(saved.is_idle() || saved.is_loading())
+        if !saved.wants_fetch()
             || self
                 .session
                 .requests
@@ -282,7 +282,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn refresh_notification_sounds_if_stale(
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        // Owed again: loading with no request out.
+        // Owed again: stale, with no request out.
         if !self.session.saved_sounds_owed() {
             return Ok(None);
         }

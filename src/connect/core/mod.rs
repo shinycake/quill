@@ -861,11 +861,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.maybe_search_gifs(false)?;
         }
         if gif_mutation_ok || gif_saved_changed {
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::GetSavedAnimations),
-            );
+            // A list request out predates the change: its answer is not
+            // waited for, and the list is fetched again.
+            let dropped = self
+                .session
+                .requests
+                .take_purpose(RequestPurpose::GetSavedAnimations);
+            if dropped.is_some() {
+                self.session.stickers.gifs.saved.owe_refetch();
+            }
         }
         if installed_stickers_answer
             && self.session.stickers.stickers.suggest_waiting_for_sets

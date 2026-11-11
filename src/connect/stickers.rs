@@ -823,7 +823,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Wanted: never asked, or a refetch is owed. A failed fetch waits
         // for the panel to be reopened.
         let saved = &self.session.stickers.gifs.saved;
-        if !(saved.is_idle() || saved.is_loading()) {
+        if !saved.wants_fetch() {
             return Ok(None);
         }
         self.session.stickers.gifs.saved.begin();
