@@ -78,6 +78,7 @@ impl Frames {
             task,
         } = std::mem::take(self)
         {
+            // This task is the one running this call: detach lets it end, dropping would cancel it.
             task.detach();
             *self = Self::Done { width, frames };
         }

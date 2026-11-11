@@ -8,7 +8,7 @@ use super::video_editor::{VideoEditorDialog, next_editor_serial};
 use super::video_player::VideoPlayer;
 use gpui_kit::Task;
 use quill::lang::{keys, tr};
-use quill::video_edit::{VideoEdits, VideoSource};
+use quill::video_edit::{Crop, VideoEdits, VideoSource};
 use quill::video_timeline::Timeline;
 
 pub(super) enum EditorStage {
@@ -17,12 +17,12 @@ pub(super) enum EditorStage {
     Reading { serial: u64, probe: Task<()> },
     /// The probe found no video.
     Unreadable,
-    /// Read: the edits, the strip's selection, the looping player and its
-    /// pause, and the last failure's line. The range of `edits` is not
-    /// used: the timeline holds it (`VideoEditorDialog::edits`).
+    /// Read: the picture edits, the strip's selection (the one place the
+    /// kept range and the cover live), the looping player and its pause,
+    /// and the last failure's line.
     Ready {
         info: VideoSource,
-        edits: VideoEdits,
+        look: Look,
         timeline: Timeline,
         looping: Looping,
         note: Option<String>,
@@ -32,10 +32,46 @@ pub(super) enum EditorStage {
     /// to `Ready` with its line.
     Encoding {
         info: VideoSource,
-        edits: VideoEdits,
+        look: Look,
         timeline: Timeline,
         serial: u64,
     },
+}
+
+/// The edits that are not the kept range: quality, GIF, turns, flip and
+/// crop. The range and the cover are the timeline's, so they are not here.
+#[derive(Clone, Copy)]
+pub(super) struct Look {
+    pub quality: u32,
+    pub gif: bool,
+    pub turns: u8,
+    pub flipped: bool,
+    pub crop: Option<Crop>,
+}
+
+impl Look {
+    fn of(edits: VideoEdits) -> Self {
+        Self {
+            quality: edits.quality,
+            gif: edits.gif,
+            turns: edits.turns,
+            flipped: edits.flipped,
+            crop: edits.crop,
+        }
+    }
+
+    fn with_range(self, timeline: &Timeline) -> VideoEdits {
+        VideoEdits {
+            from_ms: timeline.from,
+            till_ms: timeline.till,
+            cover_ms: timeline.cover,
+            quality: self.quality,
+            gif: self.gif,
+            turns: self.turns,
+            flipped: self.flipped,
+            crop: self.crop,
+        }
+    }
 }
 
 /// The muted loop of the kept range: not playing here, playing, or held by
@@ -99,31 +135,22 @@ impl VideoEditorDialog {
         }
     }
 
-    /// The edits as they stand: the stored ones with the kept range and the
-    /// cover taken from the strip's selection. Before the video is read,
-    /// the whole of nothing.
+    /// The edits as they stand: the picture edits with the kept range and
+    /// the cover taken from the strip's selection. Before the video is
+    /// read, the whole of nothing.
     pub(super) fn edits(&self) -> VideoEdits {
         match &self.stage {
-            EditorStage::Ready {
-                edits, timeline, ..
-            }
-            | EditorStage::Encoding {
-                edits, timeline, ..
-            } => VideoEdits {
-                from_ms: timeline.from,
-                till_ms: timeline.till,
-                cover_ms: timeline.cover,
-                ..*edits
-            },
+            EditorStage::Ready { look, timeline, .. }
+            | EditorStage::Encoding { look, timeline, .. } => look.with_range(timeline),
             EditorStage::Reading { .. } | EditorStage::Unreadable => VideoEdits::full(0),
         }
     }
 
-    /// The edits to change (turns, flip, crop, quality, GIF); `None`
-    /// unless the editor is ready.
-    pub(super) fn edits_mut(&mut self) -> Option<&mut VideoEdits> {
+    /// The picture edits to change (turns, flip, crop, quality, GIF);
+    /// `None` unless the editor is ready (nothing edits while it encodes).
+    pub(super) fn edits_mut(&mut self) -> Option<&mut Look> {
         match &mut self.stage {
-            EditorStage::Ready { edits, .. } => Some(edits),
+            EditorStage::Ready { look, .. } => Some(look),
             _ => None,
         }
     }
@@ -234,6 +261,8 @@ impl VideoEditorDialog {
         if let EditorStage::Reading { probe, .. } =
             std::mem::replace(&mut self.stage, EditorStage::Unreadable)
         {
+            // Detach, not drop: dropping would cancel the task that is
+            // running this very call.
             probe.detach();
         }
     }
@@ -247,7 +276,7 @@ impl VideoEditorDialog {
     ) {
         self.stage = EditorStage::Ready {
             info,
-            edits,
+            look: Look::of(edits),
             timeline,
             looping: Looping::Off,
             note: None,
@@ -259,7 +288,7 @@ impl VideoEditorDialog {
     pub(super) fn begin_encode(&mut self) -> Option<(VideoSource, u64)> {
         let EditorStage::Ready {
             info,
-            edits,
+            look,
             timeline,
             ..
         } = self.stage
@@ -269,7 +298,7 @@ impl VideoEditorDialog {
         let serial = next_editor_serial();
         self.stage = EditorStage::Encoding {
             info,
-            edits,
+            look,
             timeline,
             serial,
         };
@@ -281,14 +310,14 @@ impl VideoEditorDialog {
     pub(super) fn encode_failed(&mut self, line: String) {
         if let EditorStage::Encoding {
             info,
-            edits,
+            look,
             timeline,
             ..
         } = self.stage
         {
             self.stage = EditorStage::Ready {
                 info,
-                edits,
+                look,
                 timeline,
                 looping: Looping::Off,
                 note: Some(line),
@@ -303,5 +332,46 @@ impl VideoEditorDialog {
         if let EditorStage::Reading { serial, .. } = &mut self.stage {
             *serial = next_editor_serial();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The range and the cover come from the timeline alone; the picture
+    /// edits survive the round trip through `Look`.
+    #[test]
+    fn the_range_is_the_timelines_and_the_rest_is_the_looks() {
+        let edits = VideoEdits {
+            quality: 480,
+            gif: true,
+            turns: 3,
+            flipped: true,
+            crop: Some(Crop::FULL),
+            ..VideoEdits::full(10_000)
+        };
+        let timeline = Timeline::new(10_000, 10_000, 0, &edits);
+        let moved = Timeline {
+            from: 1_000,
+            till: 4_000,
+            cover: 2_000,
+            ..timeline
+        };
+        let whole = Look::of(edits).with_range(&moved);
+        assert_eq!(
+            (whole.from_ms, whole.till_ms, whole.cover_ms),
+            (1_000, 4_000, 2_000)
+        );
+        assert_eq!(
+            (
+                whole.quality,
+                whole.gif,
+                whole.turns,
+                whole.flipped,
+                whole.crop
+            ),
+            (480, true, 3, true, Some(Crop::FULL))
+        );
     }
 }

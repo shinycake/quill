@@ -180,7 +180,10 @@ impl QuillApp {
     }
 
     /// Forget the one-time notice and any half-finished recovery step.
-    fn twofa_forget_flow(&mut self) {
+    /// Every path that drops the box runs this: `twofa_close`, and
+    /// `replace_screen` for the ones that drop the whole `TwoStepUi` (account
+    /// switch, logout, a connection replacing the client).
+    pub(in crate::ui) fn twofa_forget_flow(&mut self) {
         if let Some(flow) = self.twofa_flow_mut() {
             flow.notice = None;
             flow.code_wait = quill::state::CodeWait::None;

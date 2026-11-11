@@ -296,6 +296,7 @@ impl StoryTick {
     /// itself from inside.
     pub(super) fn finish(&mut self) {
         if let Self::Running(task) = std::mem::replace(self, Self::Off) {
+            // This task is the one running this call: detach lets it end, dropping would cancel it.
             task.detach();
         }
     }
@@ -450,6 +451,7 @@ impl StoryUi {
             None => self.media_saves.remove(&key),
         };
         if let Some(MediaSave::Saving(task)) = old {
+            // This task is the one running this call: detach lets it end, dropping would cancel it.
             task.detach();
         }
     }

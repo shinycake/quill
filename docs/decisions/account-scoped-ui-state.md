@@ -8062,12 +8062,12 @@ posts, toasts, threads, userpic clips, vanish and the video editor.
 | 13-052 | `ThreadView::asker` replaces `ChatWindows::thread_asker`: the window that asked lives on the thread, is set by `open_thread_for` and ends with it. A retry keeps the asker. |
 | 13-053 | `advance_thread` drops the jump-to-root goal when the older end failed. |
 | 13-058, 13-059 | `ToastQueue::pointer` is gone (the hover is the visible toast's `Timer::Paused`, handed to the next toast by `dismiss`); the wake-up is `Wake::Scheduled{deadline, task}` held in the queue, so a click, a hover or an empty queue cancels it. |
-| 14-064 | The 2FA box stage and the account's recovery flow move together only from `twofa_open`, `twofa_close`, `goto_twofa_view` and `twofa_step_done` (`twofa_state.rs`); the stage setters are private. |
+| 14-064 | The session's recovery flow (`TwofaFlow`: the emailed code a step awaits, the finished step's notice) is written by the core's answers, so it stays the session's; the box only ever forgets it. Every path that drops the box runs `twofa_forget_flow`: `twofa_close` for the box's own close, `replace_screen` (account switch, logout, a replacing connection: the whole `TwoStepUi` is dropped, `Farewell` for it is empty) for the rest. `twofa_open` also starts clean. Test: `replacing_the_screen_forgets_a_half_finished_recovery_step`. |
 | 14-039 | A clip whose file entry is not known yet downloads (`should_download` handles the unknown file). |
 | 14-006 | `failed` remembers the file a clip failed on; a different file gets another try. |
 | 14-019 | `begin_vanish` skips a message that already has a ghost. |
 | 14-052 | `main_window_media_left` (hide, minimize, lock) drops the cover player and holds the main window's userpic clips. |
-| 14-056, 14-069 | The edits live in `EditorStage::Ready` and travel into `Encoding`; `edits()` takes the range and cover from the timeline, `edits_mut()` is `None` while encoding, so nothing edits during an encode. |
+| 14-056, 14-069 | `Ready` and `Encoding` hold a `Look` (quality, GIF, turns, flip, crop) beside the timeline; the kept range and cover exist only in the timeline, and `edits()` builds the `VideoEdits` from both, so no stale range can be read. `edits_mut()` returns the `Look` and is `None` while encoding, so nothing edits during an encode. The `Task::detach()` calls of the finishing task (`toast_queue`, `stories_state`, `video_editor_timeline/frames`, `end_reading`) carry a comment saying why. |
 | 14-057 | `CoverFrame{at_ms, path, still}` is replaced whole by each cut; a cut whose picture will not decode clears the still. |
 | 14-058, 14-070 | `Looping { Off, Playing, PausedByUser }` with the playhead is in `Ready`; `user_paused` and `playback_ms` are gone. The probe's task is held by `Reading`. |
 | 14-009, 14-047 | `Drag { Idle, Strip, Pressed, Dragging, Quality }` is the one live pointer drag; `QualityPointer`, `StagePress::moved` and the separate strip/press fields are gone. |

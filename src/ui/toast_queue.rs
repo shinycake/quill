@@ -176,6 +176,7 @@ impl ToastQueue {
         if let Wake::Scheduled { task, .. } = std::mem::take(&mut self.wake)
             && let Ok(task) = Rc::try_unwrap(task)
         {
+            // This task is the one running this call: detach lets it end, dropping would cancel it.
             task.detach();
         }
     }
