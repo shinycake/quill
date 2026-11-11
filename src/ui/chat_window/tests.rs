@@ -654,8 +654,8 @@ fn toast_shown(h: &Harness, chat: Option<ChatId>, cx: &mut TestAppContext) -> bo
         Some(chat) => app
             .windows
             .slot_for(chat)
-            .is_some_and(|slot| slot.borrow().viewer.extra.saved_toast.is_some()),
-        None => app.viewer.extra.saved_toast.is_some(),
+            .is_some_and(|slot| slot.borrow().viewer.extra.saved_toast.is_shown()),
+        None => app.viewer.extra.saved_toast.is_shown(),
     })
 }
 

@@ -227,9 +227,11 @@ pub(in crate::ui) fn begin_main_frame(window: &mut Window, draw: WindowDraw, cx:
     }
 }
 
-/// Marks an app whose sweeper runs; holds its watch on windows closing.
+/// Marks an app whose sweeper runs; holds its watch on windows closing and
+/// the sweeper task itself, so both end with the app.
 struct Sweeper {
     _closed: Subscription,
+    _task: Task<()>,
 }
 
 impl Global for Sweeper {}
@@ -247,16 +249,18 @@ pub(in crate::ui) fn start_sweeper(cx: &mut App) {
     MAIN.set(None);
     with_cell(&SEEN, HashMap::clear);
     let closed = cx.on_window_closed(|_, _| wake());
-    cx.set_global(Sweeper { _closed: closed });
     // Armed now, not when the task first runs: a wake before then counts.
     let mut woken = arm();
-    cx.spawn(async move |cx| {
+    let task = cx.spawn(async move |cx| {
         while woken.await.is_ok() {
             cx.update(|cx| sweep(None, cx));
             woken = arm();
         }
-    })
-    .detach();
+    });
+    cx.set_global(Sweeper {
+        _closed: closed,
+        _task: task,
+    });
 }
 
 /// How long a sweep that met a window mid-draw waits before trying again.

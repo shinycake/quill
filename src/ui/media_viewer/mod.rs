@@ -77,10 +77,8 @@ pub(super) struct ViewerExtra {
     pub shared_seen: usize,
     /// Video full screen, kept in step with the window (`fullscreen`).
     pub(in crate::ui) video_fullscreen: fullscreen::VideoFullscreen,
-    /// The "saved to your Downloads folder" toast and its generation (a
-    /// newer save restarts the hide timer).
-    pub saved_toast: Option<quill::viewer_extras::SavedToast>,
-    pub saved_toast_gen: u64,
+    /// The "saved to your Downloads folder" toast, with its hide timer.
+    pub saved_toast: SavedToastStage,
     /// Turns of videos rotated in this run, by `(chat, message)`.
     pub rotations: HashMap<(i64, i64), u8>,
     /// The width the last frame laid the thumbnail strip out in, which
@@ -90,6 +88,40 @@ pub(super) struct ViewerExtra {
     strip_asked: Vec<quill::ids::FileId>,
     /// The caption's collapsed / expanded state.
     pub(in crate::ui) caption: caption::ViewerCaption,
+}
+
+/// The viewer's "saved" toast: none, or shown with the timer that hides it.
+/// A newer save replaces the stage, which drops the older timer.
+#[derive(Default)]
+pub(in crate::ui) enum SavedToastStage {
+    #[default]
+    None,
+    Shown {
+        toast: quill::viewer_extras::SavedToast,
+        _hide: Task<()>,
+    },
+}
+
+impl SavedToastStage {
+    pub(in crate::ui) fn toast(&self) -> Option<&quill::viewer_extras::SavedToast> {
+        match self {
+            Self::Shown { toast, .. } => Some(toast),
+            Self::None => None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(in crate::ui) fn is_shown(&self) -> bool {
+        self.toast().is_some()
+    }
+
+    /// The toast goes (and its timer with it).
+    pub(in crate::ui) fn take(&mut self) -> Option<quill::viewer_extras::SavedToast> {
+        match std::mem::take(self) {
+            Self::Shown { toast, .. } => Some(toast),
+            Self::None => None,
+        }
+    }
 }
 
 impl ViewerExtra {

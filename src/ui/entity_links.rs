@@ -410,14 +410,6 @@ impl QuillApp {
         self.note_right_press(position, Some(link), None, cx);
     }
 
-    /// The link under the right-click that opened a menu at `position`.
-    pub(super) fn take_right_clicked_link(
-        &mut self,
-        position: Point<Pixels>,
-    ) -> Option<LinkTarget> {
-        self.take_right_press(position).0
-    }
-
     /// Note what a right-press is over. Notes of one press (a link inside a
     /// task) share the slot; a press elsewhere replaces it.
     pub(super) fn note_right_press(

@@ -226,21 +226,19 @@ impl QuillApp {
             quill::media_viewer::downloads_dir().as_deref(),
             video,
         );
-        self.viewer.extra.saved_toast = Some(quill::viewer_extras::SavedToast { dest, text });
-        self.viewer.extra.saved_toast_gen += 1;
-        let generation = self.viewer.extra.saved_toast_gen;
-        self.spawn_scoped(cx, async move |this, cx| {
+        let hide = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(quill::viewer_extras::SAVED_TOAST_MS))
                 .await;
             let _ = this.update(cx, |this, cx| {
-                if this.viewer.extra.saved_toast_gen == generation {
-                    this.viewer.extra.saved_toast = None;
-                    cx.notify();
-                }
+                this.viewer.extra.saved_toast.take();
+                cx.notify();
             });
-        })
-        .detach();
+        });
+        self.viewer.extra.saved_toast = super::SavedToastStage::Shown {
+            toast: quill::viewer_extras::SavedToast { dest, text },
+            _hide: hide,
+        };
         cx.notify();
     }
 

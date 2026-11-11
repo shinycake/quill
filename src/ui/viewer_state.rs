@@ -167,7 +167,7 @@ impl ViewerUi {
             controls: _,
         } = self;
         *pending_seek = None;
-        extra.saved_toast = None;
+        extra.saved_toast.take();
         extra.caption = Default::default();
         *over_controls = false;
     }
