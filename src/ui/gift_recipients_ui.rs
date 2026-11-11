@@ -134,7 +134,12 @@ fn recipient_sections(session: &Session, query: &str) -> Vec<Section> {
             })
             .collect()
     };
-    let contacts = session.users_state.contacts.as_deref().unwrap_or_default();
+    let contacts = session
+        .users_state
+        .contacts
+        .data()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
     let people = People {
         me: session.my_user_id,
         birthdays: &session.chat_list.suggestions.close_birthdays,

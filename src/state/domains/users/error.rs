@@ -73,10 +73,14 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetProfilePhotoEmojiIcons) => {
-                self.users_state.profile_photo_emoji_icons_failed = true;
+                self.users_state
+                    .profile_photo_emoji_icons
+                    .fail("The emoji request failed.");
             }
             Some(RequestPurpose::GetChatPhotoEmojiIcons) => {
-                self.users_state.chat_photo_emoji_icons_failed = true;
+                self.users_state
+                    .chat_photo_emoji_icons
+                    .fail("The emoji request failed.");
             }
             Some(RequestPurpose::GetProfileShareThemeBackdrops) => {
                 self.users_state.peer_qr.backdrops.fail();
@@ -98,7 +102,9 @@ impl Session {
                 self.users_state.peer_qr.fail_link(free, error_reason(err));
             }
             Some(RequestPurpose::GetBackgroundEmojiIcons) => {
-                self.users_state.background_emoji_icons_failed = true;
+                self.users_state
+                    .background_emoji_icons
+                    .fail("The emoji request failed.");
             }
             // B10: profile panel fetches keep the reason for a Retry row;
             // refused edits surface as a toast.
@@ -170,10 +176,11 @@ impl Session {
             }
             Some(RequestPurpose::AddContactByPhone) => {
                 let id = pending.map(|p| p.id);
-                if id.is_some() && self.users_state.new_contact_request == id {
-                    self.users_state.new_contact_request = None;
-                    self.users_state.new_contact_outcome =
-                        pending.map(|p| (p.id, NewContactOutcome::Failed(err.code)));
+                if let Some(id) = id
+                    && self.users_state.new_contact.sending() == Some(id)
+                {
+                    self.users_state.new_contact =
+                        NewContact::Done(id, NewContactOutcome::Failed(err.code));
                 }
             }
             Some(RequestPurpose::ClearImportedContacts) => {
@@ -187,7 +194,9 @@ impl Session {
         // Phase 6: a failed `getContacts` surfaces a retry in the
         // contacts tab instead of a stuck spinner.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetContacts) {
-            self.users_state.contacts_error = true;
+            self.users_state
+                .contacts
+                .fail("The contacts request failed.");
         }
     }
 }

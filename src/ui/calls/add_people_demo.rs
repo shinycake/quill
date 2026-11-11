@@ -131,7 +131,7 @@ fn seed_people(
     }
     let mut contacts = vec![PEER];
     contacts.extend(CONTACTS.iter().map(|(id, ..)| *id));
-    session.users_state.contacts = Some(contacts);
+    session.users_state.contacts.succeed(contacts);
     if !query.trim().is_empty() {
         let search = &mut session.calls.add_people_search;
         search.begin(query, RequestId(1), RequestId(2));

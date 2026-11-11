@@ -118,7 +118,7 @@ impl QuillApp {
         let outcome = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.users_state.new_contact_outcome.take())
+            .and_then(|live| live.driver.session.users_state.new_contact.take_outcome())
             .filter(|(request, _)| Some(*request) == sent)
             .map(|(_, outcome)| outcome);
         // Answered: Create may send again (after "not joined" or a failure).

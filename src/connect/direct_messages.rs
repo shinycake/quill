@@ -57,13 +57,11 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// monoforum it lists).
     pub(crate) fn maybe_preload_direct_topics(&mut self, chat_id: ChatId) {
         if !self.session.is_direct_messages_admin(chat_id)
-            || self.session.threads.direct.requested.contains(&chat_id.0)
+            || self.session.threads.direct.preloaded(chat_id.0)
         {
             return;
         }
-        if matches!(self.load_more_direct_topics(chat_id), Ok(Some(_))) {
-            self.session.threads.direct.requested.insert(chat_id.0);
-        }
+        let _ = self.load_more_direct_topics(chat_id);
     }
 
     /// The next page of conversations (the tabs scrolled to their end).
@@ -75,14 +73,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::LoadDirectMessagesChatTopics;
-        if self.session.threads.direct.exhausted.contains(&chat_id.0)
+        if self.session.threads.direct.exhausted(chat_id.0)
             || self.session.requests.has_purpose_for_chat(purpose, chat_id)
         {
             return Ok(None);
         }
         let extra = self.session.request(purpose, Some(chat_id));
         let json = load_direct_messages_chat_topics(extra, chat_id, DIRECT_TOPICS_PAGE);
-        self.send_json_request(extra, &json).map(Some)
+        let sent = self.send_json_request(extra, &json).map(Some);
+        if sent.is_ok() {
+            self.session.threads.direct.page_asked(chat_id.0);
+        }
+        sent
     }
 
     /// Show one conversation (or All) and load its first page.

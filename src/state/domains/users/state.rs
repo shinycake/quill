@@ -1,6 +1,7 @@
 //! Users: contacts, profiles, profile photos, secret chats and the info panel: the `users` domain's share of `Session`.
 //! Added to by features in this domain only; `Session::new` builds it
 //! with `new`.
+use crate::state::fetch::Fetch;
 use crate::state::*;
 
 pub struct UsersState {
@@ -26,11 +27,10 @@ pub struct UsersState {
     /// A group or channel's photo history, by chat id. Dropped on
     /// `updateChatPhoto`.
     pub chat_photo_history: HashMap<i64, ChatPhotosFetch>,
-    /// Phase 6: `getContacts` result — user ids, in server order. `None`
-    /// until the first `users` response; `contacts_error` records a failed
-    /// fetch so the UI can offer a retry.
-    pub contacts: Option<Vec<i64>>,
-    pub contacts_error: bool,
+    /// Phase 6: `getContacts` result — user ids, in server order. Idle
+    /// until asked, `Failed` after a failed fetch so the UI can offer a
+    /// retry.
+    pub contacts: Fetch<Vec<i64>>,
     /// Slice A6: outcome line for contacts mutations (`removeContacts`,
     /// `importContacts`, `clearImportedContacts`) — set on ok and on
     /// error, cleared by the next mutation; shown in the contacts
@@ -76,23 +76,17 @@ pub struct UsersState {
     pub peer_color_error: Option<String>,
     /// `getDefaultBackgroundCustomEmojiStickers` answer: the custom emoji
     /// the color editor offers as reply and profile icons.
-    pub background_emoji_icons: Vec<StickerItem>,
-    /// The icon request failed; the editor shows a retry hint.
-    pub background_emoji_icons_failed: bool,
+    /// A failed request shows a retry hint in the editor.
+    pub background_emoji_icons: Fetch<Vec<StickerItem>>,
     /// `getDefaultProfilePhotoCustomEmojiStickers` answer: the emoji the
     /// avatar builder offers.
-    pub profile_photo_emoji_icons: Vec<StickerItem>,
-    /// The builder request failed.
-    pub profile_photo_emoji_icons_failed: bool,
+    pub profile_photo_emoji_icons: Fetch<Vec<StickerItem>>,
     /// `getDefaultChatPhotoCustomEmojiStickers` answer: the emoji the
     /// builder offers for a group or channel photo.
-    pub chat_photo_emoji_icons: Vec<StickerItem>,
-    pub chat_photo_emoji_icons_failed: bool,
+    pub chat_photo_emoji_icons: Fetch<Vec<StickerItem>>,
     /// Gifts with wearable colors (`getReceivedGifts` with
     /// `exclude_without_colors`), for the color editor.
-    pub wearable_gifts: Vec<crate::premium_hub::ReceivedGift>,
-    /// The wearable gifts request answered or failed.
-    pub wearable_gifts_loaded: bool,
+    pub wearable_gifts: Fetch<Vec<crate::premium_hub::ReceivedGift>>,
     /// Phase B1: secret-chat records keyed by `secret_chat_id`
     /// (`updateSecretChat` / `getSecretChat` answers). Kept at the
     /// session level because `updateSecretChat` is guaranteed to arrive
@@ -109,19 +103,59 @@ pub struct UsersState {
     /// the `getSupportUser` answer (Settings > Ask a Question) or a
     /// contact just created by phone (New Contact).
     pub user_chat_to_open: Option<i64>,
-    /// The answer to the New Contact box's `importContacts`, taken by the
-    /// box: tdesktop's `AddContactBox::save` opens the chat when the phone
-    /// belongs to a Telegram user and otherwise shows "not joined". Keyed by
-    /// the import it answers: only the box that sent it applies it.
-    pub new_contact_outcome: Option<(RequestId, NewContactOutcome)>,
-    /// The `importContacts` the open New Contact box waits for. Closing the
-    /// box forgets it: its answer then opens no chat, and the next box's
-    /// Create is sent instead of waiting for it.
-    pub new_contact_request: Option<RequestId>,
+    /// The New Contact box's `importContacts`: the request it waits for,
+    /// then its answer (taken by the box), keyed by the import it answers
+    /// so only the box that sent it applies it. Closing the box forgets
+    /// it: the answer then opens no chat, and the next box's Create is sent
+    /// instead of waiting for it.
+    pub new_contact: NewContact,
     /// Phase 6: the open user / supergroup info panel, if any.
     pub open_info_panel: Option<InfoPanelTarget>,
     /// The QR box's backdrops, contact link and free-code answers.
     pub peer_qr: crate::peer_qr::session::PeerQrData,
+}
+
+/// The New Contact box's import, from Create to its taken answer.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum NewContact {
+    /// No box waits for an import.
+    #[default]
+    Closed,
+    /// `importContacts` `RequestId` is out.
+    Sending(RequestId),
+    /// The import answered; the box takes it. tdesktop's
+    /// `AddContactBox::save` opens the chat when the phone belongs to a
+    /// Telegram user and otherwise shows "not joined".
+    Done(RequestId, NewContactOutcome),
+}
+
+impl NewContact {
+    /// The import in flight.
+    pub fn sending(&self) -> Option<RequestId> {
+        match self {
+            Self::Sending(request) => Some(*request),
+            _ => None,
+        }
+    }
+
+    /// The answer waiting to be taken.
+    pub fn outcome(&self) -> Option<&NewContactOutcome> {
+        match self {
+            Self::Done(_, outcome) => Some(outcome),
+            _ => None,
+        }
+    }
+
+    /// Take the answer; the stage is closed.
+    pub fn take_outcome(&mut self) -> Option<(RequestId, NewContactOutcome)> {
+        match std::mem::take(self) {
+            Self::Done(request, outcome) => Some((request, outcome)),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
 }
 
 /// How the New Contact box's import ended.
@@ -136,6 +170,32 @@ pub enum NewContactOutcome {
 }
 
 impl UsersState {
+    /// The reply and profile icons the color editor offers.
+    pub fn background_icons(&self) -> &[StickerItem] {
+        self.background_emoji_icons
+            .data()
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// The emoji the avatar builder offers.
+    pub fn profile_photo_icons(&self) -> &[StickerItem] {
+        self.profile_photo_emoji_icons
+            .data()
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// The emoji the group or channel photo builder offers.
+    pub fn chat_photo_icons(&self) -> &[StickerItem] {
+        self.chat_photo_emoji_icons
+            .data()
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// The gifts whose colors can be worn.
+    pub fn wearable_gift_list(&self) -> &[crate::premium_hub::ReceivedGift] {
+        self.wearable_gifts.data().map_or(&[], Vec::as_slice)
+    }
+
     /// Fold the options this domain reads (`bio_length_max`).
     pub(crate) fn apply_option(
         &mut self,
@@ -165,8 +225,7 @@ impl UsersState {
             user_profile_photos: HashMap::new(),
             chat_current_photos: HashMap::new(),
             chat_photo_history: HashMap::new(),
-            contacts: None,
-            contacts_error: false,
+            contacts: Fetch::Idle,
             contacts_notice: None,
             replies_block: None,
             replies_blocked: Vec::new(),
@@ -178,19 +237,14 @@ impl UsersState {
             bio_length_max: 70,
             profile_edit_error: None,
             peer_color_error: None,
-            background_emoji_icons: Vec::new(),
-            background_emoji_icons_failed: false,
-            profile_photo_emoji_icons: Vec::new(),
-            profile_photo_emoji_icons_failed: false,
-            chat_photo_emoji_icons: Vec::new(),
-            chat_photo_emoji_icons_failed: false,
-            wearable_gifts: Vec::new(),
-            wearable_gifts_loaded: false,
+            background_emoji_icons: Fetch::Idle,
+            profile_photo_emoji_icons: Fetch::Idle,
+            chat_photo_emoji_icons: Fetch::Idle,
+            wearable_gifts: Fetch::Idle,
             secret_chat_states: HashMap::new(),
             secret_chat_fetch_queue: Vec::new(),
             user_chat_to_open: None,
-            new_contact_outcome: None,
-            new_contact_request: None,
+            new_contact: NewContact::Closed,
             open_info_panel: None,
             peer_qr: crate::peer_qr::session::PeerQrData::default(),
         }

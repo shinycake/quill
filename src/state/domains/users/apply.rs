@@ -55,8 +55,8 @@ impl Session {
                 } else if self.apply_web_app_users(&user_ids, pending) {
                     // Apps tab: `getGrossingWebAppBots`.
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetContacts) {
-                    self.users_state.contacts = Some(user_ids);
-                    self.users_state.contacts_error = false;
+                    self.users_state.contacts.succeed(user_ids);
+                    self.users_state.contacts.clear_error();
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCloseFriends) {
                     // B14: `getCloseFriends` answer.
                     self.stories.close_friends = CloseFriendsList::Ready(user_ids);
@@ -253,14 +253,15 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::AddContactByPhone) {
                     // tdesktop `AddContactBox::save`: a user id means the
                     // phone is on Telegram (open the chat), 0 means not.
-                    self.users_state.contacts = None;
-                    self.users_state.contacts_error = false;
+                    self.users_state.contacts = Default::default();
+                    self.users_state.contacts.clear_error();
                     // A box closed before its answer opens nothing.
-                    let id = pending.map(|p| p.id);
-                    if id.is_none() || self.users_state.new_contact_request != id {
+                    let Some(id) = pending.map(|p| p.id) else {
+                        return;
+                    };
+                    if self.users_state.new_contact.sending() != Some(id) {
                         return;
                     }
-                    self.users_state.new_contact_request = None;
                     let user_id = user_ids.first().copied().unwrap_or_default();
                     let outcome = if user_id != 0 {
                         self.users_state.user_chat_to_open = Some(user_id);
@@ -268,10 +269,10 @@ impl Session {
                     } else {
                         NewContactOutcome::NotJoined
                     };
-                    self.users_state.new_contact_outcome = pending.map(|p| (p.id, outcome));
+                    self.users_state.new_contact = NewContact::Done(id, outcome);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::ImportContacts) {
-                    self.users_state.contacts = None;
-                    self.users_state.contacts_error = false;
+                    self.users_state.contacts = Default::default();
+                    self.users_state.contacts.clear_error();
                     self.users_state.contacts_notice = Some("Contacts imported.".to_string());
                 }
             }

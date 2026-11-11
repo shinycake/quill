@@ -343,8 +343,9 @@ fn a_failed_category_strip_is_asked_again_when_the_panel_opens_again() {
 fn creating_a_forum_topic_lets_the_chat_list_row_ask_for_its_topics_again() {
     let mut rig = Rig::new();
     let threads = &mut rig.driver.session.threads;
-    threads.forum_row_asked.insert(7);
-    threads.forum_topics_failed.insert(7);
+    threads
+        .forum_row
+        .insert(7, crate::state::ForumRowLoad::Failed);
     let created = rig.driver.session.request(
         crate::state::RequestPurpose::CreateForumTopic,
         Some(ChatId(7)),
@@ -354,8 +355,8 @@ fn creating_a_forum_topic_lets_the_chat_list_row_ask_for_its_topics_again() {
         created.0
     ));
     let threads = &rig.driver.session.threads;
-    assert!(!threads.forum_row_asked.contains(&7));
-    assert!(!threads.forum_topics_failed.contains(&7));
+    assert!(!threads.forum_row_asked(7));
+    assert!(!threads.forum_topics_failed(7));
 }
 
 #[test]

@@ -395,7 +395,7 @@ impl QuillApp {
                 .emoji
                 .custom_emoji_stickers
                 .iter()
-                .chain(s.users_state.background_emoji_icons.iter())
+                .chain(s.users_state.background_icons().iter())
                 .find(|sticker| sticker.custom_emoji_id == Some(custom_emoji_id))
         });
         let Some(sticker) = sticker else {
@@ -734,7 +734,7 @@ impl QuillApp {
         };
         let icon_ids: Vec<i64> = session
             .users_state
-            .background_emoji_icons
+            .background_icons()
             .iter()
             .filter_map(|sticker| sticker.custom_emoji_id)
             .collect();

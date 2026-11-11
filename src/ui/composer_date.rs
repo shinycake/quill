@@ -257,7 +257,10 @@ pub(super) fn demo_contacts(
             session.apply(owned);
         }
     }
-    session.users_state.contacts = Some(people.iter().map(|(id, _, _)| *id).collect());
+    session
+        .users_state
+        .contacts
+        .succeed(people.iter().map(|(id, _, _)| *id).collect());
 }
 
 #[cfg(test)]

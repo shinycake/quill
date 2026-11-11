@@ -52,7 +52,9 @@ impl Session {
                             topic,
                         );
                     }
-                    self.threads.forum_topics_failed.remove(&chat_id.0);
+                    self.threads
+                        .forum_row
+                        .insert(chat_id.0, ForumRowLoad::Asked);
                     self.threads.forum_topics.insert(chat_id.0, topics);
                 }
             }
@@ -63,8 +65,7 @@ impl Session {
                     self.threads.forum_topics.remove(&chat_id);
                     // The chat list's row asks for the list again: it
                     // would read "Loading..." for good otherwise.
-                    self.threads.forum_row_asked.remove(&chat_id);
-                    self.threads.forum_topics_failed.remove(&chat_id);
+                    self.threads.forum_row.remove(&chat_id);
                 }
                 // The new thread joins the tabs now, so the view can open
                 // it before any refetch.

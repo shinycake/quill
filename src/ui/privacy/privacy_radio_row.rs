@@ -410,7 +410,7 @@ impl QuillApp {
     /// coming, they could not be loaded (with Retry), or all are used.
     pub(super) fn empty_contact_picker_note(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
-        let failed = session.is_some_and(|s| s.users_state.contacts_error);
+        let failed = session.is_some_and(|s| s.users_state.contacts.error().is_some());
         let loading = session.is_some_and(|s| !s.contacts_settled());
         let muted = cx.theme().muted_foreground;
         let line = |text: &'static str| div().text_xs().text_color(muted).px_2().child(text);

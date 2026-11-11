@@ -924,8 +924,8 @@ impl Session {
         let mut rows: Vec<ContactRow> = self
             .users_state
             .contacts
-            .as_deref()
-            .unwrap_or(&[])
+            .data()
+            .map_or(&[][..], Vec::as_slice)
             .iter()
             .filter_map(|id| self.users.get(id))
             .map(|user| ContactRow {
@@ -949,7 +949,7 @@ impl Session {
     /// Phase 6: `true` once a `users` answer (or a failed attempt) settled —
     /// the contacts tab shows rows, an error, or a loading state.
     pub fn contacts_settled(&self) -> bool {
-        self.users_state.contacts.is_some() || self.users_state.contacts_error
+        self.users_state.contacts.data().is_some() || self.users_state.contacts.error().is_some()
     }
 }
 

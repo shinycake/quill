@@ -378,7 +378,7 @@ fn forums_in_a_list_load_their_topics_when_they_appear() {
     let fetches = sent(&recorder, "getForumTopics");
     assert_eq!(fetches.len(), 1);
     assert_eq!(fetches[0]["chat_id"], id(61));
-    assert!(driver.session.threads.forum_row_asked.contains(&id(61)));
+    assert!(driver.session.threads.forum_row_asked(id(61)));
     // A repeated update does not ask again.
     ingest(&mut driver, &forum(61));
     assert_eq!(sent(&recorder, "getForumTopics").len(), 1);
@@ -390,7 +390,7 @@ fn forums_in_a_list_load_their_topics_when_they_appear() {
             fetches[0]["@extra"].as_str().unwrap()
         ),
     );
-    assert!(driver.session.threads.forum_topics_failed.contains(&id(61)));
+    assert!(driver.session.threads.forum_topics_failed(id(61)));
     ingest(&mut driver, &forum(61));
     assert_eq!(sent(&recorder, "getForumTopics").len(), 1);
     // A forum that is in no chat list is not preloaded; once it enters one it is.
@@ -410,7 +410,7 @@ fn forums_in_a_list_load_their_topics_when_they_appear() {
     ingest(&mut driver, &chat(62, true));
     ingest(&mut driver, &forum(62));
     assert_eq!(sent(&recorder, "getForumTopics").len(), 2);
-    assert!(!driver.session.threads.forum_row_asked.contains(&id(62)));
+    assert!(!driver.session.threads.forum_row_asked(id(62)));
     driver.session.auth = AuthorizationState::Ready;
     driver.preload_known_forums();
     assert_eq!(sent(&recorder, "getForumTopics").len(), 3);
