@@ -31,12 +31,12 @@ impl QuillApp {
         match mode.as_str() {
             "quiz" => dialog.set_quiz(true),
             "channel" => {
-                dialog.limit_by_country = true;
-                dialog.country_codes = vec!["US".into(), "GB".into()];
+                dialog.set_limit_by_country(true);
+                dialog.set_country_codes(vec!["US".into(), "GB".into()]);
             }
             _ => {
-                dialog.limit_duration = true;
-                dialog.close = PollClose::Period(8 * 3600);
+                dialog.set_limit_duration(true);
+                dialog.set_close(PollClose::Period(8 * 3600));
             }
         }
         if mode == "deadline" {

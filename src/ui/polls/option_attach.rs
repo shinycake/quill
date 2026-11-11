@@ -8,6 +8,7 @@
 
 use super::super::app::QuillApp;
 use super::super::composer_field::emoji_token;
+use super::super::dialogs::poll::ReadId;
 use super::super::dialogs::{AttachMode, OptionAttach, OptionMediaSlot};
 use super::super::media_panel::PanelTab;
 use crate::ui::status_note::StatusNote;
@@ -45,7 +46,13 @@ impl AttachTarget {
 impl QuillApp {
     fn attach_ref(&self, target: AttachTarget) -> Option<&OptionAttach> {
         match target {
-            AttachTarget::Row(index) => self.chat_ui.poll_dialog.as_ref()?.attach.get(index),
+            AttachTarget::Row(index) => self
+                .chat_ui
+                .poll_dialog
+                .as_ref()?
+                .rows
+                .get(index)
+                .map(|row| &row.attach),
             AttachTarget::Added => self
                 .message_ui
                 .poll_add_option
@@ -56,7 +63,13 @@ impl QuillApp {
 
     fn attach_mut(&mut self, target: AttachTarget) -> Option<&mut OptionAttach> {
         match target {
-            AttachTarget::Row(index) => self.chat_ui.poll_dialog.as_mut()?.attach.get_mut(index),
+            AttachTarget::Row(index) => self
+                .chat_ui
+                .poll_dialog
+                .as_mut()?
+                .rows
+                .get_mut(index)
+                .map(|row| &mut row.attach),
             AttachTarget::Added => self
                 .message_ui
                 .poll_add_option
@@ -71,7 +84,7 @@ impl QuillApp {
             .chat_ui
             .poll_dialog
             .as_ref()
-            .and_then(|dialog| dialog.attach.iter().position(|attach| attach.id == id));
+            .and_then(|dialog| dialog.rows.iter().position(|row| row.attach.id == id));
         match row {
             Some(index) => Some(AttachTarget::Row(index)),
             None => self
@@ -87,7 +100,7 @@ impl QuillApp {
     fn attach_slots(&mut self) -> Vec<&mut OptionAttach> {
         let mut slots: Vec<&mut OptionAttach> = Vec::new();
         if let Some(dialog) = self.screen.chat_ui.poll_dialog.as_mut() {
-            slots.extend(dialog.attach.iter_mut());
+            slots.extend(dialog.rows.iter_mut().map(|row| &mut row.attach));
         }
         if let Some(panel) = self.screen.message_ui.poll_add_option.as_mut() {
             slots.push(&mut panel.attach);
@@ -102,9 +115,9 @@ impl QuillApp {
                 .chat_ui
                 .poll_dialog
                 .as_ref()?
-                .option_inputs
+                .rows
                 .get(index)
-                .cloned(),
+                .map(|row| row.input.clone()),
             AttachTarget::Added => self
                 .message_ui
                 .poll_add_option
@@ -262,7 +275,7 @@ impl QuillApp {
         if attach.media != OptionMediaSlot::None {
             shown = true;
             let (label, thumb): (String, Option<PathBuf>) = match &attach.media {
-                OptionMediaSlot::Preparing(path) => (
+                OptionMediaSlot::Preparing { path, .. } => (
                     tr_with(
                         keys::Q_MEDIA_PREPARING,
                         &[("file_name", &(file_name(path)).to_string())],
@@ -384,8 +397,14 @@ impl QuillApp {
             cx.notify();
             return;
         };
-        let shown = path.to_string_lossy().into_owned();
-        self.set_poll_option_media(target, OptionMediaSlot::Preparing(shown.clone()));
+        let read_id = ReadId::next();
+        self.set_poll_option_media(
+            target,
+            OptionMediaSlot::Preparing {
+                path: path.to_string_lossy().into_owned(),
+                read: read_id,
+            },
+        );
         cx.notify();
         let read = cx.background_executor().spawn({
             let path = path.clone();
@@ -423,23 +442,23 @@ impl QuillApp {
         self.spawn_scoped(cx, async move |this, cx| {
             let result = read.await;
             let _ = this.update(cx, |this, cx| {
-                this.finish_poll_option_file(&shown, result, cx)
+                this.finish_poll_option_file(read_id, result, cx)
             });
         })
         .detach();
     }
 
-    /// The file for the option preparing `shown` was read.
+    /// The file read `read_id` asked for was read.
     fn finish_poll_option_file(
         &mut self,
-        shown: &str,
+        read_id: ReadId,
         result: Result<(PollOptionInput, Option<PathBuf>), String>,
         cx: &mut Context<Self>,
     ) {
-        let waiting = OptionMediaSlot::Preparing(shown.to_string());
         let mut note = None;
         for attach in self.attach_slots() {
-            if attach.media != waiting {
+            if !matches!(&attach.media, OptionMediaSlot::Preparing { read, .. } if *read == read_id)
+            {
                 continue;
             }
             match &result {
@@ -459,6 +478,14 @@ impl QuillApp {
             self.set_note(StatusNote::error(note));
         }
         cx.notify();
+    }
+
+    /// The media panel that served a sticker or emoji choice closed: the
+    /// options stop waiting for it (the prompt and its Cancel go).
+    pub(in crate::ui) fn end_poll_option_waits(&mut self) {
+        for attach in self.attach_slots() {
+            attach.leave(|mode| matches!(mode, AttachMode::AwaitSticker | AttachMode::AwaitEmoji));
+        }
     }
 
     /// "Sticker": open the sticker panel; the next sticker clicked in it goes
@@ -502,7 +529,7 @@ impl QuillApp {
             .chat_ui
             .poll_dialog
             .as_ref()
-            .map_or(0, |dialog| dialog.attach.len());
+            .map_or(0, |dialog| dialog.rows.len());
         (0..rows)
             .map(AttachTarget::Row)
             .chain([AttachTarget::Added])
@@ -580,7 +607,7 @@ impl QuillApp {
             .chat_ui
             .poll_dialog
             .as_ref()
-            .map_or(0, |dialog| dialog.attach.len());
+            .map_or(0, |dialog| dialog.rows.len());
         let target = (0..rows)
             .map(AttachTarget::Row)
             .chain([AttachTarget::Added])

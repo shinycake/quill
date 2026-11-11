@@ -13,9 +13,26 @@ use quill::poll::{
 pub(crate) enum OptionMediaSlot {
     #[default]
     None,
-    /// A picked video being read (duration and size) off the UI thread.
-    Preparing(String),
+    /// A picked file being read (duration and size) off the UI thread; its
+    /// answer lands on the slot holding `read`, so a removed or replaced
+    /// slot never takes a stale one.
+    Preparing {
+        path: String,
+        read: ReadId,
+    },
     Ready(PollOptionInput),
+}
+
+/// One file read for an option's media. Unique in the process, so the
+/// answer is matched to the slot that asked, not to the file's name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReadId(u64);
+
+impl ReadId {
+    pub(crate) fn next() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        Self(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    }
 }
 
 impl OptionMediaSlot {
@@ -94,6 +111,14 @@ impl Default for OptionAttach {
     }
 }
 
+/// One option row of the new poll: its field, its media and whether it is
+/// marked as a right answer, so removing the row removes all three.
+pub(crate) struct PollOptionRow {
+    pub(crate) input: Entity<TextareaState>,
+    pub(crate) attach: OptionAttach,
+    pub(crate) correct: bool,
+}
+
 /// What the box was opened with: tdesktop's `chosen`/`disabled` flags.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum QuizLock {
@@ -165,14 +190,12 @@ pub(crate) struct DeadlineBox {
 pub struct PollDialog {
     pub(crate) description_input: Entity<TextareaState>,
     pub(crate) question_input: Entity<TextareaState>,
-    pub(crate) option_inputs: Vec<Entity<TextareaState>>,
-    /// The media of each option, by the same index as `option_inputs`.
-    pub(crate) attach: Vec<OptionAttach>,
+    pub(crate) rows: Vec<PollOptionRow>,
     pub(crate) explanation_input: Entity<TextareaState>,
-    /// The allowed countries (ISO codes), picked in the country box.
-    /// tdesktop's "Limit by Country" switch (channels); off keeps no codes.
-    pub(crate) limit_by_country: bool,
-    pub(crate) country_codes: Vec<String>,
+    /// tdesktop's "Limit by Country" switch (channels): `None` is off,
+    /// `Some` holds the allowed countries (ISO codes) picked in the country
+    /// box. Off keeps no codes.
+    pub(crate) countries: Option<Vec<String>>,
     /// The opposite of tdesktop's "Show Who Voted".
     pub(crate) is_anonymous: bool,
     pub(crate) allows_multiple_answers: bool,
@@ -182,8 +205,6 @@ pub struct PollDialog {
     /// A broadcast channel: votes are always anonymous and options cannot
     /// be added.
     pub(crate) in_channel: bool,
-    /// Dialog-row indexes marked as the quiz's correct options.
-    pub(crate) quiz_correct_rows: Vec<usize>,
     pub(crate) allows_revoting: bool,
     pub(crate) shuffle_options: bool,
     /// B15: "Allow Adding Options" (`inputPollTypeRegular.allow_adding_options`).
@@ -195,9 +216,8 @@ pub struct PollDialog {
     /// Which page the box shows (the form, a picker over it, or the discard
     /// question).
     pub(crate) page: PollPage,
-    /// "Limit Duration" is on: the poll closes at `close`.
-    pub(crate) limit_duration: bool,
-    pub(crate) close: PollClose,
+    /// "Limit Duration": `None` is off, `Some` is when the poll closes.
+    pub(crate) close: Option<PollClose>,
     /// A bot's one-time keyboard whose Poll button opened this box: it
     /// goes when the poll is sent, not when the box opens.
     pub(crate) dismiss_keyboard_on_send: Option<(ChatId, MessageId)>,
@@ -217,6 +237,56 @@ pub struct PollAddOption {
 }
 
 impl PollDialog {
+    /// "Limit Duration" is on.
+    pub(crate) fn limit_duration(&self) -> bool {
+        self.close.is_some()
+    }
+
+    /// Turn "Limit Duration" on (keeping a deadline already chosen) or off.
+    pub(crate) fn set_limit_duration(&mut self, on: bool) {
+        self.close = on.then(|| {
+            self.close
+                .unwrap_or(PollClose::Period(POLL_DEFAULT_PERIOD_SECS))
+        });
+    }
+
+    /// Choose when the poll closes; ignored while the limit is off.
+    pub(crate) fn set_close(&mut self, close: PollClose) {
+        if let Some(current) = self.close.as_mut() {
+            *current = close;
+        }
+    }
+
+    /// "Limit by Country" is on.
+    pub(crate) fn limit_by_country(&self) -> bool {
+        self.countries.is_some()
+    }
+
+    /// The allowed countries; none while the limit is off.
+    pub(crate) fn country_codes(&self) -> &[String] {
+        self.countries.as_deref().unwrap_or_default()
+    }
+
+    /// Turn "Limit by Country" on or off; off forgets the countries and
+    /// closes the country box.
+    pub(crate) fn set_limit_by_country(&mut self, on: bool) {
+        if on {
+            self.countries.get_or_insert_with(Vec::new);
+        } else {
+            self.countries = None;
+            if matches!(self.page, PollPage::Country(_)) {
+                self.page = PollPage::Form;
+            }
+        }
+    }
+
+    /// Keep the countries picked in the box; ignored while the limit is off.
+    pub(crate) fn set_country_codes(&mut self, codes: Vec<String>) {
+        if let Some(countries) = self.countries.as_mut() {
+            *countries = codes;
+        }
+    }
+
     pub(crate) fn country_box(&self) -> Option<&crate::ui::country_box::CountryBox> {
         match &self.page {
             PollPage::Country(country_box) => Some(country_box),
@@ -287,41 +357,37 @@ impl PollDialog {
             tr(keys::Q_MEDIA_QUIZ_EXPLANATION_OPTIONAL_200_MAX),
             (1, 3),
         );
-        let option_inputs = (0..POLL_OPTIONS_MIN)
-            .map(|index| {
-                textarea(
+        let rows = (0..POLL_OPTIONS_MIN)
+            .map(|index| PollOptionRow {
+                input: textarea(
                     cx,
                     &tr_with(
                         keys::Q_MEDIA_OPTION,
                         &[("index_1", &(index + 1).to_string())],
                     ),
                     (1, 2),
-                )
+                ),
+                attach: OptionAttach::default(),
+                correct: false,
             })
             .collect();
         let mut dialog = Self {
             description_input,
             question_input,
-            attach: (0..POLL_OPTIONS_MIN)
-                .map(|_| OptionAttach::default())
-                .collect(),
-            option_inputs,
+            rows,
             explanation_input,
-            limit_by_country: false,
-            country_codes: Vec::new(),
+            countries: None,
             is_anonymous: in_channel,
             allows_multiple_answers: true,
             is_quiz: lock == QuizLock::Quiz,
             lock,
             in_channel,
-            quiz_correct_rows: Vec::new(),
             allows_revoting: lock != QuizLock::Quiz,
             shuffle_options: true,
             allow_adding_options: !in_channel && lock != QuizLock::Quiz,
             hide_results_until_closes: false,
             members_only: false,
-            limit_duration: false,
-            close: PollClose::Period(POLL_DEFAULT_PERIOD_SECS),
+            close: None,
             page: PollPage::Opening,
             dismiss_keyboard_on_send: None,
             baseline: None,
@@ -339,8 +405,8 @@ impl PollDialog {
             shuffle: self.shuffle_options,
             quiz: self.is_quiz,
             subscribers: self.members_only,
-            by_country: self.limit_by_country,
-            limit_duration: self.limit_duration,
+            by_country: self.countries.is_some(),
+            limit_duration: self.close.is_some(),
             hide_results: self.hide_results_until_closes,
         }
     }
@@ -350,24 +416,16 @@ impl PollDialog {
         let value = |input: &Entity<TextareaState>| input.read(cx).value().to_string();
         // Options carry their custom emoji as composer markup.
         let options: Vec<DraftOption> = self
-            .option_inputs
+            .rows
             .iter()
-            .enumerate()
-            .map(|(row, input)| DraftOption {
-                text: crate::ui::composer_field::field_doc(input.read(cx)).to_markup(),
-                media: self
-                    .attach
-                    .get(row)
-                    .and_then(|attach| attach.media.ready().cloned()),
-                correct: self.quiz_correct_rows.contains(&row),
+            .map(|row| DraftOption {
+                text: crate::ui::composer_field::field_doc(row.input.read(cx)).to_markup(),
+                media: row.attach.media.ready().cloned(),
+                correct: row.correct,
             })
             .collect();
-        let country_codes = if self.limit_by_country {
-            self.country_codes.clone()
-        } else {
-            Vec::new()
-        };
-        let deadline = self.limit_duration.then_some(self.close);
+        let country_codes = self.countries.clone().unwrap_or_default();
+        let deadline = self.close;
         PollDraft {
             question: value(&self.question_input),
             description: value(&self.description_input),
@@ -380,7 +438,7 @@ impl PollDialog {
             shuffle_options: self.shuffle_options,
             country_codes,
             allow_adding_options: self.allow_adding_options,
-            hide_results_until_closes: self.limit_duration && self.hide_results_until_closes,
+            hide_results_until_closes: self.close.is_some() && self.hide_results_until_closes,
             members_only: self.members_only,
             deadline,
             close_max: 0,
@@ -389,9 +447,9 @@ impl PollDialog {
 
     /// A picked video is still being read: sending now would drop it.
     pub(crate) fn media_preparing(&self) -> bool {
-        self.attach
+        self.rows
             .iter()
-            .any(|attach| matches!(attach.media, OptionMediaSlot::Preparing(_)))
+            .any(|row| matches!(row.attach.media, OptionMediaSlot::Preparing { .. }))
     }
 
     /// `true` when closing would lose user input (drives the discard prompt).
@@ -399,15 +457,15 @@ impl PollDialog {
         let value = |input: &Entity<TextareaState>| input.read(cx).value();
         Some(self.toggles()) != self.baseline
             || self
-                .attach
+                .rows
                 .iter()
-                .any(|attach| attach.media != OptionMediaSlot::None)
+                .any(|row| row.attach.media != OptionMediaSlot::None)
             || !value(&self.question_input).trim().is_empty()
             || !value(&self.description_input).trim().is_empty()
             || !value(&self.explanation_input).trim().is_empty()
             || self
-                .option_inputs
+                .rows
                 .iter()
-                .any(|input| !value(input).trim().is_empty())
+                .any(|row| !value(&row.input).trim().is_empty())
     }
 }

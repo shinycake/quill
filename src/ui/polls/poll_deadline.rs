@@ -38,7 +38,7 @@ impl QuillApp {
     ) {
         let now = WallClock::of(cx).now();
         let max = self.poll_close_max_secs();
-        let Some(close) = self.chat_ui.poll_dialog.as_ref().map(|d| d.close) else {
+        let Some(close) = self.chat_ui.poll_dialog.as_ref().and_then(|d| d.close) else {
             return;
         };
         let picker = new_date_time_picker(window, cx, deadline_start(close, now), max);
@@ -80,7 +80,7 @@ impl QuillApp {
         match deadline_choice(picked, WallClock::of(cx).now(), max) {
             Some(date) => {
                 if let Some(dialog) = self.chat_ui.poll_dialog.as_mut() {
-                    dialog.close = PollClose::Date(date);
+                    dialog.set_close(PollClose::Date(date));
                     dialog.show_form();
                 }
                 cx.notify();

@@ -210,7 +210,7 @@ impl QuillApp {
                     .chat_ui
                     .poll_dialog
                     .as_ref()
-                    .map(|d| d.country_codes.clone())
+                    .map(|d| d.country_codes().to_vec())
                     .unwrap_or_default();
                 (CountryMode::Multi { max }, chosen)
             }
@@ -331,7 +331,7 @@ impl QuillApp {
         if let (Some(chosen), CountryHost::Poll) = (chosen, host)
             && let Some(dialog) = self.chat_ui.poll_dialog.as_mut()
         {
-            dialog.country_codes = chosen;
+            dialog.set_country_codes(chosen);
         }
         self.close_country_box(host, cx);
     }

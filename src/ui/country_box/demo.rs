@@ -78,8 +78,8 @@ impl QuillApp {
         self.sync_chat_ui(cx);
         self.open_poll_dialog(window, cx);
         if let Some(dialog) = self.chat_ui.poll_dialog.as_mut() {
-            dialog.limit_by_country = true;
-            dialog.country_codes = vec!["US".into(), "GB".into()];
+            dialog.set_limit_by_country(true);
+            dialog.set_country_codes(vec!["US".into(), "GB".into()]);
         }
         if open_requested() {
             self.open_country_box(CountryHost::Poll, window, cx);

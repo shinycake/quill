@@ -108,6 +108,11 @@ impl QuillApp {
     /// its choices.
     pub(in crate::ui) fn set_media_panel_mode(&mut self, mode: PanelMode) {
         let old = std::mem::replace(&mut self.pickers.media_panel.panel_mode, mode);
+        // A poll option waiting for a sticker or emoji waits on the compose
+        // panel: any other mode (closed, reactions, status) ends the wait.
+        if !matches!(mode, PanelMode::Compose) {
+            self.end_poll_option_waits();
+        }
         // Opening the panel again retries a failed category strip.
         if old == PanelMode::Closed
             && let Some(session) = self.session_mut()
