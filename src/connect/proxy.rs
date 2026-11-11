@@ -59,16 +59,21 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(RequestPurpose::GetProxies, None);
+        let was_stale = matches!(
+            self.session.settings.proxy.list,
+            crate::proxy::ProxyList::Stale(_)
+        );
         self.session.settings.proxy.list.begin(extra);
         match self.sender.send_json(&get_proxies(extra)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session
-                    .settings
-                    .proxy
-                    .list
-                    .fail(tr(keys::Q_OPS_ERR_REFUSED));
+                let list = &mut self.session.settings.proxy.list;
+                if was_stale {
+                    list.fail_stale(tr(keys::Q_OPS_ERR_REFUSED));
+                } else {
+                    list.fail(tr(keys::Q_OPS_ERR_REFUSED));
+                }
                 Err(err)
             }
         }

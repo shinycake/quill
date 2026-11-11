@@ -186,3 +186,39 @@ fn a_refused_gif_request_fails_only_what_it_asked() {
     assert!(driver.session.stickers.gifs.search_failed());
     assert!(!driver.session.stickers.gifs.failed());
 }
+
+/// A refetch of a stale proxy list that could not be sent leaves the list
+/// stale, so no planner acts on it; a failed answer settles as before.
+#[test]
+fn a_refused_proxy_refetch_keeps_the_list_unsettled() {
+    let (_dir, mut driver, sender, sink, seq) = toggle_driver();
+    driver.session.settings.proxy.list = crate::proxy::ProxyList::Stale(Some(Vec::new()));
+    assert!(!driver.session.settings.proxy.settled());
+
+    sender.refuse(true);
+    assert!(driver.maybe_fetch_proxies().is_err());
+    let proxy = &driver.session.settings.proxy;
+    assert!(proxy.list.error().is_some(), "the failure shows");
+    assert!(!proxy.settled(), "the list is still out of date");
+    assert!(!proxy.list.wanted(), "and is not asked again by itself");
+
+    // Refresh (the dialog) asks again; its failed answer settles.
+    sender.refuse(false);
+    let asked = driver.fetch_proxies().unwrap();
+    driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"error","@extra":"{}","code":500,"message":"boom"}}"#,
+                    asked.0
+                ),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let proxy = &driver.session.settings.proxy;
+    assert!(proxy.list.error().is_some());
+    assert!(proxy.settled());
+}

@@ -673,6 +673,13 @@ pub enum ProxyList {
         error: String,
         known: Option<Vec<ProxyEntry>>,
     },
+    /// The refetch of a stale list could not be sent. Like `Failed`, it is
+    /// not asked again by itself, but the held list is still out of date,
+    /// so nothing plans on it ([`ProxyState::settled`]).
+    FailedStale {
+        error: String,
+        known: Option<Vec<ProxyEntry>>,
+    },
 }
 
 impl ProxySave {
@@ -707,9 +714,10 @@ impl ProxyList {
         match self {
             Self::Unasked => None,
             Self::Fresh(list) => Some(list),
-            Self::Loading { known, .. } | Self::Stale(known) | Self::Failed { known, .. } => {
-                known.as_deref()
-            }
+            Self::Loading { known, .. }
+            | Self::Stale(known)
+            | Self::Failed { known, .. }
+            | Self::FailedStale { known, .. } => known.as_deref(),
         }
     }
 
@@ -717,7 +725,10 @@ impl ProxyList {
         match std::mem::take(self) {
             Self::Unasked => None,
             Self::Fresh(list) => Some(list),
-            Self::Loading { known, .. } | Self::Stale(known) | Self::Failed { known, .. } => known,
+            Self::Loading { known, .. }
+            | Self::Stale(known)
+            | Self::Failed { known, .. }
+            | Self::FailedStale { known, .. } => known,
         }
     }
 
@@ -746,7 +757,7 @@ impl ProxyList {
     /// The failed fetch's error line.
     pub fn error(&self) -> Option<&str> {
         match self {
-            Self::Failed { error, .. } => Some(error),
+            Self::Failed { error, .. } | Self::FailedStale { error, .. } => Some(error),
             _ => None,
         }
     }
@@ -767,6 +778,15 @@ impl ProxyList {
         };
     }
 
+    /// The refetch of a stale list never left: the failure shows, and the
+    /// list stays marked out of date.
+    pub fn fail_stale(&mut self, error: impl Into<String>) {
+        *self = Self::FailedStale {
+            error: error.into(),
+            known: self.take_data(),
+        };
+    }
+
     /// A mutation succeeded: what is held is out of date.
     pub fn mark_stale(&mut self) {
         *self = Self::Stale(self.take_data());
@@ -774,11 +794,15 @@ impl ProxyList {
 
     /// Forget a failure, keeping the data (never asks by itself).
     pub fn clear_error(&mut self) {
-        if let Self::Failed { .. } = self {
-            *self = match self.take_data() {
-                Some(list) => Self::Fresh(list),
-                None => Self::Unasked,
-            };
+        match self {
+            Self::Failed { .. } => {
+                *self = match self.take_data() {
+                    Some(list) => Self::Fresh(list),
+                    None => Self::Unasked,
+                };
+            }
+            Self::FailedStale { .. } => *self = Self::Stale(self.take_data()),
+            _ => {}
         }
     }
 }
@@ -842,10 +866,14 @@ impl ProxyState {
     }
 
     /// No change is out and the list is neither stale nor being fetched:
-    /// what it holds can be planned on.
+    /// what it holds can be planned on. A refetch that failed to send
+    /// leaves the list stale; a failed answer settles it.
     pub fn settled(&self) -> bool {
         !matches!(self.save, ProxySave::Saving { .. })
-            && !matches!(self.list, ProxyList::Stale(_) | ProxyList::Loading { .. })
+            && !matches!(
+                self.list,
+                ProxyList::Stale(_) | ProxyList::Loading { .. } | ProxyList::FailedStale { .. }
+            )
     }
 
     pub fn entries(&self) -> &[ProxyEntry] {
