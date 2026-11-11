@@ -82,7 +82,7 @@ fn open_checkout(
     let mut vcx = VisualTestContext::from_window(handle.into(), cx);
     app.update_in(&mut vcx, |app, window, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.checkout =
+            session.payments.checkout.form =
                 quill::state::CheckoutForm::Ready(stripe_checkout(can_save, need_password));
         }
         app.payments.card_transport = Some(transport);

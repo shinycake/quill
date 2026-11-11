@@ -1,6 +1,6 @@
 //! The checkout's lifetime: closing it, and the payments it sent.
 use crate::ids::RequestId;
-use crate::state::{CheckoutForm, OrderInfoStage, PaymentInFlight, Session};
+use crate::state::{Checkout, PaymentInFlight, Session};
 
 impl Session {
     /// The checkout closed: its form and answers go. A `sendPaymentForm`
@@ -9,19 +9,14 @@ impl Session {
     /// purchase still unlocks and a checkout opened meanwhile does not take
     /// its answer.
     pub fn close_checkout(&mut self) {
-        let payments = &mut self.payments;
-        payments.note = None;
-        payments.order_info = OrderInfoStage::Unvalidated;
-        payments.shipping_id = None;
-        payments.checkout = CheckoutForm::Closed;
-        payments.request = None;
+        self.payments.checkout = Checkout::default();
     }
 
     /// `sendPaymentForm` went out as `request_id` for the checkout on
     /// screen: remember what it pays, so its answer goes to it.
     pub(crate) fn payment_sent(&mut self, request_id: RequestId) {
         let payments = &mut self.payments;
-        let Some(request) = payments.request.as_ref() else {
+        let Some(request) = payments.checkout.request.as_ref() else {
             return;
         };
         payments.paying.push(PaymentInFlight {

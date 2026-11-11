@@ -7,15 +7,26 @@ use crate::state::{PaymentVerification, Session};
 use crate::telegram::envelope::{CallbackQueryAnswer, LoginUrlInfo};
 use std::sync::Arc;
 
+fn form() -> crate::telegram::envelope::PaymentFormData {
+    crate::telegram::envelope::PaymentFormData {
+        id: 1,
+        form_type: crate::telegram::envelope::PaymentFormTypeData::Stars { star_count: 5 },
+        seller_bot_user_id: 0,
+        product_title: String::new(),
+        product_description: String::new(),
+    }
+}
+
 #[test]
 fn outcomes_that_landed_in_the_background_are_not_drained_later() {
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
     let mut session = Session::new(AccountKey::primary(), sink);
-    session.payments.verification_url = Some(PaymentVerification {
+    session.payments.verifications.push(PaymentVerification {
         url: "https://bank.example/3ds".into(),
         closes_checkout: true,
         giveaway_chat_id: None,
     });
+    session.payments.checkout.form = crate::state::CheckoutForm::Verifying(form());
     session.messages.message_link = Some(crate::state::MessageLinkAnswer {
         link: "https://t.me/c/1/2".into(),
         is_public: false,
@@ -35,8 +46,6 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
         .effects
         .push(crate::earn::EarnEffect::SetupDone);
 
-    session.payments.receipt_error = Some("receipt".into());
-    session.payments.unlocked_notice = Some("unlocked".into());
     session
         .messages
         .send_permission_error
@@ -63,15 +72,15 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
 
     session.forget_screen_outcomes();
 
-    assert!(session.payments.receipt_error.is_none());
-    assert!(session.payments.unlocked_notice.is_none());
     assert!(session.messages.send_permission_error.is_empty());
     assert!(session.messages.flood_notice.is_empty());
     assert!(session.bots.callback_answers.is_empty());
     assert!(session.bots.last_login_url_info.is_none());
     assert!(session.bots.login_url_request.is_none());
 
-    assert!(session.payments.verification_url.is_none());
+    assert!(session.payments.verifications.is_empty());
+    // The payment that waited on that page is not stuck on Verifying.
+    assert!(!session.payments.checkout.is_verifying());
     assert!(session.messages.message_link.is_none());
     assert!(session.messages.message_link_error.is_empty());
     assert!(session.messages.resend_error.is_empty());

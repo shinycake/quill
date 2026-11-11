@@ -10,9 +10,10 @@ impl Session {
     /// The account comes back on screen: what finished while it was away
     /// is not reported on the screen it comes back to.
     pub fn forget_screen_outcomes(&mut self) {
-        self.payments.verification_url = None;
-        self.payments.receipt_error = None;
-        self.payments.unlocked_notice = None;
+        // A payment waiting on its provider's page leaves Verifying with the
+        // page that nobody will open.
+        self.payments.verifications.clear();
+        self.payments.checkout.end_verification();
         // The earn toasts, a Fragment URL and a setup page's "go back"
         // belong to the screen that asked.
         let earn = &mut self.payments.earn;

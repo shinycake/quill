@@ -246,10 +246,10 @@ fn a_paid_checkout_reports_paid_and_closes(cx: &mut TestAppContext) {
         // The checkout shows the watched invoice: a payment of another
         // invoice would not be reported here.
         let payments = &mut app.demo_session.as_mut().unwrap().payments;
-        payments.request = Some(quill::state::PaymentRequest {
+        payments.checkout.request = Some(quill::state::PaymentRequest {
             invoice: quill::payment_invoice::InputInvoice::Name("abc".into()),
         });
-        payments.checkout =
+        payments.checkout.form =
             quill::state::CheckoutForm::Paid(quill::telegram::envelope::PaymentFormData {
                 id: 1,
                 form_type: quill::telegram::envelope::PaymentFormTypeData::Stars { star_count: 50 },

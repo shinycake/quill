@@ -50,6 +50,7 @@ impl QuillApp {
         let paid_giveaway = self.session().is_some_and(|s| {
             s.payments.checkout.is_paid()
                 && s.payments
+                    .checkout
                     .request
                     .as_ref()
                     .is_some_and(|r| r.invoice.is_giveaway())
@@ -270,7 +271,7 @@ impl QuillApp {
             );
         }
         let typed_order = dialog.order(cx);
-        if let Some(validated) = session.payments.order_info.validated_for(&typed_order)
+        if let Some(validated) = session.payments.checkout.order_info.validated_for(&typed_order)
             && !validated.shipping_options.is_empty()
         {
             // Phase 6: kit RadioGroup (was: buttons with a ◉/○ prefix).
@@ -281,7 +282,7 @@ impl QuillApp {
                 .map(|option| option.id.clone())
                 .collect();
             let shipping_selected = validated.shipping_options.iter().position(|option| {
-                session.payments.shipping_id.as_deref() == Some(option.id.as_str())
+                session.payments.checkout.shipping_id.as_deref() == Some(option.id.as_str())
             });
             body = body.child(
                 div()
@@ -313,7 +314,7 @@ impl QuillApp {
                                 if let Some(live) = this.live.as_mut()
                                     && let Some(id) = shipping_ids.get(ix)
                                 {
-                                    live.driver.session.payments.shipping_id = Some(id.clone());
+                                    live.driver.session.payments.checkout.shipping_id = Some(id.clone());
                                 }
                                 cx.notify();
                             })),
@@ -367,6 +368,7 @@ impl QuillApp {
             let order_ok = !needs_order
                 || session
                     .payments
+                    .checkout
                     .order_info
                     .validated_for(&typed_order)
                     .is_some();
@@ -442,7 +444,7 @@ impl QuillApp {
         let order = self.payments.dialog.as_ref().map(|dialog| dialog.order(cx));
         let request = self
             .session()
-            .and_then(|session| session.payments.request.clone());
+            .and_then(|session| session.payments.checkout.request.clone());
         let allow_save = self
             .payments
             .dialog
@@ -456,7 +458,7 @@ impl QuillApp {
             return;
         };
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.payments.note = None;
+            live.driver.session.payments.checkout.note = None;
             live.driver
                 .validate_payment_order_info(&request.invoice, &order, allow_save)
         });
@@ -476,9 +478,9 @@ impl QuillApp {
         let snapshot = self.session().map(|session| {
             (
                 session.payments.checkout.form().cloned(),
-                session.payments.request.clone(),
-                session.payments.order_info.clone(),
-                session.payments.shipping_id.clone(),
+                session.payments.checkout.request.clone(),
+                session.payments.checkout.order_info.clone(),
+                session.payments.checkout.shipping_id.clone(),
                 session.payments.checkout.is_paid(),
             )
         });
@@ -528,7 +530,7 @@ impl QuillApp {
             .unwrap_or("");
         let shipping_option_id = shipping_id.as_deref().unwrap_or("");
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.payments.note = None;
+            live.driver.session.payments.checkout.note = None;
             live.driver.submit_payment_form(
                 &request.invoice,
                 form.id,

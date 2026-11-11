@@ -20,8 +20,7 @@ impl Session {
             // An earlier checkout's form fetch failing is not this one's.
             Some(RequestPurpose::GetPaymentForm) => {
                 if extra.is_some() && self.payments.checkout.waits_for(extra) {
-                    self.payments.checkout = CheckoutForm::Closed;
-                    self.payments.note = Some(crate::lang::tr_with(
+                    self.payments.checkout = Checkout::failed(crate::lang::tr_with(
                         crate::lang::keys::Q_MONEY_PAYMENT_FAILED_REASON,
                         &[("reason", &error_reason(err))],
                     ));
@@ -30,12 +29,12 @@ impl Session {
             Some(RequestPurpose::ValidateOrderInfo) => {
                 if extra.is_some()
                     && matches!(
-                        &self.payments.order_info,
+                        &self.payments.checkout.order_info,
                         OrderInfoStage::Validating { request, .. } if Some(*request) == extra
                     )
                 {
-                    self.payments.order_info = OrderInfoStage::Unvalidated;
-                    self.payments.note = Some(crate::lang::tr_with(
+                    self.payments.checkout.order_info = OrderInfoStage::Unvalidated;
+                    self.payments.checkout.note = Some(crate::lang::tr_with(
                         crate::lang::keys::Q_MONEY_PAYMENT_FAILED_REASON,
                         &[("reason", &error_reason(err))],
                     ));
@@ -50,7 +49,7 @@ impl Session {
                         &[("reason", &error_reason(err))],
                     );
                     if self.payments.shows(&failed.invoice) {
-                        self.payments.note = Some(text);
+                        self.payments.checkout.note = Some(text);
                     } else {
                         // The checkout was closed while it paid.
                         self.payments.notify(NoticeKind::Error, text);
@@ -61,8 +60,10 @@ impl Session {
                 // A receipt the user already dismissed has nobody to tell.
                 if self.payments.receipt.waits_for(extra) {
                     self.payments.receipt = ReceiptStage::Closed;
-                    self.payments.receipt_error =
-                        Some(format!("Receipt failed: {}", error_reason(err)));
+                    self.payments.notify(
+                        NoticeKind::Error,
+                        format!("Receipt failed: {}", error_reason(err)),
+                    );
                 }
             }
             Some(RequestPurpose::GetMarketplaceGift | RequestPurpose::SendMarketplaceGift) => {

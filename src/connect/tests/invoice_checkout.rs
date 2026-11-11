@@ -70,7 +70,7 @@ fn an_invoice_link_asks_for_its_form_by_name() {
         json!({"@type": "inputInvoiceName", "name": "shop_1"})
     );
     assert_eq!(
-        driver.session.payments.request.as_ref().map(|r| &r.invoice),
+        driver.session.payments.checkout.request.as_ref().map(|r| &r.invoice),
         Some(&invoice)
     );
 }
@@ -107,7 +107,7 @@ fn a_message_invoice_still_needs_a_real_message() {
         driver.send_payment_form_request(invoice),
         Err(ConnectSendError::InvalidRequest)
     );
-    assert!(driver.session.payments.request.is_none());
+    assert!(driver.session.payments.checkout.request.is_none());
     assert!(
         recorder
             .snapshot()
@@ -312,8 +312,8 @@ fn a_new_card_pays_with_the_provider_token_and_may_need_verification() {
         driver
             .session
             .payments
-            .verification_url
-            .as_ref()
+            .verifications
+            .first()
             .map(|step| step.url.as_str()),
         Some("https://hooks.stripe.com/3d_secure/x")
     );

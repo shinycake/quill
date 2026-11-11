@@ -37,10 +37,8 @@ impl Session {
                     && extra.is_some()
                     && self.payments.checkout.waits_for(extra)
                 {
-                    self.payments.checkout = CheckoutForm::Ready(form);
-                    self.payments.order_info = OrderInfoStage::Unvalidated;
-                    self.payments.shipping_id = None;
-                    self.payments.note = None;
+                    self.payments.checkout = std::mem::take(&mut self.payments.checkout)
+                        .with_form(form);
                 }
             }
             PaymentsPayload::ValidatedOrderInfo(validated) => {
@@ -50,17 +48,17 @@ impl Session {
                 // is not this one's.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::ValidateOrderInfo)
                     && extra.is_some()
-                    && let OrderInfoStage::Validating { request, order } = &self.payments.order_info
+                    && let OrderInfoStage::Validating { request, order } = &self.payments.checkout.order_info
                     && Some(*request) == extra
                 {
                     let order = order.clone();
-                    self.payments.shipping_id =
+                    self.payments.checkout.shipping_id =
                         validated.shipping_options.first().map(|o| o.id.clone());
-                    self.payments.order_info = OrderInfoStage::Validated {
+                    self.payments.checkout.order_info = OrderInfoStage::Validated {
                         order,
                         info: validated,
                     };
-                    self.payments.note = None;
+                    self.payments.checkout.note = None;
                 }
             }
             PaymentsPayload::PaymentResult(result) => {
@@ -75,11 +73,11 @@ impl Session {
                         self.payments.checkout.end_verification();
                     }
                     if result.success {
-                        self.note_paid_media_unlocked(&paid);
+                        let unlocked = self.note_paid_media_unlocked(&paid);
                         if let Some(chat_id) = paid.invoice.giveaway_chat_id() {
                             self.payments.giveaway.launch = GiveawayLaunch::Paid { chat_id };
                         }
-                        if !shown && self.payments.unlocked_notice.is_none() {
+                        if !shown && !unlocked {
                             // The checkout was closed while it paid.
                             self.payments.notify(
                                 NoticeKind::Info,
@@ -88,7 +86,7 @@ impl Session {
                         }
                         if shown {
                             self.payments.checkout.mark_paid();
-                            self.payments.note = Some(format!(
+                            self.payments.checkout.note = Some(format!(
                                 "✅ {}",
                                 crate::lang::tr(crate::lang::keys::Q_MONEY_PAYMENT_SUCCESS_NOTE)
                             ));
@@ -103,7 +101,7 @@ impl Session {
                         if let Some(chat_id) = paid.invoice.giveaway_chat_id() {
                             self.payments.giveaway.launch = GiveawayLaunch::Verifying { chat_id };
                         }
-                        self.payments.verification_url = Some(PaymentVerification {
+                        self.payments.verifications.push(PaymentVerification {
                             url: result.verification_url,
                             closes_checkout: shown,
                             giveaway_chat_id: paid.invoice.giveaway_chat_id(),
@@ -112,7 +110,7 @@ impl Session {
                             self.payments.checkout.mark_verifying();
                         }
                     } else if shown {
-                        self.payments.note = Some(
+                        self.payments.checkout.note = Some(
                             crate::lang::tr(crate::lang::keys::Q_MONEY_PAYMENT_FAILED).to_string(),
                         );
                     } else {

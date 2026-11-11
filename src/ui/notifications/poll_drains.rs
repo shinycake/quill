@@ -271,23 +271,13 @@ impl QuillApp {
         }
         // Slice P1: a `paymentResult` verification URL — the provider's
         // page the buyer must complete (schema:4740).
-        if let Some(step) = self
+        let steps = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.payments.verification_url.take())
-        {
+            .map(|live| std::mem::take(&mut live.driver.session.payments.verifications))
+            .unwrap_or_default();
+        for step in steps {
             self.open_payment_verification(&step, cx);
-            progressed = true;
-        }
-        // Slice P1 fix-up: a failed `getPaymentReceipt` surfaces in the
-        // status bar — the receipt dialog never opens, and `payment_note`
-        // only renders inside the checkout dialog.
-        if let Some(err) = self
-            .live
-            .as_mut()
-            .and_then(|live| live.driver.session.payments.receipt_error.take())
-        {
-            self.set_note(StatusNote::error(err));
             progressed = true;
         }
         let notices = self
@@ -300,14 +290,6 @@ impl QuillApp {
                 quill::state::NoticeKind::Info => StatusNote::info(notice.text),
                 quill::state::NoticeKind::Error => StatusNote::error(notice.text),
             });
-            progressed = true;
-        }
-        if let Some(note) = self
-            .live
-            .as_mut()
-            .and_then(|live| live.driver.session.payments.unlocked_notice.take())
-        {
-            self.set_note(StatusNote::info(note));
             progressed = true;
         }
         for notice in self

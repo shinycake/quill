@@ -33,7 +33,7 @@ impl QuillApp {
             && self.session().is_some_and(|s| {
                 s.payments.checkout.form().is_some()
                     || s.payments.checkout.is_loading()
-                    || s.payments.note.is_some()
+                    || s.payments.checkout.note.is_some()
             })
     }
 
@@ -50,14 +50,10 @@ impl QuillApp {
         ) {
             return;
         }
-        let sent = self.live.as_mut().map(|live| {
-            let payments = &mut live.driver.session.payments;
-            payments.checkout = quill::state::CheckoutForm::Closed;
-            payments.order_info = quill::state::OrderInfoStage::Unvalidated;
-            payments.shipping_id = None;
-            payments.note = None;
-            live.driver.send_payment_form_request(invoice)
-        });
+        let sent = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.send_payment_form_request(invoice));
         self.open_box(crate::ui::shell::DialogKind::PaymentForm);
         match sent {
             Some(Ok(_)) => self.open_payment_dialog(window, cx),
@@ -202,7 +198,7 @@ impl QuillApp {
         let snapshot = self.session().map(|session| {
             (
                 session.payments.checkout.form().cloned(),
-                session.payments.request.clone(),
+                session.payments.checkout.request.clone(),
                 session.payments.checkout.is_paid(),
             )
         });
@@ -213,7 +209,7 @@ impl QuillApp {
             return;
         }
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.payments.note = None;
+            live.driver.session.payments.checkout.note = None;
             live.driver.submit_payment_form(
                 &request.invoice,
                 form.id,

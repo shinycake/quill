@@ -27,7 +27,7 @@ impl QuillApp {
             };
             if session.payments.checkout.form().is_none()
                 && !session.payments.checkout.is_loading()
-                && session.payments.note.is_none()
+                && session.payments.checkout.note.is_none()
             {
                 return dialog.on_close(on_close.clone());
             }
@@ -42,7 +42,7 @@ impl QuillApp {
                         .child(tr(keys::Q_MONEY_LOADING_PAYMENT_FORM)),
                 );
             }
-            if let Some(note) = &session.payments.note {
+            if let Some(note) = &session.payments.checkout.note {
                 body = body.child(
                     div()
                         .text_sm()
