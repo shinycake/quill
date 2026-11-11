@@ -244,7 +244,6 @@ mod tests {
     use crate::ids::{ChatId, MessageId};
     use crate::state::{HistoryMessage, HistoryState};
     use crate::telegram::envelope::MessageContent;
-    use std::collections::HashSet;
 
     fn message(id: i64) -> HistoryMessage {
         HistoryMessage {

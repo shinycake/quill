@@ -279,7 +279,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .and_then(|pending| {
                     pending
                         .chat_id
-                        .map(|chat_id| (pending.window, chat_id, text.clone()))
+                        .map(|chat_id| (pending.asked_in.chat(), chat_id, text.clone()))
                 }),
             _ => None,
         };
@@ -307,7 +307,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         let note = ai_rich_draft_note(pending.purpose);
                         pending
                             .chat_id
-                            .map(|chat_id| (pending.window, chat_id, rich.clone(), note))
+                            .map(|chat_id| (pending.asked_in.chat(), chat_id, rich.clone(), note))
                     }),
                 _ => None,
             };

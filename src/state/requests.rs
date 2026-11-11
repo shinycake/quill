@@ -388,6 +388,28 @@ impl ForwardResult {
     }
 }
 
+/// Whose view a request was registered in: the main window's, or a chat
+/// window's.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AskingView {
+    #[default]
+    Main,
+    /// The window of `chat`, in its `opening`-th opening
+    /// (`WindowViews::opening_of`): a window closed and opened again for
+    /// the same chat is a new one.
+    Window { chat: ChatId, opening: u64 },
+}
+
+impl AskingView {
+    /// The chat window, `None` for the main window's.
+    pub fn chat(self) -> Option<ChatId> {
+        match self {
+            Self::Main => None,
+            Self::Window { chat, .. } => Some(chat),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PendingRequest {
     pub id: RequestId,
@@ -452,14 +474,10 @@ pub struct PendingRequest {
     /// TDLib error the pre-request value is restored so the UI never
     /// keeps showing a change the server rejected.
     pub rollback: Option<RequestRollback>,
-    /// The chat window whose view was in the session's place when the
-    /// request was registered (`None`: the main window's). An answer that
-    /// lands in a view applies to that window's
+    /// The view that was in the session's place when the request was
+    /// registered. An answer that lands in a view applies to that window's
     /// (`Session::apply_payload_in_asking_view`).
-    pub window: Option<ChatId>,
-    /// Which opening of that window it was (`WindowViews::opening_of`):
-    /// a window closed and opened again for the same chat is a new one.
-    pub window_opening: u64,
+    pub asked_in: AskingView,
     /// When the request was registered. The periodic sweep
     /// ([`RequestRegistry::sweep_stale`]) drops dedupe-guard entries whose
     /// answer never came, so a lost response cannot block a chat forever.
@@ -470,12 +488,10 @@ pub struct PendingRequest {
 pub struct RequestRegistry {
     pub(crate) next: u64,
     pub(crate) pending: HashMap<u64, PendingRequest>,
-    /// The chat window whose view is in the session's place (`None`: the
-    /// main window's). `Session::enter_view` keeps it; every request
-    /// registered meanwhile carries it (`PendingRequest::window`).
-    pub(crate) window: Option<ChatId>,
-    /// The opening of `window` ([`PendingRequest::window_opening`]).
-    pub(crate) window_opening: u64,
+    /// The view that is in the session's place. `Session::enter_view`
+    /// keeps it; every request registered meanwhile carries it
+    /// (`PendingRequest::asked_in`).
+    pub(crate) view: AskingView,
     /// In-flight `DownloadFile` requests per file id, so the
     /// already-downloading check does not scan `pending`.
     downloads: HashMap<i32, u32>,
@@ -527,8 +543,7 @@ impl RequestRegistry {
             invite_link: None,
             subject_id: None,
             rollback: None,
-            window: self.window,
-            window_opening: self.window_opening,
+            asked_in: self.view,
             created_at: Instant::now(),
         }
     }

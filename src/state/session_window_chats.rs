@@ -75,7 +75,7 @@ impl Session {
     /// The chat window whose view is in the session's place (`None`: the
     /// main window's).
     pub fn view_in_place(&self) -> Option<ChatId> {
-        self.requests.window
+        self.requests.view.chat()
     }
 
     /// Put `target`'s view in the session's place (`None`: the main
@@ -84,18 +84,20 @@ impl Session {
     /// records a diagnostic (the UI asks only for windows it has, so a
     /// miss means the two disagree).
     pub fn enter_view(&mut self, target: Option<ChatId>) -> bool {
-        if self.requests.window == target {
+        if self.requests.view.chat() == target {
             return true;
         }
-        if let Some(current) = self.requests.window.take() {
+        if let Some(current) = self.requests.view.chat() {
             self.swap_stored_view(current);
         }
-        self.requests.window_opening = 0;
+        self.requests.view = AskingView::Main;
         match target {
             Some(chat_id) if self.window_chats.contains(&chat_id) => {
                 self.swap_stored_view(chat_id);
-                self.requests.window = Some(chat_id);
-                self.requests.window_opening = self.window_chats.opening_of(chat_id);
+                self.requests.view = AskingView::Window {
+                    chat: chat_id,
+                    opening: self.window_chats.opening_of(chat_id),
+                };
                 true
             }
             Some(chat_id) => {
@@ -146,25 +148,26 @@ impl Session {
     ) {
         let Some(asked_in) = pending
             .filter(|pending| lands_in_view(pending.purpose))
-            .map(|pending| pending.window)
+            .map(|pending| pending.asked_in)
         else {
             return self.apply_payload(payload, pending, extra, seq);
         };
         let outer = self.view_in_place();
-        let asked_opening = pending.map_or(0, |pending| pending.window_opening);
         // The same chat in a new window is not the window that asked.
-        if asked_in.is_none_or(|chat_id| self.window_chats.opening_of(chat_id) == asked_opening) {
-            self.enter_view(asked_in);
+        let current = match asked_in {
+            AskingView::Main => true,
+            AskingView::Window { chat, opening } => self.window_chats.opening_of(chat) == opening,
+        };
+        if current {
+            self.enter_view(asked_in.chat());
             self.apply_payload(payload, pending, extra, seq);
         } else {
             self.enter_view(None);
             let mut detached = SessionView::default();
             self.swap_view(&mut detached);
-            self.requests.window = asked_in;
-            self.requests.window_opening = asked_opening;
+            self.requests.view = asked_in;
             self.apply_payload(payload, pending, extra, seq);
-            self.requests.window = None;
-            self.requests.window_opening = 0;
+            self.requests.view = AskingView::Main;
             self.swap_view(&mut detached);
         }
         self.enter_view(outer);

@@ -305,8 +305,12 @@ fn a_stop_pressed_again_after_a_failure_leaves_the_failed_stage() {
     t.fail("stopPendingMessage", "boom");
     let stage = |t: &Flaky| t.driver.session.messages.pending_bot_messages[&(7, 0)].stop;
     assert_eq!(stage(&t), BotStopStage::Failed);
-    t.driver.stop_pending_bot_message(ChatId(7), 0, 12).unwrap();
-    assert_eq!(stage(&t), BotStopStage::Running);
+    let again = t
+        .driver
+        .stop_pending_bot_message(ChatId(7), 0, 12)
+        .unwrap()
+        .expect("sent");
+    assert_eq!(stage(&t), BotStopStage::Stopping(again));
 }
 
 #[test]

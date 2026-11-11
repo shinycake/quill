@@ -16,7 +16,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .and_then(|id| {
                     let pending = self.session.requests.get(id)?;
                     (pending.purpose == RequestPurpose::GetWebPageInstantView)
-                        .then_some((id, pending.window))
+                        .then_some((id, pending.asked_in.chat()))
                 })
                 .and_then(|(id, window)| {
                     let messages = &mut self.session.messages;

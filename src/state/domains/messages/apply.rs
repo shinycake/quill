@@ -150,13 +150,18 @@ impl Session {
                         MessageContent::Text(_) | MessageContent::RichMessage(_)
                     )
                 {
-                    let stopped = self
+                    // An update of the same draft keeps a Stop that is
+                    // stopped or on its way.
+                    let carried = self
                         .messages
                         .pending_bot_messages
                         .get(&(chat_id.0, forum_topic_id))
-                        .is_some_and(|old| {
-                            old.draft_id == draft_id && old.stop == BotStopStage::Stopped
+                        .filter(|old| old.draft_id == draft_id)
+                        .map(|old| old.stop)
+                        .filter(|stop| {
+                            matches!(stop, BotStopStage::Stopped | BotStopStage::Stopping(_))
                         });
+                    let stopped = carried == Some(BotStopStage::Stopped);
                     self.remember_files(&files);
                     self.messages.pending_bot_messages.insert(
                         (chat_id.0, forum_topic_id),
@@ -165,11 +170,7 @@ impl Session {
                             can_stop: can_stop && !stopped,
                             keep_on_stop,
                             content,
-                            stop: if stopped {
-                                BotStopStage::Stopped
-                            } else {
-                                BotStopStage::Running
-                            },
+                            stop: carried.unwrap_or(BotStopStage::Running),
                             expires_at_ms: unix_ms_now().saturating_add(
                                 self.messages.pending_bot_period_secs.saturating_mul(1000),
                             ),

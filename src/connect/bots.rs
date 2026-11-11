@@ -778,9 +778,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .messages
             .pending_bot_messages
             .get_mut(&(chat_id.0, topic_id))
-            .filter(|draft| draft.stop == crate::state::BotStopStage::Failed)
+            .filter(|draft| {
+                matches!(
+                    draft.stop,
+                    crate::state::BotStopStage::Running | crate::state::BotStopStage::Failed
+                )
+            })
         {
-            draft.stop = crate::state::BotStopStage::Running;
+            draft.stop = crate::state::BotStopStage::Stopping(extra);
         }
         Ok(Some(extra))
     }

@@ -129,6 +129,7 @@ impl Session {
                 .pending_bot_messages
                 .get_mut(&(chat_id.0, topic_id))
             && draft.draft_id == draft_id
+            && draft.stop == BotStopStage::Stopping(request.id)
         {
             draft.stop = BotStopStage::Failed;
         }

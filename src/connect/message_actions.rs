@@ -21,24 +21,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         for (chat_id, message_id) in self.session.reply_fetch_candidates() {
-            let extra = self.session.request(
-                RequestPurpose::GetRepliedMessage {
-                    chat_id,
-                    message_id,
-                },
-                Some(chat_id),
-            );
+            let extra = self.session.begin_reply_fetch(chat_id, message_id);
             if let Err(err) = self
                 .sender
                 .send_json(&get_replied_message(extra, chat_id, message_id))
             {
-                self.session.requests.take(extra);
+                self.session.cancel_reply_fetch(extra);
                 return Err(err);
             }
-            self.session.messages.reply_targets.insert(
-                (chat_id.0, message_id.0),
-                crate::state::ReplyTarget::Loading,
-            );
         }
         // The stories replied to: their picture fills the strip. `get_story`
         // skips cached and in-flight ones and those waiting out a failure,
@@ -549,7 +539,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if pending.purpose != RequestPurpose::GetWebPageInstantView {
             return None;
         }
-        let window = pending.window;
+        let window = pending.asked_in.chat();
         let messages = &mut self.session.messages;
         let from_agent = messages.instant_view_agent_requests.remove(&id);
         let url = messages.instant_view_urls.remove(&id)?;

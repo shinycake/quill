@@ -9,8 +9,8 @@ use crate::ids::UserId;
 /// `HistoryItem::requestReply`). Keyed by the *replying* message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReplyTarget {
-    /// `getRepliedMessage` sent, answer pending.
-    Loading,
+    /// `getRepliedMessage` sent as this request, answer pending.
+    Loading(RequestId),
     /// The answer: the replied message (own chat or another one).
     Loaded(Box<HistoryMessage>),
     /// TDLib said it does not exist (deleted, or no access).
@@ -587,6 +587,33 @@ impl Session {
             (chat_id.0, message_id.0),
             ReplyTarget::Loaded(Box::new(history_message(message, false))),
         );
+    }
+
+    /// `getRepliedMessage` for the row `(chat_id, message_id)`: the request
+    /// is registered and the row marked loading in one step, so the two
+    /// never disagree. The caller sends it, and calls
+    /// [`Self::cancel_reply_fetch`] when the send is refused.
+    pub fn begin_reply_fetch(&mut self, chat_id: ChatId, message_id: MessageId) -> RequestId {
+        let request = self.request(
+            RequestPurpose::GetRepliedMessage {
+                chat_id,
+                message_id,
+            },
+            Some(chat_id),
+        );
+        self.messages
+            .reply_targets
+            .insert((chat_id.0, message_id.0), ReplyTarget::Loading(request));
+        request
+    }
+
+    /// The request of [`Self::begin_reply_fetch`] never left: the row is
+    /// asked for again later.
+    pub fn cancel_reply_fetch(&mut self, request: RequestId) {
+        self.requests.take(request);
+        self.messages
+            .reply_targets
+            .retain(|_, target| *target != ReplyTarget::Loading(request));
     }
 
     /// Keep at most [`MAX_REPLY_TARGETS_OUTSIDE_WINDOW`] of `chat_id`'s

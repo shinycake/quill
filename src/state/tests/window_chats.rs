@@ -171,7 +171,7 @@ fn a_view_is_put_in_place_by_window_and_given_back() {
         session
             .requests
             .take(extra)
-            .and_then(|pending| pending.window),
+            .and_then(|pending| pending.asked_in.chat()),
         Some(ChatId(2))
     );
     // A chat with no window has no view to enter.
@@ -298,7 +298,7 @@ fn an_answer_for_a_closed_window_leaves_the_main_view_in_place() {
         session
             .requests
             .take(next)
-            .and_then(|pending| pending.window),
+            .and_then(|pending| pending.asked_in.chat()),
         None
     );
 }
