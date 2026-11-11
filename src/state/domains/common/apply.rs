@@ -301,7 +301,9 @@ impl Session {
                 // B1: `getLoginUrl` returns `httpUrl` too (schema 1.8.67,
                 // line 7458) — the authorized URL after consent.
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetLoginUrl) {
-                    self.bots.last_login_url_info = Some(LoginUrlInfo::Open { url });
+                    self.bots
+                        .login_url
+                        .answer(pending.map(|p| p.id), LoginUrlInfo::Open { url });
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBackgroundUrl)
                     && let Some(id) = pending.map(|p| p.id)
                 {

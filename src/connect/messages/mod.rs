@@ -315,32 +315,32 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let caption = snapshot.caption();
-        if snapshot.attachment.is_none() && caption.is_empty() {
+        if snapshot.attachment().is_none() && caption.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
         // MED4: caption-length gate (runtime option; the counter in the
         // composer shows the same limit). Only the caption-carrying
         // paths are gated — plain text has its own (untracked) limit.
-        if snapshot.attachment.is_some() || snapshot.is_album() {
+        if snapshot.attachment().is_some() || snapshot.is_album() {
             self.check_caption_length(caption)?;
         }
         // Slice G1: quote-carrying reply (`inputTextQuote`).
         let reply_to = snapshot.send_reply();
         // Validate the picked path before allocating `@extra`.
-        let media_path = match snapshot.attachment.as_ref() {
+        let media_path = match snapshot.attachment().as_ref() {
             Some(att) => Some(
                 media_options::media_send_path(att, snapshot)
                     .ok_or(ConnectSendError::InvalidRequest)?,
             ),
             None => None,
         };
-        let video_probe = match snapshot.attachment.as_ref() {
+        let video_probe = match snapshot.attachment().as_ref() {
             Some(att) if att.kind == AttachmentKind::Video && !att.extras.is_gif() => {
                 Some(media_options::video_probe(att, snapshot)?)
             }
             _ => None,
         };
-        let video_note = match snapshot.attachment.as_ref() {
+        let video_note = match snapshot.attachment().as_ref() {
             Some(att) if att.kind == AttachmentKind::VideoNote => {
                 Some(media_options::video_note(att, snapshot)?)
             }
@@ -372,11 +372,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chats
             .get(&chat_id.0)
             .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
-        let spoiler = snapshot.attachment.as_ref().is_some_and(|att| {
+        let spoiler = snapshot.attachment().as_ref().is_some_and(|att| {
             att.spoiler && matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video)
         });
         // Contains caption / path — do not log `json`.
-        let json = match (snapshot.attachment.as_ref(), media_path.as_deref()) {
+        let json = match (snapshot.attachment().as_ref(), media_path.as_deref()) {
             (Some(att), Some(path)) => {
                 match att.kind {
                     AttachmentKind::Photo => send_photo(
@@ -495,7 +495,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         let json = if spoiler { with_spoiler(json) } else { json };
         // Silent and scheduled sends reach media too (text builds its own).
-        let json = if snapshot.attachment.is_some() {
+        let json = if snapshot.attachment().is_some() {
             crate::telegram::requests::with_message_send_options(json, &snapshot.send_options, true)
         } else {
             json

@@ -322,8 +322,7 @@ impl QuillApp {
                     // the reply rides the first part only.
                     let mut split = None;
                     if let [only] = snaps.as_slice()
-                        && only.attachment.is_none()
-                        && only.album.is_empty()
+                        && only.content == quill::composer::SendContent::Text
                     {
                         let limit = self.text_length_limit();
                         if quill::text_split::units_over_limit(&only.text, limit) > 0 {

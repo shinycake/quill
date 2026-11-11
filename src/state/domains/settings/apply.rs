@@ -122,10 +122,8 @@ impl Session {
                     ..
                 })) = pending.map(|p| p.purpose)
                 {
-                    if let Some(join_as) = self.calls.create_join_as.as_mut()
-                        && Some(join_as.request) == extra
-                    {
-                        join_as.answer = Some(Ok(senders));
+                    if let Some(join_as) = self.calls.create_join_as.as_mut() {
+                        join_as.accept(extra, senders);
                     }
                 } else if let Some(RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
                     offset,

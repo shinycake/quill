@@ -103,7 +103,7 @@ impl Session {
                 // B1: `getLoginUrlInfo` response to our own login-button
                 // press (matched by `@extra`).
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetLoginUrlInfo) {
-                    self.bots.last_login_url_info = Some(info);
+                    self.bots.login_url.answer(pending.map(|p| p.id), info);
                 }
             }
         }

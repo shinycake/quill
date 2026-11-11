@@ -8119,3 +8119,44 @@ whose variants carry the data, with a way out of every stage.
 | 13-010, 13-011 | Skipped. 010: folding the host map, `QuillShell::open_dialog` and `dialogs_closed` is a shell-wide redesign, beyond a local change. 011: both borrows are statement-scoped with nothing called while held. |
 | 13-035 | A statistics send that fails puts the story's insights in `StoryStatsFetch::Failed` (`story_statistics_not_sent`), so the panel shows its error with Retry. |
 | 14-079 | `AgeCheck` moved into `UpdatesSync::age_verification` (`AgeVerification { params, check }`): it ends when the server lifts the request and a repeat keeps it. `AccountBoxes::age_check` is gone. |
+
+### Sweep fixes (r2-12)
+
+Round 2, 22 files of the agent tools and driver, the calls engine and
+capture, the composer and the connect bots and backgrounds. Every file ends
+with no entry left; each id below is fixed or proven not to be a bug.
+
+| id | what |
+| --- | --- |
+| 01-014, 01-015 | `Asked` is one enum (`Off`, `Reserved{options, slot}`, `Skipped(note)`). `shot::Slot` gives itself back to the limiter on `Drop`; `keep()` is for a picture that was taken, so every early return releases it. |
+| 01-017 | Skipped: the composer clears only the text the send delivered, and the match on chat and text is that guard, not a correlation. A retyped identical text was delivered too. An id would have nothing stored on the window side to match against. |
+| 01-018 | `pin_uploads` runs at the paced-queue turn inside `common::send` and before the direct `td_call` writes: it refuses the data folder again and rewrites each local path to the file it resolves to now. |
+| 01-019 | `set_draft` reads the chat's draft first and refuses to replace or clear a different non-empty one unless `replace_existing` is true. |
+| 01-020 | `guard::Injecting` is a scope guard (depth, restored on `Drop`) replacing `set_injecting(bool)` in the driver; `Commands{Closed{latest}, Open{step, count}}` replaces the `open` count and the `step` slot. `set_injecting` stays for tests only. |
+| 01-021 | The revival of an ended session is `Session::revive_unnamed`, one named transition. |
+| 01-026 | `DeviceThread::opened()` keeps its answer (`Opened::{Waiting, Answered}`): asking again returns it. |
+| 01-027 | A PipeWire `Unconnected` ends the share from any phase (`StreamPhase::Gone`, once). |
+| 01-028 | `WindowMonitor` no longer joins its thread on drop: it checks the stop right after the ScreenCaptureKit wait. |
+| 01-029, 01-030 | A Failed or Ended feeder sends nothing (`NotReady` / `ResyncNeeded`, time answers 0). `Syncing` is no longer set by the time request; `StreamsSync::Asking` is the one record of a request in flight. |
+| 01-031 | `StreamQualityTracker` is deleted: the engine's own `stream_quality` is the record, so a width reported before the engine has the call is reported again. |
+| 01-032 | `CreateJoinAs.stage` is `JoinAsStage::{Asking, Answered, Failed}`; `accept` and `fail` take only the request that asked. |
+| 01-033 | `GroupCall::playback_muted` is deleted; the reopen reads `SoundSlot::muted()`. The viewer's stream volume is a global preference, the slot's volume the per-call applied value, so not copies. |
+| 01-037 | `RtmpStart::revoking` returns whether it recorded; the driver sends no second revoke while one is out and refuses one with no box. |
+| 01-038 | `peak` lives in `HintStage::Listening`. |
+| 01-039 | `SampleRing` loads `read` before `write`, and a gap over capacity counts as empty. |
+| 01-040 | Keycode span uses `saturating_sub` and `saturating_add`. |
+| 02-008 | `confirm_delete(confirm, cx)` takes the box's `DeleteConfirm`; `ChatUi::pending_delete` is deleted. |
+| 02-012 | `ReplacementProbe::Probing{job}`: only the answer of that job settles it. |
+| 02-021 | `BotsState::login_url: LoginUrlStage::{Idle, Asking{request, context}, Answered{info, context}}`; recorded after the send, answers matched by request. |
+| 02-023, 02-024 | `InstalledBackgrounds` holds one `Fetch` per theme, begun once, `sent(extra)`, answered by request. |
+| 02-025 | `InlineQueryFetch::Loading{request}` and `Loaded.more: InlineMore::{Idle, Asking{request}, Failed{offset}}`; the slot changes after the send. |
+| 02-026 | `ComposerSnapshot.content: SendContent::{Text, Single, Album}`. |
+| 02-027 | `GifMode::HeldAsFile` remembers the animation while "Send without compression" is on and returns it. |
+| 02-028 | `AttachmentExtras.video: VideoPrep::{Untouched, Edited(VideoEdit{edits, start_timestamp, source})}`. |
+
+Outside the bundle's files, the smallest changes: `src/ui/agent_driver.rs`,
+`src/ui/selection_mode.rs`, `src/ui/chat_ui_state.rs`, `src/ui/inline_grid.rs`,
+`src/ui/video_editor.rs`, `src/ui/send_prep.rs`, the connect drivers for
+revoke, stream tile width and the login URL, and the tests that built the old
+shapes. `connect/messages/media_send.rs` still takes `album().len() - 1`
+unguarded; it belongs to another bundle.

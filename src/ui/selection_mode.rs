@@ -945,8 +945,7 @@ impl QuillApp {
                                 cx,
                             );
                         }
-                        this.chat_ui.pending_delete = Some(confirm);
-                        this.confirm_delete(cx);
+                        this.confirm_delete(confirm, cx);
                     });
                     !refused
                 })

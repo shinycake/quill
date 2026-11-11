@@ -354,7 +354,7 @@ fn the_join_as_list_is_asked_for_before_creating() {
     let join_as = driver.session.calls.create_join_as.as_ref().expect("kept");
     assert_eq!(join_as.request, sent);
     assert_eq!(
-        join_as.answer,
+        join_as.answer(),
         Some(Ok(vec![
             MessageSender::User { user_id: 1 },
             MessageSender::Chat { chat_id: CHAT },
@@ -365,5 +365,5 @@ fn the_join_as_list_is_asked_for_before_creating() {
     let request = last(&recorder);
     reply(&mut driver, error_answer(&request));
     let join_as = driver.session.calls.create_join_as.as_ref().expect("kept");
-    assert_eq!(join_as.answer, Some(Err(())));
+    assert_eq!(join_as.answer(), Some(Err(())));
 }

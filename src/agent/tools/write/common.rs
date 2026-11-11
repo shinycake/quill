@@ -698,8 +698,15 @@ pub fn send(
     result
 }
 
-fn send_inner(ctx: &Ctx, target: &Target, request: Value, count: u32) -> Result<Batch, ToolError> {
+fn send_inner(
+    ctx: &Ctx,
+    target: &Target,
+    mut request: Value,
+    count: u32,
+) -> Result<Batch, ToolError> {
     let turn = admit(ctx, target, count)?;
+    // A refused upload gives the turn back: dropping it releases the slots.
+    super::super::td_request::pin_uploads(&mut request)?;
     // Before the request goes out: no outcome recorded earlier is this
     // send's.
     let since = events::send_mark();

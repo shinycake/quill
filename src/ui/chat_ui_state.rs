@@ -17,7 +17,7 @@
 
 use super::app::QuillApp;
 use gpui_kit::*;
-use quill::composer::{ComposerEdit, ComposerReplyTo, DeleteConfirm};
+use quill::composer::{ComposerEdit, ComposerReplyTo};
 use quill::ids::{ChatId, MessageId, TopicId};
 
 /// Which info cards are open in a chat. A thread's card opens over a
@@ -251,8 +251,6 @@ pub(crate) struct ChatUi {
     pub(super) date_dialog: Option<super::composer_date::ComposerDateDialog>,
     /// The "Code Language" box for the fenced block under the caret.
     pub(super) code_language: Option<super::composer_shortcuts::CodeLanguageDialog>,
-    /// Delete confirm (tdesktop `DeleteMessagesBox` / Unigram popup).
-    pub(super) pending_delete: Option<DeleteConfirm>,
     /// B4: pending "Stop poll" confirm (`stopPoll`, schema 1.8.67 line
     /// 12953) — (chat, message, is_quiz) for the warning copy. TGX
     /// `StopPollWarn` / `StopQuizWarn`: nobody can vote afterwards and

@@ -146,7 +146,7 @@ pub(super) fn inline_view(app: &QuillApp, cx: &Context<QuillApp>) -> Option<Inli
                 slot.chat_id == chat_id && slot.bot_user_id == *user_id && slot.query == query
             });
             match slot.map(|slot| &slot.fetch) {
-                None | Some(InlineQueryFetch::Loading) => {
+                None | Some(InlineQueryFetch::Loading { .. }) => {
                     InlineView::Status(tr(keys::Q_MEDIA_LOADING_RESULTS).to_string())
                 }
                 Some(InlineQueryFetch::Failed(reason)) => InlineView::Status(reason.clone()),
@@ -437,7 +437,6 @@ impl QuillApp {
                             fetch: InlineQueryFetch::Failed(
                                 tr(keys::Q_MEDIA_COULD_NOT_LOAD_INLINE_RESULTS).to_string(),
                             ),
-                            more_failed: None,
                         });
                     }
                 }

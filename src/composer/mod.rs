@@ -49,7 +49,7 @@ pub use draft_content::DraftContent;
 pub use draft_topic::{DraftKey, DraftTopic};
 pub use edit::{
     ComposerEdit, ComposerEditKind, EDIT_MEDIA_ALBUM_ERROR, EDIT_MEDIA_INVALID_FILE, EditMediaKind,
-    EditMediaReplacement, EditRender, EditableMedia, LinkPreviewChoice, MediaEdit,
+    EditMediaReplacement, EditRender, EditableMedia, LinkPreviewChoice, MediaEdit, ProbeJob,
     ReplacementProbe, begin_edit_draft, begin_edit_keeping_reply, cancel_edit_draft,
     cancel_edit_keeping_reply,
 };
@@ -63,11 +63,12 @@ pub use markup::{
 };
 pub use markup_parser::parse_format_markup;
 pub use media_options::{
-    AttachmentExtras, FILE_THUMBNAIL_SIDE, FileThumbnail, GifMode, MediaSendOptions,
+    AttachmentExtras, FILE_THUMBNAIL_SIDE, FileThumbnail, GifMode, HeldGif, MediaSendOptions,
     PAID_MEDIA_MAX_STARS, PHOTO_SIDE_LARGE, PHOTO_SIDE_STANDARD, PhotoPrep, PhotoScaleTimedOut,
-    PriceInput, can_use_high_quality, file_thumbnail_upload_required, fitted_photo_size,
-    is_gif_path, paid_media_fits, parse_paid_price, photo_for_send, photo_scale_args,
-    photo_side_limit, photo_size_of, scaled_photo_for_send, session_allows_paid_media,
+    PriceInput, VideoEdit, VideoPrep, can_use_high_quality, file_thumbnail_upload_required,
+    fitted_photo_size, is_gif_path, paid_media_fits, parse_paid_price, photo_for_send,
+    photo_scale_args, photo_side_limit, photo_size_of, scaled_photo_for_send,
+    session_allows_paid_media,
 };
 pub use media_prep::{
     AnimationSize, PREP_BUDGET, PrepareError, PreparedFile, PreparedMedia, PreparedNote,
@@ -149,15 +150,45 @@ pub fn draft_text_to_store(text: &str, has_reply: bool) -> Option<&str> {
     }
 }
 
+/// What a send carries besides its text: one value, so a single attachment
+/// and an album can never both be set.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum SendContent {
+    #[default]
+    Text,
+    Single(ComposerAttachment),
+    /// 2–10 photos and/or videos, or files.
+    Album(Vec<ComposerAttachment>),
+}
+
+impl SendContent {
+    /// One attachment, or an album from `list` (none when it is empty).
+    pub fn album(list: Vec<ComposerAttachment>) -> Self {
+        if list.is_empty() {
+            Self::Text
+        } else {
+            Self::Album(list)
+        }
+    }
+
+    /// Every attachment, in order.
+    pub fn attachments(&self) -> &[ComposerAttachment] {
+        match self {
+            Self::Text => &[],
+            Self::Single(attachment) => std::slice::from_ref(attachment),
+            Self::Album(list) => list,
+        }
+    }
+}
+
 /// Snapshot of a send attempt: destination is frozen at submit time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComposerSnapshot {
     pub chat_id: i64,
     pub view_generation: u64,
     pub text: String,
-    pub attachment: Option<ComposerAttachment>,
-    /// 2–10 photos and/or videos. Empty when `attachment` is the single send.
-    pub album: Vec<ComposerAttachment>,
+    /// What goes with the text: nothing, one attachment, or an album.
+    pub content: SendContent,
     pub reply_to: Option<ComposerReplyTo>,
     /// Phase B3: self-destruct choice for photo/video sends
     /// (`inputMessagePhoto`/`inputMessageVideo` `self_destruct_type`,
@@ -199,8 +230,7 @@ impl ComposerSnapshot {
             chat_id: chat_id.0,
             view_generation: view_generation.0,
             text: text.into(),
-            attachment,
-            album: Vec::new(),
+            content: attachment.map_or(SendContent::Text, SendContent::Single),
             reply_to: None,
             self_destruct: None,
             send_options: SendOptions::default(),
@@ -221,8 +251,7 @@ impl ComposerSnapshot {
             chat_id: chat_id.0,
             view_generation: view_generation.0,
             text: text.into(),
-            attachment: None,
-            album,
+            content: SendContent::album(album),
             reply_to: None,
             self_destruct: None,
             send_options: SendOptions::default(),
@@ -281,14 +310,30 @@ impl ComposerSnapshot {
         ChatId(self.chat_id)
     }
 
+    /// The one attachment of a single send.
+    pub fn attachment(&self) -> Option<&ComposerAttachment> {
+        match &self.content {
+            SendContent::Single(attachment) => Some(attachment),
+            SendContent::Text | SendContent::Album(_) => None,
+        }
+    }
+
+    /// The attachments of an album send; empty for any other send.
+    pub fn album(&self) -> &[ComposerAttachment] {
+        match &self.content {
+            SendContent::Album(list) => list,
+            SendContent::Text | SendContent::Single(_) => &[],
+        }
+    }
+
     /// 2–10 photos and videos, or 2–10 files.
     pub fn is_album(&self) -> bool {
-        self.album.len() <= crate::album::ALBUM_MAX_ITEMS
-            && ComposerAttachment::albumable(&self.album)
+        let album = self.album();
+        album.len() <= crate::album::ALBUM_MAX_ITEMS && ComposerAttachment::albumable(album)
     }
 
     pub fn is_empty(&self) -> bool {
-        self.text.trim().is_empty() && self.attachment.is_none() && self.album.is_empty()
+        self.text.trim().is_empty() && self.content == SendContent::Text
     }
 
     pub fn caption(&self) -> &str {
