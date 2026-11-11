@@ -28,7 +28,10 @@ impl QuillApp {
     /// chat's (which is for everyone).
     fn wallpaper_for_both(&self, chat_id: i64, state: &ChatLookDialog) -> Option<String> {
         let session = self.session()?;
-        let new_wallpaper = state.background.is_some() || state.file.is_some();
+        let new_wallpaper = matches!(
+            state.wallpaper,
+            super::WallpaperChoice::Installed(_) | super::WallpaperChoice::File(_)
+        );
         if !new_wallpaper || self.is_boosted_look(chat_id) || !session.premium_possible() {
             return None;
         }

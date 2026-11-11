@@ -627,12 +627,12 @@ impl QuillApp {
         // The view moved on under the drag (a folder, the archive): its
         // pinned list is off screen, so the drag goes, unsaved.
         if !self.pinned_list_shown(drag.archived) {
-            if self.chat_list.pin_reorder.take().is_some() {
+            if self.chat_list.pin.end_drag() {
                 self.notify_sidebar(cx);
             }
             return;
         }
-        if let Some(pin) = self.chat_list.pin_reorder.as_mut()
+        if let Some(pin) = self.chat_list.pin.drag_mut()
             && pin.archived == drag.archived
             && pin.reorder.dragging() == Some(drag.chat_id.0)
         {
@@ -657,22 +657,23 @@ impl QuillApp {
                     Some((*id, f32::from(height)))
                 })
                 .collect();
-            let press = match self.chat_list.pin_press.take() {
-                Some((id, press)) if id == drag.chat_id.0 => press,
-                _ => y,
-            };
-            self.chat_list.pin_reorder =
-                quill::pin_reorder::PinReorder::begin(ids, heights, drag.chat_id.0, press, now)
-                    .map(|mut reorder| {
-                        reorder.drag_to(y, now);
-                        crate::ui::chat_list_state::PinDrag {
-                            archived: drag.archived,
-                            reorder,
-                        }
-                    });
+            let press = self.chat_list.pin.take_press(drag.chat_id.0).unwrap_or(y);
+            self.chat_list.pin = quill::pin_reorder::PinReorder::begin(
+                ids,
+                heights,
+                drag.chat_id.0,
+                press,
+                now,
+            )
+            .map_or(crate::ui::chat_list_state::PinStage::Idle, |mut reorder| {
+                reorder.drag_to(y, now);
+                crate::ui::chat_list_state::PinStage::Dragging(crate::ui::chat_list_state::PinDrag {
+                    archived: drag.archived,
+                    reorder,
+                })
+            });
             // A reorder is not a long press: no peek preview over the drag.
-            self.chat_list.preview_press = None;
-            self.chat_list.preview = None;
+            self.chat_list.peek = crate::ui::chat_list_state::PeekPreview::Idle;
         }
         self.notify_sidebar(cx);
     }
@@ -682,11 +683,11 @@ impl QuillApp {
     pub(super) fn cancel_pin_drag(&mut self, cx: &mut Context<Self>) {
         let dragging = self
             .chat_list
-            .pin_reorder
-            .as_ref()
+            .pin
+            .drag()
             .is_some_and(|pin| pin.reorder.dragging().is_some());
         if dragging {
-            self.chat_list.pin_reorder = None;
+            self.chat_list.pin.end_drag();
             self.notify_sidebar(cx);
         }
     }
@@ -695,7 +696,7 @@ impl QuillApp {
     /// `savePinnedOrder`): the dragged row slides into its slot and the
     /// full order goes out as `setPinnedChats`.
     pub(super) fn finish_pin_drag(&mut self, cx: &mut Context<Self>) {
-        let Some(pin) = self.chat_list.pin_reorder.as_mut() else {
+        let Some(pin) = self.chat_list.pin.drag_mut() else {
             return;
         };
         if pin.reorder.dragging().is_none() {

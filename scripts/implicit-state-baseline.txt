@@ -29,7 +29,6 @@ Ceremony::finished
 ChatListState::archive_settings_loading
 ChatSummary::my_rights_fetched
 ChatSwipeFacts::is_saved
-ChatUi::inline_query_waiting
 ChatWindowsState::asked
 ChatbotDraft::loaded
 Checklist::others_can_mark_tasks_as_done

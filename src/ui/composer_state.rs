@@ -47,9 +47,6 @@ pub(crate) struct ComposerUi {
     /// Composer `#hashtag` / `:emoji` autocomplete popup.
     pub(super) suggest: super::composer_suggest::SuggestUi,
     pub(super) emoji_words: super::emoji_words_ui::EmojiWordsUi,
-    /// Debounces the `getInlineQueryResults` dispatch (100ms quiet
-    /// window, TGX); the dropdown itself is the chat's (`ChatUi`).
-    pub(super) inline_query_token: u64,
     /// Scroll position of the inline results panel (`inline_grid.rs`).
     pub(super) inline_scroll: gpui_kit::ScrollHandle,
     /// The chat an inline results button left, to come back to
@@ -118,7 +115,6 @@ impl ComposerUi {
             mention_selected: 0,
             suggest: super::composer_suggest::SuggestUi::default(),
             emoji_words: Default::default(),
-            inline_query_token: 0,
             inline_scroll: gpui_kit::ScrollHandle::new(),
             inline_return: None,
             preview_timer: None,

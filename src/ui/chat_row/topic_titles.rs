@@ -129,7 +129,7 @@ fn on_jump(
 ) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
     cx.listener(move |this, event: &ClickEvent, window, cx| {
         cx.stop_propagation();
-        this.chat_list.preview_press = None;
+        this.chat_list.peek.cancel_press();
         if event.modifiers().secondary(cx) {
             this.open_chat_in_new_window(chat_id, window, cx);
         } else {

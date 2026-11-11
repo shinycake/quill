@@ -87,7 +87,7 @@ fn contacts_over_the_rows_end_a_pinned_drag_unsaved(cx: &mut TestAppContext) {
     let first = *pinned.first().expect("a pinned chat");
     drag(&app, &mut vcx, first, 10.0);
     drag(&app, &mut vcx, first, 200.0);
-    assert!(app.read_with(&vcx, |app, _| app.chat_list.pin_reorder.is_some()));
+    assert!(app.read_with(&vcx, |app, _| app.chat_list.pin.drag().is_some()));
     // Cmd+J while the button is held: the rows give way to Contacts.
     app.update(&mut vcx, |app, cx| {
         app.chat_list.tab = SidebarTab::Contacts;
@@ -95,7 +95,7 @@ fn contacts_over_the_rows_end_a_pinned_drag_unsaved(cx: &mut TestAppContext) {
     });
     frames(&mut vcx);
     assert!(
-        app.read_with(&vcx, |app, _| app.chat_list.pin_reorder.is_none()),
+        app.read_with(&vcx, |app, _| app.chat_list.pin.drag().is_none()),
         "the drag ends with its rows"
     );
     // Back to the rows: the next release on them sends nothing.
@@ -120,11 +120,11 @@ fn another_folder_ends_a_pinned_drag_unsaved(cx: &mut TestAppContext) {
     app.update(&mut vcx, |app, _| {
         app.set_chat_list_view(ChatListFilter::Archived, None);
     });
-    assert!(app.read_with(&vcx, |app, _| app.chat_list.pin_reorder.is_none()));
+    assert!(app.read_with(&vcx, |app, _| app.chat_list.pin.drag().is_none()));
     // Moving on in the archive does not start the main list's drag again.
     drag(&app, &mut vcx, first, 240.0);
     assert!(
-        app.read_with(&vcx, |app, _| app.chat_list.pin_reorder.is_none()),
+        app.read_with(&vcx, |app, _| app.chat_list.pin.drag().is_none()),
         "the main list's drag does not run over the archive"
     );
     app.update(&mut vcx, |app, cx| app.finish_pin_drag(cx));
@@ -141,12 +141,12 @@ fn a_deactivated_window_ends_a_pinned_drag_unsaved(cx: &mut TestAppContext) {
     let first = *pinned.first().expect("a pinned chat");
     drag(&app, &mut vcx, first, 10.0);
     drag(&app, &mut vcx, first, 200.0);
-    assert!(app.read_with(&vcx, |app, _| app.chat_list.pin_reorder.is_some()));
+    assert!(app.read_with(&vcx, |app, _| app.chat_list.pin.drag().is_some()));
     // The release is lost to a menu or an alert: the window deactivates.
     vcx.deactivate_window();
     frames(&mut vcx);
     assert!(
-        app.read_with(&vcx, |app, _| app.chat_list.pin_reorder.is_none()),
+        app.read_with(&vcx, |app, _| app.chat_list.pin.drag().is_none()),
         "no drag is left redrawing"
     );
     assert_eq!(

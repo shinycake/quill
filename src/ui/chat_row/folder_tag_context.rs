@@ -161,7 +161,7 @@ impl QuillApp {
                 } else {
                     self.chat_swipe_label(chat)
                 };
-                let pin_drag = self.chat_list.pin_reorder.as_ref().map(|drag| {
+                let pin_drag = self.chat_list.pin.drag().map(|drag| {
                     let r = &drag.reorder;
                     let now = std::time::Instant::now();
                     (r.offset(chat.id.0, now), r.lift(chat.id.0, now))

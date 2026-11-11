@@ -425,6 +425,7 @@ mod inline_members;
 mod inline_members_state;
 mod inline_members_view;
 mod inline_mode;
+mod inline_stage;
 mod inline_playback;
 mod inline_return;
 mod invite_admin_more_ui;

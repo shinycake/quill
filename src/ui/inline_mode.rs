@@ -167,9 +167,7 @@ impl QuillApp {
             if self.chat_ui.pending_inline_bot_alert.as_deref() == Some("") {
                 self.chat_ui.pending_inline_bot_alert = None;
             }
-            self.chat_ui.inline_results_open = false;
-            self.chat_ui.inline_query_armed = None;
-            self.chat_ui.inline_query_waiting = false;
+            self.chat_ui.inline.close();
             return;
         };
         // TGX: the first inline use in a secret chat shows the privacy
@@ -179,7 +177,7 @@ impl QuillApp {
             if self.chat_ui.pending_inline_bot_alert.is_none() {
                 self.chat_ui.pending_inline_bot_alert = Some(String::new());
             }
-            self.chat_ui.inline_results_open = false;
+            self.chat_ui.inline.close();
             cx.notify();
             return;
         }
@@ -188,10 +186,7 @@ impl QuillApp {
         if username_changed {
             self.resolve_inline_bot(username);
             // The query goes out once the bot is known (`progress_inline_mode`).
-            self.chat_ui.inline_query_waiting = true;
-            self.chat_ui.inline_query_armed = None;
-            self.chat_ui.inline_results_open = true;
-            self.chat_ui.inline_results_selected = 0;
+            self.chat_ui.inline.open_waiting();
             cx.notify();
             return;
         }
@@ -204,13 +199,12 @@ impl QuillApp {
                 ..
             })
         );
+        self.chat_ui.inline.open();
         if !proceed {
-            self.chat_ui.inline_results_open = true;
             cx.notify();
             return;
         }
         self.maybe_dispatch_inline_query(username, query, cx);
-        self.chat_ui.inline_results_open = true;
         cx.notify();
     }
 
@@ -221,7 +215,7 @@ impl QuillApp {
     /// the trigger text, so the debounced `getInlineQueryResults` was never
     /// armed; (2) an older in-flight query's response landed and the
     /// newest query still needs sending. Only a window that waits for one
-    /// of these (`ChatUi::inline_query_waiting`) sends: two windows with
+    /// of these (`InlineMode`'s session wait) sends: two windows with
     /// different queries share the session's one results slot, and would
     /// otherwise replace each other's query at every answer.
     pub(super) fn progress_inline_mode(&mut self, cx: &mut Context<Self>) {
@@ -236,7 +230,7 @@ impl QuillApp {
     fn progress_inline_mode_here(&mut self, cx: &mut Context<Self>) {
         // A page that landed may still not fill the panel.
         self.load_more_inline_results_if_needed(cx);
-        if !std::mem::take(&mut self.chat_ui.inline_query_waiting) {
+        if !self.chat_ui.inline.take_session_wait() {
             return;
         }
         let text = self.composer.read(cx).value().to_string();
@@ -256,7 +250,7 @@ impl QuillApp {
             // took the session's one slot before ours answered (its answer
             // was dropped as older): ask again once that one is settled, so
             // this panel does not wait for an answer that never comes.
-            self.chat_ui.inline_query_waiting = match self.inline_bot_for(username) {
+            let waits = match self.inline_bot_for(username) {
                 Some(InlineBotResolve::Resolving { .. }) => true,
                 Some(_) => false,
                 None => {
@@ -271,6 +265,9 @@ impl QuillApp {
                     true
                 }
             };
+            if waits {
+                self.chat_ui.inline.wait_for_session();
+            }
             return;
         }
         self.maybe_dispatch_inline_query(username, query, cx);
@@ -358,35 +355,19 @@ impl QuillApp {
         // batch of session updates — never arm two timers for the same
         // trigger. A newer keystroke bumps the token and re-arms for its
         // own (username, query).
-        if self
-            .chat_ui
-            .inline_query_armed
-            .as_ref()
-            .is_some_and(|(u, q)| u == username && q == query)
-        {
+        if self.chat_ui.inline.is_armed_for(username, query) {
             return;
         }
-        self.composer_ui.inline_query_token = self.composer_ui.inline_query_token.wrapping_add(1);
-        let token = self.composer_ui.inline_query_token;
-        self.chat_ui.inline_query_armed = Some((username.to_string(), query.to_string()));
+        let armed_username = username;
+        let armed_query = query;
         let username = username.to_string();
         let query = query.to_string();
-        self.spawn_scoped(cx, async move |this, cx| {
+        let timer = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(100))
                 .await;
             this.update(cx, |this, cx| {
-                if this.composer_ui.inline_query_token != token {
-                    return;
-                }
-                if this
-                    .chat_ui
-                    .inline_query_armed
-                    .as_ref()
-                    .is_some_and(|(u, q)| u == &username && q == &query)
-                {
-                    this.chat_ui.inline_query_armed = None;
-                }
+                this.chat_ui.inline.timer_fired();
                 // The trigger must have survived the quiet window; a
                 // newer keystroke scheduled its own timer.
                 let text = this.composer.read(cx).value().to_string();
@@ -397,7 +378,7 @@ impl QuillApp {
                     return;
                 };
                 // A new query starts at the top of its results.
-                this.chat_ui.inline_results_selected = 0;
+                this.chat_ui.inline.select(0);
                 this.composer_ui
                     .inline_scroll
                     .set_offset(gpui_kit::gpui::point(
@@ -411,27 +392,25 @@ impl QuillApp {
                     Ok(Some(_)) => {}
                     // An older query of this chat and bot is in flight:
                     // this one goes out when it answers.
-                    Ok(None) => this.chat_ui.inline_query_waiting = true,
-                    Err(_) => this.chat_ui.inline_results_open = false,
+                    Ok(None) => this.chat_ui.inline.wait_for_session(),
+                    Err(_) => this.chat_ui.inline.close(),
                 }
                 cx.notify();
             })
             .ok();
-        })
-        .detach();
+        });
+        self.chat_ui.inline.arm(armed_username, armed_query, timer);
     }
 
     /// Bots slice: close the inline-results dropdown. Returns true when it
     /// consumed the key (open); mirrors `close_command_menu`.
     pub(super) fn close_inline_results(&mut self, cx: &mut Context<Self>) -> bool {
-        if !self.chat_ui.inline_results_open {
+        if !self.chat_ui.inline.is_open() {
             return false;
         }
-        self.chat_ui.inline_results_open = false;
-        self.chat_ui.inline_results_selected = 0;
-        self.chat_ui.inline_query_armed = None;
-        // A query waiting out its pause is for a panel that is gone.
-        self.composer_ui.inline_query_token = self.composer_ui.inline_query_token.wrapping_add(1);
+        // A query waiting out its pause is for a panel that is gone: closing
+        // drops its timer.
+        self.chat_ui.inline.close();
         cx.notify();
         true
     }
@@ -442,11 +421,11 @@ impl QuillApp {
         let count = inline_view(self, cx)
             .map(|view| view.display_order().len())
             .unwrap_or(0);
-        if !self.chat_ui.inline_results_open || count == 0 {
+        if !self.chat_ui.inline.is_open() || count == 0 {
             return false;
         }
-        self.chat_ui.inline_results_selected =
-            quill::inline_grid::step_selection(self.chat_ui.inline_results_selected, delta, count);
+        let stepped = quill::inline_grid::step_selection(self.chat_ui.inline.selected(), delta, count);
+        self.chat_ui.inline.select(stepped);
         self.scroll_inline_selection_into_view(cx);
         cx.notify();
         true
@@ -463,10 +442,10 @@ impl QuillApp {
             return false;
         };
         let order = layout_results(&results).order();
-        if !self.chat_ui.inline_results_open || order.is_empty() {
+        if !self.chat_ui.inline.is_open() || order.is_empty() {
             return false;
         }
-        let index = self.chat_ui.inline_results_selected.min(order.len() - 1);
+        let index = self.chat_ui.inline.selected().min(order.len() - 1);
         let Some(result) = order.get(index).and_then(|&at| results.get(at)) else {
             return false;
         };
@@ -494,9 +473,7 @@ impl QuillApp {
         self.composer.update(cx, |input, cx| {
             input.set_value(String::new(), window, cx);
         });
-        self.chat_ui.inline_results_open = false;
-        self.chat_ui.inline_results_selected = 0;
-        self.chat_ui.inline_query_armed = None;
+        self.chat_ui.inline.close();
         let sent = self.live.as_mut().map(|live| {
             live.driver
                 .send_inline_query_result(chat_id, query_id, &result_id)
@@ -520,7 +497,7 @@ impl QuillApp {
     /// Bots slice: the inline-results panel above the composer (see
     /// `inline_grid.rs` for the grid and list rows).
     pub(super) fn inline_results_dropdown(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.chat_ui.inline_results_open {
+        if !self.chat_ui.inline.is_open() {
             return None;
         }
         let view = inline_view(self, cx)?;
