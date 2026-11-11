@@ -5,6 +5,7 @@
 //! binding.
 
 use super::pill_radius;
+use super::style_notices::text_toast;
 use crate::ui::actions::AiComposeApply;
 use crate::ui::ai_compose_state::{AiComposeView, PreviewStage};
 use crate::ui::app::QuillApp;
@@ -18,6 +19,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ai_compose::{StyleChoice, TextCompositionStyle, prefs, style_link};
+use quill::ids::AccountKey;
 use quill::lang::{keys, tr, tr_with};
 use quill::settings_catalog::Page;
 
@@ -35,12 +37,22 @@ pub(super) fn ai_apply_shortcut_text(cx: &App) -> Option<String> {
     (!text.is_empty()).then(|| text.join(" "))
 }
 
-pub(super) fn bound_to(name: &str) -> bool {
-    prefs::current().bound_style_name.as_deref() == Some(name)
+fn bound_to(account: Option<&AccountKey>, name: &str) -> bool {
+    account.is_some_and(|account| prefs::current().bound_style(account) == Some(name))
 }
 
-pub(super) fn set_bound_style(name: Option<&str>) {
-    prefs::update(|prefs| prefs.bound_style_name = name.map(str::to_string));
+impl QuillApp {
+    /// Whether `name` is bound to the shortcut of the account on screen.
+    pub(super) fn ai_style_bound(&self, name: &str) -> bool {
+        bound_to(self.current_account().as_ref(), name)
+    }
+
+    /// Bind (or unbind) the account on screen's shortcut.
+    pub(super) fn bind_ai_style(&self, name: Option<&str>) {
+        if let Some(account) = self.current_account() {
+            prefs::update(|prefs| prefs.bind_style(&account, name));
+        }
+    }
 }
 
 impl QuillApp {
@@ -156,9 +168,9 @@ impl QuillApp {
             alert
                 .cancel_text(tr(keys::CANCEL))
                 .show_cancel(true)
-                .on_ok(move |_, _, cx| {
+                .on_ok(move |_, window, cx| {
                     let _ = app.update(cx, |this, cx| {
-                        this.remove_ai_style(&name, creator, from_preview, cx);
+                        this.remove_ai_style(&name, creator, from_preview, window, cx);
                     });
                     true
                 })
@@ -170,12 +182,28 @@ impl QuillApp {
         name: &str,
         creator: bool,
         from_preview: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if from_preview && let Some(preview) = self.ai_compose.preview.as_mut() {
+        let sent = self.live.as_mut().map(|live| {
+            if creator {
+                live.driver.delete_text_composition_style(name)
+            } else {
+                live.driver.remove_text_composition_style(name)
+            }
+        });
+        if matches!(sent, Some(Err(_))) {
+            // Nothing went out: the editor and the preview stay as they were.
+            self.push_ai_toast(text_toast(""), window, cx);
+            return;
+        }
+        if let Some(Ok(request)) = sent
+            && from_preview
+            && let Some(preview) = self.ai_compose.preview.as_mut()
+        {
             let stage = std::mem::replace(&mut preview.stage, PreviewStage::LookingUp { token: 0 });
             preview.stage = match stage {
-                PreviewStage::Shown(style) => PreviewStage::Removing(style),
+                PreviewStage::Shown(style) => PreviewStage::Removing { style, request },
                 other => other,
             };
         }
@@ -184,13 +212,6 @@ impl QuillApp {
         {
             open.editor = None;
             open.view = AiComposeView::Card;
-        }
-        if let Some(live) = self.live.as_mut() {
-            let _ = if creator {
-                live.driver.delete_text_composition_style(name)
-            } else {
-                live.driver.remove_text_composition_style(name)
-            };
         }
         cx.notify();
     }
@@ -227,16 +248,20 @@ fn ai_style_menu(
         }
     };
     if !style.name.is_empty() {
+        let account = owner
+            .read_with(cx, |app, _| app.current_account())
+            .ok()
+            .flatten();
         menu = match ai_apply_shortcut_text(cx) {
             Some(shortcut) => menu.item(
                 PopupMenuItem::new(tr_with(
                     keys::AI_COMPOSE_BIND_USE_HOTKEY,
                     &[("keys", &shortcut)],
                 ))
-                .checked(bound_to(&style.name))
-                .on_click(act(|_, style, _, cx| {
-                    let bound = bound_to(&style.name);
-                    set_bound_style((!bound).then_some(style.name.as_str()));
+                .checked(bound_to(account.as_ref(), &style.name))
+                .on_click(act(|this, style, _, cx| {
+                    let bound = this.ai_style_bound(&style.name);
+                    this.bind_ai_style((!bound).then_some(style.name.as_str()));
                     cx.notify();
                 })),
             ),

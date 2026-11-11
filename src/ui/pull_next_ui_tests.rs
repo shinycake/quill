@@ -224,7 +224,7 @@ fn the_wide_layout_puts_every_message_on_the_left_with_photos(cx: &mut TestAppCo
     frames(vcx);
     // Wide enough, but off by default: the look is unchanged.
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.history.chat_layout.get(), ChatLayout::Wide);
+        assert_eq!(app.history.measure.get().layout(), ChatLayout::Wide);
         assert!(!app.chat_wide());
     });
     let outgoing_photo = |app: &QuillApp| {
@@ -261,9 +261,31 @@ fn a_narrow_chat_keeps_the_normal_layout(cx: &mut TestAppContext) {
     });
     frames(vcx);
     app.update(vcx, |app, cx| {
-        assert_eq!(app.history.chat_layout.get(), ChatLayout::Normal);
+        assert_eq!(app.history.measure.get().layout(), ChatLayout::Normal);
         assert!(!app.chat_wide());
         // tdesktop hides the checkbox while the chat is narrow.
         assert!(app.adaptive_wide_checkbox(cx).is_none());
+    });
+}
+
+#[gpui_kit::test]
+fn a_jump_started_behind_the_lock_opens_nothing_and_ends(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, 1100.);
+    let vcx = &mut vcx;
+    frames(vcx);
+    open_channel_with_a_next_one(&app, vcx);
+    let at = history_centre(&app, vcx);
+    pull(vcx, at, 12);
+    app.update(vcx, |app, cx| {
+        // As a release does, then Quill locks within the wait.
+        let now = app.history.pull.now();
+        app.history.pull.machine.begin_jump(now);
+        app.set_locked(true, cx);
+        app.pull_jump_when_ready(ChatId(14), cx);
+    });
+    vcx.run_until_parked();
+    app.read_with(vcx, |app, _| {
+        assert!(!app.history.pull.machine_for_tests().jumping());
+        assert_eq!(app.open_chat_id(), Some(ChatId(13)), "nothing opened");
     });
 }

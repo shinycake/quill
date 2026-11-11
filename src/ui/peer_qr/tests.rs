@@ -138,7 +138,7 @@ fn a_color_circle_recolors_the_box_and_esc_closes_only_the_panel(cx: &mut TestAp
     click(vcx, "peer-qr-swatch-2");
     app.read_with(vcx, |app, _| {
         let open = app.peer_qr.open.as_ref().expect("open");
-        assert_eq!(open.state.color, SwatchKey::Backdrop(id));
+        assert_eq!(open.state.color(), SwatchKey::Backdrop(id));
         let view = app.qr_view().expect("view");
         assert_eq!(view.appearance.center, Rgb::hex(center));
         assert_eq!(view.appearance.edge, Rgb::hex(edge));
@@ -148,7 +148,7 @@ fn a_color_circle_recolors_the_box_and_esc_closes_only_the_panel(cx: &mut TestAp
     app.read_with(vcx, |app, _| {
         let open = app.peer_qr.open.as_ref().expect("the box stays");
         assert_eq!(open.state.panel, None);
-        assert_eq!(open.state.color, SwatchKey::Backdrop(id));
+        assert_eq!(open.state.color(), SwatchKey::Backdrop(id));
     });
     vcx.simulate_keystrokes("escape");
     frames(vcx);
@@ -170,7 +170,7 @@ fn an_emoji_toggles_in_and_out_of_the_pattern(cx: &mut TestAppContext) {
             app.peer_qr
                 .open
                 .as_ref()
-                .map(|open| super::plain_picks(&open.state.emoji))
+                .map(|open| super::plain_picks(open.state.emoji()))
                 .unwrap_or_default()
         })
     };
@@ -257,7 +257,7 @@ fn a_member_who_cannot_change_info_gets_no_colors(cx: &mut TestAppContext) {
             .as_mut()
             .and_then(|session| session.chats.get_mut(&GROUP_CHAT))
         {
-            chat.my_member_status = Some(ChannelMemberStatus::Member);
+            chat.assume_member_status(Some(ChannelMemberStatus::Member));
         }
         app.open_peer_qr_box(QrPeer::Chat(GROUP_CHAT), cx);
     });
@@ -434,7 +434,7 @@ fn the_clock_runs_only_while_a_countdown_shows(cx: &mut TestAppContext) {
             app.peer_qr
                 .open
                 .as_ref()
-                .is_some_and(|open| open.clock_running)
+                .is_some_and(|open| open.clock.is_some())
         })
     };
     assert!(!running(&app, vcx), "a username link never runs out");
@@ -563,7 +563,7 @@ fn a_share_finishing_in_a_reopened_box_is_dropped(cx: &mut TestAppContext) {
     app.read_with(vcx, |app, _| {
         assert_eq!(app.share.link_text, None, "the new box shared nothing");
         let open = app.peer_qr.open.as_ref().expect("the new box");
-        assert_eq!(open.share_image, None);
+        assert_eq!(open.share.image(), None);
     });
 }
 
@@ -578,9 +578,12 @@ fn a_card_whose_chat_did_not_open_is_not_attached_later(cx: &mut TestAppContext)
     // opens is another one.
     app.update(vcx, |app, cx| {
         app.peer_qr.pending_attach = Some((quill::ids::ChatId(424_242), card.clone()));
-        app.links.pending_deep_link_open = Some(crate::ui::links_state::PendingOpen::user(
-            quill::ids::ChatId(GROUP_CHAT),
-            quill::state::DeepLinkAction::ShareDraft { text: "hi".into() },
+        app.links.resolved = Some(crate::ui::links_state::ResolvedLink::open(
+            crate::ui::links_state::PendingOpen::user(
+                quill::ids::ChatId(GROUP_CHAT),
+                quill::state::DeepLinkAction::ShareDraft { text: "hi".into() },
+            ),
+            None,
         ));
         cx.notify();
     });
@@ -606,7 +609,7 @@ fn share_hides_the_box_under_the_chat_chooser_until_cancelled(cx: &mut TestAppCo
             .peer_qr
             .open
             .as_ref()
-            .and_then(|open| open.share_image.clone());
+            .and_then(|open| open.share.image().cloned());
         assert!(
             card.is_some_and(|path| path.exists()),
             "the card waits as a file"
@@ -624,8 +627,72 @@ fn share_hides_the_box_under_the_chat_chooser_until_cancelled(cx: &mut TestAppCo
     );
     app.read_with(vcx, |app, _| {
         let open = app.peer_qr.open.as_ref().expect("the box is back");
-        assert_eq!(open.share_image, None);
+        assert_eq!(open.share.image(), None);
     });
 }
 
+/// Another chooser's pick (a group link row's Share) does not close a box
+/// that opened no chooser of its own.
+#[gpui_kit::test]
+fn a_pick_in_another_share_chooser_leaves_the_box_open(cx: &mut TestAppContext) {
+    let (app, _, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    app.update(vcx, |app, cx| {
+        app.qr_share_chosen(quill::ids::ChatId(GROUP_CHAT), cx);
+        app.qr_share_cancelled(cx);
+    });
+    app.read_with(vcx, |app, _| {
+        assert!(app.peer_qr.open.is_some(), "the box stayed open");
+        assert_eq!(app.peer_qr.pending_attach, None);
+    });
+}
+
+/// The screen going away takes a shared card that no chat has taken yet.
+#[gpui_kit::test]
+fn leaving_the_screen_removes_a_waiting_share_card(cx: &mut TestAppContext) {
+    use crate::ui::on_screen::Farewell;
+    let (app, _, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    let card = std::env::temp_dir().join(format!("quill-qr-farewell-{}.png", std::process::id()));
+    std::fs::write(&card, b"card").expect("a card file");
+    close_box(&app, vcx);
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.peer_qr.pending_attach = Some((quill::ids::ChatId(424_242), card.clone()));
+            super::PeerQrUi::farewell(app, window, cx);
+        })
+    });
+    vcx.run_until_parked();
+    assert!(!card.exists(), "the card file is gone");
+}
+
 mod theme;
+
+/// A pick saved as the box closes answers after the box is gone: a failure
+/// reaches the app's note instead of being dropped, so the person is not
+/// left believing the share theme was saved.
+#[gpui_kit::test]
+fn a_save_that_fails_after_the_box_closed_is_told(cx: &mut TestAppContext) {
+    use quill::peer_qr::state::SaveTicket;
+    let (app, _, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    close_box(&app, vcx);
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.users_state.peer_qr.fail_save(
+                SaveTicket {
+                    box_id: 1,
+                    serial: 1,
+                },
+                "Too many requests".into(),
+            );
+        }
+        app.drain_peer_qr(cx);
+    });
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.connection.status_note(), "Too many requests");
+    });
+}

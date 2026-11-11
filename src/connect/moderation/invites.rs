@@ -1,5 +1,6 @@
 //! Connect driver: chat invite links and join requests.
 use super::*;
+use crate::state::send_failed_line;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Phase D3a: `getChatInviteLinks` (TDLib 1.8.67, `schema/td_api.tl:14138`).
@@ -21,7 +22,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if matches!(
             self.session.groups.invite_links.get(&chat_id.0),
-            Some(InviteLinkFetch::Loading | InviteLinkFetch::Loaded(_))
+            Some(InviteLinkFetch::Loading(_) | InviteLinkFetch::Loaded(_))
         ) || self
             .session
             .requests
@@ -29,13 +30,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.session
-            .groups
-            .invite_links
-            .insert(chat_id.0, InviteLinkFetch::Loading);
         let extra = self
             .session
             .request(RequestPurpose::GetChatInviteLinks, Some(chat_id));
+        self.session
+            .groups
+            .invite_links
+            .insert(chat_id.0, InviteLinkFetch::Loading(extra));
         // `creator_user_id` must be an administrator — yourself unless you
         // own the chat (schema 1.8.67, line 14133); 0 is rejected (400).
         let creator = self.session.my_user_id.unwrap_or(0);
@@ -43,7 +44,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra, chat_id.0, creator, false, 0, "", 100,
         )) {
             self.session.requests.take(extra);
-            self.session.groups.invite_links.remove(&chat_id.0);
+            self.session.groups.invite_links.insert(
+                chat_id.0,
+                InviteLinkFetch::Failed(send_failed_line("Could not load invite links")),
+            );
             return Err(err);
         }
         Ok(Some(extra))
@@ -201,31 +205,34 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if matches!(
             self.session.groups.join_requests.get(&chat_id.0),
-            Some(JoinRequestFetch::Loading | JoinRequestFetch::Loaded(_))
+            Some(JoinRequestFetch::Loading { .. } | JoinRequestFetch::Loaded(_))
         ) {
             return Ok(None);
         }
-        self.session
-            .groups
-            .join_requests
-            .insert(chat_id.0, JoinRequestFetch::Loading);
         let extra = self
             .session
             .request(RequestPurpose::GetChatJoinRequests, Some(chat_id));
+        // The unfiltered list is what the box waits for now: a search
+        // still in flight is superseded, so its answer is not shown as
+        // the whole list under an empty field.
+        self.session.groups.join_requests.insert(
+            chat_id.0,
+            JoinRequestFetch::Loading {
+                query: String::new(),
+                request: extra,
+            },
+        );
         if let Err(err) = self
             .sender
             .send_json(&get_chat_join_requests(extra, chat_id.0, "", "", 50))
         {
             self.session.requests.take(extra);
-            self.session.groups.join_requests.remove(&chat_id.0);
+            self.session.groups.join_requests.insert(
+                chat_id.0,
+                JoinRequestFetch::Failed(send_failed_line("Could not load join requests")),
+            );
             return Err(err);
         }
-        // The unfiltered list is what the box waits for now: a search
-        // still in flight is superseded, so its answer is not shown as
-        // the whole list under an empty field.
-        let groups = &mut self.session.groups;
-        groups.join_request_latest.insert(chat_id.0, extra);
-        groups.join_request_queries.insert(chat_id.0, String::new());
         Ok(Some(extra))
     }
 

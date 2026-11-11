@@ -84,8 +84,8 @@ fn forwarding_to_two_chats_keeps_both_results_and_options() {
     let first = driver
         .session
         .messages
-        .last_forward
-        .take()
+        .forwards
+        .take_result()
         .expect("bob result");
     assert_eq!(first.dest_title, "Bob");
     assert_eq!(first.from_chat_id, ChatId(7));
@@ -93,13 +93,12 @@ fn forwarding_to_two_chats_keeps_both_results_and_options() {
     let second = driver
         .session
         .messages
-        .last_forward
-        .take()
+        .forwards
+        .take_result()
         .expect("cy result");
     assert_eq!(second.dest_title, "Cy");
     assert_eq!(second.from_chat_id, ChatId(7));
-    assert!(driver.session.messages.queued_forward_flights.is_empty());
-    assert!(driver.session.messages.in_flight_forward.is_none());
+    assert!(!driver.session.messages.forwards.in_flight());
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -121,7 +120,7 @@ fn scheduled_forward_carries_the_send_date() {
         ForwardDraft::from_message(ChatId(7), crate::ids::TopicId::None, MessageId(50), false)
             .unwrap();
     let options = SendOptions {
-        scheduling: ComposerScheduling::SendAtDate(1_900_000_000),
+        scheduling: ComposerScheduling::at(1_900_000_000),
         ..SendOptions::default()
     };
     driver
@@ -165,7 +164,7 @@ fn share_search_sends_both_searches_and_ignores_stale_answers() {
         &seq,
         &sink,
     );
-    assert!(driver.session.messages.share_search.server.is_empty());
+    assert!(driver.session.messages.share_search.server().is_empty());
     assert!(
         driver
             .session
@@ -331,7 +330,7 @@ fn a_forward_goes_to_the_topic_its_draft_picked_and_not_to_the_open_one() {
             .unwrap();
     driver.select_chat(ChatId(8)).unwrap();
     // Another topic is open when Send runs.
-    driver.session.open_topic = Some(6);
+    driver.session.open = driver.session.open.with_topic(6);
     draft.topic_id = Some(5);
     driver
         .forward_messages_with_options(ChatId(8), &draft, &SendOptions::default())
@@ -355,4 +354,55 @@ fn a_forward_goes_to_the_topic_its_draft_picked_and_not_to_the_open_one() {
     assert_eq!(topic_of(8).unwrap()["forum_topic_id"], 5);
     assert_eq!(topic_of(8).unwrap()["@type"], "messageTopicForum");
     assert!(topic_of(9).unwrap().is_null());
+}
+
+#[test]
+fn a_refused_sender_list_is_failed_and_asked_again_on_retry() {
+    use crate::state::fetch::Fetch;
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateNewChat","chat":{"id":-100,"title":"Group","type":{"@type":"chatTypeSupergroup","supergroup_id":100,"is_channel":false},"unread_count":0,"message_sender_id":{"@type":"messageSenderUser","user_id":1}}}"#,
+        &seq,
+        &sink,
+    );
+    driver
+        .get_chat_available_message_senders(ChatId(-100))
+        .unwrap();
+    assert!(
+        driver
+            .session
+            .message_senders_fetch(ChatId(-100))
+            .is_loading()
+    );
+    let request = sent_request(&recorder, "getChatAvailableMessageSenders");
+    let extra = request["@extra"].as_str().unwrap().to_string();
+    ingest(
+        &mut driver,
+        &format!(r#"{{"@type":"error","@extra":"{extra}","code":500,"message":"Internal"}}"#),
+        &seq,
+        &sink,
+    );
+    // The picker is not left on its spinner: it has an error to show.
+    assert!(matches!(
+        driver.session.message_senders_fetch(ChatId(-100)),
+        Fetch::Failed { .. }
+    ));
+    // Retry asks again.
+    let before = recorder.snapshot().len();
+    driver
+        .get_chat_available_message_senders(ChatId(-100))
+        .unwrap();
+    assert_eq!(recorder.snapshot().len(), before + 1);
+    assert!(
+        driver
+            .session
+            .message_senders_fetch(ChatId(-100))
+            .is_loading()
+    );
+    let _ = std::fs::remove_dir_all(dir);
 }

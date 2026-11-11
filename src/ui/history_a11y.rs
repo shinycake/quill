@@ -18,12 +18,13 @@
 //!   or pauses the focused voice message, audio or video message when
 //!   nothing is selected (`keyPressEvent`, `playPauseFocusedMedia`).
 //!
-//! The focused message is the selection's focus row (`selection_focus`),
-//! the same row Ctrl+Space toggles, as tdesktop shares
-//! `_accessibilityFocusedItem` between the two.
+//! The focused message is the chat's `A11yFocus` (`ChatUi::a11y_focus`: none,
+//! the unread bar, or a row), the same row Ctrl+Space toggles, as tdesktop
+//! shares `_accessibilityFocusedItem` between the two.
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::chat_ui_state::A11yFocus;
 use super::history_row::HistoryRow;
 use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
@@ -31,17 +32,45 @@ use quill::message_a11y::{MessageA11yContext, message_accessibility_name};
 use quill::state::{ReplyState, message_time_hhmm};
 use quill::telegram::envelope::MessageContent;
 
+/// Whether the history has keyboard focus, and whether it waits for its
+/// first messages. Focus leaving drops the wait with it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum HistoryFocus {
+    /// Neither the history nor anything inside it has keyboard focus.
+    #[default]
+    Away,
+    /// The history (or something inside it) has keyboard focus.
+    Focused,
+    /// The history took focus while this chat had no messages: its first
+    /// messages take focus when they arrive (`_announceFirstMessages`).
+    ArmedForFirst(ChatId),
+}
+
+impl HistoryFocus {
+    #[cfg(test)]
+    pub(crate) fn is_focused(self) -> bool {
+        self != Self::Away
+    }
+
+    pub(crate) fn armed(self) -> Option<ChatId> {
+        match self {
+            Self::ArmedForFirst(chat) => Some(chat),
+            _ => None,
+        }
+    }
+
+    /// A focus move spent the wait.
+    fn disarm(&mut self) {
+        if matches!(self, Self::ArmedForFirst(_)) {
+            *self = Self::Focused;
+        }
+    }
+}
+
 /// Accessibility focus bookkeeping of the history.
 #[derive(Debug, Default)]
 pub(crate) struct HistoryA11y {
-    /// The unread bar holds accessibility focus (tdesktop: a focused index
-    /// with no item).
-    pub(super) bar_focused: bool,
-    /// The history took focus while this chat had no messages: its first
-    /// messages take focus when they arrive (`_announceFirstMessages`).
-    pub(super) announce_first: Option<ChatId>,
-    /// The history (or something inside it) has keyboard focus.
-    pub(super) focused: bool,
+    pub(super) focus: HistoryFocus,
     /// Tests: act as if a screen reader read the window (the test platform
     /// has no accessibility client).
     #[cfg(test)]
@@ -137,12 +166,12 @@ impl QuillApp {
 
     /// The accessibility child focused now, if it is still in the list.
     pub(super) fn history_a11y_current(&self, items: &[A11yItem]) -> Option<usize> {
-        if self.message_ui.a11y.bar_focused {
+        if self.chat_ui.focus.is_bar() {
             return items
                 .iter()
                 .position(|item| matches!(item, A11yItem::Bar(_)));
         }
-        let focus = self.chat_ui.selection_focus?;
+        let focus = self.chat_ui.focus.row()?;
         items.iter().position(|item| match item {
             A11yItem::Row(ix) => self
                 .history
@@ -166,20 +195,19 @@ impl QuillApp {
             });
         let ix = match item {
             A11yItem::Bar(ix) => {
-                self.message_ui.a11y.bar_focused = true;
+                self.chat_ui.focus = A11yFocus::Bar;
                 ix
             }
             A11yItem::Row(ix) => {
                 let Some(id) = self.history.rows.get(ix).and_then(HistoryRow::first_id) else {
                     return;
                 };
-                self.message_ui.a11y.bar_focused = false;
-                self.chat_ui.selection_focus = Some(id);
+                self.chat_ui.focus = A11yFocus::Row(id);
                 self.chat_ui.selection_anchor = Some(id);
                 ix
             }
         };
-        self.message_ui.a11y.announce_first = None;
+        self.message_ui.a11y.focus.disarm();
         // Bring the row on screen only when it is off screen.
         let on_screen = self
             .history
@@ -199,13 +227,15 @@ impl QuillApp {
 
     /// Focus entered the history (`focusInEvent`).
     pub(super) fn history_a11y_focus_in(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.message_ui.a11y.focused = true;
         let items = a11y_items(&self.history.rows);
         if items.is_empty() {
-            self.message_ui.a11y.announce_first = self.viewed_chat();
+            self.message_ui.a11y.focus = match self.viewed_chat() {
+                Some(chat) => HistoryFocus::ArmedForFirst(chat),
+                None => HistoryFocus::Focused,
+            };
             return;
         }
-        self.message_ui.a11y.announce_first = None;
+        self.message_ui.a11y.focus = HistoryFocus::Focused;
         if !self.screen_reader_on(window) {
             return;
         }
@@ -229,14 +259,14 @@ impl QuillApp {
     /// The history rows were rebuilt: the first messages of a chat whose
     /// empty history holds focus take accessibility focus.
     pub(super) fn history_a11y_rows_changed(&mut self, cx: &mut Context<Self>) {
-        let Some(chat) = self.message_ui.a11y.announce_first else {
+        let Some(chat) = self.message_ui.a11y.focus.armed() else {
             return;
         };
         if self.viewed_chat() != Some(chat) {
-            self.message_ui.a11y.announce_first = None;
+            self.message_ui.a11y.focus = HistoryFocus::Focused;
             return;
         }
-        if !self.message_ui.a11y.focused || self.history.rows.is_empty() {
+        if self.history.rows.is_empty() {
             return;
         }
         let items = a11y_items(&self.history.rows);
@@ -264,8 +294,10 @@ impl QuillApp {
         }
         if extend {
             // Shift+Up / Down: grow the selection from the focused message.
-            let chat = self.session().and_then(|s| s.open_chat)?;
-            self.message_ui.a11y.bar_focused = false;
+            let chat = self.session().and_then(|s| s.open_chat_id())?;
+            if self.chat_ui.focus.is_bar() {
+                self.chat_ui.focus = A11yFocus::None;
+            }
             if !self.selecting_in(chat) {
                 self.toggle_focused_selection_by_key(window, cx);
             }
@@ -287,10 +319,10 @@ impl QuillApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.screen_reader_on(window) || self.message_ui.a11y.bar_focused {
+        if !self.screen_reader_on(window) || self.chat_ui.focus.is_bar() {
             return false;
         }
-        let Some(focus) = self.chat_ui.selection_focus else {
+        let Some(focus) = self.chat_ui.focus.row() else {
             return false;
         };
         let Some(message) = self.history.rows.iter().find_map(|row| match row {
@@ -338,12 +370,13 @@ impl QuillApp {
         let Some(row) = self.history.rows.get(ix) else {
             return (false, false);
         };
-        if self.message_ui.a11y.bar_focused {
+        if self.chat_ui.focus.is_bar() {
             return (false, row.unread_divider());
         }
         let focused = self
             .chat_ui
-            .selection_focus
+            .focus
+            .row()
             .is_some_and(|focus| row.contains(focus));
         (focused, false)
     }
@@ -414,7 +447,7 @@ pub(crate) fn install(handle: &FocusHandle, window: &mut Window, cx: &mut Contex
     .detach();
     cx.on_focus_out(handle, window, |this, _, window, cx| {
         this.in_window_of(window, cx, |this, _, _| {
-            this.message_ui.a11y.focused = false
+            this.message_ui.a11y.focus = HistoryFocus::Away
         });
     })
     .detach();

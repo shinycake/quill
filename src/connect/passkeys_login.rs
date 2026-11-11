@@ -6,8 +6,8 @@ use super::*;
 use crate::ids::RequestId;
 use crate::passkeys::PasskeysPurpose;
 use crate::passkeys::login::{
-    HANDLE_INVALID, check_authentication_passkey, get_authentication_passkey_parameters,
-    user_handle_valid,
+    HANDLE_INVALID, LoginStage, check_authentication_passkey,
+    get_authentication_passkey_parameters, user_handle_valid,
 };
 use crate::state::{RequestPurpose, SettingsPurpose, ShutdownPhase};
 use crate::telegram::envelope::AuthorizationState;
@@ -30,50 +30,59 @@ impl<S: JsonSender> ConnectDriver<S> {
         ) && matches!(self.session.shutdown, ShutdownPhase::Running)
     }
 
-    fn passkey_login_in_flight(&self, passkeys: PasskeysPurpose) -> bool {
-        self.session.requests.has_purpose(purpose(passkeys))
-    }
-
     /// "Log in using passkey" (tdesktop `setupPasskeyLink`'s click): the
     /// options of the last try while they are within their timeout, else
     /// `getAuthenticationPasskeyParameters`. Once known they wait in
-    /// `login.ceremony` for the dialog. `Ok(None)` when no request was
+    /// `login.stage` for the dialog. `Ok(None)` when no request was
     /// needed.
     pub fn begin_login(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         let state = &self.session.settings.passkeys;
-        if !self.passkey_login_state()
+        let blocked = !self.passkey_login_state()
             || !state.login_link_shown()
-            || state.login.checking
-            || self.session.requests.has_auth_submit()
-        {
+            || matches!(state.login.stage, LoginStage::Checking(_))
+            || self.session.requests.has_auth_submit();
+        if blocked {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if let Some(pending) = &state.login.pending
-            && pending.fresh(Instant::now())
+        if self
+            .session
+            .settings
+            .passkeys
+            .login
+            .reuse_options(Instant::now())
         {
-            let options = pending.options.clone();
-            let login = &mut self.session.settings.passkeys.login;
-            login.ceremony = Some(options);
-            login.error = None;
             return Ok(None);
         }
-        if self.passkey_login_in_flight(PasskeysPurpose::LoginParameters) {
+        if matches!(
+            self.session.settings.passkeys.login.stage,
+            LoginStage::FetchingOptions(_)
+        ) {
             return Ok(None);
         }
         let extra = self
             .session
             .request(purpose(PasskeysPurpose::LoginParameters), None);
-        let login = &mut self.session.settings.passkeys.login;
-        login.pending = None;
-        login.error = None;
-        self.send_json_request(extra, &get_authentication_passkey_parameters(extra))
-            .map(Some)
+        self.send_json_request(extra, &get_authentication_passkey_parameters(extra))?;
+        // Only an ask that went out is waited for; the old options and
+        // error go with it.
+        self.session.settings.passkeys.login.stage = LoginStage::FetchingOptions(extra);
+        Ok(Some(extra))
     }
 
     /// Whether the link waits for the server's options or answer.
     pub fn passkey_login_pending(&self) -> bool {
-        self.passkey_login_in_flight(PasskeysPurpose::LoginParameters)
-            || self.session.settings.passkeys.login.checking
+        self.session.settings.passkeys.login.is_waiting()
+    }
+
+    /// A step whose request is gone without an answer (a dropped
+    /// connection) ends instead of waiting for good.
+    pub(crate) fn drop_lost_passkey_login(&mut self) {
+        let requests = &self.session.requests;
+        self.session
+            .settings
+            .passkeys
+            .login
+            .drop_lost(|id| requests.get(id).is_some());
     }
 
     /// The ceremony signed in: `checkAuthenticationPasskey` (tdesktop
@@ -84,7 +93,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         assertion: &Assertion,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.passkey_login_state() || self.session.settings.passkeys.login.checking {
+        if !self.passkey_login_state()
+            || matches!(
+                self.session.settings.passkeys.login.stage,
+                LoginStage::Checking(_)
+            )
+        {
             return Err(ConnectSendError::InvalidRequest);
         }
         if !user_handle_valid(&assertion.user_handle) {
@@ -98,14 +112,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(purpose(PasskeysPurpose::CheckLogin), None);
-        let login = &mut self.session.settings.passkeys.login;
-        login.checking = true;
-        login.error = None;
-        let sent = self.send_json_request(extra, &check_authentication_passkey(extra, assertion));
-        if sent.is_err() {
-            self.session.settings.passkeys.login.checking = false;
-        }
-        sent.map(Some)
+        self.send_json_request(extra, &check_authentication_passkey(extra, assertion))?;
+        self.session.settings.passkeys.login.stage = LoginStage::Checking(extra);
+        Ok(Some(extra))
     }
 
     /// On the sign-in screens: `getApplicationConfig` once, for
@@ -113,16 +122,16 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// tdesktop's `AppConfig` refreshes before login too and shows the
     /// link once the value arrives).
     pub(crate) fn maybe_request_login_config(&mut self) {
-        if !self.passkey_login_state() || self.session.settings.passkeys.login.config_requested {
+        if !self.passkey_login_state() || !self.session.settings.passkeys.login.config.is_idle() {
             return;
         }
         let extra = self
             .session
             .request(purpose(PasskeysPurpose::LoginConfig), None);
-        self.session.settings.passkeys.login.config_requested = true;
         let json = crate::telegram::requests::get_application_config(extra);
-        if self.send_json_request(extra, &json).is_err() {
-            self.session.settings.passkeys.login.config_requested = false;
+        // A send that failed leaves the ask open for the next ingest.
+        if self.send_json_request(extra, &json).is_ok() {
+            self.session.settings.passkeys.login.config.begin();
         }
     }
 }

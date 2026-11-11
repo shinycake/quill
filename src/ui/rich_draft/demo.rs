@@ -7,6 +7,7 @@
 //! without Premium).
 
 use crate::ui::app::QuillApp;
+use crate::ui::composer_sends::SendOnce;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::diagnostics::DiagnosticSink;
@@ -70,10 +71,10 @@ impl QuillApp {
         }
         self.restore_open_draft(window, cx);
         match variant.as_str() {
-            "discard" => self.chat_ui.rich_draft_box = super::RichDraftBox::Discard,
+            "discard" => self.chat_ui.rich.ask_discard(),
             "editor" => self.open_rich_draft(window, cx),
             "choice" | "toast" => {
-                let _ = self.submit_rich_draft(window, cx);
+                let _ = self.submit_rich_draft(SendOnce::default(), window, cx);
             }
             "paste" | "paste-locked" => {
                 self.set_composer_markup(PASTED, window, cx);

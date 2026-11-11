@@ -40,11 +40,14 @@ impl Session {
         let Some(playlist) = self.my_playlist_mut() else {
             return;
         };
-        if playlist.tracks.iter().any(|t| t.file_id == audio.file_id) {
+        let Some(data) = playlist.list.data_mut() else {
+            return;
+        };
+        if data.tracks.iter().any(|t| t.file_id == audio.file_id) {
             return;
         }
-        playlist.tracks.insert(0, audio);
-        playlist.total_count = playlist.total_count.max(0) + 1;
+        data.tracks.insert(0, audio);
+        data.total_count = data.total_count.max(0) + 1;
     }
 
     /// `remove`: the track leaves the list. Returns whether it was there.
@@ -53,11 +56,14 @@ impl Session {
         let Some(playlist) = self.my_playlist_mut() else {
             return false;
         };
-        let before = playlist.tracks.len();
-        playlist.tracks.retain(|t| t.file_id != file_id);
-        let removed = before - playlist.tracks.len();
+        let Some(data) = playlist.list.data_mut() else {
+            return false;
+        };
+        let before = data.tracks.len();
+        data.tracks.retain(|t| t.file_id != file_id);
+        let removed = before - data.tracks.len();
         if removed > 0 {
-            playlist.total_count = (playlist.total_count - removed as i32).max(0);
+            data.total_count = (data.total_count - removed as i32).max(0);
         }
         removed > 0
     }
@@ -66,17 +72,17 @@ impl Session {
     /// to send as `after_file_id` (0 for the front). `None` for positions
     /// that are out of range or equal, as in tdesktop.
     pub fn local_move_profile_audio(&mut self, from: usize, to: usize) -> Option<(i32, i32)> {
-        let playlist = self.my_playlist_mut()?;
-        let len = playlist.tracks.len();
+        let data = self.my_playlist_mut()?.list.data_mut()?;
+        let len = data.tracks.len();
         if from >= len || to >= len || from == to {
             return None;
         }
-        let track = playlist.tracks.remove(from);
+        let track = data.tracks.remove(from);
         let file_id = track.file_id.0;
-        playlist.tracks.insert(to, track);
+        data.tracks.insert(to, track);
         let after = to
             .checked_sub(1)
-            .and_then(|prev| playlist.tracks.get(prev))
+            .and_then(|prev| data.tracks.get(prev))
             .map_or(0, |t| t.file_id.0);
         Some((file_id, after))
     }
@@ -89,7 +95,10 @@ impl Session {
         if let Some(RequestPurpose::Media(MediaPurpose::IsProfileAudio { file_id })) =
             pending.map(|p| p.purpose)
         {
-            self.media.profile_audio_ids.insert(file_id, true);
+            // The check is only asked while the song is unknown, so a known
+            // value now came from a local save or remove made after the
+            // check went out, and it is newer than this answer.
+            self.media.profile_audio_ids.entry(file_id).or_insert(true);
         }
     }
 
@@ -104,14 +113,13 @@ impl Session {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::Media(MediaPurpose::IsProfileAudio { file_id })) => {
                 if err.code == 404 {
-                    self.media.profile_audio_ids.insert(file_id, false);
+                    self.media.profile_audio_ids.entry(file_id).or_insert(false);
                 }
             }
             Some(RequestPurpose::Media(MediaPurpose::AddProfileAudio { file_id })) => {
                 self.local_remove_profile_audio(FileId(file_id));
-                self.media.profile_audio_ids.remove(&file_id);
-                self.mark_my_playlist_stale();
-                self.messages.message_action_note = Some(format!(
+                self.playlist_change_unsent(file_id);
+                self.messages.message_action_note.push(format!(
                     "could not save to your profile: {}",
                     error_reason(err)
                 ));
@@ -121,8 +129,8 @@ impl Session {
                 | MediaPurpose::SetProfileAudioPosition { file_id },
             )) => {
                 self.media.profile_audio_ids.remove(&file_id);
-                self.mark_my_playlist_stale();
-                self.messages.message_action_note = Some(format!(
+                self.playlist_change_unsent(file_id);
+                self.messages.message_action_note.push(format!(
                     "could not change your playlist: {}",
                     error_reason(err)
                 ));
@@ -131,9 +139,13 @@ impl Session {
         }
     }
 
-    fn mark_my_playlist_stale(&mut self) {
+    /// A remove or reorder of `file_id` did not happen (refused by the
+    /// server, or never sent): the local change is undone by loading the
+    /// list again.
+    pub fn playlist_change_unsent(&mut self, file_id: i32) {
+        self.media.profile_audio_ids.remove(&file_id);
         if let Some(playlist) = self.my_playlist_mut() {
-            playlist.stale = true;
+            playlist.list.outdate();
         }
     }
 
@@ -141,13 +153,9 @@ impl Session {
     pub fn take_stale_playlists(&mut self) -> Vec<i64> {
         self.media
             .playlists
-            .iter_mut()
-            .filter(|(_, p)| p.stale && !p.loading)
-            .map(|(user, p)| {
-                p.stale = false;
-                p.loaded = false;
-                *user
-            })
+            .iter()
+            .filter(|(_, p)| p.list.is_outdated())
+            .map(|(user, _)| *user)
             .collect()
     }
 }
@@ -155,6 +163,7 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ids::RequestId;
 
     fn track(id: i32) -> ProfileAudio {
         ProfileAudio {
@@ -173,15 +182,13 @@ mod tests {
         );
         session.my_user_id = Some(7);
         let playlist = session.media.playlists.entry(7).or_default();
-        playlist.tracks = ids.iter().map(|id| track(*id)).collect();
-        playlist.total_count = ids.len() as i32;
-        playlist.loaded = true;
+        playlist.set_ready(ids.iter().map(|id| track(*id)).collect());
         session
     }
 
     fn order(session: &Session) -> Vec<i32> {
         session.media.playlists[&7]
-            .tracks
+            .tracks()
             .iter()
             .map(|t| t.file_id.0)
             .collect()
@@ -193,7 +200,7 @@ mod tests {
         session.local_save_profile_audio(track(3));
         session.local_save_profile_audio(track(3));
         assert_eq!(order(&session), [3, 1, 2]);
-        assert_eq!(session.media.playlists[&7].total_count, 3);
+        assert_eq!(session.media.playlists[&7].total_count(), 3);
         assert_eq!(session.profile_audio_known(FileId(3)), Some(true));
     }
 
@@ -203,7 +210,7 @@ mod tests {
         assert!(session.local_remove_profile_audio(FileId(2)));
         assert!(!session.local_remove_profile_audio(FileId(2)));
         assert_eq!(order(&session), [1, 3]);
-        assert_eq!(session.media.playlists[&7].total_count, 2);
+        assert_eq!(session.media.playlists[&7].total_count(), 2);
         assert_eq!(session.profile_audio_known(FileId(2)), Some(false));
     }
 
@@ -225,9 +232,39 @@ mod tests {
     fn failed_changes_reload_the_playlist() {
         let mut session = session_with(&[1, 2]);
         session.local_remove_profile_audio(FileId(1));
-        session.mark_my_playlist_stale();
+        session.playlist_change_unsent(1);
         assert_eq!(session.take_stale_playlists(), vec![7]);
-        assert!(!session.media.playlists[&7].loaded);
+        assert!(session.media.playlists[&7].list.is_outdated());
+        // The reload going out leaves the outdated stage.
+        session
+            .media
+            .playlists
+            .get_mut(&7)
+            .unwrap()
+            .list
+            .begin(RequestId(1), false);
         assert!(session.take_stale_playlists().is_empty());
+    }
+
+    #[test]
+    fn a_late_check_answer_does_not_undo_a_local_save_or_remove() {
+        let mut session = session_with(&[1]);
+        let check = |session: &mut Session, file_id: i32| {
+            let id = session.request(
+                RequestPurpose::Media(MediaPurpose::IsProfileAudio { file_id }),
+                None,
+            );
+            session.requests.take(id)
+        };
+        let saved = check(&mut session, 3);
+        session.local_save_profile_audio(track(3));
+        let not_found = TdError::from_code(404);
+        session.apply_profile_music_error(&not_found, saved.as_ref());
+        assert_eq!(session.profile_audio_known(FileId(3)), Some(true));
+
+        let removed = check(&mut session, 1);
+        session.local_remove_profile_audio(FileId(1));
+        session.apply_profile_music_ok(removed.as_ref());
+        assert_eq!(session.profile_audio_known(FileId(1)), Some(false));
     }
 }

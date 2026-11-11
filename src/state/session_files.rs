@@ -10,24 +10,24 @@ const INLINE_CLIP_MAX: i64 = 5 * 1024 * 1024;
 impl Session {
     pub(crate) fn upsert_file(&mut self, file: ParsedFile, from_file_update: bool) {
         // The file on disk changed: drop the sandbox verdicts for its path.
-        if !file.local.path.is_empty() {
-            crate::local_path::invalidate_display_path(&file.local.path);
+        if !file.local.path().is_empty() {
+            crate::local_path::invalidate_display_path(file.local.path());
         }
         if !from_file_update
             && self.media.files.get(&file.id.0).is_some_and(|current| {
                 (current.usable_path().is_some() && file.usable_path().is_none())
-                    || (current.local.is_downloading_active && file.local.is_idle_incomplete())
+                    || (current.local.is_downloading_active() && file.local.is_idle_incomplete())
             })
         {
             return;
         }
         let id = file.id.0;
         let idle_incomplete = file.local.is_idle_incomplete();
-        if file.local.is_downloading_completed {
+        if file.local.is_downloading_completed() {
             self.record_completed_user_download(id);
             self.media.downloads.forget(id);
         }
-        if from_file_update && !file.local.is_downloading_active {
+        if from_file_update && !file.local.is_downloading_active() {
             self.media.downloads.confirm_cancel(id);
         }
         let paused = self.media.downloads.is_paused(id);
@@ -38,8 +38,8 @@ impl Session {
             // cancels are no longer requested.
             self.media.downloads.end(id);
         }
-        if file.local.is_downloading_completed
-            || !file.local.can_be_downloaded
+        if file.local.is_downloading_completed()
+            || !file.local.can_be_downloaded()
             || (from_file_update && idle_incomplete && !paused)
         {
             self.unstick_download(id);
@@ -47,7 +47,7 @@ impl Session {
         let sound_id = self.settings.sound_file_ids.get(&file.id.0).copied();
         if let Some(sound_id) = sound_id {
             if let Some(path) = file.usable_path() {
-                if self.settings.pending_sound_downloads.remove(&sound_id) {
+                if self.settings.take_sound_preview(sound_id) {
                     // Parity slice: a completed notification-sound download
                     // with playback requested → hand the path to the UI for
                     // the in-process player. The reducer never spawns processes.
@@ -58,7 +58,7 @@ impl Session {
                 // (active → idle without completing) must not leave the id in
                 // `pending_sound_downloads` — otherwise a stale late
                 // completion could trigger a belated play.
-                self.settings.pending_sound_downloads.remove(&sound_id);
+                self.settings.take_sound_preview(sound_id);
             }
         }
         self.note_avatar_file_changed(file.id.0);
@@ -86,26 +86,24 @@ impl Session {
         let media = &mut self.media;
         let downloads = &media.downloads;
         let avatars = &media.avatar_file_refs;
-        let open_chat = &media.open_chat_media_downloads;
         let extras = &media.download_extras;
         let sounds = &self.settings.sound_file_ids;
         // Queued tracks are not rendered, so no read keeps them recent.
         let queued: HashSet<i32> = media
             .playlists
             .values()
-            .flat_map(|playlist| playlist.tracks.iter().map(|track| track.file_id.0))
+            .flat_map(|playlist| playlist.tracks().iter().map(|track| track.file_id.0))
             .collect();
         media.files.evict(|file| {
             let id = file.id.0;
-            file.local.is_downloading_active
-                || file.uploading
+            file.local.is_downloading_active()
+                || file.local.is_uploading()
                 || downloads.is_requested(id)
                 || downloads.is_paused(id)
                 || downloads.is_user(id)
                 || downloads.is_listed(id)
                 || queued.contains(&id)
                 || avatars.contains_key(&id)
-                || open_chat.contains(&id)
                 || extras.has_file(id)
                 || sounds.contains_key(&id)
         });
@@ -166,7 +164,7 @@ impl Session {
             // device, a resume) is not requested a second time. After our
             // own request ended, TDLib's idle update is what clears it.
             Some(file)
-                if file.local.is_downloading_active
+                if file.local.is_downloading_active()
                     && !self.media.downloads.has_record(file_id.0) =>
             {
                 false
@@ -174,7 +172,7 @@ impl Session {
             // Cancelled, TDLib's idle update still on its way: an automatic
             // download must not undo the cancel.
             Some(file)
-                if file.local.is_downloading_active
+                if file.local.is_downloading_active()
                     && self.media.downloads.is_cancelling(file_id.0) =>
             {
                 false
@@ -308,7 +306,7 @@ impl Session {
             )
             .flat_map(|history| history.messages.values());
         for message in self
-            .open_chat
+            .open_chat_id()
             .and_then(|id| self.histories.get(&id.0))
             .into_iter()
             .flat_map(|history| history.messages.values())
@@ -486,8 +484,8 @@ impl Session {
             }
         }
         // The received-gifts dialog shows each gift's sticker.
-        if self.payments.hub.gifts_open {
-            for gift in &self.payments.hub.gifts {
+        if self.payments.hub.received.is_open() {
+            for gift in &self.payments.hub.received.rows {
                 if let Some(file_id) = gift
                     .gift
                     .sticker
@@ -528,7 +526,7 @@ impl Session {
             }
         }
         // Sponsored rows in the open chat: content + sponsor thumbs at priority 1.
-        if let Some(chat_id) = self.open_chat
+        if let Some(chat_id) = self.open_chat_id()
             && let Some(entry) = self.messages.sponsored.get(&chat_id.0)
         {
             for message in &entry.messages {
@@ -566,7 +564,7 @@ impl Session {
     /// to exceed `AUTO_DOWNLOAD_MAX_BYTES` are skipped (TGX
     /// `canAutomaticallyDownload` download limit).
     pub fn auto_download_media_file_ids(&self) -> Vec<FileId> {
-        let Some(chat_id) = self.open_chat else {
+        let Some(chat_id) = self.open_chat_id() else {
             return Vec::new();
         };
         if self.settings.media_prefs.data_saver {
@@ -610,7 +608,7 @@ impl Session {
     /// bitfield (TGX `settings_autodownload` private/group/channel shifts).
     /// Secret chats use the private bucket.
     pub fn auto_download_allowed(&self, chat_id: ChatId, flag: u8) -> bool {
-        if self.settings.media_prefs.data_saver || self.media.disk_holds_auto_downloads {
+        if self.settings.media_prefs.data_saver || self.media.disk.holds_auto_downloads() {
             return false;
         }
         let bits = match self.chats.get(&chat_id.0).map(|chat| &chat.kind) {

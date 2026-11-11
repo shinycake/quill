@@ -189,16 +189,21 @@ impl QuillApp {
             let strip = session?.similar_strip(chat)?;
             Some((strip.joined_at, strip.expanded))
         });
+        // The "New Thread" card of a bot whose users create threads.
+        let new_thread = chat.and_then(|chat| session?.new_bot_thread_row(chat));
+        let new_thread_date = new_thread.as_ref().map(|row| row.date);
         let source = RowsSource {
             list: "session-history",
             chat,
             scope: topic.map_or(0, i64::from),
             messages: history.map(|h| &h.messages),
-            extra: hash_of(joined),
+            extra: hash_of((joined, new_thread_date)),
             window_epoch: history.map_or(0, |h| h.window_epoch),
             unread_anchor: history.and_then(|h| h.unread_anchor),
             translated: chat,
-            tail: Some(usize::from(chat.is_some() && joined.is_some())),
+            tail: Some(
+                usize::from(chat.is_some() && joined.is_some()) + usize::from(new_thread.is_some()),
+            ),
         };
         self.history_rows_input(source, highlight, || {
             let mut messages: Vec<HistoryMessage> = history
@@ -209,6 +214,7 @@ impl QuillApp {
                 if let Some(notice) = session.and_then(|s| s.joined_notice_row(chat_id)) {
                     messages.push(notice);
                 }
+                messages.extend(new_thread);
             }
             messages
         })
@@ -269,7 +275,7 @@ impl QuillApp {
         let (scope, history) = self.saved_history()?;
         let source = RowsSource {
             list: "saved-history",
-            chat: self.session().and_then(|s| s.open_chat),
+            chat: self.session().and_then(|s| s.open_chat_id()),
             scope,
             messages: Some(&history.messages),
             extra: 0,
@@ -289,12 +295,7 @@ impl QuillApp {
             .map(|draft| (draft.from_chat_id.0, draft.message_ids))
             .hash(&mut hasher);
         self.stream_rows_hash().hash(&mut hasher);
-        let mut fact_checks: Vec<(i64, i64)> = self
-            .message_ui
-            .fact_check_expanded
-            .iter()
-            .copied()
-            .collect();
+        let mut fact_checks: Vec<i64> = self.chat_ui.fact_check_expanded.iter().copied().collect();
         fact_checks.sort_unstable();
         fact_checks.hash(&mut hasher);
         self.vanish_rows_hash().hash(&mut hasher);

@@ -43,6 +43,43 @@ struct Basis {
     blocked: Vec<String>,
 }
 
+/// A word and the bar it offers.
+pub(super) type WordStrip = (Highlight, Vec<SuggestItem>);
+
+/// An open word bar and, while the pointer is away from it, the wait for
+/// the bar to follow the pointer. The wait lives and dies with the bar.
+pub(super) struct OpenBar {
+    pub(super) strip: WordStrip,
+    /// The pointer went somewhere else: the bar follows it when the
+    /// [`BAR_GRACE`] timer ends, unless the pointer comes back first.
+    away: Option<(BarAim, Task<()>)>,
+}
+
+impl OpenBar {
+    pub(super) fn new(strip: WordStrip) -> Self {
+        Self { strip, away: None }
+    }
+}
+
+/// The word bar: closed, waiting for the keyword answer of a word asked
+/// about with "Suggest Emoji" in the menu, open for the highlight under the
+/// pointer, or pinned open by that answer (it stays while its word does,
+/// highlighted or not). `Asking` leaves on the answer, on a lookup that
+/// gave up (a note says so), when the word is edited and when another bar
+/// takes the place. Every way of closing the bar, and every new bar, goes
+/// through `unhover`, so a pin or a wait never outlives its bar.
+#[derive(Default)]
+pub(super) enum WordBar {
+    #[default]
+    Closed,
+    Asking {
+        range: Range<usize>,
+        word: String,
+    },
+    Hover(OpenBar),
+    Pinned(OpenBar),
+}
+
 #[derive(Default)]
 pub(super) struct EmojiWordsUi {
     basis: Basis,
@@ -50,34 +87,54 @@ pub(super) struct EmojiWordsUi {
     /// When each word of this draft (by normalized text) first lit up:
     /// its glimmer plays once.
     lit_at: HashMap<String, Instant>,
-    /// The highlight under the pointer, with its bar.
-    pub hovered: Option<(Highlight, Vec<SuggestItem>)>,
-    /// `hovered` came from "Suggest Emoji" in the menu: it stays while
-    /// its word does, highlighted or not.
-    pub pinned: bool,
-    /// "Suggest Emoji" on a word whose keyword answer is on its way.
-    pub asked: Option<(Range<usize>, String)>,
+    /// The word whose bar is open, and how it opened.
+    pub bar: WordBar,
     /// Words closed with Esc: not highlighted again in this session.
     ignored: HashSet<String>,
     /// Where the word's bar was painted, so moving the pointer from the
     /// word to it does not close it.
     strip_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
-    /// The pointer went somewhere else: the bar follows it when the
-    /// [`BAR_GRACE`] timer ends, unless the pointer comes back first.
-    pending: Option<(BarAim, Task<()>)>,
 }
 
 impl EmojiWordsUi {
+    /// The word whose bar is open and its tiles.
+    pub(super) fn hovered(&self) -> Option<&WordStrip> {
+        match &self.bar {
+            WordBar::Hover(open) | WordBar::Pinned(open) => Some(&open.strip),
+            WordBar::Closed | WordBar::Asking { .. } => None,
+        }
+    }
+
+    pub(super) fn is_pinned(&self) -> bool {
+        matches!(self.bar, WordBar::Pinned(_))
+    }
+
+    /// Take the open bar, leaving it closed.
+    pub(super) fn take_bar(&mut self) -> Option<WordStrip> {
+        match std::mem::take(&mut self.bar) {
+            WordBar::Hover(open) | WordBar::Pinned(open) => Some(open.strip),
+            asking @ WordBar::Asking { .. } => {
+                self.bar = asking;
+                None
+            }
+            WordBar::Closed => None,
+        }
+    }
+
     pub(super) fn strip_bounds(&self) -> Rc<Cell<Option<Bounds<Pixels>>>> {
         self.strip_bounds.clone()
     }
 
-    /// Close the word's bar.
-    pub(super) fn unhover(&mut self) {
-        self.hovered = None;
-        self.pinned = false;
+    /// Close the word's bar. The bar's grid and scroll are the composer's
+    /// one `EmojiBarUi`, shared with the `:` suggestions: closing the word
+    /// bar puts it back to a closed strip unless the suggestions are using
+    /// it, so the next word's bar does not open expanded and scrolled.
+    pub(super) fn unhover(&mut self, suggest: &mut super::composer_suggest::SuggestUi) {
+        self.bar = WordBar::Closed;
         self.strip_bounds.set(None);
-        self.pending = None;
+        if suggest.active.is_none() {
+            suggest.bar.reset();
+        }
     }
 }
 
@@ -138,7 +195,7 @@ impl QuillApp {
     pub(super) fn hover_highlight(&mut self, index: usize) {
         if let Some(h) = self.composer_ui.emoji_words.highlights.get(index).cloned() {
             let items = self.word_strip_items(&h);
-            self.composer_ui.emoji_words.hovered = Some((h, items));
+            self.composer_ui.emoji_words.bar = WordBar::Hover(OpenBar::new((h, items)));
         }
     }
     fn emoji_words_on(&self) -> bool {
@@ -216,19 +273,19 @@ impl QuillApp {
         let same_word = |h: &Highlight| {
             text.get(h.range.clone()).map(str::to_lowercase).as_deref() == Some(&h.normalized)
         };
-        if ui.hovered.as_ref().is_some_and(|(hovered, _)| {
-            if ui.pinned {
+        if ui.hovered().is_some_and(|(hovered, _)| {
+            if ui.is_pinned() {
                 !same_word(hovered)
             } else {
                 !highlights.contains(hovered)
             }
         }) {
-            ui.unhover();
+            ui.unhover(&mut self.screen.composer_ui.suggest);
         }
-        if ui.asked.as_ref().is_some_and(|(range, word)| {
-            text.get(range.clone()).map(str::to_lowercase).as_deref() != Some(word)
-        }) {
-            ui.asked = None;
+        if matches!(&ui.bar, WordBar::Asking { range, word }
+            if text.get(range.clone()).map(str::to_lowercase).as_deref() != Some(word.as_str()))
+        {
+            ui.bar = WordBar::Closed;
         }
         ui.basis = Basis {
             text: rope,
@@ -266,11 +323,11 @@ impl QuillApp {
                         .any(|rect| rect.contains(&position))
             })
             .cloned();
-        let aim = match ui.hovered.as_ref() {
+        let aim = match ui.hovered() {
             Some((shown, _)) => bar_aim(
                 under.as_ref(),
                 shown,
-                ui.pinned,
+                ui.is_pinned(),
                 self.pointer_on_the_way(position, cx),
             ),
             None => {
@@ -288,24 +345,34 @@ impl QuillApp {
     /// closes the bar, and sweeping across words only moves it once the
     /// pointer rests on one.
     pub(super) fn aim_word_bar(&mut self, aim: BarAim, cx: &mut Context<Self>) {
-        let ui = &mut self.composer_ui.emoji_words;
+        let (WordBar::Hover(open) | WordBar::Pinned(open)) = &mut self.composer_ui.emoji_words.bar
+        else {
+            return;
+        };
         if aim == BarAim::Hold {
-            ui.pending = None;
+            open.away = None;
             return;
         }
-        if ui.pending.as_ref().is_some_and(|(to, _)| *to == aim) {
+        if open.away.as_ref().is_some_and(|(to, _)| *to == aim) {
             return;
         }
         let task = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor().timer(BAR_GRACE).await;
             let _ = this.update(cx, |this, cx| this.settle_word_bar(cx));
         });
-        self.composer_ui.emoji_words.pending = Some((aim, task));
+        if let WordBar::Hover(open) | WordBar::Pinned(open) = &mut self.composer_ui.emoji_words.bar
+        {
+            open.away = Some((aim, task));
+        }
     }
 
     /// The wait ended with the pointer still away.
     fn settle_word_bar(&mut self, cx: &mut Context<Self>) {
-        let Some((aim, _)) = self.composer_ui.emoji_words.pending.take() else {
+        let (WordBar::Hover(open) | WordBar::Pinned(open)) = &mut self.composer_ui.emoji_words.bar
+        else {
+            return;
+        };
+        let Some((aim, _)) = open.away.take() else {
             return;
         };
         match aim {
@@ -325,9 +392,11 @@ impl QuillApp {
             let items = self.word_strip_items(&h);
             (h, items)
         });
-        let ui = &mut self.composer_ui.emoji_words;
-        ui.unhover();
-        ui.hovered = bar.filter(|(_, items)| !items.is_empty());
+        let ui = &mut self.screen.composer_ui.emoji_words;
+        ui.unhover(&mut self.screen.composer_ui.suggest);
+        ui.bar = bar
+            .filter(|(_, items)| !items.is_empty())
+            .map_or(WordBar::Closed, |strip| WordBar::Hover(OpenBar::new(strip)));
         cx.notify();
     }
 
@@ -335,7 +404,7 @@ impl QuillApp {
     /// way from one to the other.
     fn pointer_on_the_way(&self, position: Point<Pixels>, cx: &App) -> bool {
         let ui = &self.composer_ui.emoji_words;
-        let Some((h, _)) = ui.hovered.as_ref() else {
+        let Some((h, _)) = ui.hovered() else {
             return false;
         };
         let word = self.composer.read(cx).range_to_rects(&h.range);
@@ -347,7 +416,7 @@ impl QuillApp {
 
     /// The pointer left the field or the bar.
     pub(super) fn leave_word_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.composer_ui.emoji_words.hovered.is_some() {
+        if self.composer_ui.emoji_words.hovered().is_some() {
             self.track_word_bar(window.mouse_position(), cx);
         }
     }
@@ -371,11 +440,11 @@ impl QuillApp {
     /// Esc while a word's strip is open: close it and stop highlighting
     /// that word. True when consumed.
     pub(super) fn dismiss_emoji_word(&mut self, cx: &mut Context<Self>) -> bool {
-        let ui = &mut self.composer_ui.emoji_words;
-        let Some((h, _)) = ui.hovered.take() else {
+        let ui = &mut self.screen.composer_ui.emoji_words;
+        let Some((h, _)) = ui.take_bar() else {
             return false;
         };
-        ui.unhover();
+        ui.unhover(&mut self.screen.composer_ui.suggest);
         ui.ignored.insert(h.normalized);
         ui.basis = Basis::default();
         self.sync_emoji_words(cx);
@@ -390,10 +459,13 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((h, items)) = self.composer_ui.emoji_words.hovered.take() else {
+        let Some((h, items)) = self.composer_ui.emoji_words.take_bar() else {
             return;
         };
-        self.composer_ui.emoji_words.unhover();
+        self.screen
+            .composer_ui
+            .emoji_words
+            .unhover(&mut self.screen.composer_ui.suggest);
         self.composer_ui.suggest.bar.reset();
         let Some(item) = items.get(index) else {
             return;
@@ -440,7 +512,7 @@ impl QuillApp {
         element
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
                 if !this.composer_ui.emoji_words.highlights.is_empty()
-                    || this.composer_ui.emoji_words.hovered.is_some()
+                    || this.composer_ui.emoji_words.hovered().is_some()
                 {
                     this.track_word_bar(event.position, cx);
                 }
@@ -457,9 +529,8 @@ impl QuillApp {
     pub(super) fn emoji_word_highlights(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let ui = &self.composer_ui.emoji_words;
         let pinned = ui
-            .hovered
-            .as_ref()
-            .filter(|(h, _)| ui.pinned && !ui.highlights.contains(h))
+            .hovered()
+            .filter(|(h, _)| ui.is_pinned() && !ui.highlights.contains(h))
             .map(|(h, _)| (h.range.clone(), None, true));
         if (ui.highlights.is_empty() && pinned.is_none())
             || ui.basis.text != *self.composer.read(cx).text()
@@ -478,7 +549,7 @@ impl QuillApp {
                     .map(|at| now.saturating_duration_since(*at))
                     .filter(|age| !still && *age < GLIMMER)
                     .map(|age| age.as_secs_f32() / GLIMMER.as_secs_f32());
-                let hovered = ui.hovered.as_ref().is_some_and(|(o, _)| o == h);
+                let hovered = ui.hovered().is_some_and(|(o, _)| o == h);
                 (h.range.clone(), glimmer, hovered)
             })
             .chain(pinned)

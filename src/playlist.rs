@@ -8,6 +8,8 @@
 //! notes just continue to the next newer unread voice note.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ids::ChatId;
+
 /// Repeat mode of the music playlist (tdesktop `Media::RepeatMode`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum RepeatMode {
@@ -61,33 +63,81 @@ pub enum Step {
 
 /// Tracks already played in the current shuffle round, so Previous walks
 /// back through them and Next never repeats one before the round is done.
+///
+/// The round is one path with the playhead in it: `back` ends at the
+/// track now playing, `ahead` holds the ones Previous walked back over
+/// (the path Next replays). It belongs to one chat, since message ids
+/// repeat across chats; a move in another chat starts a fresh round.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ShuffleState {
-    played: Vec<i64>,
-    cursor: usize,
+    chat: Option<ChatId>,
+    /// Played tracks up to and including the current one.
+    back: Vec<i64>,
+    /// Tracks Previous stepped back over, nearest last.
+    ahead: Vec<i64>,
 }
 
 impl ShuffleState {
     pub fn clear(&mut self) {
-        self.played.clear();
-        self.cursor = 0;
+        *self = Self::default();
     }
 
-    /// Record `current` as the track now playing (a track picked by hand
-    /// starts a fresh round).
-    pub fn note_current(&mut self, current: i64) {
-        if self.played.get(self.cursor) == Some(&current) {
+    /// Record `current` of `chat` as the track now playing (a track picked
+    /// by hand starts a fresh round).
+    pub fn note_current(&mut self, chat: ChatId, current: i64) {
+        if self.chat == Some(chat) && self.back.last() == Some(&current) {
             return;
         }
-        self.played.clear();
-        self.played.push(current);
-        self.cursor = 0;
+        self.chat = Some(chat);
+        self.back = vec![current];
+        self.ahead.clear();
+    }
+
+    /// Forget played tracks that left the list (deleted messages), keeping
+    /// `current` and its place among the rest.
+    fn retain_listed(&mut self, ids: &[i64], current: i64) {
+        let keep = |id: &i64| *id == current || ids.contains(id);
+        self.back.retain(keep);
+        self.ahead.retain(keep);
+    }
+
+    fn played(&self, id: i64) -> bool {
+        self.back.contains(&id) || self.ahead.contains(&id)
+    }
+
+    /// Previous: the track before the current one, now current.
+    fn step_back(&mut self) -> Option<i64> {
+        if self.back.len() < 2 {
+            return None;
+        }
+        let current = self.back.pop()?;
+        self.ahead.push(current);
+        self.back.last().copied()
+    }
+
+    /// Next along the path already walked, if Previous went back.
+    fn step_ahead(&mut self) -> Option<i64> {
+        let next = self.ahead.pop()?;
+        self.back.push(next);
+        Some(next)
+    }
+
+    /// Start another round holding only `current`.
+    fn restart(&mut self, current: i64) {
+        self.back = vec![current];
+        self.ahead.clear();
+    }
+
+    fn push_new(&mut self, id: i64) {
+        self.back.push(id);
     }
 }
 
 /// How the playlist moves: the playing track, direction, and the modes.
 #[derive(Clone, Copy, Debug)]
 pub struct Move {
+    /// The chat the playlist is of.
+    pub chat: ChatId,
     pub current: i64,
     pub step: Step,
     /// True when the track ended by itself: repeat-one then replays it,
@@ -145,22 +195,18 @@ fn shuffled(
     state: &mut ShuffleState,
     pick: &mut impl FnMut(usize) -> usize,
 ) -> Option<i64> {
-    state.note_current(mv.current);
+    state.note_current(mv.chat, mv.current);
+    state.retain_listed(ids, mv.current);
     if mv.step == Step::Previous {
-        if state.cursor == 0 {
-            return None;
-        }
-        state.cursor -= 1;
-        return state.played.get(state.cursor).copied();
+        return state.step_back();
     }
-    if state.cursor + 1 < state.played.len() {
-        state.cursor += 1;
-        return state.played.get(state.cursor).copied();
+    if let Some(next) = state.step_ahead() {
+        return Some(next);
     }
     let mut fresh: Vec<i64> = ids
         .iter()
         .copied()
-        .filter(|id| !state.played.contains(id))
+        .filter(|id| !state.played(*id))
         .collect();
     if fresh.is_empty() {
         if mv.repeat != RepeatMode::All {
@@ -168,17 +214,14 @@ fn shuffled(
         }
         // Round over: start another, not opening with the track that
         // just played.
-        state.played.clear();
-        state.played.push(mv.current);
-        state.cursor = 0;
+        state.restart(mv.current);
         fresh = ids.iter().copied().filter(|id| *id != mv.current).collect();
         if fresh.is_empty() {
             return Some(mv.current);
         }
     }
     let chosen = *fresh.get(pick(fresh.len()).min(fresh.len() - 1))?;
-    state.played.push(chosen);
-    state.cursor = state.played.len() - 1;
+    state.push_new(chosen);
     Some(chosen)
 }
 
@@ -204,11 +247,12 @@ pub fn next_voice(entries: &[VoiceEntry], current: i64) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Move, OrderMode, RepeatMode, ShuffleState, Step, VoiceEntry, next_track, next_voice,
+        ChatId, Move, OrderMode, RepeatMode, ShuffleState, Step, VoiceEntry, next_track, next_voice,
     };
 
     fn mv(current: i64, step: Step, auto: bool, repeat: RepeatMode, order: OrderMode) -> Move {
         Move {
+            chat: ChatId(1),
             current,
             step,
             auto,
@@ -310,6 +354,22 @@ mod tests {
         assert_eq!(g(1, Step::Previous), None);
         assert_eq!(g(1, Step::Next), Some(b));
         assert_eq!(g(b, Step::Next), Some(c));
+    }
+
+    #[test]
+    fn shuffle_previous_skips_a_track_that_was_deleted() {
+        let mut state = ShuffleState::default();
+        let mut g = |ids: &[i64], cur, step| {
+            let m = mv(cur, step, false, RepeatMode::Off, OrderMode::Shuffle);
+            next_track(ids, m, &mut state, |_| 0)
+        };
+        let all = [1, 2, 3, 4];
+        let b = g(&all, 1, Step::Next).unwrap();
+        let c = g(&all, b, Step::Next).unwrap();
+        let without_b: Vec<i64> = all.iter().copied().filter(|id| *id != b).collect();
+        assert_eq!(g(&without_b, c, Step::Previous), Some(1));
+        assert_eq!(g(&without_b, 1, Step::Previous), None);
+        assert_eq!(g(&without_b, 1, Step::Next), Some(c));
     }
 
     #[test]

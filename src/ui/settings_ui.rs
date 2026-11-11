@@ -99,7 +99,7 @@ impl QuillApp {
     /// kit Phase 6: write the requested value (was: flip the bit).
     pub(super) fn set_archive_setting(&mut self, index: usize, on: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            let Some(mut settings) = live.driver.session.chat_list.archive_chat_list_settings
+            let Some(mut settings) = live.driver.session.chat_list.archive_chat_list_settings()
             else {
                 self.set_note(StatusNote::silent(tr(
                     keys::Q_PREFS_ARCHIVE_SETTINGS_STILL_LOADING,
@@ -115,11 +115,11 @@ impl QuillApp {
                 )));
             }
         } else if let Some(session) = self.demo_session.as_mut()
-            && let Some(mut settings) = session.chat_list.archive_chat_list_settings
+            && let Some(mut settings) = session.chat_list.archive_chat_list_settings()
         {
             archive_setting_set(&mut settings, index, on);
             // box-host: a setting of the open archive box; it does not ask for the suggestion box
-            session.chat_list.archive_chat_list_settings = Some(settings);
+            session.chat_list.edit_archive_settings(Some(settings));
         }
         cx.notify();
     }
@@ -149,10 +149,10 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let settings = this
                 .session()
-                .and_then(|s| s.chat_list.archive_chat_list_settings);
+                .and_then(|s| s.chat_list.archive_chat_list_settings());
             let loading = this
                 .session()
-                .is_some_and(|s| s.chat_list.archive_settings_loading);
+                .is_some_and(|s| s.chat_list.archive_settings_loading());
             let mut body = div().flex().flex_col().gap_3();
             if loading {
                 body = body.child(
@@ -278,18 +278,21 @@ impl QuillApp {
             self.session()
                 .and_then(|session| session.settings.privacy.get(&key).cloned())
         };
-        let who_of = |key: PrivacySettingKey| match rule_state(key) {
-            Some(PrivacyKeyState::Ready(detail)) => detail.who,
-            _ => None,
-        };
+        let who_of =
+            |key: PrivacySettingKey| rule_state(key).and_then(|s| s.detail().and_then(|d| d.who));
         let allow_calls = who_of(PrivacySettingKey::AllowCalls);
         let p2p = who_of(PrivacySettingKey::PeerToPeer);
         let privacy_loading = [PrivacySettingKey::AllowCalls, PrivacySettingKey::PeerToPeer]
             .into_iter()
-            .any(|key| matches!(rule_state(key), None | Some(PrivacyKeyState::Loading)));
+            .any(|key| {
+                matches!(
+                    rule_state(key),
+                    None | Some(PrivacyKeyState::Loading { .. })
+                )
+            });
         let privacy_failed = [PrivacySettingKey::AllowCalls, PrivacySettingKey::PeerToPeer]
             .into_iter()
-            .any(|key| matches!(rule_state(key), Some(PrivacyKeyState::Failed)));
+            .any(|key| matches!(rule_state(key), Some(PrivacyKeyState::Failed { .. })));
         let ptt_section = self.push_to_talk_settings(&prefs.push_to_talk, cx);
         let mic_test_section = self.mic_test_section(cx);
         let device_prefs_section = self.call_device_prefs_section(cx);
@@ -410,7 +413,7 @@ impl QuillApp {
                 // schema 1.8.67 :9856) — one toggle driving all three
                 // networks — replacing the old local-only CallPrefs flag.
                 let on = self.session().is_some_and(|s| {
-                    s.settings.data_storage.seeded
+                    s.settings.data_storage.seeded.is_seeded()
                         && NetworkKind::ALL.iter().all(|n| {
                             s.settings
                                 .data_storage
@@ -446,7 +449,8 @@ impl QuillApp {
                                             .for_network_mut(n)
                                             .use_less_data_for_calls = on;
                                     }
-                                    demo.settings.data_storage.seeded = true;
+                                    demo.settings.data_storage.seeded =
+                                        quill::data_settings::PresetsSeed::Seeded;
                                 }
                                 cx.notify();
                             })),
@@ -622,7 +626,7 @@ impl QuillApp {
                     "open-emoji-sets",
                     tr(keys::Q_PREFS_EMOJI_SETS),
                     None,
-                    cx.listener(|this, _, _, cx| this.open_emoji_sets(cx)),
+                    cx.listener(|this, _, window, cx| this.open_emoji_sets(window, cx)),
                     cx,
                 ),
                 cx,
@@ -854,8 +858,8 @@ impl QuillApp {
     /// including the one for chats from folders, inline.
     pub(crate) fn archive_privacy_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
-        let settings = session.and_then(|s| s.chat_list.archive_chat_list_settings);
-        let loading = session.is_some_and(|s| s.chat_list.archive_settings_loading);
+        let settings = session.and_then(|s| s.chat_list.archive_chat_list_settings());
+        let loading = session.is_some_and(|s| s.chat_list.archive_settings_loading());
         let mut section = div().flex().flex_col().gap_1().child(
             div()
                 .text_sm()

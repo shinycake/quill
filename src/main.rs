@@ -237,7 +237,7 @@ fn ui_main(args: &[String]) {
     // as argv instead (handled above and via the single-instance socket).
     application.on_open_urls(|urls| {
         for url in urls {
-            if !quill::deep_link_inbox::push_external_link(&url) {
+            if !quill::deep_link_inbox::push_external_link(&url).is_link() {
                 quill::start_files::push_file_url(&url);
             }
         }
@@ -337,46 +337,10 @@ fn open_main_window(cx: &mut gpui_kit::App, launch: MainWindowLaunch) -> gpui_ki
         quill::startup_trace::mark("app_new");
         #[cfg(target_os = "macos")]
         install_app_menus(window, cx, launch.start_in_tray);
-        install_main_window_tray(window, cx, &view, !launch.start_in_tray);
+        install_main_window_tray(window, cx, &view, launch.start_in_tray);
         install_link_inbox(window, cx, &view);
         if window.focused(cx).is_none() {
             window.focus(&view.focus_handle(cx), cx);
-        }
-        if launch.start_in_tray {
-            // No tray host must never leave the only window
-            // inaccessible. Registration runs off-thread; poll its
-            // outcome without blocking launch.
-            let watch = view.downgrade();
-            let handle = window.window_handle();
-            cx.spawn(async move |cx| {
-                let mut waited = 0u64;
-                loop {
-                    let state = watch.update(cx, |this, _| {
-                        quill::tray::sync_tray(this.session());
-                        quill::tray::tray_startup_reveal(
-                            quill::tray::tray_available(),
-                            quill::tray::tray_registering(),
-                            waited,
-                        )
-                    });
-                    match state {
-                        Ok(None) => {}
-                        Ok(Some(true)) => {
-                            let _ = handle.update(cx, |_, window, cx| {
-                                cx.activate(true);
-                                window.activate_window();
-                            });
-                            break;
-                        }
-                        _ => break,
-                    }
-                    cx.background_executor()
-                        .timer(std::time::Duration::from_millis(100))
-                        .await;
-                    waited += 100;
-                }
-            })
-            .detach();
         }
         view.update(cx, |app, cx| app.poll_before_first_frame(cx));
         // The shell adds Quill's dialog hit-test barrier; Root
@@ -428,8 +392,11 @@ fn install_main_window_tray(
     window: &mut gpui_kit::Window,
     cx: &mut gpui_kit::App,
     view: &gpui_kit::Entity<ui::QuillApp>,
-    after_first_frame: bool,
+    start_in_tray: bool,
 ) {
+    // A window that starts in the tray draws nothing, so its tray cannot
+    // wait for a first frame.
+    let after_first_frame = !start_in_tray;
     ui::link_inbox::attach_main_window(window, cx, view);
     quill::notify_focus::warm();
     // Creating the status item takes ~30 ms of the main thread on a cold
@@ -473,10 +440,15 @@ fn install_main_window_tray(
             // `wake::CHROME` (applied updates, tray menu clicks, settings).
             let executor = cx.background_executor().clone();
             let mut tray_waiting = Vec::new();
+            // Start-in-tray: no tray host must never leave the only window
+            // inaccessible. Registration runs off-thread; each pass looks at
+            // its outcome, and the check ends with this loop.
+            let mut startup =
+                quill::tray_reveal::StartupWatch::new(start_in_tray, std::time::Instant::now());
             ui::run_chrome_loop(executor, || {
                 let alive = tray_view
                     .update(cx, |this, _| {
-                        quill::tray::sync_tray(this.session());
+                        this.sync_system_tray();
                         // parity:platform-app-icon-badge — unread
                         // badge on the app/taskbar icon
                         // (Linux LauncherEntry D-Bus signal,
@@ -486,6 +458,17 @@ fn install_main_window_tray(
                     .is_ok();
                 if !alive {
                     return None;
+                }
+                let startup_step = startup.step(
+                    quill::tray::tray_available(),
+                    quill::tray::tray_registering(),
+                    std::time::Instant::now(),
+                );
+                if startup_step == quill::tray_reveal::StartupStep::Reveal {
+                    let _ = tray_window.update(cx, |_, window, cx| {
+                        cx.activate(true);
+                        window.activate_window();
+                    });
                 }
                 tray_waiting.extend(quill::tray::take_tray_actions());
                 let actions = std::mem::take(&mut tray_waiting);
@@ -497,16 +480,12 @@ fn install_main_window_tray(
                                 tray_view.update(cx, |this, cx| this.lock_from_tray(window, cx));
                         }
                         quill::tray::TrayAction::ToggleNotifications => {
-                            let _ = tray_view.update(cx, |this, cx| {
-                                let on = this.desktop_notifications_enabled();
-                                this.set_desktop_notifications(!on, cx);
-                            });
+                            let _ = tray_view
+                                .update(cx, |this, cx| this.toggle_notifications_from_tray(cx));
                         }
                         quill::tray::TrayAction::ToggleSounds => {
-                            let _ = tray_view.update(cx, |this, cx| {
-                                let on = this.notification_sounds_enabled();
-                                this.set_inapp_sounds_enabled(!on, cx);
-                            });
+                            let _ =
+                                tray_view.update(cx, |this, cx| this.toggle_sounds_from_tray(cx));
                         }
                         quill::tray::TrayAction::Quit => {
                             let _ = tray_view.update(cx, |this, cx| {
@@ -522,7 +501,8 @@ fn install_main_window_tray(
                 }
                 Some(ui::PassEnd {
                     work_left: false,
-                    due: None,
+                    due: (startup_step == quill::tray_reveal::StartupStep::Waiting)
+                        .then_some(quill::tray_reveal::LOOK_AGAIN),
                 })
             })
             .await;
@@ -531,8 +511,8 @@ fn install_main_window_tray(
     .detach();
     // A shown window gets its tray from the chrome loop's first pass, once
     // it has drawn.
-    if !after_first_frame {
-        view.update(cx, |this, _| quill::tray::sync_tray_startup(this.session()));
+    if start_in_tray {
+        view.update(cx, |this, _| this.sync_system_tray_startup());
     }
 }
 

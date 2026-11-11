@@ -251,7 +251,13 @@ fn a_photo_that_lands_has_its_thumb_asked_for_by_the_same_pass(cx: &mut TestAppC
     let vcx = &mut vcx;
     let (asked, gallery) = app.update(vcx, |app, cx| {
         let gallery = app.viewer.state.items().to_vec();
-        app.viewer.state = MediaViewer::open_profile(gallery[..2].to_vec(), 0, 2);
+        let owner = app
+            .viewer
+            .state
+            .source()
+            .profile_owner()
+            .expect("the fixture opened a profile gallery");
+        app.viewer.state = MediaViewer::open_profile(owner, gallery[..2].to_vec(), 0, 2);
         app.viewer.extra.strip_asked.clear();
         app.pump_profile_gallery(cx);
         (app.viewer.extra.strip_asked.clone(), gallery)
@@ -320,7 +326,7 @@ fn the_strip_stays_up_while_the_pointer_rests_on_it(cx: &mut TestAppContext) {
     idle(vcx);
     assert_eq!(current(&app, vcx), 8902);
     assert!(
-        app.read_with(vcx, |app, _| !app.viewer.controls_hidden),
+        app.read_with(vcx, |app, _| !app.viewer.visibility.is_hidden()),
         "a click on a thumb under the resting pointer keeps the strip up"
     );
 
@@ -332,7 +338,7 @@ fn the_strip_stays_up_while_the_pointer_rests_on_it(cx: &mut TestAppContext) {
     settle(vcx);
     idle(vcx);
     assert!(
-        app.read_with(vcx, |app, _| app.viewer.controls_hidden),
+        app.read_with(vcx, |app, _| app.viewer.visibility.is_hidden()),
         "off the strip, the controls fade after the idle wait"
     );
 }

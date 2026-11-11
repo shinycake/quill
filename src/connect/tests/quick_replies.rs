@@ -224,7 +224,10 @@ fn the_slash_menu_skips_bots_and_empty_shortcuts_but_not_saved_messages() {
 fn choosing_a_shortcut_sends_it_to_the_chat() {
     let (mut driver, recorder, _sink, _seq) = driver_parts();
     driver.send_quick_reply(ChatId(31), 2).unwrap();
+    // A double tap while the first is on its way sends nothing more.
     driver.send_quick_reply(ChatId(31), 2).unwrap();
+    // Another chat is its own send.
+    driver.send_quick_reply(ChatId(32), 2).unwrap();
     let sent: Vec<serde_json::Value> = recorder
         .snapshot()
         .iter()
@@ -234,7 +237,26 @@ fn choosing_a_shortcut_sends_it_to_the_chat() {
     assert_eq!(sent.len(), 2);
     assert_eq!(sent[0]["chat_id"], 31);
     assert_eq!(sent[0]["shortcut_id"], 2);
+    assert_eq!(sent[1]["chat_id"], 32);
     assert_ne!(sent[0]["sending_id"], sent[1]["sending_id"]);
+}
+
+#[test]
+fn a_double_click_on_add_creates_the_message_once() {
+    let (mut driver, recorder, _sink, _seq) = driver_parts();
+    driver.add_quick_reply_text("hours", "Hi").unwrap();
+    driver.add_quick_reply_text("hours", "Hi").unwrap();
+    let adds = |recorder: &Recorder| {
+        recorder
+            .snapshot()
+            .iter()
+            .filter(|json| json.contains("addQuickReplyShortcutMessage"))
+            .count()
+    };
+    assert_eq!(adds(&recorder), 1);
+    // Another text is another change.
+    driver.add_quick_reply_text("hours", "Bye").unwrap();
+    assert_eq!(adds(&recorder), 2);
 }
 
 #[test]
@@ -333,4 +355,42 @@ fn a_successful_request_clears_the_last_refusal() {
         &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
     );
     assert!(driver.session.settings.quick_replies.error.is_none());
+}
+
+/// r2-05 (12-B002): a change is answered by its own request (`acks`), not by
+/// whatever error the dialog shows.
+#[test]
+fn a_change_is_answered_by_its_own_request() {
+    use crate::state::Answer;
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    let add = driver
+        .add_quick_reply_text("hours", "Hi")
+        .unwrap()
+        .expect("sent");
+    driver.session.acks.expect(add);
+    driver.delete_quick_reply_shortcut(9).unwrap();
+    let delete = sent_request(&recorder, "deleteQuickReplyShortcut");
+    let extra = delete["@extra"].as_str().unwrap().to_string();
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"SHORTCUT_INVALID"}}"#
+        ),
+    );
+    assert!(driver.session.settings.quick_replies.error.is_some());
+    assert_eq!(driver.session.acks.take(add), None, "the add is still out");
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"quickReplyMessage","@extra":"{}","id":5,"can_be_edited":true,"content":{{"@type":"messageText","text":{{"text":"Hi","entities":[]}}}}}}"#,
+            add.0
+        ),
+    );
+    // Accepted, though the delete's refusal is still showing.
+    assert!(driver.session.settings.quick_replies.error.is_some());
+    assert_eq!(driver.session.acks.take(add), Some(Answer::Done));
 }

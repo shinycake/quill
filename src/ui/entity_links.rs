@@ -64,12 +64,19 @@ pub(super) struct LinkPopup {
 }
 
 /// The tooltip of the link under the pointer.
-#[derive(Debug, Clone, PartialEq)]
 pub(super) struct LinkTooltip {
     position: Point<Pixels>,
     text: SharedString,
-    token: u64,
-    shown: bool,
+    stage: TooltipStage,
+}
+
+/// Where a link tooltip stands: waiting out the show delay, or shown. The
+/// waiting stage owns the timer, so dropping the tooltip (the pointer left,
+/// another link, another chat) cancels it and an old timer cannot show a
+/// newer tooltip.
+enum TooltipStage {
+    Waiting { _timer: Task<()> },
+    Shown,
 }
 
 impl QuillApp {
@@ -80,7 +87,7 @@ impl QuillApp {
         msg_key: (i64, u64),
         cx: &mut Context<Self>,
     ) {
-        self.message_ui.link_tooltip = None;
+        self.chat_ui.link_tooltip = None;
         self.message_ui.pending_link = Some(PendingLink {
             link,
             msg_key,
@@ -209,7 +216,9 @@ impl QuillApp {
                     ChatKind::Supergroup { .. } | ChatKind::BasicGroup { .. }
                 )
             })
-            && self.session().is_some_and(|s| s.open_chat == Some(chat_id));
+            && self
+                .session()
+                .is_some_and(|s| s.open_chat_id() == Some(chat_id));
         if in_chat {
             self.open_chat_search_ui(window, cx);
             let query = tag.to_string();
@@ -236,7 +245,7 @@ impl QuillApp {
         let Some(session) = session else {
             return;
         };
-        if session.open_chat != Some(chat_id) {
+        if session.open_chat_id() != Some(chat_id) {
             return;
         }
         let in_group = session.chats.get(&chat_id.0).is_some_and(|chat| {
@@ -264,35 +273,40 @@ impl QuillApp {
     }
 
     /// Send `text` (a `/command`) to `chat_id`, unless slow mode holds it
-    /// back; a demo session applies it locally.
+    /// back; a demo session applies it locally. Whether the text went out
+    /// (or was applied in a demo session).
     pub(in crate::ui) fn send_command_text(
         &mut self,
         chat_id: ChatId,
         text: &str,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let session = self.live.as_ref().map(|live| &live.driver.session);
         let session = session.or(self.demo_session.as_deref());
         let Some(view_generation) = session.map(|session| session.view_generation) else {
-            return;
+            return false;
         };
         if self.slow_mode_blocked(chat_id, cx) {
-            return;
+            return false;
         }
         if let Some(live) = self.live.as_mut() {
             let snapshot = ComposerSnapshot::capture(chat_id, view_generation, text);
+            let sent = live.driver.send_snapshot(&snapshot).is_ok();
             self.screen.connection.set_note_for(
                 &self.screen.windows,
-                match live.driver.send_snapshot(&snapshot) {
-                    Ok(_) => StatusNote::silent(tr(keys::Q_OPS_SENDING)),
-                    Err(_) => StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_COMMAND)),
+                if sent {
+                    StatusNote::silent(tr(keys::Q_OPS_SENDING))
+                } else {
+                    StatusNote::error(tr(keys::Q_OPS_COULD_NOT_SEND_THE_COMMAND))
                 },
             );
+            sent
         } else {
             self.apply_demo_outgoing(text, None, None);
             self.set_note(StatusNote::silent(tr(
                 keys::Q_OPS_DEMO_SEND_APPLIED_LOCALLY_NO,
             )));
+            true
         }
     }
 
@@ -316,7 +330,7 @@ impl QuillApp {
         let replied = own
             .and_then(|message| message.reply_to.as_ref())
             .filter(|reply| reply.is_same_chat(chat_id))
-            .and_then(|reply| message(reply.message_id.0));
+            .and_then(|reply| message(reply.message_id().0));
         let target = [own, replied]
             .into_iter()
             .flatten()
@@ -334,7 +348,7 @@ impl QuillApp {
                 self.playback
                     .positions
                     .insert(ChatMessage::new(chat_id, target_id), secs);
-                if self.playback.playing_voice == Some(target_id)
+                if self.playback.active.voice() == Some(target_id)
                     && self.playback.player.chat.is_none_or(|c| c == chat_id)
                 {
                     self.seek_active_to(secs, cx);
@@ -355,7 +369,7 @@ impl QuillApp {
                 self.playback
                     .positions
                     .insert(ChatMessage::new(chat_id, target_id), secs);
-                if self.playback.playing_audio == Some(target_id)
+                if self.playback.active.audio() == Some(target_id)
                     && self.playback.player.chat.is_none_or(|c| c == chat_id)
                 {
                     self.seek_active_to(secs, cx);
@@ -381,9 +395,23 @@ impl QuillApp {
 
     /// Remember a right-press on a link; the message menu picks it up if
     /// it opens at this very point.
-    pub(super) fn note_right_clicked_link(&mut self, position: Point<Pixels>, link: LinkTarget) {
-        self.message_ui.link_tooltip = None;
+    ///
+    /// The note lives for this press only: the menu opens in the same
+    /// event, and whatever is left when it ends is dropped, so a press
+    /// where no menu opened cannot hand its link to a later menu at the
+    /// same point.
+    pub(super) fn note_right_clicked_link(
+        &mut self,
+        position: Point<Pixels>,
+        link: LinkTarget,
+        cx: &mut Context<Self>,
+    ) {
+        self.chat_ui.link_tooltip = None;
         self.message_ui.right_clicked_link = Some((position, link));
+        self.spawn_scoped(cx, async move |this, cx| {
+            let _ = this.update(cx, |this, _| this.message_ui.right_clicked_link = None);
+        })
+        .detach();
     }
 
     /// The link under the right-click that opened a menu at `position`.
@@ -406,30 +434,30 @@ impl QuillApp {
     ) {
         match hover {
             Some((position, text)) => {
-                let token = self.message_ui.link_tooltip.as_ref().map_or(0, |t| t.token) + 1;
-                self.message_ui.link_tooltip = Some(LinkTooltip {
-                    position,
-                    text: text.into(),
-                    token,
-                    shown: false,
-                });
                 // Same delay as every kit tooltip (`ui::tooltip_timing`).
                 let delay = super::tooltip_timing::show_delay(cx);
-                self.spawn_scoped(cx, async move |this, cx| {
+                let timer = self.spawn_scoped(cx, async move |this, cx| {
                     cx.background_executor().timer(delay).await;
                     let _ = this.update(cx, |this, cx| {
-                        if let Some(tooltip) = this.message_ui.link_tooltip.as_mut()
-                            && tooltip.token == token
-                        {
-                            tooltip.shown = true;
+                        if let Some(tooltip) = this.chat_ui.link_tooltip.as_mut() {
+                            tooltip.stage = TooltipStage::Shown;
                             cx.notify();
                         }
                     });
-                })
-                .detach();
+                });
+                self.chat_ui.link_tooltip = Some(LinkTooltip {
+                    position,
+                    text: text.into(),
+                    stage: TooltipStage::Waiting { _timer: timer },
+                });
             }
             None => {
-                if self.message_ui.link_tooltip.take().is_some_and(|t| t.shown) {
+                if self
+                    .chat_ui
+                    .link_tooltip
+                    .take()
+                    .is_some_and(|t| matches!(t.stage, TooltipStage::Shown))
+                {
                     cx.notify();
                 }
             }
@@ -438,7 +466,11 @@ impl QuillApp {
 
     /// The link tooltip, once the pointer has rested on the link.
     pub(super) fn link_tooltip_overlay(&self, cx: &App) -> Option<AnyElement> {
-        let tooltip = self.message_ui.link_tooltip.as_ref().filter(|t| t.shown)?;
+        let tooltip = self
+            .chat_ui
+            .link_tooltip
+            .as_ref()
+            .filter(|t| matches!(t.stage, TooltipStage::Shown))?;
         Some(
             div()
                 .id("link-tooltip")
@@ -491,7 +523,7 @@ impl QuillApp {
                 .bank_card
                 .as_ref()
                 .filter(|lookup| &lookup.number == number)
-                .and_then(|lookup| lookup.info.as_ref())
+                .and_then(|lookup| lookup.info())
                 .map(|info| (info.title.clone(), info.actions.clone()))
                 .unwrap_or_default(),
             _ => Default::default(),

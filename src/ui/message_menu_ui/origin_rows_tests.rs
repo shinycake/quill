@@ -142,7 +142,7 @@ fn only_a_gift_you_sent_offers_another(cx: &mut TestAppContext) {
     assert!(has(vcx, "menu-send-another-gift"));
     assert!(!has(vcx, "menu-original-date"));
     click(vcx, "menu-send-another-gift");
-    assert!(app.read_with(vcx, |app, _| app.message_ui.menu.is_none()));
+    assert!(app.read_with(vcx, |app, _| !app.message_ui.menu.is_open()));
 
     app.update(vcx, |app, _| {
         if let Some(session) = app.demo_session.as_mut()
@@ -232,7 +232,7 @@ fn hide_read_time(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
                 quill::telegram::envelope::MessageReadDate::MyPrivacyRestricted,
             );
             session.messages.message_audience = Some(audience);
-            session.settings.read_date_show = Some(false);
+            session.settings.read_date = quill::state::ReadDate::Known(false);
         }
         cx.notify();
     });
@@ -250,14 +250,14 @@ fn your_hidden_read_time_offers_to_show_it(cx: &mut TestAppContext) {
     open_menu_on(&app, vcx, TIMES_CHAT, MessageId(71));
     hide_read_time(&app, vcx);
     click(vcx, "menu-read-show");
-    assert!(app.read_with(vcx, |app, _| app.message_ui.menu.is_none()));
+    assert!(app.read_with(vcx, |app, _| !app.message_ui.menu.is_open()));
     let shown = read_time_box(&app, vcx);
     assert_eq!(shown.map(|open| open.kind), Some(ShowOrPremium::ReadTime));
     click(vcx, "show-or-premium-show");
     assert_eq!(read_time_box(&app, vcx), None);
     let shown = app.read_with(vcx, |app, _| {
         app.session()
-            .and_then(|session| session.settings.read_date_show)
+            .and_then(|session| session.settings.read_date.show())
     });
     assert_eq!(
         shown,
@@ -280,8 +280,8 @@ fn the_read_time_box_subscribes_with_its_ref(cx: &mut TestAppContext) {
     let premium = app.read_with(vcx, |app, _| {
         app.session().map(|session| {
             (
-                session.payments.hub.premium_open,
-                session.payments.hub.premium_ref.clone(),
+                session.payments.hub.premium_open(),
+                session.payments.hub.premium_ref().to_string(),
             )
         })
     });

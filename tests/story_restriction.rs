@@ -67,7 +67,7 @@ fn can_post_story_error_surfaces_tgx_notice() {
             ),
         );
         assert_eq!(
-            session.stories.post.check_error.as_deref(),
+            check_error(&session, extra),
             Some(expected),
             "message {message}"
         );
@@ -90,6 +90,14 @@ fn can_post_story_unknown_error_keeps_generic_failure() {
             extra.0
         ),
     );
-    let error = session.stories.post.check_error.expect("check error");
+    let error = check_error(&session, extra).expect("check error");
     assert!(error.starts_with("Eligibility check failed:"), "{error}");
+}
+
+/// Why the check `request` failed, as the composer would read it.
+fn check_error(session: &Session, request: quill::ids::RequestId) -> Option<&str> {
+    match session.stories.post.check.answer_to(request) {
+        Some(Err(reason)) => Some(reason.as_str()),
+        _ => None,
+    }
 }

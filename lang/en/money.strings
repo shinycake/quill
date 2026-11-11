@@ -433,6 +433,8 @@
 "qll_money_choose_when_winners_of_your" = "Choose when winners of your {place} will be randomly selected. Up to {max_days} days ahead.";
 "qll_money_collect_your_reward_using_fragment" = "Collect your reward using Fragment, a third-party platform used by advertisers to pay for ads.";
 "qll_money_collectible_gift_name_e_g" = "Collectible gift name, e.g. PlushPepe-123";
+"qll_money_collectible_phone_bought" = "This phone number was bought on ";
+"qll_money_collectible_username_bought" = "This username was bought on ";
 "qll_money_collectibles" = "Collectibles";
 "qll_money_collection_name" = "Collection name";
 "qll_money_collections" = "Collections";
@@ -453,6 +455,8 @@
 "qll_money_could_not_delete_the_gift" = "Couldn't delete the gift: {reason}";
 "qll_money_could_not_load_boost_status" = "Couldn't load boost status";
 "qll_money_could_not_load_gifts" = "Couldn't load gifts";
+"qll_money_could_not_load_members" = "Couldn't load the members.";
+"qll_money_could_not_load_members_reason" = "Couldn't load the members: {reason}";
 "qll_money_could_not_load_more_subscriptions" = "Couldn't load more subscriptions";
 "qll_money_could_not_load_stars" = "Couldn't load Stars";
 "qll_money_could_not_load_statistics" = "Couldn't load statistics";
@@ -469,6 +473,10 @@
 "qll_money_could_not_open_the_collection" = "could not open the collection";
 "qll_money_could_not_re_enable_the" = "Couldn't re-enable the subscription";
 "qll_money_could_not_reassign_the_boost" = "Couldn't reassign the boost";
+"qll_money_could_not_load_the_collectible" = "Couldn't load the details";
+"qll_money_could_not_load_this_list" = "Couldn't load this list.";
+"qll_money_couldnt_start_the_purchase" = "Couldn't start the purchase";
+"qll_money_couldnt_send_the_stars" = "Couldn't send the Stars";
 "qll_money_could_not_rejoin_the_subscription" = "Couldn't rejoin the subscription";
 "qll_money_could_not_save_the_collection" = "could not save the collection";
 "qll_money_could_not_save_the_currency" = "Couldn't save the currency";
@@ -651,6 +659,7 @@
 "qll_money_only_new" = "Only new {who}";
 "qll_money_open_a_chat_with_a" = "Open a chat with a person or a channel to choose who gets the gift.";
 "qll_money_open_app" = "Open App";
+"qll_money_gift_is_being_sent" = "A gift is being sent. Wait for it to finish before choosing someone else.";
 "qll_money_open_sticker_set" = "Open sticker set";
 "qll_money_optional_up_to_characters" = "Optional. Up to {max} characters.";
 "qll_money_outgoing" = "Outgoing";
@@ -905,3 +914,26 @@
 "lng_audio_transcribe_trials_over" = "You have used all your free transcriptions this week. Wait until {date} to use it again or subscribe to {link} now.";
 "lng_settings_privacy_premium_link" = "Telegram Premium";
 "lng_unlock_tags" = "Unlock";
+"qll_money_statistics_unavailable" = "Statistics are not available for this chat.";
+"qll_money_statistics_send_failed" = "Could not send the statistics request.";
+"qll_money_statistics_info_failed" = "Could not load the chat's details.";
+"qll_money_countries_failed" = "Couldn't load the countries.";
+
+"qll_marketplace_comment_unchecked" = "Could not check the comment length. Retry.";
+"qll_marketplace_comment_too_long" = "The comment is too long.";
+"qll_web_app_no_address" = "The bot returned no app address.";
+
+"qll_money_payment_success_note" = "Payment successful";
+"qll_money_payment_failed" = "Payment failed";
+"qll_money_payment_failed_reason" = "Payment failed: {reason}";
+"qll_money_gift_sent" = "Gift sent.";
+"qll_money_could_not_load_gifts_reason" = "Couldn't load gifts: {reason}";
+"qll_money_could_not_load_stars_history" = "Couldn't load the Stars history";
+"qll_money_could_not_load_the_subscriptions" = "Couldn't load the subscriptions";
+"qll_money_could_not_load_revenue" = "Couldn't load the revenue";
+"qll_money_could_not_load_revenue_reason" = "Couldn't load the revenue: {reason}";
+"qll_money_stars_not_sent" = "Stars were not sent";
+"qll_money_stars_not_sent_reason" = "Stars were not sent: {reason}";
+"qll_money_giveaway_payment_pending_title" = "Waiting for the payment";
+"qll_money_giveaway_payment_pending" = "Finish the verification in your browser. Your giveaway starts when the payment goes through. If you did not finish it, start over.";
+"qll_money_giveaway_start_over" = "Start over";

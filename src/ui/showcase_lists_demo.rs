@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
+use crate::ui::chat_list_state::SidebarTab;
 use quill::diagnostics::DiagnosticSink;
 use quill::state::RequestPurpose;
 use quill::telegram::client::copy_and_parse;
@@ -23,7 +24,7 @@ impl QuillApp {
         self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
         let extra = session.request(RequestPurpose::SearchCallMessages, None);
         // Recent calls only take the page they wait for.
-        session.calls.recent_calls_request = Some(extra);
+        session.calls.recent_calls_stage = quill::state::RecentCalls::Loading { request: extra };
         let now = quill::local_time::now_unix();
         // (chat, outgoing, missed, video, minutes ago, seconds long)
         let calls: [(i64, bool, bool, bool, i64, i64); 9] = [
@@ -63,8 +64,7 @@ impl QuillApp {
         if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &sink) {
             session.apply(owned);
         }
-        self.chat_list.contacts_tab_open = false;
-        self.chat_list.calls_tab_open = true;
+        self.chat_list.tab = SidebarTab::Calls;
     }
 
     pub(super) fn demo_showcase_contacts(&mut self) {
@@ -84,8 +84,7 @@ impl QuillApp {
                 session.apply(owned);
             }
         }
-        session.users_state.contacts = Some((101..=112).collect());
-        self.chat_list.calls_tab_open = false;
-        self.chat_list.contacts_tab_open = true;
+        session.users_state.contacts = quill::state::fetch::Fetch::Ready((101..=112).collect());
+        self.chat_list.tab = SidebarTab::Contacts;
     }
 }

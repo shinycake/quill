@@ -22,6 +22,19 @@ def problems(files):
 
 
 class MainFrameQueues(unittest.TestCase):
+    def test_a_bare_resolve_outside_the_seam_fails(self):
+        found = problems(
+            {"src/ui/premium_ui/a.rs": "fn a(&mut self) {\n    live.driver.resolve_deep_link(action);\n}\n"}
+        )
+        self.assertEqual(len(found), 1)
+        self.assertIn("src/ui/premium_ui/a.rs:2", found[0])
+
+    def test_the_seam_may_resolve(self):
+        found = problems(
+            {"src/ui/deep_links.rs": "fn a(&mut self) {\n    live.driver.resolve_deep_link(action);\n}\n"}
+        )
+        self.assertEqual(found, [])
+
     def test_a_queue_with_no_raise_fails(self):
         found = problems(
             {"src/ui/web_app_ui/a.rs": "fn a(&mut self) {\n    self.mini_apps.render_action = Some(x);\n}\n"}

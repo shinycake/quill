@@ -7,6 +7,7 @@
 
 use super::*;
 use crate::ui::owned_image::OwnedImage;
+use crate::ui::stories_state::{PanelKind, ViewerPanel};
 use crate::ui::story_viewer::chrome;
 use quill::story_cover::{
     STRIP_FRAMES, fraction_of, frame_times, time_at, time_label, timestamp_secs,
@@ -31,9 +32,10 @@ static NEXT_SERIAL: AtomicU64 = AtomicU64::new(1);
 pub(in crate::ui) struct CoverPicker {
     chat_id: i64,
     story_id: i32,
-    source: Option<PathBuf>,
-    /// The clip's length, once read.
-    duration_ms: Option<i64>,
+    /// Where the clip stands: not local yet, being read, or ready.
+    stage: CoverStage,
+    /// The story's own length, for a clip the probe cannot measure.
+    fallback_ms: Option<i64>,
     /// The chosen time.
     at_ms: i64,
     frames: Vec<Option<OwnedImage>>,
@@ -41,10 +43,38 @@ pub(in crate::ui) struct CoverPicker {
     /// The preview is being cut for this time.
     preview_job: Option<i64>,
     dragging: bool,
-    unreadable: bool,
     bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     focus: FocusHandle,
     serial: u64,
+}
+
+/// The cover picker's clip. Each stage leaves on its own: `WaitingForClip`
+/// when the clip is local (`cover_upkeep` looks each frame, so a clip that
+/// finishes downloading is picked up) or the picker closes; `Probing` with
+/// the probe's answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CoverStage {
+    /// The clip is not local yet (still downloading, or evicted).
+    WaitingForClip,
+    /// The clip is local; its length is being read.
+    Probing {
+        source: PathBuf,
+    },
+    Ready {
+        source: PathBuf,
+        duration_ms: i64,
+    },
+    /// The clip cannot be read.
+    Unreadable,
+}
+
+impl CoverStage {
+    fn duration_ms(&self) -> Option<i64> {
+        match self {
+            Self::Ready { duration_ms, .. } => Some(*duration_ms),
+            _ => None,
+        }
+    }
 }
 
 impl QuillApp {
@@ -55,30 +85,34 @@ impl QuillApp {
         story_id: i32,
         cx: &mut Context<Self>,
     ) {
-        if self.stories.viewer_ui().cover.is_some() {
+        if self.stories.viewer_ui().cover().is_some() {
             if let Some(open) = self.stories.viewer_ui_mut() {
-                open.cover = None;
+                open.close(PanelKind::Cover);
             }
             cx.notify();
             return;
         }
         if let Some(open) = self.stories.viewer_ui_mut() {
-            open.cover_sent = false;
+            open.cover_request = None;
         }
         let source = self.story_video_path();
         let fallback_ms = self
             .stories
             .viewer
             .current()
-            .and_then(|item| item.duration_secs)
+            .and_then(|item| item.duration_secs())
             .map(|secs| i64::from(secs) * 1000);
         let serial = NEXT_SERIAL.fetch_add(1, Ordering::Relaxed);
-        let value = Some(CoverPicker {
+        let value = CoverPicker {
             chat_id,
             story_id,
-            unreadable: source.is_none(),
-            source: source.clone(),
-            duration_ms: None,
+            stage: match &source {
+                Some(source) => CoverStage::Probing {
+                    source: source.clone(),
+                },
+                None => CoverStage::WaitingForClip,
+            },
+            fallback_ms,
             at_ms: 0,
             frames: (0..STRIP_FRAMES).map(|_| None).collect(),
             preview: None,
@@ -87,12 +121,67 @@ impl QuillApp {
             bounds: Rc::new(Cell::new(None)),
             focus: cx.focus_handle(),
             serial,
-        });
+        };
         if let Some(open) = self.stories.viewer_ui_mut() {
-            open.cover = value;
+            open.show(ViewerPanel::Cover(Box::new(value)));
         }
         cx.notify();
         let Some(source) = source else { return };
+        self.cover_probe(serial, source, cx);
+    }
+
+    /// The open cover picker waits for its clip to finish downloading.
+    #[cfg(test)]
+    pub(in crate::ui) fn cover_waits_for_clip(&self) -> bool {
+        self.stories
+            .viewer_ui()
+            .cover()
+            .is_some_and(|cover| cover.stage == CoverStage::WaitingForClip)
+    }
+
+    /// The open cover picker found its clip unreadable.
+    #[cfg(test)]
+    pub(in crate::ui) fn cover_clip_unreadable(&self) -> bool {
+        self.stories
+            .viewer_ui()
+            .cover()
+            .is_some_and(|cover| cover.stage == CoverStage::Unreadable)
+    }
+
+    /// The clip became local: read its length. Per frame, while the picker
+    /// waits for a clip still downloading.
+    pub(in crate::ui) fn cover_upkeep(&mut self, cx: &mut Context<Self>) {
+        let Some((serial, CoverStage::WaitingForClip)) = self
+            .stories
+            .viewer_ui()
+            .cover()
+            .map(|cover| (cover.serial, cover.stage.clone()))
+        else {
+            return;
+        };
+        let Some(source) = self.story_video_path() else {
+            return;
+        };
+        if let Some(cover) = self
+            .stories
+            .viewer_ui_mut()
+            .and_then(|open| open.cover_mut())
+        {
+            cover.stage = CoverStage::Probing {
+                source: source.clone(),
+            };
+        }
+        cx.notify();
+        self.cover_probe(serial, source, cx);
+    }
+
+    /// Read the clip's length off the UI thread, then cut the strip.
+    fn cover_probe(&mut self, serial: u64, source: PathBuf, cx: &mut Context<Self>) {
+        let fallback_ms = self
+            .stories
+            .viewer_ui()
+            .cover()
+            .and_then(|cover| cover.fallback_ms);
         self.spawn_scoped(cx, async move |this, cx| {
             let probe_source = source.clone();
             let probed = cx
@@ -106,10 +195,10 @@ impl QuillApp {
                     if let Some(cover) = this
                         .stories
                         .viewer_ui_mut()
-                        .and_then(|open| open.cover.as_mut())
+                        .and_then(|open| open.cover_mut())
                         .filter(|c| c.serial == serial)
                     {
-                        cover.unreadable = true;
+                        cover.stage = CoverStage::Unreadable;
                     }
                     cx.notify();
                 });
@@ -119,12 +208,15 @@ impl QuillApp {
                 let Some(cover) = this
                     .stories
                     .viewer_ui_mut()
-                    .and_then(|open| open.cover.as_mut())
+                    .and_then(|open| open.cover_mut())
                     .filter(|c| c.serial == serial)
                 else {
                     return false;
                 };
-                cover.duration_ms = Some(duration_ms);
+                cover.stage = CoverStage::Ready {
+                    source: source.clone(),
+                    duration_ms,
+                };
                 this.cover_refresh_preview(cx);
                 cx.notify();
                 true
@@ -151,7 +243,7 @@ impl QuillApp {
                     let Some(cover) = this
                         .stories
                         .viewer_ui_mut()
-                        .and_then(|open| open.cover.as_mut())
+                        .and_then(|open| open.cover_mut())
                         .filter(|c| c.serial == serial)
                     else {
                         return false;
@@ -176,11 +268,11 @@ impl QuillApp {
         let Some(cover) = self
             .stories
             .viewer_ui_mut()
-            .and_then(|open| open.cover.as_mut())
+            .and_then(|open| open.cover_mut())
         else {
             return;
         };
-        let (Some(source), Some(_)) = (cover.source.clone(), cover.duration_ms) else {
+        let CoverStage::Ready { source, .. } = cover.stage.clone() else {
             return;
         };
         if cover.preview_job.is_some() {
@@ -202,7 +294,7 @@ impl QuillApp {
                 let Some(cover) = this
                     .stories
                     .viewer_ui_mut()
-                    .and_then(|open| open.cover.as_mut())
+                    .and_then(|open| open.cover_mut())
                     .filter(|c| c.serial == serial)
                 else {
                     return;
@@ -226,11 +318,11 @@ impl QuillApp {
         let Some(cover) = self
             .stories
             .viewer_ui_mut()
-            .and_then(|open| open.cover.as_mut())
+            .and_then(|open| open.cover_mut())
         else {
             return;
         };
-        let Some(duration) = cover.duration_ms else {
+        let Some(duration) = cover.stage.duration_ms() else {
             return;
         };
         let at = time_at(fraction, duration);
@@ -245,7 +337,7 @@ impl QuillApp {
         let Some(cover) = self
             .stories
             .viewer_ui_mut()
-            .and_then(|open| open.cover.as_mut())
+            .and_then(|open| open.cover_mut())
         else {
             return;
         };
@@ -259,13 +351,7 @@ impl QuillApp {
     }
 
     fn cover_drag(&mut self, x: f32, cx: &mut Context<Self>) {
-        let Some(cover) = self
-            .stories
-            .viewer_ui()
-            .cover
-            .as_ref()
-            .filter(|c| c.dragging)
-        else {
+        let Some(cover) = self.stories.viewer_ui().cover().filter(|c| c.dragging) else {
             return;
         };
         let Some(bounds) = cover.bounds.get() else {
@@ -279,17 +365,17 @@ impl QuillApp {
         if let Some(cover) = self
             .stories
             .viewer_ui_mut()
-            .and_then(|open| open.cover.as_mut())
+            .and_then(|open| open.cover_mut())
         {
             cover.dragging = false;
         }
     }
 
     fn cover_key(&mut self, key: &str, shift: bool, cx: &mut Context<Self>) {
-        let Some(cover) = self.stories.viewer_ui().cover.as_ref() else {
+        let Some(cover) = self.stories.viewer_ui().cover() else {
             return;
         };
-        let Some(duration) = cover.duration_ms else {
+        let Some(duration) = cover.stage.duration_ms() else {
             return;
         };
         let step = if shift { KEY_STEP_BIG } else { KEY_STEP };
@@ -307,7 +393,7 @@ impl QuillApp {
     /// Phase 9.5: the cover picker panel — preview, frame strip, time and
     /// the Set / Cancel buttons.
     pub(in crate::ui) fn story_cover_editor(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(cover) = self.stories.viewer_ui().cover.as_ref() else {
+        let Some(cover) = self.stories.viewer_ui().cover() else {
             return div().into_any_element();
         };
         // No second call for this story while one is in flight.
@@ -315,23 +401,30 @@ impl QuillApp {
             .session()
             .is_some_and(|s| s.stories.manage.pending_for(cover.chat_id, cover.story_id));
         let chrome_text = || chrome::secondary();
-        let ready = cover.duration_ms.is_some();
+        let ready = cover.stage.duration_ms().is_some();
         let fraction = cover
-            .duration_ms
+            .stage
+            .duration_ms()
             .map_or(0.0, |duration| fraction_of(cover.at_ms, duration));
         let time = time_label(cover.at_ms);
-        let preview: AnyElement = match (&cover.preview, cover.unreadable) {
-            (_, true) => div()
+        let preview: AnyElement = match (&cover.preview, &cover.stage) {
+            (_, CoverStage::Unreadable) => div()
                 .px_3()
                 .text_sm()
                 .text_color(chrome_text())
                 .child(tr(keys::Q_MEDIA_COVER_UNREADABLE))
                 .into_any_element(),
-            (Some(image), false) => img(ImageSource::Render(Arc::clone(image)))
+            (_, CoverStage::WaitingForClip) => div()
+                .px_3()
+                .text_sm()
+                .text_color(chrome_text())
+                .child(tr(keys::Q_MEDIA_COVER_WAITING_FOR_VIDEO))
+                .into_any_element(),
+            (Some(image), _) => img(ImageSource::Render(Arc::clone(image)))
                 .h_full()
                 .object_fit(ObjectFit::Contain)
                 .into_any_element(),
-            (None, false) => div()
+            (None, _) => div()
                 .text_sm()
                 .text_color(chrome_text())
                 .child(tr(keys::Q_MEDIA_COVER_PREVIEW_LOADING))
@@ -464,14 +557,14 @@ impl QuillApp {
                             .custom(chrome::ghost(cx))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 if let Some(open) = this.stories.viewer_ui_mut() {
-                                    open.cover = None;
+                                    open.close(PanelKind::Cover);
                                 }
                                 cx.notify();
                             })),
                     )
                     .child(
                         Button::new("story-cover-set")
-                            .label(if self.stories.viewer_ui().cover_sent {
+                            .label(if self.stories.viewer_ui().cover_request.is_some() {
                                 tr(keys::Q_MEDIA_SAVING)
                             } else {
                                 tr(keys::Q_MEDIA_SET_2)
@@ -485,18 +578,23 @@ impl QuillApp {
             .into_any_element()
     }
 
+    /// The story the open cover picker is for.
+    pub(in crate::ui) fn open_cover_story(&self) -> Option<(i64, i32)> {
+        let cover = self.stories.viewer_ui().cover()?;
+        Some((cover.chat_id, cover.story_id))
+    }
+
     /// Phase 9.5: send `editStoryCover` (`td_api.tl:13738`) for the chosen
     /// frame. The driver gates on `can_be_edited`; the tick closes the
     /// picker on success.
     pub(super) fn story_cover_save(&mut self, cx: &mut Context<Self>) {
-        if self.stories.viewer_ui().cover_sent {
+        if self.stories.viewer_ui().cover_request.is_some() {
             return;
         }
         let Some((chat_id, story_id, at_ms)) = self
             .stories
             .viewer_ui()
-            .cover
-            .as_ref()
+            .cover()
             .map(|cover| (cover.chat_id, cover.story_id, cover.at_ms))
         else {
             return;
@@ -519,9 +617,9 @@ impl QuillApp {
                 .driver
                 .edit_story_cover(ChatId(chat_id), story_id, timestamp_secs(at_ms))
             {
-                Ok(_) => {
+                Ok(request) => {
                     if let Some(open) = self.stories.viewer_ui_mut() {
-                        open.cover_sent = true;
+                        open.cover_request = Some(request);
                     }
                 }
                 Err(_) => {

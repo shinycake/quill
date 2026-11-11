@@ -1,6 +1,8 @@
 use quill::ids::{ChatId, RequestId};
 use quill::telegram::envelope::StoriesPayload;
-use quill::telegram::envelope::{EnvelopePayload, StoryChosenExtraReaction, parse_envelope};
+use quill::telegram::envelope::{
+    EnvelopePayload, StoryChosenExtraReaction, StoryReaction, parse_envelope,
+};
 use quill::telegram::requests::set_story_custom_emoji_reaction;
 
 #[test]
@@ -18,9 +20,9 @@ fn story_chosen_reaction_custom_emoji_and_paid_parsed() {
     .unwrap();
     match env.payload {
         EnvelopePayload::Stories(StoriesPayload::Story { story, .. }) => {
-            assert_eq!(story.chosen_reaction_emoji, None);
+            assert_eq!(story.chosen_reaction_emoji(), None);
             assert_eq!(
-                story.chosen_reaction_extra,
+                story.chosen_reaction_extra(),
                 Some(StoryChosenExtraReaction::CustomEmoji(123))
             );
         }
@@ -29,9 +31,9 @@ fn story_chosen_reaction_custom_emoji_and_paid_parsed() {
     let env = parse_envelope(&reaction_json(r#"{"@type":"reactionTypePaid"}"#)).unwrap();
     match env.payload {
         EnvelopePayload::Stories(StoriesPayload::Story { story, .. }) => {
-            assert_eq!(story.chosen_reaction_emoji, None);
+            assert_eq!(story.chosen_reaction_emoji(), None);
             assert_eq!(
-                story.chosen_reaction_extra,
+                story.chosen_reaction_extra(),
                 Some(StoryChosenExtraReaction::Paid)
             );
         }
@@ -41,8 +43,8 @@ fn story_chosen_reaction_custom_emoji_and_paid_parsed() {
     let env = parse_envelope(&reaction_json(r#"{"@type":"reactionTypeUnknown"}"#)).unwrap();
     match env.payload {
         EnvelopePayload::Stories(StoriesPayload::Story { story, .. }) => {
-            assert_eq!(story.chosen_reaction_emoji, None);
-            assert_eq!(story.chosen_reaction_extra, None);
+            assert_eq!(story.chosen_reaction_emoji(), None);
+            assert_eq!(story.chosen_reaction_extra(), None);
         }
         other => panic!("{other:?}"),
     }
@@ -60,15 +62,15 @@ fn story_interactions_extra_reactions_parse() {
     match env.payload {
         EnvelopePayload::Stories(StoriesPayload::StoryInteractions { interactions }) => {
             assert_eq!(interactions.interactions.len(), 2);
-            assert_eq!(interactions.interactions[0].reaction_emoji, None);
             assert_eq!(
-                interactions.interactions[0].reaction_extra,
-                Some(StoryChosenExtraReaction::CustomEmoji(987))
+                interactions.interactions[0].reaction,
+                Some(StoryReaction::Extra(StoryChosenExtraReaction::CustomEmoji(
+                    987
+                )))
             );
-            assert_eq!(interactions.interactions[1].reaction_emoji, None);
             assert_eq!(
-                interactions.interactions[1].reaction_extra,
-                Some(StoryChosenExtraReaction::Paid)
+                interactions.interactions[1].reaction,
+                Some(StoryReaction::Extra(StoryChosenExtraReaction::Paid))
             );
         }
         other => panic!("unexpected {other:?}"),

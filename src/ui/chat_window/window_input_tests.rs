@@ -99,6 +99,31 @@ fn each_window_has_its_own_gif_panel(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn the_lock_shuts_the_gif_gate_and_the_unlock_opens_it_again(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    h.settle(cx);
+    let gate = |h: &Harness, cx: &mut TestAppContext| {
+        h.app.read_with(cx, |app, _| {
+            app.session().is_some_and(|s| s.stickers.gifs.open)
+        })
+    };
+    scoped(&h, None, cx, |app, cx| {
+        app.open_media_panel(PanelTab::Gifs, cx)
+    });
+    assert!(gate(&h, cx), "the panel's GIFs load");
+    scoped(&h, None, cx, |app, cx| {
+        app.account.passcode.enabled = true;
+        app.lock_by_passcode(cx);
+    });
+    assert!(!gate(&h, cx), "locked: no GIF search or download");
+    scoped(&h, None, cx, |app, cx| app.set_locked(false, cx));
+    assert!(
+        gate(&h, cx),
+        "unlocked: the panel on its GIFs tab loads again"
+    );
+}
+
+#[gpui_kit::test]
 fn each_window_scrolls_its_own_subsection_tabs(cx: &mut TestAppContext) {
     let h = new_app(cx);
     let _chat_window = h.open_in_new_window(OTHER, cx);
@@ -135,13 +160,14 @@ fn each_saved_view_has_its_own_history_key(cx: &mut TestAppContext) {
             return scopes;
         };
         // The open chat becomes Saved Messages.
-        session.my_user_id = session.open_chat.map(|chat| chat.0);
+        session.my_user_id = session.open_chat_id().map(|chat| chat.0);
         scopes.push(app.saved_view_scope());
         for topic_id in [5, 6] {
             if let Some(session) = app.demo_session.as_mut() {
                 session.threads.saved.sublist = Some(SavedSublistView {
                     topic_id,
                     history: TopicHistory::default(),
+                    page: quill::state::SavedPage::Idle,
                 });
             }
             scopes.push(app.saved_view_scope());
@@ -154,8 +180,7 @@ fn each_saved_view_has_its_own_history_key(cx: &mut TestAppContext) {
                         emoji: emoji.to_string(),
                     },
                     history: TopicHistory::default(),
-                    loaded: true,
-                    request: None,
+                    page: quill::state::SavedPage::Idle,
                 });
             }
             scopes.push(app.saved_view_scope());

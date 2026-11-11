@@ -21,8 +21,8 @@ use gpui_kit::{TestSupportExt, *};
 use quill::ids::{ChatId, FileId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::message_menu::{
-    MediaAction, MediaFacts, MediaKind, MediaTarget, SeenKind, media_actions, media_target, order,
-    reacted_label, read_date_label, seen_kind, seen_label,
+    MediaAction, MediaFacts, MediaFile, MediaKind, MediaTarget, SeenKind, media_actions,
+    media_target, order, reacted_label, read_date_label, seen_kind, seen_label,
 };
 use quill::state::{Audience, MessageReportStage, Session};
 use quill::telegram::envelope::{
@@ -32,43 +32,44 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-/// Which page of the message menu is showing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(super) enum MessageMenuPage {
-    #[default]
-    Main,
-    /// A song's "Save to..." destinations.
-    SaveTo,
-    /// "Add to Sticker Set" / "Add to Emoji Set": the sets the user
-    /// created.
-    AddToSet { emoji: bool },
-    /// Who saw / reacted to the message.
-    Audience,
-    /// The page of the poll option the menu was opened over (tdesktop
-    /// `FillPollOptionPage`).
-    PollOption,
-}
+pub(super) use super::message_menu_state::MessageMenuPage;
 
 /// UI state of the message menu's extras.
 pub(super) struct MessageMenuUi {
-    pub page: MessageMenuPage,
-    /// The report dialog (`DialogKind::MessageReport`) is open.
-    pub report_open: bool,
-    /// The sticker set dialog (`DialogKind::StickerSet`) is open.
-    pub sticker_set_open: bool,
-    /// The "who reacted" tab (`None` = All).
-    pub audience_tab: Option<quill::telegram::envelope::ReactionType>,
+    /// The sticker set dialog (`DialogKind::StickerSet`) of this window.
+    /// The report dialog is not kept here: it shows while the session's
+    /// report flow exists, in the window that opened it (`open_box`).
+    pub sticker_box: StickerBox,
     /// Details of a report (`reportChatResultTextRequired`).
     pub report_text: Entity<TextareaState>,
+}
+
+/// Whether this window shows the sticker set dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(super) enum StickerBox {
+    #[default]
+    Closed,
+    Shown,
+}
+
+impl MessageMenuUi {
+    pub(super) fn sticker_set_open(&self) -> bool {
+        self.sticker_box == StickerBox::Shown
+    }
+
+    pub(super) fn show_sticker_set(&mut self) {
+        self.sticker_box = StickerBox::Shown;
+    }
+
+    pub(super) fn end_sticker_set(&mut self) {
+        self.sticker_box = StickerBox::Closed;
+    }
 }
 
 impl MessageMenuUi {
     pub(super) fn new(window: &mut Window, cx: &mut App) -> Self {
         Self {
-            page: MessageMenuPage::Main,
-            report_open: false,
-            sticker_set_open: false,
-            audience_tab: None,
+            sticker_box: StickerBox::Closed,
             report_text: cx.new(|cx| {
                 TextareaState::new(window, cx)
                     .placeholder(tr(keys::Q_CHAT_ADD_COMMENT))
@@ -242,8 +243,13 @@ impl QuillApp {
             _ => (false, false),
         };
         MediaFacts {
-            downloading,
-            local: local_media_path(session, content, target).is_some(),
+            file: if downloading {
+                MediaFile::Downloading
+            } else if local_media_path(session, content, target).is_some() {
+                MediaFile::Local
+            } else {
+                MediaFile::Remote
+            },
             can_save: !protected && actions.is_none_or(|a| a.can_be_saved),
             set_installed: session
                 .stickers
@@ -252,7 +258,7 @@ impl QuillApp {
                 .iter()
                 .any(|set| set.id == target.set_id),
             favorite: (target.kind == MediaKind::Sticker
-                && (session.stickers.stickers.installed_loaded
+                && (session.stickers.stickers.installed_loaded()
                     || !session.stickers.stickers.favorites.is_empty()))
             .then(|| {
                 session
@@ -262,7 +268,7 @@ impl QuillApp {
                     .iter()
                     .any(|s| s.file_id == target.file_id)
             }),
-            gif_saved: session.stickers.gifs.loaded.then(|| {
+            gif_saved: session.stickers.gifs.loaded().then(|| {
                 session
                     .stickers
                     .gifs
@@ -278,7 +284,7 @@ impl QuillApp {
                 && quill::message_menu::tone_offered(
                     target,
                     file.map_or(0, |f| f.display_size()),
-                    session.settings.saved_notification_sounds.len(),
+                    session.settings.saved_notification_sounds().len(),
                     session.messages.tone_limits,
                 ),
         }
@@ -345,12 +351,14 @@ impl QuillApp {
                             this.save_message_tone(target.file_id, cx)
                         }
                         MediaAction::SaveTo => {
-                            this.message_ui.menu_ui.page = MessageMenuPage::SaveTo;
+                            this.message_ui.menu.show_page(MessageMenuPage::SaveTo);
                             cx.notify();
                             return;
                         }
                         MediaAction::AddToSet { emoji } => {
-                            this.message_ui.menu_ui.page = MessageMenuPage::AddToSet { emoji };
+                            this.message_ui
+                                .menu
+                                .show_page(MessageMenuPage::AddToSet { emoji });
                             cx.notify();
                             return;
                         }
@@ -363,7 +371,7 @@ impl QuillApp {
                             }
                         }
                     }
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 },
             ));
@@ -630,11 +638,13 @@ crate::ui::shell::register_dialogs! {
     /// The message menu's Report flow.
     MessageReport => DialogSpec::new(
         5600,
-        |app| app.message_ui.menu_ui.report_open,
+        |app| {
+            app.session()
+                .is_some_and(|s| s.messages.message_report.is_some())
+        },
         QuillApp::build_message_report_dialog,
     )
-    .per_window()
-    .close(|app, _, cx| app.close_message_report(cx)),
+    .close(|app, window, cx| app.close_message_report(window, cx)),
 }
 
 mod delete_member_reaction;
@@ -643,6 +653,7 @@ pub(in crate::ui) mod item_rows;
 #[cfg(feature = "demo-capture")]
 mod media_order_tests;
 mod menu_add_to_set_rows;
+mod menu_audience_page;
 mod menu_save_to_rows;
 pub(in crate::ui) mod origin_rows;
 mod read_date_row;

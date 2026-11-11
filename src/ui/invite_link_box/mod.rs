@@ -15,13 +15,15 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::{InputEvent, InputState};
+use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::invite_link_form::{
     ChatFacts, InviteLinkForm, InviteLinkRequest, NAME_MAX, STARS_MAX_DEFAULT, stars_amount,
 };
-use quill::lang::{keys, tr};
+use quill::lang::{keys, tr, tr_with};
 use quill::local_time::now_unix;
+use quill::state::{Submit, SubmitView};
 use quill::telegram::envelope::ParsedChatInviteLink;
 
 /// The open box: its choices and its two text fields.
@@ -32,15 +34,27 @@ pub(crate) struct InviteLinkBox {
     pub(crate) stars_input: Entity<InputState>,
     /// A Custom box shown in place of this one.
     pub(crate) custom: Option<CustomBox>,
-    /// The Custom number field takes focus on its box's next frame.
-    pub(crate) focus_custom: bool,
+    /// The last Save: the box closes on its answer, stays on its error.
+    pub(crate) submit: Submit,
 }
 
 /// tdesktop's boxes over the link box: the date and time picker, and the
 /// number of users.
 pub(crate) enum CustomBox {
     Date(TimePicker),
-    Limit(Entity<InputState>),
+    Limit {
+        input: Entity<InputState>,
+        focus: LimitFocus,
+    },
+}
+
+/// Whether the number field still has to take focus: the kit focuses a
+/// dialog as it opens, so the field asks once the dialog is built. It goes
+/// with the box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LimitFocus {
+    Requested,
+    Done,
 }
 
 impl QuillApp {
@@ -95,7 +109,7 @@ impl QuillApp {
                 .default_value(name)
         });
         let stars = form
-            .locked_stars
+            .locked_stars()
             .map(|stars| stars.to_string())
             .unwrap_or_default();
         let stars_input = cx.new(|cx| {
@@ -134,7 +148,7 @@ impl QuillApp {
             name_input,
             stars_input,
             custom: None,
-            focus_custom: false,
+            submit: Submit::default(),
         });
         self.open_box(DialogKind::InviteLinkBox);
         cx.notify();
@@ -156,9 +170,17 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// tdesktop `addSaveButtons`: send the box's request and close it.
+    /// tdesktop `addSaveButtons`: send the box's request. The box stays,
+    /// saving, until TDLib answers: it closes then, or keeps what was typed
+    /// and shows the reason (`settle_invite_link_box`).
     pub(in crate::ui) fn save_invite_link_box(&mut self, cx: &mut Context<Self>) {
-        let Some(link_box) = self.admin.invite_link_box.take() else {
+        let requests = self.session().map(|session| &session.requests);
+        let Some(link_box) = self
+            .admin
+            .invite_link_box
+            .as_ref()
+            .filter(|link_box| !link_box.submit.is_sending(requests))
+        else {
             return;
         };
         let name = link_box.name_input.read(cx).value().to_string();
@@ -217,11 +239,15 @@ impl QuillApp {
         // `Ok(None)` is a refusal to send (the same create still in flight,
         // or the invite right gone), not a request on its way: the box
         // stays with what was typed and says so.
-        let sent = matches!(sent, Ok(Some(_)));
-        if !sent {
-            // box-host: put back after a refused save; it stays where it shows
-            self.admin.invite_link_box = Some(link_box);
-        }
+        let sent = match sent {
+            Ok(Some(id)) => {
+                if let Some(link_box) = self.admin.invite_link_box.as_mut() {
+                    link_box.submit = Submit::sent(vec![id]);
+                }
+                true
+            }
+            _ => false,
+        };
         let note = match (sent, creating) {
             (true, true) => StatusNote::info(tr(keys::Q_PEOPLE_CREATING_INVITE_LINK)),
             (true, false) => StatusNote::info(tr(keys::Q_PEOPLE_SAVING_INVITE_LINK)),
@@ -230,6 +256,33 @@ impl QuillApp {
         };
         self.set_note(note);
         cx.notify();
+    }
+
+    /// The link box leaves its Sending stage on TDLib's answer.
+    pub(in crate::ui) fn settle_invite_link_box(&mut self, cx: &mut Context<Self>) {
+        let requests = self.session().map(|session| &session.requests);
+        let Some(view) = self
+            .admin
+            .invite_link_box
+            .as_ref()
+            .map(|link_box| link_box.submit.view(requests))
+        else {
+            return;
+        };
+        match view {
+            SubmitView::Done => {
+                self.admin.invite_link_box = None;
+                cx.notify();
+            }
+            SubmitView::Failed(reason) => {
+                if let Some(link_box) = self.admin.invite_link_box.as_mut()
+                    && link_box.submit.keep_failure(reason)
+                {
+                    cx.notify();
+                }
+            }
+            SubmitView::Editing | SubmitView::Sending => {}
+        }
     }
 
     fn invite_link_box_open(&self) -> bool {
@@ -261,6 +314,11 @@ impl QuillApp {
             if this.invite_link_box().is_none() {
                 return dialog.on_close(on_close);
             }
+            let sending = this.invite_link_box().is_some_and(|link_box| {
+                link_box
+                    .submit
+                    .is_sending(this.session().map(|session| &session.requests))
+            });
             let footer = div()
                 .flex()
                 .justify_end()
@@ -282,6 +340,8 @@ impl QuillApp {
                             tr(keys::FORMATTING_LINK_CREATE)
                         })
                         .primary()
+                        .loading(sending)
+                        .disabled(sending)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.save_invite_link_box(cx);
                             this.close_kit_dialog_if_done(DialogKind::InviteLinkBox, window, cx);
@@ -294,7 +354,25 @@ impl QuillApp {
                         let body = body_app
                             .update(cx, |this, cx| this.invite_link_box_body(cx))
                             .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
+                        let refused =
+                            body_app.read(cx).invite_link_box().and_then(
+                                |link_box| match &link_box.submit {
+                                    Submit::Failed(reason) => Some(tr_with(
+                                        keys::Q_PEOPLE_COULDNT_SAVE_REASON,
+                                        &[("reason", reason)],
+                                    )),
+                                    _ => None,
+                                },
+                            );
+                        let danger = cx.theme().danger;
+                        content.child(body).children(refused.map(|line| {
+                            div()
+                                .id("invite-link-refused")
+                                .pt_2()
+                                .text_xs()
+                                .text_color(danger)
+                                .child(line)
+                        }))
                     },
                 ))
                 .footer(footer)

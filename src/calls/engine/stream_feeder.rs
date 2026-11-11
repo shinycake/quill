@@ -123,9 +123,10 @@ pub trait StreamPort {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeederState {
-    /// Created, nothing asked yet.
+    /// Created, no stream seen yet. A `getGroupCallStreams` in flight is
+    /// [`StreamsSync::Asking`], not a state of its own.
     Idle,
-    /// Waiting for `getGroupCallStreams`.
+    /// The stream list names a stream and no segment has arrived yet.
     Syncing,
     Streaming,
     NoStream,
@@ -134,6 +135,20 @@ pub enum FeederState {
     Failed,
     /// The server said the call is gone.
     Ended,
+}
+
+/// The `getGroupCallStreams` in flight and the time requests that wait for
+/// it (tdesktop answers every waiter with one request). The waiters live in
+/// the request's stage, so none outlives it: the reply, a failed send and
+/// `drain` all end it.
+#[derive(Debug, Default)]
+enum StreamsSync {
+    #[default]
+    Idle,
+    Asking {
+        request: RequestId,
+        waiters: Vec<BroadcastRequestId>,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -153,10 +168,7 @@ pub struct StreamFeeder {
     rtmp: bool,
     channels: Vec<StreamChannel>,
     pending: HashMap<RequestId, PendingPart>,
-    /// The `getGroupCallStreams` in flight and the time requests that
-    /// wait for it (tdesktop answers every waiter with one request).
-    streams_request: Option<RequestId>,
-    time_waiters: Vec<BroadcastRequestId>,
+    sync: StreamsSync,
     state: FeederState,
     last_timestamp_ms: i64,
     trace: bool,
@@ -170,8 +182,7 @@ impl StreamFeeder {
             rtmp: mode == GroupCallMode::Rtmp,
             channels: Vec::new(),
             pending: HashMap::new(),
-            streams_request: None,
-            time_waiters: Vec::new(),
+            sync: StreamsSync::Idle,
             state: FeederState::Idle,
             last_timestamp_ms: 0,
             trace: trace_stream(),
@@ -216,7 +227,8 @@ impl StreamFeeder {
 
     /// Whether `id` is one of this feeder's TDLib requests.
     pub fn owns(&self, id: RequestId) -> bool {
-        self.streams_request == Some(id) || self.pending.contains_key(&id)
+        matches!(&self.sync, StreamsSync::Asking { request, .. } if *request == id)
+            || self.pending.contains_key(&id)
     }
 
     /// The engine asked for the stream's current time.
@@ -226,17 +238,25 @@ impl StreamFeeder {
             port.answer_time(self.chat_id, request, now);
             return;
         }
-        self.time_waiters.push(request);
-        if self.streams_request.is_some() {
+        if let StreamsSync::Asking { waiters, .. } = &mut self.sync {
+            waiters.push(request);
             return;
         }
-        if self.state == FeederState::Idle {
-            self.state = FeederState::Syncing;
+        if matches!(self.state, FeederState::Failed | FeederState::Ended) {
+            // Terminal: no request goes out; the engine asks again in a
+            // second until the rejoin replaces this feeder or the call ends.
+            self.answer_time_waiters(vec![request], 0, port);
+            return;
         }
         match port.request_streams(self.group_call_id) {
-            Some(id) => self.streams_request = Some(id),
+            Some(id) => {
+                self.sync = StreamsSync::Asking {
+                    request: id,
+                    waiters: vec![request],
+                };
+            }
             // The send failed: answer 0 so the engine asks again in a second.
-            None => self.answer_time_waiters(0, port),
+            None => self.answer_time_waiters(vec![request], 0, port),
         }
     }
 
@@ -259,6 +279,17 @@ impl StreamFeeder {
             timestamp_ms,
             requested_at: now,
         };
+        // Failed (the rejoin replaces this feeder) and Ended send nothing:
+        // a failed segment would only fail again, every 100 ms.
+        let terminal = match self.state {
+            FeederState::Failed => Some(BroadcastPartStatus::NotReady),
+            FeederState::Ended => Some(BroadcastPartStatus::ResyncNeeded),
+            _ => None,
+        };
+        if let Some(status) = terminal {
+            self.answer(port, &pending, status, Vec::new(), None);
+            return;
+        }
         if self.pending.len() >= MAX_PENDING_PARTS {
             self.answer(
                 port,
@@ -316,11 +347,15 @@ impl StreamFeeder {
     /// The engine no longer wants `request`. Returns whether it was one
     /// of this feeder's.
     pub fn on_cancel(&mut self, request: BroadcastRequestId) -> bool {
-        let waiters = self.time_waiters.len();
-        self.time_waiters.retain(|waiter| *waiter != request);
+        let mut changed = false;
+        if let StreamsSync::Asking { waiters, .. } = &mut self.sync {
+            let before = waiters.len();
+            waiters.retain(|waiter| *waiter != request);
+            changed = waiters.len() != before;
+        }
         let parts = self.pending.len();
         self.pending.retain(|_, part| part.request != request);
-        waiters != self.time_waiters.len() || parts != self.pending.len()
+        changed || parts != self.pending.len()
     }
 
     /// A TDLib answer arrived for `id`.
@@ -331,9 +366,10 @@ impl StreamFeeder {
         now: Instant,
         port: &mut impl StreamPort,
     ) -> ReplyOutcome {
-        if self.streams_request == Some(id) {
-            self.streams_request = None;
-            return self.on_streams_reply(reply, port);
+        if self.owns_streams_request(id)
+            && let StreamsSync::Asking { waiters, .. } = std::mem::take(&mut self.sync)
+        {
+            return self.on_streams_reply(reply, waiters, port);
         }
         let Some(part) = self.pending.remove(&id) else {
             return ReplyOutcome::NotMine;
@@ -389,13 +425,17 @@ impl StreamFeeder {
                 None,
             );
         }
-        self.streams_request = None;
-        self.time_waiters.clear();
+        self.sync = StreamsSync::Idle;
+    }
+
+    fn owns_streams_request(&self, id: RequestId) -> bool {
+        matches!(&self.sync, StreamsSync::Asking { request, .. } if *request == id)
     }
 
     fn on_streams_reply(
         &mut self,
         reply: StreamReply<'_>,
+        waiters: Vec<BroadcastRequestId>,
         port: &mut impl StreamPort,
     ) -> ReplyOutcome {
         match reply {
@@ -409,11 +449,15 @@ impl StreamFeeder {
                         if matches!(self.state, FeederState::Idle | FeederState::NoStream) {
                             self.state = FeederState::Syncing;
                         }
-                        self.answer_time_waiters(first.time_offset, port);
+                        self.answer_time_waiters(waiters, first.time_offset, port);
                     }
                     None => {
-                        self.state = FeederState::NoStream;
-                        self.answer_time_waiters(0, port);
+                        // Failed and Ended are terminal: a late empty list
+                        // must not revive them.
+                        if !matches!(self.state, FeederState::Failed | FeederState::Ended) {
+                            self.state = FeederState::NoStream;
+                        }
+                        self.answer_time_waiters(waiters, 0, port);
                     }
                 }
                 ReplyOutcome::Handled
@@ -421,7 +465,7 @@ impl StreamFeeder {
             StreamReply::Error(error) => {
                 // tdesktop answers 0 on any failure and rejoins on the two
                 // membership errors; TDLib counts GROUPCALL_INVALID as left.
-                self.answer_time_waiters(0, port);
+                self.answer_time_waiters(waiters, 0, port);
                 match error {
                     StreamFetchError::RejoinNeeded => {
                         self.state = FeederState::Failed;
@@ -437,14 +481,19 @@ impl StreamFeeder {
                 }
             }
             StreamReply::Data(_) => {
-                self.answer_time_waiters(0, port);
+                self.answer_time_waiters(waiters, 0, port);
                 ReplyOutcome::Handled
             }
         }
     }
 
-    fn answer_time_waiters(&mut self, timestamp_ms: i64, port: &mut impl StreamPort) {
-        for request in std::mem::take(&mut self.time_waiters) {
+    fn answer_time_waiters(
+        &self,
+        waiters: Vec<BroadcastRequestId>,
+        timestamp_ms: i64,
+        port: &mut impl StreamPort,
+    ) {
+        for request in waiters {
             port.answer_time(self.chat_id, request, timestamp_ms);
         }
     }
@@ -494,25 +543,6 @@ fn part_error_status(error: StreamFetchError) -> (BroadcastPartStatus, ReplyOutc
         StreamFetchError::RejoinNeeded => (BroadcastPartStatus::NotReady, ReplyOutcome::Rejoin),
         StreamFetchError::CallLeft => (BroadcastPartStatus::ResyncNeeded, ReplyOutcome::Left),
         StreamFetchError::Other => (BroadcastPartStatus::ResyncNeeded, ReplyOutcome::Handled),
-    }
-}
-
-/// Reports a stream tile's size as a quality bucket, once per change.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct StreamQualityTracker {
-    last: Option<StreamQuality>,
-}
-
-impl StreamQualityTracker {
-    /// The bucket for `width`, or `None` when it is the one already
-    /// reported.
-    pub fn observe(&mut self, width: f32) -> Option<StreamQuality> {
-        let quality = StreamQuality::for_tile_width(width);
-        if self.last == Some(quality) {
-            return None;
-        }
-        self.last = Some(quality);
-        Some(quality)
     }
 }
 

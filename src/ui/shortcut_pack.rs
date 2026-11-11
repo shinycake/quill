@@ -12,6 +12,7 @@
 
 use super::app::{ChatListFilter, PaneMode, QuillApp};
 use super::chat_row::ChatListItem;
+use super::chat_ui_state::A11yFocus;
 use super::history_a11y::A11yKey;
 use super::menu_states::ChatMenuState;
 use gpui_kit::component::*;
@@ -126,7 +127,9 @@ impl QuillApp {
         self.pane_mode() != PaneMode::Ready
             || self.account.passcode.is_locked()
             || self.viewer.state.is_open()
-            || self.stories.viewer.is_open()
+            // The story viewer is the main window's: a chat window's
+            // keys are its own.
+            || (self.windows.scope.is_none() && self.stories.viewer.is_open())
             || window.has_active_dialog(cx)
     }
 
@@ -172,12 +175,12 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return false;
         };
-        let Some(chat_id) = session.open_chat else {
+        let Some(chat_id) = session.open_chat_id() else {
             return false;
         };
         // tdesktop skips forums; a topic or comment thread is the same
         // kind of sub-view here.
-        if session.open_topic.is_some() || self.thread_active() {
+        if session.open_forum_topic().is_some() || self.thread_active() {
             return false;
         }
         let Some(chat) = session.chats.get(&chat_id.0) else {
@@ -229,7 +232,7 @@ impl QuillApp {
         }
         let can_attach = self.session().is_some_and(|session| {
             session
-                .open_chat
+                .open_chat_id()
                 .and_then(|chat| session.chats.get(&chat.0))
                 .is_some_and(|chat| chat.can_post() && chat.can_send_basic_messages)
         });
@@ -250,7 +253,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.shortcut_blocked(window, cx) || self.session().and_then(|s| s.open_chat).is_none() {
+        if self.shortcut_blocked(window, cx)
+            || self.session().and_then(|s| s.open_chat_id()).is_none()
+        {
             return false;
         }
         self.end_landing();
@@ -288,6 +293,15 @@ impl QuillApp {
                     return false;
                 };
                 let count = self.history.scroller.read(cx).item_count();
+                if key == HistoryKey::PageDown {
+                    // A page past a channel's end adds its next ad first.
+                    let page = self
+                        .history
+                        .viewport
+                        .get()
+                        .map_or(px(0.), |v| v.size.height);
+                    self.sponsored_bottom_request(page, cx);
+                }
                 let target = if key == HistoryKey::PageUp {
                     page_up_target(first, last)
                 } else {
@@ -319,7 +333,7 @@ impl QuillApp {
         if self.shortcut_blocked(window, cx) {
             return false;
         }
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|s| s.open_chat_id()) else {
             return false;
         };
         if !self.selecting_in(chat_id) {
@@ -344,20 +358,21 @@ impl QuillApp {
         if self.shortcut_blocked(window, cx) {
             return false;
         }
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|s| s.open_chat_id()) else {
             return false;
         };
         let ids = self.loaded_selectable_ids(chat_id);
         let focus = self
             .chat_ui
-            .selection_focus
+            .focus
+            .row()
             .filter(|id| ids.contains(id))
             .or(ids.last().copied());
         let Some(focus) = focus else {
             return false;
         };
         self.chat_ui.selection_anchor = Some(focus);
-        self.chat_ui.selection_focus = Some(focus);
+        self.chat_ui.focus = A11yFocus::Row(focus);
         self.toggle_forward_select(chat_id, focus, false, cx);
         if self.selecting_in(chat_id) {
             // The keyboard stays on the rows: Space keeps toggling, Up and
@@ -386,7 +401,7 @@ impl QuillApp {
         if keystroke.key == "space" && !modifiers.shift {
             let selecting = self
                 .session()
-                .and_then(|s| s.open_chat)
+                .and_then(|s| s.open_chat_id())
                 .is_some_and(|chat| self.selecting_in(chat));
             // Space toggles the selection when there is one, else plays the
             // focused media for a screen reader (`playPauseFocusedMedia`).
@@ -459,7 +474,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|s| s.open_chat_id()) else {
             return false;
         };
         if !self.selecting_in(chat_id) {
@@ -469,7 +484,7 @@ impl QuillApp {
             return false;
         }
         let ids = self.loaded_selectable_ids(chat_id);
-        let old = self.chat_ui.selection_focus.filter(|id| ids.contains(id));
+        let old = self.chat_ui.focus.row().filter(|id| ids.contains(id));
         let Some(new) = quill::selection_pin::step_focus(&ids, old, older) else {
             return false;
         };
@@ -499,7 +514,7 @@ impl QuillApp {
         } else {
             self.chat_ui.selection_anchor = Some(new);
         }
-        self.chat_ui.selection_focus = Some(new);
+        self.chat_ui.focus = A11yFocus::Row(new);
         self.scroll_selection_focus_into_view(new, cx);
         cx.notify();
         true
@@ -624,7 +639,7 @@ impl QuillApp {
         if self.shortcut_blocked(window, cx) {
             return false;
         }
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|s| s.open_chat_id()) else {
             return false;
         };
         let unread = self
@@ -643,11 +658,11 @@ impl QuillApp {
         if self.shortcut_blocked(window, cx) {
             return false;
         }
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|s| s.open_chat_id()) else {
             return false;
         };
         let size = window.viewport_size();
-        self.chat_list.preview = None;
+        self.chat_list.peek = crate::ui::chat_list_state::PeekPreview::Idle;
         self.chat_list.menu = Some(ChatMenuState::at(
             chat_id,
             point(size.width - px(220.), px(64.)),
@@ -665,7 +680,7 @@ impl QuillApp {
         if self.shortcut_blocked(window, cx) {
             return false;
         }
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|s| s.open_chat_id()) else {
             return false;
         };
         let size = window.viewport_size();

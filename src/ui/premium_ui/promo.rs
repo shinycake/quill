@@ -35,13 +35,47 @@ pub(super) fn on_brand() -> Rgba {
 pub(super) fn preview_stickers(
     hub: &quill::premium_hub::PremiumHub,
 ) -> impl Iterator<Item = &quill::telegram::envelope::StickerItem> {
-    let requested = hub.premium_requested.as_ref();
+    let requested = hub.premium_requested();
     requested
         .into_iter()
-        .chain(hub.premium_stickers.iter().filter(move |sticker| {
-            requested.is_none_or(|requested| requested.file_id != sticker.file_id)
-        }))
+        .chain(
+            hub.premium_stickers
+                .data()
+                .into_iter()
+                .flatten()
+                .filter(move |sticker| {
+                    requested.is_none_or(|requested| requested.file_id != sticker.file_id)
+                }),
+        )
         .take(super::preview::STICKER_TILES)
+}
+
+/// The `(file id, priority)` pairs the shown preview draws: the promotion
+/// clip once the Premium state is known, and the example stickers once
+/// their answer is in. It is a function of the state alone, with no
+/// deadline: an answer that comes late is downloaded when it comes.
+pub(super) fn preview_downloads(hub: &quill::premium_hub::PremiumHub) -> Vec<(i32, i32)> {
+    let PromoPage::Preview { feature, .. } = hub.promo_page() else {
+        return Vec::new();
+    };
+    if !hub.premium_open() {
+        return Vec::new();
+    }
+    let clip = hub
+        .premium_state
+        .data()
+        .and_then(|state| animation_for(&state.animations, feature))
+        .map(|animation| (animation.file_id, 32));
+    let stickers: Vec<(i32, i32)> =
+        if feature == PromoFeature::Premium(PremiumFeature::UniqueStickers) {
+            preview_stickers(hub)
+                .filter_map(|sticker| sticker.display_file_id())
+                .map(|id| (id.0, 16))
+                .collect()
+        } else {
+            Vec::new()
+        };
+    clip.into_iter().chain(stickers).collect()
 }
 
 fn feature_icon(index: usize) -> Div {
@@ -72,40 +106,16 @@ impl QuillApp {
     /// The page the Premium dialog is on.
     pub(super) fn promo_page(&self) -> PromoPage {
         self.session()
-            .map(|s| s.payments.hub.promo_page)
+            .map(|s| s.payments.hub.promo_page())
             .unwrap_or_default()
     }
 
-    /// Ask for the example stickers and fetch their files as they arrive
-    /// (the answer lands a moment later, so this checks a few times).
-    fn start_sticker_examples(&mut self, cx: &mut Context<Self>) {
+    /// Ask for the example stickers; their files are fetched by
+    /// [`Self::sync_premium_preview_files`] once the answer is in.
+    fn start_sticker_examples(&mut self) {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.maybe_fetch_premium_stickers();
         }
-        self.spawn_screen(cx, async move |this, cx| {
-            for _ in 0..10 {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(600))
-                    .await;
-                let _ = this.update(cx, |this, cx| {
-                    let ids: Vec<FileId> = this
-                        .session()
-                        .map(|s| {
-                            preview_stickers(&s.payments.hub)
-                                .filter_map(|st| st.display_file_id())
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    if let Some(live) = this.live.as_mut() {
-                        for id in ids {
-                            let _ = live.driver.download_file(id, 16);
-                        }
-                    }
-                    cx.notify();
-                });
-            }
-        })
-        .detach();
     }
 
     /// A Premium sticker was chosen without Premium: show the Premium
@@ -117,8 +127,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.open_premium_at(PremiumFeature::UniqueStickers, cx);
-        if let Some(hub) = self.hub_mut() {
-            hub.premium_requested = sticker;
+        if let Some(open) = self.hub_mut().and_then(|hub| hub.premium_box.as_mut()) {
+            open.requested = sticker;
         }
     }
 
@@ -134,67 +144,32 @@ impl QuillApp {
     pub(super) fn set_promo_page(&mut self, page: PromoPage, cx: &mut Context<Self>) {
         // A new page starts without the old clip; a preview asks for its own.
         self.premium_preview.stop();
-        if let PromoPage::Preview { feature, .. } = page {
-            self.fetch_preview_clip(feature, cx);
-            if feature == PromoFeature::Premium(PremiumFeature::UniqueStickers) {
-                self.start_sticker_examples(cx);
-            }
+        if let PromoPage::Preview { feature, .. } = page
+            && feature == PromoFeature::Premium(PremiumFeature::UniqueStickers)
+        {
+            self.start_sticker_examples();
         }
         if let Some(hub) = self.hub_mut() {
-            hub.promo_page = page;
+            hub.set_promo_page(page);
         }
         cx.notify();
     }
 
-    /// Download the promotion clip of `feature`: at once when the Premium
-    /// state is known, else as soon as it arrives while the preview shows.
-    fn fetch_preview_clip(&mut self, feature: PromoFeature, cx: &mut Context<Self>) {
-        let clip = move |this: &Self| -> Option<Option<i32>> {
-            let state = this.session()?.payments.hub.premium_state.as_ref()?;
-            Some(animation_for(&state.animations, feature).map(|a| a.file_id))
-        };
-        let download = |this: &mut Self, id: i32| {
-            if let Some(live) = this.live.as_mut() {
-                let _ = live.driver.download_file(FileId(id), 32);
-            }
-        };
-        if let Some(found) = clip(self) {
-            if let Some(id) = found {
-                download(self, id);
-            }
+    /// While a preview shows, fetch what it draws that is not on disk:
+    /// the promotion clip once the Premium state is known, and the example
+    /// stickers once their answer is in. Derived from the state each frame
+    /// (a download already asked for or done is skipped), so a slow answer
+    /// is picked up whenever it lands. Run at every main frame.
+    pub(in crate::ui) fn sync_premium_preview_files(&mut self) {
+        let Some(session) = self.session() else {
             return;
-        }
-        self.spawn_screen(cx, async move |this, cx| {
-            for _ in 0..24 {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(250))
-                    .await;
-                let done = this
-                    .update(cx, |this, cx| {
-                        let showing = matches!(
-                            this.promo_page(),
-                            PromoPage::Preview { feature: shown, .. } if shown == feature
-                        );
-                        if !showing || !this.session().is_some_and(|s| s.payments.hub.premium_open)
-                        {
-                            return true;
-                        }
-                        let Some(found) = clip(this) else {
-                            return false;
-                        };
-                        if let Some(id) = found {
-                            download(this, id);
-                            cx.notify();
-                        }
-                        true
-                    })
-                    .unwrap_or(true);
-                if done {
-                    break;
-                }
+        };
+        let downloads = preview_downloads(&session.payments.hub);
+        if let Some(live) = self.live.as_mut() {
+            for (id, priority) in downloads {
+                let _ = live.driver.download_file(FileId(id), priority);
             }
-        })
-        .detach();
+        }
     }
 
     /// The body of the Premium dialog for the current page.
@@ -213,10 +188,10 @@ impl QuillApp {
         };
         let hub = &session.payments.hub;
         let subscribed =
-            hub.premium_state.as_ref().is_some_and(|s| s.is_subscribed) || session.my_is_premium();
+            hub.premium_state.data().is_some_and(|s| s.is_subscribed) || session.my_is_premium();
         let state_text = hub
             .premium_state
-            .as_ref()
+            .data()
             .map(|s| s.text.clone())
             .filter(|t| !t.is_empty());
         let mut body = div().flex().flex_col().gap_3();
@@ -261,10 +236,10 @@ impl QuillApp {
                     },
                 )),
         );
-        if let Some(err) = hub.premium_error.as_ref() {
-            body = body.child(div().text_sm().child(err.clone()));
+        if let Some(err) = hub.premium.error() {
+            body = body.child(div().text_sm().child(err.to_string()));
         }
-        if hub.premium_loading && hub.premium.is_none() {
+        if hub.premium.is_loading() && hub.premium.data().is_none() {
             body = body.child(
                 div()
                     .text_sm()
@@ -272,7 +247,7 @@ impl QuillApp {
                     .child(tr(keys::Q_MONEY_LOADING_FEATURES)),
             );
         }
-        if let Some(info) = hub.premium.as_ref() {
+        if let Some(info) = hub.premium.data() {
             let mut list = div().flex().flex_col().gap_1();
             for (index, &feature) in info.features.iter().enumerate() {
                 let target = PromoPage::for_feature(feature.into(), PreviewOpen::Overview);
@@ -327,7 +302,7 @@ impl QuillApp {
             .payments
             .hub
             .premium_state
-            .as_ref()
+            .data()
             .map(|s| s.options.clone())
             .unwrap_or_default();
         let mut section = div().flex().flex_col().gap_2().pt_2();
@@ -386,7 +361,7 @@ impl QuillApp {
     /// "Doubled limits": each limit with its free and Premium value.
     fn promo_limits(&self, cx: &mut Context<Self>) -> Div {
         let muted = cx.theme().muted_foreground;
-        let info = self.session().and_then(|s| s.payments.hub.premium.as_ref());
+        let info = self.session().and_then(|s| s.payments.hub.premium.data());
         let mut body = div().flex().flex_col().gap_2().child(
             div()
                 .text_sm()
@@ -436,3 +411,8 @@ impl QuillApp {
         )
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "promo_tests.rs"]
+mod tests;

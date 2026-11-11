@@ -15,23 +15,42 @@ impl Session {
         // composer shows it instead of spinning forever.
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::Stories(StoriesPurpose::Live(purpose))) => {
-                self.apply_live_story_error(purpose, err);
+                self.apply_live_story_error(purpose, pending.map(|p| p.id), err);
             }
             Some(RequestPurpose::PostStory) => {
-                self.stories.post.outcome =
-                    StoryPostOutcome::Failed(format!("Posting failed: {}", error_reason(err)));
+                if let Some(request) = pending.map(|p| p.id) {
+                    self.stories.post.outcomes.record(StoryPostOutcome::Failed {
+                        request,
+                        message: format!("Posting failed: {}", error_reason(err)),
+                    });
+                }
             }
             Some(RequestPurpose::CheckCanPostStory) => {
                 // S14: a chat-level story restriction surfaces the
                 // TGX-verbatim notice; anything else keeps the
                 // generic eligibility failure.
-                self.stories.post.check_error = Some(
-                    crate::story_restriction::notice_for_error_class(err.class)
-                        .map(str::to_string)
-                        .unwrap_or_else(|| {
-                            format!("Eligibility check failed: {}", error_reason(err))
-                        }),
-                );
+                if let Some(request) = pending.map(|p| p.id) {
+                    self.stories.post.check.record(
+                        request,
+                        Err(crate::story_restriction::notice_for_error_class(err.class)
+                            .map(str::to_string)
+                            .unwrap_or_else(|| {
+                                format!("Eligibility check failed: {}", error_reason(err))
+                            })),
+                    );
+                }
+            }
+            Some(RequestPurpose::ActivateStoryStealthMode) => {
+                // Flood wait, Premium lapsed: the box that asked shows why.
+                if let Some(request) = pending.map(|p| p.id) {
+                    self.stories.stealth_refusal = Some((
+                        request,
+                        crate::lang::tr_with(
+                            crate::lang::keys::Q_MEDIA_COULD_NOT_ENABLE_STEALTH_MODE_BECAUSE,
+                            &[("reason", &error_reason(err))],
+                        ),
+                    ));
+                }
             }
             Some(RequestPurpose::GetStoryInteractions) => {
                 if let Some(pending) = pending {
@@ -68,7 +87,7 @@ impl Session {
             Some(RequestPurpose::GetStory) => {
                 if let Some(story) = pending.and_then(|p| Some((p.chat_id?.0, p.story_id?))) {
                     if matches!(err.code, 400 | 404) {
-                        self.stories.missing.insert(story);
+                        self.stories.story_fetch.gone(story);
                     } else {
                         self.stories
                             .story_fetch_failed(story, std::time::Instant::now());
@@ -110,10 +129,11 @@ impl Session {
                 }
             }
             // Phase 9.5 (review fix-up): `getChatsToPostStories`
-            // failed — surface a transient error so the "Post as"
-            // picker doesn't silently show only "Myself".
+            // failed — the "Post as" picker draws the error instead of
+            // silently showing only "Myself"; it is not the eligibility
+            // check's error.
             Some(RequestPurpose::GetChatsToPostStories) => {
-                self.stories.post.check_error = Some(format!(
+                self.stories.post_as.fail(format!(
                     "Could not load \"Post as\" chats: {}",
                     error_reason(err)
                 ));
@@ -138,8 +158,10 @@ impl Session {
                 | RequestPurpose::SetChatActiveStoriesList
                 | RequestPurpose::ToggleStoryIsPostedToChatPage),
             ) => {
-                if purpose == RequestPurpose::SetCloseFriends {
-                    self.stories.close_friends_pending = None;
+                if purpose == RequestPurpose::GetCloseFriends
+                    && let Some(pending) = pending
+                {
+                    self.stories.close_friends.fail_load(pending.id);
                 }
                 // The profile gallery's Stories tab loads from this request
                 // too: it fails instead of loading forever.
@@ -149,6 +171,7 @@ impl Session {
                     self.fail_profile_tab(
                         chat_id,
                         SharedMediaTab::Stories,
+                        pending.and_then(|p| p.search_generation),
                         crate::state::request_errors::call_request_error_line(
                             err,
                             "Could not load this tab",

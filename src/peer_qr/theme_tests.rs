@@ -9,8 +9,9 @@ use crate::peer_qr::state::{
     PeerQrBox, QrAction, QrEffect, QrEnv, QrPanel, QrPeer, QrSubject, QrToast, SaveTicket,
 };
 use crate::peer_qr::theme::{
-    BACKDROPS_REFRESH_SECS, Backdrops, GiftsLayout, SaveRights, ShareTheme, ThemeChoice,
-    ThemeEmoji, ThemeGift, ThemeGifts, can_save, gifts_layout, parse_share_theme,
+    BACKDROPS_LOAD_SECS, BACKDROPS_REFRESH_SECS, Backdrops, BackdropsStage, GiftsLayout,
+    SaveRights, ShareTheme, ThemeChoice, ThemeEmoji, ThemeGift, ThemeGifts, can_save, gifts_layout,
+    parse_share_theme,
 };
 use serde_json::{Value, json};
 
@@ -207,19 +208,51 @@ fn the_gifts_request_lists_only_owned_upgraded_gifts() {
 fn backdrops_refresh_an_hour_after_the_last_request() {
     let mut backdrops = Backdrops::default();
     assert!(backdrops.due(0));
-    backdrops.start(100);
+    backdrops.start(RequestId(1), 100);
     assert!(
-        !backdrops.due(100 + BACKDROPS_REFRESH_SECS),
+        !backdrops.due(100 + BACKDROPS_LOAD_SECS - 1),
         "one at a time"
     );
-    backdrops.accept(vec![backdrop(1, DEFAULT_CENTER, DEFAULT_EDGE)]);
+    backdrops.accept(
+        RequestId(1),
+        vec![backdrop(1, DEFAULT_CENTER, DEFAULT_EDGE)],
+    );
     assert!(!backdrops.due(100 + BACKDROPS_REFRESH_SECS - 1));
     assert!(backdrops.due(100 + BACKDROPS_REFRESH_SECS));
-    backdrops.start(5_000);
+    backdrops.start(RequestId(2), 5_000);
     assert_eq!(backdrops.list.len(), 1, "kept during a refresh");
-    backdrops.fail();
+    backdrops.fail(RequestId(2));
     assert!(backdrops.due(5_001), "a failure asks again at once");
     assert_eq!(backdrops.list.len(), 1);
+}
+
+#[test]
+fn a_backdrops_answer_of_another_request_changes_nothing() {
+    let mut backdrops = Backdrops::default();
+    backdrops.start(RequestId(1), 100);
+    backdrops.start(RequestId(2), 200);
+    // The first request's answer and error arrive late.
+    backdrops.accept(
+        RequestId(1),
+        vec![backdrop(1, DEFAULT_CENTER, DEFAULT_EDGE)],
+    );
+    backdrops.fail(RequestId(1));
+    assert!(backdrops.list.is_empty());
+    assert!(matches!(
+        backdrops.stage,
+        BackdropsStage::Loading {
+            id: RequestId(2),
+            ..
+        }
+    ));
+}
+
+#[test]
+fn a_backdrops_request_that_never_answers_expires() {
+    let mut backdrops = Backdrops::default();
+    backdrops.start(RequestId(1), 100);
+    assert!(!backdrops.due(100 + BACKDROPS_LOAD_SECS - 1));
+    assert!(backdrops.due(100 + BACKDROPS_LOAD_SECS), "asked again");
 }
 
 #[test]
@@ -315,7 +348,7 @@ fn picks_preview_and_save_once_the_panel_closes() {
         env(true),
     );
     assert_eq!(qr.served, Some(picked));
-    assert!(qr.saving.is_none());
+    assert!(qr.saving().is_none());
     assert!(qr.apply(QrAction::Closing, env(true)).is_empty());
 }
 
@@ -361,7 +394,7 @@ fn a_pick_is_not_overwritten_by_a_later_served_theme() {
         }),
         env(true),
     );
-    assert_eq!(qr.color, SwatchKey::Backdrop(7));
+    assert_eq!(qr.color(), SwatchKey::Backdrop(7));
 }
 
 #[test]
@@ -377,7 +410,7 @@ fn a_gift_replaces_the_emoji_and_an_emoji_replaces_the_gift() {
         vec![QrEffect::LoadGifts { more: true }]
     );
     qr.apply(QrAction::PickGift(Box::new(gift(9, "r9"))), env(true));
-    assert!(qr.emoji.is_empty());
+    assert!(qr.emoji().is_empty());
     let appearance = qr.appearance(&[]);
     assert_eq!(appearance.gift, Some(9));
     assert_eq!(appearance.center, Rgb::hex(0x5A_8CF0));
@@ -392,8 +425,8 @@ fn a_gift_replaces_the_emoji_and_an_emoji_replaces_the_gift() {
     );
     qr.apply(QrAction::OpenPanel(QrPanel::Emoji), env(true));
     qr.apply(QrAction::ToggleEmoji("🐶".into()), env(true));
-    assert!(qr.gift.is_none());
-    assert_eq!(qr.color, SwatchKey::Default);
+    assert!(qr.gift().is_none());
+    assert_eq!(qr.color(), SwatchKey::Default);
 }
 
 #[test]
@@ -416,7 +449,7 @@ fn a_failed_save_is_toasted_and_the_pick_stays() {
             "Too many attempts.".into()
         ))]
     );
-    assert_eq!(qr.color, SwatchKey::Backdrop(3));
+    assert_eq!(qr.color(), SwatchKey::Backdrop(3));
     let silent = qr.apply(
         QrAction::SaveAnswer {
             ticket,
@@ -520,6 +553,30 @@ fn a_failed_save_is_sent_again_only_after_another_pick() {
 }
 
 #[test]
+fn a_late_answer_of_an_older_save_does_not_free_a_failed_pick() {
+    let mut qr = own_box();
+    qr.apply(QrAction::Served(ThemeChoice::default()), env(true));
+    let first = ticket_of(&pick_and_close(&mut qr, SwatchKey::Backdrop(3)));
+    let second = ticket_of(&pick_and_close(&mut qr, SwatchKey::Backdrop(4)));
+    assert_ne!(first.serial, second.serial);
+    qr.apply(
+        QrAction::SaveAnswer {
+            ticket: second,
+            result: Err("Too many attempts.".into()),
+        },
+        env(true),
+    );
+    qr.apply(
+        QrAction::SaveAnswer {
+            ticket: first,
+            result: Ok(backdrop_pick(3)),
+        },
+        env(true),
+    );
+    assert!(saves(&pick_and_close(&mut qr, SwatchKey::Backdrop(4))).is_empty());
+}
+
+#[test]
 fn the_default_is_not_saved_while_the_saved_theme_is_unknown() {
     let mut qr = own_box();
     qr.apply(QrAction::OpenPanel(QrPanel::Colors), env(true));
@@ -550,6 +607,50 @@ fn a_gifts_request_for_another_owner_never_reuses_a_serial() {
     assert!(gifts.start(channel, true, 10).is_some());
     gifts.fail();
     assert_eq!(gifts.list.len(), 1);
-    assert!(!gifts.complete && !gifts.wants_more(10 + GIFTS_RETRY_SECS - 1));
+    assert!(!gifts.wants_more(10 + GIFTS_RETRY_SECS - 1));
     assert!(gifts.wants_more(10 + GIFTS_RETRY_SECS));
+}
+
+#[test]
+fn a_refused_gifts_request_settles_the_panel_instead_of_asking_every_frame() {
+    use crate::peer_qr::theme::{GIFTS_RETRY_SECS, ThemeOwner};
+    let owner = ThemeOwner::User(1);
+    let mut gifts = ThemeGifts::default();
+    gifts.start(owner, false, 0).unwrap();
+    gifts.accept(vec![gift(1, "r1")], "page2".into(), true);
+    assert!(gifts.wants_more(20));
+    gifts.refuse(20);
+    assert!(!gifts.wants_more(20 + GIFTS_RETRY_SECS - 1));
+    assert!(gifts.wants_more(20 + GIFTS_RETRY_SECS));
+    // No first page ever: a failure with Retry, not an empty list that
+    // stays until the box is reopened, and not a spinner for good.
+    let mut fresh = ThemeGifts::default();
+    fresh.start(owner, false, 20).unwrap();
+    fresh.refuse(20);
+    assert_eq!(gifts_layout(&fresh), GiftsLayout::Failed);
+    assert!(
+        !fresh.wants_more(1_000),
+        "a retry is the user's, not a frame's"
+    );
+    // Retry asks for the first page again; it lands like any first page.
+    let retry = fresh.start(owner, false, 30).unwrap();
+    assert_eq!(gifts_layout(&fresh), GiftsLayout::Loading);
+    assert_eq!(retry.offset, "");
+    fresh.accept(vec![gift(1, "r1")], String::new(), true);
+    assert_eq!(gifts_layout(&fresh), GiftsLayout::Wide(1));
+}
+
+#[test]
+fn retry_on_the_gifts_failure_asks_for_the_first_page_again() {
+    let mut qr = own_box();
+    qr.apply(QrAction::OpenPanel(QrPanel::Gifts), env(true));
+    assert_eq!(
+        qr.apply(QrAction::RetryGifts, env(true)),
+        vec![QrEffect::LoadGifts { more: false }]
+    );
+    qr.apply(QrAction::ClosePanel, env(true));
+    assert!(
+        qr.apply(QrAction::RetryGifts, env(true)).is_empty(),
+        "panel closed"
+    );
 }

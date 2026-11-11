@@ -1,4 +1,5 @@
 //! Applies TDLib updates and answers for forum topics, comment threads and Saved Messages.
+use crate::lang::{keys, tr};
 use crate::state::*;
 use crate::telegram::envelope::ThreadsPayload;
 
@@ -9,7 +10,7 @@ impl Session {
         &mut self,
         payload: ThreadsPayload,
         pending: Option<&PendingRequest>,
-        _extra: Option<RequestId>,
+        extra: Option<RequestId>,
         _seq: u64,
     ) {
         match payload {
@@ -24,12 +25,12 @@ impl Session {
             ThreadsPayload::UpdateSavedMessagesTags {
                 saved_messages_topic_id,
                 tags,
-            } => self.apply_saved_tags(saved_messages_topic_id, tags),
+            } => self.apply_saved_tags(saved_messages_topic_id, tags, None),
             ThreadsPayload::SavedMessagesTags { tags } => {
                 if let Some(RequestPurpose::GetSavedMessagesTags { topic_id }) =
                     pending.map(|p| p.purpose)
                 {
-                    self.apply_saved_tags(topic_id, tags);
+                    self.apply_saved_tags(topic_id, tags, pending.map(|p| p.id));
                 }
             }
             // Phase 5.1: `getForumTopics` response — cache the first page
@@ -51,17 +52,42 @@ impl Session {
                             topic,
                         );
                     }
-                    self.threads.forum_topics_failed.remove(&chat_id.0);
-                    self.threads.forum_topics.insert(chat_id.0, topics);
+                    self.threads
+                        .forum_topics
+                        .answered(chat_id.0, pending.map(|p| p.id), topics);
                 }
             }
             // Slice G2: `createForumTopic` answers `forumTopicInfo` —
             // drop the cached topic list so the UI refetches it.
-            ThreadsPayload::ForumTopic { chat_id } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::CreateForumTopic) {
+            ThreadsPayload::ForumTopic { chat_id, info } => match pending.map(|p| p.purpose) {
+                Some(RequestPurpose::CreateForumTopic) => {
+                    // The chat list's row asks for the list again: it
+                    // would read "Loading..." for good otherwise.
                     self.threads.forum_topics.remove(&chat_id);
                 }
-            }
+                // The new thread joins the tabs now, so the view can open
+                // it before any refetch.
+                Some(RequestPurpose::StartBotThread) => {
+                    let Some(request) = extra else { return };
+                    let outcome = match info {
+                        Some(info) => {
+                            let topic = info.forum_topic_id;
+                            self.apply_update_forum_topic_info(*info);
+                            // A thread made just now has nothing older to
+                            // page in.
+                            let key = (chat_id, topic);
+                            if !self.threads.topic_histories.contains_key(&key) {
+                                self.topic_history_entry(ChatId(chat_id), topic)
+                                    .mark_complete();
+                            }
+                            Ok(topic)
+                        }
+                        None => Err(tr(keys::Q_CHAT_COULDN_T_START_A_NEW_THREAD).to_string()),
+                    };
+                    self.bot_thread_answered(request, outcome);
+                }
+                _ => {}
+            },
             ThreadsPayload::UpdateForumTopicInfo(info) => {
                 self.apply_update_forum_topic_info(info);
             }

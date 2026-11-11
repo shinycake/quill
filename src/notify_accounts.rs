@@ -170,14 +170,22 @@ pub fn other_accounts_unread() -> AccountUnread {
 /// The app-wide badge: the account on screen plus every background one.
 pub fn total_unread(active: Option<&Session>) -> AccountUnread {
     active
-        .map(|session| ACTIVE_UNREAD.with_borrow_mut(|memo| memo.get(session)))
+        .map(|session| {
+            // The memo is out of its cell while it counts, so a count that
+            // asks again from inside starts from an empty memo; no borrow
+            // is held across the walk.
+            let mut memo = ACTIVE_UNREAD.take();
+            let unread = memo.get(session);
+            ACTIVE_UNREAD.set(memo);
+            unread
+        })
         .unwrap_or_default()
         .combine(other_accounts_unread())
 }
 
 thread_local! {
     /// The tray and the icon badge both ask on every wake of their loop.
-    static ACTIVE_UNREAD: std::cell::RefCell<UnreadMemo> = Default::default();
+    static ACTIVE_UNREAD: std::cell::Cell<UnreadMemo> = Default::default();
 }
 
 /// Memo for [`AccountUnread::of`]: the count walks every chat and forum
@@ -220,7 +228,7 @@ pub fn drain_on_screen(session: &mut Session) -> NotifyDrain {
     let settings = &mut session.settings;
     NotifyDrain {
         notifications: std::mem::take(&mut settings.pending_notifications),
-        clears: std::mem::take(&mut settings.pending_notification_clears),
+        clears: settings.notified.take_clears(),
         sound_plays: std::mem::take(&mut settings.pending_sound_plays),
         attention: std::mem::take(&mut settings.pending_attention),
     }
@@ -235,7 +243,7 @@ pub fn drain_on_screen(session: &mut Session) -> NotifyDrain {
 /// account that is not on screen.
 pub fn drain_background(session: &mut Session, notify_from_all: bool) -> NotifyDrain {
     let drain = drain_on_screen(session);
-    session.bots.pending_force_reply = None;
+    session.bots.pending_force_replies.clear();
     if !account_may_notify(notify_from_all, false) {
         return NotifyDrain {
             clears: drain.clears,

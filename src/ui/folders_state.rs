@@ -19,6 +19,10 @@ pub(crate) struct FolderUi {
     pub(super) tab_menu: Option<super::folder_extras::FolderTabMenu>,
     /// The shared folder's "N new chats" join dialog.
     pub(super) new_chats_dialog: Option<super::folder_extras::FolderNewChatsDialog>,
+    /// Recommended folders being added from Settings > Folders: the
+    /// request of each, by the recommendation's name. A second tap on the
+    /// same one waits for the first; the answer ends it either way.
+    pub(super) recommended_adds: std::collections::HashMap<String, quill::ids::RequestId>,
     /// A folder limit box (or the tag Premium notice).
     pub(super) limit_box: Option<quill::folder_limits::FolderLimitKind>,
     /// Scroll state of the top tab strip, shared with the kit `TabBar`.
@@ -38,6 +42,7 @@ impl FolderUi {
             menu_chat: None,
             tab_menu: None,
             new_chats_dialog: None,
+            recommended_adds: std::collections::HashMap::new(),
             limit_box: None,
             tabs_scroll: gpui_kit::ScrollHandle::new(),
             tabs_revealed: std::cell::Cell::new(None),

@@ -319,6 +319,13 @@ private:
     /// qid of the host's own post-load ack query; engine queries count up from 1.
     static constexpr int kRenderAckQid = -1;
 
+    // QUILL: declared before the host thread. The validator and the renderer report diagnostics while
+    // they are built, and the host thread runs those reports at once, so the lock and the diagnostics
+    // have to exist first; declared after, a widget whose bundle was refused aborted the app (#1425).
+    mutable std::mutex mutex_;              // diagnostics_, waiters
+    std::condition_variable cv_;
+    WidgetDiagnostics diagnostics_;
+
     JSThread hostThread_;
     std::string html_;
     /// The colour scheme ("light" | "dark") and the whole theme with its palette checked (host thread after start).
@@ -330,10 +337,6 @@ private:
     TrustedValidator validator_;
     std::unique_ptr<Renderer> renderer_;
     SandboxEngine engine_;
-
-    mutable std::mutex mutex_;              // diagnostics_, waiters
-    std::condition_variable cv_;
-    WidgetDiagnostics diagnostics_;
 
     // Host-thread state.
     bool rendererReady_ = false;

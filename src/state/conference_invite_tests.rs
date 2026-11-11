@@ -35,10 +35,8 @@ fn invitation_message(
 #[test]
 fn a_fresh_invitation_rings_until_it_is_joined() {
     let mut session = session();
-    apply(
-        &mut session,
-        &invitation(crate::local_time::now_unix(), false, false),
-    );
+    let date = crate::local_time::now_unix();
+    apply(&mut session, &invitation(date, false, false));
     assert_eq!(
         session.calls.conference_invite,
         Some(ConferenceInvite {
@@ -48,6 +46,7 @@ fn a_fresh_invitation_rings_until_it_is_joined() {
             user_id: 41,
             is_video: true,
             others: vec![42],
+            rings_until: date + CONFERENCE_INVITE_RING_SECS,
         })
     );
     apply(
@@ -180,4 +179,25 @@ fn a_busy_declined_calls_updates_do_not_reach_the_call_window() {
     );
     assert!(session.calls.summary.is_none(), "not this window's call");
     assert!(session.calls.busy_declined_calls.is_empty());
+}
+
+/// Round 5, 044: an invitation whose settling update never came stops
+/// ringing when the ring timeout passes, and is declined like a too-old
+/// one. The clock is passed in.
+#[test]
+fn an_unanswered_invitation_stops_ringing_at_the_ring_timeout() {
+    let mut session = session();
+    let date = crate::local_time::now_unix();
+    apply(&mut session, &invitation(date, false, false));
+    let until = date + CONFERENCE_INVITE_RING_SECS;
+    assert!(!session.expire_conference_invite(until));
+    assert!(session.calls.conference_invite.is_some());
+    assert_eq!(session.conference_invite_rings_for(until), Some(1));
+    assert!(session.expire_conference_invite(until + 1));
+    assert_eq!(session.calls.conference_invite, None);
+    assert_eq!(
+        session.calls.conference_invite_declines,
+        vec![(ChatId(41), MessageId(90))]
+    );
+    assert!(!session.expire_conference_invite(until + 2), "once");
 }

@@ -139,7 +139,13 @@ fn stepped(picture: &RgbaImage, steps: &[bool]) -> RgbaImage {
 fn pending_turns_render_the_same_pixels_and_preview() {
     let picture = RgbaImage::from_fn(30, 18, |x, y| Rgba([x as u8 * 8, y as u8 * 13, 50, 255]));
     let steps = [true, false, true, true, false];
-    let mut editor = PhotoEditor::new(EditorPurpose::MessageEdit, picture.clone());
+    let mut editor = PhotoEditor::new(
+        EditorPurpose::MessageEdit {
+            chat: quill::ids::ChatId(1),
+            message: quill::ids::MessageId(2),
+        },
+        picture.clone(),
+    );
     for &rotate in &steps {
         if rotate {
             editor.rotate();
@@ -176,7 +182,7 @@ fn pending_turns_render_the_same_pixels_and_preview() {
 fn newest_sent_photo(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<String> {
     app.update_in(vcx, |app, _, _| {
         let session = app.demo_session.as_ref()?;
-        let chat = session.open_chat?;
+        let chat = session.open_chat_id()?;
         let newest = session.histories.get(&chat.0)?.ordered().last().copied()?;
         let quill::telegram::envelope::MessageContent::Photo(photo) = &newest.content else {
             return None;
@@ -192,7 +198,9 @@ fn reopen_now(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, original: &Pa
     let pixels = image::open(original).expect("decodes").to_rgba8();
     app.update_in(vcx, |app, _, _| {
         let item = app.tray_item(0).expect("a tray item");
-        app.viewer.photo_editor = Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
+        app.viewer
+            .photo_editor
+            .open(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
     });
 }
 
@@ -205,7 +213,7 @@ fn a_send_during_the_render_waits_and_sends_the_edited_photo(cx: &mut TestAppCon
     app.update_in(&mut vcx, |app, window, cx| {
         app.photo_editor_mut(PhotoEditor::rotate, cx);
         app.save_photo_editor(window, cx);
-        app.submit_composer(String::new(), window, cx);
+        app.submit_composer(String::new(), Default::default(), window, cx);
         // Held: nothing went, and the tray still has the photo.
         assert_eq!(app.pending_attachments().len(), 1);
     });
@@ -263,11 +271,13 @@ fn an_edit_lands_on_its_photo_after_an_earlier_card_is_removed(cx: &mut TestAppC
             .expect("an open chat");
         let item = app.tray_item(1).expect("the second card");
         let pixels = image::open(&second).expect("decodes").to_rgba8();
-        app.viewer.photo_editor = Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
+        app.viewer
+            .photo_editor
+            .open(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
         app.photo_editor_mut(PhotoEditor::rotate, cx);
         app.save_photo_editor(window, cx);
         app.remove_attachment(0, cx);
-        app.submit_composer(String::new(), window, cx);
+        app.submit_composer(String::new(), Default::default(), window, cx);
     });
     assert_eq!(newest_sent_photo(&app, &mut vcx), sent_before, "held");
     vcx.run_until_parked();
@@ -306,9 +316,9 @@ fn a_held_send_whose_chat_closed_says_it_did_not_go(cx: &mut TestAppContext) {
     let first_chat = app.update_in(&mut vcx, |app, window, cx| {
         app.photo_editor_mut(PhotoEditor::rotate, cx);
         app.save_photo_editor(window, cx);
-        app.submit_composer(String::new(), window, cx);
+        app.submit_composer(String::new(), Default::default(), window, cx);
         let session = app.demo_session.as_mut().expect("demo session");
-        let open = session.open_chat.expect("an open chat");
+        let open = session.open_chat_id().expect("an open chat");
         let other = session
             .chats
             .keys()
@@ -347,11 +357,11 @@ fn send_with_a_deferred_open(cx: &mut TestAppContext, name: &str, send_first: bo
         app.photo_editor_mut(PhotoEditor::rotate, cx);
         app.save_photo_editor(window, cx);
         if send_first {
-            app.submit_composer(String::new(), window, cx);
+            app.submit_composer(String::new(), Default::default(), window, cx);
             app.open_photo_editor(0, cx);
         } else {
             app.open_photo_editor(0, cx);
-            app.submit_composer(String::new(), window, cx);
+            app.submit_composer(String::new(), Default::default(), window, cx);
         }
     });
     vcx.run_until_parked();
@@ -435,7 +445,7 @@ fn tap_mid_render_then(
 fn a_tap_mid_render_then_a_chat_change_opens_nothing(cx: &mut TestAppContext) {
     tap_mid_render_then(cx, "away.png", 11, |app, _| {
         let session = app.demo_session.as_mut().expect("demo session");
-        let open = session.open_chat.expect("an open chat");
+        let open = session.open_chat_id().expect("an open chat");
         let other = session
             .chats
             .keys()
@@ -471,13 +481,17 @@ fn the_held_send_going_out_closes_an_editor_open_on_its_tray(cx: &mut TestAppCon
     app.update_in(&mut vcx, |app, window, cx| {
         let item = app.tray_item(0).expect("the first card");
         let pixels = image::open(&first).expect("decodes").to_rgba8();
-        app.viewer.photo_editor = Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
+        app.viewer
+            .photo_editor
+            .open(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
         app.photo_editor_mut(PhotoEditor::rotate, cx);
         app.save_photo_editor(window, cx);
-        app.submit_composer(String::new(), window, cx);
+        app.submit_composer(String::new(), Default::default(), window, cx);
         let item = app.tray_item(1).expect("the second card");
         let pixels = image::open(&second).expect("decodes").to_rgba8();
-        app.viewer.photo_editor = Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
+        app.viewer
+            .photo_editor
+            .open(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
     });
     vcx.run_until_parked();
     app.update_in(&mut vcx, |app, _, _| {
@@ -510,12 +524,14 @@ fn a_tap_while_a_send_waits_opens_no_editor(cx: &mut TestAppContext) {
     app.update_in(&mut vcx, |app, window, cx| {
         let item = app.tray_item(0).expect("the first card");
         let pixels = image::open(&first).expect("decodes").to_rgba8();
-        app.viewer.photo_editor = Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
+        app.viewer
+            .photo_editor
+            .open(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
         app.photo_editor_mut(PhotoEditor::rotate, cx);
         app.save_photo_editor(window, cx);
-        app.submit_composer(String::new(), window, cx);
+        app.submit_composer(String::new(), Default::default(), window, cx);
         app.open_photo_editor(1, cx);
-        assert!(app.viewer.photo_editor_after.is_none());
+        assert!(app.viewer.photo_editor.deferred().is_none());
         assert_eq!(
             app.connection.note().text(),
             quill::lang::tr(quill::lang::keys::Q_OPS_PHOTOS_ARE_SENDING)
@@ -545,14 +561,16 @@ fn a_send_cancels_a_tap_on_a_rendering_card(cx: &mut TestAppContext) {
             .expect("an open chat");
         let item = app.tray_item(0).expect("the first card");
         let pixels = image::open(&first).expect("decodes").to_rgba8();
-        app.viewer.photo_editor = Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
+        app.viewer
+            .photo_editor
+            .open(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
         app.photo_editor_mut(PhotoEditor::rotate, cx);
         app.save_photo_editor(window, cx);
         // The second card's Done is still rendering when the first lands.
-        app.update_pending_attachments(|tray| tray[1].extras.photo_render = Some(u64::MAX))
+        app.update_pending_attachments(|tray| tray[1].extras.begin_render(u64::MAX))
             .expect("an open chat");
         app.open_photo_editor(0, cx);
-        app.submit_composer(String::new(), window, cx);
+        app.submit_composer(String::new(), Default::default(), window, cx);
     });
     vcx.run_until_parked();
     app.update_in(&mut vcx, |app, _, _| {
@@ -562,4 +580,28 @@ fn a_send_cancels_a_tap_on_a_rendering_card(cx: &mut TestAppContext) {
     if let Some(edited) = tray_path(&app, &mut vcx) {
         let _ = std::fs::remove_file(edited);
     }
+}
+
+#[gpui_kit::test]
+fn a_render_finishing_after_the_screen_was_replaced_still_lands_and_ends(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let original = picture("switched.png", 43, 19);
+    open_on(&app, &mut vcx, &original);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.photo_editor_mut(PhotoEditor::rotate, cx);
+        app.save_photo_editor(window, cx);
+        // An account switch moves the epoch while the PNG is rendering.
+        app.replace_screen(window, cx);
+    });
+    vcx.run_until_parked();
+    let edited = tray_path(&app, &mut vcx).expect("still in the tray");
+    assert_ne!(edited, original);
+    assert_eq!(image::image_dimensions(&edited).ok(), Some((19, 43)));
+    app.update_in(&mut vcx, |app, _, _| {
+        let rendering = app
+            .update_pending_send(|send| send.renders_an_edit())
+            .unwrap_or(false);
+        assert!(!rendering, "the card must not stay rendering");
+    });
+    let _ = std::fs::remove_file(edited);
 }

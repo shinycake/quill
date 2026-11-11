@@ -13,6 +13,7 @@ use serde_json::Value;
 use std::sync::Arc;
 use std::time::Instant;
 
+mod camera_join;
 mod conference;
 mod levels;
 mod link;

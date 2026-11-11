@@ -17,27 +17,11 @@ pub fn chat_unavailable(session: &Session, chat: &ChatSummary) -> bool {
     }
 }
 
-/// `SponsoredMessages::hasUnshownFor`: the open channel has an ad that will
-/// be shown after its last message but has not been shown yet, so the
-/// bottom is not the end yet. Lists fetched more than five minutes ago and
-/// ads placed between posts (`messages_between`) never hold the pull.
+/// `SponsoredMessages::hasUnshownFor`: the open channel has an ad that
+/// will join the end of its history but has not yet, so the bottom is not
+/// the end yet (`Session::sponsored_unshown_at_end`).
 pub fn sponsored_unshown(session: &Session, chat: ChatId, now: std::time::Instant) -> bool {
-    if session.open_chat != Some(chat) {
-        return false;
-    }
-    let Some(entry) = session.messages.sponsored.get(&chat.0) else {
-        return false;
-    };
-    if entry.messages_between != 0
-        || entry.fetched_at.is_none_or(|at| {
-            now.saturating_duration_since(at) >= crate::state::SPONSORED_REFETCH_AFTER
-        })
-    {
-        return false;
-    }
-    session
-        .open_sponsored_tail()
-        .is_some_and(|ad| !entry.viewed.contains(&ad.message_id))
+    session.sponsored_unshown_at_end(chat, now)
 }
 
 /// `FindInList`: the first other channel with unread messages that is not

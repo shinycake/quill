@@ -802,8 +802,13 @@ fn a_click_in_a_chat_window_closed_before_its_clip_lands_plays_nothing(cx: &mut 
         app.update(vcx, |app, _| {
             let session = app.demo_session.as_mut().expect("the demo session");
             session.media.files.update(ROUND_FILE, |file| {
-                file.local.is_downloading_completed = local;
-                file.local.is_downloading_active = false;
+                file.local = quill::telegram::envelope::LocalFileState::from_parts(
+                    file.local.path().to_string(),
+                    file.local.can_be_downloaded(),
+                    false,
+                    local,
+                    file.local.downloaded_size(),
+                );
             });
         });
     };

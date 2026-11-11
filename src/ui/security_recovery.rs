@@ -88,10 +88,9 @@ impl QuillApp {
         };
         if let Some(flow) = flow {
             flow.notice = None;
-            flow.recovery_code_sent_to = None;
-            flow.login_email_code_sent_to = None;
+            flow.code_wait = quill::state::CodeWait::None;
         }
-        self.twofa.confirm = None;
+        self.twofa.set_confirm(None);
     }
 
     /// The pending recovery email: code entry, resend, abort.
@@ -115,7 +114,7 @@ impl QuillApp {
                     .aria_label(tr(keys::Q_PREFS_RECOVERY_EMAIL_CONFIRMATION_CODE))
                     .h(px(40.)),
             )
-            .when_some(self.twofa.notice.clone(), |this, note| {
+            .when_some(self.twofa.notice().cloned(), |this, note| {
                 this.child(div().text_xs().text_color(danger()).child(note))
             })
             .child(
@@ -160,18 +159,19 @@ impl QuillApp {
     pub(super) fn submit_twofa_email_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut code = self.twofa.code.read(cx).value().trim().to_string();
         if code.is_empty() {
-            self.twofa.notice = Some(tr(keys::Q_PREFS_ENTER_THE_CODE_FROM_THE).into());
+            self.twofa
+                .set_notice(Some(tr(keys::Q_PREFS_ENTER_THE_CODE_FROM_THE).into()));
             cx.notify();
             return;
         }
-        self.twofa.notice = None;
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.check_recovery_email_code(&code);
-        }
+        let sent = match self.live.as_mut() {
+            Some(live) => live.driver.check_recovery_email_code(&code).is_ok(),
+            None => true,
+        };
         code.zeroize();
         self.twofa
-            .code
-            .update(cx, |input, cx| input.set_value("", window, cx));
+            .set_notice((!sent).then(|| tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string()));
+        let _ = window;
         cx.notify();
     }
 
@@ -243,12 +243,16 @@ impl QuillApp {
         let state = session
             .as_ref()
             .and_then(|s| s.auth_state.password_state.clone());
-        let code_sent_to = session
-            .as_ref()
-            .and_then(|s| s.auth_state.twofa_flow.recovery_code_sent_to.clone());
+        let code_sent_to = session.as_ref().and_then(|s| {
+            s.auth_state
+                .twofa_flow
+                .code_wait
+                .recovery()
+                .map(str::to_string)
+        });
         let loading = session
             .as_ref()
-            .is_some_and(|s| s.auth_state.password_state_loading);
+            .is_some_and(|s| s.auth_state.password_state_loading());
         let Some(state) = state else {
             return body.child(muted_line(cx, tr(keys::Q_PREFS_LOADING)));
         };
@@ -326,7 +330,7 @@ impl QuillApp {
                     cx,
                     tr(keys::Q_PREFS_LEAVE_THE_PASSWORD_EMPTY_TO),
                 ))
-                .when_some(self.twofa.notice.clone(), |this, note| {
+                .when_some(self.twofa.notice().cloned(), |this, note| {
                     this.child(div().text_xs().text_color(danger()).child(note))
                 })
                 .child(
@@ -430,7 +434,7 @@ impl QuillApp {
         no: &'static str,
         loading: bool,
     ) -> Div {
-        if self.twofa.confirm != Some(confirm) {
+        if self.twofa.confirm() != Some(confirm) {
             return div().child(
                 Button::new(format!("twofa-confirm-open-{trigger_label}"))
                     .label(trigger_label)
@@ -438,7 +442,7 @@ impl QuillApp {
                     .small()
                     .disabled(loading)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.twofa.confirm = Some(confirm);
+                        this.twofa.set_confirm(Some(confirm));
                         cx.notify();
                     })),
             );
@@ -458,7 +462,7 @@ impl QuillApp {
                             .primary()
                             .disabled(loading)
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                this.twofa.confirm = None;
+                                this.twofa.set_confirm(None);
                                 if let Some(live) = this.live.as_mut() {
                                     let _ = match confirm {
                                         TwofaConfirm::Reset { .. } => {
@@ -478,7 +482,7 @@ impl QuillApp {
                     )
                     .child(Button::new("twofa-confirm-no").label(no).ghost().on_click(
                         cx.listener(|this, _, _, cx| {
-                            this.twofa.confirm = None;
+                            this.twofa.set_confirm(None);
                             cx.notify();
                         }),
                     )),
@@ -491,36 +495,75 @@ impl QuillApp {
         let mut new = self.twofa.new_password.read(cx).value().to_string();
         let hint = self.twofa.hint.read(cx).value().to_string();
         if code.is_empty() {
-            self.twofa.notice = Some(tr(keys::Q_PREFS_ENTER_THE_CODE_FROM_THE).into());
+            self.twofa
+                .set_notice(Some(tr(keys::Q_PREFS_ENTER_THE_CODE_FROM_THE).into()));
             code.zeroize();
             new.zeroize();
             cx.notify();
             return;
         }
-        self.twofa.notice = None;
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.recover_twofa_password(&code, &new, &hint);
-        }
+        // The fields keep what was typed until the step is done
+        // (`sync_twofa_forms`): a rejected code or password is corrected,
+        // not retyped, and a request the driver refused says so.
+        let sent = match self.live.as_mut() {
+            Some(live) => live
+                .driver
+                .recover_twofa_password(&code, &new, &hint)
+                .is_ok(),
+            None => true,
+        };
         code.zeroize();
         new.zeroize();
-        for input in [&self.twofa.code, &self.twofa.new_password] {
-            input.update(cx, |input, cx| input.set_value("", window, cx));
-        }
         self.twofa
-            .hint
-            .update(cx, |input, cx| input.set_value("", window, cx));
+            .set_notice((!sent).then(|| tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string()));
+        let _ = window;
         cx.notify();
+    }
+
+    /// Per frame: a two-step form whose step is over is emptied. A finished
+    /// step reports on the status screen; a login email whose code was sent
+    /// moves on to the code field.
+    pub(super) fn sync_twofa_forms(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(flow) = self.session().map(|s| &s.auth_state.twofa_flow) else {
+            return;
+        };
+        let finished = flow.notice.is_some();
+        let code_sent = flow.code_wait.login_email().is_some();
+        let twofa = &self.twofa;
+        let lines = [
+            (finished, twofa.code.clone()),
+            (finished, twofa.new_password.clone()),
+            (finished, twofa.current_password.clone()),
+        ];
+        let areas = [
+            (finished, twofa.hint.clone()),
+            (finished || code_sent, twofa.email.clone()),
+        ];
+        for (stale, input) in lines {
+            if stale && !input.read(cx).value().is_empty() {
+                input.update(cx, |input, cx| input.set_value("", window, cx));
+            }
+        }
+        for (stale, input) in areas {
+            if stale && !input.read(cx).value().is_empty() {
+                input.update(cx, |input, cx| input.set_value("", window, cx));
+            }
+        }
     }
 
     /// Login email: new address, then the code sent to it.
     pub(super) fn twofa_login_email_body(&self, cx: &mut Context<Self>, body: Div) -> Div {
         let session = self.session();
-        let code_sent_to = session
-            .as_ref()
-            .and_then(|s| s.auth_state.twofa_flow.login_email_code_sent_to.clone());
+        let code_sent_to = session.as_ref().and_then(|s| {
+            s.auth_state
+                .twofa_flow
+                .code_wait
+                .login_email()
+                .map(str::to_string)
+        });
         let loading = session
             .as_ref()
-            .is_some_and(|s| s.auth_state.password_state_loading);
+            .is_some_and(|s| s.auth_state.password_state_loading());
         let body = if let Some(pattern) = code_sent_to {
             body.child(heading(tr(keys::SETTINGS_CLOUD_LOGIN_EMAIL_CODE_TITLE)))
                 .child(div().text_sm().child(tr_with(
@@ -532,7 +575,7 @@ impl QuillApp {
                         .aria_label(tr(keys::Q_PREFS_LOGIN_EMAIL_CONFIRMATION_CODE))
                         .h(px(40.)),
                 )
-                .when_some(self.twofa.notice.clone(), |this, note| {
+                .when_some(self.twofa.notice().cloned(), |this, note| {
                     this.child(div().text_xs().text_color(danger()).child(note))
                 })
                 .child(
@@ -570,7 +613,7 @@ impl QuillApp {
                         .aria_label(tr(keys::Q_PREFS_LOGIN_EMAIL_ADDRESS))
                         .h(px(40.)),
                 )
-                .when_some(self.twofa.notice.clone(), |this, note| {
+                .when_some(self.twofa.notice().cloned(), |this, note| {
                     this.child(div().text_xs().text_color(danger()).child(note))
                 })
                 .child(
@@ -597,42 +640,56 @@ impl QuillApp {
     fn submit_login_email(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let email = self.twofa.email.read(cx).value().trim().to_string();
         if email.is_empty() {
-            self.twofa.notice = Some(tr(keys::Q_PREFS_ENTER_THE_NEW_LOGIN_EMAIL).into());
+            self.twofa
+                .set_notice(Some(tr(keys::Q_PREFS_ENTER_THE_NEW_LOGIN_EMAIL).into()));
             cx.notify();
             return;
         }
-        self.twofa.notice = None;
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.set_login_email(&email);
-        }
+        let sent = match self.live.as_mut() {
+            Some(live) => live.driver.set_login_email(&email).is_ok(),
+            None => true,
+        };
         self.twofa
-            .email
-            .update(cx, |input, cx| input.set_value("", window, cx));
+            .set_notice((!sent).then(|| tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string()));
+        let _ = window;
         cx.notify();
     }
 
     fn submit_login_email_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut code = self.twofa.code.read(cx).value().trim().to_string();
         if code.is_empty() {
-            self.twofa.notice = Some(tr(keys::Q_PREFS_ENTER_THE_CODE_FROM_THE).into());
+            self.twofa
+                .set_notice(Some(tr(keys::Q_PREFS_ENTER_THE_CODE_FROM_THE).into()));
             cx.notify();
             return;
         }
-        self.twofa.notice = None;
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.check_login_email_code(&code);
-        }
+        let sent = match self.live.as_mut() {
+            Some(live) => live.driver.check_login_email_code(&code).is_ok(),
+            None => true,
+        };
         code.zeroize();
         self.twofa
-            .code
-            .update(cx, |input, cx| input.set_value("", window, cx));
+            .set_notice((!sent).then(|| tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string()));
+        let _ = window;
         cx.notify();
     }
 
-    /// Whether the two-step dialog should fall back to the status
-    /// screen: a finished step reports there.
-    pub(super) fn twofa_step_finished(&self) -> bool {
-        self.session()
-            .is_some_and(|s| s.auth_state.twofa_flow.notice.is_some())
+    /// A recovery / reset / login-email step that finished reports on the
+    /// status screen. Run where the answer is drained, never while the
+    /// dialog draws. Returns whether the view moved.
+    pub(super) fn drain_twofa_step(&mut self) -> bool {
+        let finished = self
+            .session()
+            .is_some_and(|s| s.auth_state.twofa_flow.notice.is_some());
+        if !finished
+            || !matches!(
+                self.twofa.view(),
+                TwofaView::Recover | TwofaView::LoginEmail
+            )
+        {
+            return false;
+        }
+        self.twofa.goto(TwofaView::Status);
+        true
     }
 }

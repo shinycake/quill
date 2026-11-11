@@ -4,6 +4,7 @@
 use super::app::QuillApp;
 use super::dismiss_layer::DismissLayer;
 use super::pressable::PressableDiv;
+use super::status_note::StatusNote;
 use super::*;
 use gpui_kit::TestSupportExt;
 use gpui_kit::component::button::*;
@@ -15,8 +16,11 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use quill::state::{StoryPostOutcome, StoryPostState};
-use quill::story_composer::{StoryComposer, StoryExpiry, StoryMedia, StoryMediaKind, StoryPrivacy};
+use quill::state::StoryPostState;
+use quill::story_composer::{
+    ComposerStage, StoryComposer, StoryExpiry, StoryMedia, StoryMediaKind, StoryPrivacy,
+};
+use quill::telegram::envelope::CanPostStoryResult;
 use quill::telegram::requests::input_story_content;
 
 impl QuillApp {
@@ -25,7 +29,10 @@ impl QuillApp {
     /// the previous post's outcome. Phase 9.5: also fetches
     /// `getChatsToPostStories` for the "post as" picker.
     pub(super) fn open_story_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.stories.composer = StoryComposer::open();
+        if self.story_composer_still_out(cx) {
+            return;
+        }
+        *self.stories.composer = StoryComposer::open();
         self.stories
             .composer_caption
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -60,7 +67,10 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.stories.composer = StoryComposer::open_edit(poster_chat_id, story_id);
+        if self.story_composer_still_out(cx) {
+            return;
+        }
+        *self.stories.composer = StoryComposer::open_edit(poster_chat_id, story_id);
         let (caption, link_url, reactions) = self
             .session()
             .and_then(|s| s.stories.stories.get(&(poster_chat_id, story_id)))
@@ -93,7 +103,10 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.stories.composer = StoryComposer::open_repost(poster_chat_id, story_id);
+        if self.story_composer_still_out(cx) {
+            return;
+        }
+        *self.stories.composer = StoryComposer::open_repost(poster_chat_id, story_id);
         self.stories
             .composer_caption
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -116,8 +129,33 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Phase 9.3: close the story composer (Escape / backdrop / Close).
+    /// A press of Post or Save is still out: another composer opening now
+    /// would replace the one whose request reports it, so it waits and says
+    /// why (the same line as Close).
+    fn story_composer_still_out(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.stories.composer.stage.in_flight() {
+            return false;
+        }
+        self.set_note(StatusNote::info(tr(keys::Q_MEDIA_STILL_POSTING_STORY)));
+        cx.notify();
+        true
+    }
+
+    /// Phase 9.3: close the story composer (Escape / backdrop / Close). A
+    /// press that is out keeps it open: closing would drop the request that
+    /// reports a failed post or edit (`story_composer_upkeep`).
     pub(super) fn close_story_composer(&mut self, cx: &mut Context<Self>) {
+        // Not silent: the status line says what it waits on, and the press
+        // says why the box stays.
+        if self.story_composer_still_out(cx) {
+            return;
+        }
+        self.end_story_composer(cx);
+    }
+
+    /// The composer is done (a saved edit) or its screen goes: closes it
+    /// whatever stage it was in.
+    pub(super) fn end_story_composer(&mut self, cx: &mut Context<Self>) {
         self.stories.composer.close();
         cx.notify();
     }
@@ -129,30 +167,16 @@ impl QuillApp {
     /// media path is optional (empty = keep content) and the save goes
     /// straight to `editStory` — no eligibility check.
     pub(super) fn story_composer_post(&mut self, cx: &mut Context<Self>) {
-        // Phase 9.3: `postStory` already sent, answer not yet landed —
-        // the button is disabled while `busy`; this guards a
-        // stale-snapshot race from re-running canPostStory→postStory.
-        if self.stories.composer.post_sent || self.stories.composer.save_sent {
+        // A press is already being answered (or the story is posted): the
+        // button is disabled meanwhile; this guards a stale-snapshot race
+        // from re-running canPostStory→postStory, or posting the media twice.
+        if self.stories.composer.stage.busy() {
             return;
         }
         let media = self.stories.composer.media.clone();
-        // Phase 9.4: sync the area inputs into composer state before
-        // validating — the link URL check runs up front so a typo
-        // surfaces locally instead of failing the post.
-        self.stories.composer.link_url = self
-            .stories
-            .composer_link
-            .read(cx)
-            .value()
-            .trim()
-            .to_string();
-        self.stories.composer.reaction_emojis = self
-            .stories
-            .composer_reaction
-            .read(cx)
-            .value()
-            .trim()
-            .to_string();
+        // Phase 9.4: the link URL check runs up front so a typo surfaces
+        // locally instead of failing the post.
+        let (link_url, _) = self.story_area_text(cx);
         let is_edit = self.stories.composer.is_edit();
         let error = if !is_edit && media.is_none() {
             Some(tr(keys::Q_MEDIA_CHOOSE_A_PHOTO_OR_VIDEO))
@@ -164,10 +188,10 @@ impl QuillApp {
         } else if !is_edit && self.stories.composer.needs_users() {
             Some(tr(keys::Q_MEDIA_PICK_AT_LEAST_ONE_USER))
         } else {
-            self.stories.composer.link_url_error()
+            StoryComposer::link_url_error(&link_url)
         };
         if let Some(error) = error {
-            self.stories.composer.local_error = Some(error.into());
+            self.stories.composer.set_error(error);
             cx.notify();
             return;
         }
@@ -180,21 +204,46 @@ impl QuillApp {
         // `live` borrow below.
         let target = self.story_composer_target_chat();
         if let Some(live) = self.live.as_mut() {
-            self.screen.stories.composer.local_error = None;
-            self.screen.stories.composer.check_sent = true;
-            live.driver.session.stories.post.check_error = None;
-            live.driver.session.stories.post.eligibility = None;
-            live.driver.session.stories.post.outcome = StoryPostOutcome::None;
-            if live.driver.check_can_post_story(target).is_err() {
-                self.stories.composer.check_sent = false;
-                self.stories.composer.local_error =
-                    Some(tr(keys::Q_MEDIA_COULD_NOT_CHECK_POSTING_ELIGIBILITY).into());
+            self.screen.stories.composer.clear_error();
+            live.driver.session.stories.post.check.clear();
+            live.driver.session.stories.post.outcomes.clear();
+            // The stage is entered only once the check went out, with its
+            // request: a failed send leaves the composer as it was.
+            match live.driver.check_can_post_story(target) {
+                Ok(request) => {
+                    self.screen.stories.composer.stage =
+                        ComposerStage::Checking { request, target };
+                }
+                Err(_) => {
+                    self.stories
+                        .composer
+                        .set_error(tr(keys::Q_MEDIA_COULD_NOT_CHECK_POSTING_ELIGIBILITY));
+                }
             }
         } else if self.demo_session.is_some() {
-            self.stories.composer.local_error =
-                Some(tr(keys::Q_MEDIA_DEMO_POSTING_RUNS_WITH_LIVE).into());
+            self.stories
+                .composer
+                .set_error(tr(keys::Q_MEDIA_DEMO_POSTING_RUNS_WITH_LIVE));
         }
         cx.notify();
+    }
+
+    /// The link area URL and the suggested-reaction emoji as typed.
+    fn story_area_text(&self, cx: &App) -> (String, String) {
+        (
+            self.stories
+                .composer_link
+                .read(cx)
+                .value()
+                .trim()
+                .to_string(),
+            self.stories
+                .composer_reaction
+                .read(cx)
+                .value()
+                .trim()
+                .to_string(),
+        )
     }
 
     /// Phase 9.5: the chat the current composer post targets — the
@@ -216,21 +265,25 @@ impl QuillApp {
         cx: &mut Context<Self>,
         media: Option<&StoryMedia>,
     ) {
-        let Some((poster_chat_id, story_id)) = self.stories.composer.edit_target else {
+        let Some((poster_chat_id, story_id)) = self.stories.composer.edit_target() else {
             return;
         };
         let caption = self.stories.composer_caption.read(cx).value().to_string();
         let content = media.map(|media| input_story_content(media.kind, &media.path));
         // Areas can't be edited unless the content changes — keep them
         // untouched when the media is kept.
-        let areas = content.as_ref().map(|_| self.stories.composer.areas_json());
+        let (link_url, reactions) = self.story_area_text(cx);
+        let areas = content
+            .as_ref()
+            .map(|_| StoryComposer::areas_json(&link_url, &reactions));
         let Some(live) = self.live.as_mut() else {
-            self.stories.composer.local_error =
-                Some(tr(keys::Q_MEDIA_DEMO_EDITING_RUNS_WITH_LIVE).into());
+            self.stories
+                .composer
+                .set_error(tr(keys::Q_MEDIA_DEMO_EDITING_RUNS_WITH_LIVE));
             cx.notify();
             return;
         };
-        self.screen.stories.composer.local_error = None;
+        self.screen.stories.composer.clear_error();
         match live.driver.edit_story(
             ChatId(poster_chat_id),
             story_id,
@@ -238,10 +291,11 @@ impl QuillApp {
             areas,
             Some(&caption),
         ) {
-            Ok(_) => self.stories.composer.save_sent = true,
+            Ok(request) => self.stories.composer.stage = ComposerStage::Saving { request },
             Err(_) => {
-                self.stories.composer.local_error =
-                    Some(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_EDIT).into());
+                self.stories
+                    .composer
+                    .set_error(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_EDIT));
             }
         }
         cx.notify();
@@ -251,77 +305,77 @@ impl QuillApp {
     /// when eligible, otherwise surface the reason in the composer.
     /// Phase 9.5: posts to the "post as" target chat and carries the
     /// repost source (`from_story_full_id`).
-    pub(super) fn story_composer_after_check(&mut self, cx: &mut Context<Self>) {
-        let (eligibility, check_error) = match self.session() {
-            Some(session) => (
-                session.stories.post.eligibility.clone(),
-                session.stories.post.check_error.clone(),
-            ),
-            None => (None, None),
-        };
-        if let Some(error) = check_error {
-            self.stories.composer.local_error = Some(error);
-        } else if let Some(result) = eligibility {
-            if !result.can_post() {
-                self.stories.composer.local_error = Some(result.user_message());
-                if let Some(kind) = result.premium_limit() {
-                    self.show_premium_limit(kind, 0, cx);
-                }
-            } else {
-                // Phase 9.5: the target chat matches the eligibility
-                // check (the picker is disabled while `check_sent`).
-                // Hoisted before the mutable `live` borrow below.
-                let target = self.story_composer_target_chat();
-                let from_story = self.stories.composer.repost_source;
-                let media = self.stories.composer.media.clone();
-                if let (Some(live), Some(media)) = (self.live.as_mut(), media) {
-                    let caption = self
-                        .screen
-                        .stories
-                        .composer_caption
-                        .read(cx)
-                        .value()
-                        .to_string();
-                    let privacy = self.screen.stories.composer.privacy;
-                    let user_ids = self.screen.stories.composer.selected_user_ids.clone();
-                    // Phase 9.4: areas + options are read from composer state
-                    // (synced in `story_composer_post`), so what lands in the
-                    // `postStory` JSON is exactly what the UI showed.
-                    let areas = self.screen.stories.composer.areas_json();
-                    let active_period = self.screen.stories.composer.expiry.seconds();
-                    let is_posted_to_chat_page = self.screen.stories.composer.post_to_chat_page;
-                    let protect_content = self.screen.stories.composer.protect_content;
-                    match live.driver.post_story(
-                        target,
-                        media.kind,
-                        &media.path,
-                        &caption,
-                        privacy,
-                        &user_ids,
-                        areas,
-                        active_period,
-                        from_story,
-                        is_posted_to_chat_page,
-                        protect_content,
-                    ) {
-                        Ok(_) => {
-                            self.screen.stories.composer.local_error = None;
-                            // Phase 9.3: request sent, answer not yet landed —
-                            // the Post button stays disabled (busy) until the
-                            // outcome moves, so a second press can't post a
-                            // duplicate story.
-                            self.screen.stories.composer.post_sent = true;
-                            // Fresh eligibility for the next post.
-                            live.driver.session.stories.post.eligibility = None;
-                        }
-                        Err(_) => {
-                            self.stories.composer.local_error =
-                                Some(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_POST).into());
-                        }
+    pub(super) fn story_composer_after_check(
+        &mut self,
+        target: ChatId,
+        answer: Result<CanPostStoryResult, String>,
+        cx: &mut Context<Self>,
+    ) {
+        match answer {
+            Err(error) => self.stories.composer.set_error(error),
+            Ok(result) => {
+                if !result.can_post() {
+                    self.stories.composer.set_error(result.user_message());
+                    if let Some(kind) = result.premium_limit() {
+                        self.show_premium_limit(kind, 0, cx);
                     }
-                } else if self.live.is_none() {
-                    self.stories.composer.local_error =
-                        Some(tr(keys::Q_MEDIA_DEMO_POSTING_RUNS_WITH_LIVE).into());
+                } else {
+                    // Phase 9.5: `target` is the chat the check was asked for,
+                    // so the post goes where the eligibility was computed.
+                    let from_story = self.stories.composer.repost_source();
+                    let (link_url, reactions) = self.story_area_text(cx);
+                    let media = self.stories.composer.media.clone();
+                    if let (Some(live), Some(media)) = (self.live.as_mut(), media) {
+                        let caption = self
+                            .screen
+                            .stories
+                            .composer_caption
+                            .read(cx)
+                            .value()
+                            .to_string();
+                        let privacy = self.screen.stories.composer.privacy;
+                        let user_ids = self.screen.stories.composer.selected_user_ids.clone();
+                        // Phase 9.4: areas are read from the inputs as typed, so
+                        // what lands in the `postStory` JSON is what the UI shows.
+                        let areas = StoryComposer::areas_json(&link_url, &reactions);
+                        let active_period = self.screen.stories.composer.expiry.seconds();
+                        let is_posted_to_chat_page = self.screen.stories.composer.post_to_chat_page;
+                        let protect_content = self.screen.stories.composer.protect_content;
+                        match live.driver.post_story(
+                            target,
+                            media.kind,
+                            &media.path,
+                            &caption,
+                            privacy,
+                            &user_ids,
+                            areas,
+                            active_period,
+                            from_story,
+                            is_posted_to_chat_page,
+                            protect_content,
+                        ) {
+                            Ok(request) => {
+                                self.screen.stories.composer.clear_error();
+                                // Phase 9.3: request sent, answer not yet landed —
+                                // the Post button stays disabled (busy) until the
+                                // outcome of this request lands, so a second press
+                                // can't post a duplicate story.
+                                self.screen.stories.composer.stage =
+                                    ComposerStage::Posting { request };
+                                // Fresh eligibility for the next post.
+                                live.driver.session.stories.post.check.clear();
+                            }
+                            Err(_) => {
+                                self.stories
+                                    .composer
+                                    .set_error(tr(keys::Q_MEDIA_COULD_NOT_SEND_THE_POST));
+                            }
+                        }
+                    } else if self.live.is_none() {
+                        self.stories
+                            .composer
+                            .set_error(tr(keys::Q_MEDIA_DEMO_POSTING_RUNS_WITH_LIVE));
+                    }
                 }
             }
         }
@@ -331,6 +385,9 @@ impl QuillApp {
     /// "Choose a file": the native file dialog for the story's photo or
     /// video.
     pub(super) fn choose_story_media(&mut self, cx: &mut Context<Self>) {
+        // The pick belongs to the composer that asked: another one opened
+        // meanwhile (or none) does not take it.
+        let asked = self.stories.composer.id;
         let picker = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -341,10 +398,25 @@ impl QuillApp {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.into_iter().next()
             {
-                let _ = this.update(cx, |this, cx| this.take_story_media(&[path], cx));
+                let _ = this.update(cx, |this, cx| {
+                    this.take_story_media_asked_by(asked, &[path], cx);
+                });
             }
         })
         .detach();
+    }
+
+    /// A pick the composer `asked` (its id) opened the dialog for: dropped
+    /// when that composer is gone.
+    pub(super) fn take_story_media_asked_by(
+        &mut self,
+        asked: u64,
+        paths: &[std::path::PathBuf],
+        cx: &mut Context<Self>,
+    ) {
+        if self.stories.composer.id == asked {
+            self.take_story_media(paths, cx);
+        }
     }
 
     /// A pick or a drop: the first photo or video among `paths` becomes
@@ -356,7 +428,7 @@ impl QuillApp {
     ) {
         let composer = &mut self.stories.composer;
         if !paths.iter().any(|path| composer.pick_media(path)) {
-            composer.local_error = Some(tr(keys::Q_MEDIA_ONLY_PHOTOS_AND_VIDEOS_STORIES).into());
+            composer.set_error(tr(keys::Q_MEDIA_ONLY_PHOTOS_AND_VIDEOS_STORIES));
         }
         cx.notify();
     }
@@ -366,36 +438,28 @@ impl QuillApp {
     /// outcome, then the eligibility check state.
     pub(super) fn story_composer_status(&self) -> Option<String> {
         let composer = &self.stories.composer;
-        if let Some(error) = &composer.local_error {
+        if let Some(error) = composer.error() {
             return Some(format!("✗ {error}"));
         }
         // Phase 9.5: edit-mode save state — the tick closes the
-        // composer on success or moves the failure into local_error.
-        if composer.is_edit() {
-            return composer.save_sent.then(|| tr(keys::Q_MEDIA_SAVING).into());
-        }
-        let post = self.session().map(|session| session.stories.post.clone())?;
-        match &post.outcome {
-            StoryPostOutcome::Posting { .. } => Some(tr(keys::Q_MEDIA_POSTING).into()),
-            StoryPostOutcome::Succeeded => Some(tr(keys::Q_MEDIA_POSTED_IT_WILL_APPEAR_IN).into()),
-            StoryPostOutcome::Failed(message) => Some(format!("✗ {message}")),
-            StoryPostOutcome::None => {
-                if composer.post_sent {
-                    Some(tr(keys::Q_MEDIA_SENDING).into())
-                } else if composer.check_sent {
-                    Some(tr(keys::Q_MEDIA_CHECKING_ELIGIBILITY).into())
-                } else if let Some(error) = &post.check_error {
-                    Some(format!("✗ {error}"))
+        // composer on success or moves the failure into the composer's error line.
+        match &composer.stage {
+            ComposerStage::Saving { .. } => Some(tr(keys::Q_MEDIA_SAVING).into()),
+            ComposerStage::Checking { .. } => Some(tr(keys::Q_MEDIA_CHECKING_ELIGIBILITY).into()),
+            ComposerStage::Posting { request } => {
+                let uploading = self
+                    .session()
+                    .is_some_and(|s| s.stories.post.outcomes.get(*request).is_some());
+                Some(if uploading {
+                    tr(keys::Q_MEDIA_POSTING).into()
                 } else {
-                    post.eligibility.as_ref().map(|result| {
-                        if result.can_post() {
-                            tr(keys::Q_MEDIA_ELIGIBLE_TO_POST).into()
-                        } else {
-                            format!("✗ {}", result.user_message())
-                        }
-                    })
-                }
+                    tr(keys::Q_MEDIA_SENDING).into()
+                })
             }
+            ComposerStage::Posted => Some(tr(keys::Q_MEDIA_POSTED_IT_WILL_APPEAR_IN).into()),
+            // A "Post as" list that failed to load says so under the
+            // picker (`post_as`), not here.
+            ComposerStage::Editing | ComposerStage::Failed(_) => None,
         }
     }
 
@@ -417,7 +481,7 @@ impl QuillApp {
         // fields); the areas are only editable when the media is being
         // replaced (schema: areas can't change unless content does).
         let is_edit = self.stories.composer.is_edit();
-        let is_repost = self.stories.composer.repost_source.is_some();
+        let is_repost = self.stories.composer.repost_source().is_some();
         let show_privacy = !is_edit && self.stories.composer.as_chat_id.is_none();
         let areas_editable = !is_edit || media.is_some();
         let title = if is_edit {
@@ -535,7 +599,7 @@ impl QuillApp {
                     if let Some(&privacy) = StoryPrivacy::ALL.get(ix) {
                         this.stories.composer.privacy = privacy;
                     }
-                    this.stories.composer.local_error = None;
+                    this.stories.composer.clear_error();
                     cx.notify();
                 })),
         );
@@ -598,7 +662,7 @@ impl QuillApp {
                     if let Some(&expiry) = StoryExpiry::ALL.get(ix) {
                         this.stories.composer.expiry = expiry;
                     }
-                    this.stories.composer.local_error = None;
+                    this.stories.composer.clear_error();
                     cx.notify();
                 })),
         );
@@ -610,13 +674,13 @@ impl QuillApp {
             .child(
                 // Phase 6: kit Checkboxes (were: ghost buttons with ☑/☐
                 // labels). Controlled: write the requested value, keep
-                // clearing local_error on change.
+                // clearing the error line on change.
                 Checkbox::new("story-composer-post-to-chat-page")
                     .label(tr(keys::Q_MEDIA_POST_TO_CHAT_PAGE_KEEP))
                     .checked(self.stories.composer.post_to_chat_page)
                     .on_click(cx.listener(|this, &on, _, cx| {
                         this.stories.composer.post_to_chat_page = on;
-                        this.stories.composer.local_error = None;
+                        this.stories.composer.clear_error();
                         cx.notify();
                     })),
             )
@@ -626,34 +690,31 @@ impl QuillApp {
                     .checked(self.stories.composer.protect_content)
                     .on_click(cx.listener(|this, &on, _, cx| {
                         this.stories.composer.protect_content = on;
-                        this.stories.composer.local_error = None;
+                        this.stories.composer.clear_error();
                         cx.notify();
                     })),
             );
 
         let status = self.story_composer_status();
-        let busy = self.stories.composer.check_sent
-            || self.stories.composer.post_sent
-            || self.stories.composer.save_sent
-            || self.session().is_some_and(|session| {
-                matches!(
-                    session.stories.post.outcome,
-                    StoryPostOutcome::Posting { .. }
-                )
-            });
+        let busy = self.stories.composer.stage.busy();
 
         // Phase 9.5: "Post as" picker — the user's own stories plus the
         // channels/supergroups from `getChatsToPostStories`. Disabled
         // while a check/post is in flight so the eligibility answer
         // always matches the target chat.
         let post_as: Option<AnyElement> = (!is_edit).then(|| {
+            let post_as_error: Option<String> = self
+                .session()
+                .and_then(|session| session.stories.post_as.error().map(str::to_owned));
             let as_chats: Vec<(i64, String)> = self
                 .session()
                 .map(|session| {
                     session
                         .stories
-                        .post_as_chats
-                        .iter()
+                        .post_as
+                        .data()
+                        .into_iter()
+                        .flatten()
                         .map(|id| {
                             let title = session
                                 .chats
@@ -699,7 +760,7 @@ impl QuillApp {
                     if let Some(chosen) = chosen {
                         this.stories.composer.as_chat_id = chosen;
                     }
-                    this.stories.composer.local_error = None;
+                    this.stories.composer.clear_error();
                     cx.notify();
                 }));
             div()
@@ -713,6 +774,9 @@ impl QuillApp {
                         .child(tr(keys::Q_MEDIA_POST_AS)),
                 )
                 .child(picker)
+                .children(
+                    post_as_error.map(|error| div().text_xs().text_color(danger()).child(error)),
+                )
                 .into_any_element()
         });
 

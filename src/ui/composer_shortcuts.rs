@@ -32,8 +32,23 @@ pub(super) struct ComposerLinkDialog {
     /// The text in that range, to detect a draft that changed meanwhile.
     selected: String,
     input: Entity<TextareaState>,
-    /// Focus the field once the dialog has mounted.
-    focus_on_mount: bool,
+    /// `Opening` until the dialog has mounted and focused the field.
+    stage: BoxStage,
+}
+
+/// Where a box stands in showing itself: it focuses its field once, at the
+/// first frame it is on screen.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BoxStage {
+    Opening,
+    Open,
+}
+
+impl BoxStage {
+    /// The first frame: true once, then the box is `Open`.
+    fn mounted(&mut self) -> bool {
+        std::mem::replace(self, Self::Open) == Self::Opening
+    }
 }
 
 /// The "Code Language" box (tdesktop `EditCodeLanguageBox`): one field,
@@ -42,9 +57,33 @@ pub(super) struct CodeLanguageDialog {
     /// Where the block was when the box opened, to notice a changed draft.
     block: Range<usize>,
     input: Entity<TextareaState>,
-    error: Option<&'static str>,
-    /// Focus and select the field once the dialog has mounted.
-    focus_on_mount: bool,
+    stage: CodeLanguageStage,
+}
+
+/// The Code Language box: waiting for its first frame (to focus the field),
+/// then editing, with the language error the last Apply found.
+#[derive(Clone, Copy)]
+enum CodeLanguageStage {
+    Opening,
+    Editing { error: Option<&'static str> },
+}
+
+impl CodeLanguageStage {
+    /// The first frame: true once, then the box is `Editing` with no error.
+    fn mounted(&mut self) -> bool {
+        let first = matches!(self, Self::Opening);
+        if first {
+            *self = Self::Editing { error: None };
+        }
+        first
+    }
+
+    fn error(&self) -> Option<&'static str> {
+        match *self {
+            Self::Opening => None,
+            Self::Editing { error } => error,
+        }
+    }
 }
 
 /// The chord for a shortcut as shown in menus: "⌘B" on macOS, "Ctrl+B"
@@ -152,11 +191,11 @@ impl QuillApp {
             }
         })
         .detach();
-        self.composer_ui.link_dialog = Some(ComposerLinkDialog {
+        self.chat_ui.link_dialog = Some(ComposerLinkDialog {
             range,
             selected,
             input,
-            focus_on_mount: true,
+            stage: BoxStage::Opening,
         });
         cx.notify();
     }
@@ -167,7 +206,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.composer_ui.link_dialog.take().is_some() {
+        if self.chat_ui.link_dialog.take().is_some() {
             self.composer
                 .update(cx, |input, cx| input.focus(window, cx));
             cx.notify();
@@ -176,7 +215,7 @@ impl QuillApp {
 
     /// Wrap the remembered selection in `[text](url)`.
     fn apply_composer_link(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(dialog) = self.composer_ui.link_dialog.as_ref() else {
+        let Some(dialog) = self.chat_ui.link_dialog.as_ref() else {
             return;
         };
         let typed = dialog.input.read(cx).value().to_string();
@@ -198,7 +237,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        if !self.chat_ui.rich_editor_open {
+        if !self.chat_ui.rich.editor_open() {
             // The selected text becomes a link, shown in the link colour.
             self.composer.update(cx, |input, cx| {
                 input.set_selected_range(range.clone(), cx);
@@ -222,13 +261,13 @@ impl QuillApp {
 
     /// The link field, once, for the dialog to focus after it mounts.
     pub(super) fn take_link_focus(&mut self) -> Option<Entity<TextareaState>> {
-        let dialog = self.composer_ui.link_dialog.as_mut()?;
-        std::mem::take(&mut dialog.focus_on_mount).then(|| dialog.input.clone())
+        let dialog = self.chat_ui.link_dialog.as_mut()?;
+        dialog.stage.mounted().then(|| dialog.input.clone())
     }
 
     /// The link box's body: what the link is for and the address field.
     pub(super) fn composer_link_dialog_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let dialog = self.composer_ui.link_dialog.as_ref()?;
+        let dialog = self.chat_ui.link_dialog.as_ref()?;
         Some(
             div()
                 .id("composer-link-dialog")
@@ -284,7 +323,7 @@ impl QuillApp {
         let caret = self.composer.read(cx).selected_range().start;
         // A code block is formatting in the field (codex:composer-input);
         // the rich editor still writes fences.
-        let (block, current) = if self.chat_ui.rich_editor_open {
+        let (block, current) = if self.chat_ui.rich.editor_open() {
             let Some(fence) = quill::code_language::fence_at(&text, caret) else {
                 self.set_note(StatusNote::silent(tr(keys::Q_CHAT_PUT_THE_CURSOR_INSIDE_A)));
                 cx.notify();
@@ -313,11 +352,10 @@ impl QuillApp {
             }
         })
         .detach();
-        self.composer_ui.code_language = Some(CodeLanguageDialog {
+        self.chat_ui.code_language = Some(CodeLanguageDialog {
             block,
             input,
-            error: None,
-            focus_on_mount: true,
+            stage: CodeLanguageStage::Opening,
         });
         cx.notify();
     }
@@ -327,7 +365,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.composer_ui.code_language.take().is_some() {
+        if self.chat_ui.code_language.take().is_some() {
             self.composer
                 .update(cx, |input, cx| input.focus(window, cx));
             cx.notify();
@@ -336,12 +374,12 @@ impl QuillApp {
 
     /// Save: rewrite the language after the block's opening fence.
     fn apply_code_language(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(dialog) = self.composer_ui.code_language.as_ref() else {
+        let Some(dialog) = self.chat_ui.code_language.as_ref() else {
             return;
         };
         let typed = dialog.input.read(cx).value().to_string();
         let block = dialog.block.clone();
-        if !self.chat_ui.rich_editor_open {
+        if !self.chat_ui.rich.editor_open() {
             let still_there = self
                 .composer_code_block_at_caret(cx)
                 .is_some_and(|(range, _)| range == block);
@@ -359,8 +397,10 @@ impl QuillApp {
                     self.set_composer_code_language(block, language, window, cx);
                 }
                 Err(error) => {
-                    if let Some(dialog) = self.composer_ui.code_language.as_mut() {
-                        dialog.error = Some(error.note());
+                    if let Some(dialog) = self.chat_ui.code_language.as_mut() {
+                        dialog.stage = CodeLanguageStage::Editing {
+                            error: Some(error.note()),
+                        };
                     }
                 }
             }
@@ -389,8 +429,10 @@ impl QuillApp {
                 });
             }
             Err(error) => {
-                if let Some(dialog) = self.composer_ui.code_language.as_mut() {
-                    dialog.error = Some(error.note());
+                if let Some(dialog) = self.chat_ui.code_language.as_mut() {
+                    dialog.stage = CodeLanguageStage::Editing {
+                        error: Some(error.note()),
+                    };
                 }
             }
         }
@@ -399,14 +441,14 @@ impl QuillApp {
 
     /// The language field, once, for the dialog to focus after it mounts.
     pub(super) fn take_code_language_focus(&mut self) -> Option<Entity<TextareaState>> {
-        let dialog = self.composer_ui.code_language.as_mut()?;
-        std::mem::take(&mut dialog.focus_on_mount).then(|| dialog.input.clone())
+        let dialog = self.chat_ui.code_language.as_mut()?;
+        dialog.stage.mounted().then(|| dialog.input.clone())
     }
 
     /// The Code Language box's body (tdesktop `EditCodeLanguageBox`): the
     /// field, its error and the length counter.
     pub(super) fn code_language_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let dialog = self.composer_ui.code_language.as_ref()?;
+        let dialog = self.chat_ui.code_language.as_ref()?;
         let typed = dialog.input.read(cx).value().chars().count();
         let over = typed > quill::code_language::CODE_LANGUAGE_LIMIT;
         Some(
@@ -430,7 +472,7 @@ impl QuillApp {
                         .child(
                             div()
                                 .text_color(cx.theme().danger)
-                                .child(dialog.error.unwrap_or("")),
+                                .child(dialog.stage.error().unwrap_or("")),
                         )
                         .child(
                             div()

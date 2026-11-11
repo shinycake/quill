@@ -43,8 +43,8 @@ pub(super) fn apply_ready_stickers(session: &mut Session, sink: &Arc<MemorySink>
         session.apply(owned);
     }
     session.stickers.stickers.open = true;
-    session.stickers.stickers.loading_sets = true;
     let sets_extra = session.request(RequestPurpose::GetInstalledStickerSets, None);
+    session.stickers.stickers.lists.installed.begin();
     let sets = format!(
         r#"{{"@type":"stickerSets","@extra":"{}","total_count":1,"sets":[{{"@type":"stickerSetInfo","id":"77","title":"Demo stickers","name":"DemoStickers","thumbnail":null,"thumbnail_outline":null,"is_owned":false,"is_installed":true,"is_archived":false,"is_official":true,"sticker_type":{{"@type":"stickerTypeRegular"}},"needs_repainting":false,"is_allowed_as_chat_emoji_status":false,"is_viewed":true,"size":2,"covers":[]}}]}}"#,
         sets_extra.0
@@ -52,8 +52,8 @@ pub(super) fn apply_ready_stickers(session: &mut Session, sink: &Arc<MemorySink>
     if let Some(owned) = copy_and_parse(&sets, seq, &dyn_sink) {
         session.apply(owned);
     }
-    session.mark_sticker_set_loading();
     let set_extra = session.request(RequestPurpose::GetStickerSet, None);
+    session.mark_sticker_set_loading(77, set_extra);
     let smile = demo_file_json(41, &thumb_path, true);
     let wave = demo_file_json(44, "", false);
     let set = format!(
@@ -104,8 +104,7 @@ pub(super) fn apply_ready_sticker_playback(
                 thumb_file_id: None,
                 thumb_width: 0,
                 thumb_height: 0,
-                requires_premium: false,
-                premium_animation: None,
+                premium: None,
             });
     }
     for id in [101, 102, 103, 401] {
@@ -125,14 +124,14 @@ impl QuillApp {
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
-        quote: &str,
+        (quote, nth): (&str, usize),
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let quote = quote.trim();
         let Some(selection) = self
             .message_quotable(chat_id, message_id)
-            .and_then(|text| text.quote_for(quote))
+            .and_then(|text| text.quote_for_nth(quote, nth))
         else {
             // Not verbatim text of the message (it shouldn't happen for a
             // selection); reply to the whole message instead.
@@ -170,7 +169,7 @@ impl QuillApp {
         if self.route_story_reply_gif(file_id, duration, (width, height), cx) {
             return;
         }
-        let chat_id = self.session().and_then(|session| session.open_chat);
+        let chat_id = self.session().and_then(|session| session.open_chat_id());
         let Some(chat_id) = chat_id else {
             return;
         };
@@ -230,7 +229,10 @@ impl QuillApp {
     }
 
     pub(super) fn close_sticker_panel(&mut self, cx: &mut Context<Self>) {
-        if self.settings.sticker_settings_open {
+        if self
+            .settings
+            .box_open(crate::ui::settings_state::SettingsBox::Stickers)
+        {
             self.close_stickers_manager(cx);
             return;
         }
@@ -566,7 +568,7 @@ impl QuillApp {
             };
             let spoiler = attachment.spoiler;
             let is_photo = attachment.kind == AttachmentKind::Photo;
-            let rendering = attachment.extras.photo_render.is_some();
+            let rendering = attachment.extras.photo_render().is_some();
             // "Edit video" and "Cover" on a video, no spoiler on paid media
             // (`send_box_options.rs`).
             let video_actions = self.video_card_actions(index, attachment, cx);
@@ -645,11 +647,7 @@ impl QuillApp {
         let grouped = self.composer_group_media_effective();
         // Telegram Desktop's "Send without compression".
         let can_files = ComposerAttachment::can_send_as_files(self.pending_attachments());
-        let as_files = can_files
-            && self
-                .pending_attachments()
-                .iter()
-                .all(|attachment| attachment.kind == AttachmentKind::Document);
+        let as_files = ComposerAttachment::sends_as_files(self.pending_attachments());
         let remember = self
             .session()
             .map(|s| s.settings.media_prefs.remember_media_grouping)
@@ -714,7 +712,7 @@ impl QuillApp {
                                         ComposerAttachment::set_send_as_files(tray, !as_files)
                                     });
                                     // Back to media: read the videos again.
-                                    this.composer_ui.send_box.sound_checked.clear();
+                                    this.composer_sends.reads.sound.clear_done();
                                     this.check_tray_videos(cx);
                                     cx.notify();
                                 })),

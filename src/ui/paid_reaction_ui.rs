@@ -20,6 +20,7 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::connect::PaidAddError;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::paid_reaction::{
@@ -31,8 +32,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 impl QuillApp {
-    /// Adds `stars` to the message's pending Star reaction. A refusal ends
-    /// up in the status line.
+    /// Adds `stars` to the message's pending Star reaction. `Err` is the
+    /// line saying why not (a refusal, or a request that could not go
+    /// out): the caller shows it where the user is looking.
     fn add_paid(
         &mut self,
         chat_id: ChatId,
@@ -40,26 +42,30 @@ impl QuillApp {
         stars: i64,
         sender: Option<PaidSender>,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Result<(), String> {
         let now = unix_ms_now();
-        if let Some(live) = self.live.as_mut() {
-            let _ = live
-                .driver
-                .add_paid_reaction(chat_id, message_id, stars, sender, now);
-            if let Some(note) = live.driver.session.payments.paid.note.clone() {
-                self.set_note(StatusNote::info(note));
-            }
+        let result = if let Some(live) = self.live.as_mut() {
+            live.driver
+                .add_paid_reaction(chat_id, message_id, stars, sender, now)
+                .map_err(|err| match err {
+                    PaidAddError::Refused(refusal) => refusal.message().to_string(),
+                    PaidAddError::Send(_) => tr(keys::Q_MONEY_COULDNT_SEND_THE_STARS).to_string(),
+                })
         } else if let Some(session) = self.demo_session.as_mut() {
             let balance = session.payments.hub.balance.map(|b| b.stars);
             let paid = &mut session.payments.paid;
             match paid.refusal(chat_id.0, message_id.0, stars, balance) {
                 None => {
-                    paid.add(chat_id.0, message_id.0, stars, sender, now);
+                    paid.add(chat_id.0, message_id.0, stars, sender, now, None);
+                    Ok(())
                 }
-                Some(refusal) => self.set_note(StatusNote::error(refusal.message().to_string())),
+                Some(refusal) => Err(refusal.message().to_string()),
             }
-        }
+        } else {
+            Ok(())
+        };
         cx.notify();
+        result
     }
 
     /// A click on the Star chip: one Star, Undo for a few seconds.
@@ -69,7 +75,9 @@ impl QuillApp {
         message_id: MessageId,
         cx: &mut Context<Self>,
     ) {
-        self.add_paid(chat_id, message_id, QUICK_AMOUNT, None, cx);
+        if let Err(line) = self.add_paid(chat_id, message_id, QUICK_AMOUNT, None, cx) {
+            self.set_note(StatusNote::error(line));
+        }
     }
 
     /// The Star cell of the reaction picker, when the message allows Star
@@ -80,12 +88,7 @@ impl QuillApp {
         message_id: MessageId,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if !self
-            .session()?
-            .payments
-            .paid
-            .offered_for(chat_id.0, message_id.0)
-        {
+        if !self.session()?.paid_reaction_offered(chat_id, message_id) {
             return None;
         }
         Some(
@@ -103,7 +106,7 @@ impl QuillApp {
                 .aria_label(tr(keys::PAID_REACTION_TITLE))
                 .child(div().text_size(px(22.)).child("\u{2B50}"))
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     this.open_paid_box(chat_id, message_id, cx);
                 }))
                 .into_any_element(),
@@ -163,6 +166,7 @@ impl QuillApp {
             let max = this.session().map_or(1, |s| s.payments.paid.max());
             if let Some(boxed) = this.paid_reaction.boxed.as_mut() {
                 boxed.amount = amount_for_step(value.end().round() as i64, max);
+                boxed.error = None;
             }
             cx.notify();
         })
@@ -173,6 +177,7 @@ impl QuillApp {
             amount,
             sender,
             slider,
+            error: None,
         });
         self.open_box(crate::ui::shell::DialogKind::PaidReaction);
         if let Some(live) = self.live.as_mut() {
@@ -195,8 +200,17 @@ impl QuillApp {
         };
         let (chat_id, message_id, amount) = (boxed.chat_id, boxed.message_id, boxed.amount);
         let sender = boxed.sender;
-        self.paid_reaction.boxed = None;
-        self.add_paid(chat_id, message_id, amount, Some(sender), cx);
+        // The box closes as the Stars are added; a refusal keeps it open
+        // with the reason, so the user can change the amount or give up.
+        match self.add_paid(chat_id, message_id, amount, Some(sender), cx) {
+            Ok(()) => self.paid_reaction.boxed = None,
+            Err(line) => {
+                if let Some(boxed) = self.paid_reaction.boxed.as_mut() {
+                    boxed.error = Some(line);
+                }
+            }
+        }
+        cx.notify();
     }
 
     /// The "Star sent" toast under the chat's top bars, with Undo and the
@@ -224,18 +238,18 @@ impl QuillApp {
         }
         let message_id = MessageId(pending.message_id);
         let anonymous = pending.sender == Some(PaidSender::Anonymous);
-        let title = match (pending.stars, anonymous) {
+        let title = match (pending.stars(), anonymous) {
             (1, false) => tr(keys::Q_MONEY_STAR_SENT),
             (_, false) => tr(keys::Q_MONEY_STARS_SENT),
             (1, true) => tr(keys::Q_MONEY_STAR_SENT_ANONYMOUSLY),
             (_, true) => tr(keys::Q_MONEY_STARS_SENT_ANONYMOUSLY),
         };
-        let body = if pending.stars == 1 {
+        let body = if pending.stars() == 1 {
             tr(keys::Q_MONEY_YOU_REACTED_WITH_1_STAR).to_string()
         } else {
             tr_with(
                 keys::Q_MONEY_YOU_REACTED_WITH_STARS,
-                &[("stars", &(group_digits(pending.stars)).to_string())],
+                &[("stars", &(group_digits(pending.stars())).to_string())],
             )
         };
         let seconds = pending.seconds_left(unix_ms_now());
@@ -322,6 +336,7 @@ impl QuillApp {
                 .unwrap_or(0);
             let balance = session.payments.hub.balance;
             let amount = boxed.amount;
+            let error = boxed.error.clone();
             let paid = &session.payments.paid;
             let refusal = paid.refusal(
                 boxed.chat_id.0,
@@ -462,6 +477,8 @@ impl QuillApp {
                         .text_color(warning())
                         .child(refusal.message()),
                 );
+            } else if let Some(error) = error {
+                body = body.child(div().text_xs().text_color(warning()).child(error));
             }
             body = body.child(
                 Button::new("paid-reaction-send")

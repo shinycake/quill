@@ -1,6 +1,7 @@
 //! Methods moved out of `composer.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::composer_sends::SendOnce;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr};
 
@@ -15,23 +16,18 @@ pub(in crate::ui) struct SendOptionsState {
 
 impl QuillApp {
     /// M1: the composer's `messageSendOptions` for the next send.
-    pub(in crate::ui) fn composer_send_options(&self) -> SendOptions {
+    pub(in crate::ui) fn composer_send_options(&self, once: SendOnce) -> SendOptions {
         let send = self.pending_send();
         SendOptions {
-            disable_notification: self.composer_effective_silent()
-                || self.composer_ui.send_silent_once,
+            disable_notification: self.composer_effective_silent() || once.silent,
             scheduling: send.scheduling,
-            schedule_repeat_period: match send.scheduling {
-                ComposerScheduling::SendAtDate(_) => send.schedule_repeat,
-                _ => 0,
-            },
             link_preview_disabled: send.preview.disabled,
             link_preview_above_text: send.preview.above_text,
             link_preview_media: send.preview.media,
             link_preview_link: send.preview.link_index,
             // The driver overrides this for secret chats at send time.
             is_secret: false,
-            effect_id: self.composer_ui.send_effect_once,
+            effect_id: once.effect,
             ..SendOptions::default()
         }
     }
@@ -59,7 +55,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.chat_ui.rich_editor_open {
+        if !self.chat_ui.rich.editor_open() {
             let tag = super::composer_field::tag_for_action(&action);
             self.toggle_composer_tag(tag, window, cx);
             self.composer
@@ -85,7 +81,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.chat_ui.rich_editor_open {
+        if !self.chat_ui.rich.editor_open() {
             self.clear_composer_tags(window, cx);
             self.composer
                 .update(cx, |input, cx| input.focus(window, cx));
@@ -102,25 +98,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// M1: load the chat's scheduled sends and open the dialog.
-    pub(in crate::ui) fn open_scheduled_dialog(&mut self, cx: &mut Context<Self>) {
-        self.chat_ui.schedule_popup_open = false;
-        if let Some(live) = self.live.as_mut()
-            && let Some(chat_id) = live.driver.session.open_chat
-        {
-            match live.driver.get_chat_scheduled_messages(chat_id) {
-                Ok(_) => self.set_note(StatusNote::silent(tr(
-                    keys::Q_CHAT_LOADING_SCHEDULED_MESSAGES,
-                ))),
-                Err(_) => self.set_note(StatusNote::error(tr(
-                    keys::Q_CHAT_COULD_NOT_LOAD_SCHEDULED_MESSAGES,
-                ))),
-            }
-        }
-        self.chat_ui.scheduled_dialog_open = true;
-        cx.notify();
-    }
-
     /// M1: delete a scheduled send (`deleteMessages`, revoke false —
     /// scheduled messages are not in history, so this goes through the
     /// driver's scheduled-message path, not the confirm dialog).
@@ -132,7 +109,7 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        let Some(chat_id) = live.driver.session.open_chat else {
+        let Some(chat_id) = live.driver.session.open_chat_id() else {
             return;
         };
         match live.driver.delete_scheduled_message(chat_id, message_id) {
@@ -375,7 +352,7 @@ impl QuillApp {
     fn schedule_option_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let label = match self.pending_send().scheduling {
             ComposerScheduling::None => return None,
-            ComposerScheduling::SendAtDate(date) => format!(
+            ComposerScheduling::SendAtDate { date, .. } => format!(
                 "{} · {}",
                 match self.schedule_kind() {
                     ScheduleKind::Reminder => tr(keys::Q_CHAT_REMINDER),
@@ -389,8 +366,8 @@ impl QuillApp {
             option_chip("chip-schedule", label, cx)
                 .cursor_pointer()
                 .on_click(cx.listener(|this, _, window, cx| {
-                    if this.chat_ui.schedule_popup_open {
-                        this.chat_ui.schedule_popup_open = false;
+                    if this.chat_ui.schedule_picker.is_some() {
+                        this.chat_ui.hide_schedule_popup();
                         cx.notify();
                     } else {
                         this.open_schedule_picker(ScheduleTarget::Composer, window, cx);
@@ -445,7 +422,7 @@ impl QuillApp {
     /// of opening the editor.
     #[inline(never)]
     fn rich_editor_entry(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if self.chat_ui.rich_editor_open || self.composer.read(cx).value().lines().count() <= 3 {
+        if self.chat_ui.rich.editor_open() || self.composer.read(cx).value().lines().count() <= 3 {
             return None;
         }
         Some(
@@ -460,7 +437,7 @@ impl QuillApp {
                     if premium {
                         // The editor works on block markup: show it raw.
                         let markup = this.composer_markup(cx);
-                        this.chat_ui.rich_editor_open = true;
+                        this.chat_ui.rich.set_editor(true);
                         this.set_composer_markup(&markup, window, cx);
                         this.set_note(StatusNote::silent(tr(
                             keys::Q_CHAT_RICH_EDITOR_MARKUP_BECOMES_BLOCKS,
@@ -496,11 +473,18 @@ impl QuillApp {
                 keys::Q_CHAT_TYPE_SOMETHING_FIRST_THE_AI,
             )));
         } else if let Some(live) = self.live.as_mut()
-            && let Some(chat_id) = live.driver.session.open_chat
+            && let Some(chat_id) = live.driver.session.open_chat_id()
         {
+            let sent = send(live, chat_id, &text);
+            if let Ok(request) = sent {
+                self.chat_ui.ai_ask = super::AiAsk::Asked {
+                    request,
+                    markup: text.clone(),
+                };
+            }
             self.screen.connection.set_note_for(
                 &self.screen.windows,
-                match send(live, chat_id, &text) {
+                match sent {
                     Ok(_) => StatusNote::silent(working_note),
                     Err(_) => StatusNote::info(tr(keys::Q_CHAT_AI_TOOLS_UNAVAILABLE_HERE)),
                 },

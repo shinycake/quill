@@ -94,7 +94,7 @@ impl QuillApp {
 
     /// tdesktop shows the player for songs only, from start until stop.
     fn touch_bar_song(&self) -> Option<Track> {
-        self.playback.playing_audio?;
+        self.playback.active.audio()?;
         let (can_previous, can_next) = self.playlist_can_move();
         Some(Track {
             playing: self.is_playing(),
@@ -111,7 +111,10 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return false;
         };
-        let Some(chat) = session.open_chat.and_then(|id| session.chats.get(&id.0)) else {
+        let Some(chat) = session
+            .open_chat_id()
+            .and_then(|id| session.chats.get(&id.0))
+        else {
             return false;
         };
         chat.can_post() && self.send_denial(SendKind::Stickers).is_none()
@@ -170,7 +173,7 @@ impl QuillApp {
             return PickerContents::default();
         };
         let panel = &session.stickers.stickers;
-        let library = &session.media.media_library.set_stickers;
+        let library = &session.media.media_library;
         let sections: Vec<StickerSection<'_>> = panel
             .sets
             .iter()
@@ -254,6 +257,15 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A touch that was already queued when the lock engaged (the bar is
+        // emptied by the next throttled sync) must not open a chat or send a
+        // sticker behind the lock screen.
+        if self.refused_while_locked() {
+            if matches!(command, Command::ReorderPinned(_)) {
+                mac::reorder_refused(cx);
+            }
+            return;
+        }
         match command {
             Command::OpenChat(chat_id) => self.select_listed_chat(chat_id, window, cx),
             Command::OpenSavedMessages => self.open_saved_messages(window, cx),
@@ -307,14 +319,27 @@ impl QuillApp {
 
     fn touch_bar_reorder(&mut self, ids: Vec<i64>, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            if let Err(err) = live.driver.set_pinned_chat_order(false, ids) {
-                self.set_note(StatusNote::error(user_error_for(
-                    keys::Q_NOTES_FAILED_PIN_REORDER,
-                    &err,
-                )));
+            match live.driver.set_pinned_chat_order(false, ids) {
+                // Out: the panel keeps the dropped order until the model
+                // shows it.
+                Ok(Some(_)) => {}
+                // Nothing was sent (a reorder is already in flight, or the
+                // order is the model's): the panel shows the model's order.
+                Ok(None) => mac::reorder_refused(cx),
+                Err(err) => {
+                    self.set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_PIN_REORDER,
+                        &err,
+                    )));
+                    // The panel shows the order the server holds again.
+                    mac::reorder_refused(cx);
+                }
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.reorder_pinned_chats(false, &ids);
+        } else {
+            // Nothing took the order: the panel draws the model's again.
+            mac::reorder_refused(cx);
         }
         cx.notify();
     }

@@ -5,7 +5,7 @@
 
 use super::super::app::QuillApp;
 use super::super::shell::{DialogKind, QuillShell};
-use super::bold_marked;
+use super::{RatingMode, bold_marked};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -72,7 +72,7 @@ impl RatingView {
 impl QuillApp {
     /// The person and rating of the open box; `None` closes it.
     fn rating_box_target(&self) -> Option<RatingView> {
-        let user_id = self.profile_cover.rating_box?;
+        let user_id = self.profile_cover.rating_box?.user_id;
         let session = self.session()?;
         let ratings = session.user_full_info(user_id)?.ratings;
         let is_self = session.my_user_id == Some(user_id);
@@ -86,13 +86,15 @@ impl QuillApp {
             name,
             rating: ratings.rating?,
             pending: ratings.pending.filter(|_| is_self),
-            preview: self.profile_cover.rating_preview,
+            preview: self
+                .profile_cover
+                .rating_box
+                .is_some_and(|open| open.mode == RatingMode::Future),
         })
     }
 
     pub(super) fn close_rating_box(&mut self, cx: &mut Context<Self>) {
         self.profile_cover.rating_box = None;
-        self.profile_cover.rating_preview = false;
         cx.notify();
     }
 
@@ -107,7 +109,13 @@ impl QuillApp {
                 this.close_rating_box(cx)
             });
         let target = app.read(cx).rating_box_target();
-        app.update(cx, |_, cx| {
+        app.update(cx, |this, cx| {
+            // The person's rating is gone (the info was dropped or has no
+            // rating): the box has nothing to say, so it ends here instead
+            // of standing open and empty.
+            if target.is_none() {
+                this.close_rating_box(cx);
+            }
             let body = target
                 .map(|view| rating_body(&view, cx))
                 .unwrap_or_else(|| div().into_any_element());
@@ -294,7 +302,12 @@ fn pending_row(
                         .ghost()
                         .xsmall()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.profile_cover.rating_preview = !this.profile_cover.rating_preview;
+                            if let Some(open) = this.profile_cover.rating_box.as_mut() {
+                                open.mode = match open.mode {
+                                    RatingMode::Current => RatingMode::Future,
+                                    RatingMode::Future => RatingMode::Current,
+                                };
+                            }
                             cx.notify();
                         })),
                 ),

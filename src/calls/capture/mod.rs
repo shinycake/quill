@@ -63,6 +63,10 @@ pub enum CaptureError {
     /// The device failed or went away.
     #[error("{0}")]
     Device(String),
+    /// The call refused a long run of frames: the device is fine, the
+    /// call is not taking audio, so reopening the device changes nothing.
+    #[error("{0}")]
+    Refused(String),
 }
 
 /// What a capture backend reports beside its frames.

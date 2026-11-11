@@ -6,7 +6,6 @@
 use crate::media_tools::{NoConsole, command};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::LazyLock;
 
 /// ffmpeg input arguments for the camera and microphone of a round video,
 /// with the stream specifiers of the audio and video they produce.
@@ -38,14 +37,14 @@ fn platform_input(
     with_audio: bool,
 ) -> Result<CaptureInput, String> {
     if cfg!(target_os = "macos") {
-        let (video, audio) = avfoundation_inputs(choice);
+        let (video, audio) = avfoundation_inputs(choice)?;
         Ok(avfoundation_input(&video, with_audio.then_some(&*audio)))
     } else if cfg!(target_os = "linux") {
         let nodes = v4l2_capture_devices();
         let camera =
             crate::capture_choice::pick_v4l2(choice.camera.as_deref(), &nodes, v4l2_card_name)
                 .ok_or("No camera found.")?;
-        let audio = with_audio.then(|| linux_audio(choice));
+        let audio = with_audio.then(|| linux_audio(choice)).transpose()?;
         Ok(v4l2_input(
             camera,
             audio
@@ -153,14 +152,18 @@ fn choose_dshow(
 /// Linux audio input: the audio backend and the source name. PulseAudio
 /// sources (PipeWire serves them too) are matched to the picked microphone
 /// by the name the call engine lists; otherwise, and for ALSA, `default`.
-fn linux_audio(choice: &crate::capture_choice::CaptureChoice) -> (&'static str, String) {
+/// A listing that did not come back is an error, not an empty list: the
+/// pick must not silently become the default microphone.
+fn linux_audio(
+    choice: &crate::capture_choice::CaptureChoice,
+) -> Result<(&'static str, String), String> {
     let backend = linux_audio_backend();
     let source = match (backend, choice.microphone.as_deref()) {
         ("pulse", Some(_)) => {
             let mut list = command("ffmpeg");
             list.args(["-hide_banner", "-sources", "pulse"]);
-            let listing =
-                capture_within(&mut list, DEVICE_LIST_LIMIT, Stream::Stdout).unwrap_or_default();
+            let listing = capture_within(&mut list, DEVICE_LIST_LIMIT, Stream::Stdout)
+                .ok_or(DEVICE_LIST_FAILED)?;
             crate::capture_choice::pick_pulse_source(
                 choice.microphone.as_deref(),
                 &crate::capture_choice::parse_pulse_sources(&listing),
@@ -168,8 +171,12 @@ fn linux_audio(choice: &crate::capture_choice::CaptureChoice) -> (&'static str, 
         }
         _ => "default".to_string(),
     };
-    (backend, source)
+    Ok((backend, source))
 }
+
+/// The device probe could not run or ran out of time.
+const DEVICE_LIST_FAILED: &str =
+    "Couldn't list the cameras and microphones. Try again, or pick another device.";
 
 /// How long a device-listing ffmpeg may run. Capture starts on the UI
 /// thread, so a stuck device probe must not hang the app.
@@ -195,8 +202,38 @@ pub(crate) fn stdout_within(cmd: &mut Command, limit: std::time::Duration) -> Op
     capture_within(cmd, limit, Stream::Stdout)
 }
 
+/// How long [`capture_patiently`] waits for the reader to finish.
+#[derive(Clone, Copy)]
+enum Patience {
+    /// Up to this long.
+    Within(std::time::Duration),
+    /// Until it is done (tests of the output).
+    #[cfg(test)]
+    Forever,
+    /// The time is already up: only what has arrived counts (tests of the
+    /// give-up path, which then need no clock).
+    #[cfg(test)]
+    Expired,
+}
+
+impl Patience {
+    fn wait(self, rx: &std::sync::mpsc::Receiver<Vec<u8>>) -> Option<Vec<u8>> {
+        match self {
+            Self::Within(limit) => rx.recv_timeout(limit).ok(),
+            #[cfg(test)]
+            Self::Forever => rx.recv().ok(),
+            #[cfg(test)]
+            Self::Expired => rx.try_recv().ok(),
+        }
+    }
+}
+
 /// [`stderr_within`] for either stream (`-sources` prints on stdout).
 fn capture_within(cmd: &mut Command, limit: std::time::Duration, stream: Stream) -> Option<String> {
+    capture_patiently(cmd, Patience::Within(limit), stream)
+}
+
+fn capture_patiently(cmd: &mut Command, patience: Patience, stream: Stream) -> Option<String> {
     use std::io::Read;
     use std::process::Stdio;
     let (out, err) = match stream {
@@ -222,7 +259,7 @@ fn capture_within(cmd: &mut Command, limit: std::time::Duration, stream: Stream)
             let _ = tx.send(bytes);
         });
     let bytes = match reader {
-        Ok(_) => rx.recv_timeout(limit).ok(),
+        Ok(_) => patience.wait(&rx),
         Err(_) => None,
     };
     if bytes.is_none() {
@@ -234,10 +271,13 @@ fn capture_within(cmd: &mut Command, limit: std::time::Duration, stream: Stream)
 
 /// AVFoundation `(video, audio)` input specifiers: the picked devices'
 /// indices, `default` for an unset or vanished pick. Lists the devices only
-/// when something was picked.
-fn avfoundation_inputs(choice: &crate::capture_choice::CaptureChoice) -> (String, String) {
+/// when something was picked; a listing that did not come back is an error
+/// (the pick must not silently become the default device).
+fn avfoundation_inputs(
+    choice: &crate::capture_choice::CaptureChoice,
+) -> Result<(String, String), String> {
     if choice.camera.is_none() && choice.microphone.is_none() {
-        return ("default".into(), "default".into());
+        return Ok(("default".into(), "default".into()));
     }
     let mut list = command("ffmpeg");
     list.args([
@@ -249,11 +289,11 @@ fn avfoundation_inputs(choice: &crate::capture_choice::CaptureChoice) -> (String
         "-i",
         "",
     ]);
-    let listing = stderr_within(&mut list, DEVICE_LIST_LIMIT).unwrap_or_default();
-    avfoundation_specifiers(
+    let listing = stderr_within(&mut list, DEVICE_LIST_LIMIT).ok_or(DEVICE_LIST_FAILED)?;
+    Ok(avfoundation_specifiers(
         choice,
         &crate::capture_choice::parse_avfoundation_devices(&listing),
-    )
+    ))
 }
 
 /// The `(video, audio)` AVFoundation specifiers for `choice` among the
@@ -270,14 +310,19 @@ pub fn avfoundation_specifiers(
 
 /// Audio capture backend ffmpeg uses on Linux: PulseAudio (which PipeWire
 /// also serves) when this ffmpeg has it, otherwise ALSA.
+/// Only a probe that answered is remembered: one that timed out or found no
+/// ffmpeg is asked again by the next capture (and guesses PulseAudio now).
 fn linux_audio_backend() -> &'static str {
-    static BACKEND: LazyLock<&'static str> = LazyLock::new(|| {
-        let mut list = command("ffmpeg");
-        list.args(["-hide_banner", "-devices"]);
-        let listing = stdout_within(&mut list, DEVICE_LIST_LIMIT).unwrap_or_default();
-        pick_audio_backend(&listing)
-    });
-    *BACKEND
+    static BACKEND: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+    if let Some(backend) = BACKEND.get() {
+        return backend;
+    }
+    let mut list = command("ffmpeg");
+    list.args(["-hide_banner", "-devices"]);
+    match stdout_within(&mut list, DEVICE_LIST_LIMIT) {
+        Some(listing) => BACKEND.get_or_init(|| pick_audio_backend(&listing)),
+        None => pick_audio_backend(""),
+    }
 }
 
 fn pick_audio_backend(devices_listing: &str) -> &'static str {
@@ -497,22 +542,22 @@ dummy: Immediate exit requested\n";
     }
 
     #[test]
-    fn stderr_within_returns_output_and_gives_up_on_a_stuck_command() {
+    fn a_probe_returns_its_output_and_gives_up_on_a_stuck_command() {
         if cfg!(windows) {
             return;
         }
         let mut quick = Command::new("sh");
         quick.args(["-c", "echo listed >&2"]);
-        let out = stderr_within(&mut quick, std::time::Duration::from_secs(10));
+        let out = capture_patiently(&mut quick, Patience::Forever, Stream::Stderr);
         assert_eq!(out.as_deref().map(str::trim), Some("listed"));
+        // The time is up before the command says anything: it is killed and
+        // the probe reports that it did not answer, not an empty list.
         let mut stuck = Command::new("sh");
-        stuck.args(["-c", "sleep 30"]);
-        let started = std::time::Instant::now();
+        stuck.args(["-c", "exec sleep 30"]);
         assert_eq!(
-            stderr_within(&mut stuck, std::time::Duration::from_millis(100)),
+            capture_patiently(&mut stuck, Patience::Expired, Stream::Stderr),
             None
         );
-        assert!(started.elapsed() < std::time::Duration::from_secs(10));
     }
 
     fn joined(args: &[String]) -> String {

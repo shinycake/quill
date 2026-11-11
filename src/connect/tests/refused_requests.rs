@@ -75,7 +75,10 @@ fn a_failed_sticker_set_is_not_asked_again_until_another_is_picked() {
         r#"{"@type":"updateUserStatus","user_id":7,"status":{"@type":"userStatusOnline","expires":1}}"#,
     );
     assert_eq!(rig.sent("getStickerSet").len(), 1);
-    assert_eq!(rig.driver.session.stickers.stickers.failed_set_id, Some(77));
+    assert_eq!(
+        rig.driver.session.stickers.stickers.set,
+        crate::state::StickerSetStage::Failed { set_id: 77 }
+    );
     // Another set, then back: asked again (the user chose it).
     let other = rig.driver.select_sticker_set(88).unwrap().unwrap();
     rig.refuse(other, "STICKERSET_INVALID");
@@ -87,12 +90,12 @@ fn a_failed_sticker_set_is_not_asked_again_until_another_is_picked() {
 fn a_failed_similar_bots_load_can_be_asked_again() {
     let mut rig = Rig::new();
     let asked = rig.driver.fetch_similar_bots(42).unwrap().unwrap();
-    // The UI marks the section loading once the request is out.
-    rig.driver
-        .session
-        .bots
-        .similar_bots
-        .insert(42, SimilarBotsFetch::Loading);
+    // The driver marks the section loading once the request is out.
+    assert!(matches!(
+        rig.driver.session.bots.similar_bots.get(&42),
+        Some(SimilarBotsFetch::Loading)
+    ));
+    assert!(rig.driver.fetch_similar_bots(42).unwrap().is_none());
     rig.refuse(asked, "BOT_INVALID");
     assert!(!rig.driver.session.bots.similar_bots.contains_key(&42));
     assert!(rig.driver.fetch_similar_bots(42).unwrap().is_some());

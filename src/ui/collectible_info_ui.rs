@@ -13,18 +13,19 @@ use super::chat_row::chat_avatar;
 use super::earn::ton_icon;
 use super::message_text::format_unix_date_time;
 use super::shell::{DialogKind, QuillShell};
+use super::status_note::StatusNote;
 use crate::ui::os_open::open_link_in;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::collectible_info::{
-    CollectibleKind, CollectibleLookup, copy_label, crypto_text, fiat_text, format_entity,
-    info_prefix, title_parts,
+    CollectibleKind, CollectibleLookup, LookupSpec, copy_label, crypto_text, fiat_text,
+    format_entity, info_prefix, title_parts, word_range,
 };
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// The error text `COLLECTIBLE_NOT_FOUND` leaves in a failed lookup.
@@ -40,21 +41,28 @@ impl QuillApp {
         copy_text: String,
         cx: &mut Context<Self>,
     ) {
-        let lookup = CollectibleLookup::new(entity, owner_name, owner_chat, copy_text);
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.request_collectible_info(lookup);
+        let lookup = LookupSpec::new(entity, owner_name, owner_chat, copy_text);
+        if let Some(live) = self.live.as_mut()
+            && live.driver.request_collectible_info(lookup).is_err()
+        {
+            self.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULD_NOT_LOAD_THE_COLLECTIBLE,
+            )));
+            cx.notify();
+            return;
         }
         self.open_box(crate::ui::shell::DialogKind::CollectibleInfo);
         cx.notify();
     }
 
     /// A lookup that failed: a username that is not a collectible one is
-    /// copied as a link, everything else stays silent.
+    /// copied as a link; any other failure says so in a status note, so the
+    /// tap is not silently dead.
     pub(super) fn pump_collectible_info(&mut self, cx: &mut Context<Self>) {
         let failed = self
             .session()
             .and_then(|s| s.payments.hub.collectible.as_ref())
-            .is_some_and(|lookup| lookup.failed.is_some());
+            .is_some_and(|lookup| lookup.failure().is_some());
         if !failed {
             return;
         }
@@ -65,10 +73,14 @@ impl QuillApp {
             return;
         };
         if lookup.kind == CollectibleKind::Username
-            && lookup.failed.as_deref() == Some(NOT_FOUND)
+            && lookup.failure() == Some(NOT_FOUND)
             && !lookup.copy_text.is_empty()
         {
             self.copy_profile_text(&lookup.copy_text, tr(keys::STICKERS_COPIED), cx);
+        } else {
+            self.set_note(StatusNote::error(tr(
+                keys::Q_MONEY_COULD_NOT_LOAD_THE_COLLECTIBLE,
+            )));
         }
         cx.notify();
     }
@@ -121,7 +133,7 @@ impl QuillApp {
             else {
                 return dialog.on_close(on_close);
             };
-            let Some(info) = lookup.info.clone() else {
+            let Some(info) = lookup.info().cloned() else {
                 return dialog.on_close(on_close);
             };
             let formatted = format_entity(lookup.kind, &lookup.entity);
@@ -183,9 +195,13 @@ impl QuillApp {
                 font_weight: Some(FontWeight::BOLD),
                 ..Default::default()
             };
-            let fragment_range = prefix.len()
-                ..prefix.len() + tr(keys::INFO_MOBILE_CONTEXT_MENU_FRAGMENT_ABOUT_LINK).len();
-            let sentence = StyledText::new(sentence).with_highlights(vec![(fragment_range, bold)]);
+            let highlights = word_range(
+                &sentence,
+                tr(keys::INFO_MOBILE_CONTEXT_MENU_FRAGMENT_ABOUT_LINK),
+            )
+            .map(|range| vec![(range, bold)])
+            .unwrap_or_default();
+            let sentence = StyledText::new(sentence).with_highlights(highlights);
             let price_color = cx.theme().foreground;
             let mut price = div().flex().items_center().justify_center().gap_1();
             if info.crypto_currency == "TON" {
@@ -237,16 +253,14 @@ impl QuillApp {
                         })),
                 )
                 .into_any_element();
-            let body = Rc::new(RefCell::new(Some(body)));
+            // One-shot hand-over; `Cell::take` cannot panic on re-entry.
+            let body = Rc::new(Cell::new(Some(body)));
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(formatted))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))
@@ -270,7 +284,7 @@ crate::ui::shell::register_dialogs! {
                     .hub
                     .collectible
                     .as_ref()
-                    .is_some_and(|lookup| lookup.info.is_some())
+                    .is_some_and(|lookup| lookup.info().is_some())
             })
         },
         QuillApp::build_collectible_info_dialog,

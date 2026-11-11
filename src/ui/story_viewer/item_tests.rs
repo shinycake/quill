@@ -4,6 +4,7 @@
 //! `ready-story-viewer` demo, which opens on Leo's story 3.
 use super::icon_chrome::MenuAct;
 use super::open_tests::{frames, open_app};
+use crate::ui::stories_state::{PanelKind, ViewerPanel};
 use crate::ui::story_albums::StoryPrivacyEdit;
 use gpui_kit::TestAppContext;
 use quill::ids::ChatId;
@@ -30,10 +31,13 @@ fn a_menu_answer_for_another_story_does_nothing(cx: &mut TestAppContext) {
         app.stories.with_viewer_ui(|open| open.menu_open = true);
         app.run_story_menu(MenuAct::React, (LEO, 2), window, cx);
         let open = app.stories.viewer_ui();
-        assert!(!open.reaction_picker_open, "the menu was for story 2");
+        assert!(
+            !open.is_open(PanelKind::ReactionPicker),
+            "the menu was for story 2"
+        );
         assert!(!open.menu_open, "the menu closed");
         app.run_story_menu(MenuAct::React, (LEO, 3), window, cx);
-        assert!(app.stories.viewer_ui().reaction_picker_open);
+        assert!(app.stories.viewer_ui().is_open(PanelKind::ReactionPicker));
     });
 }
 
@@ -45,7 +49,7 @@ fn the_open_menu_and_the_composer_pause_the_story(cx: &mut TestAppContext) {
         app.stories.with_viewer_ui(|open| open.menu_open = true);
         assert!(app.story_playback_paused(), "the menu is open");
         app.stories.with_viewer_ui(|open| open.menu_open = false);
-        app.stories.composer.open = true;
+        *app.stories.composer = quill::story_composer::StoryComposer::open();
         assert!(
             app.story_playback_paused(),
             "Edit or Repost is open over it"
@@ -58,9 +62,8 @@ fn a_step_drops_the_last_storys_editors(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_app(cx, "ready-story-viewer");
     app.update(&mut vcx, |app, cx| {
         app.stories.with_viewer_ui(|open| {
-            open.privacy_edit = Some(privacy_edit());
+            open.show(ViewerPanel::Privacy(privacy_edit()));
             open.menu_open = true;
-            open.share_open = true;
         });
         app.step_story_viewer(1, cx);
     });
@@ -71,9 +74,9 @@ fn a_step_drops_the_last_storys_editors(cx: &mut TestAppContext) {
             app.stories.viewer.current().map(|item| item.chat_id),
             Some(LEO)
         );
-        assert!(open.privacy_edit.is_none(), "Leo's privacy editor");
+        assert!(open.privacy_edit().is_none(), "Leo's privacy editor");
         assert!(!open.menu_open);
-        assert!(!open.share_open);
+        assert!(!open.has_panel());
     });
 }
 
@@ -82,8 +85,7 @@ fn opening_over_the_viewer_starts_clean(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_app(cx, "ready-story-viewer");
     app.update(&mut vcx, |app, cx| {
         app.stories.with_viewer_ui(|open| {
-            open.privacy_edit = Some(privacy_edit());
-            open.reply_open = true;
+            open.show(ViewerPanel::Privacy(privacy_edit()));
         });
         app.open_story_viewer(ChatId(MAYA), 5, StoryOpenScope::Tray, cx);
     });
@@ -91,8 +93,8 @@ fn opening_over_the_viewer_starts_clean(cx: &mut TestAppContext) {
     app.read_with(&vcx, |app, _| {
         let open = app.stories.viewer_ui();
         assert!(app.stories.viewer.is_open());
-        assert!(open.privacy_edit.is_none(), "the old viewer's editor");
-        assert!(!open.reply_open, "the old viewer's reply row");
+        assert!(open.privacy_edit().is_none(), "the old viewer's editor");
+        assert!(!open.reply_open(), "the old viewer's reply row");
     });
 }
 
@@ -108,7 +110,7 @@ fn a_release_cancels_the_story_reply_being_recorded(cx: &mut TestAppContext) {
             let path = std::env::temp_dir().join("quill-story-reply-release-test.ogg");
             Ok(quill::voice::VoiceCapture::preview(path, 1, vec![4]))
         });
-        app.stories.with_viewer_ui(|open| open.reply_open = true);
+        app.stories.with_viewer_ui(|open| open.open_reply());
         app.start_voice_capture(CaptureFor::StoryReply, cx);
     });
     vcx.run_until_parked();
@@ -122,22 +124,24 @@ fn a_release_cancels_the_story_reply_being_recorded(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn a_finished_page_op_goes_with_the_story(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_app(cx, "ready-story-viewer");
-    let op = |state| {
-        Some(StoryPageOp {
-            label: "Saving".into(),
-            state,
-            request: None,
-        })
+    let op = |state| StoryPageOp {
+        label: "Saving".into(),
+        state,
+        request: quill::ids::RequestId(1),
+        chat_id: None,
     };
     app.update(&mut vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_deref_mut() {
-            session.stories.page_op = op(StoryPageOpState::Sending);
+            session
+                .stories
+                .page_ops
+                .begin(op(StoryPageOpState::Sending));
         }
         app.close_story_viewer(cx);
         let kept = app
             .demo_session
             .as_deref()
-            .map(|s| s.stories.page_op.is_some());
+            .map(|s| !s.stories.page_ops.is_empty());
         assert_eq!(kept, Some(true), "an op in flight keeps its line");
     });
     app.update(&mut vcx, |app, cx| {
@@ -146,13 +150,16 @@ fn a_finished_page_op_goes_with_the_story(cx: &mut TestAppContext) {
     frames(&mut vcx);
     app.update(&mut vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_deref_mut() {
-            session.stories.page_op = op(StoryPageOpState::Failed("no".into()));
+            session
+                .stories
+                .page_ops
+                .begin(op(StoryPageOpState::Failed("no".into())));
         }
         app.close_story_viewer(cx);
         let kept = app
             .demo_session
             .as_deref()
-            .map(|s| s.stories.page_op.is_some());
+            .map(|s| !s.stories.page_ops.is_empty());
         assert_eq!(kept, Some(false), "a failed op's line was about this story");
     });
 }
@@ -168,13 +175,13 @@ fn a_late_story_answer_stays_with_its_story(cx: &mut TestAppContext) {
             .with_viewer_ui(|open| open.page_op = Some(request));
         if let Some(session) = app.demo_session.as_deref_mut() {
             let manage = &mut session.stories.manage;
-            manage.pending = true;
             manage.story = Some((LEO.0, 3));
             manage.request = Some(request);
-            session.stories.page_op = Some(StoryPageOp {
+            session.stories.page_ops.begin(StoryPageOp {
                 label: "hiding stories".into(),
                 state: StoryPageOpState::Sending,
-                request: Some(request),
+                request,
+                chat_id: None,
             });
         }
         assert!(app.story_manage_status().is_some(), "Saving… under story 3");
@@ -197,13 +204,13 @@ fn a_late_story_answer_stays_with_its_story(cx: &mut TestAppContext) {
         // Both answers land now, as errors.
         if let Some(session) = app.demo_session.as_deref_mut() {
             let manage = &mut session.stories.manage;
-            manage.pending = false;
             manage.request = None;
             manage.error = Some("Story update failed: STORY_ID_INVALID".into());
-            session.stories.page_op = Some(StoryPageOp {
+            session.stories.page_ops.begin(StoryPageOp {
                 label: "hiding stories".into(),
                 state: StoryPageOpState::Failed("PEER_ID_INVALID".into()),
-                request: Some(request),
+                request,
+                chat_id: None,
             });
         }
         assert_eq!(app.story_manage_status(), None);

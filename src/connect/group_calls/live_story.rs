@@ -21,6 +21,13 @@ use crate::telegram::requests::{
 /// the same chat holds the chat's stream.
 const STORY_CHAT_TAKEN: &str = "a call in this chat is using its stream";
 
+/// Which step of a live comment's delete box did not go out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LiveDeleteFailed {
+    Delete(ConnectSendError),
+    Ban(ConnectSendError),
+}
+
 impl<S: JsonSender> ConnectDriver<S> {
     fn live_story_request(
         &mut self,
@@ -34,13 +41,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_json_request(extra, &json)
     }
 
+    /// A request did not go out: its stage goes back, so the next ingest
+    /// asks again.
+    fn live_story_unsent(
+        &mut self,
+        group_call_id: i32,
+        back: impl FnOnce(&mut crate::state::LiveStoryState),
+    ) {
+        if let Some(live) = self.session.live_story_mut(group_call_id) {
+            back(live);
+        }
+    }
+
     fn watched_live_call(&self) -> Option<&crate::state::ActiveGroupCall> {
-        let live = self.session.stories.live.as_ref()?;
-        self.session
-            .calls
-            .story_stream
-            .as_ref()
-            .filter(|call| call.id == live.group_call_id)
+        self.session.live_call()
     }
 
     /// Once the `joinLiveStory` answer is in: `getLiveStoryStreamer` (not
@@ -53,7 +67,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let Some((group_call_id, is_rtmp)) = self
             .watched_live_call()
-            .filter(|call| call.is_joined || !call.join_payload.is_empty())
+            .filter(|call| call.is_joined || !call.transport.answer().is_empty())
             .map(|call| (call.id, call.is_rtmp_stream))
         else {
             return Ok(());
@@ -61,37 +75,86 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(live) = self.session.live_story_mut(group_call_id) else {
             return Ok(());
         };
-        if live.extras_requested {
+        // Each is asked while idle; a failed one waits for the next Join,
+        // and one whose send failed is idle again, for the next ingest.
+        let want = (
+            !is_rtmp && live.streamer.is_idle(),
+            live.donors.is_idle(),
+            live.message_senders.is_idle(),
+        );
+        // A new Join (every extra idle again) lets a failed bursts ask go out.
+        if want.1 && want.2 {
+            self.session.stories.live_bursts.retry_failed();
+        }
+        if !(want.0 || want.1 || want.2) {
             return Ok(());
         }
-        live.extras_requested = true;
-        if !is_rtmp {
-            self.live_story_request(LiveStoryPurpose::GetStreamer { group_call_id }, |extra| {
-                get_live_story_streamer(extra, group_call_id)
-            })?;
+        if want.0 {
+            if let Some(live) = self.session.live_story_mut(group_call_id) {
+                live.streamer.begin();
+            }
+            let sent = self
+                .live_story_request(LiveStoryPurpose::GetStreamer { group_call_id }, |extra| {
+                    get_live_story_streamer(extra, group_call_id)
+                });
+            if let Err(err) = sent {
+                self.live_story_unsent(group_call_id, |live| live.streamer.cancel());
+                return Err(err);
+            }
         }
-        self.live_story_request(LiveStoryPurpose::GetTopDonors { group_call_id }, |extra| {
-            get_live_story_top_donors(extra, group_call_id)
-        })?;
-        self.live_story_request(
-            LiveStoryPurpose::GetMessageSenders { group_call_id },
-            |extra| get_live_story_available_message_senders(extra, group_call_id),
-        )?;
-        self.maybe_fetch_live_bursts()
+        if want.1 {
+            if let Some(live) = self.session.live_story_mut(group_call_id) {
+                live.donors.begin();
+            }
+            let sent = self
+                .live_story_request(LiveStoryPurpose::GetTopDonors { group_call_id }, |extra| {
+                    get_live_story_top_donors(extra, group_call_id)
+                });
+            if let Err(err) = sent {
+                self.live_story_unsent(group_call_id, |live| live.donors.cancel());
+                return Err(err);
+            }
+        }
+        if want.2 {
+            if let Some(live) = self.session.live_story_mut(group_call_id) {
+                live.message_senders.begin();
+            }
+            let sent = self.live_story_request(
+                LiveStoryPurpose::GetMessageSenders { group_call_id },
+                |extra| get_live_story_available_message_senders(extra, group_call_id),
+            );
+            if let Err(err) = sent {
+                self.live_story_unsent(group_call_id, |live| live.message_senders.cancel());
+                return Err(err);
+            }
+        }
+        Ok(())
     }
 
     /// The Stars effect's bursts, once per session (tdesktop asks for the
     /// generic animations once too, `Reactions::requestGeneric`).
-    fn maybe_fetch_live_bursts(&mut self) -> Result<(), ConnectSendError> {
-        if self.session.stories.live_bursts != LiveBursts::Unasked {
+    /// Asked from its own step, so an early return of the extras fetch never
+    /// skips it; a refused send ends in `Failed`, not in a re-ask per ingest.
+    pub(crate) fn maybe_fetch_live_bursts(&mut self) -> Result<(), ConnectSendError> {
+        let joined = self
+            .watched_live_call()
+            .is_some_and(|call| call.is_joined || !call.transport.answer().is_empty());
+        if self.session.stories.live_bursts != LiveBursts::Unasked || !joined {
             return Ok(());
         }
-        self.live_story_request(
+        match self.live_story_request(
             LiveStoryPurpose::GetBursts,
             get_custom_emoji_reaction_animations,
-        )?;
-        self.session.stories.live_bursts = LiveBursts::Requested;
-        Ok(())
+        ) {
+            Ok(request) => {
+                self.session.stories.live_bursts = LiveBursts::Requested(request);
+                Ok(())
+            }
+            Err(err) => {
+                self.session.stories.live_bursts = LiveBursts::Failed;
+                Err(err)
+            }
+        }
     }
 
     /// The streamer's camera and screen for the engine's video
@@ -104,7 +167,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .live
             .as_ref()
             .filter(|live| live.group_call_id == group_call_id)
-            .and_then(|live| live.streamer.as_ref())
+            .and_then(|live| live.streamer.data())
         else {
             return Vec::new();
         };
@@ -200,18 +263,23 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// The toast's Undo: the pending Stars are dropped.
     pub fn undo_live_story_reaction(&mut self) -> Result<(), ConnectSendError> {
-        let Some(live) = self.session.stories.live.as_mut() else {
+        let Some(live) = self.session.stories.live.as_ref() else {
             return Ok(());
         };
-        if live.pending_reaction.take().is_none() {
+        if live.pending_reaction.is_none() {
             return Ok(());
         }
         let group_call_id = live.group_call_id;
+        // The pending Stars are dropped only once the removal went out: a
+        // refused send leaves them (and the Undo) as they were.
         self.live_story_request(
             LiveStoryPurpose::RemovePendingReactions { group_call_id },
             |extra| remove_pending_live_story_reactions(extra, group_call_id),
-        )
-        .map(|_| ())
+        )?;
+        if let Some(live) = self.session.live_story_mut(group_call_id) {
+            live.pending_reaction = None;
+        }
+        Ok(())
     }
 
     /// Commits the pending Stars once their Undo window is over. Returns
@@ -223,27 +291,41 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !live.pending_reaction.is_some_and(|p| p.due(now_ms)) {
             return false;
         }
-        let Some(pending) = live.commit_reaction() else {
+        let group_call_id = live.group_call_id;
+        let extra = self.session.request(
+            RequestPurpose::Stories(StoriesPurpose::Live(
+                LiveStoryPurpose::CommitPendingReactions { group_call_id },
+            )),
+            None,
+        );
+        let Some(live) = self.session.live_story_mut(group_call_id) else {
             return false;
         };
-        let group_call_id = live.group_call_id;
+        let Some(pending) = live.commit_reaction(extra) else {
+            self.session.requests.take(extra);
+            return false;
+        };
+        if self
+            .send_json_request(
+                extra,
+                &commit_pending_live_story_reactions(extra, group_call_id),
+            )
+            .is_err()
+        {
+            // Nothing went out: TDLib still holds the taps as pending, so
+            // they wait here again for the next commit.
+            if let Some(live) = self.session.live_story_mut(group_call_id) {
+                live.commit_unsent(extra, pending, now_ms);
+                live.note = Some(Refusal::NotEnough.message().to_string());
+            }
+            return true;
+        }
         // tdesktop `addStars(from, stars, mine)` at send time: your Stars
         // fly up from the button as the reaction goes out.
         if let Some(sender) = self.session.live_story_sender()
             && let Some(live) = self.session.live_story_mut(group_call_id)
         {
             live.push_effect(sender, pending.stars);
-        }
-        if self
-            .live_story_request(
-                LiveStoryPurpose::CommitPendingReactions { group_call_id },
-                |extra| commit_pending_live_story_reactions(extra, group_call_id),
-            )
-            .is_err()
-            && let Some(live) = self.session.live_story_mut(group_call_id)
-        {
-            live.committed_stars = live.committed_stars.saturating_sub(pending.stars);
-            live.note = Some(Refusal::NotEnough.message().to_string());
         }
         true
     }
@@ -296,7 +378,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .stories
             .live
             .as_ref()
-            .and_then(|live| live.message_senders.as_ref())
+            .and_then(|live| live.message_senders.data())
             .is_some_and(|senders| senders.iter().any(|s| s.sender == sender));
         if !offered {
             return Err(ConnectSendError::InvalidRequest);
@@ -306,7 +388,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             |extra| set_live_story_message_sender(extra, group_call_id, sender),
         )?;
         // Shown at once; `updateGroupCall` confirms.
-        if let Some(call) = self.session.calls.story_stream.as_mut() {
+        if let Some(call) = self
+            .session
+            .calls
+            .story_stream
+            .as_mut()
+            .filter(|call| call.id == group_call_id)
+        {
             call.message_sender_id = Some(sender);
         }
         Ok(extra)
@@ -334,7 +422,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             })?,
         };
         // tdesktop removes them at once.
-        if let Some(call) = self.session.calls.story_stream.as_mut() {
+        if let Some(call) = self
+            .session
+            .calls
+            .story_stream
+            .as_mut()
+            .filter(|call| call.id == group_call_id)
+        {
             call.messages.retain(|m| match all_from {
                 Some(sender) => m.sender_id != sender,
                 None => m.message_id != message_id,
@@ -343,6 +437,25 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session
             .after_live_story_messages_deleted(group_call_id);
         Ok(extra)
+    }
+
+    /// The delete box confirmed (tdesktop `Messages::deleteConfirmed`):
+    /// delete, and when `ban` names the sender, ban them, but only once the
+    /// delete went out: a comment that stayed is not a reason to ban.
+    pub fn delete_live_story_comment_then_ban(
+        &mut self,
+        message_id: i32,
+        report_spam: bool,
+        all_from: Option<MessageSender>,
+        ban: Option<MessageSender>,
+    ) -> Result<(), LiveDeleteFailed> {
+        self.delete_live_story_comment(message_id, report_spam, all_from)
+            .map_err(LiveDeleteFailed::Delete)?;
+        if let Some(sender) = ban {
+            self.ban_live_story_commenter(sender)
+                .map_err(LiveDeleteFailed::Ban)?;
+        }
+        Ok(())
     }
 
     /// The viewer left the live story: pending Stars are dropped (tdesktop
@@ -394,7 +507,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 group_call_id,
             }))
             .is_some();
-        if !(stream.is_joined || stream.reconnecting() || stream.need_rejoin || joining) {
+        if !(stream.is_joined || stream.reconnecting() || joining) {
             return Ok(());
         }
         let extra = self.session.request(
@@ -437,9 +550,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.teardown_group_call_transport(group_call_id);
         if let Some(call) = self.session.calls.story_stream.as_mut() {
-            call.transport_ready = false;
-            call.join_payload.clear();
-            call.transport_error = Some(STORY_CHAT_TAKEN.to_string());
+            call.transport.connect_failed(STORY_CHAT_TAKEN);
         }
     }
 
@@ -461,7 +572,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_mut()
             .filter(|call| call.id == group_call_id)
         {
-            call.transport_error = Some(STORY_CHAT_TAKEN.to_string());
+            call.transport.fail(STORY_CHAT_TAKEN);
         }
         true
     }
@@ -477,7 +588,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 chat_id: live.chat_id,
             });
         }
-        let streamer = live.streamer.as_ref()?;
+        let streamer = live.streamer.data()?;
         let user_id = match streamer.participant_id {
             MessageSender::User { user_id } => user_id,
             MessageSender::Chat { chat_id } => chat_id,

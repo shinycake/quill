@@ -40,6 +40,7 @@ pub use notice::{OFFICIAL_APPS_URL, WalletSurface};
 pub use own::{NftPage, OwnWallet, TxKind, TxPage, WalletNft, WalletTx};
 pub use payload::{TonWalletPayload, TonWalletPurpose, parse_payload};
 
+use crate::state::fetch::Fetch;
 use std::collections::HashMap;
 
 /// The "Telegram" service-notifications chat (user 777000). Transfers
@@ -105,50 +106,154 @@ pub enum ProfileAddress {
     None,
 }
 
-/// A paged, read-only list (history or NFTs).
+/// The rows of a paged list and where its next page starts.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Paged<T> {
+pub struct Page<T> {
     pub items: Vec<T>,
     pub next_offset: String,
-    pub loading: bool,
-    /// The first page arrived (an empty list then means "nothing yet").
-    pub loaded: bool,
-    pub error: Option<String>,
 }
 
-impl<T> Default for Paged<T> {
-    fn default() -> Self {
-        Self {
-            items: Vec::new(),
-            next_offset: String::new(),
-            loading: false,
-            loaded: false,
-            error: None,
-        }
-    }
+/// A paged, read-only list (history or NFTs): one value for "not asked",
+/// "a page is in flight", "shown" and "failed". The rows already shown stay
+/// reachable while another page loads or after it failed. A page is applied
+/// only when its answer carries the request the list waits for, so a late
+/// answer of an earlier list (the Money page was closed and opened again)
+/// lands nowhere.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Paged<T> {
+    /// Never asked.
+    #[default]
+    Idle,
+    /// `request` asks for the first page, or the next one (`append`).
+    Loading {
+        request: crate::ids::RequestId,
+        append: bool,
+        shown: Option<Page<T>>,
+    },
+    /// The latest page landed. An empty list then means "nothing yet".
+    Ready(Page<T>),
+    /// The latest request failed; Retry asks again.
+    Failed {
+        error: String,
+        shown: Option<Page<T>>,
+    },
 }
 
 impl<T> Paged<T> {
-    /// Apply one page: a first page replaces the list.
-    pub fn apply(&mut self, items: Vec<T>, next_offset: String, append: bool) {
-        if !append {
-            self.items.clear();
-        }
-        self.items.extend(items);
-        self.next_offset = next_offset;
-        self.loading = false;
-        self.loaded = true;
-        self.error = None;
+    /// A list that already holds its first page (a demo or a test seed).
+    pub fn set_ready(&mut self, items: Vec<T>, next_offset: String) {
+        *self = Self::Ready(Page { items, next_offset });
     }
 
-    /// The request failed: stop loading and keep what is shown.
-    pub fn fail(&mut self, error: String) {
-        self.loading = false;
-        self.error = Some(error);
+    fn shown(&self) -> Option<&Page<T>> {
+        match self {
+            Self::Idle => None,
+            Self::Ready(page) => Some(page),
+            Self::Loading { shown, .. } | Self::Failed { shown, .. } => shown.as_ref(),
+        }
+    }
+
+    fn take_shown(&mut self) -> Option<Page<T>> {
+        match std::mem::take(self) {
+            Self::Idle => None,
+            Self::Ready(page) => Some(page),
+            Self::Loading { shown, .. } | Self::Failed { shown, .. } => shown,
+        }
+    }
+
+    /// The rows shown, oldest request first.
+    pub fn items(&self) -> &[T] {
+        self.shown().map_or(&[], |page| page.items.as_slice())
+    }
+
+    pub fn next_offset(&self) -> &str {
+        self.shown().map_or("", |page| page.next_offset.as_str())
+    }
+
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading { .. })
+    }
+
+    /// The first page arrived (an empty list then means "nothing yet").
+    pub fn is_loaded(&self) -> bool {
+        self.shown().is_some()
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            Self::Failed { error, .. } => Some(error),
+            _ => None,
+        }
     }
 
     pub fn has_more(&self) -> bool {
-        self.loaded && !self.next_offset.is_empty()
+        self.shown()
+            .is_some_and(|page| !page.next_offset.is_empty())
+    }
+
+    /// The request that asks for a page went out. The rows shown stay and
+    /// the last error is gone.
+    pub fn begin(&mut self, request: crate::ids::RequestId, append: bool) {
+        let shown = self.take_shown();
+        *self = Self::Loading {
+            request,
+            append,
+            shown,
+        };
+    }
+
+    /// Apply the answer of `request`: a first page replaces the list.
+    /// `false` (and nothing changes) when the list waits for another one.
+    pub fn apply(
+        &mut self,
+        request: Option<crate::ids::RequestId>,
+        items: Vec<T>,
+        next_offset: String,
+    ) -> bool {
+        let Self::Loading {
+            request: waiting,
+            append,
+            shown,
+        } = self
+        else {
+            return false;
+        };
+        if Some(*waiting) != request {
+            return false;
+        }
+        let mut rows = match shown.take() {
+            Some(page) if *append => page.items,
+            _ => Vec::new(),
+        };
+        rows.extend(items);
+        *self = Self::Ready(Page {
+            items: rows,
+            next_offset,
+        });
+        true
+    }
+
+    /// The error of `request`: the rows shown stay. `false` when the list
+    /// waits for another request.
+    pub fn fail(&mut self, request: Option<crate::ids::RequestId>, error: String) -> bool {
+        let Self::Loading {
+            request: waiting, ..
+        } = self
+        else {
+            return false;
+        };
+        if Some(*waiting) != request {
+            return false;
+        }
+        let shown = self.take_shown();
+        *self = Self::Failed { error, shown };
+        true
+    }
+
+    /// The request could not be sent: back to what the list held.
+    pub fn send_failed(&mut self, error: String) {
+        let shown = self.take_shown();
+        *self = Self::Failed { error, shown };
     }
 }
 
@@ -160,6 +265,27 @@ pub enum MoneyTab {
     Collectibles,
 }
 
+/// What the Money page shows over its lists: nothing (the overview), one
+/// transaction, one NFT, or the lookup of a clicked transfer card's
+/// transaction. One at a time, so "back" is one assignment.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum MoneyDetail {
+    #[default]
+    Overview,
+    /// The transaction whose details are shown; `hint` brings "Your first
+    /// Grams!" up over them until "Got it".
+    Tx { tx: Box<WalletTx>, hint: bool },
+    /// The NFT whose details are shown (by address).
+    Nft(String),
+    /// The lookup of a clicked transfer card's transaction. The answer
+    /// shows the details only while the lookup is for the request that
+    /// answers; "back" or another click replaces it, so a late answer for
+    /// an earlier card is dropped.
+    Lookup { request: crate::ids::RequestId },
+    /// The text shown instead of the details.
+    LookupFailed(String),
+}
+
 /// The Money page (iOS `WalletScreen`, read-only).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MoneyPage {
@@ -167,23 +293,42 @@ pub struct MoneyPage {
     pub tab: MoneyTab,
     pub history: Paged<WalletTx>,
     pub nfts: Paged<WalletNft>,
-    /// The transaction whose details are shown.
-    pub selected_tx: Option<WalletTx>,
-    /// The NFT whose details are shown (by address).
-    pub selected_nft: Option<String>,
-    /// A clicked transfer card's transaction is being looked up.
-    pub tx_loading: bool,
-    /// The lookup failed: the text shown instead of the details.
-    pub tx_error: Option<String>,
-    /// The "Your first Grams!" info is up over the details.
-    pub hint_open: bool,
+    pub detail: MoneyDetail,
 }
 
 impl MoneyPage {
+    /// Whether the card lookup waits for the answer of `request`.
+    pub fn tx_lookup_waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
+        request.is_some_and(|id| self.detail == MoneyDetail::Lookup { request: id })
+    }
+
+    /// The text of a failed lookup.
+    pub fn tx_error(&self) -> Option<&str> {
+        match &self.detail {
+            MoneyDetail::LookupFailed(text) => Some(text),
+            _ => None,
+        }
+    }
+
+    /// The transaction whose details are shown.
+    pub fn selected_tx(&self) -> Option<&WalletTx> {
+        match &self.detail {
+            MoneyDetail::Tx { tx, .. } => Some(tx),
+            _ => None,
+        }
+    }
+
+    /// "Your first Grams!" is up over the details.
+    pub fn hint_open(&self) -> bool {
+        matches!(self.detail, MoneyDetail::Tx { hint: true, .. })
+    }
+
     /// The NFT whose details are shown.
     pub fn selected_nft(&self) -> Option<&WalletNft> {
-        let address = self.selected_nft.as_deref()?;
-        self.nfts.items.iter().find(|nft| nft.address == address)
+        let MoneyDetail::Nft(address) = &self.detail else {
+            return None;
+        };
+        self.nfts.items().iter().find(|nft| nft.address == *address)
     }
 }
 
@@ -194,9 +339,9 @@ pub struct TonWalletState {
     /// `ton_blockchain_explorer_url` from `getApplicationConfig`, once
     /// known; [`address::DEFAULT_EXPLORER_URL`] is used until then.
     pub explorer_url: Option<String>,
-    /// A `getApplicationConfig` for the explorer address is in flight or
-    /// done, so it is asked once per session.
-    pub explorer_url_requested: bool,
+    /// The `getApplicationConfig` for the explorer address: asked once per
+    /// session, again after it failed.
+    pub explorer: Fetch<()>,
     /// The `can_use_ton_wallet` option: when false nothing wallet-related
     /// is shown and no wallet getter is sent.
     pub can_use: bool,
@@ -204,12 +349,13 @@ pub struct TonWalletState {
     pub ton_usd_rate: Option<f64>,
     /// The own wallet, from `updateTonWalletState`.
     pub own: Option<OwnWallet>,
-    /// `loadTonWalletState` was sent this session.
-    pub state_requested: bool,
+    /// `loadTonWalletState`: sent once per session, again after it failed.
+    pub state_fetch: Fetch<()>,
     /// `currencyExchangeRates`: `(code, units per USD)`.
     pub rates: Vec<(String, f64)>,
-    /// `getCurrencyExchangeRates` is in flight or done.
-    pub rates_requested: bool,
+    /// `getCurrencyExchangeRates`: asked once per session, again after it
+    /// failed.
+    pub rates_fetch: Fetch<()>,
     /// The fiat currency the user picked; `None` until the account's prefs
     /// are read ([`fiat::DEFAULT_CURRENCY`] is used meanwhile).
     pub currency: Option<String>,
@@ -260,7 +406,7 @@ impl TonWalletState {
         self.can_use = on;
         if !on {
             self.own = None;
-            self.state_requested = false;
+            self.state_fetch = Fetch::Idle;
             self.money = MoneyPage::default();
             self.profile_addresses.clear();
         }

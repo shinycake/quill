@@ -23,6 +23,8 @@ use std::rc::Rc;
 
 /// Link names are 0–32 characters (`createChatFolderInviteLink`).
 const LINK_NAME_MAX: usize = 32;
+/// How long the copy button shows its check mark.
+const COPIED_MARK: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Whether the folder's rules allow a link (tdesktop
 /// `GoodForExportFilterLink`): only pinned and always-included chats may
@@ -142,11 +144,16 @@ impl QuillApp {
     /// Chats a link may include, in the list's order.
     fn folder_link_choices(&self, folder_id: i32) -> Vec<i64> {
         self.session()
-            .and_then(|s| s.chat_list.folder_link_chats.get(&folder_id).cloned())
+            .and_then(|s| {
+                s.chat_list
+                    .folder_shares
+                    .get(&folder_id)
+                    .and_then(|share| share.chats.data().cloned())
+            })
             .unwrap_or_default()
     }
 
-    fn start_folder_link_form(
+    pub(in crate::ui) fn start_folder_link_form(
         &mut self,
         link: Option<ChatFolderInviteLink>,
         window: &mut Window,
@@ -160,8 +167,9 @@ impl QuillApp {
             let full = self.session().is_some_and(|s| {
                 let count = s
                     .chat_list
-                    .folder_invite_links
+                    .folder_shares
                     .get(&folder_id)
+                    .and_then(|share| share.links.data())
                     .map_or(0, Vec::len);
                 s.chat_list
                     .folder_limits
@@ -172,6 +180,15 @@ impl QuillApp {
                 return;
             }
         }
+        // A delete in flight keeps the list: its answer settles that view.
+        if self
+            .folders
+            .share
+            .as_ref()
+            .is_some_and(|dialog| dialog.view.is_busy())
+        {
+            return;
+        }
         let choices = self.folder_link_choices(folder_id);
         let name = link.as_ref().map(|l| l.name.clone()).unwrap_or_default();
         let selected: std::collections::HashSet<i64> = match &link {
@@ -180,12 +197,8 @@ impl QuillApp {
             None => choices.iter().copied().collect(),
         };
         if let Some(dialog) = self.folders.share.as_mut() {
-            dialog.view = FolderShareView::Edit {
-                link: link.map(|l| l.invite_link),
-            };
+            dialog.view = FolderShareView::edit(link.map(|l| l.invite_link));
             dialog.selected = selected;
-            dialog.error = None;
-            dialog.confirm_delete = None;
             dialog
                 .name_input
                 .update(cx, |input, cx| input.set_value(name, window, cx));
@@ -208,7 +221,7 @@ impl QuillApp {
         };
         let fail = |this: &mut Self, text: &str| {
             if let Some(dialog) = this.folders.share.as_mut() {
-                dialog.error = Some(text.to_string());
+                dialog.view.set_op(LinkOp::Failed(text.to_string()));
             }
         };
         if name.chars().count() > LINK_NAME_MAX {
@@ -221,7 +234,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        let FolderShareView::Edit { link } = view else {
+        let FolderShareView::Edit { link, .. } = view else {
             return;
         };
         chat_ids.dedup();
@@ -230,30 +243,29 @@ impl QuillApp {
                 Some(link) => live
                     .driver
                     .edit_folder_invite_link(folder_id, link, &name, &chat_ids)
-                    .map(|_| ()),
+                    .map(Some),
                 None => live
                     .driver
                     .create_folder_invite_link(folder_id, &name, &chat_ids)
-                    .map(|_| ()),
+                    .map(Some),
             },
             None => {
                 // Screenshot demo: apply locally.
                 self.apply_demo_folder_link(folder_id, link.clone(), name.clone(), chat_ids);
                 if let Some(dialog) = self.folders.share.as_mut() {
-                    dialog.view = FolderShareView::List;
+                    dialog.view = FolderShareView::list();
                 }
-                Ok(())
+                Ok(None)
             }
         };
         match result {
-            Ok(()) => {
-                if self.live.is_some()
-                    && let Some(dialog) = self.folders.share.as_mut()
-                {
-                    dialog.busy = true;
-                    dialog.error = None;
+            // The form waits for the answer to this request.
+            Ok(Some(request)) => {
+                if let Some(dialog) = self.folders.share.as_mut() {
+                    dialog.view.set_op(LinkOp::Saving(request));
                 }
             }
+            Ok(None) => {}
             Err(err) => fail(
                 self,
                 &user_error_for(keys::Q_NOTES_FAILED_SAVE_FOLDER_LINK, &err),
@@ -272,11 +284,15 @@ impl QuillApp {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        let links = session
+        let share = session
             .chat_list
-            .folder_invite_links
+            .folder_shares
             .entry(folder_id)
             .or_default();
+        share.links.insert_data_if_missing(Vec::new);
+        let Some(links) = share.links.data_mut() else {
+            return;
+        };
         match link {
             Some(url) => {
                 if let Some(existing) = links.iter_mut().find(|l| l.invite_link == url) {
@@ -301,77 +317,159 @@ impl QuillApp {
         }
     }
 
-    fn delete_folder_link(&mut self, link: &str, cx: &mut Context<Self>) {
-        let Some(folder_id) = self.folders.share.as_ref().map(|d| d.folder_id) else {
+    pub(in crate::ui) fn delete_folder_link(&mut self, link: &str, cx: &mut Context<Self>) {
+        let Some((folder_id, busy)) = self
+            .folders
+            .share
+            .as_ref()
+            .map(|d| (d.folder_id, d.view.is_busy()))
+        else {
             return;
         };
+        // One link request at a time: a second delete would overwrite the
+        // first one's stage and its answer would never be seen.
+        if busy {
+            return;
+        }
         let result = match self.live.as_mut() {
             Some(live) => live
                 .driver
                 .delete_folder_invite_link(folder_id, link)
-                .map(|_| ()),
+                .map(Some),
             None => {
                 if let Some(session) = self.demo_session.as_mut()
-                    && let Some(links) = session.chat_list.folder_invite_links.get_mut(&folder_id)
+                    && let Some(links) = session
+                        .chat_list
+                        .folder_shares
+                        .get_mut(&folder_id)
+                        .and_then(|share| share.links.data_mut())
                 {
                     links.retain(|l| l.invite_link != link);
                 }
-                Ok(())
+                Ok(None)
             }
         };
         if let Some(dialog) = self.folders.share.as_mut() {
-            dialog.confirm_delete = None;
-            if let Err(err) = result {
-                dialog.error = Some(user_error_for(
-                    keys::Q_NOTES_FAILED_DELETE_FOLDER_LINK,
-                    &err,
-                ));
+            if let FolderShareView::List { confirm_delete, .. } = &mut dialog.view {
+                *confirm_delete = None;
+            }
+            match result {
+                Ok(Some(request)) => dialog.view.set_op(LinkOp::Saving(request)),
+                Ok(None) => {}
+                Err(err) => {
+                    dialog.view.set_op(LinkOp::Failed(user_error_for(
+                        keys::Q_NOTES_FAILED_DELETE_FOLDER_LINK,
+                        &err,
+                    )));
+                }
             }
         }
         cx.notify();
     }
 
-    fn copy_folder_link(&mut self, link: &str, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn copy_folder_link(&mut self, link: &str, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(link.to_string()));
-        if let Some(dialog) = self.folders.share.as_mut() {
-            dialog.copied = Some(link.to_string());
+        if self.folders.share.is_some() {
+            // The check mark goes back to the copy icon on its own. The
+            // mark owns this timer: replacing or dropping the mark (another
+            // copy, the form, the box closing, another account) cancels it.
+            let timer = self.spawn_screen(cx, async move |this, cx| {
+                cx.background_executor().timer(COPIED_MARK).await;
+                let _ = this.update(cx, |this, cx| {
+                    if let Some(dialog) = this.folders.share.as_mut() {
+                        dialog.mark_copied(CopyMark::Idle);
+                        cx.notify();
+                    }
+                });
+            });
+            if let Some(dialog) = self.folders.share.as_mut() {
+                dialog.mark_copied(CopyMark::Copied {
+                    link: link.to_string(),
+                    timer: CopyTimer::new(timer),
+                });
+            }
         }
         self.set_note(StatusNote::info(tr(keys::STAR_REF_LINK_COPIED_TITLE)));
         cx.notify();
     }
 
-    /// Poll-loop half: drain the one-shot results of link requests into the
-    /// open dialog. Returns whether anything changed.
-    pub(super) fn drain_folder_share(&mut self, cx: &mut Context<Self>) -> bool {
-        let (saved, error) = match self.session_mut_any() {
-            Some(session) => (
-                std::mem::take(&mut session.chat_list.folder_link_saved),
-                session.chat_list.folder_share_error.take(),
-            ),
-            None => return false,
+    /// Poll-loop half: the box's link request answered. Only the answer to
+    /// the request this box sent settles it: the form closes on success and
+    /// the error shows in the box when it failed. Returns whether anything
+    /// changed.
+    pub(super) fn settle_folder_share(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(LinkOp::Saving(request)) =
+            self.folders.share.as_ref().map(|d| d.view.op().clone())
+        else {
+            return false;
         };
-        let mut changed = false;
+        let answer = self
+            .session_mut_any()
+            .and_then(|session| session.chat_list.dialog_answers.take(request));
+        let Some(answer) = answer else {
+            return false;
+        };
         if let Some(dialog) = self.folders.share.as_mut() {
-            if saved {
-                dialog.view = FolderShareView::List;
-                dialog.busy = false;
-                dialog.error = None;
-                changed = true;
-            }
-            if let Some(error) = error {
-                dialog.busy = false;
-                dialog.error = Some(error);
-                changed = true;
-            }
-        } else if let Some(error) = error {
-            // Recommended folders (or a stray failure) report in the toast.
-            self.set_note(StatusNote::error(error));
-            changed = true;
+            let next = match answer {
+                quill::state::DialogAnswer::Failed(line) => LinkOp::Failed(line),
+                // The limit box is up; no line on top of it.
+                quill::state::DialogAnswer::LimitHit => LinkOp::Idle,
+                quill::state::DialogAnswer::Done | quill::state::DialogAnswer::Checked(_) => {
+                    if matches!(dialog.view, FolderShareView::Edit { .. }) {
+                        dialog.view = FolderShareView::list();
+                    }
+                    LinkOp::Idle
+                }
+            };
+            dialog.view.set_op(next);
         }
-        if changed {
-            cx.notify();
+        cx.notify();
+        true
+    }
+
+    /// The Retry of a share box whose folder or links failed to load.
+    fn retry_folder_share(&mut self, cx: &mut Context<Self>) {
+        let Some(folder_id) = self.folders.share.as_ref().map(|d| d.folder_id) else {
+            return;
+        };
+        if let Some(live) = self.live.as_mut() {
+            let spec_missing = live
+                .driver
+                .session
+                .chat_list
+                .fresh_spec(folder_id)
+                .is_none();
+            if spec_missing {
+                let _ = live.driver.fetch_chat_folder(folder_id);
+            }
+            let _ = live.driver.fetch_folder_share(folder_id);
         }
-        changed
+        cx.notify();
+    }
+
+    /// A line and a Retry for a part of the Share Folder box that could
+    /// not load.
+    fn folder_share_load_error(&self, error: String, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+                div()
+                    .id("folder-share-load-error")
+                    .text_xs()
+                    .text_color(danger_dark())
+                    .child(error),
+            )
+            .child(
+                div().flex().child(
+                    Button::new("folder-share-load-retry")
+                        .label(tr(keys::Q_MONEY_RETRY))
+                        .small()
+                        .on_click(cx.listener(|this, _, _, cx| this.retry_folder_share(cx))),
+                ),
+            )
+            .into_any_element()
     }
 
     pub(super) fn build_folder_share_dialog(
@@ -399,11 +497,11 @@ impl QuillApp {
                 .unwrap_or_default();
             let editing = matches!(state.view, FolderShareView::Edit { .. });
             let title = match &state.view {
-                FolderShareView::List => tr(keys::FILTERS_LINK).to_string(),
-                FolderShareView::Edit { link: None } => {
+                FolderShareView::List { .. } => tr(keys::FILTERS_LINK).to_string(),
+                FolderShareView::Edit { link: None, .. } => {
                     tr(keys::Q_CHATLIST_NEW_INVITE_LINK).to_string()
                 }
-                FolderShareView::Edit { link: Some(_) } => {
+                FolderShareView::Edit { link: Some(_), .. } => {
                     tr(keys::Q_CHATLIST_EDIT_INVITE_LINK).to_string()
                 }
             };
@@ -443,11 +541,20 @@ impl QuillApp {
         let spec = self
             .session()
             .and_then(|s| s.chat_list.folder_specs.get(&folder_id).cloned());
-        let links = self
+        let spec_error = self.session().and_then(|s| {
+            s.chat_list
+                .folder_specs
+                .error(folder_id)
+                .map(str::to_string)
+        });
+        let share = self
             .session()
-            .and_then(|s| s.chat_list.folder_invite_links.get(&folder_id).cloned());
+            .and_then(|s| s.chat_list.folder_shares.get(&folder_id));
+        let links = share.and_then(|share| share.links.data().cloned());
+        let links_error = share.and_then(|share| share.links.error().map(str::to_owned));
+        let chats_error = share.and_then(|share| share.chats.error().map(str::to_owned));
         let mut body = div().flex().flex_col().gap_3();
-        if let Some(error) = state.error.clone() {
+        if let Some(error) = state.view.op().error().map(str::to_owned) {
             body = body.child(
                 div()
                     .id("folder-share-error")
@@ -457,6 +564,13 @@ impl QuillApp {
             );
         }
         let Some(spec) = spec else {
+            // The folder failed to load: the error and a Retry, not a
+            // spinner nothing will end.
+            if let Some(error) = spec_error {
+                return body
+                    .child(self.folder_share_load_error(error, cx))
+                    .into_any_element();
+            }
             return body
                 .child(
                     div()
@@ -476,6 +590,11 @@ impl QuillApp {
             &[("folder_name", folder_name)],
         )));
         let Some(links) = links else {
+            if let Some(error) = links_error.or(chats_error.clone()) {
+                return body
+                    .child(self.folder_share_load_error(error, cx))
+                    .into_any_element();
+            }
             return body
                 .child(
                     div()
@@ -498,12 +617,16 @@ impl QuillApp {
                 short_link(&link.invite_link),
                 trn(keys::FILTERS_CHATS_COUNT, link.chat_ids.len())
             );
-            let confirming = state.confirm_delete.as_deref() == Some(url.as_str());
-            let copied = state.copied.as_deref() == Some(url.as_str());
+            let confirming = matches!(
+                &state.view,
+                FolderShareView::List { confirm_delete: Some(ask), .. } if *ask == url
+            );
+            let copied = state.copy_mark().is_copied(&url);
             let copy_url = url.clone();
             let edit_link = link.clone();
             let ask_url = url.clone();
             let delete_url = url.clone();
+            let busy = state.view.is_busy();
             let mut row = div()
                 .flex()
                 .flex_col()
@@ -549,6 +672,7 @@ impl QuillApp {
                                 .icon(gpui_kit::assets::IconName::Pencil)
                                 .ghost()
                                 .small()
+                                .disabled(busy)
                                 .tooltip(tr(keys::Q_CHATLIST_EDIT_LINK))
                                 .accessibility_label(tr(keys::Q_CHATLIST_EDIT_INVITE_LINK))
                                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -564,11 +688,15 @@ impl QuillApp {
                                 .icon(gpui_kit::assets::IconName::Trash)
                                 .ghost()
                                 .small()
+                                .disabled(busy)
                                 .tooltip(tr(keys::Q_CHATLIST_DELETE_LINK))
                                 .accessibility_label(tr(keys::Q_CHATLIST_DELETE_INVITE_LINK))
                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                    if let Some(dialog) = this.folders.share.as_mut() {
-                                        dialog.confirm_delete = Some(ask_url.clone());
+                                    if let Some(dialog) = this.folders.share.as_mut()
+                                        && let FolderShareView::List { confirm_delete, .. } =
+                                            &mut dialog.view
+                                    {
+                                        *confirm_delete = Some(ask_url.clone());
                                     }
                                     cx.notify();
                                 })),
@@ -592,8 +720,12 @@ impl QuillApp {
                                         .ghost()
                                         .small()
                                         .on_click(cx.listener(|this, _, _, cx| {
-                                            if let Some(dialog) = this.folders.share.as_mut() {
-                                                dialog.confirm_delete = None;
+                                            if let Some(dialog) = this.folders.share.as_mut()
+                                                && let FolderShareView::List {
+                                                    confirm_delete, ..
+                                                } = &mut dialog.view
+                                            {
+                                                *confirm_delete = None;
                                             }
                                             cx.notify();
                                         })),
@@ -613,10 +745,16 @@ impl QuillApp {
         }
         body = body.child(list);
         let choices = self.folder_link_choices(folder_id);
-        let loaded = self
-            .session()
-            .is_some_and(|s| s.chat_list.folder_link_chats.contains_key(&folder_id));
-        if loaded && choices.is_empty() {
+        let loaded = self.session().is_some_and(|s| {
+            s.chat_list
+                .folder_shares
+                .get(&folder_id)
+                .is_some_and(|share| share.chats.data().is_some())
+        });
+        if let Some(error) = chats_error.filter(|_| !loaded) {
+            // The chats a link may take failed to load: say so, with Retry.
+            body = body.child(self.folder_share_load_error(error, cx));
+        } else if loaded && choices.is_empty() {
             body = body.child(
                 div()
                     .text_xs()
@@ -647,7 +785,7 @@ impl QuillApp {
         let all_selected =
             !choices.is_empty() && choices.iter().all(|id| state.selected.contains(id));
         let mut body = div().flex().flex_col().gap_2();
-        if let Some(error) = state.error.clone() {
+        if let Some(error) = state.view.op().error().map(str::to_owned) {
             body = body.child(
                 div()
                     .id("folder-link-form-error")
@@ -734,10 +872,14 @@ impl QuillApp {
     }
 
     fn folder_link_form_footer(&self, cx: &mut Context<Self>) -> AnyElement {
-        let busy = self.folders.share.as_ref().is_some_and(|d| d.busy);
+        let busy = self
+            .folders
+            .share
+            .as_ref()
+            .is_some_and(|d| d.view.is_busy());
         let creating = matches!(
             self.folders.share.as_ref().map(|d| &d.view),
-            Some(FolderShareView::Edit { link: None })
+            Some(FolderShareView::Edit { link: None, .. })
         );
         div()
             .flex()
@@ -749,9 +891,7 @@ impl QuillApp {
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(dialog) = this.folders.share.as_mut() {
-                            dialog.view = FolderShareView::List;
-                            dialog.error = None;
-                            dialog.busy = false;
+                            dialog.view = FolderShareView::list();
                         }
                         cx.notify();
                     })),
@@ -768,153 +908,6 @@ impl QuillApp {
                     .on_click(cx.listener(|this, _, _, cx| this.save_folder_link(cx))),
             )
             .into_any_element()
-    }
-
-    // ------------------------------------------------------------------
-    // Add folder by link
-    // ------------------------------------------------------------------
-
-    /// `addlist` link opened: show the dialog and check the link.
-    pub(super) fn open_folder_invite(&mut self, link: String, cx: &mut Context<Self>) {
-        self.folders.invite = Some(FolderInviteDialog::new(link.clone()));
-        self.open_box(DialogKind::FolderInvite);
-        if let Some(live) = self.live.as_mut()
-            && let Err(err) = live.driver.check_folder_invite_link(&link)
-        {
-            self.set_note(StatusNote::error(user_error_for(
-                keys::Q_NOTES_FAILED_CHECK_FOLDER_LINK,
-                &err,
-            )));
-        }
-        cx.notify();
-    }
-
-    pub(super) fn close_folder_invite(&mut self, cx: &mut Context<Self>) {
-        self.folders.invite = None;
-        if let Some(session) = self.session_mut_any() {
-            session.chat_list.folder_invite_link = None;
-            session.chat_list.folder_invite_info = None;
-            session.chat_list.folder_invite_error = None;
-            session.chat_list.folder_invite_done = false;
-        }
-        cx.notify();
-    }
-
-    /// Poll-loop half of the add-by-link dialog: seed the ticked chats once
-    /// the link is checked, fetch the titles of chats we do not know yet,
-    /// and finish when the add is confirmed.
-    pub(super) fn drive_folder_invite(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.folders.invite.is_none() {
-            return false;
-        }
-        let (info, done) = match self.session() {
-            Some(s) => (
-                s.chat_list.folder_invite_info.clone(),
-                s.chat_list.folder_invite_done,
-            ),
-            None => return false,
-        };
-        let mut changed = false;
-        if done {
-            let name = info.as_ref().map(|i| i.folder.name.clone());
-            let joined = self
-                .folders
-                .invite
-                .as_ref()
-                .map(|d| d.selected.len())
-                .unwrap_or(0);
-            self.close_folder_invite(cx);
-            self.set_note(match (name, joined) {
-                (Some(name), 0) => StatusNote::silent(tr_with(
-                    keys::FILTERS_ADDED_TITLE,
-                    &[("folder", &name.to_string())],
-                )),
-                (Some(name), n) => StatusNote::silent(format!(
-                    "{} {}",
-                    tr_with(keys::FILTERS_ADDED_TITLE, &[("folder", &name.to_string())]),
-                    trn(keys::FILTERS_ADDED_ALSO, n)
-                )),
-                (None, _) => StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_ADDED)),
-            });
-            return true;
-        }
-        if let Some(info) = info {
-            let unknown: Vec<i64> = info
-                .missing_chat_ids
-                .iter()
-                .chain(info.added_chat_ids.iter())
-                .copied()
-                .filter(|id| self.session().is_some_and(|s| !s.chats.contains_key(id)))
-                .collect();
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.fetch_chats_for_folder_invite(&unknown);
-            }
-            if let Some(dialog) = self.folders.invite.as_mut()
-                && !dialog.seeded
-            {
-                dialog.seeded = true;
-                dialog.selected = info.missing_chat_ids.iter().copied().collect();
-                changed = true;
-            }
-        }
-        if let Some(dialog) = self.screen.folders.invite.as_mut()
-            && dialog.adding
-            && self
-                .live
-                .as_ref()
-                .is_some_and(|l| l.driver.session.chat_list.folder_invite_error.is_some())
-        {
-            dialog.adding = false;
-            changed = true;
-        }
-        if changed {
-            cx.notify();
-        }
-        changed
-    }
-
-    fn confirm_folder_invite(&mut self, cx: &mut Context<Self>) {
-        let Some((link, selected)) = self.folders.invite.as_ref().map(|d| {
-            let mut ids: Vec<i64> = d.selected.iter().copied().collect();
-            ids.sort_unstable();
-            (d.link.clone(), ids)
-        }) else {
-            return;
-        };
-        let info = self
-            .session()
-            .and_then(|s| s.chat_list.folder_invite_info.clone());
-        let Some(info) = info else { return };
-        // A new folder keeps every chat of the link; chats already joined
-        // are part of it whatever was ticked.
-        let mut chat_ids = selected;
-        if info.folder.id == 0 {
-            chat_ids.extend(info.added_chat_ids.iter().copied());
-            chat_ids.sort_unstable();
-            chat_ids.dedup();
-        }
-        match self.live.as_mut() {
-            Some(live) => match live.driver.add_folder_by_invite_link(&link, &chat_ids) {
-                Ok(_) => {
-                    if let Some(dialog) = self.folders.invite.as_mut() {
-                        dialog.adding = true;
-                    }
-                }
-                Err(err) => {
-                    if let Some(session) = self.session_mut_any() {
-                        session.chat_list.folder_invite_error =
-                            Some(user_error_for(keys::Q_NOTES_FAILED_ADD_FOLDER, &err));
-                    }
-                }
-            },
-            None => {
-                // Screenshot demo: finish without a server.
-                if let Some(session) = self.demo_session.as_mut() {
-                    session.chat_list.folder_invite_done = true;
-                }
-            }
-        }
-        cx.notify();
     }
 }
 
@@ -935,6 +928,7 @@ crate::ui::shell::register_dialogs! {
 }
 
 mod build_folder_invite_dialog;
+mod invite;
 
 #[cfg(test)]
 mod tests {

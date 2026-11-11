@@ -150,7 +150,11 @@ pub fn unpack(zip: &[u8], dir: &Path) -> Result<(), UnpackError> {
         .and_then(|n| n.to_str())
         .ok_or(UnpackError::Invalid)?;
     std::fs::create_dir_all(parent)?;
-    let tmp = parent.join(format!(".{name}.{}.part", std::process::id()));
+    // Each call has its own folders: a download of this set finishing while
+    // another install of it starts would otherwise wipe the other's files.
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = parent.join(format!(".{name}.{}.{serial}.part", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp)?;
     let result = extract(zip, &tmp).and_then(|()| {
@@ -159,8 +163,12 @@ pub fn unpack(zip: &[u8], dir: &Path) -> Result<(), UnpackError> {
         }
         // Move the old pack aside rather than deleting it first, so a
         // failed rename puts it back.
-        let old = parent.join(format!(".{name}.old"));
+        let old = parent.join(format!(".{name}.{serial}.old"));
         let _ = std::fs::remove_dir_all(&old);
+        // One swap at a time, so two installs of a set never rename `dir`
+        // between each other's move-aside and move-in.
+        static SWAP: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _swap = SWAP.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let had_old = crate::fs_retry::rename_retrying(dir, &old, crate::fs_retry::LONG).is_ok();
         if let Err(err) = crate::fs_retry::rename_retrying(&tmp, dir, crate::fs_retry::LONG) {
             if had_old {
@@ -322,6 +330,31 @@ mod tests {
             Err(UnpackError::Invalid)
         ));
         assert!(is_ready(&dir));
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+    }
+
+    #[test]
+    fn overlapping_installs_of_one_set_both_land() {
+        let dir = temp("overlap").join("noto");
+        let cfg = config(r#""😀":[0,0]"#);
+        let zip = zip_of(&[
+            ("config.json", cfg.as_bytes()),
+            ("emoji_0.webp", b"x"),
+            ("emoji_1.webp", b"y"),
+        ]);
+        let results: Vec<_> = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..4)
+                .map(|_| scope.spawn(|| unpack(&zip, &dir).is_ok()))
+                .collect();
+            workers
+                .into_iter()
+                .map(|worker| worker.join().unwrap_or(false))
+                .collect()
+        });
+        assert!(results.iter().all(|ok| *ok));
+        assert!(is_ready(&dir));
+        let left = std::fs::read_dir(dir.parent().unwrap()).unwrap().count();
+        assert_eq!(left, 1);
         let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 }

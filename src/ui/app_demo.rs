@@ -2,7 +2,7 @@
 //! the session and runs its registered setup at the end.
 
 use super::app::QuillApp;
-use super::connect_ui::ConnectUiStatus;
+use super::connect_ui::ConnectStage;
 use super::screenshot_demo::ScreenshotDemo;
 use super::synthetic::SyntheticChat;
 use gpui_kit::component::input::{InputEvent, TextareaState};
@@ -10,7 +10,6 @@ use gpui_kit::component::menu::AppMenuBar;
 use gpui_kit::*;
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::MemorySink;
-use quill::telegram::envelope::AuthorizationState;
 use std::sync::Arc;
 use std::time::Duration;
 impl QuillApp {
@@ -24,6 +23,10 @@ impl QuillApp {
         {
             quill::wake::isolate_current_thread();
             quill::power_saving::isolate_for_tests();
+            // The Linux handler read runs on its own thread and wakes the UI
+            // from there, which the deterministic test executor rejects:
+            // tests answer it instead, so no read ever starts.
+            quill::link_handler::demo_pin(Some(quill::link_handler::LinkHandlerState::Unset));
         }
         super::tooltip_timing::install(cx);
         super::image_budget::start_sweeper(cx);
@@ -35,25 +38,23 @@ impl QuillApp {
         let chat_prefs = Self::load_chat_prefs();
         let demo_sink = Arc::new(MemorySink::new());
         let mut demo_session = None;
-        let (connect_status, live, status_note, auth_demo) = match demo {
+        let (live, status_note, auth_demo) = match demo {
             Some(d) => {
-                let (seed, status, note, auth) = d.start();
+                let (seed, stage, note) = d.start();
                 if let Some(seed) = seed {
                     demo_session = Some(Box::new(seed(demo_sink.clone())));
                 }
-                (status, None, note, auth)
+                (None, note, stage)
             }
             None => (
-                ConnectUiStatus::Live,
                 None,
                 "Connecting to Telegram…".into(),
-                AuthorizationState::WaitTdlibParameters,
+                ConnectStage::Connecting,
             ),
         };
         let screen = super::on_screen::OnScreen::new(
             Default::default(),
             &chat_prefs,
-            connect_status,
             status_note,
             window,
             cx,
@@ -103,7 +104,7 @@ impl QuillApp {
             // `setup_app_menus` at startup).
             menu_bar: AppMenuBar::new(cx),
             first_run: super::first_run_ui::initial_first_run(demo.is_some(), &credentials, cx),
-            frame: super::frame_state::FrameUi::new(cx),
+            frame: Box::new(super::frame_state::FrameUi::new(cx)),
             group_call: super::group_call_state::GroupCallUi::new(),
             screen_share: Default::default(),
             composer_sends: Default::default(),
@@ -113,7 +114,7 @@ impl QuillApp {
             credentials,
             start_files: super::start_files_state::StartFilesUi::new(window, cx),
             update_pill: Default::default(),
-            agent_bridge: super::agent_state::AgentBridge::new(window, cx),
+            agent_bridge: Box::new(super::agent_state::AgentBridge::new(window, cx)),
             takeover: super::agent_takeover_state::TakeoverUi::new(window, cx),
             focus_sidebar: cx.focus_handle(),
             connect: super::connection_state::ConnectGeneration::new(),
@@ -263,6 +264,7 @@ impl QuillApp {
             }
             // The gate counts the chat windows too: one may be in front.
             this.frame.main_active.set(active);
+            this.preferences.advanced.forget_import_offer();
             this.follow_windows(cx);
             super::glyph_sweep::window_activation(window.window_handle().window_id(), active);
             this.viewer_window_activation(window, cx);

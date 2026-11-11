@@ -72,7 +72,7 @@ impl QuillApp {
     /// The open chat's tabs, when `SubsectionTabs::UsedFor` holds.
     pub(super) fn subsection_tabs_snapshot(&self) -> Option<TabsSnapshot> {
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         if let Some(direct) = super::direct_messages_tabs::DirectTabs::of(session, chat_id) {
             return Some(TabsSnapshot {
                 chat_id,
@@ -90,7 +90,7 @@ impl QuillApp {
         Some(TabsSnapshot {
             chat_id,
             mode: session.subsection_tabs_mode(chat_id),
-            active: session.open_topic,
+            active: session.open_forum_topic(),
             topics: session
                 .ordered_forum_topics(chat_id)
                 .into_iter()
@@ -135,8 +135,8 @@ impl QuillApp {
                 tab_count,
                 strip_width: f32::from(scroll.bounds().size.width) as i32,
             };
-            if needs_reveal(self.history.subsection_tabs.revealed.get(), key) {
-                self.history.subsection_tabs.revealed.set(Some(key));
+            if needs_reveal(self.chat_ui.tabs_revealed.get(), key) {
+                self.chat_ui.tabs_revealed.set(Some(key));
                 scroll.scroll_to_item(selected);
             }
         }
@@ -561,9 +561,10 @@ impl QuillApp {
     }
 
     pub(super) fn select_subsection_tab(&mut self, tab: Tab, cx: &mut Context<Self>) {
-        let direct_chat = self
-            .session()
-            .and_then(|s| s.open_chat.filter(|chat| s.is_direct_messages_admin(*chat)));
+        let direct_chat = self.session().and_then(|s| {
+            s.open_chat_id()
+                .filter(|chat| s.is_direct_messages_admin(*chat))
+        });
         if let Some(chat_id) = direct_chat {
             let topic = match tab {
                 Tab::Direct(id) => Some(id),
@@ -575,12 +576,15 @@ impl QuillApp {
         match tab {
             Tab::Direct(_) => {}
             Tab::All => {
-                if self.session().is_some_and(|s| s.open_topic.is_some()) {
+                if self
+                    .session()
+                    .is_some_and(|s| s.open_forum_topic().is_some())
+                {
                     self.deselect_topic_ui(cx);
                 }
             }
             Tab::Topic(id) => {
-                if self.session().and_then(|s| s.open_topic) != Some(id) {
+                if self.session().and_then(|s| s.open_forum_topic()) != Some(id) {
                     self.select_topic_ui(id, cx);
                 }
             }
@@ -616,20 +620,20 @@ impl QuillApp {
             return;
         }
         if action == TopicMenuAction::Info {
-            if self.session().and_then(|s| s.open_topic) != Some(topic_id) {
+            if self.session().and_then(|s| s.open_forum_topic()) != Some(topic_id) {
                 self.select_topic_ui(topic_id, cx);
             }
             // The card is the topic's: take the new topic's `ChatUi` first,
             // so the next frame's sync does not drop the card with the old.
-            self.sync_chat_ui();
-            self.chat_ui.topic_info_open = true;
+            self.sync_chat_ui(cx);
+            self.chat_ui.info_card.open_topic();
             cx.notify();
             return;
         }
         if action == TopicMenuAction::Delete {
             self.open_group_confirm(
-                chat_id,
                 GroupConfirmAction::DeleteForumTopic {
+                    chat_id,
                     forum_topic_id: topic_id,
                 },
                 cx,

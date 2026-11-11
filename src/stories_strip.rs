@@ -142,8 +142,19 @@ const AXIS_DECIDE_PX: f32 = 2.0;
 
 impl AxisLock {
     /// Feed one scroll delta; `restart` is true for a new gesture. A line
-    /// (mouse wheel) delta is `precise = false` and decides at once.
+    /// (mouse wheel) delta is `precise = false`: a wheel has no gesture (it
+    /// never reports where one ends), so each notch decides alone and
+    /// nothing is kept, and a Shift+wheel after a plain one scrolls the
+    /// other way.
     pub fn feed(&mut self, restart: bool, precise: bool, dx: f32, dy: f32) -> Axis {
+        if !precise {
+            *self = Self::default();
+            return match (dx.abs() > dy.abs(), dx != 0.0 || dy != 0.0) {
+                (true, _) => Axis::Horizontal,
+                (false, true) => Axis::Vertical,
+                (false, false) => Axis::Undecided,
+            };
+        }
         if restart {
             *self = Self::default();
         }
@@ -153,8 +164,7 @@ impl AxisLock {
         self.sum.0 += dx;
         self.sum.1 += dy;
         let (ax, ay) = (self.sum.0.abs(), self.sum.1.abs());
-        let decide = if precise { AXIS_DECIDE_PX } else { 0.0 };
-        if ax.max(ay) > decide || (!precise && (dx != 0.0 || dy != 0.0)) {
+        if ax.max(ay) > AXIS_DECIDE_PX {
             self.axis = if ax > ay {
                 Axis::Horizontal
             } else {
@@ -257,5 +267,19 @@ mod tests {
         assert_eq!(lock.feed(true, false, 0.0, 3.0), Axis::Vertical);
         let mut lock = AxisLock::default();
         assert_eq!(lock.feed(true, false, 3.0, 0.0), Axis::Horizontal);
+    }
+
+    /// A mouse wheel sends no start or end: the axis of one notch is not
+    /// kept for the next (sweep 13-146).
+    #[test]
+    fn a_wheel_decides_each_notch_alone() {
+        let mut lock = AxisLock::default();
+        assert_eq!(lock.feed(false, false, 0.0, 3.0), Axis::Vertical);
+        assert_eq!(lock.feed(false, false, 3.0, 0.0), Axis::Horizontal);
+        assert_eq!(lock.feed(false, false, 0.0, -3.0), Axis::Vertical);
+        // A trackpad gesture that was locked does not outlive a wheel.
+        assert_eq!(lock.feed(true, true, 6.0, 0.0), Axis::Horizontal);
+        assert_eq!(lock.feed(false, false, 0.0, 3.0), Axis::Vertical);
+        assert_eq!(lock.feed(false, true, 6.0, 0.0), Axis::Horizontal);
     }
 }

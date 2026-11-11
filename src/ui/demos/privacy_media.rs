@@ -87,6 +87,57 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_albums(session, &self.demo_ui.sink, &self.demo_ui.seq);
+            // `QUILL_DEMO_ALBUM_REACTIONS=1`: reactions on the second item
+            // of each album (any item of an album may carry them).
+            if std::env::var_os("QUILL_DEMO_ALBUM_REACTIONS").is_some() {
+                // And a received album without a caption: bubble-less.
+                let bare = crate::ui::demo::demo_file_json(
+                    77,
+                    &crate::ui::demo::demo_thumb_png_path(),
+                    true,
+                );
+                // Then an own album sent as a reply, and a forwarded one.
+                let reply = r#","reply_to":{"@type":"messageReplyToMessage","chat_id":11,"message_id":801,"quote":null,"checklist_task_id":0,"poll_option_id":""}"#;
+                let forward = r#","forward_info":{"@type":"messageForwardInfo","origin":{"@type":"messageOriginUser","sender_user_id":11},"date":1790631000,"source":null,"public_service_announcement_type":""}"#;
+                let photos = [
+                    (821, false, 77003, ""),
+                    (822, false, 77003, ""),
+                    (831, true, 77004, reply),
+                    (832, true, 77004, reply),
+                    (841, false, 77005, forward),
+                    (842, false, 77005, forward),
+                ]
+                .map(|(id, outgoing, album, extra)| {
+                    format!(
+                        r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":11,"is_outgoing":{outgoing},"date":1790632500,"media_album_id":"{album}","content":{{"@type":"messagePhoto","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"m","photo":{bare},"width":320,"height":200,"progressive_sizes":[]}}]}},"caption":{{"@type":"formattedText","text":"","entities":[]}},"has_spoiler":false,"is_secret":false}}{extra}}}}}"#
+                    )
+                });
+                let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
+                    self.demo_ui.sink.clone();
+                for json in &photos {
+                    if let Some(owned) =
+                        quill::telegram::client::copy_and_parse(json, &self.demo_ui.seq, &sink)
+                    {
+                        session.apply(owned);
+                    }
+                }
+                for (message_id, emoji, chosen) in [
+                    (802, "😭", false),
+                    (812, "❤", true),
+                    (822, "😭", false),
+                    (832, "👍", false),
+                    (841, "🔥", false),
+                ] {
+                    let json = format!(
+                        r#"{{"@type":"updateMessageInteractionInfo","chat_id":11,"message_id":{message_id},"interaction_info":{{"@type":"messageInteractionInfo","view_count":0,"forward_count":0,"reactions":{{"@type":"messageReactions","reactions":[{{"@type":"messageReaction","type":{{"@type":"reactionTypeEmoji","emoji":"{emoji}"}},"total_count":1,"is_chosen":{chosen},"recent_sender_ids":[{{"@type":"messageSenderUser","user_id":11}}]}}],"are_tags":false,"can_get_added_reactions":true}}}}}}"#
+                    );
+                    if let Some(owned) =
+                        quill::telegram::client::copy_and_parse(&json, &self.demo_ui.seq, &sink)
+                    {
+                        session.apply(owned);
+                    }
+                }
+            }
         }
         self.composer.update(cx, |input, cx| {
             input.set_value("album caption", window, cx);
@@ -139,12 +190,12 @@ impl QuillApp {
                         MessageId(sc::HIKERS_FIRST_MESSAGE),
                     );
                 }
-                self.message_ui.menu = Some(MessageMenuState {
+                self.message_ui.menu.open_at(MessageMenuState {
                     chat_id: ChatId(sc::HIKERS),
                     message_id: MessageId(sc::HIKERS_FIRST_MESSAGE),
                     position: point(px(560.), px(150.)),
                 });
-                self.message_ui.reactions_expanded = true;
+                self.message_ui.menu.expand_reactions();
             }
             "viewer" => {
                 self.open_media_viewer(ChatId(sc::HIKERS), MessageId(sc::HIKERS_PHOTO_MESSAGE), cx);

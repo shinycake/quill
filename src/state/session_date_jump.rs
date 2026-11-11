@@ -6,25 +6,59 @@ use crate::telegram::envelope::{CalendarDay, ParsedChatMember};
 impl Session {
     /// Open the calendar box for the open chat. `None` when no chat is open.
     pub fn open_history_calendar(&mut self, now: i64) -> Option<&HistoryCalendar> {
-        let chat_id = self.open_chat?;
-        let media =
-            if self.search.chat_search.open && self.search.chat_search.chat_id == Some(chat_id) {
-                self.search.chat_search.media
-            } else {
-                SearchMediaKind::All
-            };
-        let generation = self
-            .search
-            .history_calendar
-            .as_ref()
-            .map_or(1, |c| c.generation.saturating_add(1));
-        self.search.date_jump_note = None;
+        let chat_id = self.open_chat_id()?;
+        let media = if self.search.chat_search.is_open()
+            && self.search.chat_search.chat_id == Some(chat_id)
+        {
+            self.search.chat_search.media
+        } else {
+            SearchMediaKind::All
+        };
+        let generation = self.next_calendar_generation();
+        self.search.clear_date_jump_note();
         self.search.history_calendar = Some(HistoryCalendar::new(chat_id, media, now, generation));
         self.search.history_calendar.as_ref()
     }
 
+    /// The generation for a calendar being opened: one more than the last
+    /// one opened, closed or not.
+    pub(crate) fn next_calendar_generation(&mut self) -> u64 {
+        self.search.calendar_generation = self.search.calendar_generation.saturating_add(1);
+        self.search.calendar_generation
+    }
+
     pub fn close_history_calendar(&mut self) {
         self.search.history_calendar = None;
+    }
+
+    /// The date-jump UI goes with its chat (or with the account leaving the
+    /// screen): the calendar box, a resolved jump nobody started and the
+    /// "nothing found" note. `chat` limits it to that chat's pieces
+    /// (`None`: all of them).
+    pub fn clear_date_jump_ui(&mut self, chat: Option<ChatId>) {
+        let is_chat = |id: ChatId| chat.is_none_or(|chat| chat == id);
+        if self
+            .search
+            .history_calendar
+            .as_ref()
+            .is_some_and(|calendar| is_chat(calendar.chat_id))
+        {
+            self.search.history_calendar = None;
+        }
+        if matches!(
+            self.search.date_jump,
+            DateJumpAnswer::Resolved(jump) if jump.window.is_none() && is_chat(jump.chat_id)
+        ) {
+            self.search.date_jump = DateJumpAnswer::Idle;
+        }
+        if self
+            .search
+            .date_jump_pending
+            .is_some_and(|(pending_chat, ..)| is_chat(pending_chat))
+        {
+            self.search.date_jump_pending = None;
+        }
+        self.search.clear_date_jump_note();
     }
 
     pub(crate) fn apply_message_calendar(
@@ -70,7 +104,8 @@ impl Session {
         message_id: MessageId,
         pending: Option<&PendingRequest>,
     ) {
-        self.search.date_jump = ViewJump::for_request(pending, message_id, DateJumpMode::Next);
+        self.search.date_jump = ViewJump::for_request(pending, message_id, DateJumpMode::Next)
+            .map_or(DateJumpAnswer::Idle, DateJumpAnswer::Resolved);
     }
 
     /// `getChatMessageByDate` failed: a 404 means nothing is that old, so
@@ -78,9 +113,10 @@ impl Session {
     pub(crate) fn fail_date_jump(&mut self, not_found: bool, pending: Option<&PendingRequest>) {
         if not_found {
             self.search.date_jump =
-                ViewJump::for_request(pending, FIRST_MESSAGE_ID, DateJumpMode::Oldest);
+                ViewJump::for_request(pending, FIRST_MESSAGE_ID, DateJumpMode::Oldest)
+                    .map_or(DateJumpAnswer::Idle, DateJumpAnswer::Resolved);
         } else {
-            self.search.date_jump_note = Some("Couldn't jump to that date.".into());
+            self.search.date_jump = DateJumpAnswer::NotFound(DateJumpNote::Failed);
         }
     }
 
@@ -95,7 +131,7 @@ impl Session {
             .search
             .chat_search
             .chat_id
-            .or(self.open_chat)
+            .or(self.open_chat_id())
             .filter(|_| mode != DateJumpMode::Exact)
             .map(|chat_id| (chat_id, message_id, mode));
         let need = self.begin_chat_search_jump(message_id);
@@ -117,7 +153,7 @@ impl Session {
         self.search.date_jump_pending = None;
         // The view moved to another chat since the jump began: its window
         // is not the one the jump was for.
-        if self.search.chat_search.chat_id.or(self.open_chat) != Some(chat_id) {
+        if self.search.chat_search.chat_id.or(self.open_chat_id()) != Some(chat_id) {
             return;
         }
         let Some(history) = self.histories.get(&chat_id.0) else {
@@ -143,7 +179,7 @@ impl Session {
     /// "From: member" needs someone to choose from: basic groups and
     /// supergroups (not channels, private chats or Saved Messages).
     pub fn chat_search_can_pick_sender(&self) -> bool {
-        let Some(chat_id) = self.search.chat_search.chat_id.or(self.open_chat) else {
+        let Some(chat_id) = self.search.chat_search.chat_id.or(self.open_chat_id()) else {
             return false;
         };
         self.chats.get(&chat_id.0).is_some_and(|chat| {
@@ -160,7 +196,7 @@ impl Session {
 
     /// Open the "From:" picker (groups only; the caller checks).
     pub fn open_from_picker(&mut self) {
-        if self.search.chat_search.open && self.search.chat_search.from_picker.is_none() {
+        if self.search.chat_search.is_open() && self.search.chat_search.from_picker.is_none() {
             self.search.chat_search.from_picker = Some(FromPicker::default());
         }
     }

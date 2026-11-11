@@ -68,25 +68,18 @@ impl QuillApp {
     ) {
         let mut text = state.read(cx).value();
         if matches!(event, InputEvent::Change) {
-            let prev = self.composer_ui.prev_text.clone();
-            if self
-                .composer_ui
-                .markdown_revert
-                .as_ref()
-                .is_some_and(|revert| revert.text != text.as_ref())
-            {
-                self.composer_ui.markdown_revert = None;
-            }
-            if let Some(replaced) = self.apply_instant_replace(&text, window, cx) {
+            let prev = self.composer_ui.echo.set(text.clone());
+            if let Some(replaced) = self.apply_instant_replace(&prev, &text, window, cx) {
                 text = replaced;
             } else if self.apply_markdown_replacement(&prev, window, cx) {
                 // `**bold**` typed: the markers became formatting.
                 text = state.read(cx).value();
-                self.composer_ui.prev_text = text.clone();
+                self.composer_ui.echo.set(text.clone());
             } else {
                 // A macOS text replacement shortcut ended by this keystroke.
                 self.queue_system_text_replace(&prev, &text, window, cx);
             }
+            self.end_button_command_menu(cx);
             self.sync_composer_typing(&text);
             self.retry_failed_link_preview(&prev, &text);
             self.close_stale_rich_paste_notice(&text, window, cx);
@@ -134,6 +127,7 @@ impl QuillApp {
                     let markup = self.composer_markup(cx);
                     self.submit_composer(
                         quill::composer::send_text_on_enter(markup, self.chat_prefs.send_key_mode),
+                        crate::ui::composer_sends::SendOnce::default(),
                         window,
                         cx,
                     );

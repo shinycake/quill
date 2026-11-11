@@ -33,15 +33,10 @@ fn ended(call_id: i32) -> CallSummary {
         duration_secs: 30,
         had_audio: true,
         end_line: String::new(),
-        need_rating: true,
         busy: false,
-        need_debug_information: false,
-        need_log: false,
-        rating_sent: false,
-        debug_information_sent: false,
-        debug_information_error: None,
-        log_sent: false,
-        log_error: None,
+        rating: quill::state::CallRating::Offered,
+        debug_information: quill::state::CallUpload::NotNeeded,
+        log: quill::state::CallUpload::NotNeeded,
         final_transport: None,
         reconnect_attempts: 0,
         muted: false,
@@ -56,7 +51,7 @@ fn show(app: &mut QuillApp, call_id: i32) {
 
 fn rating_sent(app: &QuillApp) -> Option<bool> {
     let session = app.demo_session.as_deref()?;
-    Some(session.calls.summary.as_ref()?.rating_sent)
+    Some(session.calls.summary.as_ref()?.rating == quill::state::CallRating::Sent)
 }
 
 #[gpui_kit::test]

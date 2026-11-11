@@ -358,7 +358,7 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_2()
-            .when_some(self.twofa.notice.clone(), |this, note| {
+            .when_some(self.twofa.notice().cloned(), |this, note| {
                 this.child(div().text_xs().text_color(danger()).child(note))
             })
             .child(
@@ -439,12 +439,11 @@ impl QuillApp {
         ) {
             return;
         }
-        self.privacy.websites_open = true;
+        self.privacy.websites.open();
         self.open_box(DialogKind::Websites);
-        self.privacy.websites_confirm = None;
         // The last open's failure line goes: a cached list skips the fetch.
         if let Some(session) = self.session_mut() {
-            session.settings.websites_error = None;
+            session.settings.connected_websites.clear_error();
         }
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.maybe_fetch_connected_websites();
@@ -455,8 +454,7 @@ impl QuillApp {
     /// Slice A4: close the overlay and drop any pending disconnect
     /// confirmation.
     pub(in crate::ui) fn close_websites(&mut self, cx: &mut Context<Self>) {
-        self.privacy.websites_open = false;
-        self.privacy.websites_confirm = None;
+        self.privacy.websites.close();
         cx.notify();
     }
 
@@ -464,13 +462,11 @@ impl QuillApp {
     /// fetch refires; demo re-injects the fixture.
     pub(in crate::ui) fn refresh_websites(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.settings.connected_websites = None;
-            live.driver.session.settings.websites_stale = false;
+            live.driver.session.settings.connected_websites = Fetch::Idle;
+            live.driver.session.settings.websites_op.refetched();
             let _ = live.driver.maybe_fetch_connected_websites();
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.settings.connected_websites = Some(demo_websites());
-            session.settings.connected_websites_loading = false;
-            session.settings.websites_error = None;
+            session.settings.connected_websites = Fetch::Ready(demo_websites());
         }
         cx.notify();
     }
@@ -482,7 +478,9 @@ impl QuillApp {
         website_id: i64,
         cx: &mut Context<Self>,
     ) {
-        self.privacy.websites_confirm = Some(WebsitesConfirm::DisconnectOne { website_id });
+        self.privacy
+            .websites
+            .ask(WebsitesConfirm::DisconnectOne { website_id });
         cx.notify();
     }
 
@@ -490,13 +488,13 @@ impl QuillApp {
     /// `DisconnectAllWebsitesHint` "Are you sure you want to disconnect
     /// all websites?").
     pub(in crate::ui) fn begin_disconnect_all_websites(&mut self, cx: &mut Context<Self>) {
-        self.privacy.websites_confirm = Some(WebsitesConfirm::DisconnectAll);
+        self.privacy.websites.ask(WebsitesConfirm::DisconnectAll);
         cx.notify();
     }
 
     /// Slice A4: drop the pending disconnect confirmation.
     pub(in crate::ui) fn cancel_websites_confirm(&mut self, cx: &mut Context<Self>) {
-        self.privacy.websites_confirm = None;
+        self.privacy.websites.drop_confirm();
         cx.notify();
     }
 
@@ -504,7 +502,7 @@ impl QuillApp {
     /// no TDLib; the list refreshes from the authoritative `ok` answer,
     /// never optimistically.
     pub(in crate::ui) fn confirm_websites_disconnect(&mut self, cx: &mut Context<Self>) {
-        let confirm = self.privacy.websites_confirm.take();
+        let confirm = self.privacy.websites.take_confirm();
         if let (Some(live), Some(confirm)) = (self.live.as_mut(), confirm) {
             let result = match confirm {
                 WebsitesConfirm::DisconnectOne { website_id } => {

@@ -84,7 +84,7 @@ fn a_song_menu_lists_media_actions_before_copy_text_and_translate(cx: &mut TestA
                 audio.caption = "Recorded on the night drive home".into();
             }
         }
-        app.message_ui.menu = Some(MessageMenuState {
+        app.message_ui.menu.open_at(MessageMenuState {
             chat_id: CHAT,
             message_id: SONG,
             position: point(px(500.), px(120.)),

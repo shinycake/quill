@@ -29,8 +29,10 @@ fn statistics_and_forwards_land_for_the_open_story_only() {
         )
     };
     let first = session.request_for_story(RequestPurpose::GetStoryPublicForwards, ChatId(11), 5);
+    session.story_forwards_loading(11, 5, first, "");
     apply_json(&mut session, &seq, &sink, &page(first.0, "n"));
     let second = session.request_for_story(RequestPurpose::GetStoryPublicForwards, ChatId(11), 5);
+    session.story_forwards_loading(11, 5, second, "n");
     apply_json(&mut session, &seq, &sink, &page(second.0, ""));
     let state = session.stories.insights.as_ref().unwrap();
     assert_eq!(state.forwards.len(), 2);
@@ -50,6 +52,69 @@ fn statistics_and_forwards_land_for_the_open_story_only() {
             .forwards
             .is_empty()
     );
+}
+
+/// A first page answered twice replaces the rows instead of extending
+/// them, and a page nobody waits for is dropped (sweep 03-007).
+#[test]
+fn a_first_forwards_page_replaces_and_a_stray_page_is_dropped() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.begin_story_insights(11, 5);
+    let page = |extra: u64| {
+        format!(
+            r#"{{"@type":"publicForwards","@extra":"{extra}","total_count":1,"next_offset":"","forwards":[{{"@type":"publicForwardMessage","message":{{"id":40,"chat_id":-100,"date":9}}}}]}}"#
+        )
+    };
+    let first = session.request_for_story(RequestPurpose::GetStoryPublicForwards, ChatId(11), 5);
+    session.story_forwards_loading(11, 5, first, "");
+    apply_json(&mut session, &seq, &sink, &page(first.0));
+    // Asked again (a reopen), answered again: one row, not two.
+    let again = session.request_for_story(RequestPurpose::GetStoryPublicForwards, ChatId(11), 5);
+    session.story_forwards_loading(11, 5, again, "");
+    // The first request's late duplicate answer is not the one awaited.
+    apply_json(&mut session, &seq, &sink, &page(first.0));
+    assert!(
+        session
+            .stories
+            .insights
+            .as_ref()
+            .unwrap()
+            .forwards_loading()
+    );
+    apply_json(&mut session, &seq, &sink, &page(again.0));
+    let state = session.stories.insights.as_ref().unwrap();
+    assert_eq!(state.forwards.len(), 1);
+    assert!(!state.forwards_loading());
+}
+
+#[test]
+fn a_forwards_page_from_an_earlier_visit_is_not_appended() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let page = |extra: u64| {
+        format!(
+            r#"{{"@type":"publicForwards","@extra":"{extra}","total_count":3,"next_offset":"n","forwards":[{{"@type":"publicForwardMessage","message":{{"id":40,"chat_id":-100,"date":9}}}}]}}"#
+        )
+    };
+    session.begin_story_insights(11, 5);
+    let old = session.request_for_story(RequestPurpose::GetStoryPublicForwards, ChatId(11), 5);
+    session.story_forwards_loading(11, 5, old, "");
+    // Another story and back: the new visit starts clean and asks again.
+    session.begin_story_insights(11, 6);
+    session.begin_story_insights(11, 5);
+    let fresh = session.request_for_story(RequestPurpose::GetStoryPublicForwards, ChatId(11), 5);
+    session.story_forwards_loading(11, 5, fresh, "");
+
+    apply_json(&mut session, &seq, &sink, &page(old.0));
+    let state = session.stories.insights.as_ref().unwrap();
+    assert!(state.forwards.is_empty(), "the old page lands in nothing");
+    assert!(state.forwards_loading(), "still waiting for its own");
+
+    apply_json(&mut session, &seq, &sink, &page(fresh.0));
+    let state = session.stories.insights.as_ref().unwrap();
+    assert_eq!(state.forwards.len(), 1);
+    assert!(!state.forwards_loading());
 }
 
 #[test]
@@ -97,7 +162,7 @@ fn found_stories_fill_the_cache_and_page() {
     let search = session.stories.search.as_ref().unwrap();
     assert_eq!(search.stories, vec![(21, 1), (22, 2)]);
     assert_eq!(search.next_offset, "p2");
-    assert!(!search.loading);
+    assert!(!search.page.is_loading());
     assert!(session.stories.stories.contains_key(&(22, 2)));
 
     session.story_search_page_requested();
@@ -136,6 +201,18 @@ fn search_error_lands_in_the_panel() {
         ),
     );
     let search = session.stories.search.as_ref().unwrap();
-    assert!(!search.loading);
-    assert!(search.error.is_some());
+    assert!(search.page.error().is_some());
+}
+
+#[test]
+fn a_statistics_send_that_failed_leaves_the_panel_a_failure_to_retry() {
+    let (mut session, _sink) = session();
+    session.begin_story_insights(11, 5);
+    session.story_statistics_not_sent(11, 5, "no connection".into());
+    let state = session.stories.insights.as_ref().expect("insights kept");
+    assert_eq!((state.chat_id, state.story_id), (11, 5));
+    assert_eq!(
+        state.statistics,
+        StoryStatsFetch::Failed("no connection".into())
+    );
 }

@@ -55,7 +55,10 @@ fn files_from_outside_open_the_chooser(cx: &mut TestAppContext) {
     let file = a_file();
     app.update_in(vcx, |app, _, cx| {
         app.begin_start_files(vec![file.clone(), file.clone()], cx);
-        assert_eq!(app.start_files.choosing, vec![file.clone()]);
+        assert_eq!(
+            app.start_files.choosing.files(),
+            std::slice::from_ref(&file)
+        );
     });
     vcx.run_until_parked();
     shell.read_with(vcx, |shell, _| {
@@ -81,7 +84,7 @@ fn a_chat_that_takes_no_files_keeps_the_chooser_open(cx: &mut TestAppContext) {
         });
         app.begin_start_files(vec![a_file()], cx);
         app.choose_start_files_chat(chat, window, cx);
-        assert_eq!(app.start_files.choosing.len(), 1);
+        assert_eq!(app.start_files.choosing.files().len(), 1);
         assert_eq!(
             app.connection.status_note(),
             "Sorry, no way to send media here :("
@@ -98,8 +101,39 @@ fn a_chat_that_takes_files_opens_with_them_attached(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, window, cx| {
         app.begin_start_files(vec![a_file()], cx);
         app.choose_start_files_chat(chat, window, cx);
-        assert!(app.start_files.choosing.is_empty());
+        assert!(!app.start_files.choosing.is_choosing());
         assert_eq!(app.open_chat_id(), Some(chat));
+        assert_eq!(app.pending_attachments().len(), 1);
+    });
+}
+
+#[gpui_kit::test]
+fn a_chat_that_does_not_open_keeps_the_files_in_the_chooser(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| app.begin_start_files(vec![a_file()], cx));
+    let chat = app.update_in(vcx, |app, _, _| {
+        let open = app.open_chat_id();
+        let session = app.demo_session.as_ref().expect("demo session");
+        session
+            .chats
+            .keys()
+            .copied()
+            .map(ChatId)
+            .find(|id| Some(*id) != open)
+            .expect("a second chat")
+    });
+    app.update_in(vcx, |app, window, cx| {
+        // A driver that is not granted the chat cannot open it: the list
+        // does not open it either.
+        quill::agent::ui_driver::guard::set_injecting(true);
+        app.choose_start_files_chat(chat, window, cx);
+        quill::agent::ui_driver::guard::set_injecting(false);
+        assert_eq!(app.start_files.choosing.files().len(), 1, "the files wait");
+        assert!(app.pending_attachments().is_empty());
+        // Picking the chat again, now that it can open, attaches them.
+        app.choose_start_files_chat(chat, window, cx);
+        assert!(!app.start_files.choosing.is_choosing());
         assert_eq!(app.pending_attachments().len(), 1);
     });
 }

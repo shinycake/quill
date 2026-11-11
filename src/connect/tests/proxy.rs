@@ -4,7 +4,7 @@ use super::super::*;
 use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::platform::MemorySecretStore;
-use crate::proxy::{PingStatus, ProxyPrefs};
+use crate::proxy::{PingStatus, ProxyFetch, ProxyPrefs};
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::ConnectionState;
 use serde_json::{Value, json};
@@ -116,9 +116,36 @@ fn a_mutation_refetches_the_authoritative_list() {
         rig.driver.session.settings.proxy.enabled().map(|p| p.id),
         Some(7)
     );
-    assert!(
-        !rig.driver.session.settings.proxy.stale && !rig.driver.session.settings.proxy.mutating
+    assert!(!rig.driver.session.settings.proxy.busy());
+}
+
+#[test]
+fn a_list_fetch_that_predates_a_change_does_not_clear_the_stale_mark() {
+    let mut rig = Rig::new();
+    rig.load_list(&[(1, true), (2, false)]);
+    let old = rig.driver.fetch_proxies().unwrap();
+    assert_eq!(
+        rig.driver.fetch_proxies().unwrap(),
+        old,
+        "the fetch out is waited for, not repeated"
     );
+    assert_eq!(rig.count("getProxies"), 2);
+    rig.driver.enable_proxy(2).unwrap();
+    rig.answer("enableProxy", json!({"@type": "ok"}));
+    assert_eq!(rig.count("getProxies"), 3, "the change asks again");
+    // The answer sent before the change lands late: it is not the list.
+    let mut stale = proxies_json(&[(1, true), (2, false)]);
+    stale["@extra"] = json!(old.0.to_string());
+    rig.feed(stale);
+    let proxy = &rig.driver.session.settings.proxy;
+    assert!(
+        proxy.ops.loading(),
+        "still waiting for the fetch after the change"
+    );
+    rig.answer("getProxies", proxies_json(&[(1, false), (2, true)]));
+    let proxy = &rig.driver.session.settings.proxy;
+    assert_eq!(proxy.ops.fetch(), ProxyFetch::Idle);
+    assert_eq!(proxy.enabled().map(|p| p.id), Some(2));
 }
 
 #[test]
@@ -140,7 +167,7 @@ fn ok_acks_refetch_and_errors_surface_without_touching_the_list() {
         json!({"@type": "error", "code": 400, "message": "PROXY_NOT_FOUND"}),
     );
     let proxy = &rig.driver.session.settings.proxy;
-    assert!(!proxy.mutating);
+    assert!(!proxy.ops.changing());
     assert!(
         proxy
             .error
@@ -154,10 +181,10 @@ fn ok_acks_refetch_and_errors_surface_without_touching_the_list() {
 fn ping_answers_and_failures_set_the_row_status() {
     let mut rig = Rig::new();
     rig.load_list(&[(1, false), (2, false)]);
-    rig.driver.ping_listed_proxy(1).unwrap();
+    let asked = rig.driver.ping_listed_proxy(1).unwrap();
     assert_eq!(
         rig.driver.session.settings.proxy.pings.get(&1),
-        Some(&PingStatus::Checking)
+        Some(&PingStatus::Checking(asked))
     );
     rig.answer("pingProxy", json!({"@type": "seconds", "seconds": 0.0423}));
     assert_eq!(
@@ -290,6 +317,38 @@ fn detected(server: &str) -> crate::system_proxy::Detected {
     crate::system_proxy::Detected::Proxy(draft)
 }
 
+/// Sweep 03-013: a background account does not run the system-proxy step
+/// itself; it mirrors the list of the account on screen, system entry
+/// included, so it follows the OS proxy too.
+#[test]
+fn a_background_account_follows_the_system_proxy_through_the_mirror() {
+    let mut screen = Rig::new();
+    screen.load_list(&[]);
+    assert!(screen.driver.system_proxy_tick(&detected("sys.lan")));
+    screen.answer("addProxy", system_entry(5, "sys.lan", true));
+    let mut list = proxies_json(&[]);
+    list["proxies"]
+        .as_array_mut()
+        .unwrap()
+        .push(system_entry(5, "sys.lan", true));
+    screen.answer("getProxies", list);
+    let target = screen
+        .driver
+        .session
+        .settings
+        .proxy
+        .all_entries()
+        .unwrap_or_default();
+
+    let mut background = Rig::new();
+    background.load_list(&[]);
+    assert!(background.driver.sync_proxies_to(&target, false));
+    let add = sent_request(&background.recorder, "addProxy");
+    assert_eq!(add["comment"], crate::system_proxy::SYSTEM_PROXY_COMMENT);
+    assert_eq!(add["proxy"]["server"], "sys.lan");
+    assert_eq!(add["enable"], true);
+}
+
 #[test]
 fn the_system_proxy_is_added_hidden_and_followed() {
     let mut rig = Rig::new();
@@ -373,6 +432,91 @@ fn a_refused_system_proxy_waits_and_stays_out_of_the_box() {
     assert_eq!(rig.count("addProxy"), 2);
 }
 
+/// Sweep 02-187 / 06-033: the system step's outcome is its own answer. A
+/// failure of the user's own proxy mutation is not swallowed as the
+/// step's refusal, and a step's refusal never shows in the box.
+#[test]
+fn the_users_failed_proxy_change_is_not_taken_for_the_system_steps() {
+    let mut rig = Rig::new();
+    rig.load_list(&[]);
+    assert!(rig.driver.system_proxy_tick(&detected("sys.lan")));
+    rig.answer("addProxy", system_entry(5, "sys.lan", true));
+    let mut list = proxies_json(&[]);
+    list["proxies"]
+        .as_array_mut()
+        .unwrap()
+        .push(system_entry(5, "sys.lan", true));
+    rig.answer("getProxies", list);
+    // The user adds a proxy the server refuses.
+    let mut draft = crate::proxy::ProxyDraft::empty(crate::calls::proxy::ProxyKind::Socks5);
+    draft.server = "mine.lan".into();
+    draft.port = 1080;
+    rig.driver.add_proxy(&draft, false, "").unwrap();
+    rig.answer(
+        "addProxy",
+        json!({"@type": "error", "code": 400, "message": "Wrong server name"}),
+    );
+    assert!(rig.driver.session.settings.proxy.error.is_some());
+    let _ = rig.driver.system_proxy_tick(&detected("sys.lan"));
+    assert!(
+        rig.driver.session.settings.proxy.error.is_some(),
+        "the user's error stays for the box"
+    );
+    assert_eq!(rig.count("addProxy"), 2, "the step was not resent");
+}
+
+fn user_draft(server: &str) -> crate::proxy::ProxyDraft {
+    let mut draft = crate::proxy::ProxyDraft::empty(crate::calls::proxy::ProxyKind::Socks5);
+    draft.server = server.into();
+    draft.port = 1080;
+    draft
+}
+
+/// Sweep 06-033: the system step's success is not the user's success. The
+/// error of the user's own failed change stays for the box.
+#[test]
+fn a_system_step_succeeding_keeps_the_users_failed_change_error() {
+    let mut rig = Rig::new();
+    rig.load_list(&[]);
+    rig.driver
+        .add_proxy(&user_draft("mine.lan"), false, "")
+        .unwrap();
+    rig.answer(
+        "addProxy",
+        json!({"@type": "error", "code": 400, "message": "Wrong server name"}),
+    );
+    assert!(rig.driver.session.settings.proxy.error.is_some());
+    assert!(rig.driver.system_proxy_tick(&detected("sys.lan")));
+    rig.answer("addProxy", system_entry(5, "sys.lan", true));
+    assert!(
+        rig.driver.session.settings.proxy.error.is_some(),
+        "the step's success leaves the user's error"
+    );
+}
+
+/// Sweep 02-187: a refused system step stays refused when the user changes
+/// a proxy before the list is refetched; it is not sent again at once.
+#[test]
+fn a_user_change_does_not_make_a_refused_system_step_look_accepted() {
+    let mut rig = Rig::new();
+    rig.load_list(&[]);
+    assert!(rig.driver.system_proxy_tick(&detected("bad.lan")));
+    rig.answer(
+        "addProxy",
+        json!({"@type": "error", "code": 400, "message": "Wrong server name"}),
+    );
+    rig.driver
+        .add_proxy(&user_draft("mine.lan"), false, "")
+        .unwrap();
+    rig.answer("addProxy", json!({"@type": "proxy", "id": 6}));
+    rig.answer("getProxies", proxies_json(&[(6, false)]));
+    assert!(
+        !rig.driver.system_proxy_tick(&detected("bad.lan")),
+        "the refusal still holds"
+    );
+    assert_eq!(rig.count("addProxy"), 2, "the step was not resent");
+}
+
 #[test]
 fn without_a_carrier_host_a_web_proxy_carrier_is_refused() {
     let mut rig = Rig::new();
@@ -384,17 +528,24 @@ fn without_a_carrier_host_a_web_proxy_carrier_is_refused() {
     let report = sent_request(&rig.recorder, "reportWebProxyCarrierError");
     assert_eq!(report["carrier_id"], 9);
     assert_eq!(report["error"]["@type"], "webProxyCarrierErrorUnsupported");
-    assert_eq!(rig.driver.session.settings.proxy.carrier_failed, Some(1));
+    // No host: the web proxy's row reads "not available" and it is never
+    // switched to.
+    assert!(
+        !rig.driver
+            .session
+            .settings
+            .proxy
+            .can_enable(crate::calls::proxy::ProxyKind::Web)
+    );
 
     // A temporary carrier (a ping or test) is refused without marking the proxy.
-    rig.driver.session.settings.proxy.carrier_failed = None;
     rig.feed(json!({"@type": "updateWebProxyCarrierOpened", "carrier": {
         "@type": "webProxyCarrier", "id": 10, "proxy_id": 0, "url": "https://x.example/",
         "origin": "https://x.example", "path_prefix": "/",
         "bridge_object_name": "TelegramWebProxy", "is_temporary": true}}));
     let report = sent_request(&rig.recorder, "reportWebProxyCarrierError");
     assert_eq!(report["error"]["@type"], "webProxyCarrierErrorRefused");
-    assert_eq!(rig.driver.session.settings.proxy.carrier_failed, None);
+    assert!(!rig.driver.session.settings.proxy.carriers.failed_for(0));
     assert_eq!(rig.count("reportWebProxyCarrierError"), 2);
 }
 
@@ -458,25 +609,15 @@ fn an_earlier_links_ping_does_not_fill_the_next_links_box() {
     };
     let first = rig.driver.ping_link_proxy(&dead).unwrap();
     // The box closes and the next link's box opens and checks its proxy.
-    rig.driver
-        .session
-        .settings
-        .proxy
-        .pings
-        .remove(&crate::state::LINK_PING_ID);
+    rig.driver.session.settings.proxy.link_check = crate::proxy::LinkCheck::Review;
     let second = rig.driver.ping_link_proxy(&live).unwrap();
     rig.feed(json!({"@type": "seconds", "seconds": 0.05, "@extra": second.0.to_string()}));
     rig.feed(
         json!({"@type": "error", "code": 400, "message": "Request timeout", "@extra": first.0.to_string()}),
     );
     assert_eq!(
-        rig.driver
-            .session
-            .settings
-            .proxy
-            .pings
-            .get(&crate::state::LINK_PING_ID),
-        Some(&PingStatus::Available(50)),
+        rig.driver.session.settings.proxy.link_check,
+        crate::proxy::LinkCheck::Available(50),
         "the working proxy is not shown as unavailable"
     );
 }
@@ -497,4 +638,21 @@ fn a_ping_sent_before_an_edit_does_not_land_on_the_edited_entry() {
     rig.driver.edit_proxy(1, &draft, false, "").unwrap();
     rig.feed(json!({"@type": "seconds", "seconds": 0.05, "@extra": before.0.to_string()}));
     assert_eq!(rig.driver.session.settings.proxy.pings.get(&1), None);
+}
+
+/// Sweep 02-189: Edit or Remove refused while another change is out keeps
+/// the proxy's ping result.
+#[test]
+fn a_refused_remove_keeps_the_ping_result() {
+    let mut rig = Rig::new();
+    rig.load_list(&[(1, false), (2, false)]);
+    rig.driver.ping_listed_proxy(1).unwrap();
+    rig.answer("pingProxy", json!({"@type": "seconds", "seconds": 0.0423}));
+    rig.driver.disable_proxy().unwrap();
+    assert!(rig.driver.session.settings.proxy.ops.changing());
+    assert!(rig.driver.remove_proxy(1).is_err());
+    assert_eq!(
+        rig.driver.session.settings.proxy.pings.get(&1),
+        Some(&PingStatus::Available(42))
+    );
 }

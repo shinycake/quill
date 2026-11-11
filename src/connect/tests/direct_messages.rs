@@ -115,3 +115,84 @@ fn an_admin_loads_conversations_and_writes_into_one() {
     assert_eq!(routed["topic_id"]["@type"], "messageTopicDirectMessages");
     assert_eq!(routed["topic_id"]["direct_messages_chat_topic_id"], 501);
 }
+
+#[test]
+fn a_failed_first_page_is_asked_again_when_the_chat_opens() {
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+    let ingest = |driver: &mut ConnectDriver<Arc<RecordingSender>>, json: &str| {
+        if let Some(owned) = copy_and_parse(json, &seq, &dyn_sink) {
+            let _ = driver.ingest(owned);
+        }
+    };
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{DIRECT},"title":"Quill Weekly","type":{{"@type":"chatTypeSupergroup","supergroup_id":82,"is_channel":false}},"unread_count":0,"permissions":{{"can_send_basic_messages":true}},"positions":[{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"1","is_pinned":false}}]}}}}"#
+        ),
+    );
+    let admin = r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":82,"is_channel":false,"is_direct_messages_group":true,"is_administered_direct_messages_group":true,"status":{"@type":"chatMemberStatusAdministrator","rights":{"@type":"chatAdministratorRights","can_manage_direct_messages":true}}}}"#;
+    ingest(&mut driver, admin);
+    let loads = sent(&recorder, "loadDirectMessagesChatTopics");
+    assert_eq!(loads.len(), 1);
+    let extra = loads[0]["@extra"].clone();
+    ingest(
+        &mut driver,
+        &format!(r#"{{"@type":"error","@extra":{extra},"code":500,"message":"Internal"}}"#),
+    );
+    assert!(!driver.session.threads.direct.preloaded(DIRECT));
+    // Another update about the chat does not ask again.
+    ingest(&mut driver, admin);
+    assert_eq!(sent(&recorder, "loadDirectMessagesChatTopics").len(), 1);
+    // Opening the chat does.
+    driver.select_chat(ChatId(DIRECT)).unwrap();
+    assert_eq!(sent(&recorder, "loadDirectMessagesChatTopics").len(), 2);
+    assert!(driver.session.threads.direct.preloaded(DIRECT));
+}
+
+#[test]
+fn mark_as_read_reports_the_half_that_went_out_and_fails_only_when_none_did() {
+    let (_dir, mut driver, sender, sink, seq) = super::support::toggle_driver();
+    let ingest = |driver: &mut ConnectDriver<Arc<super::support::ToggleSender>>, json: &str| {
+        if let Some(owned) = copy_and_parse(json, &seq, &sink) {
+            let _ = driver.ingest(owned);
+        }
+    };
+    ingest(
+        &mut driver,
+        &format!(
+            r#"{{"@type":"updateNewChat","chat":{{"id":{DIRECT},"title":"Quill Weekly","type":{{"@type":"chatTypeSupergroup","supergroup_id":82,"is_channel":false}},"unread_count":0,"permissions":{{"can_send_basic_messages":true}},"positions":[{{"@type":"chatPosition","list":{{"@type":"chatListMain"}},"order":"1","is_pinned":false}}]}}}}"#
+        ),
+    );
+    ingest(
+        &mut driver,
+        r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":82,"is_channel":false,"is_direct_messages_group":true,"is_administered_direct_messages_group":true,"status":{"@type":"chatMemberStatusAdministrator","rights":{"@type":"chatAdministratorRights","can_manage_direct_messages":true}}}}"#,
+    );
+    ingest(
+        &mut driver,
+        &topic_json(501).replace(
+            "\"is_marked_as_unread\":false",
+            "\"is_marked_as_unread\":true",
+        ),
+    );
+    let before = sender.snapshot().len();
+    // The mark leaves, the view is refused: the call did send something.
+    sender.refuse_after(before + 1);
+    let sent_id = driver
+        .set_direct_topic_read(ChatId(DIRECT), 501, true)
+        .expect("a half went out");
+    assert!(sent_id.is_some());
+    assert_eq!(sender.snapshot().len(), before + 1);
+    // Nothing leaves: the call fails.
+    sender.refuse_after(before + 1);
+    assert!(
+        driver
+            .set_direct_topic_read(ChatId(DIRECT), 501, true)
+            .is_err()
+    );
+}

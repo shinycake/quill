@@ -34,7 +34,7 @@ impl QuillApp {
     /// The open chat's rights, `None` without a chat.
     fn open_send_rights(&self) -> Option<SendRights> {
         let session = self.session()?;
-        let chat = session.chats.get(&session.open_chat?.0)?;
+        let chat = session.chats.get(&session.open_chat_id()?.0)?;
         Some(SendRights::for_chat(session, chat, now_unix()))
     }
 
@@ -42,7 +42,7 @@ impl QuillApp {
     /// send nothing here (tdesktop's `TextErrorSendRestriction`).
     pub(super) fn composer_restriction(&self) -> Option<String> {
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         let replying = self
             .chat_ui
             .reply()
@@ -88,12 +88,13 @@ impl QuillApp {
 
     fn demo_voice_restricted(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
-            session
-                .users_state
-                .user_full_infos
-                .entry(DEMO_RESTRICTED_USER)
-                .or_default()
-                .voice_notes_restricted = true;
+            let infos = &mut session.users_state.user_full_infos;
+            let mut info = infos
+                .get(&DEMO_RESTRICTED_USER)
+                .cloned()
+                .unwrap_or_default();
+            info.voice_notes_restricted = true;
+            infos.insert(DEMO_RESTRICTED_USER, info);
         }
     }
 }

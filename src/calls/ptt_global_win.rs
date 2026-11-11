@@ -26,12 +26,18 @@ struct Context {
 /// Only one hook is live at a time (the controller drops the old one first).
 static CONTEXT: Mutex<Option<Context>> = Mutex::new(None);
 
+/// A key event arrived while `CONTEXT` was locked and was skipped; the next
+/// event the hook can handle ends a hold whose release it may have been.
+static SKIPPED: AtomicBool = AtomicBool::new(false);
+
 /// A running hook; dropping it ends the hook thread.
 #[derive(Debug)]
 pub struct Handle {
     active: Arc<AtomicBool>,
     thread_id: Arc<AtomicU32>,
 }
+
+impl super::HookLife for Handle {}
 
 impl Drop for Handle {
     fn drop(&mut self) {
@@ -59,13 +65,22 @@ unsafe extern "system" fn on_key(code: i32, wparam: WPARAM, lparam: LPARAM) -> L
                 WM_KEYUP | WM_SYSKEYUP => Some(false),
                 _ => None,
             };
-            if let (Some(pressed), Some(mut guard)) =
-                (pressed, crate::locks::try_lock_or_recover(&CONTEXT))
-                && let Some(ctx) = guard.as_mut()
+            let Some(pressed) = pressed else { return };
+            let Some(mut guard) = crate::locks::try_lock_or_recover(&CONTEXT) else {
+                SKIPPED.store(true, Ordering::SeqCst);
+                return;
+            };
+            if let Some(ctx) = guard.as_mut()
                 && ctx.active.load(Ordering::SeqCst)
-                && let Some(edge) = ctx.filter.feed(info.vkCode, pressed)
             {
-                (ctx.sink)(edge);
+                if SKIPPED.swap(false, Ordering::SeqCst)
+                    && let Some(edge) = ctx.filter.resync()
+                {
+                    (ctx.sink)(edge);
+                }
+                if let Some(edge) = ctx.filter.feed(info.vkCode, pressed) {
+                    (ctx.sink)(edge);
+                }
             }
         });
     }
@@ -88,11 +103,27 @@ fn run_hook(
         let mut msg: MSG = std::mem::zeroed();
         // Creates this thread's message queue so WM_QUIT can be posted.
         PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_NOREMOVE);
-        *crate::locks::lock_or_recover(&CONTEXT) = Some(Context {
-            filter: KeyFilter::new(target),
-            sink,
-            active: active.clone(),
-        });
+        // A start that timed out already gave up (`active` is false): its
+        // late thread must not replace the context of a newer hook.
+        let installed = {
+            let mut guard = crate::locks::lock_or_recover(&CONTEXT);
+            if active.load(Ordering::SeqCst) {
+                *guard = Some(Context {
+                    filter: KeyFilter::new(target),
+                    sink,
+                    active: active.clone(),
+                });
+                true
+            } else {
+                false
+            }
+        };
+        if !installed {
+            let _ = ready.send(Err(StartError::Failed(
+                "The key listener did not start.".into(),
+            )));
+            return;
+        }
         let module = GetModuleHandleW(std::ptr::null());
         let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(on_key), module, 0);
         if hook.is_null() {

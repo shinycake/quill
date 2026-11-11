@@ -134,7 +134,7 @@ fn update_supergroup_parses_own_status() {
             ..
         }) => {
             assert_eq!(supergroup_id, 16);
-            assert_eq!(status, ChannelMemberStatus::Administrator);
+            assert_eq!(status.kind(), ChannelMemberStatus::Administrator);
         }
         other => panic!("{other:?}"),
     }
@@ -145,7 +145,7 @@ fn update_supergroup_parses_own_status() {
         .unwrap();
     match env.payload {
         EnvelopePayload::Groups(GroupsPayload::UpdateSupergroup { status, .. }) => {
-            assert_eq!(status, ChannelMemberStatus::Unknown);
+            assert_eq!(status.kind(), ChannelMemberStatus::Unknown);
         }
         other => panic!("{other:?}"),
     }

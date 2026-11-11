@@ -22,10 +22,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(chat_id),
         );
         let json = get_full_rich_message(extra, chat_id, message_id);
+        let load = self
+            .session
+            .messages
+            .full_rich_loads
+            .entry(ChatMessage::new(chat_id, message_id))
+            .or_default();
+        load.begin();
         if let Err(err) = self.sender.send_json(&json) {
             self.session.requests.take(extra);
+            load.cancel();
             return Err(err);
         }
+        load.sent(extra);
         Ok(extra)
     }
 

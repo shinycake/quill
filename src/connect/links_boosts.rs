@@ -5,7 +5,7 @@ use crate::ids::{ChatId, RequestId};
 use crate::state::GroupsPurpose;
 use crate::state::{
     AdminLinksState, BOOSTS_PAGE_SIZE, BoostsListState, INVITE_ADMIN_PAGE_SIZE, InviteLinkFetch,
-    LinkRequestsState, RequestPurpose,
+    LinkRequestsState, PageStage, RequestPurpose,
 };
 use crate::telegram::requests::{
     delete_all_revoked_chat_invite_links, get_chat_boost_link, get_chat_boosts,
@@ -54,10 +54,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             chat_id.0,
             AdminLinksState {
                 creator_user_id,
-                active: InviteLinkFetch::Loading,
-                revoked: InviteLinkFetch::Loading,
-                active_request: Some(active),
-                revoked_request: Some(revoked),
+                active: InviteLinkFetch::Loading(active),
+                revoked: InviteLinkFetch::Loading(revoked),
             },
         );
         let first = get_chat_invite_links(
@@ -109,6 +107,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn delete_all_revoked_admin_links(
         &mut self,
         chat_id: ChatId,
+        admin: i64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -122,6 +121,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return Ok(None);
         };
+        // The box asked about one admin's links: the page open now must
+        // still be that admin's.
+        if creator != admin {
+            return Ok(None);
+        }
         if !self.session.chat_can_invite_users(chat_id) || !self.session.chat_is_owner(chat_id) {
             return Ok(None);
         }
@@ -189,10 +193,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .invite_pages
             .join_requests_mut(chat_id.0)
         {
-            Some(state) if append => {
-                state.error = None;
-                state.request = Some(extra);
-            }
+            Some(state) if append => state.stage = PageStage::Loading(extra),
             _ => {
                 self.session.groups.invite_pages.set_join_requests(
                     chat_id.0,
@@ -200,8 +201,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         invite_link: invite_link.to_owned(),
                         total_count: 0,
                         requests: Vec::new(),
-                        error: None,
-                        request: Some(extra),
+                        stage: PageStage::Loading(extra),
                     },
                 );
             }
@@ -216,10 +216,28 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         let sent = self.links_boosts_send(extra, &payload);
         if sent.is_err() {
-            self.session
+            // The requests already loaded stay when only the next page did
+            // not leave; a first page has nothing to keep.
+            match self
+                .session
                 .groups
                 .invite_pages
-                .close_join_requests(chat_id.0);
+                .join_requests_mut(chat_id.0)
+            {
+                Some(state) if append && !state.requests.is_empty() => {
+                    state.stage = PageStage::Failed(
+                        crate::lang::tr(
+                            crate::lang::keys::Q_INVITE_LINK_COULD_NOT_LOAD_MORE_REQUESTS,
+                        )
+                        .into(),
+                    );
+                }
+                _ => self
+                    .session
+                    .groups
+                    .invite_pages
+                    .close_join_requests(chat_id.0),
+            }
         }
         sent
     }
@@ -261,9 +279,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }) {
             return Ok(None);
         }
-        let extra = self.session.request(
+        let extra = self.session.request_for_invite_link(
             RequestPurpose::Groups(GroupsPurpose::ProcessLinkJoinRequests { approve }),
-            Some(chat_id),
+            chat_id,
+            &link,
         );
         let payload = process_chat_join_requests(extra, chat_id.0, &link, approve);
         self.links_boosts_send(extra, &payload)
@@ -287,7 +306,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(state) = self.session.groups.chat_boost_lists.get(&chat_id.0) else {
             return Ok(None);
         };
-        if state.loading || state.next_offset.is_empty() {
+        if state.loading() || state.next_offset.is_empty() {
             return Ok(None);
         }
         let (only_gifts, offset) = (state.only_gifts, state.next_offset.clone());
@@ -311,10 +330,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::GetChatBoosts { append }, Some(chat_id));
         match self.session.groups.chat_boost_lists.get_mut(&chat_id.0) {
-            Some(state) if append => {
-                state.error = None;
-                state.request = Some(extra);
-            }
+            Some(state) if append => state.stage = PageStage::Loading(extra),
             _ => {
                 self.session.groups.chat_boost_lists.insert(
                     chat_id.0,
@@ -323,17 +339,20 @@ impl<S: JsonSender> ConnectDriver<S> {
                         total_count: 0,
                         boosts: Vec::new(),
                         next_offset: String::new(),
-                        loading: true,
-                        error: None,
-                        request: Some(extra),
+                        stage: PageStage::Loading(extra),
                     },
                 );
             }
         }
         let payload = get_chat_boosts(extra, chat_id.0, only_gifts, offset, BOOSTS_PAGE_SIZE);
         let sent = self.links_boosts_send(extra, &payload);
-        if sent.is_err() {
-            self.session.groups.chat_boost_lists.remove(&chat_id.0);
+        if sent.is_err()
+            && let Some(state) = self.session.groups.chat_boost_lists.get_mut(&chat_id.0)
+        {
+            // The rows already loaded stay; the page that never left shows
+            // its error (a first page has no rows, so it shows the error
+            // instead of "Loading").
+            state.stage = PageStage::Failed("Could not load boosts".into());
         }
         sent
     }

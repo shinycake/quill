@@ -48,7 +48,7 @@ pub(super) fn seed_premium_limits_session(sink: Arc<MemorySink>) -> Session {
     let users = &mut session.users_state;
     users.profile_chat_lists.insert(
         (ProfileChatsKind::SimilarChats, SIMILAR_SOURCE_CHANNEL),
-        ProfileChatsFetch::Loaded(SIMILAR.iter().map(|(id, _)| *id).collect()),
+        ProfileChatsFetch::complete(SIMILAR.iter().map(|(id, _)| *id).collect()),
     );
     users
         .similar_chat_totals
@@ -69,13 +69,14 @@ impl QuillApp {
             "bots" => PremiumLimitKind::OwnedBots,
             "stories" => {
                 self.open_story_composer(window, cx);
-                if let Some(session) = self.demo_session.as_mut() {
-                    session.stories.post.eligibility =
-                        Some(CanPostStoryResult::WeeklyLimitExceeded {
-                            retry_after: 2 * 86_400,
-                        });
-                }
-                self.story_composer_after_check(cx);
+                let target = self.story_composer_target_chat();
+                self.story_composer_after_check(
+                    target,
+                    Ok(CanPostStoryResult::WeeklyLimitExceeded {
+                        retry_after: 2 * 86_400,
+                    }),
+                    cx,
+                );
                 return;
             }
             "similar-unlock" => {

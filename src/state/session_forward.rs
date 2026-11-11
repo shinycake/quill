@@ -80,27 +80,27 @@ impl Session {
 
     pub fn resolve_reply_preview(&self, reply: &MessageReplyTo, fallback_chat: ChatId) -> String {
         if let Some(quote) = reply
-            .quote_text
+            .quote_text()
             .as_ref()
             .map(|text| text.trim())
             .filter(|text| !text.is_empty())
         {
             return quote.to_string();
         }
-        let chat_id = if reply.chat_id.0 != 0 {
-            reply.chat_id
+        let chat_id = if reply.chat_id().0 != 0 {
+            reply.chat_id()
         } else {
             fallback_chat
         };
         if let Some(original) = self
             .histories
             .get(&chat_id.0)
-            .and_then(|history| history.messages.get(&reply.message_id.0))
+            .and_then(|history| history.messages.get(&reply.message_id().0))
         {
             return effective_preview(original);
         }
         reply
-            .content_preview
+            .content_preview()
             .clone()
             .unwrap_or_else(|| "Message".into())
     }
@@ -165,17 +165,7 @@ impl Session {
             self.remember_files(&message.files);
             self.upsert_message(message.clone(), message.id.0 < 0);
         }
-        let flight = match self.messages.in_flight_forward.take() {
-            Some(flight) if flight.extra == pending.id => Some(flight),
-            other => {
-                self.messages.in_flight_forward = other;
-                self.messages
-                    .queued_forward_flights
-                    .iter()
-                    .position(|flight| flight.extra == pending.id)
-                    .map(|index| self.messages.queued_forward_flights.remove(index))
-            }
-        };
+        let flight = self.messages.forwards.finish(pending.id);
         let dest_chat_id = flight
             .as_ref()
             .map(|f| f.dest_chat_id)
@@ -186,7 +176,7 @@ impl Session {
             .get(&dest_chat_id.0)
             .map(|chat| chat.title.clone())
             .unwrap_or_else(|| format!("chat {}", dest_chat_id.0));
-        self.messages.last_forward = Some(ForwardResult {
+        self.messages.forwards.push_result(ForwardResult {
             dest_chat_id,
             dest_title,
             from_chat_id: flight.as_ref().map(|f| f.from_chat_id).unwrap_or(ChatId(0)),

@@ -11,6 +11,10 @@ fn chat_statistics_fetch_flow_loads_and_caches() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatStatistics, Some(ChatId(13)));
+    session
+        .groups
+        .chat_statistics
+        .insert(13, ChatStatisticsFetch::Loading { is_dark: true });
     let graph = r#"{"@type":"statisticalGraphData","json_data":"{}","zoom_token":""}"#;
     let value = r#"{"@type":"statisticalValue","value":1.0,"previous_value":1.0,"growth_rate_percentage":0.0}"#;
     apply_json(
@@ -24,7 +28,10 @@ fn chat_statistics_fetch_flow_loads_and_caches() {
             v = value,
         ),
     );
-    let ChatStatisticsFetch::Loaded(boxed) = session
+    let ChatStatisticsFetch::Loaded {
+        stats: boxed,
+        is_dark,
+    } = session
         .groups
         .chat_statistics
         .get(&13)
@@ -32,6 +39,8 @@ fn chat_statistics_fetch_flow_loads_and_caches() {
     else {
         panic!("expected loaded channel statistics");
     };
+    // The theme the answered request asked for (13-032).
+    assert!(*is_dark);
     let ChatStatistics::Channel(stats) = boxed.as_ref() else {
         panic!("expected channel statistics");
     };
@@ -89,6 +98,7 @@ fn optimistic_mutations_roll_back_on_error() {
         pending.rollback = Some(RequestRollback::ChatPermissions {
             previous: None,
             previous_can_send: false,
+            sent: ChatPermissions::all(),
         });
     }
     // Simulate the optimistic write the driver performs at send.
@@ -119,6 +129,7 @@ fn optimistic_mutations_roll_back_on_error() {
         pending.rollback = Some(RequestRollback::JoinByRequest {
             supergroup_id: 21,
             previous: Some(true),
+            shown: false,
         });
     }
     session.groups.supergroup_join_by_request.insert(21, false);
@@ -146,6 +157,7 @@ fn optimistic_mutations_roll_back_on_error() {
         pending.rollback = Some(RequestRollback::SupergroupUsername {
             supergroup_id: 22,
             previous: Some("oldname".into()),
+            shown: "newname".into(),
         });
     }
     session
@@ -262,7 +274,7 @@ fn load_chats_404_marks_exhaustion() {
             extra.0
         ),
     );
-    assert!(session.chat_list.chats_exhausted);
+    assert!(session.chat_list.main_paging.is_exhausted());
     assert!(!sink.rendered().contains("Not Found"));
 }
 
@@ -293,10 +305,16 @@ fn chat_list_paging_restarts_after_logout_and_login() {
             );
         }
         session.chat_list.folder_chats_exhausted.insert(2);
-        assert!(session.chat_list.chats_exhausted && session.chat_list.archive_chats_exhausted);
+        assert!(
+            session.chat_list.main_paging.is_exhausted()
+                && session.chat_list.archive_paging.is_exhausted()
+        );
         apply_json(&mut session, &seq, &sink, &auth(leaving));
-        assert!(!session.chat_list.chats_exhausted, "{leaving}");
-        assert!(!session.chat_list.archive_chats_exhausted, "{leaving}");
+        assert!(!session.chat_list.main_paging.is_exhausted(), "{leaving}");
+        assert!(
+            !session.chat_list.archive_paging.is_exhausted(),
+            "{leaving}"
+        );
         assert!(
             session.chat_list.folder_chats_exhausted.is_empty(),
             "{leaving}"
@@ -326,13 +344,36 @@ fn take_purpose_drops_only_matching_request() {
     assert!(session.requests.take(sounds_id).is_some());
 }
 
+/// A request that is never answered (the account closes, or the flood
+/// re-send fails) settles through the error path, which ends the stages
+/// that waited on it: nothing blocks until restart (02-206, 02-211).
+#[test]
+fn an_unanswered_device_login_and_tone_upload_settle_with_their_account() {
+    use crate::tone_upload::{ToneTarget, ToneUpload};
+    let (mut session, _) = session();
+    let login = session.request(RequestPurpose::ConfirmDeviceLogin, None);
+    let upload = session.request(RequestPurpose::UploadSavedNotificationSound, None);
+    session.settings.sessions_op.begin(login);
+    session.settings.tone_upload = ToneUpload::Uploading {
+        name: "Chime".into(),
+        target: ToneTarget::Reaction,
+        request: upload,
+    };
+    session.settle_account_requests();
+    assert!(!session.settings.sessions_op.is_mutating());
+    assert!(matches!(
+        session.settings.tone_upload,
+        ToneUpload::Failed(_)
+    ));
+}
+
 #[test]
 fn storage_statistics_answer_cached_by_purpose() {
     let (mut with_purpose, sink) = session();
     let (mut without_purpose, sink2) = session();
     let seq = AtomicU64::new(0);
     let extra = with_purpose.request(RequestPurpose::GetStorageStatistics, None);
-    with_purpose.settings.storage_stats_loading = true;
+    with_purpose.settings.storage_stats.begin();
     apply_json(
         &mut with_purpose,
         &seq,
@@ -342,7 +383,11 @@ fn storage_statistics_answer_cached_by_purpose() {
             extra.0
         ),
     );
-    let stats = with_purpose.settings.storage_stats.expect("stats cached");
+    let stats = with_purpose
+        .settings
+        .storage_stats
+        .data()
+        .expect("stats cached");
     assert_eq!(stats.total_size, 6000);
     assert!(
         stats
@@ -351,7 +396,7 @@ fn storage_statistics_answer_cached_by_purpose() {
             .any(|t| t.file_type == "fileTypeSecret" && t.size == 4000 && t.count == 1),
         "secret category present"
     );
-    assert!(!with_purpose.settings.storage_stats_loading);
+    assert!(!with_purpose.settings.storage_stats.is_loading());
 
     // A stray `storageStatistics` (no matching purpose) is ignored.
     let seq2 = AtomicU64::new(0);
@@ -361,7 +406,7 @@ fn storage_statistics_answer_cached_by_purpose() {
         &sink2,
         r#"{"@type":"storageStatistics","size":1,"count":1,"by_chat":[]}"#,
     );
-    assert!(without_purpose.settings.storage_stats.is_none());
+    assert!(without_purpose.settings.storage_stats.data().is_none());
 }
 
 #[test]
@@ -369,7 +414,7 @@ fn storage_statistics_error_clears_loading() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetStorageStatistics, None);
-    session.settings.storage_stats_loading = true;
+    session.settings.storage_stats.begin();
     apply_json(
         &mut session,
         &seq,
@@ -379,8 +424,12 @@ fn storage_statistics_error_clears_loading() {
             extra.0
         ),
     );
-    assert!(session.settings.storage_stats.is_none());
-    assert!(!session.settings.storage_stats_loading);
+    assert!(session.settings.storage_stats.data().is_none());
+    assert!(!session.settings.storage_stats.is_loading());
+    assert!(
+        session.settings.storage_stats.error().is_some(),
+        "the overlay draws the failure"
+    );
 }
 
 #[test]
@@ -431,9 +480,17 @@ fn opening_a_chat_clears_viewed_ids_for_that_generation() {
     let seq = AtomicU64::new(0);
     session.open_chat(ChatId(1));
     session.mark_viewed(ChatId(1), &[MessageId(5)]);
-    assert!(session.histories.get(&1).unwrap().viewed.contains(&5));
+    assert!(session.histories.get(&1).unwrap().views.is_viewed(5));
     session.open_chat(ChatId(1));
-    assert!(session.histories.get(&1).unwrap().viewed.is_empty());
+    assert!(
+        session
+            .histories
+            .get(&1)
+            .unwrap()
+            .views
+            .done_ids()
+            .is_empty()
+    );
     apply_json(
         &mut session,
         &seq,
@@ -495,14 +552,14 @@ fn update_chat_photo_swaps_and_clears() {
 fn topic_selection_state() {
     let (mut session, _sink) = session();
     session.open_chat(ChatId(16));
-    assert_eq!(session.open_topic, None);
+    assert_eq!(session.open_forum_topic(), None);
     session.select_topic(ChatId(16), 2);
-    assert_eq!(session.open_topic, Some(2));
+    assert_eq!(session.open_forum_topic(), Some(2));
     session.deselect_topic();
-    assert_eq!(session.open_topic, None);
+    assert_eq!(session.open_forum_topic(), None);
     session.select_topic(ChatId(16), 2);
     session.open_chat(ChatId(17));
-    assert_eq!(session.open_topic, None);
+    assert_eq!(session.open_forum_topic(), None);
 }
 
 #[test]
@@ -712,11 +769,10 @@ fn cl_chat_preview_cached_for_unopened_chat() {
     let fetch = session
         .chat_list
         .chat_preview_fetch
-        .as_ref()
+        .get(&ChatId(12))
         .expect("preview fetch");
-    assert_eq!(fetch.chat_id, ChatId(12));
-    assert_eq!(fetch.messages.len(), 1);
-    assert_eq!(fetch.failed, None);
+    assert_eq!(fetch.data().map(Vec::len), Some(1));
+    assert_eq!(fetch.error(), None);
     assert!(
         session
             .histories
@@ -737,14 +793,49 @@ fn cl_chat_preview_cached_for_unopened_chat() {
     let fetch = session
         .chat_list
         .chat_preview_fetch
-        .as_ref()
+        .get(&ChatId(12))
         .expect("preview fetch");
+    assert!(fetch.error().unwrap().contains("Could not load preview"));
+}
+
+#[test]
+fn a_late_preview_answer_for_another_chat_keeps_the_one_on_screen() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let a = session.request(RequestPurpose::GetChatPreview, Some(ChatId(11)));
+    let b = session.request(RequestPurpose::GetChatPreview, Some(ChatId(12)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","messages":[{{"@type":"message","id":7,"chat_id":12,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"hi","entities":[]}}}}}}],"total_count":1}}"#,
+            b.0
+        ),
+    );
+    // Chat 11's request fails after chat 12 answered.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"Timeout"}}"#,
+            a.0
+        ),
+    );
+    let previews = &session.chat_list.chat_preview_fetch;
+    assert_eq!(
+        previews
+            .get(&ChatId(12))
+            .and_then(|fetch| fetch.data())
+            .map(Vec::len),
+        Some(1),
+        "chat 12 keeps its messages"
+    );
     assert!(
-        fetch
-            .failed
-            .as_ref()
-            .unwrap()
-            .contains("Could not load preview")
+        previews
+            .get(&ChatId(11))
+            .is_some_and(|fetch| fetch.error().is_some())
     );
 }
 

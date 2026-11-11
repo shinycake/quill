@@ -19,15 +19,6 @@ impl Session {
             has_automatic_translation,
             username,
             status,
-            can_restrict_members,
-            can_invite_users,
-            can_promote_members,
-            can_manage_tags,
-            can_manage_topics,
-            can_change_info,
-            can_send_welcome_messages,
-            can_manage_video_chats,
-            is_anonymous,
             join_by_request,
             is_broadcast_group,
             sign_messages,
@@ -39,6 +30,17 @@ impl Session {
         else {
             return;
         };
+        let rights = status.rights();
+        let can_restrict_members = rights.map(|r| r.can_restrict_members);
+        let can_invite_users = rights.map(|r| r.can_invite_users);
+        let can_promote_members = rights.map(|r| r.can_promote_members);
+        let can_manage_tags = rights.map(|r| r.can_manage_tags);
+        let can_manage_topics = rights.map(|r| r.can_manage_topics);
+        let can_change_info = rights.map(|r| r.can_change_info);
+        let can_send_welcome_messages = rights.map(|r| r.can_send_welcome_messages);
+        let can_manage_video_chats = rights.map(|r| r.can_manage_video_chats);
+        let is_anonymous = status.is_anonymous();
+        let status = status.kind();
         self.set_direct_messages_role(supergroup_id, direct_messages);
         // Same as the other rights: only the `getSupergroup`
         // answer is trusted for the viewer's own status.

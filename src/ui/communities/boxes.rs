@@ -141,6 +141,9 @@ impl QuillApp {
             let loading = this
                 .session()
                 .is_some_and(|s| s.communities.joined.is_loading());
+            let joined_error = this
+                .session()
+                .and_then(|s| s.communities.joined.error().map(str::to_string));
             let muted = cx.theme().muted_foreground;
             let mut body = div()
                 .flex()
@@ -183,6 +186,33 @@ impl QuillApp {
                         .flex()
                         .justify_center()
                         .child(gpui_kit::component::spinner::Spinner::new()),
+                );
+            } else if let Some(error) = joined_error {
+                // The list did not load: say so, with a Retry, instead of
+                // showing only "Create".
+                body = body.child(
+                    div()
+                        .py_2()
+                        .flex()
+                        .flex_col()
+                        .items_start()
+                        .gap_2()
+                        .child(div().text_sm().text_color(muted).child(error))
+                        .child(
+                            Button::new("community-pick-retry")
+                                .label(tr(keys::Q_CHAT_RETRY))
+                                .small()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    if let Some(live) = this.live.as_mut()
+                                        && let Err(err) = live.driver.fetch_joined_communities()
+                                    {
+                                        this.set_note(crate::ui::status_note::StatusNote::error(
+                                            crate::ui::user_error::user_error(&err),
+                                        ));
+                                    }
+                                    cx.notify();
+                                })),
+                        ),
                 );
             }
             let footer = div().flex().justify_end().child(

@@ -9,8 +9,9 @@ use crate::telegram::envelope::UsernameCheckResult;
 /// The Type box's requests; wrapped as `GroupsPurpose::GroupType`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GroupTypePurpose {
-    /// `checkChatUsername`; only the newest generation counts.
-    CheckChatUsername { generation: u64 },
+    /// `checkChatUsername`; only the request `UsernameCheck::Checking` names
+    /// counts.
+    CheckChatUsername,
     /// `checkCreatedPublicChatsLimit`: an error means the limit is reached.
     CheckPublicChatsLimit,
     /// `getCreatedPublicChats` for the limit box's list.
@@ -25,6 +26,28 @@ pub struct UsernameVerdict {
     pub chat_id: ChatId,
     pub username: String,
     pub result: UsernameCheckResult,
+}
+
+/// The newest link check of the Type box: one stage at a time. Set only
+/// once the request went out, so `Checking` always has an answer coming
+/// (the verdict or the failure).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum UsernameCheck {
+    #[default]
+    Idle,
+    /// The check in flight: its request, chat and text. Only its own answer
+    /// ends it.
+    Checking {
+        request: RequestId,
+        chat_id: ChatId,
+        username: String,
+    },
+    /// The newest answer.
+    Verdict(UsernameVerdict),
+    /// The chat and text whose newest check failed (FLOOD_WAIT, a server
+    /// error): the box says so instead of "Checking..." with nothing in
+    /// flight, and Save asks again.
+    Failed { chat_id: ChatId, username: String },
 }
 
 /// The owned public chats of the limit box.
@@ -43,8 +66,54 @@ pub enum PublicChatsFetch {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicLinkRevoke {
     pub chat_id: ChatId,
+    /// The requests whose answers are still out.
     pub requests: Vec<RequestId>,
-    pub failed: bool,
+}
+
+/// A revoke from the limit box: idle, its two requests out, or both
+/// answered and the link free. `Freed` leaves when the UI takes it
+/// ([`Session::take_public_link_freed`]) or a new revoke starts. A refused
+/// or unsent request moves `Revoking` to `RevokingFailed`; with the other
+/// answers in, the revoke ends in `Idle` with a note and the list is asked
+/// again.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum PublicLinkStage {
+    #[default]
+    Idle,
+    Revoking(PublicLinkRevoke),
+    /// One of the requests failed; the others are still awaited.
+    RevokingFailed(PublicLinkRevoke),
+    Freed,
+}
+
+impl PublicLinkStage {
+    /// The revoke whose answers are out.
+    pub fn revoking(&self) -> Option<&PublicLinkRevoke> {
+        match self {
+            Self::Revoking(revoke) | Self::RevokingFailed(revoke) => Some(revoke),
+            _ => None,
+        }
+    }
+
+    pub fn revoking_mut(&mut self) -> Option<&mut PublicLinkRevoke> {
+        match self {
+            Self::Revoking(revoke) | Self::RevokingFailed(revoke) => Some(revoke),
+            _ => None,
+        }
+    }
+
+    pub fn is_revoking(&self) -> bool {
+        self.revoking().is_some()
+    }
+
+    /// A request of the revoke failed: the revoke can no longer free the
+    /// link.
+    pub fn request_failed(&mut self) {
+        *self = match std::mem::take(self) {
+            Self::Revoking(revoke) => Self::RevokingFailed(revoke),
+            other => other,
+        };
+    }
 }
 
 /// Why the usernames list could not show or hide a link (tdesktop
@@ -68,23 +137,14 @@ pub struct EditAfterUpgrade {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GroupTypeState {
-    /// Counts checks; an answer for an older one is dropped.
-    pub check_generation: u64,
-    /// The chat and text of the check in flight.
-    pub check_pending: Option<(ChatId, String)>,
-    /// The newest answer.
-    pub check: Option<UsernameVerdict>,
-    /// The chat and text whose newest check failed (FLOOD_WAIT, a server
-    /// error): the box says so instead of "Checking..." with nothing in
-    /// flight, and Save asks again.
-    pub check_failed: Option<(ChatId, String)>,
+    pub check: UsernameCheck,
     /// `checkCreatedPublicChatsLimit`: `Some(true)` at the limit.
     pub public_limit_reached: Option<bool>,
     /// Chats `checkChatUsername` said can't be public
     /// (`PublicGroupsUnavailable`).
     pub public_unavailable: HashSet<i64>,
     pub public_chats: PublicChatsFetch,
-    pub revoke: Option<PublicLinkRevoke>,
+    pub revoke: PublicLinkStage,
     /// The usernames list's last refused toggle, by chat id.
     pub toggle_error: Option<(ChatId, UsernameToggleError)>,
     /// Saves waiting for `upgradeBasicGroupChatToSupergroupChat`, by its
@@ -100,13 +160,24 @@ fn group_type_purpose(pending: Option<&PendingRequest>) -> Option<GroupTypePurpo
 }
 
 impl Session {
+    /// A revoke freed its link since this was last asked: true once, so
+    /// the Type box checks its typed link again (tdesktop goes back to
+    /// Public and checks it).
+    pub fn take_public_link_freed(&mut self) -> bool {
+        let freed = self.groups.group_type.revoke == PublicLinkStage::Freed;
+        if freed {
+            self.groups.group_type.revoke = PublicLinkStage::Idle;
+        }
+        freed
+    }
+
     /// The newest check of exactly `username` in `chat_id` failed.
     pub fn group_username_check_failed(&self, chat_id: ChatId, username: &str) -> bool {
-        self.groups
-            .group_type
-            .check_failed
-            .as_ref()
-            .is_some_and(|(chat, text)| *chat == chat_id && text == username)
+        matches!(
+            &self.groups.group_type.check,
+            UsernameCheck::Failed { chat_id: chat, username: text }
+                if *chat == chat_id && text == username
+        )
     }
 
     /// The verdict for exactly `username` in `chat_id`, if one came.
@@ -115,12 +186,12 @@ impl Session {
         chat_id: ChatId,
         username: &str,
     ) -> Option<UsernameCheckResult> {
-        self.groups
-            .group_type
-            .check
-            .as_ref()
-            .filter(|v| v.chat_id == chat_id && v.username == username)
-            .map(|v| v.result)
+        match &self.groups.group_type.check {
+            UsernameCheck::Verdict(v) if v.chat_id == chat_id && v.username == username => {
+                Some(v.result)
+            }
+            _ => None,
+        }
     }
 
     /// What the Type box opens with: the chat as TDLib last reported it
@@ -174,6 +245,17 @@ impl Session {
         }
     }
 
+    /// The count of active invite links was asked for and is not in yet:
+    /// Save of a changed join approval waits for it. A count that failed
+    /// reads as none, as in tdesktop (`requestInviteLinksCount`'s `fail`
+    /// is `done(0)`).
+    pub fn chat_invite_link_count_loading(&self, chat_id: ChatId) -> bool {
+        matches!(
+            self.groups.invite_link_counts.get(&chat_id.0),
+            Some(InviteLinkCountsFetch::Loading)
+        )
+    }
+
     /// A `checkChatUsernameResult*` answering the Type box's check. At
     /// the limit, the public links box opens (tdesktop
     /// `askUsernameRevoke`).
@@ -182,15 +264,23 @@ impl Session {
         result: UsernameCheckResult,
         pending: Option<&PendingRequest>,
     ) {
-        let Some(GroupTypePurpose::CheckChatUsername { generation }) = group_type_purpose(pending)
-        else {
+        let Some(pending) = pending else {
             return;
         };
-        let state = &mut self.groups.group_type;
-        if generation != state.check_generation {
+        if group_type_purpose(Some(pending)) != Some(GroupTypePurpose::CheckChatUsername) {
             return;
         }
-        let Some((chat_id, username)) = state.check_pending.take() else {
+        let state = &mut self.groups.group_type;
+        // Only the check in flight is answered: an answer to an older one
+        // leaves the stage (a newer check, its verdict or failure) alone.
+        if !matches!(&state.check, UsernameCheck::Checking { request, .. } if *request == pending.id)
+        {
+            return;
+        }
+        let UsernameCheck::Checking {
+            chat_id, username, ..
+        } = std::mem::take(&mut state.check)
+        else {
             return;
         };
         match result {
@@ -203,7 +293,7 @@ impl Session {
             }
             _ => {}
         }
-        self.groups.group_type.check = Some(UsernameVerdict {
+        self.groups.group_type.check = UsernameCheck::Verdict(UsernameVerdict {
             chat_id,
             username,
             result,
@@ -247,11 +337,17 @@ impl Session {
         pending: Option<&PendingRequest>,
     ) {
         match group_type_purpose(pending) {
-            Some(GroupTypePurpose::CheckChatUsername { generation })
-                if generation == self.groups.group_type.check_generation =>
-            {
+            Some(GroupTypePurpose::CheckChatUsername) => {
                 let state = &mut self.groups.group_type;
-                state.check_failed = state.check_pending.take();
+                let asked = pending.map(|p| p.id);
+                state.check = match std::mem::take(&mut state.check) {
+                    UsernameCheck::Checking {
+                        request,
+                        chat_id,
+                        username,
+                    } if Some(request) == asked => UsernameCheck::Failed { chat_id, username },
+                    other => other,
+                };
             }
             Some(GroupTypePurpose::CheckPublicChatsLimit) => {
                 self.groups.group_type.public_limit_reached =
@@ -288,30 +384,35 @@ impl Session {
             return;
         };
         let state = &mut self.groups.group_type;
-        let Some(revoke) = state.revoke.as_mut() else {
+        let Some(revoke) = state.revoke.revoking_mut() else {
             return;
         };
         if !revoke.requests.contains(&pending.id) {
             return;
         }
         revoke.requests.retain(|id| *id != pending.id);
-        revoke.failed |= failed;
-        if !revoke.requests.is_empty() {
+        let all_in = revoke.requests.is_empty();
+        if failed {
+            state.revoke.request_failed();
+        }
+        if !all_in {
             return;
         }
-        if revoke.failed {
-            state.revoke = None;
+        if matches!(state.revoke, PublicLinkStage::RevokingFailed(_)) {
+            state.revoke = PublicLinkStage::Idle;
             state.public_chats = PublicChatsFetch::None;
-            self.chats_state.chat_action_error =
-                Some(crate::lang::tr(crate::lang::keys::Q_GROUP_TYPE_REVOKE_FAILED).to_string());
+            self.chats_state
+                .chat_action_error
+                .push(crate::lang::tr(crate::lang::keys::Q_GROUP_TYPE_REVOKE_FAILED).to_string());
             return;
         }
-        state.revoke = None;
+        state.revoke = PublicLinkStage::Freed;
         state.public_limit_reached = Some(false);
         state.public_chats = PublicChatsFetch::None;
-        if self.payments.hub.limit_box.map(|(kind, _)| kind) == Some(PremiumLimitKind::PublicLinks)
+        if self.payments.hub.limit_box().map(|(kind, _)| kind)
+            == Some(PremiumLimitKind::PublicLinks)
         {
-            self.payments.hub.limit_box = None;
+            self.payments.hub.close_limit_box();
         }
     }
 }

@@ -7,12 +7,13 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::engine::Shared;
+use super::engine::Stage;
 use super::source::Packer;
 use super::store::Scratch;
-use super::{Cancel, ClipInfo, ClipKey, ClipState, DecodeAll};
+use super::{Cancel, ClipInfo, ClipKey, DecodeAll};
 use crate::locks::lock_or_recover;
 
-pub(super) fn run(shared: &Shared) {
+pub(super) fn run(index: usize, shared: &Shared) {
     let mut scratch = Scratch::default();
     loop {
         let (key, id, decode, cancel) = {
@@ -21,7 +22,7 @@ pub(super) fn run(shared: &Shared) {
                 if state.stop {
                     return;
                 }
-                if let Some(job) = state.next_decode() {
+                if let Some(job) = state.next_decode(index) {
                     break job;
                 }
                 state = shared
@@ -52,15 +53,14 @@ pub(super) fn open(
         state.freed.push(packed);
         return;
     };
-    clip.busy = false;
     match opened {
         Ok(timeline) => {
-            clip.state = ClipState::Ready(ClipInfo { timeline });
+            clip.stage = Stage::Ready(ClipInfo { timeline });
             state.install(&key, packed);
         }
         Err(error) => {
             clip.wanted.clear();
-            clip.state = ClipState::Failed(error);
+            clip.stage = Stage::Failed(error);
             state.freed.push(packed);
         }
     }

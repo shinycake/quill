@@ -13,7 +13,7 @@ pub(in crate::ui) fn rich_text_reserving(
     entities: &[TextEntity],
     msg_key: (i64, u64),
     is_caption: bool,
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &super::revealed::Revealed,
     font: Pixels,
     emoji_paths: &HashMap<i64, ImageSource>,
     // Animated custom emoji for the animation layer (see `paint_text_run`).
@@ -43,7 +43,7 @@ pub(super) fn rich_part_line(
     text: &str,
     entities: &[TextEntity],
     msg_key: (i64, u64),
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &super::revealed::Revealed,
     font: Pixels,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
@@ -90,7 +90,7 @@ fn text_at(
     entities: &[TextEntity],
     msg_key: (i64, u64),
     is_caption: bool,
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &super::revealed::Revealed,
     font: Pixels,
     emoji_paths: &HashMap<i64, ImageSource>,
     layered: &HashMap<i64, StickerView>,
@@ -99,7 +99,10 @@ fn text_at(
 ) -> AnyElement {
     let runs = styled_runs(text, entities);
     let mut column = div()
-        .id(("msg-rich-text", msg_key.1 * 2 + is_caption as u64))
+        .id((
+            "msg-rich-text",
+            msg_key.1.wrapping_mul(2).wrapping_add(is_caption as u64),
+        ))
         .text_size(font)
         .flex()
         .flex_col()
@@ -188,7 +191,7 @@ pub(super) fn inline_paragraph(
     first_index: usize,
     msg_key: (i64, u64),
     is_caption: bool,
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &super::revealed::Revealed,
     emoji_paths: &HashMap<i64, ImageSource>,
     layered: &HashMap<i64, StickerView>,
     font: Pixels,
@@ -265,7 +268,7 @@ pub(super) fn inline_paragraph(
             InlineAction::Link(link) => this.queue_link(link, msg_key, cx),
             InlineAction::CopyCode(text) => this.copy_entity_text(text, cx),
             InlineAction::RevealSpoiler(key) => {
-                this.message_ui.spoiler_revealed.insert(key);
+                this.message_ui.revealed.reveal_spoiler(key);
                 super::super::spoiler_fx::mark_revealed(key);
                 cx.notify();
             }
@@ -277,7 +280,9 @@ pub(super) fn inline_paragraph(
     .on_secondary_press(move |ix, position, _, cx| {
         if let Some(InlineAction::Link(link)) = press_actions.get(ix) {
             let link = link.clone();
-            let _ = press_owner.update(cx, |this, _| this.note_right_clicked_link(position, link));
+            let _ = press_owner.update(cx, |this, cx| {
+                this.note_right_clicked_link(position, link, cx)
+            });
         }
     })
     .on_range_hover(move |hover, _, cx| {
@@ -317,7 +322,7 @@ pub(in crate::ui) fn message_text_block(
     // Animated frames of this message's custom emoji, when decoded; they
     // replace the still images.
     animated_emoji: &HashMap<i64, super::super::sticker_player::StickerView>,
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &super::revealed::Revealed,
     // Settings → Appearance: message font size.
     font: Pixels,
     big_emoji: bool,
@@ -326,8 +331,30 @@ pub(in crate::ui) fn message_text_block(
     reserve: Option<Pixels>,
     // How wide the bubble may get: the link preview card fits it.
     room: crate::ui::history::bubble_width::BubbleRoom,
+    // A streamed bot reply appearing line by line (`bot_stream`).
+    reveal: Option<crate::ui::text_reveal::TextReveal>,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
+    if reveal.is_some() {
+        return crate::ui::text_reveal::revealing(reveal, || {
+            message_text_block(
+                msg_key,
+                text,
+                files,
+                downloading,
+                media_roots,
+                custom_emoji,
+                animated_emoji,
+                revealed,
+                font,
+                big_emoji,
+                reserve,
+                room,
+                None,
+                cx,
+            )
+        });
+    }
     let row_id = msg_key.1;
     let font = if big_emoji && text.link_preview.is_none() {
         match quill::emoji_catalog::big_emoji_count_with_entities(&text.text, &text.entities) {
@@ -498,7 +525,7 @@ pub(in crate::ui) fn link_preview_card(
             let side = px(fit.clamp(1, 72) as f32);
             for (index, thumb_photo) in thumbnails.iter().enumerate() {
                 strip = strip.child(preview_thumb(
-                    row_id * 100 + index as u64,
+                    row_id.wrapping_mul(100).wrapping_add(index as u64),
                     thumb_photo,
                     ThumbFrame::Fixed(side, side),
                     files,
@@ -698,7 +725,9 @@ pub(in crate::ui) fn message_rich_block(
     chat_id: ChatId,
     message_id: MessageId,
     rich: &quill::telegram::envelope::RichMessageContent,
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &super::revealed::Revealed,
+    // Whether "Load full message" of this message is out (the button waits).
+    loading_full: bool,
     // Settings → Appearance: message font size.
     font: Pixels,
     cx: &mut Context<QuillApp>,
@@ -719,8 +748,13 @@ pub(in crate::ui) fn message_rich_block(
     if !rich.is_full {
         stack = stack.child(
             Button::new(format!("rich-load-full-{row_id}"))
-                .label(tr(keys::Q_MISC_LOAD_FULL_MESSAGE))
+                .label(tr(if loading_full {
+                    keys::Q_MISC_LOADING_FULL_MESSAGE
+                } else {
+                    keys::Q_MISC_LOAD_FULL_MESSAGE
+                }))
                 .ghost()
+                .disabled(loading_full)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if let Some(live) = this.live.as_mut() {
                         match live.driver.fetch_full_rich_message(chat_id, message_id) {

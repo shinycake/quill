@@ -15,6 +15,8 @@ mod custom_stickers;
 pub use custom_stickers::CustomEmojiStickers;
 pub mod keyword_lookup;
 pub use keyword_lookup::KeywordLookups;
+mod stages;
+pub use stages::{AnimatedSuggestion, KeywordEmojis, TrendingPage, TrendingSets};
 
 /// Most resolved custom emoji kept in `EmojiPanel::custom_emoji_stickers`.
 pub const CUSTOM_EMOJI_CACHE_CAP: usize = 4000;
@@ -27,66 +29,139 @@ pub enum EmojiSetTab {
     Search,
 }
 
-/// Slice S10: custom-emoji backend (packs + statuses + picker search).
-/// Mirrors `StickerPanel`'s shape but stays separate — emoji sets, statuses
-/// and picker answers are a different domain from regular stickers, and the
-/// two panels must never share a slot.
-/// The panel's `getKeywordEmojis` search: one list for the session, with
-/// the query it was asked for. Two windows' panels share it, so each reads
-/// it through [`KeywordEmojis::for_query`]: a list asked for another
-/// window's query is none of its own.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct KeywordEmojis {
-    /// The trimmed query the list is for (the last one asked).
-    pub query: String,
-    pub emojis: Vec<String>,
+/// One fetch per tab of the Emoji Sets box.
+#[derive(Debug, Clone, Default)]
+pub struct EmojiLists {
+    pub installed: crate::state::fetch::Fetch<()>,
+    /// The Trending tab holds its list and its paging in the one value.
+    pub trending: TrendingSets,
+    pub search: crate::state::fetch::Fetch<()>,
 }
 
-impl KeywordEmojis {
-    /// The matches for `query`; none when the list is another query's.
-    pub fn for_query(&self, query: &str) -> &[String] {
-        if self.query == query.trim() {
-            &self.emojis
-        } else {
-            &[]
+impl EmojiLists {
+    /// The list a request loads; `None` for every other request.
+    pub fn for_purpose(
+        &mut self,
+        purpose: crate::state::RequestPurpose,
+    ) -> Option<&mut crate::state::fetch::Fetch<()>> {
+        use crate::state::RequestPurpose;
+        match purpose {
+            RequestPurpose::GetInstalledEmojiSets => Some(&mut self.installed),
+            RequestPurpose::SearchEmojiSets => Some(&mut self.search),
+            _ => None,
+        }
+    }
+
+    /// The failure a tab shows.
+    pub fn error_of(&self, tab: EmojiSetTab) -> Option<&str> {
+        match tab {
+            EmojiSetTab::Installed => self.installed.error(),
+            EmojiSetTab::Trending => self.trending.error(),
+            EmojiSetTab::Search => self.search.error(),
         }
     }
 }
 
+/// The install or removal of one emoji set (`changeStickerSet`): at most
+/// one at a time. Only the answer of `Running`'s own request settles it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SetMutation {
+    #[default]
+    Idle,
+    Running {
+        request: crate::ids::RequestId,
+        set_id: i64,
+        installed: bool,
+    },
+    /// The change failed; the box says so until the next change, the next
+    /// answer or the box opens again.
+    Failed,
+}
+
+impl SetMutation {
+    /// The set being changed and whether it is being installed.
+    pub fn running(self) -> Option<(i64, bool)> {
+        match self {
+            Self::Running {
+                set_id, installed, ..
+            } => Some((set_id, installed)),
+            _ => None,
+        }
+    }
+
+    pub fn is_failed(self) -> bool {
+        self == Self::Failed
+    }
+
+    pub fn is_running(self) -> bool {
+        matches!(self, Self::Running { .. })
+    }
+
+    /// `request` is the change this stage waits for.
+    pub fn waits_for(self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(self, Self::Running { request: waiting, .. } if Some(waiting) == request)
+    }
+
+    /// A failure line from an earlier change goes; a change in flight
+    /// stays.
+    pub fn forget_failure(&mut self) {
+        if self.is_failed() {
+            *self = Self::Idle;
+        }
+    }
+}
+
+/// Which screen reads the emoji status choices, so their custom emoji are
+/// looked up. One at a time: a status picker and the chat appearance box
+/// are not open together.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum StatusPicker {
+    #[default]
+    Closed,
+    /// The profile's status selector.
+    Profile,
+    /// The Appearance box of a chat (its status choices).
+    ChatAppearance,
+}
+
+/// The `setEmojiStatus` call in flight, and the emoji a success adds to the
+/// recents.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum StatusChange {
+    #[default]
+    Idle,
+    Setting {
+        request: crate::ids::RequestId,
+        /// `None` removes the status, or sets a gift's.
+        emoji: Option<i64>,
+    },
+}
+
+/// Slice S10: custom-emoji backend (packs + statuses + picker search).
+/// Mirrors `StickerPanel`'s shape but stays separate — emoji sets, statuses
+/// and picker answers are a different domain from regular stickers, and the
+/// two panels must never share a slot.
 #[derive(Debug, Clone, Default)]
 pub struct EmojiPanel {
-    pub mutating_set: Option<(i64, bool)>,
+    pub mutation: SetMutation,
     /// Sets whose cover previews were asked for, so a repaint never asks twice.
     pub covers_requested: HashSet<i64>,
-    pub pending_status_emoji: Option<i64>,
-    pub outdated_packs: std::collections::HashSet<i64>,
-    pub status_open: bool,
-    pub status_note: Option<String>,
+    pub status_change: StatusChange,
+    pub status_picker: StatusPicker,
     /// Where each custom emoji id's `getCustomEmojiStickers` stands: asked,
     /// answered, failed or given up ([`custom_lookup`]).
     pub custom_lookups: CustomEmojiLookups,
     pub open: bool,
-    pub failed: bool,
-    pub mutation_failed: bool,
+    /// Each set list's own fetch: a failure shows on its tab only, and no
+    /// other request clears it.
+    pub lists: EmojiLists,
     pub tab: EmojiSetTab,
     pub search_query: String,
-    pub trending_offset: i32,
-    pub trending_next_offset: i32,
-    pub trending_total: i32,
-    /// `updateTrendingStickerSets` for custom emoji arrived.
-    pub trending_stale: bool,
-    pub trending_has_more: bool,
     /// Slice S10: installed emoji sets (`getInstalledStickerSets` with
     /// `stickerTypeCustomEmoji`) — the "Emoji Sets" settings list.
     pub installed_sets: Vec<StickerSetInfo>,
-    /// The installed list has been answered at least once, so an empty
-    /// list means none rather than not loaded yet.
-    pub installed_loaded: bool,
     /// Slice S10: archived emoji sets (`getArchivedStickerSets`, paged).
     pub archived_sets: Vec<StickerSetInfo>,
-    /// Slice S10: trending/discover emoji sets + premium-row flag.
-    pub trending_sets: Vec<StickerSetInfo>,
-    pub trending_is_premium: bool,
     /// Slice S10: `searchStickerSets` results (emoji type).
     pub found_sets: Vec<StickerSetInfo>,
     /// Slice S10: recent emoji statuses (`getRecentEmojiStatuses`).
@@ -97,16 +172,11 @@ pub struct EmojiPanel {
     pub default_status_ids: Vec<i64>,
     /// `getDefaultChatEmojiStatuses`: the statuses of channels and groups.
     pub chat_default_status_ids: Vec<i64>,
-    /// The Appearance box of a chat is open and shows those statuses.
-    pub chat_status_open: bool,
     /// Slice S10: upgraded-gift statuses (`getUpgradedGiftEmojiStatuses`).
     pub upgraded_gift_statuses: Vec<EmojiStatusItem>,
-    /// Slice S10: last `getAnimatedEmoji` answer for the composer's
-    /// "suggest animated emoji".
-    pub animated_emoji: Option<StickerItem>,
-    /// Suggest-animated-emoji: the emoji the last `getAnimatedEmoji`
-    /// request went out for; dedupes requests across keystrokes.
-    pub animated_emoji_for: Option<String>,
+    /// `getAnimatedEmoji` for the composer's "suggest animated emoji": the
+    /// emoji asked (it dedupes requests across keystrokes) and its answer.
+    pub animated: AnimatedSuggestion,
     /// Slice S10: last `getCustomEmojiStickers` answer.
     pub custom_emoji_stickers: CustomEmojiStickers,
     /// `searchEmojis` answers for the composer's emoji suggestions.
@@ -117,9 +187,9 @@ pub struct EmojiPanel {
     /// Slice S10: `getEmojiCategories` rows for the picker.
     pub categories: Vec<EmojiCategory>,
     /// `getEmojiCategories` for the sticker panel (`GetStickerCategories`).
-    pub sticker_categories: Vec<EmojiCategory>,
-    /// The sticker categories were asked for.
-    pub sticker_categories_asked: bool,
+    /// One value: not asked, in flight, answered, or failed (the strip
+    /// stays hidden and the next panel open asks again).
+    pub sticker_categories: crate::state::fetch::Fetch<Vec<EmojiCategory>>,
 }
 
 /// B11: input-language codes for `getKeywordEmojis`: the script of what
@@ -263,15 +333,12 @@ impl Session {
             .emoji
             .found_sets
             .iter_mut()
-            .chain(self.stickers.emoji.trending_sets.iter_mut())
+            .chain(self.stickers.emoji.lists.trending.sets_mut().iter_mut())
         {
             set.is_installed = installed.contains(&set.id);
         }
-        if self.stickers.emoji.tab == EmojiSetTab::Installed {
-            self.stickers.emoji.failed = false;
-        }
+        self.stickers.emoji.lists.installed.succeed(());
         self.stickers.emoji.installed_sets = sets;
-        self.stickers.emoji.installed_loaded = true;
     }
 
     /// Slice S10: store an archived-emoji-sets page. First page replaces,
@@ -284,43 +351,28 @@ impl Session {
         }
     }
 
-    /// Slice S10: store the trending emoji sets (single-page replace, like S8).
-    pub fn accept_trending_emoji_sets(&mut self, sets: Vec<StickerSetInfo>, is_premium: bool) {
+    /// Slice S10: store a trending emoji sets page: the first replaces
+    /// the list, a later one joins it. Only the ask the list waits for
+    /// lands.
+    pub fn accept_trending_emoji_sets(
+        &mut self,
+        request: Option<crate::ids::RequestId>,
+        sets: Vec<StickerSetInfo>,
+        total: i32,
+        is_premium: bool,
+    ) {
         self.remember_cover_files(&sets);
-        if self.stickers.emoji.tab == EmojiSetTab::Trending {
-            self.stickers.emoji.failed = false;
-        }
-        let raw_count = sets.len() as i32;
-        if self.stickers.emoji.trending_offset == 0 {
-            self.stickers.emoji.trending_sets.clear();
-        }
-        for set in sets {
-            if !self
-                .stickers
-                .emoji
-                .trending_sets
-                .iter()
-                .any(|old| old.id == set.id)
-            {
-                self.stickers.emoji.trending_sets.push(set);
-            }
-        }
-        self.stickers.emoji.trending_next_offset = self
-            .stickers
+        self.stickers
             .emoji
-            .trending_offset
-            .saturating_add(raw_count);
-        self.stickers.emoji.trending_has_more = raw_count > 0
-            && self.stickers.emoji.trending_next_offset < self.stickers.emoji.trending_total;
-        self.stickers.emoji.trending_is_premium = is_premium;
+            .lists
+            .trending
+            .answered(request, sets, total, is_premium);
     }
 
     /// Slice S10: store a `searchStickerSets` answer (emoji type).
     pub fn accept_found_emoji_sets(&mut self, sets: Vec<StickerSetInfo>) {
         self.remember_cover_files(&sets);
-        if self.stickers.emoji.tab == EmojiSetTab::Search {
-            self.stickers.emoji.failed = false;
-        }
+        self.stickers.emoji.lists.search.succeed(());
         self.stickers.emoji.found_sets = sets;
     }
 
@@ -330,7 +382,7 @@ impl Session {
     /// refetches the authoritative list.
     pub fn invalidate_installed_emoji_sets(&mut self) {
         self.stickers.emoji.installed_sets.clear();
-        self.stickers.emoji.installed_loaded = false;
+        self.stickers.emoji.lists.installed = Default::default();
     }
 
     /// Slice S10: purpose-gated dispatch for the emoji payloads. Stray
@@ -338,6 +390,7 @@ impl Session {
     pub fn dispatch_emoji_payload(
         &mut self,
         purpose: Option<RequestPurpose>,
+        request: Option<crate::ids::RequestId>,
         payload: EnvelopePayload,
     ) {
         match payload {
@@ -350,11 +403,11 @@ impl Session {
                 self.accept_emoji_status_ids(purpose, custom_emoji_ids);
             }
             EnvelopePayload::Stickers(StickersPayload::AnimatedEmoji { sticker, files }) => {
-                self.accept_animated_emoji(purpose, sticker, files);
+                self.accept_animated_emoji(purpose, request, sticker, files);
             }
             EnvelopePayload::Stickers(StickersPayload::Emojis { emojis }) => {
                 if purpose == Some(RequestPurpose::GetKeywordEmojis) {
-                    self.stickers.emoji.keyword_emojis.emojis = emojis;
+                    self.stickers.emoji.keyword_emojis.answered(request, emojis);
                 }
             }
             EnvelopePayload::Stickers(StickersPayload::EmojiCategories { categories, files }) => {
@@ -396,12 +449,14 @@ impl Session {
     pub fn accept_animated_emoji(
         &mut self,
         purpose: Option<RequestPurpose>,
+        request: Option<crate::ids::RequestId>,
         sticker: Option<StickerItem>,
         files: Vec<ParsedFile>,
     ) {
-        if purpose == Some(RequestPurpose::GetAnimatedEmoji) {
+        if purpose == Some(RequestPurpose::GetAnimatedEmoji)
+            && self.stickers.emoji.animated.answered(request, sticker)
+        {
             self.remember_files(&files);
-            self.stickers.emoji.animated_emoji = sticker;
         }
     }
 
@@ -417,7 +472,7 @@ impl Session {
             self.stickers.emoji.categories = categories;
         } else if purpose == Some(RequestPurpose::GetStickerCategories) {
             self.remember_files(&files);
-            self.stickers.emoji.sticker_categories = categories;
+            self.stickers.emoji.sticker_categories.succeed(categories);
         }
     }
 
@@ -632,32 +687,37 @@ impl Session {
 
     /// Slice S10: an emoji-status or emoji-set mutation succeeded — drop the
     /// affected cache so the next fetch shows the server-confirmed state.
-    pub fn invalidate_emoji_caches(&mut self, purpose: Option<RequestPurpose>) {
+    pub fn invalidate_emoji_caches(
+        &mut self,
+        purpose: Option<RequestPurpose>,
+        request: Option<crate::ids::RequestId>,
+    ) {
         if purpose == Some(RequestPurpose::ChangeEmojiSet) {
-            self.stickers.emoji.mutation_failed = false;
-            self.stickers.emoji.mutating_set = None;
+            let mutation = &mut self.stickers.emoji.mutation;
+            if mutation.waits_for(request) || mutation.is_failed() {
+                *mutation = SetMutation::Idle;
+            }
         }
         if matches!(
             purpose,
             Some(RequestPurpose::SetEmojiStatus | RequestPurpose::ClearRecentEmojiStatuses)
         ) {
             if purpose == Some(RequestPurpose::SetEmojiStatus)
-                && let Some(id) = self.stickers.emoji.pending_status_emoji.take()
+                && let StatusChange::Setting {
+                    request: waiting,
+                    emoji,
+                } = self.stickers.emoji.status_change
+                && Some(waiting) == request
             {
-                self.remember_emoji_pack_usage(&[id]);
+                self.stickers.emoji.status_change = StatusChange::Idle;
+                if let Some(id) = emoji {
+                    self.remember_emoji_pack_usage(&[id]);
+                }
             }
             self.stickers.emoji.recent_statuses.clear();
             drop(
                 self.requests
                     .take_purpose(RequestPurpose::GetRecentEmojiStatuses),
-            );
-            self.stickers.emoji.status_note = Some(
-                if purpose == Some(RequestPurpose::SetEmojiStatus) {
-                    "Emoji status updated."
-                } else {
-                    "Recent emoji statuses cleared."
-                }
-                .into(),
             );
         }
         if matches!(

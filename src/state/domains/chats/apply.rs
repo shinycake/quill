@@ -3,6 +3,46 @@ use crate::state::*;
 use crate::telegram::envelope::ChatsPayload;
 
 impl Session {
+    /// The `ok` of a wallpaper removal: the entry leaves where the server
+    /// removed it. A refused request left everything in place.
+    pub(crate) fn apply_backgrounds_ok(&mut self, pending: Option<&PendingRequest>) {
+        let Some(pending) = pending else { return };
+        match pending.purpose {
+            RequestPurpose::Chats(ChatsPurpose::DeleteDefaultBackground { for_dark_theme }) => {
+                self.chats_state.default_backgrounds.remove(&for_dark_theme);
+            }
+            RequestPurpose::Chats(ChatsPurpose::RemoveInstalledBackground { background_id }) => {
+                self.chats_state.installed_backgrounds.forget(background_id);
+            }
+            RequestPurpose::DeleteChatBackground => {
+                if let Some(chat_id) = pending.chat_id {
+                    self.set_chat_background(chat_id.0, None);
+                }
+            }
+            _ => {}
+        }
+        self.file_appearance_answer(Some(pending), Ok(()));
+    }
+
+    /// The answer of an Appearance box request (name, profile, status, or
+    /// the group's emoji pack), filed under the request that asked.
+    pub(crate) fn file_appearance_answer(
+        &mut self,
+        pending: Option<&PendingRequest>,
+        answer: Result<(), String>,
+    ) {
+        let Some(pending) = pending else { return };
+        if matches!(
+            pending.purpose,
+            RequestPurpose::SetChatAccentColor
+                | RequestPurpose::SetChatProfileAccentColor
+                | RequestPurpose::SetChatEmojiStatus
+                | RequestPurpose::SetSupergroupCustomEmojiStickerSet
+        ) {
+            self.chats_state.appearance_answers.push(pending.id, answer);
+        }
+    }
+
     /// Applies one chats payload; called by
     /// [`Session::apply_payload`].
     pub(crate) fn apply_chats_payload(
@@ -102,10 +142,7 @@ impl Session {
                 self.set_chat_message_sender(chat_id.0, message_sender);
                 self.set_chat_translatable(chat_id.0, is_translatable);
                 if reply_markup_message_id.0 > 0 {
-                    self.bots
-                        .reply_keyboards
-                        .markup_message_ids
-                        .insert(chat_id.0, reply_markup_message_id.0);
+                    self.note_reply_markup_message(chat_id, reply_markup_message_id);
                 }
                 self.set_chat_action_bar(chat_id.0, action_bar);
                 self.set_business_bot_bar(chat_id.0, business_bot_bar);
@@ -212,9 +249,9 @@ impl Session {
                 colors,
                 available_ids,
             } => {
-                // Server name-color palette (ids 7+); the renderer reads it
-                // through the process-wide table.
-                crate::telegram::name_accent::set_palette(&colors);
+                // Server name-color palette (ids 7+); the renderer reads the
+                // table of the account on screen.
+                crate::telegram::name_accent::set_palette(&self.account, &colors);
                 self.chats_state.name_accent_colors = colors;
                 self.chats_state.available_name_accent_ids = available_ids;
             }
@@ -415,18 +452,33 @@ impl Session {
                 for background in &list {
                     self.upsert_background_files(background);
                 }
-                self.chats_state.installed_backgrounds = Some(list);
+                if let Some(RequestPurpose::Chats(ChatsPurpose::GetInstalledBackgrounds {
+                    for_dark_theme,
+                })) = pending.map(|p| p.purpose)
+                {
+                    self.chats_state
+                        .installed_backgrounds
+                        .theme_mut(for_dark_theme)
+                        .answered(extra, list);
+                }
             }
             ChatsPayload::Background(background) => {
                 self.upsert_background_files(&background);
                 match pending.map(|p| p.purpose) {
-                    Some(
-                        RequestPurpose::SetDefaultBackground
-                        | RequestPurpose::SetDefaultBackgroundLocal,
-                    ) => {
+                    Some(RequestPurpose::Chats(
+                        ChatsPurpose::SetDefaultBackground { for_dark_theme }
+                        | ChatsPurpose::SetDefaultBackgroundLocal { for_dark_theme },
+                    )) => {
+                        // Filed under the theme the request was sent for,
+                        // not the one the app shows when it lands.
                         self.chats_state
                             .default_backgrounds
-                            .insert(self.chats_state.background_set_for_dark, background);
+                            .insert(for_dark_theme, background);
+                        if let Some(id) = pending.map(|p| p.id) {
+                            self.chats_state
+                                .background_answers
+                                .push(id, Ok(BackgroundOutcome::Applied));
+                        }
                     }
                     Some(RequestPurpose::SearchBackground)
                         if self
@@ -461,12 +513,17 @@ impl Session {
             ChatsPayload::UpdateDefaultBackground {
                 for_dark_theme,
                 background,
-            } => {
-                self.upsert_background_files(&background);
-                self.chats_state
-                    .default_backgrounds
-                    .insert(for_dark_theme, background);
-            }
+            } => match background {
+                Some(background) => {
+                    self.upsert_background_files(&background);
+                    self.chats_state
+                        .default_backgrounds
+                        .insert(for_dark_theme, background);
+                }
+                None => {
+                    self.chats_state.default_backgrounds.remove(&for_dark_theme);
+                }
+            },
             ChatsPayload::ChatPhotos {
                 total_count,
                 photos,
@@ -490,19 +547,19 @@ impl Session {
                     generation,
                 })) = pending.map(|p| p.purpose)
                     && matches!(
-                        &self.chats_state.deep_link,
-                        Some(DeepLinkState::ResolvingInfo { generation: slot }) if *slot == generation
+                        self.chats_state.deep_link_stage(),
+                        Some(DeepLinkState::ResolvingInfo { generation: slot, .. }) if *slot == generation
                     )
                 {
                     use crate::deep_link_types::{LinkRoute, route};
-                    let original = std::mem::take(&mut self.chats_state.deep_link_original);
+                    let original = self.chats_state.deep_link_original().to_string();
                     let wallet_link =
                         crate::ton_wallet::links::wallet_link(&link, self.ton_wallet.can_use);
                     if let Some(crate::ton_wallet::links::WalletLink::Notice(surface)) = wallet_link
                     {
                         self.ton_wallet.show_notice(surface);
                     }
-                    self.chats_state.deep_link = match wallet_link {
+                    let next = match wallet_link {
                         Some(crate::ton_wallet::links::WalletLink::Notice(_)) => None,
                         Some(crate::ton_wallet::links::WalletLink::Unavailable) => Some(
                             DeepLinkState::ShowText(crate::ton_wallet::links::UNAVAILABLE.into()),
@@ -519,6 +576,10 @@ impl Session {
                             LinkRoute::Message(text) => DeepLinkState::ShowText(text),
                         }),
                     };
+                    match next {
+                        Some(stage) => self.chats_state.enter_deep_link_stage(stage),
+                        None => self.chats_state.deep_link = None,
+                    }
                 }
             }
             ChatsPayload::MessageLinkInfo {
@@ -530,14 +591,14 @@ impl Session {
                 if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve { generation })) =
                     pending.map(|p| p.purpose)
                     && matches!(
-                        &self.chats_state.deep_link,
+                        self.chats_state.deep_link_stage(),
                         Some(DeepLinkState::ResolvingChat {
                             action: DeepLinkAction::MessageLink { .. },
                             generation: slot,
                         }) if *slot == generation
                     )
                 {
-                    self.chats_state.deep_link = Some(if chat_id == 0 {
+                    self.chats_state.enter_deep_link_stage(if chat_id == 0 {
                         DeepLinkState::ShowText(
                             "This message is in a chat you can't see. Join it first.".into(),
                         )
@@ -560,14 +621,14 @@ impl Session {
                 if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkResolve { generation })) =
                     pending.map(|p| p.purpose)
                     && matches!(
-                        &self.chats_state.deep_link,
+                        self.chats_state.deep_link_stage(),
                         Some(DeepLinkState::ResolvingChat {
                             action: DeepLinkAction::BoostLink { .. },
                             generation: slot,
                         }) if *slot == generation
                     )
                 {
-                    self.chats_state.deep_link = Some(if chat_id == 0 {
+                    self.chats_state.enter_deep_link_stage(if chat_id == 0 {
                         DeepLinkState::ShowText("This boost link is broken.".into())
                     } else {
                         DeepLinkState::Info {
@@ -592,14 +653,15 @@ impl Session {
                 if let Some(RequestPurpose::Chats(ChatsPurpose::DeepLinkInfo { generation })) =
                     pending.map(|p| p.purpose)
                     && matches!(
-                        &self.chats_state.deep_link,
+                        self.chats_state.deep_link_stage(),
                         Some(DeepLinkState::ResolvingInfo {
-                            generation: slot
+                            generation: slot,
+                            ..
                         }) if *slot == generation
                     )
                 {
                     let action = crate::connect::parse_deep_link_action(&entities);
-                    self.chats_state.deep_link = Some(DeepLinkState::Info {
+                    self.chats_state.enter_deep_link_stage(DeepLinkState::Info {
                         text,
                         need_update,
                         action,

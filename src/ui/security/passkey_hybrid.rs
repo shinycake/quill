@@ -162,9 +162,8 @@ impl QuillApp {
                 let qr = self
                     .privacy
                     .passkeys
-                    .ceremony
-                    .as_ref()
-                    .and_then(|ui| ui.qr.as_ref())
+                    .ceremony()
+                    .and_then(|ui| ui.qr())
                     .map(|qr| (Arc::clone(&qr.image), qr.side))
                     .filter(|_| bluetooth);
                 let (title, about) = match mode {
@@ -231,13 +230,7 @@ impl QuillApp {
     /// "Use a security key": the worker looks for a key; with none the
     /// QR stays and a toast says so (`CeremonyEvent::NoKey`).
     fn use_passkey_security_key(&mut self, cx: &mut Context<Self>) {
-        if let Some(ceremony) = self
-            .privacy
-            .passkeys
-            .ceremony
-            .as_ref()
-            .and_then(|ui| ui.ceremony.as_ref())
-        {
+        if let Some(ceremony) = self.privacy.passkeys.ceremony().and_then(|ui| ui.worker()) {
             ceremony.use_security_key();
         }
         cx.notify();

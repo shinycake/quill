@@ -20,11 +20,14 @@
 //! window is left.
 #![deny(clippy::indexing_slicing)]
 
+mod corner_preview;
+mod hold;
 mod position;
 mod view;
 
 use super::app::QuillApp;
 use gpui_kit::*;
+use hold::{Clock, Hold};
 use quill::ids::{AccountKey, ChatId};
 use quill::notify::custom::{
     self, DELTA_Y, FAST_ANIM_MS, HIDE_ALL_HEIGHT, INPUT_CHECK_MS, MIN_HEIGHT, NativeService,
@@ -103,15 +106,18 @@ struct Popup {
     height: f32,
     shift: Anim,
     opacity: Anim,
-    hiding: bool,
     /// Where the window was last put, so a still frame moves nothing.
     placed: Option<Point<Pixels>>,
     drawn_opacity: f32,
 }
 
 impl Popup {
+    /// Fading out: the opacity heads for zero (`hide`), until `unhide`.
+    fn hiding(&self) -> bool {
+        self.opacity.to == 0.0
+    }
+
     fn hide(&mut self, slow: bool, now: Instant) {
-        self.hiding = true;
         let ms = if slow { SLOW_HIDE_MS } else { FAST_ANIM_MS };
         // Restart from fully shown, as tdesktop does (its #28811).
         self.opacity = Anim::still(1.0, now);
@@ -119,8 +125,7 @@ impl Popup {
     }
 
     fn unhide(&mut self, now: Instant) {
-        if self.hiding {
-            self.hiding = false;
+        if self.hiding() {
             self.opacity.retarget(1.0, FAST_ANIM_MS, false, now);
         }
     }
@@ -132,20 +137,47 @@ impl Popup {
     }
 }
 
+/// Where a shown notification stands. Unlinking leaves `Replying`: a window
+/// that is fading out holds nothing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Stage {
+    Live,
+    /// The user is typing a reply: nothing fades.
+    Replying,
+    /// Read, closed or replaced: fading out, no longer counted.
+    Unlinked,
+}
+
 struct Shown {
     id: u64,
     key: Key,
     popup: Popup,
-    /// Read, closed or replaced: fading out, no longer counted.
-    unlinked: bool,
+    stage: Stage,
     started: Instant,
-    waiting_for_input: bool,
-    /// When the slow fade is due: set once the user was back at the
-    /// computer (`notify_check_input`) or the pointer left the stack, and
-    /// never cleared while the window is up. Whether it fades now is
-    /// derived from it and the hold (`notify_settle_hiding`).
-    hide_at: Option<Instant>,
-    replying: bool,
+    hold: Hold,
+}
+
+impl Shown {
+    fn unlinked(&self) -> bool {
+        self.stage == Stage::Unlinked
+    }
+
+    fn replying(&self) -> bool {
+        self.stage == Stage::Replying
+    }
+
+    /// Read, closed or replaced: no longer counted, and its window fades
+    /// out (the stage and the fade change together, here only).
+    fn unlink(&mut self, now: Instant) {
+        self.stage = Stage::Unlinked;
+        self.popup.hide(false, now);
+    }
+
+    fn start_reply(&mut self) {
+        if self.stage == Stage::Live {
+            self.stage = Stage::Replying;
+        }
+    }
 }
 
 struct Pending {
@@ -170,7 +202,7 @@ pub(crate) struct NotifyWindows {
     /// The live window under the pointer: while it is, nothing fades
     /// (tdesktop `stopAllHiding`).
     hovered: Option<u64>,
-    ticking: bool,
+    clock: Clock,
     /// The main window's windowing system and display, noted every frame.
     pub(super) platform: NotifyPlatform,
     pub(super) main_display: Option<DisplayId>,
@@ -186,7 +218,7 @@ impl NotifyWindows {
             demo: Anim::still(1.0, Instant::now()),
             next_id: 0,
             hovered: None,
-            ticking: false,
+            clock: Clock::Stopped,
             platform: NotifyPlatform::Other,
             main_display: None,
         }
@@ -205,15 +237,15 @@ impl NotifyWindows {
     }
 
     fn live(&self) -> usize {
-        self.shown.iter().filter(|s| !s.unlinked).count()
+        self.shown.iter().filter(|s| !s.unlinked()).count()
     }
 
     fn any_replying(&self) -> bool {
-        self.shown.iter().any(|s| s.replying)
+        self.shown.iter().any(|s| s.replying())
     }
 
     fn is_live(&self, id: u64) -> bool {
-        self.shown.iter().any(|s| s.id == id && !s.unlinked)
+        self.shown.iter().any(|s| s.id == id && !s.unlinked())
     }
 
     /// Nothing fades: the pointer is over a live window, or a reply is
@@ -319,10 +351,9 @@ impl QuillApp {
         for shown in windows
             .shown
             .iter_mut()
-            .filter(|s| s.key == key && !s.unlinked && !s.replying)
+            .filter(|s| s.key == key && s.stage == Stage::Live)
         {
-            shown.unlinked = true;
-            shown.popup.hide(false, now);
+            shown.unlink(now);
         }
         windows.queue.push(
             key,
@@ -353,10 +384,9 @@ impl QuillApp {
         for shown in windows
             .shown
             .iter_mut()
-            .filter(|s| s.key == key && !s.unlinked)
+            .filter(|s| s.key == key && !s.unlinked())
         {
-            shown.unlinked = true;
-            shown.popup.hide(false, now);
+            shown.unlink(now);
             changed = true;
         }
         if changed {
@@ -369,9 +399,8 @@ impl QuillApp {
         let now = Instant::now();
         let windows = &mut self.delivery.windows;
         windows.queue.clear();
-        for shown in windows.shown.iter_mut().filter(|s| !s.unlinked) {
-            shown.unlinked = true;
-            shown.popup.hide(false, now);
+        for shown in windows.shown.iter_mut().filter(|s| !s.unlinked()) {
+            shown.unlink(now);
         }
         self.notify_show_next(cx);
     }
@@ -385,8 +414,19 @@ impl QuillApp {
         // connected (`custom_notify_displays_changed`; tdesktop keeps its
         // queue for `screenAdded`).
         if let Some((display_id, area)) = self.notify_display(cx) {
-            for (key, pending) in self.delivery.windows.queue.take(free) {
-                self.open_notification(key, pending, display_id, area, cx);
+            let mut batch = self.delivery.windows.queue.take(free).into_iter();
+            while let Some((key, pending)) = batch.next() {
+                if self.open_notification(&key, &pending, display_id, area, cx) {
+                    continue;
+                }
+                // No window opened: the notification waits at the head of
+                // the queue, with the rest, for the next change (a window
+                // closing, a display connecting, a setting).
+                let waiting: Vec<_> = std::iter::once((key, pending)).chain(batch).collect();
+                for (key, pending) in waiting.into_iter().rev() {
+                    self.delivery.windows.queue.push_front(key, pending);
+                }
+                break;
             }
         }
         self.notify_restack(cx);
@@ -411,22 +451,24 @@ impl QuillApp {
         self.notify_show_next(cx);
     }
 
+    /// Opens the window for `pending`; `false` when the platform would not
+    /// open one.
     fn open_notification(
         &mut self,
-        key: Key,
-        pending: Pending,
+        key: &Key,
+        pending: &Pending,
         display_id: DisplayId,
         area: Rect,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let windows = &mut self.delivery.windows;
         windows.next_id += 1;
         let id = windows.next_id;
         let content = Content::Message {
-            title: pending.notification.title.into(),
-            body: pending.notification.body.into(),
-            photo: pending.icon,
-            media: pending.preview,
+            title: pending.notification.title.clone().into(),
+            body: pending.notification.body.clone().into(),
+            photo: pending.icon.clone(),
+            media: pending.preview.clone(),
             hide_sender: pending.locked,
             can_reply: pending.reply && pending.notification.message_id.is_some(),
             reply_inline: self.delivery.windows.platform != NotifyPlatform::X11,
@@ -436,19 +478,18 @@ impl QuillApp {
             self.open_popup(id, content, MIN_HEIGHT, 0.0, corner, display_id, area, cx)
         else {
             eprintln!("quill: could not open a notification window");
-            return;
+            return false;
         };
         let now = Instant::now();
         self.delivery.windows.shown.push(Shown {
             id,
-            key,
+            key: key.clone(),
             popup,
-            unlinked: false,
+            stage: Stage::Live,
             started: now,
-            waiting_for_input: true,
-            hide_at: None,
-            replying: false,
+            hold: Hold::WaitingForInput { hide_at: None },
         });
+        true
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -507,7 +548,6 @@ impl QuillApp {
             height,
             shift: Anim::still(shift, now),
             opacity,
-            hiding: false,
             placed: Some(point(px(x), px(y))),
             drawn_opacity: 0.0,
         })
@@ -521,12 +561,17 @@ impl QuillApp {
         let heights: Vec<f32> = windows
             .shown
             .iter()
-            .filter(|s| !s.unlinked)
+            .filter(|s| !s.unlinked())
             .map(|s| s.popup.height)
             .collect();
         let (shifts, below) = custom::stack_shifts(&heights);
         let mut last_current = 0.0;
-        for (shown, shift) in windows.shown.iter_mut().filter(|s| !s.unlinked).zip(shifts) {
+        for (shown, shift) in windows
+            .shown
+            .iter_mut()
+            .filter(|s| !s.unlinked())
+            .zip(shifts)
+        {
             if (shown.popup.shift.to - shift).abs() > f32::EPSILON {
                 shown.popup.shift.retarget(shift, FAST_ANIM_MS, false, now);
             }
@@ -556,7 +601,7 @@ impl QuillApp {
                 hide_all.unhide(now);
             }
         } else if let Some(hide_all) = self.delivery.windows.hide_all.as_mut()
-            && !hide_all.hiding
+            && !hide_all.hiding()
         {
             hide_all.hide(false, now);
         }
@@ -569,12 +614,11 @@ impl QuillApp {
         let now = Instant::now();
         let mut allow = limit;
         for shown in self.delivery.windows.shown.iter_mut().rev() {
-            if shown.unlinked {
+            if shown.unlinked() {
                 continue;
             }
             if allow == 0 {
-                shown.unlinked = true;
-                shown.popup.hide(false, now);
+                shown.unlink(now);
             } else {
                 allow -= 1;
             }
@@ -593,61 +637,6 @@ impl QuillApp {
             .map(|s| &mut s.popup)
             .chain(windows.hide_all.iter_mut())
             .chain(windows.samples.iter_mut().map(|(_, p)| p))
-    }
-
-    /// The settings' corner preview: sample windows in `corner` (as many
-    /// as the count), the real ones dimmed; `None` takes them away
-    /// (tdesktop `setOverCorner` / `clearOverCorner`).
-    pub(in crate::ui) fn notify_corner_preview(
-        &mut self,
-        corner: Option<ScreenCorner>,
-        cx: &mut Context<Self>,
-    ) {
-        let now = Instant::now();
-        let windows = &mut self.delivery.windows;
-        let dim = if corner.is_some() { 0.0 } else { 1.0 };
-        if (windows.demo.to - dim).abs() > f32::EPSILON {
-            windows.demo.retarget(dim, FAST_ANIM_MS, false, now);
-        }
-        for (sample_corner, popup) in windows.samples.iter_mut() {
-            if Some(*sample_corner) != corner {
-                popup.hide(false, now);
-            }
-        }
-        if let Some(corner) = corner {
-            let count = custom::clamp_count(quill::notify_prefs::current().count);
-            let mut present = 0;
-            for (sample_corner, popup) in windows.samples.iter_mut() {
-                if *sample_corner == corner {
-                    if present < count {
-                        popup.unhide(now);
-                        present += 1;
-                    } else {
-                        popup.hide(false, now);
-                    }
-                }
-            }
-            if let Some((display_id, area)) = self.notify_display(cx) {
-                for index in present..count {
-                    let shift = DELTA_Y + index as f32 * (MIN_HEIGHT + DELTA_Y);
-                    self.delivery.windows.next_id += 1;
-                    let id = self.delivery.windows.next_id;
-                    if let Some(popup) = self.open_popup(
-                        id,
-                        Content::Sample,
-                        MIN_HEIGHT,
-                        shift,
-                        corner,
-                        display_id,
-                        area,
-                        cx,
-                    ) {
-                        self.delivery.windows.samples.push((corner, popup));
-                    }
-                }
-            }
-        }
-        self.ensure_notify_clock(cx);
     }
 
     /// Something happened in a window (`view::ViewEvent`).
@@ -686,17 +675,19 @@ impl QuillApp {
             }
             ViewEvent::ReplyOpened => {
                 if let Some(shown) = self.delivery.windows.shown.iter_mut().find(|s| s.id == id) {
-                    shown.replying = true;
+                    shown.start_reply();
                 }
             }
             ViewEvent::ReplySent(text) => {
                 // Sent only while the notification's account is on screen;
                 // otherwise Reply switches to it and focuses the composer.
-                if let Some(key) = self.notify_key(id)
-                    && !self.send_inline_reply(&key.0, key.1, &text, cx)
-                    && self.session().is_none_or(|s| s.account != key.0)
-                {
-                    self.push_notification_click(&key, NotificationAction::Reply, cx);
+                if let Some(key) = self.notify_key(id) {
+                    let outcome = self.send_inline_reply(&key.0, key.1, &text, cx);
+                    self.keep_unsent_reply(&key.0, key.1, text, outcome);
+                    let on_screen = self.session().is_some_and(|s| s.account == key.0);
+                    if outcome.opens_chat(on_screen) {
+                        self.push_notification_click(&key, NotificationAction::Reply, cx);
+                    }
                 }
                 self.unlink_notification(id, cx);
                 self.notify_start_all_hiding(now);
@@ -726,7 +717,7 @@ impl QuillApp {
             .windows
             .shown
             .iter()
-            .find(|s| s.id == id && !s.unlinked)
+            .find(|s| s.id == id && !s.unlinked())
             .map(|s| s.key.clone())
     }
 
@@ -757,11 +748,9 @@ impl QuillApp {
             .windows
             .shown
             .iter_mut()
-            .find(|s| s.id == id && !s.unlinked)
+            .find(|s| s.id == id && !s.unlinked())
         {
-            shown.unlinked = true;
-            shown.replying = false;
-            shown.popup.hide(false, now);
+            shown.unlink(now);
             self.notify_show_next(cx);
         }
     }
@@ -773,8 +762,8 @@ impl QuillApp {
         if windows.any_replying() {
             return;
         }
-        for shown in windows.shown.iter_mut().filter(|s| !s.unlinked) {
-            shown.hide_at = Some(shown.hide_at.map_or(now, |at| at.min(now)));
+        for shown in windows.shown.iter_mut().filter(|s| !s.unlinked()) {
+            shown.hold = shown.hold.due_by(now);
         }
         self.notify_settle_hiding(now);
         let windows = &mut self.delivery.windows;
@@ -786,13 +775,12 @@ impl QuillApp {
     }
 
     fn ensure_notify_clock(&mut self, cx: &mut Context<Self>) {
-        if self.delivery.windows.ticking {
+        if matches!(self.delivery.windows.clock, Clock::Running { .. }) {
             return;
         }
-        self.delivery.windows.ticking = true;
         // screen-scope: the notification windows are the app's; the tick
         // shows whichever account's notices are queued.
-        cx.spawn(async move |this, cx| {
+        let task = cx.spawn(async move |this, cx| {
             loop {
                 let next = this
                     .update(cx, |app, cx| app.notify_windows_tick(cx))
@@ -803,8 +791,8 @@ impl QuillApp {
                 };
                 cx.background_executor().timer(delay).await;
             }
-        })
-        .detach();
+        });
+        self.delivery.windows.clock = Clock::Running { _task: task };
     }
 
     /// One clock step: timers, fades, slides. Returns when to run again,
@@ -847,7 +835,7 @@ impl QuillApp {
                     cx.notify();
                 });
             }
-            if popup.hiding && popup.opacity.done(now) {
+            if popup.hiding() && popup.opacity.done(now) {
                 popup.close(cx);
                 closed = true;
             }
@@ -856,17 +844,17 @@ impl QuillApp {
             let windows = &mut self.delivery.windows;
             windows
                 .shown
-                .retain(|s| !(s.popup.hiding && s.popup.opacity.done(now)));
+                .retain(|s| !(s.popup.hiding() && s.popup.opacity.done(now)));
             if windows
                 .hide_all
                 .as_ref()
-                .is_some_and(|p| p.hiding && p.opacity.done(now))
+                .is_some_and(|p| p.hiding() && p.opacity.done(now))
             {
                 windows.hide_all = None;
             }
             windows
                 .samples
-                .retain(|(_, p)| !(p.hiding && p.opacity.done(now)));
+                .retain(|(_, p)| !(p.hiding() && p.opacity.done(now)));
             self.notify_show_next(cx);
         }
         let windows = &mut self.delivery.windows;
@@ -879,8 +867,8 @@ impl QuillApp {
                 windows
                     .shown
                     .iter()
-                    .filter(|s| !s.unlinked && !s.popup.hiding)
-                    .filter_map(|s| s.hide_at)
+                    .filter(|s| !s.unlinked() && !s.popup.hiding())
+                    .filter_map(|s| s.hold.hide_at())
                     .min()
             })
             .flatten()
@@ -888,7 +876,7 @@ impl QuillApp {
         let waiting = windows
             .shown
             .iter()
-            .any(|s| s.waiting_for_input && !s.unlinked);
+            .any(|s| s.hold.waiting() && !s.unlinked());
         let next = match (deadline, waiting) {
             (Some(deadline), true) => Some(deadline.min(Duration::from_millis(INPUT_CHECK_MS))),
             (Some(deadline), false) => Some(deadline),
@@ -901,7 +889,7 @@ impl QuillApp {
             Some(delay) => Some(delay.max(FRAME)),
             None if open => Some(Duration::from_millis(INPUT_CHECK_MS)),
             None => {
-                windows.ticking = false;
+                windows.clock = Clock::Stopped;
                 None
             }
         }
@@ -914,7 +902,7 @@ impl QuillApp {
     fn notify_check_input(&mut self, now: Instant) {
         let idle = quill::passcode::os_idle_ms().map(Duration::from_millis);
         let windows = &mut self.delivery.windows;
-        for shown in windows.shown.iter_mut().filter(|s| s.waiting_for_input) {
+        for shown in windows.shown.iter_mut().filter(|s| s.hold.waiting()) {
             let back = match idle {
                 None => true,
                 Some(idle) => now
@@ -922,9 +910,8 @@ impl QuillApp {
                     .is_some_and(|input| input > shown.started),
             };
             if back {
-                shown.waiting_for_input = false;
                 let due = now + Duration::from_millis(WAIT_LONG_HIDE_MS);
-                shown.hide_at = Some(shown.hide_at.map_or(due, |at| at.min(due)));
+                shown.hold = shown.hold.input_back(due);
             }
         }
     }
@@ -944,11 +931,11 @@ impl QuillApp {
             return;
         }
         let held = windows.held();
-        for shown in windows.shown.iter_mut().filter(|s| !s.unlinked) {
-            let due = !held && shown.hide_at.is_some_and(|at| at <= now);
-            if due && !shown.popup.hiding {
+        for shown in windows.shown.iter_mut().filter(|s| !s.unlinked()) {
+            let due = !held && shown.hold.hide_at().is_some_and(|at| at <= now);
+            if due && !shown.popup.hiding() {
                 shown.popup.hide(true, now);
-            } else if !due && shown.popup.hiding {
+            } else if !due && shown.popup.hiding() {
                 shown.popup.unhide(now);
             }
         }

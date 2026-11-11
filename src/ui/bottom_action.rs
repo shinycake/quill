@@ -32,7 +32,7 @@ impl QuillApp {
         let bot = session.bot_user_id_for_chat(chat.id);
         let history = session.histories.get(&chat.id.0);
         let empty_history = history
-            .is_some_and(|history| history.loaded_complete && history.messages.is_empty())
+            .is_some_and(|history| history.loaded_complete() && history.messages.is_empty())
             && chat.last_message.is_none();
         BarFacts {
             blocked: peer.is_some() && chat.blocked,
@@ -42,7 +42,7 @@ impl QuillApp {
                 && (session.bots.bot_start_params.contains_key(&chat.id.0) || empty_history),
             channel: matches!(chat.kind, ChatKind::Supergroup { .. }).then(|| ChannelFacts {
                 broadcast: chat.is_channel(),
-                membership: chat.my_member_status,
+                membership: chat.member_status(),
                 join_by_request: self.chat_join_by_request(chat.id),
                 direct_messages: session.direct_messages_role(chat.id).is_some(),
             }),
@@ -55,10 +55,10 @@ impl QuillApp {
     /// Channel Join and Mute stay with the channel footer.
     pub(super) fn bottom_action(&self) -> Option<BottomBar> {
         let session = self.session()?;
-        if session.open_topic.is_some() {
+        if session.open_forum_topic().is_some() {
             return None;
         }
-        let chat = session.chats.get(&session.open_chat?.0)?;
+        let chat = session.chats.get(&session.open_chat_id()?.0)?;
         match bottom_bar(&self.bottom_bar_facts(session, chat))? {
             bar @ (BottomBar::Unblock { .. }
             | BottomBar::Start
@@ -71,7 +71,7 @@ impl QuillApp {
 
     pub(super) fn bottom_action_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let bar = self.bottom_action()?;
-        let chat_id = self.session()?.open_chat?;
+        let chat_id = self.session()?.open_chat_id()?;
         // `{name} only accepts messages from contacts and Premium users.`
         let sentence = (bar == BottomBar::PremiumRequired)
             .then(|| {
@@ -119,12 +119,15 @@ impl QuillApp {
             BottomBar::Start => self.start_bot_from_bar(chat_id, cx),
             BottomBar::PremiumRequired => self.open_premium_from("require_premium", cx),
             BottomBar::JoinGroup | BottomBar::ApplyToJoin => {
-                self.join_channel(chat_id, cx);
-                self.set_note(if bar == BottomBar::ApplyToJoin {
-                    StatusNote::silent(tr(keys::Q_MEDIA_JOIN_REQUEST_SENT))
-                } else {
-                    StatusNote::silent(tr(keys::Q_MEDIA_JOINING_GROUP))
-                });
+                // Only a send that went out gets its own wording: a failed
+                // one keeps `join_channel`'s error note.
+                if self.join_channel(chat_id, cx) {
+                    self.set_note(if bar == BottomBar::ApplyToJoin {
+                        StatusNote::silent(tr(keys::Q_MEDIA_JOIN_REQUEST_SENT))
+                    } else {
+                        StatusNote::silent(tr(keys::Q_MEDIA_JOINING_GROUP))
+                    });
+                }
             }
             BottomBar::JoinChannel | BottomBar::MuteUnmute { .. } => {}
         }
@@ -139,9 +142,13 @@ impl QuillApp {
         restart: bool,
         cx: &mut Context<Self>,
     ) {
+        let mut restart_now = false;
         if let Some(live) = self.live.as_mut() {
             let note = match live.driver.set_chat_user_blocked(chat_id, false) {
-                Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_UNBLOCKING_USER)),
+                Ok(Some(_)) => {
+                    restart_now = restart;
+                    StatusNote::silent(tr(keys::Q_MEDIA_UNBLOCKING_USER))
+                }
                 Ok(None) => StatusNote::silent(tr(keys::Q_MEDIA_REQUEST_ALREADY_IN_FLIGHT)),
                 Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
             };
@@ -151,8 +158,11 @@ impl QuillApp {
                 chat.blocked = false;
             }
             self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_UNBLOCKED_DEMO)));
+            restart_now = restart;
         }
-        if restart {
+        // A refused or deduped unblock leaves the bot blocked: /start would
+        // go nowhere and bury the error note.
+        if restart_now {
             self.start_bot_from_bar(chat_id, cx);
         }
     }

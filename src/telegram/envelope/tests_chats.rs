@@ -83,7 +83,7 @@ fn parse_message_topic_forum_yields_forum_topic_id() {
         .unwrap();
     match forum.payload {
         EnvelopePayload::Messages(MessagesPayload::Message(message)) => {
-            assert_eq!(message.topic_id, Some(2))
+            assert_eq!(message.topic_id(), Some(2))
         }
         other => panic!("{other:?}"),
     }
@@ -93,7 +93,7 @@ fn parse_message_topic_forum_yields_forum_topic_id() {
         .unwrap();
     match thread.payload {
         EnvelopePayload::Messages(MessagesPayload::Message(message)) => {
-            assert_eq!(message.topic_id, None)
+            assert_eq!(message.topic_id(), None)
         }
         other => panic!("{other:?}"),
     }
@@ -103,7 +103,7 @@ fn parse_message_topic_forum_yields_forum_topic_id() {
         .unwrap();
     match plain.payload {
         EnvelopePayload::Messages(MessagesPayload::Message(message)) => {
-            assert_eq!(message.topic_id, None)
+            assert_eq!(message.topic_id(), None)
         }
         other => panic!("{other:?}"),
     }
@@ -231,19 +231,13 @@ fn update_supergroup_parses_admin_restrict_right() {
     let json = r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":25,"is_forum":false,"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":false,"rights":{"@type":"chatAdministratorRights","can_manage_chat":false,"can_change_info":false,"can_post_messages":false,"can_edit_messages":false,"can_delete_messages":false,"can_invite_users":false,"can_restrict_members":true,"can_pin_messages":false,"can_promote_members":false,"can_manage_video_chats":false,"can_post_stories":false,"can_edit_stories":false,"can_delete_stories":false,"can_manage_direct_messages":false,"can_manage_tags":false,"can_send_welcome_messages":false,"is_anonymous":false}}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::Groups(GroupsPayload::UpdateSupergroup {
-            status,
-            can_restrict_members,
-            can_promote_members,
-            can_manage_tags,
-            ..
-        }) => {
-            assert_eq!(status, ChannelMemberStatus::Administrator);
-            assert_eq!(can_restrict_members, Some(true));
+        EnvelopePayload::Groups(GroupsPayload::UpdateSupergroup { status, .. }) => {
+            assert_eq!(status.kind(), ChannelMemberStatus::Administrator);
+            assert_eq!(status.rights().map(|r| r.can_restrict_members), Some(true));
             // Phase D3b: `can_promote_members` rides the same rights block.
-            assert_eq!(can_promote_members, Some(false));
+            assert_eq!(status.rights().map(|r| r.can_promote_members), Some(false));
             // Slice G1: `can_manage_tags` gates custom-title changes.
-            assert_eq!(can_manage_tags, Some(false));
+            assert_eq!(status.rights().map(|r| r.can_manage_tags), Some(false));
         }
         other => panic!("unexpected {other:?}"),
     }
@@ -251,20 +245,18 @@ fn update_supergroup_parses_admin_restrict_right() {
     let json = r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":25,"is_forum":false,"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":false,"rights":{"@type":"chatAdministratorRights","can_restrict_members":false}}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::Groups(GroupsPayload::UpdateSupergroup {
-            can_restrict_members,
-            ..
-        }) => assert_eq!(can_restrict_members, Some(false)),
+        EnvelopePayload::Groups(GroupsPayload::UpdateSupergroup { status, .. }) => {
+            assert_eq!(status.rights().map(|r| r.can_restrict_members), Some(false))
+        }
         other => panic!("unexpected {other:?}"),
     }
     // Admin with no rights block → `None` (treated as lacking the right).
     let json = r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":25,"is_forum":false,"status":{"@type":"chatMemberStatusAdministrator"}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
-        EnvelopePayload::Groups(GroupsPayload::UpdateSupergroup {
-            can_restrict_members,
-            ..
-        }) => assert_eq!(can_restrict_members, None),
+        EnvelopePayload::Groups(GroupsPayload::UpdateSupergroup { status, .. }) => {
+            assert_eq!(status.rights().map(|r| r.can_restrict_members), None)
+        }
         other => panic!("unexpected {other:?}"),
     }
 }
@@ -285,15 +277,6 @@ fn update_supergroup_parses_forum_flag() {
             has_automatic_translation: _,
             username,
             status,
-            can_restrict_members,
-            can_invite_users,
-            can_promote_members,
-            can_manage_tags: _,
-            can_manage_topics: _,
-            can_change_info: _,
-            can_send_welcome_messages: _,
-            can_manage_video_chats: _,
-            is_anonymous: _,
             join_by_request,
             sign_messages: _,
             show_message_sender: _,
@@ -309,13 +292,13 @@ fn update_supergroup_parses_forum_flag() {
             // Parity slice: null `usernames` → empty username.
             assert_eq!(username, "");
             // Phase A1: own status parsed (`chatMemberStatusMember`).
-            assert_eq!(status, ChannelMemberStatus::Member);
+            assert_eq!(status.kind(), ChannelMemberStatus::Member);
             // Members carry no admin rights.
-            assert_eq!(can_restrict_members, None);
+            assert_eq!(status.rights().map(|r| r.can_restrict_members), None);
             // Phase D3a: no invite right either.
-            assert_eq!(can_invite_users, None);
+            assert_eq!(status.rights().map(|r| r.can_invite_users), None);
             // Phase D3b: no promote right either.
-            assert_eq!(can_promote_members, None);
+            assert_eq!(status.rights().map(|r| r.can_promote_members), None);
             // Slice G1: flags parsed (both false in this fixture).
             assert!(!join_by_request);
             assert!(!is_broadcast_group);
@@ -342,15 +325,6 @@ fn update_supergroup_parses_username() {
             has_automatic_translation: _,
             username,
             status,
-            can_restrict_members,
-            can_invite_users,
-            can_promote_members,
-            can_manage_tags: _,
-            can_manage_topics: _,
-            can_change_info: _,
-            can_send_welcome_messages: _,
-            can_manage_video_chats: _,
-            is_anonymous: _,
             join_by_request,
             sign_messages: _,
             show_message_sender: _,
@@ -364,12 +338,12 @@ fn update_supergroup_parses_username() {
             assert_eq!(supergroup_id, 18);
             assert!(!is_forum);
             assert_eq!(username, "demochannel");
-            assert_eq!(status, ChannelMemberStatus::Unknown);
-            assert_eq!(can_restrict_members, None);
+            assert_eq!(status.kind(), ChannelMemberStatus::Unknown);
+            assert_eq!(status.rights().map(|r| r.can_restrict_members), None);
             // Phase D3a: no `status` block → no invite right either.
-            assert_eq!(can_invite_users, None);
+            assert_eq!(status.rights().map(|r| r.can_invite_users), None);
             // Phase D3b: no `status` block → no promote right either.
-            assert_eq!(can_promote_members, None);
+            assert_eq!(status.rights().map(|r| r.can_promote_members), None);
             // Slice G1: missing flags default to false.
             assert!(!join_by_request);
             assert!(!is_broadcast_group);
@@ -391,15 +365,6 @@ fn supergroup_response_parses_forum_flag() {
             has_automatic_translation: _,
             username,
             status,
-            can_restrict_members,
-            can_invite_users,
-            can_promote_members,
-            can_manage_tags: _,
-            can_manage_topics: _,
-            can_change_info: _,
-            can_send_welcome_messages: _,
-            can_manage_video_chats: _,
-            is_anonymous: _,
             join_by_request,
             sign_messages: _,
             show_message_sender: _,
@@ -411,11 +376,11 @@ fn supergroup_response_parses_forum_flag() {
             assert_eq!(supergroup_id, 17);
             assert!(!is_forum);
             assert_eq!(username, "");
-            assert_eq!(status, ChannelMemberStatus::Unknown);
-            assert_eq!(can_restrict_members, None);
+            assert_eq!(status.kind(), ChannelMemberStatus::Unknown);
+            assert_eq!(status.rights().map(|r| r.can_restrict_members), None);
             // No `status` block → no admin rights for either gate.
-            assert_eq!(can_invite_users, None);
-            assert_eq!(can_promote_members, None);
+            assert_eq!(status.rights().map(|r| r.can_invite_users), None);
+            assert_eq!(status.rights().map(|r| r.can_promote_members), None);
             // Slice G1: missing flags default to false.
             assert!(!join_by_request);
             assert!(!is_broadcast_group);
@@ -540,15 +505,60 @@ fn update_user_full_info_parsed() {
 }
 
 #[test]
+fn bot_info_keeps_its_description_photo() {
+    let json = r#"{"@type":"updateUserFullInfo","user_id":21,"user_full_info":{"@type":"userFullInfo","bot_info":{"@type":"botInfo","short_description":"","description":"Hi","photo":{"@type":"photo","has_stickers":false,"sizes":[{"@type":"photoSize","type":"m","photo":{"@type":"file","id":71,"size":0,"expected_size":0,"local":{"path":"","can_be_downloaded":true,"is_downloading_active":false,"is_downloading_completed":false,"downloaded_size":0},"remote":{"id":"","unique_id":"","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":0}},"width":320,"height":180,"progressive_sizes":[]}]},"commands":[]}}}"#;
+    let env = parse_envelope(json).unwrap();
+    match env.payload {
+        EnvelopePayload::Users(UsersPayload::UpdateUserFullInfo { bot_info, .. }) => {
+            let info = bot_info.expect("bot_info");
+            let sizes: Vec<_> = info
+                .description_photo
+                .iter()
+                .map(|size| (size.file_id.0, size.width, size.height))
+                .collect();
+            assert_eq!(sizes, [(71, 320, 180)]);
+            assert_eq!(info.description_photo_files.len(), 1);
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn bot_info_keeps_its_description_animation() {
+    let file = |id: i32| {
+        format!(
+            r#"{{"@type":"file","id":{id},"size":1000,"expected_size":1000,"local":{{"path":"","can_be_downloaded":true,"is_downloading_active":false,"is_downloading_completed":false,"downloaded_size":0}},"remote":{{"id":"","unique_id":"","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":0}}}}"#
+        )
+    };
+    let json = format!(
+        r#"{{"@type":"updateUserFullInfo","user_id":21,"user_full_info":{{"@type":"userFullInfo","bot_info":{{"@type":"botInfo","short_description":"","description":"Hi","animation":{{"@type":"animation","duration":3,"width":640,"height":360,"file_name":"intro.mp4","mime_type":"video/mp4","has_stickers":false,"minithumbnail":null,"thumbnail":{{"@type":"thumbnail","format":{{"@type":"thumbnailFormatJpeg"}},"width":320,"height":180,"file":{}}},"animation":{}}},"commands":[]}}}}}}"#,
+        file(72),
+        file(73)
+    );
+    let env = parse_envelope(&json).unwrap();
+    match env.payload {
+        EnvelopePayload::Users(UsersPayload::UpdateUserFullInfo { bot_info, .. }) => {
+            let info = bot_info.expect("bot_info");
+            let animation = info.description_animation.expect("animation");
+            assert_eq!((animation.width, animation.height), (640, 360));
+            assert_eq!(animation.file_id.0, 73);
+            assert_eq!(info.description_animation_files.len(), 2);
+            assert!(info.description_photo.is_empty());
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
 fn draft_message_text_and_same_chat_reply() {
     let json = r#"{"@type":"updateNewChat","chat":{"id":11,"title":"Ada","type":{"@type":"chatTypePrivate","user_id":11},"unread_count":0,"draft_message":{"@type":"draftMessage","reply_to":{"@type":"inputMessageReplyToMessage","message_id":101,"quote":null,"checklist_task_id":0,"poll_option_id":""},"date":1700000000,"content":{"@type":"draftMessageContentText","text":{"@type":"formattedText","text":"meet at 6","entities":[]},"link_preview_options":null},"effect_id":"0","suggested_post_info":null}}}"#;
     let env = parse_envelope(json).unwrap();
     match env.payload {
         EnvelopePayload::Chats(ChatsPayload::UpdateNewChat { draft, .. }) => {
             let draft = draft.expect("draft");
-            assert_eq!(draft.text, "meet at 6");
-            assert_eq!(draft.reply_to_message_id, Some(MessageId(101)));
-            assert_eq!(draft.quote, None);
+            assert_eq!(draft.text(), "meet at 6");
+            assert_eq!(draft.reply_to_message_id(), Some(MessageId(101)));
+            assert_eq!(draft.quote(), None);
         }
         other => panic!("{other:?}"),
     }
@@ -575,9 +585,9 @@ fn draft_message_text_and_same_chat_reply() {
     match external.payload {
         EnvelopePayload::Messages(MessagesPayload::UpdateChatDraftMessage { draft, .. }) => {
             let draft = draft.expect("text kept");
-            assert_eq!(draft.text, "hi");
-            assert_eq!(draft.reply_to_message_id, None);
-            assert_eq!(draft.quote, None);
+            assert_eq!(draft.text(), "hi");
+            assert_eq!(draft.reply_to_message_id(), None);
+            assert_eq!(draft.quote(), None);
         }
         other => panic!("{other:?}"),
     }
@@ -625,10 +635,10 @@ fn draft_message_parses_partial_quote() {
     match env.payload {
         EnvelopePayload::Messages(MessagesPayload::UpdateChatDraftMessage { draft, .. }) => {
             let draft = draft.expect("draft");
-            assert_eq!(draft.text, "sounds good");
-            assert_eq!(draft.reply_to_message_id, Some(MessageId(101)));
+            assert_eq!(draft.text(), "sounds good");
+            assert_eq!(draft.reply_to_message_id(), Some(MessageId(101)));
             assert_eq!(
-                draft.quote,
+                draft.quote().cloned(),
                 Some(crate::composer::QuoteSelection::plain("meet at", 7))
             );
         }
@@ -648,7 +658,7 @@ fn draft_message_quote_keeps_its_entities() {
     .unwrap();
     match env.payload {
         EnvelopePayload::Messages(MessagesPayload::UpdateChatDraftMessage { draft, .. }) => {
-            let quote = draft.expect("draft").quote.expect("quote");
+            let quote = draft.expect("draft").quote().cloned().expect("quote");
             assert_eq!(quote.text, "meet at noon");
             assert_eq!(quote.position, 7);
             assert_eq!(quote.entities.len(), 1);

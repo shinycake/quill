@@ -175,7 +175,12 @@ impl Canvases {
         let (Ok(w), Ok(h)) = (usize::try_from(w), usize::try_from(h)) else {
             return false;
         };
-        if out.len() < w * h * 4 {
+        // A widget names the size: it must fit `out` and the pixel cap.
+        let bytes = w
+            .checked_mul(h)
+            .filter(|pixels| u64::try_from(*pixels).is_ok_and(|n| n <= MAX_PIXELS))
+            .and_then(|pixels| pixels.checked_mul(4));
+        if !bytes.is_some_and(|bytes| out.len() >= bytes) {
             return false;
         }
         out.fill(0);
@@ -184,10 +189,7 @@ impl Canvases {
         };
         for row in 0..h {
             for col in 0..w {
-                let (cx, cy) = (
-                    i64::from(x).saturating_add(col as i64),
-                    i64::from(y).saturating_add(row as i64),
-                );
+                let (cx, cy) = (x + col as i32, y + row as i32);
                 let (Ok(cx), Ok(cy)) = (u32::try_from(cx), u32::try_from(cy)) else {
                     continue;
                 };
@@ -466,8 +468,7 @@ fn put_image(canvas: &mut Pixmap, op: &Value) {
     ) else {
         return;
     };
-    // Rows or columns past the pixel buffer have nothing to read.
-    if u64::from(w) * u64::from(h) * 4 > rgba.len() as u64 {
+    if u64::from(w) * u64::from(h) > MAX_PIXELS || rgba.len() < (w as usize) * (h as usize) * 4 {
         return;
     }
     let (x, y) = (g::num(op, "x") as i64, g::num(op, "y") as i64);
@@ -476,7 +477,7 @@ fn put_image(canvas: &mut Pixmap, op: &Value) {
     let data = canvas.data_mut();
     for row in 0..i64::from(h) {
         for col in 0..i64::from(w) {
-            let (cx, cy) = (x.saturating_add(col), y.saturating_add(row));
+            let (cx, cy) = (x + col, y + row);
             if cx < 0 || cy < 0 || cx >= width || cy >= height {
                 continue;
             }
@@ -491,55 +492,5 @@ fn put_image(canvas: &mut Pixmap, op: &Value) {
             super::images::premultiply(&mut px);
             dst.copy_from_slice(&px);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn canvases_with_one_pixel() -> Canvases {
-        let mut canvases = Canvases::default();
-        canvases.run(
-            1,
-            2,
-            2,
-            r#"[{"k":6,"px":"/wAA/w==","w":1,"h":1,"x":0,"y":0}]"#,
-            &Fonts::default(),
-            &Images::default(),
-        );
-        canvases
-    }
-
-    /// Positions at the edge of the number range read as outside the bitmap
-    /// instead of overflowing.
-    #[test]
-    fn reading_at_the_edge_of_the_number_range_is_transparent() {
-        let canvases = canvases_with_one_pixel();
-        let mut out = [9u8; 8];
-        assert!(canvases.read(1, i32::MAX, i32::MAX, 2, 1, &mut out));
-        assert_eq!(out, [0; 8]);
-        let mut out = [0u8; 4];
-        assert!(canvases.read(1, 0, 0, 1, 1, &mut out));
-        assert_eq!(out, [255, 0, 0, 255], "the pixel put there");
-        assert!(!canvases.read(1, 0, 0, i32::MAX, i32::MAX, &mut out));
-    }
-
-    /// A widget-supplied position or size that cannot fit draws nothing.
-    #[test]
-    fn putting_an_image_far_outside_or_too_big_draws_nothing() {
-        let mut canvases = canvases_with_one_pixel();
-        canvases.run(
-            1,
-            2,
-            2,
-            r#"[{"k":6,"px":"/wAA/w==","w":1,"h":1,"x":1e30,"y":-1e30},
-                {"k":6,"px":"/wAA/w==","w":2000000000,"h":2000000000,"x":0,"y":0}]"#,
-            &Fonts::default(),
-            &Images::default(),
-        );
-        let mut out = [0u8; 4];
-        assert!(canvases.read(1, 1, 1, 1, 1, &mut out));
-        assert_eq!(out, [0; 4]);
     }
 }

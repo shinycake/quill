@@ -89,8 +89,8 @@ fn an_empty_name_keeps_the_first_step(cx: &mut TestAppContext) {
     click(vcx, "new-chat-confirm");
     assert_eq!(step(&app, vcx), Some(NewChatStep::Info));
     assert_eq!(
-        app.read_with(vcx, |app, _| app.new_chat_dialog().map(|d| d.title_error)),
-        Some(true)
+        app.read_with(vcx, |app, _| app.new_chat_dialog().map(|d| d.title.clone())),
+        Some(super::TitleCheck::Rejected("  ".into()))
     );
 }
 
@@ -106,7 +106,7 @@ fn a_created_channel_walks_type_and_subscribers(cx: &mut TestAppContext) {
     assert_eq!(step(&app, vcx), None);
     assert!(shell.read_with(vcx, |s, _| s.open_dialog != Some(DialogKind::CreateChat)));
     assert_eq!(
-        app.read_with(vcx, |app, _| app.session().and_then(|s| s.open_chat)),
+        app.read_with(vcx, |app, _| app.session().and_then(|s| s.open_chat_id())),
         Some(chat)
     );
 }
@@ -129,4 +129,68 @@ fn a_picked_photo_opens_the_crop_and_lands_on_the_new_group(cx: &mut TestAppCont
         app.new_chat_dialog()
             .is_some_and(|dialog| dialog.photo.is_some())
     }));
+}
+
+#[gpui_kit::test]
+fn cancel_closes_the_box_while_the_create_request_is_out(cx: &mut TestAppContext) {
+    use quill::new_chat::{CreateProgress, NewChatBack, NewChatStage};
+    use quill::state::RequestPurpose;
+    let (app, shell, mut vcx) = open_demo(cx, "ready-new-channel");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| {
+        let request = app
+            .demo_session
+            .as_mut()
+            .map(|session| session.request(RequestPurpose::SetChatTitle, None))
+            .expect("demo session");
+        if let Some(dialog) = app.admin.create_chat_dialog.as_mut() {
+            dialog.stage = NewChatStage::Creating {
+                request,
+                back: NewChatBack::Info,
+                progress: CreateProgress::InFlight,
+            };
+        }
+        assert!(app.new_chat_view().is_some_and(|view| view.busy()));
+    });
+    frames(vcx);
+    // Offline, the request never answers: Cancel must still work.
+    click(vcx, "new-chat-cancel");
+    assert_eq!(step(&app, vcx), None);
+    assert!(shell.read_with(vcx, |s, _| s.open_dialog != Some(DialogKind::CreateChat)));
+}
+
+/// A plain group whose create was answered ends its dialog (and with it
+/// the creation row), instead of leaving a hidden dialog behind.
+#[gpui_kit::test]
+fn a_made_group_takes_its_dialog_away(cx: &mut TestAppContext) {
+    use quill::new_chat::{CreateProgress, CreationOutcome, NewChatBack, NewChatStage};
+    use quill::state::{NewChatCreation, RequestPurpose};
+    let (app, shell, mut vcx) = open_demo(cx, "ready-new-group");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, _| {
+        let Some(session) = app.demo_session.as_mut() else {
+            return;
+        };
+        let request = session.request(RequestPurpose::SetChatTitle, None);
+        session.groups.new_chats.creations.insert(
+            request,
+            NewChatCreation::settled(CreationOutcome::Created(ChatId(77))),
+        );
+        if let Some(dialog) = app.admin.create_chat_dialog.as_mut() {
+            dialog.stage = NewChatStage::Creating {
+                request,
+                back: NewChatBack::Info,
+                progress: CreateProgress::InFlight,
+            };
+        }
+    });
+    assert_eq!(step(&app, vcx), Some(NewChatStep::Done(ChatId(77))));
+    assert!(app.read_with(vcx, |app, _| app.admin.create_chat_dialog.is_some()));
+    app.update(vcx, |app, cx| {
+        assert!(app.drain_new_chat_done(cx));
+        assert!(!app.drain_new_chat_done(cx));
+    });
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.admin.create_chat_dialog.is_none()));
+    assert!(shell.read_with(vcx, |s, _| s.open_dialog != Some(DialogKind::CreateChat)));
 }

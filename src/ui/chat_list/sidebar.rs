@@ -9,6 +9,7 @@
 //! (docs/decisions/main-thread-stack.md).
 
 use super::*;
+use crate::ui::chat_list_state::SidebarTab;
 use crate::ui::empty_state::EmptyState;
 use gpui_kit::assets::IconName;
 use quill::community_row::{GroupedEntry, ListedChat, group_main_list};
@@ -89,7 +90,7 @@ impl QuillApp {
             .gap_2()
             .child(self.sidebar_header(mode, cx))
             .when_some(
-                (!self.chat_list.contacts_tab_open && !self.chat_list.calls_tab_open)
+                (self.chat_list.tab == SidebarTab::Chats)
                     .then(|| chat_list_caption(mode, self.session()))
                     .flatten(),
                 |this, caption| {
@@ -115,10 +116,19 @@ impl QuillApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
-        if self.chat_list.contacts_tab_open {
+        // A pinned drag lives in the chat rows, which end it on release.
+        // Contacts, Calls or search in their place: the release can never
+        // reach them, so the drag ends now, unsaved (round 18 B #2).
+        if self.chat_list.tab != SidebarTab::Chats || self.search_is_open() {
+            self.chat_list.pin.end_drag();
+            // The rows laid out by the last chats render are not on screen
+            // now: key stepping and file drags must not use that list.
+            self.chat_list.items.clear();
+        }
+        if self.chat_list.tab == SidebarTab::Contacts {
             return list.child(self.contacts_panel(cx));
         }
-        if self.chat_list.calls_tab_open {
+        if self.chat_list.tab == SidebarTab::Calls {
             return list.child(
                 div()
                     .id("calls-scroll")
@@ -188,7 +198,9 @@ impl QuillApp {
             list = list.child(self.chat_select_bar(count, cx));
         }
         if show_main_list && chats.is_empty() {
-            let loading = self.session().is_some_and(|s| !s.chat_list.chats_exhausted);
+            let loading = self
+                .session()
+                .is_some_and(|s| !s.chat_list.main_paging.is_exhausted());
             list = if loading && folder.is_none() {
                 // kit Phase 9: skeleton rows while the first chat batch is
                 // still loading.
@@ -249,9 +261,10 @@ impl QuillApp {
             // A live pinned drag shows its swapped order (tdesktop moves
             // rows while dragging); stable, so unpinned rows keep their
             // place.
-            if let Some(reorder) = self.chat_list.pin_reorder.as_ref()
+            if let Some(drag) = self.chat_list.pin.drag()
+                && !drag.archived
+                && let reorder = &drag.reorder
                 && reorder.dragging().is_some()
-                && !self.chat_list.pin_reorder_archived
             {
                 chats.sort_by_key(|chat| reorder.position(chat.id.0).unwrap_or(usize::MAX));
             }
@@ -298,9 +311,10 @@ impl QuillApp {
         // more" button: paging is automatic, not user-triggered.
         if folder.is_none() && matches!(filter, ChatListFilter::Archived | ChatListFilter::Unread) {
             if filter != ChatListFilter::Unread
-                && let Some(reorder) = self.chat_list.pin_reorder.as_ref()
+                && let Some(drag) = self.chat_list.pin.drag()
+                && drag.archived
+                && let reorder = &drag.reorder
                 && reorder.dragging().is_some()
-                && self.chat_list.pin_reorder_archived
             {
                 archived.sort_by_key(|chat| reorder.position(chat.id.0).unwrap_or(usize::MAX));
             }
@@ -322,12 +336,14 @@ impl QuillApp {
         }
         // Pinned-drag animation: keep frames coming while rows slide, drop
         // the state once everything settled.
-        if let Some(reorder) = self.chat_list.pin_reorder.as_ref() {
+        if let Some(reorder) = self.chat_list.pin.drag().map(|drag| &drag.reorder) {
             let now = std::time::Instant::now();
-            if reorder.settled(now)
-                || (!self.frame.window_active.get() && reorder.dragging().is_none())
-            {
-                self.chat_list.pin_reorder = None;
+            // A deactivated window never gets the release: the drag ends
+            // there, unsaved, instead of redrawing at 60 Hz for good.
+            if !self.frame.window_active.get() {
+                self.chat_list.pin.end_drag();
+            } else if reorder.settled(now) {
+                self.chat_list.pin.settle();
             } else {
                 self.request_animation_tick(60, cx);
             }
@@ -352,6 +368,7 @@ impl QuillApp {
                 })
                 .collect(),
         );
+        self.chat_list.row_fx.borrow_mut().begin_pass();
         self.chat_list.items = items;
         self.chat_list.folder_tags = folder_tags;
         list.child(self.chat_list_rows(sizes, focus_visible, window, cx))
@@ -372,10 +389,18 @@ impl QuillApp {
             // fires `getCommunityFullInfo` when live), so it spins like the
             // community info panel. An empty pack / no matching loaded
             // chats is the genuine empty state, never a crash.
-            if self
-                .session()
-                .is_some_and(|s| !s.groups.community_full_infos.contains_key(&community_id))
-            {
+            let pack = self.session().map(|s| {
+                let infos = &s.groups.community_full_infos;
+                (
+                    infos.contains_key(&community_id),
+                    infos
+                        .fetch(community_id)
+                        .is_some_and(|fetch| fetch.error().is_some()),
+                )
+            });
+            if let Some((false, true)) = pack {
+                EmptyState::new(id, IconName::Users).title(tr(keys::Q_NOTES_FAILED_COMMUNITY_INFO))
+            } else if let Some((false, false)) = pack {
                 EmptyState::loading(id)
                     .title(tr(keys::Q_CHATLIST_LOADING_COMMUNITY))
                     .hint(tr(keys::Q_CHATLIST_FETCHING_THE_COMMUNITYS_CHATS))
@@ -464,9 +489,9 @@ impl QuillApp {
         );
         let reordering = self
             .chat_list
-            .pin_reorder
-            .as_ref()
-            .is_some_and(|reorder| reorder.dragging().is_some());
+            .pin
+            .drag()
+            .is_some_and(|drag| drag.reorder.dragging().is_some());
         div()
             .id("chat-rows")
             .role(gpui_kit::Role::Group)
@@ -480,7 +505,14 @@ impl QuillApp {
             .rounded_md()
             .when(focus_visible, |this| this.focus_ring_style(window, cx))
             // A mouse move takes the selection back from the keys.
-            .on_mouse_move(cx.listener(|this, _, _, cx| this.chat_list_mouse_moved(cx)))
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                // A pointer moving with no button down: the release never
+                // reached the list (lost capture), so the drag ends unsaved.
+                if event.pressed_button != Some(MouseButton::Left) {
+                    this.cancel_pin_drag(cx);
+                }
+                this.chat_list_mouse_moved(cx)
+            }))
             // Pinned drag: the pointer position drives the live reorder; a
             // release anywhere ends it.
             .on_drag_move(

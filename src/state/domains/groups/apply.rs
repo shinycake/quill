@@ -153,11 +153,12 @@ impl Session {
                 if let Some(photo) = &community.photo {
                     self.remember_files(std::slice::from_ref(photo));
                 }
-                self.communities.full_info_failed.remove(&community.id);
+                let infos = &mut self.groups.community_full_infos;
+                infos.forget_failure(community.id);
                 // A community the user lost access to (deleted, or left):
                 // its chats no longer belong to it or follow its mute.
                 if !community.have_access {
-                    self.groups.community_full_infos.remove(&community.id);
+                    infos.remove(&community.id);
                 }
                 self.groups.communities.insert(community.id, community);
             }
@@ -169,10 +170,8 @@ impl Session {
                 community_id,
                 full_info,
             } => {
-                self.communities.full_info_failed.remove(&community_id);
-                self.groups
-                    .community_full_infos
-                    .insert(community_id, full_info);
+                let infos = &mut self.groups.community_full_infos;
+                infos.insert(community_id, full_info);
             }
             // TDLib 1.8.68: the direct `getCommunityFullInfo` answer has
             // no community id; the pending request carries it.
@@ -181,20 +180,19 @@ impl Session {
                     && pending.purpose == RequestPurpose::GetCommunityFullInfo
                     && let Some(community_id) = pending.community_id
                 {
-                    self.communities.full_info_failed.remove(&community_id);
-                    self.groups
-                        .community_full_infos
-                        .insert(community_id, full_info);
+                    let infos = &mut self.groups.community_full_infos;
+                    infos.answered(community_id, Some(pending.id), full_info);
                 }
             }
             // Slice G2: welcome-message pack (`updateChatWelcomeMessages`,
             // schema 1.8.67, line 10649) — the full pack replaces the
             // cache; the welcome dialog renders it.
             GroupsPayload::UpdateChatWelcomeMessages { chat_id, messages } => {
-                self.groups.welcome_messages.insert(chat_id, messages);
                 self.groups
-                    .welcome_message_fetches
-                    .insert(chat_id, WelcomeMessagesFetch::Loaded);
+                    .welcome_messages
+                    .entry(chat_id)
+                    .or_default()
+                    .succeed(messages);
             }
             // Slice G2: `updateChatHasWelcomeMessages` (schema 1.8.67,
             // line 10600).
@@ -229,11 +227,15 @@ impl Session {
                 reaction_limits,
             } => {
                 self.settings.passkeys.display_allowed = passkeys.display;
+                self.login_config_answered(pending);
                 if passkeys.max.is_some() {
                     self.settings.passkeys.max_passkeys = passkeys.max;
                 }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBoostsPerGift) {
                     self.groups.boosts_per_gift = Some(boosts_per_gift);
+                }
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetTonExplorerUrl) {
+                    self.ton_wallet.explorer.succeed(());
                 }
                 // Any app-config answer carries the current explorer.
                 if ton_explorer_url.is_some() {
@@ -249,7 +251,7 @@ impl Session {
                 let limits = &mut self.payments.earn.limits;
                 limits.starref_join_allowed = starref_join;
                 limits.starref_setup_allowed = starref_setup;
-                limits.app_config_loaded = true;
+                limits.app_config.succeed(());
                 self.payments.hub.purchase = premium_purchase;
                 self.payments.hub.fragment = fragment;
                 self.stickers.reaction_limits = reaction_limits;
@@ -264,15 +266,28 @@ impl Session {
             // Slice G2: `chatBoostSlots` (schema 1.8.67, line 6968) — the
             // `getAvailableChatBoostSlots` answer. Stashed per chat so the
             // driver's `boostChat` chain can consume it (see
-            // `maybe_continue_boost` in connect.rs). Only while a boost
-            // waits for them: a stash left from a closed box would be
-            // used, out of date, by the next press.
+            // `maybe_continue_boost` in connect.rs). Only while the box of
+            // that chat waits for them: a box that closed has nothing to
+            // hand them to.
             GroupsPayload::ChatBoostSlots { slots } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBoostSlotsForBoost)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && self.groups.boost_intent == Some(chat_id.0)
+                    && let Some(state) = self
+                        .groups
+                        .boost_box
+                        .as_mut()
+                        .filter(|state| state.chat_id == chat_id.0)
+                    && pending.is_some_and(|p| state.waits_for(p.id))
+                    && matches!(
+                        state.phase,
+                        crate::boost_box::BoostPhase::Working(
+                            crate::boost_box::BoostWork::Slots { .. }
+                        )
+                    )
                 {
-                    self.groups.boost_slots_by_chat.insert(chat_id.0, slots);
+                    state.phase = crate::boost_box::BoostPhase::Working(
+                        crate::boost_box::BoostWork::SlotsReady(slots),
+                    );
                 }
                 // Slice G2: `boostChat` answers `chatBoostSlots` as well
                 // (schema 1.8.67, line 13922) — drop the cached status so
@@ -284,20 +299,24 @@ impl Session {
                     self.groups.chat_boost_details.remove(&chat_id.0);
                     // The boost box goes back to its counters, with a line
                     // about boosts that moved here (`lng_boost_reassign_done`).
-                    if let Some(state) = self
-                        .groups
-                        .boost_box
-                        .as_mut()
-                        .filter(|state| state.chat_id == chat_id.0)
+                    // Only the answer of the `boostChat` the box works on
+                    // does that; an earlier press's answer leaves it be.
+                    if let Some(state) = self.groups.boost_box.as_mut().filter(|state| {
+                        state.chat_id == chat_id.0 && pending.is_some_and(|p| state.waits_for(p.id))
+                    }) && let crate::boost_box::BoostPhase::Working(
+                        crate::boost_box::BoostWork::Boosting { reassign, .. },
+                    ) =
+                        std::mem::replace(&mut state.phase, crate::boost_box::BoostPhase::main())
                     {
-                        state.phase = crate::boost_box::BoostPhase::Main;
-                        state.note = state.reassigning.take().map(|moved| {
-                            crate::boost_box::reassign_done_text(
-                                moved.count,
-                                moved.groups,
-                                moved.channels,
-                            )
-                        });
+                        state.phase = crate::boost_box::BoostPhase::Main {
+                            note: reassign.map(|moved| {
+                                crate::boost_box::reassign_done_text(
+                                    moved.count,
+                                    moved.groups,
+                                    moved.channels,
+                                )
+                            }),
+                        };
                     }
                 }
             }
@@ -309,9 +328,18 @@ impl Session {
                     && let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
                 {
-                    self.groups
-                        .chat_statistics
-                        .insert(chat_id.0, ChatStatisticsFetch::Loaded(Box::new(statistics)));
+                    // The theme is the one the request in flight asked for.
+                    let is_dark = match self.groups.chat_statistics.get(&chat_id.0) {
+                        Some(ChatStatisticsFetch::Loading { is_dark }) => *is_dark,
+                        _ => false,
+                    };
+                    self.groups.chat_statistics.insert(
+                        chat_id.0,
+                        ChatStatisticsFetch::Loaded {
+                            stats: std::sync::Arc::new(statistics),
+                            is_dark,
+                        },
+                    );
                 }
             }
             GroupsPayload::MessageStatistics { statistics } => {
@@ -363,12 +391,13 @@ impl Session {
                             {
                                 let loaded =
                                     InviteLinkFetch::Loaded(InviteLinkList { total_count, links });
-                                if revoked && state.revoked_request == Some(pending.id) {
-                                    state.revoked = loaded;
-                                    state.revoked_request = None;
-                                } else if !revoked && state.active_request == Some(pending.id) {
-                                    state.active = loaded;
-                                    state.active_request = None;
+                                let slot = if revoked {
+                                    &mut state.revoked
+                                } else {
+                                    &mut state.active
+                                };
+                                if *slot == InviteLinkFetch::Loading(pending.id) {
+                                    *slot = loaded;
                                 }
                             }
                         }
@@ -392,7 +421,7 @@ impl Session {
                     && let RequestPurpose::GetChatBoosts { append } = pending.purpose
                     && let Some(chat_id) = pending.chat_id
                     && let Some(state) = self.groups.chat_boost_lists.get_mut(&chat_id.0)
-                    && state.request == Some(pending.id)
+                    && state.waits_for(pending.id)
                 {
                     if !append {
                         state.boosts.clear();
@@ -400,9 +429,7 @@ impl Session {
                     state.boosts.extend(boosts);
                     state.total_count = total_count;
                     state.next_offset = next_offset;
-                    state.loading = false;
-                    state.error = None;
-                    state.request = None;
+                    state.stage = PageStage::Ready;
                 }
             }
             // `getChatBoostLink` answer.
@@ -437,16 +464,14 @@ impl Session {
                     }) = pending.purpose
                     && let Some(chat_id) = pending.chat_id
                     && let Some(state) = self.groups.invite_pages.members_mut(chat_id.0)
-                    && state.request == Some(pending.id)
+                    && state.stage.waits_for(pending.id)
                 {
                     if !append {
                         state.members.clear();
                     }
                     state.members.extend(members);
                     state.total_count = total_count;
-                    state.loading = false;
-                    state.error = None;
-                    state.request = None;
+                    state.stage = PageStage::Ready;
                 }
             }
             // Phase D3a: `getChatJoinRequests` answer.
@@ -458,15 +483,14 @@ impl Session {
                     && let RequestPurpose::GetLinkJoinRequests { append } = pending.purpose
                     && let Some(chat_id) = pending.chat_id
                     && let Some(state) = self.groups.invite_pages.join_requests_mut(chat_id.0)
-                    && state.request == Some(pending.id)
+                    && state.stage.waits_for(pending.id)
                 {
                     if !append {
                         state.requests.clear();
                     }
                     state.requests.extend(requests);
                     state.total_count = total_count;
-                    state.error = None;
-                    state.request = None;
+                    state.stage = PageStage::Ready;
                 } else if let Some(pending) = pending
                     && matches!(
                         pending.purpose,
@@ -476,15 +500,20 @@ impl Session {
                     && let Some(chat_id) = pending.chat_id
                     && self
                         .groups
-                        .join_request_latest
+                        .join_requests
                         .get(&chat_id.0)
-                        .is_none_or(|latest| *latest == pending.id)
+                        .is_none_or(|held| held.expects(pending.id))
                 {
-                    self.groups.join_request_latest.remove(&chat_id.0);
+                    // Only the newest page asked is applied; an older one
+                    // that answers later finds the list no longer waiting
+                    // for it and is dropped above.
+                    let held = self.groups.join_requests.get(&chat_id.0);
+                    let query = held
+                        .map(|held| held.query().to_string())
+                        .unwrap_or_default();
                     let mut all = Vec::new();
                     if pending.purpose == RequestPurpose::GetMoreChatJoinRequests
-                        && let Some(JoinRequestFetch::Loaded(old)) =
-                            self.groups.join_requests.get(&chat_id.0)
+                        && let Some(JoinRequestFetch::Loaded(old)) = held
                     {
                         all = old.requests.clone();
                     }
@@ -494,6 +523,8 @@ impl Session {
                         JoinRequestFetch::Loaded(JoinRequestList {
                             total_count,
                             requests: all,
+                            query,
+                            more: None,
                         }),
                     );
                 }
@@ -524,11 +555,10 @@ impl Session {
                     && pending.purpose == RequestPurpose::SearchFromMembers
                 {
                     self.apply_from_members(pending.id, &members);
-                } else if let Some(RequestPurpose::Payments(PaymentsPurpose::GetAwardMembers {
-                    generation,
-                })) = pending.map(|p| p.purpose)
+                } else if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::Payments(PaymentsPurpose::GetAwardMembers)
                 {
-                    self.apply_award_members(generation, &members, total_count);
+                    self.apply_award_members(pending.id, &members, total_count);
                 } else if let Some(RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers {
                     filter,
                 })) = pending.map(|p| p.purpose)
@@ -661,7 +691,7 @@ impl Session {
             // 11210) — a new join request arrived. Prepend it to the cached
             // list when one is loaded; otherwise the next fetch picks it up.
             // The total is bumped: the update announces a genuinely new
-            // pending request.
+            // pending request (only while no search hides it).
             GroupsPayload::UpdateNewChatJoinRequest {
                 chat_id, request, ..
             } => {
@@ -672,15 +702,12 @@ impl Session {
                         .iter()
                         .any(|existing| existing.user_id == request.user_id)
                 {
-                    if self
-                        .groups
-                        .join_request_queries
-                        .get(&chat_id)
-                        .is_none_or(|q| q.is_empty())
-                    {
+                    if list.query.is_empty() {
                         list.requests.insert(0, request);
+                        // Under a search the total counts matches: a request
+                        // the filter hides is not one of them.
+                        list.total_count = list.total_count.saturating_add(1);
                     }
-                    list.total_count = list.total_count.saturating_add(1);
                     self.groups
                         .join_requests
                         .insert(chat_id, JoinRequestFetch::Loaded(list));
@@ -707,22 +734,20 @@ impl Session {
                         .insert(chat_id, user_ids);
                 }
             }
-            // Phase 5.1: `supergroup.is_forum` via `updateSupergroup` (an
-            // update — applies whenever it arrives) or the `getSupergroup`
-            // response (gated on the pending purpose). Parity slice: the
-            // first active username is cached alongside, for the
-            // channel/supergroup header.
+            // `updateBasicGroup`: member count, the viewer's status and rights.
             GroupsPayload::UpdateBasicGroup {
                 basic_group_id,
                 member_count,
                 status,
-                can_restrict_members,
-                can_promote_members,
-                can_manage_tags,
-                can_change_info,
-                can_manage_video_chats,
                 is_active,
             } => {
+                let rights = status.rights();
+                let can_restrict_members = rights.is_some_and(|r| r.can_restrict_members);
+                let can_promote_members = rights.is_some_and(|r| r.can_promote_members);
+                let can_manage_tags = rights.is_some_and(|r| r.can_manage_tags);
+                let can_change_info = rights.map(|r| r.can_change_info);
+                let can_manage_video_chats = rights.map(|r| r.can_manage_video_chats);
+                let status = status.kind();
                 self.groups
                     .basic_group_member_counts
                     .insert(basic_group_id, member_count);
@@ -748,6 +773,7 @@ impl Session {
                     .basic_group_active
                     .insert(basic_group_id, is_active);
             }
+            // `updateSupergroup` applies whenever it arrives.
             GroupsPayload::UpdateSupergroup {
                 supergroup_id,
                 verification,
@@ -760,15 +786,6 @@ impl Session {
                 username,
                 usernames,
                 status,
-                can_restrict_members,
-                can_invite_users,
-                can_promote_members,
-                can_manage_tags,
-                can_manage_topics,
-                can_change_info,
-                can_send_welcome_messages,
-                can_manage_video_chats,
-                is_anonymous,
                 join_by_request,
                 is_broadcast_group,
                 sign_messages,
@@ -778,6 +795,17 @@ impl Session {
                 restricted,
                 direct_messages,
             } => {
+                let rights = status.rights();
+                let can_restrict_members = rights.map(|r| r.can_restrict_members);
+                let can_invite_users = rights.map(|r| r.can_invite_users);
+                let can_promote_members = rights.map(|r| r.can_promote_members);
+                let can_manage_tags = rights.map(|r| r.can_manage_tags);
+                let can_manage_topics = rights.map(|r| r.can_manage_topics);
+                let can_change_info = rights.map(|r| r.can_change_info);
+                let can_send_welcome_messages = rights.map(|r| r.can_send_welcome_messages);
+                let can_manage_video_chats = rights.map(|r| r.can_manage_video_chats);
+                let is_anonymous = status.is_anonymous();
+                let status = status.kind();
                 self.set_direct_messages_role(supergroup_id, direct_messages);
                 // `updateSupergroup` carries the viewer's own status, so a
                 // demotion or "Remain anonymous" turned off lands here.
@@ -853,7 +881,7 @@ impl Session {
                 })) = pending.map(|p| p.purpose)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
                 {
-                    let banned = member.status == ChannelMemberStatus::Banned;
+                    let banned = member.status() == ChannelMemberStatus::Banned;
                     self.set_direct_member_banned(chat_id, user_id, banned);
                 }
                 // Phase D3b: `getChatMember` for one administrator's rights
@@ -863,7 +891,7 @@ impl Session {
                     pending.map(|p| p.purpose)
                     && let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
-                    && let Some(rights) = member.admin_rights
+                    && let Some(rights) = member.admin_rights()
                 {
                     self.groups
                         .admin_rights
@@ -876,13 +904,18 @@ impl Session {
                 // instead of showing stale data. `accept_own_chat_member`
                 // also refreshes the viewer's own rights below.
                 self.groups.admin_lists.remove(&chat_id.0);
+                // A list asked before this change would put the old
+                // administrators back when it answers: forget the request
+                // (its answer is then ignored) so the next open asks again.
+                self.requests
+                    .take_purpose_for_chat(RequestPurpose::GetChatAdministrators, chat_id);
                 // Phase D3b: per-admin rights for the changed member are
                 // stale too (e.g. after an edit-rights save) — drop them
                 // so the editor refetches instead of showing old rights.
                 if let MessageSender::User { user_id } = member.member_id {
                     self.groups.admin_rights.remove(&(chat_id.0, user_id));
                     if self.direct_member_banned(chat_id, user_id).is_some() {
-                        let banned = member.status == ChannelMemberStatus::Banned;
+                        let banned = member.status() == ChannelMemberStatus::Banned;
                         self.set_direct_member_banned(chat_id, user_id, banned);
                     }
                 }
@@ -907,10 +940,10 @@ impl Session {
                     && let Some(DeepLinkState::ResolvingChat {
                         action,
                         generation: slot,
-                    }) = self.chats_state.deep_link.clone()
+                    }) = self.chats_state.deep_link_stage().cloned()
                     && slot == generation
                 {
-                    self.chats_state.deep_link = Some(match result {
+                    self.chats_state.enter_deep_link_stage(match result {
                         ChatJoinResult::Success { chat_id } => {
                             DeepLinkState::ChatReady { chat_id, action }
                         }
@@ -943,17 +976,18 @@ impl Session {
                     && let Some(DeepLinkState::ResolvingChat {
                         action: DeepLinkAction::JoinInvite { hash },
                         generation: slot,
-                    }) = self.chats_state.deep_link.clone()
+                    }) = self.chats_state.deep_link_stage().cloned()
                     && slot == generation
                 {
-                    self.chats_state.deep_link = Some(DeepLinkState::InvitePreview {
-                        hash,
-                        title,
-                        member_count,
-                        creates_join_request,
-                        is_channel,
-                        generation,
-                    });
+                    self.chats_state
+                        .enter_deep_link_stage(DeepLinkState::InvitePreview {
+                            hash,
+                            title,
+                            member_count,
+                            creates_join_request,
+                            is_channel,
+                            generation,
+                        });
                 }
             }
         }

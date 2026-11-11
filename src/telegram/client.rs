@@ -33,13 +33,28 @@ pub struct ReceiveBridge {
     pub rx: Receiver<OwnedEnvelope>,
     tx_cmd: Sender<BridgeCommand>,
     seq: Arc<AtomicU64>,
-    shutdown: Arc<AtomicBool>,
-    /// Set by the receive loop's exit guard when it ends without a
-    /// shutdown request (channel closed, thread panicked).
+    /// The feeding side's report, not the owner's stage: the receive loop's
+    /// exit guard (or the hub) sets it, from another thread, when the feed
+    /// ends without a shutdown request (channel closed, thread panicked).
+    /// It only ever goes `false` to `true`, and `feed` is touched by the
+    /// owner alone (`shutdown`), so the two cannot be put in one value
+    /// without a lock both threads take: the owner reads this flag, never
+    /// derives anything from it that `feed` also holds.
     stopped: Arc<AtomicBool>,
-    thread: Option<JoinHandle<Option<()>>>,
-    /// A hub-fed bridge: the route to remove on shutdown.
-    route: Option<(Arc<TdHub>, i32)>,
+    feed: BridgeFeed,
+}
+
+/// Where a bridge's envelopes come from, until it is shut down.
+enum BridgeFeed {
+    /// A thread of its own reading injected JSON; `shutdown` asks it to end.
+    Injected {
+        thread: JoinHandle<Option<()>>,
+        shutdown: Arc<AtomicBool>,
+    },
+    /// Fed by the hub: the route to remove on shutdown.
+    Routed { hub: Arc<TdHub>, client_id: i32 },
+    /// Shut down: nothing feeds it.
+    Closed,
 }
 
 /// Marks the bridge as stopped when the receive loop ends for any reason
@@ -78,10 +93,8 @@ impl ReceiveBridge {
             rx: rx_out,
             tx_cmd,
             seq,
-            shutdown,
             stopped,
-            thread: Some(thread),
-            route: None,
+            feed: BridgeFeed::Injected { thread, shutdown },
         })
     }
 
@@ -99,10 +112,8 @@ impl ReceiveBridge {
             rx,
             tx_cmd,
             seq,
-            shutdown: Arc::new(AtomicBool::new(false)),
             stopped,
-            thread: None,
-            route: Some((hub, client_id)),
+            feed: BridgeFeed::Routed { hub, client_id },
         }
     }
 
@@ -127,18 +138,21 @@ impl ReceiveBridge {
     /// Signal the receive loop and join it (an injected bridge), or stop
     /// routing to this client (a hub-fed one). Safe to call twice.
     pub fn shutdown(&mut self) {
-        self.shutdown.store(true, Ordering::SeqCst);
-        let _ = self.tx_cmd.send(BridgeCommand::Shutdown);
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-        if let Some((hub, client_id)) = self.route.take() {
-            hub.routes().unregister(client_id);
+        match std::mem::replace(&mut self.feed, BridgeFeed::Closed) {
+            BridgeFeed::Injected { thread, shutdown } => {
+                shutdown.store(true, Ordering::SeqCst);
+                let _ = self.tx_cmd.send(BridgeCommand::Shutdown);
+                let _ = thread.join();
+            }
+            BridgeFeed::Routed { hub, client_id } => {
+                hub.routes().unregister(client_id);
+            }
+            BridgeFeed::Closed => {}
         }
     }
 
     pub fn is_joined(&self) -> bool {
-        self.thread.is_none() && self.route.is_none()
+        matches!(self.feed, BridgeFeed::Closed)
     }
 
     /// Wake `wake`'s poll loop for this client's envelopes
@@ -146,7 +160,7 @@ impl ReceiveBridge {
     /// what arrived while the other loop was woken instead. An injected
     /// bridge wakes nothing.
     pub fn wake_with(&self, wake: &'static crate::wake::Signal) {
-        if let Some((hub, client_id)) = &self.route {
+        if let BridgeFeed::Routed { hub, client_id } = &self.feed {
             hub.routes().wake_with(*client_id, wake);
             wake.poke();
         }

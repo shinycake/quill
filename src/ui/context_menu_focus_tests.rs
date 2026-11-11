@@ -10,6 +10,7 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Root;
+use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
     AppContext, Entity, FocusHandle, Focusable, TestAppContext, VisualTestContext, point, px, size,
 };
@@ -203,11 +204,13 @@ pub(super) fn open_chat_menu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext
 
 fn open_message_menu(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     app.update_in(vcx, |app, _, cx| {
-        app.message_ui.menu = Some(crate::ui::menu_states::MessageMenuState {
-            chat_id: quill::ids::ChatId(11),
-            message_id: quill::ids::MessageId(101),
-            position: point(px(500.), px(200.)),
-        });
+        app.message_ui
+            .menu
+            .open_at(crate::ui::menu_states::MessageMenuState {
+                chat_id: quill::ids::ChatId(11),
+                message_id: quill::ids::MessageId(101),
+                position: point(px(500.), px(200.)),
+            });
         cx.notify();
     });
     vcx.run_until_parked();
@@ -438,20 +441,23 @@ fn enter_and_space_run_the_focused_menu_row(cx: &mut TestAppContext) {
     }
 }
 
-/// A menu with nothing to focus (an unknown chat, or a message that is gone)
-/// keeps the focus on its frame, swallows the arrows, and Enter does nothing.
+/// A menu whose target is gone (an unknown chat, or a message that left the
+/// session) draws nothing, so it closes instead of staying open unseen:
+/// the arrows reach the chat list again (sweep 11-p2-007, 11-p2-008).
 #[gpui_kit::test]
-fn a_menu_without_items_keeps_the_focus_on_its_frame(cx: &mut TestAppContext) {
+fn a_menu_whose_target_is_gone_closes_instead_of_swallowing_the_arrows(cx: &mut TestAppContext) {
     for message in [false, true] {
         let (app, mut vcx) = new_app(cx);
         let vcx = &mut vcx;
         app.update_in(vcx, |app, _, cx| {
             if message {
-                app.message_ui.menu = Some(crate::ui::menu_states::MessageMenuState {
-                    chat_id: quill::ids::ChatId(1),
-                    message_id: quill::ids::MessageId(987_654),
-                    position: point(px(500.), px(200.)),
-                });
+                app.message_ui
+                    .menu
+                    .open_at(crate::ui::menu_states::MessageMenuState {
+                        chat_id: quill::ids::ChatId(1),
+                        message_id: quill::ids::MessageId(987_654),
+                        position: point(px(500.), px(200.)),
+                    });
             } else {
                 app.chat_list.menu = Some(crate::ui::menu_states::ChatMenuState::at(
                     quill::ids::ChatId(987_654),
@@ -461,16 +467,20 @@ fn a_menu_without_items_keeps_the_focus_on_its_frame(cx: &mut TestAppContext) {
             cx.notify();
         });
         vcx.run_until_parked();
-        assert_eq!(drawn(&app, vcx), 0, "the menu has no focus target");
+        for _ in 0..2 {
+            vcx.update(|window, cx| window.render_frame(cx));
+        }
+        assert!(
+            !app.read_with(vcx, |app, _| app.context_menu_open()),
+            "the menu closed with its target"
+        );
+        assert_eq!(drawn(&app, vcx), 0);
         focus_chat_list(&app, vcx);
-        vcx.simulate_keystrokes("down down up enter");
-        assert!(in_menu(&app, vcx), "focus is on the menu frame");
-        app.read_with(vcx, |app, _| {
-            assert!(
-                !app.chat_list.keys.has_list_selection(),
-                "chat list untouched"
-            );
-        });
+        vcx.simulate_keystrokes("down");
+        assert!(
+            !in_menu(&app, vcx),
+            "the arrows are the chat list's again, not swallowed by an unseen menu"
+        );
     }
 }
 

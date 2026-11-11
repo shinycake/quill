@@ -3,7 +3,7 @@
 //! `SavedSublist`s).
 #![deny(clippy::indexing_slicing)]
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 
 use crate::telegram::envelope::DirectMessagesTopic;
 
@@ -16,10 +16,9 @@ pub struct DirectMessagesTopics {
     /// after the chat is left, so opening the chat again lands on it
     /// (tdesktop `activeSubsectionThread`).
     pub open: HashMap<i64, i64>,
-    /// `loadDirectMessagesChatTopics` answered 404: all are loaded.
-    pub exhausted: HashSet<i64>,
-    /// Chats whose first `loadDirectMessagesChatTopics` was sent.
-    pub requested: HashSet<i64>,
+    /// How loading each chat's conversations stands. No entry: the first
+    /// `loadDirectMessagesChatTopics` was not sent yet.
+    pub loads: HashMap<i64, TopicsLoad>,
     /// `true` = banned from the channel, by `(channel chat id, user id)`
     /// (tdesktop `kickedValue`). Missing = not asked yet.
     pub kicked: HashMap<(i64, i64), bool>,
@@ -31,7 +30,58 @@ pub struct DirectMessagesTopics {
     pub message_counts: HashMap<(i64, i64), i32>,
 }
 
+/// How far loading one chat's conversations got.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TopicsLoad {
+    /// A page was asked for (and may have answered).
+    Asked,
+    /// The last page failed with an error that is not the end of the list.
+    /// The update-driven preload does not ask again; opening the chat or
+    /// scrolling the tabs does.
+    Failed,
+    /// `loadDirectMessagesChatTopics` answered 404: all are loaded.
+    Exhausted,
+}
+
 impl DirectMessagesTopics {
+    /// Every conversation of `chat_id` is loaded.
+    pub fn exhausted(&self, chat_id: i64) -> bool {
+        self.loads.get(&chat_id) == Some(&TopicsLoad::Exhausted)
+    }
+
+    /// The first page went out and did not fail (or the list ended). A
+    /// failed first page is not loaded: opening the chat asks again.
+    pub fn preloaded(&self, chat_id: i64) -> bool {
+        matches!(
+            self.loads.get(&chat_id),
+            Some(TopicsLoad::Asked | TopicsLoad::Exhausted)
+        )
+    }
+
+    /// No page was ever asked for: the update-driven preload sends the
+    /// first one (a failed page is retried on open, not on every update).
+    pub fn never_asked(&self, chat_id: i64) -> bool {
+        !self.loads.contains_key(&chat_id)
+    }
+
+    /// A page went out.
+    pub fn page_asked(&mut self, chat_id: i64) {
+        let load = self.loads.entry(chat_id).or_insert(TopicsLoad::Asked);
+        if *load == TopicsLoad::Failed {
+            *load = TopicsLoad::Asked;
+        }
+    }
+
+    /// A page failed with `code`: 404 is the end of the list.
+    pub fn page_failed(&mut self, chat_id: i64, code: i32) {
+        let load = if code == 404 {
+            TopicsLoad::Exhausted
+        } else {
+            TopicsLoad::Failed
+        };
+        self.loads.insert(chat_id, load);
+    }
+
     /// The conversations of one chat in list order: `order` descending.
     pub fn ordered(&self, chat_id: i64) -> Vec<&DirectMessagesTopic> {
         let mut topics: Vec<&DirectMessagesTopic> = self

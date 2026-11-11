@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Time Quill's macOS launch to a painted chat list.
 
-    scripts/launch-bench.py [--runs N] [--cold] [--template dist/Quill.app] LABEL=BINARY ...
+    scripts/launch-bench.py [--runs N] [--cold | --recycle] [--template dist/Quill.app] LABEL=BINARY ...
 
 Each BINARY (a `--features ui --release` quill) is copied into its own
 signed Quill.app under ~/Library/Caches/quill-launch-bench/LABEL, built from
-the template bundle (its Frameworks hold TDLib and the other libraries). The
+the template bundle (its Frameworks hold TDLib and the other libraries). A
+BINARY that is itself a Quill.app (a release download, say) is copied whole
+and left as signed, so it stays notarized. The
 bundles are launched N times each, alternating, through LaunchServices with a
 clean environment (as a Finder double click is), against the real account in
 the default data folder, with QUILL_STARTUP_TRACE set (src/startup_trace.rs).
@@ -21,11 +23,23 @@ allow it without a password) before every launch, as after a reboot. The
 shared system libraries stay mapped, so this is close to, not exactly, a
 first launch after boot.
 
+`--recycle` makes the system forget Quill's files before every launch, the
+way a restart or a long build does: it looks at more unrelated files than the
+kernel remembers (kern.maxvnodes), which takes about 20 s. `--cold` does not
+do this. macOS checks each Mach-O file of a notarized app for malware when
+it is first mapped after being forgotten, 7 to 9 ms per MB, so only this mode
+shows that cost, and only for a notarized bundle (LABEL=Quill.app): a bundle
+this script signs is checked once and remembered
+(docs/decisions/launch-first-load-check.md).
+
 Environment: QUILL_CODESIGN_IDENTITY signs the bundles (use the identity the
 keychain already trusts for Quill's database key, or the keychain asks on
 every launch). TELEGRAM_API_ID and TELEGRAM_API_HASH are passed to the app;
 QUILL_ENV_FILE (default: quill.local.env next to this repository) fills them
 when unset.
+
+Each bundle's folder is made read-only, so the app cannot update itself
+there, and the script stops if a bundle's executable changes anyway.
 
 Quit any running Quill first: a second Quill hands its launch to the first.
 Bundles and trace files stay on the internal disk: an app that LaunchServices
@@ -59,17 +73,34 @@ def credentials():
 
 def make_bundle(label, binary, template):
     app = WORK / label / "Quill.app"
+    if app.parent.is_dir():
+        app.parent.chmod(0o755)
     shutil.rmtree(app.parent, ignore_errors=True)
     app.parent.mkdir(parents=True)
-    subprocess.run(["ditto", template, app], check=True)
-    exe = app / "Contents/MacOS/quill"
-    shutil.copy2(binary, exe)
-    subprocess.run(["install_name_tool", "-add_rpath", "@executable_path/../Frameworks", exe],
-                   capture_output=True)
-    identity = os.environ.get("QUILL_CODESIGN_IDENTITY", "-")
-    subprocess.run(["codesign", "--force", "--deep", "-s", identity, app],
-                   check=True, capture_output=True)
+    if pathlib.Path(binary).is_dir():
+        # A whole bundle: its signature and notarization are what is measured.
+        subprocess.run(["ditto", binary, app], check=True)
+    else:
+        subprocess.run(["ditto", template, app], check=True)
+        exe = app / "Contents/MacOS/quill"
+        shutil.copy2(binary, exe)
+        subprocess.run(["install_name_tool", "-add_rpath", "@executable_path/../Frameworks", exe],
+                       capture_output=True)
+        identity = os.environ.get("QUILL_CODESIGN_IDENTITY", "-")
+        subprocess.run(["codesign", "--force", "--deep", "-s", identity, app],
+                       check=True, capture_output=True)
+    # Quill does not update itself in a folder it cannot write to. A local
+    # build reports Cargo's version, older than any release, so one signed
+    # like the release would download the latest release during the runs
+    # and could swap it in for the binary under test.
+    app.parent.chmod(0o555)
     return app
+
+
+def stamp(app):
+    """What tells one executable file from another at the same path."""
+    info = (app / "Contents/MacOS/quill").stat()
+    return info.st_ino, info.st_size, info.st_mtime_ns
 
 
 def running(pattern=None):
@@ -148,6 +179,39 @@ def evict(paths):
                     os.close(fd)
 
 
+RECYCLE_ROOTS = ["/System/Library", "/usr", "/Library", "/Applications", "/opt"]
+
+
+def recycle():
+    """Make the kernel forget every file it is not using, Quill's included, by
+    looking at more other files than it keeps (kern.maxvnodes). Returns how
+    many it looked at. The file cache stays: only the per-file state goes, with
+    the verdicts of the system's first-load checks."""
+    limit = subprocess.run(["sysctl", "-n", "kern.maxvnodes"], capture_output=True, text=True).stdout.strip()
+    want = int(limit) * 3 // 2 if limit.isdigit() else 400_000
+    seen = 0
+    stack = [root for root in RECYCLE_ROOTS if os.path.isdir(root)]
+    while stack and seen < want:
+        folder = stack.pop()
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            continue
+        for name in names:
+            if "Quill" in name:
+                continue
+            path = folder + "/" + name
+            try:
+                # lstat of each path: a bulk directory read does not load the files.
+                mode = os.lstat(path).st_mode
+            except OSError:
+                continue
+            seen += 1
+            if (mode & 0o170000) == 0o040000:
+                stack.append(path)
+    return seen
+
+
 def winwatch():
     """The outside-in window timer, built from scripts/winwatch.swift."""
     binary = WORK / "winwatch"
@@ -159,10 +223,13 @@ def winwatch():
 
 
 def launch(app, trace, creds, cold=False, timeout=40.0, data_root=None, until="chat_list", extra_env=(),
-           evict_paths=(), onscreen=False):
+           evict_paths=(), onscreen=False, recycled=False):
     trace.unlink(missing_ok=True)
     seen = trace.with_suffix(".onscreen")
     seen.unlink(missing_ok=True)
+    if recycled:
+        recycle()
+        time.sleep(1)
     if cold:
         subprocess.run(["sudo", "-n", "/usr/sbin/purge"], check=True)
         time.sleep(1)
@@ -216,6 +283,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--runs", type=int, default=7)
     parser.add_argument("--cold", action="store_true", help="empty the file cache before every launch")
+    parser.add_argument("--recycle", action="store_true",
+                        help="make the system forget Quill's files before every launch (about 20 s each)")
     parser.add_argument("--evict", action="store_true",
                         help="drop only the bundle and the data folder from the file cache before every launch")
     parser.add_argument("--template", default=str(REPO / "dist/Quill.app"))
@@ -232,23 +301,32 @@ def main():
     creds = credentials()
     sides = []
     envs = {}
+    given = {}
+    made = {}
     for side in opts.sides:
         label, _, binary = side.partition("=")
         binary, *extra = binary.split("@")
         envs[label] = extra
         sides.append((label, make_bundle(label, binary, opts.template)))
+        made[label] = stamp(sides[-1][1])
+        if pathlib.Path(binary).is_dir():
+            # A release bundle carries its own credentials.
+            given[label] = {}
     results = {label: [] for label, _ in sides}
     evict_paths = [opts.data_root or DEFAULT_DATA] if opts.evict else []
     # One unrecorded launch each: a newly signed binary is assessed by the
     # system on its first launch (~0.7 s), which is not Quill's launch time.
     for label, app in sides:
-        launch(app, WORK / f"trace-{label}.txt", creds, data_root=opts.data_root, until=opts.until, extra_env=envs[label],
-               onscreen=opts.onscreen)
+        launch(app, WORK / f"trace-{label}.txt", given.get(label, creds), data_root=opts.data_root,
+               until=opts.until, extra_env=envs[label], onscreen=opts.onscreen)
     for run in range(opts.runs):
         for label, app in sides:
-            marks = launch(app, WORK / f"trace-{label}.txt", creds, opts.cold,
+            marks = launch(app, WORK / f"trace-{label}.txt", given.get(label, creds), opts.cold,
                            data_root=opts.data_root, until=opts.until, extra_env=envs[label],
-                           evict_paths=evict_paths, onscreen=opts.onscreen)
+                           evict_paths=evict_paths, onscreen=opts.onscreen, recycled=opts.recycle)
+            if stamp(app) != made[label]:
+                sys.exit(f"{label}: the executable changed during the runs (an update "
+                         "installed itself?); its numbers are not this build's")
             results[label].append(marks)
             shown = f"{marks[opts.until]:.0f} ms" if opts.until in marks else "NOT REACHED"
             print(f"{label} run {run}: {opts.until} {shown}, load {os.getloadavg()[0]:.1f}",

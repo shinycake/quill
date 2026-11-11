@@ -6,7 +6,7 @@
 use super::*;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
-use quill::media_viewer::{MediaViewer, MediaViewerItem, ViewerSource, profile_photo_items};
+use quill::media_viewer::{MediaViewer, MediaViewerItem, profile_photo_items};
 use quill::state::{
     ChatPhotosFetch, InfoPanelTarget, PhotoGallery, PhotoOwner, ProfilePhotosFetch,
 };
@@ -66,6 +66,7 @@ impl QuillApp {
     /// it is not cached; a group or channel opens once its current photo
     /// is known, and its history fills in while the viewer is open.
     pub(in crate::ui) fn open_peer_photos(&mut self, owner: PhotoOwner, cx: &mut Context<Self>) {
+        let mut chat_sent = Ok(());
         if let (PhotoOwner::Chat(chat_id), Some(live)) = (owner, self.live.as_mut()) {
             if matches!(
                 live.driver
@@ -81,7 +82,7 @@ impl QuillApp {
                     .chat_photo_history
                     .remove(&chat_id.0);
             }
-            let _ = live.driver.fetch_chat_photos(chat_id);
+            chat_sent = live.driver.fetch_chat_photos(chat_id);
         }
         let ready = self
             .session()
@@ -118,7 +119,7 @@ impl QuillApp {
                 live.driver.fetch_user_profile_photos(user_id).map(|_| ())
             }
             // Sent above.
-            PhotoOwner::Chat(_) => Ok(()),
+            PhotoOwner::Chat(_) => chat_sent,
         };
         match sent {
             Ok(()) => self.wait_for_profile_gallery(owner),
@@ -145,6 +146,10 @@ impl QuillApp {
             },
             PhotoOwner::Chat(chat_id) => match s.users_state.chat_photo_history.get(&chat_id.0) {
                 Some(ChatPhotosFetch::Failed(reason)) => Some(reason.clone()),
+                // The current photo's request ended without an answer.
+                _ if s.chat_photo_request_ended(chat_id) => {
+                    Some(tr(keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN).to_string())
+                }
                 _ => None,
             },
         });
@@ -188,8 +193,7 @@ impl QuillApp {
             return;
         }
         self.dialogs.pending_profile_gallery = None;
-        self.viewer.state = MediaViewer::open_profile(items, 0, gallery.total);
-        self.viewer.extra.profile_owner = Some(owner);
+        self.viewer.state = MediaViewer::open_profile(owner, items, 0, gallery.total);
         self.viewer.open_gen += 1;
         self.viewer_note_activity(cx);
         self.reset_viewer_item_state(cx);
@@ -199,10 +203,7 @@ impl QuillApp {
     /// Keep an open profile photo viewer in step with its gallery: append
     /// the pages that arrived, and ask for the next one near the end.
     pub(in crate::ui) fn sync_profile_photo_viewer(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.viewer.state.source() != ViewerSource::Profile {
-            return false;
-        }
-        let Some(owner) = self.viewer.extra.profile_owner else {
+        let Some(owner) = self.viewer.state.source().profile_owner() else {
             return false;
         };
         let gallery = self.session().and_then(|s| s.photo_gallery(owner));
@@ -235,7 +236,7 @@ impl QuillApp {
         let Some(item) = self.viewer.state.current().cloned() else {
             return;
         };
-        let Some(owner) = self.viewer.extra.profile_owner else {
+        let Some(owner) = self.viewer.state.source().profile_owner() else {
             return;
         };
         let Some(live) = self.live.as_mut() else {
@@ -268,7 +269,7 @@ impl QuillApp {
     /// Open the viewer's "Report" for the photo on screen: the viewer
     /// closes first so the reason list is not hidden behind it.
     pub(in crate::ui) fn report_viewer_profile_photo(&mut self, cx: &mut Context<Self>) {
-        let Some(owner) = self.viewer.extra.profile_owner else {
+        let Some(owner) = self.viewer.state.source().profile_owner() else {
             return;
         };
         let Some(file_id) = self
@@ -280,8 +281,7 @@ impl QuillApp {
             return;
         };
         self.close_media_viewer(cx);
-        self.dialogs.profile_dialog = Some(ProfileDialog::ReportPhoto { owner, file_id });
-        self.open_box(crate::ui::shell::DialogKind::ProfilePanel);
+        self.open_profile_dialog(ProfileDialog::ReportPhoto { owner, file_id });
         cx.notify();
     }
 

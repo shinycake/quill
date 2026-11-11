@@ -6,7 +6,9 @@ use crate::diagnostics::MemorySink;
 use crate::ids::{AccountKey, ChatId, MessageId};
 use crate::platform::MemorySecretStore;
 use crate::state::SupergroupFullInfoData;
-use crate::state::{LinkPreviewFetch, RequestPurpose, Session, SupergroupMembersFetch};
+use crate::state::{
+    InstantViewFallback, LinkPreviewFetch, RequestPurpose, Session, SupergroupMembersFetch,
+};
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::ChannelMemberStatus;
 use serde_json::Value;
@@ -123,7 +125,7 @@ fn driver_send_reply_shape_and_jump_to_replied() {
     );
     assert_eq!(
         driver
-            .jump_to_replied_message(reply.reply_to.as_ref().unwrap().message_id)
+            .jump_to_replied_message(reply.reply_to.as_ref().unwrap().message_id())
             .unwrap(),
         None
     );
@@ -240,7 +242,9 @@ fn driver_send_album_rejects_overlong_caption() {
         ],
     );
     let sent_before = recorder.snapshot().len();
-    let err = driver.send_album_snapshot(&snap).unwrap_err();
+    let err = driver
+        .send_album_snapshot_to(&driver.send_place(snap.chat_id()), &snap)
+        .unwrap_err();
     assert!(matches!(err, ConnectSendError::CaptionTooLong { limit: 4 }));
     assert_eq!(recorder.snapshot().len(), sent_before);
     let _ = std::fs::remove_dir_all(&dir);
@@ -362,10 +366,13 @@ fn driver_edit_snapshot_with_replacement_sends_edit_message_media() {
             media: Some(EditableMedia::Photo),
             in_album: false,
             replacement: Some(EditMediaReplacement {
+                probe: crate::composer::ReplacementProbe::NotNeeded,
                 path: picked.clone(),
                 file_name: "replacement.png".into(),
                 kind: EditMediaKind::Photo,
                 spoiler: true,
+                cover: None,
+                video_extras: Default::default(),
             }),
             ..MediaEdit::default()
         },
@@ -401,7 +408,7 @@ fn driver_instant_view_success_ingest() {
     // MED4: a `webPageInstantView` answer for a tracked
     // `GetWebPageInstantView` request populates `session.messages.instant_view`
     // (the UI drains it into the reader). The URL rides
-    // `instant_view_urls`, keyed by the request id.
+    // `instant_view_requests`, keyed by the request id.
     use crate::telegram::client::copy_and_parse;
 
     let store = MemorySecretStore::new();
@@ -418,11 +425,13 @@ fn driver_instant_view_success_ingest() {
     let extra = driver
         .session
         .request(RequestPurpose::GetWebPageInstantView, None);
-    driver
-        .session
-        .messages
-        .instant_view_urls
-        .insert(extra, "https://example.com/article".to_string());
+    driver.session.messages.instant_view_requests.insert(
+        extra,
+        crate::state::InstantViewAsk {
+            url: "https://example.com/article".to_string(),
+            from_agent: false,
+        },
+    );
 
     let json = format!(
         r#"{{"@type":"webPageInstantView","page_blocks":[],"@extra":"{id}"}}"#,
@@ -438,7 +447,7 @@ fn driver_instant_view_success_ingest() {
         .expect("IV stored");
     assert_eq!(iv.url, "https://example.com/article");
     // A success is never stashed as a browser fallback.
-    assert!(driver.session.messages.instant_view_fallback_url.is_none());
+    assert!(driver.session.messages.instant_view_fallbacks.is_empty());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -462,11 +471,13 @@ fn driver_instant_view_error_falls_back() {
     let extra = driver
         .session
         .request(RequestPurpose::GetWebPageInstantView, None);
-    driver
-        .session
-        .messages
-        .instant_view_urls
-        .insert(extra, "https://example.com/noiv".to_string());
+    driver.session.messages.instant_view_requests.insert(
+        extra,
+        crate::state::InstantViewAsk {
+            url: "https://example.com/noiv".to_string(),
+            from_agent: false,
+        },
+    );
 
     let json = format!(
         r#"{{"@type":"error","code":404,"message":"Not Found","@extra":"{id}"}}"#,
@@ -476,9 +487,66 @@ fn driver_instant_view_error_falls_back() {
     driver.ingest(owned).expect("ingest error");
     assert!(driver.session.messages.instant_view.is_none());
     assert_eq!(
-        driver.session.messages.instant_view_fallback_url.as_deref(),
-        Some("https://example.com/noiv")
+        driver.session.messages.instant_view_fallbacks,
+        vec![InstantViewFallback {
+            window: None,
+            url: "https://example.com/noiv".to_string(),
+            from_agent: false,
+        }]
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An Instant View that fails belongs to the window that asked: a chat
+/// window's link is not left for the main window to open, and a window
+/// closed in the meantime leaves nothing behind.
+#[test]
+fn driver_instant_view_fallback_belongs_to_the_asking_window() {
+    use crate::telegram::client::copy_and_parse;
+
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+    assert!(driver.session.open_window_chat(ChatId(11)));
+
+    let fail = |driver: &mut ConnectDriver<_>, window: Option<ChatId>, url: &str| {
+        driver.session.enter_view(window);
+        let extra = driver
+            .session
+            .request(RequestPurpose::GetWebPageInstantView, None);
+        driver.session.enter_view(None);
+        driver.session.messages.instant_view_requests.insert(
+            extra,
+            crate::state::InstantViewAsk {
+                url: url.to_string(),
+                from_agent: false,
+            },
+        );
+        let json = format!(
+            r#"{{"@type":"error","code":404,"message":"Not Found","@extra":"{id}"}}"#,
+            id = extra.0,
+        );
+        let owned = copy_and_parse(&json, &seq, &dyn_sink).expect("parse error");
+        driver.ingest(owned).expect("ingest error");
+    };
+    fail(&mut driver, Some(ChatId(11)), "https://example.com/a");
+    fail(&mut driver, None, "https://example.com/b");
+    let queued = &driver.session.messages.instant_view_fallbacks;
+    assert_eq!(queued.len(), 2);
+    assert_eq!(queued[0].window, Some(ChatId(11)));
+    assert_eq!(queued[1].window, None);
+
+    // The chat window closes: its link goes with it.
+    driver.session.close_window_chat(ChatId(11));
+    let queued = &driver.session.messages.instant_view_fallbacks;
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].url, "https://example.com/b");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

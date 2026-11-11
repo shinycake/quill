@@ -36,7 +36,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .message_translation(chat_id, message_id, to_language)
         {
-            Some(Translation::Pending | Translation::Done { .. }) => return Ok(()),
+            Some(Translation::Pending { .. } | Translation::Done { .. }) => return Ok(()),
             Some(Translation::Failed(_)) | None => {}
         }
         let (job, extra) = self.session.begin_translation(
@@ -109,6 +109,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             pending.rollback = Some(RequestRollback::ChatIsTranslatable {
                 chat_id: chat_id.0,
                 previous,
+                shown: is_translatable,
             });
         }
         Ok(())
@@ -154,6 +155,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             pending.rollback = Some(RequestRollback::AutoTranslate {
                 supergroup_id,
                 previous,
+                shown: enabled,
             });
         }
         Ok(Some(extra))

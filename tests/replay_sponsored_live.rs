@@ -3,6 +3,15 @@
 mod replay_common;
 use replay_common::*;
 
+/// Place the next ad in the history and return the first ad it shows.
+fn shown(session: &mut quill::state::Session) -> Option<i64> {
+    session.place_sponsored_after(quill::ids::MessageId(1));
+    session
+        .open_sponsored_in_history()
+        .first()
+        .map(|(_, ad)| ad.message_id)
+}
+
 #[test]
 fn sponsored_tail_views_count_once() {
     let sink = Arc::new(MemorySink::new());
@@ -10,8 +19,8 @@ fn sponsored_tail_views_count_once() {
     let mut session = sponsored_test_session(&sink, &seq);
     let chat_id = quill::ids::ChatId(13);
 
-    // Fetch -> store: the first text ad is the one shown after the last message.
-    assert_eq!(session.open_sponsored_tail().unwrap().message_id, 9001);
+    // Fetch -> store: the first text ad is the first to join the history.
+    assert_eq!(shown(&mut session), Some(9001));
     // Visible -> view: counted once, however often it is reported.
     assert_eq!(session.take_sponsored_views(chat_id, &[9001]), vec![9001]);
     assert!(session.take_sponsored_views(chat_id, &[9001]).is_empty());
@@ -43,6 +52,7 @@ fn sponsored_tail_hides_after_report_and_hide() {
     // Reporting the shown ad removes it; the next one needs its photo first.
     assert!(session.begin_sponsored_report(chat_id, 9001).is_some());
     let extra = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(chat_id));
+    session.note_sponsored_report_request(extra);
     apply_all_seq(
         &mut session,
         &sink,
@@ -52,11 +62,11 @@ fn sponsored_tail_hides_after_report_and_hide() {
             extra.0
         )],
     );
-    assert!(session.open_sponsored_tail().is_none());
+    assert_eq!(shown(&mut session), None);
 
     // Hide ads without Premium: the No ads preview, ads stay available.
     assert_eq!(session.begin_sponsored_hide(chat_id, 9002), Some(false));
-    assert!(session.messages.last_sponsored_report.is_none());
+    assert!(session.messages.sponsored_report.outcome().is_none());
     assert_eq!(
         session
             .payments
@@ -93,6 +103,6 @@ fn sponsored_tail_hides_after_report_and_hide() {
         &[&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0)],
     );
     assert!(session.messages.sponsored_hidden);
-    assert!(session.open_sponsored_tail().is_none());
+    assert_eq!(shown(&mut session), None);
     assert!(!session.sponsored_fetch_due(chat_id, std::time::Instant::now()));
 }

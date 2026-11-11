@@ -24,6 +24,9 @@ pub struct EditProfileDialog {
     pub(crate) initial: super::super::profile_edit_save::ProfileFields,
     /// The camera, emoji and video avatar panels.
     pub(crate) sources: crate::ui::profile_photo_sources::PhotoSources,
+    /// The last Save: the box closes when TDLib has answered the name and
+    /// bio requests, and stays with the reason when one is refused.
+    pub(crate) save: quill::state::Submit,
 }
 
 impl EditProfileDialog {
@@ -72,6 +75,7 @@ impl EditProfileDialog {
                 first_name, last_name, bio,
             ),
             sources: Default::default(),
+            save: Default::default(),
         };
         // Save's enabled state and the bio counter follow every keystroke.
         for input in [

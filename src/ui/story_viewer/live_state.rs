@@ -12,7 +12,7 @@ use crate::ui::video_player::VideoPlayer;
 use gpui_kit::component::input::{InputEvent, TextareaState};
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::*;
-use quill::ids::ChatId;
+use quill::ids::{ChatId, RequestId};
 use quill::live_story::{STAR_EFFECT_MS, level_for_stars, pin_finish, star_effect_shift};
 use quill::telegram::envelope::{GroupCallMessageLevel, MessageSender, ParsedGroupCallMessage};
 use std::time::{Duration, Instant};
@@ -47,8 +47,73 @@ pub(in crate::ui) struct LiveStarsBox {
     pub(super) stars: i64,
     pub(super) min: i64,
     pub(super) slider: Entity<SliderState>,
-    /// The comment waiting for these Stars (a send that needed more).
-    pub(super) then_send: bool,
+    /// What the box's button does besides adding the Stars.
+    pub(super) then: AfterStars,
+}
+
+/// What confirming the Stars box does after setting the Stars.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::ui) enum AfterStars {
+    /// Only set them.
+    Nothing,
+    /// Send the comment that waited for them (a send that needed more).
+    SendComment,
+}
+
+/// The Stars flow of the comment field, as one value: closed, the box open,
+/// or the viewer sent off to top up. Each leaves with the box's button, its
+/// close, the box opening again, a refused top-up, or the viewer closing
+/// (`LiveStoryUi::reset`).
+pub(in crate::ui) enum StarsFlow {
+    Idle,
+    Box(LiveStarsBox),
+    /// The box sent the viewer to top up with `stars`: the box opens on
+    /// them again. A comment that waited sends only when the box reopens
+    /// from a send that needs Stars (`SendAction::NeedsStars`), never from a
+    /// price edit.
+    TopUp {
+        mode: StarsBoxMode,
+        stars: i64,
+    },
+}
+
+impl StarsFlow {
+    pub(in crate::ui) fn boxed(&self) -> Option<&LiveStarsBox> {
+        match self {
+            Self::Box(boxed) => Some(boxed),
+            _ => None,
+        }
+    }
+
+    pub(super) fn boxed_mut(&mut self) -> Option<&mut LiveStarsBox> {
+        match self {
+            Self::Box(boxed) => Some(boxed),
+            _ => None,
+        }
+    }
+
+    /// The open box, leaving the flow idle.
+    pub(super) fn take_box(&mut self) -> Option<LiveStarsBox> {
+        match std::mem::replace(self, Self::Idle) {
+            Self::Box(boxed) => Some(boxed),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+
+    /// The amount a top-up waits to reopen the box on, leaving the flow
+    /// idle.
+    pub(super) fn take_top_up(&mut self) -> Option<(StarsBoxMode, i64)> {
+        match std::mem::replace(self, Self::Idle) {
+            Self::TopUp { mode, stars } => Some((mode, stars)),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
 }
 
 /// The delete box of one comment (tdesktop `Messages::deleteConfirmed`).
@@ -60,6 +125,84 @@ pub(in crate::ui) struct LiveDelete {
     pub(super) report_spam: bool,
     pub(super) delete_all: bool,
     pub(super) ban: bool,
+}
+
+/// A live story: `(poster, story)`.
+pub(in crate::ui) type LiveTarget = (ChatId, i32);
+
+/// The viewer's stage with a live story's call. Every stage ends: the
+/// viewer moving on, leaving, closing or a switch of account resets it to
+/// `Idle`, and "Join live" starts the refused one again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::ui) enum LiveJoin {
+    Idle,
+    /// The join is out; the call is not seen tracked yet. `request` is the
+    /// `getGroupCall` that makes the tracker (`None`: no driver, as in the
+    /// demo): when it is gone and no tracker came, the join failed.
+    Joining {
+        target: LiveTarget,
+        request: Option<RequestId>,
+    },
+    /// Joined: the call was seen tracked since the join, so its end is
+    /// noticed.
+    Joined(LiveTarget),
+    /// The join was refused: the viewer's upkeep does not join it again,
+    /// only the "Join live" button; another story (or none) clears it.
+    Refused(LiveTarget),
+}
+
+impl LiveStoryUi {
+    /// The live story the viewer joined.
+    pub(in crate::ui) fn watching(&self) -> Option<LiveTarget> {
+        match self.join {
+            LiveJoin::Joining { target, .. } | LiveJoin::Joined(target) => Some(target),
+            _ => None,
+        }
+    }
+
+    pub(super) fn refused(&self) -> Option<LiveTarget> {
+        match self.join {
+            LiveJoin::Refused(target) => Some(target),
+            _ => None,
+        }
+    }
+
+    pub(super) fn seen_call(&self) -> bool {
+        matches!(self.join, LiveJoin::Joined(_))
+    }
+
+    pub(in crate::ui) fn start_watching(&mut self, target: LiveTarget, request: Option<RequestId>) {
+        self.join = LiveJoin::Joining { target, request };
+    }
+
+    /// The story whose join waits for the tracker, and the request that
+    /// makes it.
+    pub(super) fn joining(&self) -> Option<(LiveTarget, RequestId)> {
+        match self.join {
+            LiveJoin::Joining {
+                target,
+                request: Some(request),
+            } => Some((target, request)),
+            _ => None,
+        }
+    }
+
+    pub(super) fn refuse(&mut self, target: LiveTarget) {
+        self.join = LiveJoin::Refused(target);
+    }
+
+    /// Another story (or none) than the refused one is shown.
+    pub(super) fn drop_stale_refusal(&mut self, shown: Option<LiveTarget>) {
+        if self.refused().is_some() && self.refused() != shown {
+            self.join = LiveJoin::Idle;
+        }
+    }
+
+    pub(super) fn mark_call_seen(&mut self) {
+        if let LiveJoin::Joining { target, .. } = self.join {
+            self.join = LiveJoin::Joined(target);
+        }
+    }
 }
 
 /// One Stars effect on screen.
@@ -80,17 +223,12 @@ pub(in crate::ui) struct LiveStoryUi {
     /// The stream's live player, over the driver's feed (also the live
     /// PiP's, `calls::live_pip`).
     pub(in crate::ui) player: Option<VideoPlayer>,
-    /// The live story the viewer joined: `(poster, story)`.
-    pub(in crate::ui) watching: Option<(ChatId, i32)>,
-    /// The call was seen tracked since the join (so its end is noticed).
-    pub(super) seen_call: bool,
+    /// Where the viewer stands with a live story's call.
+    pub(in crate::ui) join: LiveJoin,
     /// Stars the next comment carries (0 = free; tdesktop `_starsToSend`).
     pub(super) chosen_stars: i64,
-    pub(super) stars_box: Option<LiveStarsBox>,
+    pub(super) stars: StarsFlow,
     pub(super) delete: Option<LiveDelete>,
-    /// The Stars box's amount when it sent the viewer to top up, so the
-    /// box opens on it again.
-    pub(super) stars_before_top_up: Option<(StarsBoxMode, i64)>,
     pub(super) flying: Vec<FlyingStars>,
     /// The comments list; it follows new comments while at the bottom.
     pub(super) scroll: ScrollHandle,
@@ -136,12 +274,10 @@ impl LiveStoryUi {
         Self {
             input,
             player: None,
-            watching: None,
-            seen_call: false,
+            join: LiveJoin::Idle,
             chosen_stars: 0,
-            stars_box: None,
+            stars: StarsFlow::Idle,
             delete: None,
-            stars_before_top_up: None,
             flying: Vec::new(),
             scroll: ScrollHandle::new(),
             last_comment: None,
@@ -167,15 +303,14 @@ impl LiveStoryUi {
 
     /// Everything but the field and the picture goes back to the start.
     pub(super) fn reset(&mut self) {
-        self.watching = None;
-        self.seen_call = false;
+        self.join = LiveJoin::Idle;
         self.chosen_stars = 0;
-        self.stars_box = None;
+        self.stars = StarsFlow::Idle;
         self.delete = None;
-        self.stars_before_top_up = None;
         self.flying.clear();
         self.last_comment = None;
         self.overlay = Default::default();
+        self.volume_pill.release();
         self.demo_clock = None;
     }
 

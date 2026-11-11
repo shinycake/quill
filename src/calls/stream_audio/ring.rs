@@ -4,6 +4,13 @@ use std::sync::atomic::{AtomicI16, AtomicUsize, Ordering};
 
 const POP_ATTEMPTS: usize = 4;
 
+/// How many samples lie between `read` and `write`. A gap over `capacity`
+/// cannot exist in the ring: it is a pair of positions read apart, so none.
+fn occupied(read: usize, write: usize, capacity: usize) -> usize {
+    let used = write.wrapping_sub(read);
+    if used > capacity { 0 } else { used }
+}
+
 pub struct SampleRing {
     slots: Box<[AtomicI16]>,
     read: AtomicUsize,
@@ -30,8 +37,17 @@ impl SampleRing {
     }
 
     pub fn len(&self) -> usize {
+        let (read, write) = self.indices();
+        occupied(read, write, self.capacity())
+    }
+
+    /// The read and write positions, read first: the producer only moves
+    /// `read` up to `write`, so a `write` loaded after `read` is never
+    /// behind it, however long this thread was preempted between the loads.
+    fn indices(&self) -> (usize, usize) {
+        let read = self.read.load(Ordering::Acquire);
         let write = self.write.load(Ordering::Acquire);
-        write.wrapping_sub(self.read.load(Ordering::Acquire))
+        (read, write)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -96,9 +112,8 @@ impl SampleRing {
     /// many were written; the rest of `out` is left as it was.
     pub fn pop(&self, out: &mut [i16]) -> usize {
         for _ in 0..POP_ATTEMPTS {
-            let write = self.write.load(Ordering::Acquire);
-            let read = self.read.load(Ordering::Acquire);
-            let count = write.wrapping_sub(read).min(out.len());
+            let (read, write) = self.indices();
+            let count = occupied(read, write, self.capacity()).min(out.len());
             for (offset, sample) in out.iter_mut().take(count).enumerate() {
                 if let Some(slot) = self.slot(read.wrapping_add(offset)) {
                     *sample = slot.load(Ordering::Relaxed);
@@ -127,28 +142,35 @@ impl SampleRing {
 /// click on every buffer.
 pub struct Playout {
     prime: usize,
-    primed: bool,
+    stage: PlayoutStage,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PlayoutStage {
+    /// Waiting for `prime` samples.
+    Priming,
+    Playing,
 }
 
 impl Playout {
     pub fn new(prime: usize) -> Self {
         Self {
             prime,
-            primed: false,
+            stage: PlayoutStage::Priming,
         }
     }
 
     /// Fill `out` from `ring`, silence where there is no audio. Returns
     /// how many samples came from the ring.
     pub fn fill(&mut self, ring: &SampleRing, out: &mut [i16]) -> usize {
-        if !self.primed && ring.len() < self.prime.min(ring.capacity()) {
+        if self.stage == PlayoutStage::Priming && ring.len() < self.prime.min(ring.capacity()) {
             out.fill(0);
             return 0;
         }
-        self.primed = true;
+        self.stage = PlayoutStage::Playing;
         let got = ring.pop(out);
         if got < out.len() {
-            self.primed = false;
+            self.stage = PlayoutStage::Priming;
             if let Some(rest) = out.get_mut(got..) {
                 rest.fill(0);
             }
@@ -159,10 +181,17 @@ impl Playout {
 
 #[cfg(test)]
 mod tests {
-    use super::{Playout, SampleRing};
+    use super::{Playout, SampleRing, occupied};
 
     fn ramp(from: i16, count: usize) -> Vec<i16> {
         (0..count).map(|i| from + i as i16).collect()
+    }
+
+    #[test]
+    fn positions_read_apart_never_count_as_a_huge_backlog() {
+        assert_eq!(occupied(10, 8, 16), 0);
+        assert_eq!(occupied(usize::MAX - 1, 2, 16), 4);
+        assert_eq!(occupied(0, 16, 16), 16);
     }
 
     #[test]

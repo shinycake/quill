@@ -62,7 +62,12 @@ pub(crate) fn my_user_id(ctx: &Ctx) -> Result<i64, ToolError> {
     Ok(id)
 }
 
-/// The class of `chat`, a TDLib `chat` object.
+/// Most classes the cache keeps; past it the cache starts over.
+const MAX_CACHED_CLASSES: usize = 20_000;
+
+/// The class of `chat`, a TDLib `chat` object. Only a class that cannot
+/// change is remembered (a private chat's Saved/Bot/Other, a secret chat):
+/// a channel's class follows who owns it now, so it is read on every call.
 pub(crate) fn classify(ctx: &Ctx, chat: &Value, me: i64) -> Result<ChatClass, ToolError> {
     let chat_id = chat.get("id").and_then(Value::as_i64).unwrap_or(0);
     if let Some(class) = with_known(|known| known.classes.get(&(ctx.client.id(), chat_id)).copied())
@@ -111,7 +116,18 @@ pub(crate) fn classify(ctx: &Ctx, chat: &Value, me: i64) -> Result<ChatClass, To
         }
         _ => ChatClass::Other,
     };
-    with_known(|known| known.classes.insert((ctx.client.id(), chat_id), class));
+    let stable = matches!(
+        kind.get("@type").and_then(Value::as_str),
+        Some("chatTypePrivate" | "chatTypeSecret")
+    );
+    if stable {
+        with_known(|known| {
+            if known.classes.len() >= MAX_CACHED_CLASSES {
+                known.classes.clear();
+            }
+            known.classes.insert((ctx.client.id(), chat_id), class)
+        });
+    }
     Ok(class)
 }
 
@@ -248,6 +264,25 @@ fn by_title(ctx: &Ctx, title: &str, me: i64, reach: Reach) -> Result<i64, ToolEr
 
 /// The scope, title and class of chat `chat_id`, or `None` when it is not
 /// granted (or unknown).
+/// Whether `chat_id` is granted, remembering only an answer: a failed lookup
+/// (a timeout) says nothing about the chat, so the next message asks again.
+pub(crate) fn remember_grant(
+    known: &mut HashMap<i64, bool>,
+    chat_id: i64,
+    ask: impl FnOnce() -> Result<bool, ToolError>,
+) -> bool {
+    if let Some(allowed) = known.get(&chat_id) {
+        return *allowed;
+    }
+    match ask() {
+        Ok(allowed) => {
+            known.insert(chat_id, allowed);
+            allowed
+        }
+        Err(_) => false,
+    }
+}
+
 pub(crate) fn granted(ctx: &Ctx, chat_id: i64, me: i64) -> Result<Option<Target>, ToolError> {
     let Ok(chat) = ctx.call(json!({"@type": "getChat", "chat_id": chat_id})) else {
         return Ok(None);
@@ -360,7 +395,21 @@ pub(crate) fn chat_schema() -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::username_of;
+    use super::{ToolError, remember_grant, username_of};
+    use std::collections::HashMap;
+
+    #[test]
+    fn a_failed_grant_lookup_is_asked_again_not_remembered() {
+        let mut known = HashMap::new();
+        assert!(!remember_grant(&mut known, 5, || Err(ToolError::new(
+            "timed out"
+        ))));
+        assert!(known.is_empty());
+        assert!(remember_grant(&mut known, 5, || Ok(true)));
+        assert!(remember_grant(&mut known, 5, || Err(ToolError::new(
+            "not asked"
+        ))));
+    }
 
     #[test]
     fn usernames_come_from_handles_and_links() {

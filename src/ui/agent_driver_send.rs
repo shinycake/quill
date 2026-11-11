@@ -7,11 +7,12 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::composer_sends::SendOnce;
 use gpui_kit::*;
 use quill::agent::ui_driver::bridge::UiSend;
 use quill::agent::ui_driver::guard;
 use quill::composer::SendOptions;
-use quill::ids::{ChatId, RequestId};
+use quill::ids::{AccountKey, ChatId, RequestId};
 use quill::telegram::requests::send_text;
 use serde_json::Value;
 
@@ -28,7 +29,7 @@ impl QuillApp {
             guard::refuse_if_injecting("forward messages");
             return;
         }
-        if self.chat_ui.rich_editor_open {
+        if self.chat_ui.rich.editor_open() {
             guard::refuse_if_injecting("send formatted blocks");
             return;
         }
@@ -37,6 +38,9 @@ impl QuillApp {
             return;
         }
         let Some(chat_id) = self.open_chat_id() else {
+            return;
+        };
+        let Some(account) = self.session().map(|session| session.account.clone()) else {
             return;
         };
         if text.trim().is_empty() {
@@ -50,7 +54,7 @@ impl QuillApp {
         // else the box could carry does (a schedule, a silent send, an
         // effect, a paid message, suggested-post terms). The tool path
         // checks the request again before sending.
-        let composer = self.composer_send_options();
+        let composer = self.composer_send_options(SendOnce::default());
         let options = SendOptions {
             link_preview_disabled: composer.link_preview_disabled,
             link_preview_above_text: composer.link_preview_above_text,
@@ -68,12 +72,16 @@ impl QuillApp {
             .and_then(|session| session.chats.get(&chat_id.0))
             .map(|chat| chat.title.clone())
             .unwrap_or_default();
-        self.agent_bridge.ui_send = Some(UiSend {
-            chat_id: chat_id.0,
-            chat_title,
-            text,
-            request,
-        });
+        self.agent_bridge.ui_send = Some(Box::new((
+            self.screen_epoch(),
+            UiSend {
+                account,
+                chat_id: chat_id.0,
+                chat_title,
+                text,
+                request,
+            },
+        )));
         cx.notify();
     }
 
@@ -82,11 +90,15 @@ impl QuillApp {
     /// send from the window does.
     pub(super) fn agent_composer_sent(
         &mut self,
+        account: &AccountKey,
         chat_id: i64,
         text: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.session().map(|session| &session.account) != Some(account) {
+            return;
+        }
         if self.open_chat_id().map(|chat| chat.0) != Some(chat_id) {
             return;
         }

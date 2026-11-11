@@ -122,7 +122,7 @@ impl Session {
             last_read_inbox_message_id: Some(chat.last_read_inbox_message_id),
             // view-in-place: the main window's chat while it is active; a
             // chat window's is `shown_in_active_window`.
-            open_chat: self.open_chat,
+            open_chat: self.open_chat_id(),
             app_active: self.app_active,
             shown_in_active_window: self.active_window_chats.contains(&message.chat_id),
             view: self.settings.notify_view,
@@ -194,9 +194,7 @@ impl Session {
         sound: Option<notify::NotificationSoundKind>,
         photo: Option<crate::ids::FileId>,
     ) {
-        self.settings
-            .shown_notification_chats
-            .insert(notification.chat_id);
+        self.settings.notified.mark_shown(notification.chat_id);
         notify::coalesce_notification_with_sound(
             &mut self.settings.pending_notifications,
             notification,
@@ -212,11 +210,7 @@ impl Session {
         self.settings
             .pending_notifications
             .retain(|queued| queued.chat_id != chat_id);
-        if self.settings.shown_notification_chats.remove(&chat_id)
-            && !self.settings.pending_notification_clears.contains(&chat_id)
-        {
-            self.settings.pending_notification_clears.push(chat_id);
-        }
+        self.settings.notified.clear(chat_id);
     }
 
     /// A new unread reaction on one of our messages: notify when the
@@ -256,7 +250,7 @@ impl Session {
             chat_muted: self.effective_muted(chat),
             app_active: self.app_active,
             // view-in-place: as for messages above.
-            open_chat: self.open_chat,
+            open_chat: self.open_chat_id(),
             shown_in_active_window: self.active_window_chats.contains(&chat_id),
         });
         if let Some(notification) = notification {
@@ -266,6 +260,83 @@ impl Session {
                 (self.settings.inapp_sounds_enabled && settings.sound_id != 0 && !self.app_active)
                     .then_some(notify::NotificationSoundKind::Default);
             self.queue_notification_with_sound(notification, sound, None);
+        }
+    }
+}
+
+impl Session {
+    /// A scope's notification settings went out: they show at once, so the
+    /// next edit of the scope starts from them and never reverts this one.
+    pub fn show_scope_save(
+        &mut self,
+        scope: NotificationSettingsScope,
+        request: RequestId,
+        settings: &ScopeNotificationSettings,
+    ) {
+        let settings_state = &mut self.settings;
+        let shown = settings_state
+            .scope_notification_settings
+            .get(&scope)
+            .cloned();
+        settings_state
+            .scope_saves
+            .begin(scope, request, settings.clone(), || shown);
+        settings_state
+            .scope_notification_settings
+            .insert(scope, settings.clone());
+    }
+
+    /// The same for the reaction notification settings.
+    pub fn show_reaction_save(
+        &mut self,
+        request: RequestId,
+        settings: &ReactionNotificationSettings,
+    ) {
+        let shown = self.settings.reaction_notification_settings.clone();
+        self.settings
+            .reaction_saves
+            .begin((), request, settings.clone(), || shown);
+        self.settings.reaction_notification_settings = Some(settings.clone());
+    }
+
+    /// A save of scope or reaction notification settings answered. When the
+    /// last one of a burst was refused the settings from before come back.
+    pub(crate) fn settle_notification_save(
+        &mut self,
+        pending: Option<&PendingRequest>,
+        refused: bool,
+    ) {
+        let Some(pending) = pending else { return };
+        match pending.purpose {
+            RequestPurpose::SetScopeNotificationSettings => {
+                let Some(scope) = pending.scope else { return };
+                if let Some(back) = self
+                    .settings
+                    .scope_saves
+                    .settle(&scope, pending.id, refused)
+                {
+                    match back {
+                        Some(previous) => {
+                            self.settings
+                                .scope_notification_settings
+                                .insert(scope, previous);
+                        }
+                        None => {
+                            self.settings.scope_notification_settings.remove(&scope);
+                        }
+                    }
+                }
+            }
+            RequestPurpose::SetReactionNotificationSettings => {
+                if let Some(back) = self
+                    .settings
+                    .reaction_saves
+                    .settle(&(), pending.id, refused)
+                {
+                    self.settings.reaction_notification_settings = back;
+                }
+            }
+            _ => {}
         }
     }
 }

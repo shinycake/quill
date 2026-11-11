@@ -5,7 +5,7 @@
 use super::*;
 use crate::new_chat::{CreateFailure, CreationOutcome, NewChatKind, NewChatRequest};
 use crate::profile_photo_sources::ChatPhotoInput;
-use crate::state::NewChatCreation;
+use crate::state::{CreationStage, NewChatCreation, TypeSave};
 use crate::telegram::envelope::{ChatsPayload, EnvelopePayload, GroupsPayload};
 use crate::telegram::requests::{
     create_new_basic_group_chat, create_new_supergroup_chat, set_chat_photo,
@@ -14,7 +14,9 @@ use crate::telegram::requests::{
 impl<S: JsonSender> ConnectDriver<S> {
     /// `createNewBasicGroupChat` (schema line 13327) for a group,
     /// `createNewSupergroupChat` (line 13337) otherwise. `photo` is set
-    /// once the chat exists. `None` while another create is out.
+    /// once the chat exists. `None` while the open dialog's create is out
+    /// (one whose dialog was closed is `abandon_new_chat`, and does not
+    /// count).
     pub fn create_new_chat(
         &mut self,
         request: &NewChatRequest,
@@ -29,7 +31,21 @@ impl<S: JsonSender> ConnectDriver<S> {
                 is_channel: kind == NewChatKind::Channel,
             }),
         };
-        if self.session.requests.has_purpose(purpose) {
+        let busy = self
+            .session
+            .groups
+            .new_chats
+            .creations
+            .iter()
+            .any(|(id, creation)| {
+                matches!(creation.stage, CreationStage::Out { .. })
+                    && self
+                        .session
+                        .requests
+                        .get(*id)
+                        .is_some_and(|pending| pending.purpose == purpose)
+            });
+        if busy {
             return Ok(None);
         }
         let extra = self.session.request(purpose, None);
@@ -51,14 +67,50 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_json_request(extra, &json)?;
         self.session.groups.new_chats.creations.insert(
             extra,
-            NewChatCreation {
+            NewChatCreation::asked(
                 photo,
-                open_when_created: request.kind == NewChatKind::Group,
-                make_invite_link: request.kind.is_supergroup(),
-                outcome: None,
-            },
+                request.kind == NewChatKind::Group,
+                request.kind.is_supergroup(),
+            ),
         );
         Ok(Some(extra))
+    }
+
+    /// The type step's Save went out as `sent`: any of them failing, or
+    /// being lost, keeps the step from moving on.
+    pub fn watch_new_chat_type_save(&mut self, sent: &[RequestId]) {
+        let saves = &mut self.session.groups.new_chats.type_saves;
+        saves.clear();
+        saves.extend(sent.iter().map(|id| (*id, TypeSave::Sent)));
+    }
+
+    /// The dialog no longer owns this create (it was closed, or its answer
+    /// was taken into the next step). An answered create is forgotten; one
+    /// still out comes anyway (TDLib cannot cancel it) but nothing opens it
+    /// on top of whatever the person is doing now, and its entry goes when
+    /// its answer is applied.
+    pub fn abandon_new_chat(&mut self, request: RequestId) {
+        let creations = &mut self.session.groups.new_chats.creations;
+        let Some(creation) = creations.get_mut(&request) else {
+            return;
+        };
+        match &mut creation.stage {
+            CreationStage::Out { photo } => {
+                creation.stage = CreationStage::OutClosed {
+                    photo: photo.take(),
+                };
+            }
+            CreationStage::Made { chat, photo } => {
+                creation.stage = CreationStage::MadeClosed {
+                    chat: *chat,
+                    photo: photo.take(),
+                };
+            }
+            CreationStage::OutClosed { .. } | CreationStage::MadeClosed { .. } => {}
+            CreationStage::Settled(_) => {
+                creations.remove(&request);
+            }
+        }
     }
 
     /// Before `apply` takes the pending request: how one of our creates
@@ -69,10 +121,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         owned: &crate::telegram::client::OwnedEnvelope,
     ) -> Option<RequestId> {
         let extra = owned.envelope.extra?;
-        let creation = self.session.groups.new_chats.creations.get_mut(&extra)?;
-        if creation.outcome.is_some() {
-            return None;
-        }
+        let creations = &mut self.session.groups.new_chats.creations;
+        let creation = creations.get_mut(&extra)?;
+        let (photo, closed) = match &mut creation.stage {
+            CreationStage::Out { photo } => (photo.take(), false),
+            CreationStage::OutClosed { photo } => (photo.take(), true),
+            _ => return None,
+        };
         let outcome = match &owned.envelope.payload {
             EnvelopePayload::Groups(GroupsPayload::CreatedBasicGroupChat { chat_id }) => {
                 CreationOutcome::Created(ChatId(*chat_id))
@@ -84,11 +139,36 @@ impl<S: JsonSender> ConnectDriver<S> {
                 failure: CreateFailure::from_server_type(err.server_type.as_deref()),
                 reason: crate::state::error_reason(err),
             },
-            _ => return None,
+            _ => {
+                // Not an answer to the create: it stays out, as it was.
+                creation.stage = if closed {
+                    CreationStage::OutClosed { photo }
+                } else {
+                    CreationStage::Out { photo }
+                };
+                return None;
+            }
         };
-        let created = matches!(outcome, CreationOutcome::Created(_));
-        creation.outcome = Some(outcome);
-        created.then_some(extra)
+        match outcome {
+            CreationOutcome::Created(chat) => {
+                creation.stage = if closed {
+                    CreationStage::MadeClosed { chat, photo }
+                } else {
+                    CreationStage::Made { chat, photo }
+                };
+                Some(extra)
+            }
+            // Nobody reads the refusal of a create whose dialog is gone.
+            failed if closed => {
+                drop(failed);
+                creations.remove(&extra);
+                None
+            }
+            failed => {
+                creation.stage = CreationStage::Settled(failed);
+                None
+            }
+        }
     }
 
     /// After `apply`: the new chat's photo, then open a group.
@@ -96,20 +176,28 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(creation) = self.session.groups.new_chats.creations.get_mut(&extra) else {
             return;
         };
-        let Some(CreationOutcome::Created(chat_id)) = creation.outcome else {
-            return;
+        let (chat_id, photo, dialog_reads) = match &mut creation.stage {
+            CreationStage::Made { chat, photo } => (*chat, photo.take(), true),
+            CreationStage::MadeClosed { chat, photo } => (*chat, photo.take(), false),
+            _ => return,
         };
-        let photo = creation.photo.take();
-        let open = creation.open_when_created;
+        let open = creation.open_when_created && dialog_reads;
         let make_invite_link = creation.make_invite_link;
+        if dialog_reads {
+            creation.stage = CreationStage::Settled(CreationOutcome::Created(chat_id));
+        } else {
+            self.session.groups.new_chats.creations.remove(&extra);
+        }
         if let Some(photo) = photo {
             let photo_request = self
                 .session
                 .request(RequestPurpose::SetChatPhoto, Some(chat_id));
             let json = set_chat_photo(photo_request, chat_id, photo.to_json());
             if self.send_json_request(photo_request, &json).is_err() {
-                self.session.chats_state.chat_action_error =
-                    Some(crate::lang::tr(crate::lang::keys::Q_NEW_CHAT_PHOTO_FAILED).to_string());
+                self.session
+                    .chats_state
+                    .chat_action_error
+                    .push(crate::lang::tr(crate::lang::keys::Q_NEW_CHAT_PHOTO_FAILED).to_string());
             }
         }
         if make_invite_link && self.session.chat_primary_invite_link(chat_id).is_none() {

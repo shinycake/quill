@@ -68,39 +68,103 @@ pub const MONO_FONTS: &[&str] = &[
 /// Where one widget's runtime is. Every stage has a way out: off screen a
 /// running widget is released (keeping its last frame) or kept, back on
 /// screen a released or stopped one starts again, and new content starts
-/// over from `Idle`.
+/// over from `Idle`. `R` is the runtime the live stages hold (the UI's
+/// sandbox handle), so a runtime exists exactly while the widget is live.
+///
+/// The stops in a row ([`MAX_CRASHES`]) are the `streak` of the stages
+/// between a stop and the next first frame: they travel with the restart
+/// (`Stopped` to `Waiting` to `Loading`) and are gone once the widget runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Lifecycle {
+pub enum Lifecycle<R = ()> {
     /// Never on screen yet: nothing runs and nothing was drawn.
     Idle,
     /// On screen, waiting for one of the [`MAX_LIVE`] sandboxes.
-    Waiting,
+    Waiting { streak: u8 },
     /// The sandbox boots and runs the widget's scripts; its first frame has
     /// not come yet.
-    Loading,
+    Loading { runtime: R, streak: u8 },
     /// Running; its frames show.
-    Running,
+    Running(R),
     /// Released off screen to stay within [`MAX_LIVE`]: its last frame stays
     /// and it starts again when it comes back.
     Released,
     /// The runtime stopped itself (a CPU, memory or validator limit): the
     /// last frame with "Widget stopped" over it. It starts again when it
     /// comes back on screen, unless it stopped [`MAX_CRASHES`] times in a row.
-    Stopped { reason: String },
+    Stopped { reason: String, streak: u8 },
     /// It could not start at all (no bundles, the sandbox refused the
     /// document): the card with "Widget stopped".
     Failed { reason: String },
 }
 
-impl Lifecycle {
+impl<R> Lifecycle<R> {
     /// A runtime exists for it now.
     pub fn is_live(&self) -> bool {
-        matches!(self, Self::Loading | Self::Running)
+        self.runtime().is_some()
+    }
+
+    /// The runtime of a live widget.
+    pub fn runtime(&self) -> Option<&R> {
+        match self {
+            Self::Loading { runtime, .. } | Self::Running(runtime) => Some(runtime),
+            _ => None,
+        }
+    }
+
+    /// The runtime of a live widget.
+    pub fn runtime_mut(&mut self) -> Option<&mut R> {
+        match self {
+            Self::Loading { runtime, .. } | Self::Running(runtime) => Some(runtime),
+            _ => None,
+        }
     }
 
     /// The bubble shows "Widget stopped".
     pub fn is_stopped(&self) -> bool {
         matches!(self, Self::Stopped { .. } | Self::Failed { .. })
+    }
+
+    /// Stops in a row since the widget last ran.
+    pub fn streak(&self) -> u8 {
+        match self {
+            Self::Waiting { streak }
+            | Self::Loading { streak, .. }
+            | Self::Stopped { streak, .. } => *streak,
+            _ => 0,
+        }
+    }
+
+    /// Whether coming back on screen starts it again: a stopped widget
+    /// that stopped [`MAX_CRASHES`] times in a row stays stopped until its
+    /// content changes.
+    pub fn restarts_on_return(&self) -> Option<u8> {
+        match self {
+            Self::Idle | Self::Released => Some(0),
+            Self::Stopped { streak, .. } if *streak < MAX_CRASHES => Some(*streak),
+            _ => None,
+        }
+    }
+
+    /// The runtime stopped: `Stopped` with one more in the streak when a
+    /// frame is there to keep, else `Failed`.
+    pub fn stopped(&self, reason: String, has_frame: bool) -> Self {
+        if has_frame {
+            Self::Stopped {
+                reason,
+                streak: self.streak().saturating_add(1),
+            }
+        } else {
+            Self::Failed { reason }
+        }
+    }
+
+    /// Its first frame came: a loading runtime runs. Every other stage
+    /// stays.
+    pub fn started(self) -> Self {
+        match self {
+            Self::Loading { runtime, .. } => Self::Running(runtime),
+            other => other,
+        }
     }
 }
 

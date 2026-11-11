@@ -181,7 +181,7 @@ impl Session {
         };
         let member = self.bot_topics(chat_id).is_some()
             || matches!(
-                chat.my_member_status,
+                chat.member_status(),
                 Some(
                     crate::telegram::envelope::ChannelMemberStatus::Creator
                         | crate::telegram::envelope::ChannelMemberStatus::Administrator
@@ -275,7 +275,7 @@ impl Session {
         let jump = topics.first().filter(|t| t.unread).map(|t| t.id);
         Some(RowForum {
             loaded: self.threads.forum_topics.contains_key(&chat_id.0)
-                || self.threads.forum_topics_failed.contains(&chat_id.0),
+                || self.threads.forum_topics_failed(chat_id.0),
             unread_topics: i32::try_from(shown).unwrap_or(i32::MAX),
             badge_muted,
             jump,
@@ -392,7 +392,12 @@ fn apply_topic_info(topics: &mut Vec<ForumTopic>, info: ForumTopicInfoUpdate) {
         topic.is_outgoing = info.is_outgoing;
         return;
     }
-    let order = topics.iter().map(|t| t.order).max().unwrap_or(0) + 1;
+    let order = topics
+        .iter()
+        .map(|t| t.order)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
     topics.push(ForumTopic {
         forum_topic_id: info.forum_topic_id,
         name: info.name,
@@ -455,7 +460,7 @@ impl Session {
     /// pending sends and messages read elsewhere would skew them): the
     /// driver refetches the topic from TDLib.
     pub(crate) fn note_forum_topic_message(&mut self, message: &ParsedMessage) {
-        let Some(topic_id) = message.topic_id else {
+        let Some(topic_id) = message.topic_id() else {
             return;
         };
         self.threads
@@ -469,7 +474,7 @@ impl Session {
                     effective_content(&message.content, message.ephemeral.as_ref()).preview();
                 topic.last_message_id = topic.last_message_id.max(message.id.0);
                 if !topic.is_pinned && topic.order != top {
-                    topic.order = top + 1;
+                    topic.order = top.saturating_add(1);
                 }
             });
     }
@@ -477,10 +482,10 @@ impl Session {
     /// A `getForumTopic` answer: TDLib's state for one topic replaces the
     /// cached entry (or adds it).
     pub(crate) fn replace_forum_topic(&mut self, chat_id: ChatId, mut topic: ForumTopic) {
-        self.keep_dirty_topic_drafts(chat_id, std::slice::from_mut(&mut topic));
         if !self.threads.forum_topics.contains_key(&chat_id.0) {
             return;
         }
+        self.keep_dirty_topic_drafts(chat_id, std::slice::from_mut(&mut topic));
         settle_topic_unread(&mut topic);
         trace_topic_unread("getForumTopic", chat_id.0, &topic);
         self.threads.forum_topics.update(chat_id.0, |topics| {

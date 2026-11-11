@@ -3,11 +3,10 @@ use super::*;
 use crate::telegram::envelope::MessageSchedulingState;
 
 impl Session {
-    /// Phase 3.1: bot chats ride the ordinary private-chat path
-    /// (`is_supported_chat` / `can_post`) — no special gate. This
-    /// resolves the peer bot user id for a private chat whose user is a
-    /// known `userTypeBot`, feeding the lazy `getUserFullInfo` fetch.
-    /// `None` for every other chat kind.
+    /// Bot chats ride the ordinary private-chat path (`is_supported_chat` /
+    /// `can_post`). This resolves the peer bot user id of a private chat
+    /// whose user is a known `userTypeBot`, feeding the lazy
+    /// `getUserFullInfo` fetch. `None` for every other chat kind.
     pub fn bot_user_id_for_chat(&self, chat_id: ChatId) -> Option<i64> {
         let chat = self.chats.get(&chat_id.0)?;
         match chat.kind {
@@ -79,7 +78,7 @@ impl Session {
     /// the bytes through `key_fingerprint::key_hash_pixels` and render
     /// pixel colors only — raw bytes never leave `Session`.
     pub fn open_ready_secret_chat_for_user(&self, user_id: i64) -> Option<&ParsedSecretChat> {
-        let open = self.open_chat?;
+        let open = self.open_chat_id()?;
         let chat = self.chats.get(&open.0)?;
         let ChatKind::Secret {
             secret_chat_id,
@@ -538,7 +537,7 @@ impl Session {
     /// history win, as they carry edits.
     pub fn pinned_list(&self, chat_id: ChatId) -> Vec<&HistoryMessage> {
         let history = self.histories.get(&chat_id.0);
-        match self.messages.pinned_messages.get(&chat_id.0) {
+        match self.messages.pinned_data(chat_id.0) {
             Some(list) => list
                 .iter()
                 .map(|message| {
@@ -579,9 +578,11 @@ impl Session {
         match scheduling {
             ComposerScheduling::None => {
                 self.messages.scheduled_messages.retain(|m| !is_it(m));
-                self.messages.message_action_note = Some("message sent".into());
+                self.messages.note_action("message sent");
             }
-            ComposerScheduling::SendAtDate(send_date) => {
+            ComposerScheduling::SendAtDate {
+                date: send_date, ..
+            } => {
                 if let Some(message) = self
                     .messages
                     .scheduled_messages
@@ -594,7 +595,7 @@ impl Session {
                         repeat_period: 0,
                     });
                 }
-                self.messages.message_action_note = Some("message rescheduled".into());
+                self.messages.note_action("message rescheduled");
             }
             ComposerScheduling::SendWhenOnline => {
                 if let Some(message) = self
@@ -605,7 +606,7 @@ impl Session {
                 {
                     message.scheduling_state = Some(MessageSchedulingState::SendWhenOnline);
                 }
-                self.messages.message_action_note = Some("message rescheduled".into());
+                self.messages.note_action("message rescheduled");
             }
         }
     }
@@ -774,7 +775,7 @@ impl Session {
         let Some(chat) = self.chats.get(&chat_id.0) else {
             return false;
         };
-        if chat.my_member_status == Some(ChannelMemberStatus::Creator) {
+        if chat.member_status() == Some(ChannelMemberStatus::Creator) {
             return true;
         }
         match chat.kind {
@@ -884,7 +885,7 @@ impl Session {
     /// any message with a still-live `self_destruct_in` countdown — drives
     /// the 1-second render tick that keeps the timer badges fresh.
     pub fn open_chat_has_live_self_destruct(&self, now_ms: u64) -> bool {
-        let Some(open) = self.open_chat else {
+        let Some(open) = self.open_chat_id() else {
             return false;
         };
         self.histories.get(&open.0).is_some_and(|history| {
@@ -902,7 +903,7 @@ impl Session {
     /// current (`ensure_live_location_tick`), at the pace the labels
     /// change rather than every frame.
     pub fn open_chat_live_location_refresh(&self, now: i64) -> Option<u32> {
-        let open = self.open_chat?;
+        let open = self.open_chat_id()?;
         self.histories
             .get(&open.0)?
             .messages
@@ -924,8 +925,8 @@ impl Session {
         let mut rows: Vec<ContactRow> = self
             .users_state
             .contacts
-            .as_deref()
-            .unwrap_or(&[])
+            .data()
+            .map_or(&[][..], Vec::as_slice)
             .iter()
             .filter_map(|id| self.users.get(id))
             .map(|user| ContactRow {
@@ -949,7 +950,10 @@ impl Session {
     /// Phase 6: `true` once a `users` answer (or a failed attempt) settled —
     /// the contacts tab shows rows, an error, or a loading state.
     pub fn contacts_settled(&self) -> bool {
-        self.users_state.contacts.is_some() || self.users_state.contacts_error
+        matches!(
+            self.users_state.contacts,
+            crate::state::fetch::Fetch::Ready(_) | crate::state::fetch::Fetch::Failed { .. }
+        )
     }
 }
 

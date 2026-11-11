@@ -424,7 +424,7 @@ fn a_shut_down_bridge_is_sent_nothing_and_never_counts_as_closed() {
 }
 
 #[test]
-fn dropping_the_set_finishes_its_clients_within_the_quit_deadline() {
+fn dropping_the_set_finishes_its_clients_without_waiting_for_them() {
     let (client, handle) = client();
     let mut set = ClosingSet::new();
     set.push(key(1), client, false);
@@ -432,7 +432,7 @@ fn dropping_the_set_finishes_its_clients_within_the_quit_deadline() {
     drop(set);
     let took = started.elapsed();
     assert!(handle.finished());
-    assert!(took < QUIT_CLOSE_DEADLINE * 3, "{took:?}");
+    assert!(took < QUIT_CLOSE_DEADLINE / 2, "{took:?}");
 }
 
 const CALL_ID: i32 = 5;
@@ -445,19 +445,18 @@ fn active_call(is_outgoing: bool, state: CallState) -> ActiveCall {
         is_video: false,
         state,
         started_at: Instant::now(),
-        ready_at: None,
         ready: None,
         transport: Default::default(),
         signaling_queue: Vec::new(),
         signaling_dropped: 0,
         muted: false,
-        camera_on: false,
-        screen_sharing: false,
+        video: crate::state::LocalVideo::Off,
         remote_video: RemoteVideoState::Inactive,
         remote_screen: RemoteVideoState::Inactive,
         remote_audio_muted: false,
         remote_battery_low: false,
         signal_bars: None,
+        media_note: None,
     }
 }
 
@@ -535,6 +534,10 @@ fn closing_hangs_up_a_running_call_and_sends_close_behind_the_terminal_update() 
     let mut client = calling_driver().with_call(true, CallState::Ready);
     crate::connect::closing::begin_close(&mut client.driver);
     assert_eq!(client.sent(), ["discardCall", "setOption"]);
+    assert!(
+        !client.driver.chats_path_active(),
+        "an account on its way out starts nothing while close is held"
+    );
 
     let before_the_hold_ends = Instant::now();
     crate::connect::closing::release_close(&mut client.driver, before_the_hold_ends);

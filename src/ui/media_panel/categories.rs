@@ -22,13 +22,15 @@ const ICON: f32 = 22.;
 impl QuillApp {
     /// The chosen category's name for the results header.
     pub(super) fn chosen_category_name(&self) -> Option<SharedString> {
-        let index = self.pickers.media_panel.category?;
+        let source = self.pickers.media_panel.category.as_ref()?;
         let category = self
             .session()?
             .stickers
             .emoji
             .sticker_categories
-            .get(index)?;
+            .data()?
+            .iter()
+            .find(|category| category.source == *source)?;
         Some(match &category.source {
             EmojiCategorySource::Premium if category.name.is_empty() => {
                 tr(keys::Q_MISC_PREMIUM).into()
@@ -46,7 +48,7 @@ impl QuillApp {
         session.premium_badges_shown()
             || !self
                 .panel_item(source, ix)
-                .is_some_and(|item| item.requires_premium)
+                .is_some_and(|item| item.requires_premium())
     }
 
     /// What this window's sticker tab lists from the session's found
@@ -58,19 +60,17 @@ impl QuillApp {
         if !query.is_empty() {
             return Some(StickerSearch::Typed(query.to_string()));
         }
-        let index = self.pickers.media_panel.category?;
-        let category = self
-            .session()?
-            .stickers
-            .emoji
-            .sticker_categories
-            .get(index)?;
-        Some(StickerSearch::Category(category.source.clone()))
+        let source = self.pickers.media_panel.category.clone()?;
+        Some(StickerSearch::Category(source))
     }
 
     /// Choose a category, or leave it (`None`).
-    pub(super) fn choose_sticker_category(&mut self, index: Option<usize>, cx: &mut Context<Self>) {
-        self.pickers.media_panel.category = index;
+    pub(super) fn choose_sticker_category(
+        &mut self,
+        source: Option<EmojiCategorySource>,
+        cx: &mut Context<Self>,
+    ) {
+        self.pickers.media_panel.category = source;
         self.pickers.media_panel.key = None;
         self.pickers.media_panel.active_section = 0;
         cx.notify();
@@ -80,10 +80,10 @@ impl QuillApp {
     /// until the categories are known. Asks for them (once) and for their
     /// icons.
     pub(super) fn sticker_category_strip(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let asked = self
+        let idle = self
             .session()
-            .is_some_and(|s| s.stickers.emoji.sticker_categories_asked);
-        if !asked && self.live.is_some() {
+            .is_some_and(|s| s.stickers.emoji.sticker_categories.is_idle());
+        if idle && self.live.is_some() {
             self.defer_screen(cx, move |this, _| {
                 if let Some(live) = this.live.as_mut() {
                     let _ = live.driver.fetch_sticker_categories();
@@ -91,11 +91,11 @@ impl QuillApp {
             });
         }
         let session = self.session()?;
-        let categories = &session.stickers.emoji.sticker_categories;
+        let categories = session.stickers.emoji.sticker_categories.data()?;
         if categories.is_empty() {
             return None;
         }
-        let chosen = self.pickers.media_panel.category;
+        let chosen = self.pickers.media_panel.category.clone();
         let mut icon_files = Vec::new();
         let chips: Vec<AnyElement> = categories
             .iter()
@@ -129,6 +129,7 @@ impl QuillApp {
                         .into_any_element(),
                 };
                 let name: SharedString = category.name.clone().into();
+                let source = category.source.clone();
                 div()
                     .id(("sticker-category", index as u64))
                     .size(px(CHIP))
@@ -138,7 +139,9 @@ impl QuillApp {
                     .justify_center()
                     .rounded_md()
                     .cursor_pointer()
-                    .when(chosen == Some(index), |this| this.bg(cx.theme().accent))
+                    .when(chosen.as_ref() == Some(&category.source), |this| {
+                        this.bg(cx.theme().accent)
+                    })
                     .hover(|style| style.bg(cx.theme().accent))
                     .role(gpui_kit::Role::Button)
                     .aria_label(name.clone())
@@ -146,7 +149,7 @@ impl QuillApp {
                         gpui_kit::component::tooltip::Tooltip::new(name.clone()).build(window, cx)
                     })
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.choose_sticker_category(Some(index), cx);
+                        this.choose_sticker_category(Some(source.clone()), cx);
                     }))
                     .child(glyph)
                     .into_any_element()

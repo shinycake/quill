@@ -4,7 +4,7 @@ use crate::ids::{ChatId, RequestId};
 use crate::state::RequestPurpose;
 use crate::state::{ActiveGroupCall, LiveStoryJoinIntent};
 use crate::story_composer::{StoryMediaKind, StoryPrivacy};
-use crate::story_page::{StoryPageOp, StoryPageOpState, story_page_op_label};
+use crate::story_page::story_page_op_label;
 use crate::telegram::envelope::{StoryContentView, StoryListView};
 use crate::telegram::requests::{
     activate_story_stealth_mode as activate_story_stealth_mode_request,
@@ -67,7 +67,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let mut sent = false;
         for list in [StoryListView::Main, StoryListView::Archive] {
             let paging = self.session.stories.paging(list);
-            if paging.retry.is_some() && paging.may_load(now) {
+            if paging.retry().is_some() && paging.may_load(now) {
                 sent |= matches!(self.maybe_load_active_stories(list), Ok(Some(_)));
             }
         }
@@ -161,6 +161,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.fetch_group_call(group_call_id)?;
         self.session
             .begin_live_story(chat_id.0, story_id, group_call_id);
+        // A Join pressed again asks once more for what failed to load.
+        if let Some(live) = self.session.live_story_mut(group_call_id) {
+            live.retry_extras();
+        }
         self.session.calls.pending_live_story_join = Some(LiveStoryJoinIntent {
             group_call_id,
             request: extra,
@@ -172,7 +176,26 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// the story cache + in-flight per-story requests, and held back while
     /// a failed ask waits out its retry clock; the `story` response is
     /// authoritative on `(poster_chat_id, id)`.
+    ///
+    /// A send that is refused counts as a failed ask: its retry clock runs,
+    /// so an open waiting for the story is dropped with the failure note
+    /// instead of waiting for an answer that cannot come.
     pub fn get_story(
+        &mut self,
+        chat_id: ChatId,
+        story_id: i32,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        let sent = self.send_get_story(chat_id, story_id);
+        if sent.is_err() {
+            self.session
+                .stories
+                .story_fetch
+                .failed((chat_id.0, story_id), std::time::Instant::now());
+        }
+        sent
+    }
+
+    fn send_get_story(
         &mut self,
         chat_id: ChatId,
         story_id: i32,
@@ -212,8 +235,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<Option<RequestId>, ConnectSendError> {
         self.session
             .stories
-            .story_retry
-            .remove(&(chat_id.0, story_id));
+            .story_fetch
+            .forget_retry((chat_id.0, story_id));
         self.get_story(chat_id, story_id)
     }
 
@@ -475,12 +498,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         match self.sender.send_json(json) {
             Ok(()) => Ok(extra),
             Err(err) => {
-                self.session.requests.take(extra);
-                self.session.stories.page_op = Some(StoryPageOp {
-                    label: story_page_op_label(purpose),
-                    state: StoryPageOpState::Failed("could not send".to_string()),
-                    request: Some(extra),
-                });
+                let chat_id = self.session.requests.take(extra).and_then(|p| p.chat_id);
+                self.session.fail_story_page_send(
+                    story_page_op_label(purpose),
+                    extra,
+                    chat_id,
+                    "could not send".to_string(),
+                );
                 Err(err)
             }
         }

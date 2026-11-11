@@ -70,3 +70,46 @@ fn an_old_paid_post_deletes_without_the_warning(cx: &mut TestAppContext) {
     delete_paid_post(&app, &mut vcx, 30 * 86_400);
     assert!(vcx.debug_bounds("delete-paid-warning").is_none());
 }
+
+/// 13-067, 13-066: the delete behind an agent's Undo deletes and nothing
+/// else: the forward the user is building in another chat stays, and the
+/// answer says whether the request went out.
+#[gpui_kit::test]
+fn deleting_messages_leaves_the_users_forward_alone(cx: &mut TestAppContext) {
+    use crate::ui::forward_stage::ForwardStage;
+    use quill::composer::ForwardDraft;
+    let (app, mut vcx) = new_app(cx);
+    frames(&mut vcx);
+    let id = app.read_with(&vcx, |app, _| {
+        let session = app.demo_session.as_ref().expect("demo session");
+        let history = session.histories.get(&CHAT.0).expect("history");
+        history
+            .messages
+            .keys()
+            .copied()
+            .next_back()
+            .expect("a message")
+    });
+    app.update(&mut vcx, |app, _| {
+        let draft = ForwardDraft::from_message(ChatId(12), Default::default(), MessageId(5), false)
+            .expect("a sent message");
+        app.share.forward = ForwardStage::Selecting(draft);
+    });
+    let went_out = app.update(&mut vcx, |app, _| {
+        app.delete_messages(CHAT, &[MessageId(id)], true)
+    });
+    assert!(went_out, "the demo applies the delete");
+    app.read_with(&vcx, |app, _| {
+        assert!(
+            matches!(app.share.forward, ForwardStage::Selecting(_)),
+            "an unrelated forward draft survives"
+        );
+    });
+    // The selection box's own delete still ends selection mode.
+    app.update(&mut vcx, |app, cx| {
+        app.delete_selection(CHAT, &[], true, cx);
+    });
+    app.read_with(&vcx, |app, _| {
+        assert!(matches!(app.share.forward, ForwardStage::None));
+    });
+}

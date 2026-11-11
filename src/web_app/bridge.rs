@@ -22,6 +22,8 @@ pub const MAX_POPUP_BUTTON_ID_CHARS: usize = 64;
 /// Longest custom-method name and parameters (`sendWebAppCustomRequest`).
 pub const MAX_CUSTOM_METHOD_CHARS: usize = 64;
 pub const MAX_CUSTOM_PARAMS_BYTES: usize = 16 * 1024;
+/// The longest request id the bridge echoes back.
+pub const MAX_REQ_ID_CHARS: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BridgeError {
@@ -338,7 +340,7 @@ pub fn parse_event(name: &str, data: &str) -> Result<WebAppEvent, BridgeError> {
         "web_app_request_emoji_status_access" => WebAppEvent::RequestEmojiStatusAccess,
         "web_app_set_emoji_status" => set_emoji_status_event(&args),
         "web_app_read_text_from_clipboard" => WebAppEvent::ReadTextFromClipboard {
-            req_id: text("req_id").chars().take(64).collect(),
+            req_id: request_id(&args)?,
         },
         "web_app_setup_closing_behavior" => WebAppEvent::SetupClosingBehavior {
             need_confirmation: flag("need_confirmation"),
@@ -356,7 +358,7 @@ pub fn parse_event(name: &str, data: &str) -> Result<WebAppEvent, BridgeError> {
                 return Err(BridgeError::BadArguments("custom method params too large"));
             }
             WebAppEvent::InvokeCustomMethod {
-                req_id: text("req_id").chars().take(64).collect(),
+                req_id: request_id(&args)?,
                 method: method.to_string(),
                 params,
             }
@@ -490,6 +492,38 @@ fn button_setup(args: &Map<String, Value>) -> Result<ButtonSetup, BridgeError> {
         shine: flag("has_shine_effect"),
         position,
     })
+}
+
+/// The id a page gave its request. An over-long one is refused, not cut:
+/// the page matches the reply by the id it sent.
+fn request_id(args: &Map<String, Value>) -> Result<String, BridgeError> {
+    let id = args.get("req_id").and_then(Value::as_str).unwrap_or("");
+    if id.chars().count() > MAX_REQ_ID_CHARS {
+        return Err(BridgeError::BadArguments("req_id over 64 characters"));
+    }
+    Ok(id.to_string())
+}
+
+/// The reply a request-style event gets when `parse_event` refused it, so
+/// the page's callback settles (a dismissed popup, a failed custom method,
+/// an empty clipboard read) and carries the id that asked. `None` for
+/// events that wait for no answer, and when the page's id is unknown.
+pub fn refused_request_reply(name: &str, data: &str) -> Option<BridgeReply> {
+    let args = match serde_json::from_str::<Value>(data) {
+        Ok(Value::Object(args)) => args,
+        _ => Map::new(),
+    };
+    let req_id = args.get("req_id").and_then(Value::as_str).unwrap_or("");
+    match name {
+        "web_app_open_popup" => Some(BridgeReply::popup_closed("")),
+        "web_app_invoke_custom_method" if !req_id.is_empty() => {
+            Some(BridgeReply::custom_method_error(req_id, "METHOD_INVALID"))
+        }
+        "web_app_read_text_from_clipboard" if !req_id.is_empty() => {
+            Some(BridgeReply::clipboard_text_received(req_id, None))
+        }
+        _ => None,
+    }
 }
 
 fn popup_spec(args: &Map<String, Value>) -> Result<PopupSpec, BridgeError> {
@@ -660,6 +694,32 @@ mod tests {
 
     fn parse(name: &str, data: &str) -> WebAppEvent {
         parse_event(name, data).unwrap_or_else(|e| panic!("{name}: {e:?}"))
+    }
+
+    #[test]
+    fn an_over_long_request_id_is_refused_not_cut() {
+        let long = "x".repeat(65);
+        let data = format!(r#"{{"req_id":"{long}"}}"#);
+        assert!(parse_event("web_app_read_text_from_clipboard", &data).is_err());
+        assert!(parse_event("web_app_invoke_custom_method", &data).is_err());
+        let exact = format!(r#"{{"req_id":"{}"}}"#, "y".repeat(64));
+        assert!(parse_event("web_app_read_text_from_clipboard", &exact).is_ok());
+    }
+
+    #[test]
+    fn a_refused_request_still_gets_a_reply_with_its_own_id() {
+        let long = "z".repeat(80);
+        let data = format!(r#"{{"req_id":"{long}","method":"m"}}"#);
+        let reply = refused_request_reply("web_app_invoke_custom_method", &data).unwrap();
+        assert_eq!(reply.event, "custom_method_invoked");
+        assert_eq!(reply.data["req_id"], long.as_str());
+        assert!(reply.data["error"].is_string());
+        let popup = refused_request_reply("web_app_open_popup", r#"{"message":""}"#).unwrap();
+        assert_eq!(popup.event, "popup_closed");
+        let clip = refused_request_reply("web_app_read_text_from_clipboard", &data).unwrap();
+        assert_eq!(clip.data["req_id"], long.as_str());
+        assert!(refused_request_reply("web_app_close", "{}").is_none());
+        assert!(refused_request_reply("web_app_invoke_custom_method", "{}").is_none());
     }
 
     #[test]

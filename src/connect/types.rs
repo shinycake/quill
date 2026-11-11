@@ -257,6 +257,18 @@ pub enum ConnectSendError {
     CallsUnavailable,
 }
 
+impl ConnectSendError {
+    /// The line a stage ends in when its request could not be sent (a
+    /// spinner nothing would end becomes this, with a Retry).
+    pub fn stage_line(&self) -> String {
+        match self {
+            Self::Native => crate::lang::tr(crate::lang::keys::Q_NOTES_NO_CONNECTION),
+            _ => crate::lang::tr(crate::lang::keys::Q_NOTES_SOMETHING_WENT_WRONG),
+        }
+        .to_string()
+    }
+}
+
 /// MED4: outcome of an Instant View open attempt (TGX
 /// `TdlibUi.fetchInstantView` + browser fallback).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -266,19 +278,28 @@ pub enum InstantViewOutcome {
     Browser,
     /// `getWebPageInstantView` was sent. Success lands in
     /// `Session::instant_view`; TDLib's 404 (no Instant View for this
-    /// page) lands in `Session::instant_view_fallback_url` so the UI
+    /// page) lands in `MessagesState::instant_view_fallbacks` so the UI
     /// opens the browser — a refusal is never shown as success.
     Requested,
 }
 
 /// Session + outbound sender that auto-replies to `WaitTdlibParameters`.
+/// The call devices' list: never asked for (a call that is coming asks
+/// once), on its way, or in.
+#[derive(Default)]
+pub(crate) enum DeviceListing {
+    #[default]
+    Cold,
+    Listing(std::sync::mpsc::Receiver<Vec<MediaDevice>>),
+    Listed,
+}
+
 pub struct ConnectDriver<S: JsonSender> {
     pub session: Session,
     pub(crate) sender: S,
     /// Poll-batch state (`begin_batch` / `end_batch`).
     pub(crate) batch: super::core::batch::BatchState,
     pub(crate) call_engine: Option<Box<dyn CallEngine>>,
-    pub(crate) close_held_until: Option<std::time::Instant>,
     pub(crate) signaling_outbox: SignalingOutbox,
     pub(crate) transport_outbox: TransportOutbox,
     /// Phase C2e: engine-emitted peer camera states (worker thread ->
@@ -298,7 +319,6 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) call_capture: super::call_capture::CallCapture,
     /// The shared screen Quill captures (`connect::call_screen`).
     pub(crate) call_screen: super::call_screen::CallScreen,
-    pub(crate) call_devices_warmed: bool,
     /// Every picture (group-call tracks, streams, 1:1 calls): one live
     /// feed each, newest frame only (`group_calls/live_feeds.rs`).
     pub(crate) live_feeds: super::group_calls::live_feeds::LiveFeeds,
@@ -330,8 +350,9 @@ pub struct ConnectDriver<S: JsonSender> {
     /// (microphone, speaker) ids. `None` means the engine default; no
     /// devices are fabricated, so this can legitimately be empty.
     pub(crate) call_devices_cache: Vec<MediaDevice>,
-    /// The device list on its way (`refresh_call_devices`).
-    pub(crate) call_devices_listing: Option<std::sync::mpsc::Receiver<Vec<MediaDevice>>>,
+    /// Whether the device list was asked for, and is on its way
+    /// (`refresh_call_devices`).
+    pub(crate) call_devices_listing: DeviceListing,
     pub(crate) selected_devices: (Option<String>, Option<String>),
     /// The group calls whose sound you muted for yourself (the live
     /// stream's settings box, the live story's sound toggle).
@@ -340,23 +361,17 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) call_sound_watch: Option<(i32, crate::calls::stream_audio::watch::PlaybackWatch)>,
     pub(crate) credentials: TelegramCredentials,
     pub(crate) paths: AccountPaths,
-    /// The Telegram user this client was last checked against the account
-    /// folder's owner (`account_data::claim`).
-    pub(crate) claimed_owner: Option<i64>,
+    /// Where this client is with the account folder's owner
+    /// (`account_data::claim`).
+    pub(crate) owner_claim: OwnerClaim,
     pub(crate) database_key: DatabaseKey,
-    pub(crate) parameters_sent: bool,
-    pub(crate) search_debounce_token: u64,
-    pub(crate) pending_typed_search: Option<(u64, String)>,
-    pub(crate) chat_search_debounce_token: u64,
-    pub(crate) pending_typed_chat_search: Option<(u64, String)>,
     /// Last `chatActionTyping` we sent (Unigram `_lastTypingTime`).
     pub(crate) outgoing_typing: Option<OutgoingTyping>,
     /// Last `chatActionRecordingVoiceNote` (Unigram record button).
     pub(crate) outgoing_voice: Option<OutgoingTyping>,
-    /// tdesktop `saveDraft` clock for the open composer.
-    pub(crate) draft_clock: DraftSaveClock,
-    pub(crate) draft_save_token: u64,
-    pub(crate) pending_draft: Option<PendingDraft>,
+    /// The composer draft save waiting for its quiet window (tdesktop
+    /// `saveDraft`), or kept after a failed send.
+    pub(crate) pending_draft: crate::state::debounce::Debounce<HeldDraft>,
     /// Q1: idempotent reads waiting out a 429 before being re-sent.
     pub(crate) flood_retries: Vec<super::flood_retry::FloodRetry>,
     /// Q1: re-send count per request id that hit a rate limit.
@@ -366,10 +381,6 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) custom_emoji_hold: Option<std::time::Instant>,
     /// R5: when the stale-request sweep last scanned the registry.
     pub(crate) last_request_sweep: Option<std::time::Instant>,
-    /// The last "Use system proxy settings" step sent and when; a step
-    /// TDLib refused is not sent again until the OS setting changes or
-    /// `system_proxy::RETRY` passes.
-    pub(crate) system_proxy_sent: Option<crate::system_proxy::SentStep>,
     pub(crate) system_proxy_asked: Option<std::time::Instant>,
     pub(crate) network_seen: Option<super::ticks::Reach>,
     /// Where this client's web proxy carriers run (`connect::proxy_carrier`);
@@ -379,11 +390,49 @@ pub struct ConnectDriver<S: JsonSender> {
 
 pub(crate) struct OutgoingTyping {
     pub(crate) chat_id: ChatId,
+    /// The topic or thread the action was sent into: a change inside the
+    /// same chat ends it, and its cancel goes to the same place.
+    pub(crate) topic: crate::ids::TopicId,
     pub(crate) last_sent_ms: u64,
 }
 
+/// A draft save that has not gone out.
+pub(crate) enum HeldDraft {
+    /// Waiting out the quiet window that began at `started_ms`.
+    Quiet {
+        started_ms: u64,
+        draft: PendingDraft,
+    },
+    /// The send failed: the save waits for the next flush, typing or chat
+    /// leave.
+    Kept(PendingDraft),
+}
+
+impl HeldDraft {
+    pub(crate) fn draft(&self) -> &PendingDraft {
+        match self {
+            Self::Quiet { draft, .. } | Self::Kept(draft) => draft,
+        }
+    }
+
+    pub(crate) fn into_draft(self) -> PendingDraft {
+        match self {
+            Self::Quiet { draft, .. } | Self::Kept(draft) => draft,
+        }
+    }
+
+    /// tdesktop's `saveDraft` clock: running only in a quiet window.
+    pub(crate) fn clock(&self) -> DraftSaveClock {
+        match self {
+            Self::Quiet { started_ms, .. } => DraftSaveClock::Armed {
+                first_edit_ms: *started_ms,
+            },
+            Self::Kept(_) => DraftSaveClock::Idle,
+        }
+    }
+}
+
 pub(crate) struct PendingDraft {
-    pub(crate) token: u64,
     pub(crate) chat_id: ChatId,
     /// The slot the edit belongs to, fixed when the timer was armed: a
     /// topic or thread switch before it fires still saves to the right one.
@@ -408,4 +457,18 @@ pub enum DraftSaveOutcome {
 pub(crate) enum ToggleSessionKind {
     SecretChats,
     Calls,
+}
+
+/// The account folder's owner file, from this client's side: one value, so
+/// a failed save is retried on the next ingest.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum OwnerClaim {
+    /// Nobody checked yet (the user id is not known).
+    #[default]
+    Unclaimed,
+    /// The folder's owner is this user and the file says so.
+    Saved(i64),
+    /// The folder was checked for this user but the owner file could not be
+    /// written: only the write is retried.
+    Unsaved(i64),
 }

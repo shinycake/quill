@@ -174,7 +174,7 @@ fn the_daily_limit_offers_increase_limit(cx: &mut TestAppContext) {
 fn a_box_opened_in_a_chat_window_survives_the_main_windows_frames(cx: &mut TestAppContext) {
     let (app, mut main) = open_main(cx);
     let chat = app
-        .read_with(&main, |app, _| app.session().and_then(|s| s.open_chat))
+        .read_with(&main, |app, _| app.session().and_then(|s| s.open_chat_id()))
         .expect("the demo opens a chat");
     app.update_in(&mut main, |app, window, cx| {
         app.open_chat_in_new_window(chat, window, cx)
@@ -213,7 +213,7 @@ fn a_box_opened_in_a_chat_window_survives_the_main_windows_frames(cx: &mut TestA
 fn a_chat_windows_box_takes_its_answer_and_toasts_in_its_own_frame(cx: &mut TestAppContext) {
     let (app, mut main) = open_main(cx);
     let chat = app
-        .read_with(&main, |app, _| app.session().and_then(|s| s.open_chat))
+        .read_with(&main, |app, _| app.session().and_then(|s| s.open_chat_id()))
         .expect("the demo opens a chat");
     app.update_in(&mut main, |app, window, cx| {
         app.open_chat_in_new_window(chat, window, cx)
@@ -266,7 +266,7 @@ fn a_chat_windows_box_takes_its_answer_and_toasts_in_its_own_frame(cx: &mut Test
 fn a_chat_windows_style_preview_takes_its_answer_in_its_own_frame(cx: &mut TestAppContext) {
     let (app, mut main) = open_main(cx);
     let chat = app
-        .read_with(&main, |app, _| app.session().and_then(|s| s.open_chat))
+        .read_with(&main, |app, _| app.session().and_then(|s| s.open_chat_id()))
         .expect("the demo opens a chat");
     app.update_in(&mut main, |app, window, cx| {
         app.open_chat_in_new_window(chat, window, cx)
@@ -296,7 +296,7 @@ fn a_chat_windows_style_preview_takes_its_answer_in_its_own_frame(cx: &mut TestA
             session.messages.ai_compose.style_lookup = Some(quill::state::StyleLookup {
                 token,
                 name: "formal".into(),
-                outcome: Some(Err(quill::state::StyleError::Invalid)),
+                outcome: quill::state::StyleReply::Answered(Err(quill::state::StyleError::Invalid)),
             });
         }
         cx.notify();
@@ -325,7 +325,7 @@ fn a_chat_windows_style_preview_takes_its_answer_in_its_own_frame(cx: &mut TestA
 fn switch_topic(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, topic: i32) {
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.open_topic = Some(topic);
+            session.open = session.open.with_topic(topic);
         }
         cx.notify();
     });
@@ -357,6 +357,8 @@ fn the_shortcuts_answer_skips_another_topic(cx: &mut TestAppContext) {
         let conversation = app.open_conversation().expect("a chat is open");
         app.ai_compose.apply_in_place = Some(ApplyInPlace {
             token: 41,
+            account: quill::ids::AccountKey::primary(),
+            field: "the topic's own draft".into(),
             conversation,
             window: None,
             selection: None,
@@ -378,4 +380,41 @@ fn the_shortcuts_answer_skips_another_topic(cx: &mut TestAppContext) {
     frames(&mut main);
     let composer = app.read_with(&main, |app, cx| app.composer.read(cx).value().to_string());
     assert_eq!(composer, "the next topic's draft");
+}
+
+/// Sweep 07-028: text typed while the answer was coming is not overwritten:
+/// the answer rewrites a range of the draft it was asked for, so it lands
+/// only while the composer still holds that draft.
+#[gpui_kit::test]
+fn the_shortcuts_answer_skips_a_draft_typed_on_meanwhile(cx: &mut TestAppContext) {
+    use crate::ui::ai_compose_state::ApplyInPlace;
+    use quill::state::ApplyInPlaceAnswer;
+    let (app, mut main) = open_main(cx);
+    close_box(&app, &mut main);
+    set_draft(&app, &mut main, "Hello there");
+    app.update(&mut main, |app, _| {
+        let conversation = app.open_conversation().expect("a chat is open");
+        app.ai_compose.apply_in_place = Some(ApplyInPlace {
+            token: 42,
+            account: quill::ids::AccountKey::primary(),
+            field: "Hello there".into(),
+            conversation,
+            window: None,
+            selection: None,
+            cursor: 0,
+        });
+    });
+    set_draft(&app, &mut main, "Typed on after pressing");
+    app.update(&mut main, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.messages.ai_compose.apply_in_place = Some(ApplyInPlaceAnswer {
+                token: 42,
+                outcome: Ok(("Rewritten".into(), Vec::new())),
+            });
+        }
+        cx.notify();
+    });
+    frames(&mut main);
+    let composer = app.read_with(&main, |app, cx| app.composer.read(cx).value().to_string());
+    assert_eq!(composer, "Typed on after pressing");
 }

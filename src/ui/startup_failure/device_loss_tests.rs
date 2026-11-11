@@ -1,7 +1,7 @@
 //! A main window replaced after its renderer was lost, on the test platform:
 //! the window closes and a new one opens around what it kept. The platform
 //! side (a real device loss) does not run here.
-use super::{reopen_main_window, watch_closed_windows};
+use super::{ATTACH_DEADLINE, attach_in_time, reopen_main_window, watch_closed_windows};
 use crate::ui::app::QuillApp;
 use crate::ui::link_inbox::attach_main_window;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -340,4 +340,35 @@ fn a_main_window_lost_beside_a_pip_comes_back_and_the_pip_stays(cx: &mut TestApp
             .any(|w| w.window_id() == opened.window.window_id())
     );
     app_of(&opened);
+}
+
+/// The platform never answers the windowing request: the wait ends at the
+/// deadline (on the test clock, no real waiting) instead of leaving the
+/// process alive with no window.
+#[gpui_kit::test]
+fn a_windowing_request_that_never_answers_ends_at_the_deadline(cx: &mut TestAppContext) {
+    let deadline = cx.executor().timer(ATTACH_DEADLINE);
+    let attached = cx.foreground_executor().spawn(attach_in_time(
+        std::future::pending::<gpui_kit::Result<()>>(),
+        deadline,
+    ));
+    cx.run_until_parked();
+    cx.executor()
+        .advance_clock(ATTACH_DEADLINE + std::time::Duration::from_secs(1));
+    cx.run_until_parked();
+    let outcome = cx.foreground_executor().block_test(attached);
+    assert!(outcome.is_err(), "the wait ended with an error");
+}
+
+/// An answer that comes in time wins over the deadline.
+#[gpui_kit::test]
+fn a_windowing_request_that_answers_in_time_attaches(cx: &mut TestAppContext) {
+    let deadline = cx.executor().timer(ATTACH_DEADLINE);
+    let attached = cx.foreground_executor().spawn(attach_in_time(
+        std::future::ready(Ok(()) as gpui_kit::Result<()>),
+        deadline,
+    ));
+    cx.run_until_parked();
+    let outcome = cx.foreground_executor().block_test(attached);
+    assert!(outcome.is_ok());
 }

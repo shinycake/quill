@@ -120,12 +120,30 @@ pub fn create_forum_topic_with_icon(
     color: i32,
     custom_emoji_id: i64,
 ) -> String {
+    create_forum_topic(extra, chat_id, name, false, color, custom_emoji_id)
+}
+
+/// `createForumTopic` for a bot's new thread, named by Quill rather than
+/// the user (`is_name_implicit`, tdesktop `reserveNewBotTopic`): the bot
+/// may rename it.
+pub fn create_bot_thread(extra: RequestId, chat_id: ChatId, name: &str, color: i32) -> String {
+    create_forum_topic(extra, chat_id, name, true, color, 0)
+}
+
+fn create_forum_topic(
+    extra: RequestId,
+    chat_id: ChatId,
+    name: &str,
+    is_name_implicit: bool,
+    color: i32,
+    custom_emoji_id: i64,
+) -> String {
     json!({
         "@type": "createForumTopic",
         "@extra": extra.as_extra(),
         "chat_id": chat_id.0,
         "name": name,
-        "is_name_implicit": false,
+        "is_name_implicit": is_name_implicit,
         "icon": {
             "@type": "forumTopicIcon",
             "color": color,
@@ -315,7 +333,11 @@ mod tests {
         }
         let v = parse(&set_pinned_forum_topics(r, c, &[3, 1]));
         assert_eq!(v["forum_topic_ids"], json!([3, 1]));
+        let v = parse(&create_bot_thread(r, c, "New Chat", 0x6FB9F0));
+        assert_eq!(v["is_name_implicit"], true);
+        assert_eq!(v["icon"]["custom_emoji_id"], 0);
         let v = parse(&create_forum_topic_with_icon(r, c, "Ideas", 0xFFD67E, 99));
+        assert_eq!(v["is_name_implicit"], false);
         assert_eq!(v["icon"]["@type"], "forumTopicIcon");
         assert_eq!(v["icon"]["color"], 0xFFD67E);
         assert_eq!(v["icon"]["custom_emoji_id"], 99);

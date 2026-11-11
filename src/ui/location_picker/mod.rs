@@ -11,6 +11,7 @@ mod dialog;
 mod geolocation;
 mod map;
 pub(super) mod state;
+mod wait_budget;
 
 use super::app::QuillApp;
 use crate::ui::shell::DialogKind;
@@ -19,8 +20,10 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::location_picker::{GeoOutcome, GeoPoint, LocationSharing, MapView, Venue, country};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use wait_budget::WaitBudget;
 
 /// tdesktop's map `move_end` fires this long after the map stops.
 const SETTLE_DELAY: Duration = Duration::from_millis(500);
@@ -33,15 +36,43 @@ const LOCATE_TIMEOUT: Duration = Duration::from_secs(30);
 const GEOCODE_TIMEOUT: Duration = Duration::from_secs(15);
 
 async fn poll_answer<T>(receiver: Receiver<T>, timeout: Duration, cx: &mut AsyncApp) -> Option<T> {
-    let started = Instant::now();
+    poll_answer_unless(&receiver, timeout, None, cx).await
+}
+
+/// [`poll_answer`] whose time limit does not run while `paused` is set
+/// (the system's permission prompt is open).
+async fn poll_answer_unless<T>(
+    receiver: &Receiver<T>,
+    timeout: Duration,
+    paused: Option<&AtomicBool>,
+    cx: &mut AsyncApp,
+) -> Option<T> {
+    let mut budget = WaitBudget::default();
     loop {
         match receiver.try_recv() {
             Ok(answer) => return Some(answer),
             Err(TryRecvError::Disconnected) => return None,
-            Err(TryRecvError::Empty) if started.elapsed() >= timeout => return None,
-            Err(TryRecvError::Empty) => cx.background_executor().timer(POLL).await,
+            Err(TryRecvError::Empty) => {
+                let paused = paused.is_some_and(|flag| flag.load(Ordering::SeqCst));
+                cx.background_executor().timer(POLL).await;
+                if budget.spent(POLL, paused, timeout) {
+                    return None;
+                }
+            }
         }
     }
+}
+
+/// Wait for a "where am I" answer; `Unavailable` when it never comes.
+async fn locate_outcome(locating: geolocation::Locating, cx: &mut AsyncApp) -> GeoOutcome {
+    poll_answer_unless(
+        &locating.answer,
+        LOCATE_TIMEOUT,
+        Some(&locating.permission_prompt),
+        cx,
+    )
+    .await
+    .unwrap_or(GeoOutcome::Unavailable)
 }
 
 impl QuillApp {
@@ -127,13 +158,15 @@ impl QuillApp {
     }
 
     fn locate_for_picker(&mut self, cx: &mut Context<Self>) {
-        let receiver = geolocation::locate();
-        self.location_ui.locate = Some(self.spawn_scoped(cx, async move |this, cx| {
-            let outcome = poll_answer(receiver, LOCATE_TIMEOUT, cx)
-                .await
-                .unwrap_or(GeoOutcome::Unavailable);
-            let _ = this.update(cx, |this, cx| this.location_picker_geolocated(outcome, cx));
-        }));
+        let locating = geolocation::locate();
+        self.location_ui.locate =
+            state::Locate::locating(self.spawn_scoped(cx, async move |this, cx| {
+                let outcome = locate_outcome(locating, cx).await;
+                let _ = this.update(cx, |this, cx| {
+                    this.location_ui.locate = state::Locate::Idle;
+                    this.location_picker_geolocated(outcome, cx)
+                });
+            }));
     }
 
     /// One "where am I" lookup for a caller outside the picker (a bot's
@@ -153,11 +186,9 @@ impl QuillApp {
                 }
             });
         }
-        let receiver = geolocation::locate();
+        let locating = geolocation::locate();
         self.spawn_scoped(cx, async move |this, cx| {
-            let outcome = poll_answer(receiver, LOCATE_TIMEOUT, cx)
-                .await
-                .unwrap_or(GeoOutcome::Unavailable);
+            let outcome = locate_outcome(locating, cx).await;
             let _ = this.update(cx, |this, cx| then(this, outcome, cx));
         })
     }
@@ -217,18 +248,20 @@ impl QuillApp {
             }
             return;
         };
-        self.location_ui.geocode = Some(self.spawn_scoped(cx, async move |this, cx| {
-            let address = poll_answer(receiver, GEOCODE_TIMEOUT, cx).await.flatten();
-            let _ = this.update(cx, |this, cx| {
-                if let Some(picker) = this
-                    .location_sharing_mut()
-                    .and_then(|sharing| sharing.picker_mut())
-                {
-                    picker.address_resolved(point, address);
-                }
-                cx.notify();
-            });
-        }));
+        self.location_ui.geocode =
+            state::Geocode::resolving(self.spawn_scoped(cx, async move |this, cx| {
+                let address = poll_answer(receiver, GEOCODE_TIMEOUT, cx).await.flatten();
+                let _ = this.update(cx, |this, cx| {
+                    this.location_ui.geocode = state::Geocode::Idle;
+                    if let Some(picker) = this
+                        .location_sharing_mut()
+                        .and_then(|sharing| sharing.picker_mut())
+                    {
+                        picker.address_resolved(point, address);
+                    }
+                    cx.notify();
+                });
+            }));
     }
 
     /// The map moved to `view` (a drag step or a zoom step); it settles
@@ -240,15 +273,16 @@ impl QuillApp {
         {
             picker.moved_to(view);
         }
-        self.location_ui.resolve = None;
-        self.location_ui.settle = Some(self.spawn_scoped(cx, async move |this, cx| {
-            cx.background_executor().timer(SETTLE_DELAY).await;
-            let _ = this.update(cx, |this, cx| this.location_map_settled(cx));
-        }));
+        self.location_ui.map_phase =
+            state::MapPhase::settling(self.spawn_scoped(cx, async move |this, cx| {
+                cx.background_executor().timer(SETTLE_DELAY).await;
+                let _ = this.update(cx, |this, cx| this.location_map_settled(cx));
+            }));
         cx.notify();
     }
 
     fn location_map_settled(&mut self, cx: &mut Context<Self>) {
+        self.location_ui.map_phase = state::MapPhase::Idle;
         if self.location_ui.drag.is_some() {
             return;
         }
@@ -261,18 +295,20 @@ impl QuillApp {
             })
             .unwrap_or(false);
         if postponed {
-            self.location_ui.resolve = Some(self.spawn_scoped(cx, async move |this, cx| {
-                cx.background_executor().timer(RESOLVE_ADDRESS_DELAY).await;
-                let _ = this.update(cx, |this, cx| {
-                    if let Some(picker) = this
-                        .location_sharing_mut()
-                        .and_then(|sharing| sharing.picker_mut())
-                    {
-                        picker.resolve_postponed();
-                    }
-                    this.sync_location_picker(cx);
-                });
-            }));
+            self.location_ui.map_phase =
+                state::MapPhase::resolving(self.spawn_scoped(cx, async move |this, cx| {
+                    cx.background_executor().timer(RESOLVE_ADDRESS_DELAY).await;
+                    let _ = this.update(cx, |this, cx| {
+                        this.location_ui.map_phase = state::MapPhase::Idle;
+                        if let Some(picker) = this
+                            .location_sharing_mut()
+                            .and_then(|sharing| sharing.picker_mut())
+                        {
+                            picker.resolve_postponed();
+                        }
+                        this.sync_location_picker(cx);
+                    });
+                }));
         }
         self.sync_location_picker(cx);
     }
@@ -311,6 +347,11 @@ impl QuillApp {
         query: Option<String>,
         cx: &mut Context<Self>,
     ) {
+        // The field is open exactly while the picker holds a query: the one
+        // place that changes the picker's query also closes the field.
+        if query.is_none() {
+            self.location_ui.search = state::Search::Closed;
+        }
         let pending = self
             .location_sharing_mut()
             .and_then(|sharing| sharing.picker_mut())
@@ -319,10 +360,13 @@ impl QuillApp {
                 picker.search_debounce_pending()
             })
             .unwrap_or(false);
-        self.location_ui.search_timer = pending.then(|| {
+        let waiting = pending.then(|| {
             self.spawn_scoped(cx, async move |this, cx| {
                 cx.background_executor().timer(SEARCH_DEBOUNCE).await;
                 let _ = this.update(cx, |this, cx| {
+                    if let state::Search::Open { debounce, .. } = &mut this.location_ui.search {
+                        *debounce = state::Wait::Idle;
+                    }
                     if let Some(picker) = this
                         .location_sharing_mut()
                         .and_then(|sharing| sharing.picker_mut())
@@ -333,6 +377,9 @@ impl QuillApp {
                 });
             })
         });
+        if let state::Search::Open { debounce, .. } = &mut self.location_ui.search {
+            *debounce = waiting.map_or(state::Wait::Idle, state::Wait::waiting);
+        }
         self.sync_location_picker(cx);
     }
 

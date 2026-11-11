@@ -16,18 +16,18 @@ impl QuillApp {
         let Some(hub) = self.session().map(|s| &s.payments.hub) else {
             return;
         };
-        if !hub.stars_open
-            || hub.tx_selected.is_some()
-            || (hub.tx_error.is_some() && !scrolled)
+        if !hub.stars.is_open()
+            || hub.stars.selected().is_some()
+            || (hub.stars.page.error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.payments.stars_scroll),
-                !hub.tx_offset.is_empty(),
-                hub.tx_loading,
+                !hub.stars.offset.is_empty(),
+                hub.stars.page.is_loading(),
             )
             || !self
                 .payments
                 .stars_asked
-                .allow(hub.transactions.len(), scrolled)
+                .allow(hub.stars.rows.len(), scrolled)
         {
             return;
         }
@@ -45,15 +45,18 @@ impl QuillApp {
         let Some(hub) = self.session().map(|s| &s.payments.hub) else {
             return;
         };
-        if !hub.gifts_open
-            || hub.gift_selected.is_some()
-            || (hub.gifts_error.is_some() && !scrolled)
+        if !hub.received.is_open()
+            || hub.received.view.selected().is_some()
+            || ((hub.received.page.error().is_some() || hub.received.notice.is_some()) && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.payments.gifts_scroll),
-                !hub.gifts_offset.is_empty(),
-                hub.gifts_loading,
+                !hub.received.offset.is_empty(),
+                hub.received.page.is_loading(),
             )
-            || !self.payments.gifts_asked.allow(hub.gifts.len(), scrolled)
+            || !self
+                .payments
+                .gifts_asked
+                .allow(hub.received.rows.len(), scrolled)
         {
             return;
         }
@@ -73,11 +76,11 @@ impl QuillApp {
         };
         if !grams.open
             || grams.selected.is_some()
-            || (grams.error.is_some() && !scrolled)
+            || (grams.load.error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.payments.grams_scroll),
                 grams.has_more(),
-                grams.loading,
+                grams.load.is_loading(),
             )
             || !self
                 .payments

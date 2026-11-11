@@ -85,6 +85,10 @@ pub enum SettingsPurpose {
     PingProxy {
         proxy_id: i32,
     },
+    /// `pingProxy` for the proxy-link box's proxy (not in the list). The
+    /// answer settles `ProxyState::link` when it is the request that
+    /// stage waits for.
+    PingLinkProxy,
     /// `parity:proxy-settings`: `setOption("prefer_ipv6")`. Response is
     /// `ok`; `on` is the value that was requested.
     SetPreferIpv6 {
@@ -110,8 +114,7 @@ pub enum SettingsPurpose {
     /// is `ok`; the saved list refetches.
     RemoveSavedNotificationSound,
     /// `getSupportUser` (Settings > Ask a Question). Response is `user`;
-    /// the id is parked in `Session::user_chat_to_open` and the driver
-    /// opens the chat.
+    /// the driver opens that chat from the answer.
     GetSupportUser,
     /// Slice S3: `getUserPrivacySettingRules` for a Privacy-screen key.
     /// Response is `userPrivacySettingRules`.
@@ -171,6 +174,9 @@ pub enum SettingsPurpose {
     /// `messageSenders`.
     GetBlockedSenders {
         offset: i32,
+        /// The list this page extends (`SettingsState::blocked_generation`
+        /// when it was asked); a page of an older list is dropped.
+        generation: u32,
     },
     /// Slice S3: `setMessageSenderBlockList`. Response is `ok`; an
     /// unblock is applied optimistically at send time.
@@ -217,6 +223,7 @@ pub enum SettingsPurpose {
     /// new-login alert ("Yes, it's me" / "No, it's not me!").
     ReviewUnconfirmedSession {
         confirmed: bool,
+        session_id: i64,
     },
     /// Batch 4: `acceptTermsOfService`.
     AcceptTermsOfService,

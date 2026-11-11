@@ -26,13 +26,27 @@ impl<E: Styled> MenuSurface for E {}
 pub(crate) const MENU_WIDTH: f32 = 240.;
 /// A menu panel's inner padding, which a submenu's top rows level with.
 pub(crate) const PANEL_PADDING: f32 = 4.;
+/// From a menu panel's outer edge to its rows: the hairline border and the
+/// padding.
+const PANEL_INSET: f32 = PANEL_PADDING + 1.;
 
 /// A submenu beside its parent row (a child of that row), its top rows
-/// level with it, moved back inside the window when the row sits near an
-/// edge.
+/// level with it. As tdesktop's `PopupMenu::prepareGeometryFor` does, it
+/// opens to the right of the parent menu and moves to its left when the
+/// right has no room; near the top or bottom edge it moves back inside the
+/// window.
 pub(crate) fn submenu_panel(id: &'static str, rows: Vec<AnyElement>, cx: &App) -> AnyElement {
-    anchored()
-        .offset(point(px(MENU_WIDTH - PANEL_PADDING), px(-PANEL_PADDING)))
+    // The parent menu's outer left and right edges, relative to the row,
+    // which sits `PANEL_INSET` inside them.
+    let parent_menu = Bounds::new(
+        point(px(-PANEL_INSET), px(0.)),
+        size(px(MENU_WIDTH), px(0.)),
+    );
+    let panel = anchored()
+        .position_mode(AnchoredPositionMode::Local)
+        .attach(parent_menu, Anchor::TopRight)
+        .anchor(Anchor::TopLeft)
+        .offset(point(px(0.), px(-PANEL_INSET)))
         .snap_to_window_with_margin(px(8.))
         .child(
             div()
@@ -45,6 +59,13 @@ pub(crate) fn submenu_panel(id: &'static str, rows: Vec<AnyElement>, cx: &App) -
                 .p_1()
                 .menu_surface(cx)
                 .children(rows),
-        )
+        );
+    // Measured from the row's own corner, not from where its padding puts
+    // the next child.
+    div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .child(panel)
         .into_any_element()
 }

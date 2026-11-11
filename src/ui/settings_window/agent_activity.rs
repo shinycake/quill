@@ -137,7 +137,7 @@ impl QuillApp {
             .filter(|action| passes(&filter, action))
             .collect();
         let now = civil_local(now_unix());
-        let shown = self.agent_bridge.activity_shown.max(ACTIVITY_PAGE);
+        let shown = self.agent_ui.page.activity_shown.max(ACTIVITY_PAGE);
         let more = shown_log.len() > shown;
         let mut rows: Vec<AnyElement> = if shown_log.is_empty() {
             vec![empty_line(
@@ -167,7 +167,7 @@ impl QuillApp {
                             .ghost()
                             .small()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.agent_bridge.activity_shown += ACTIVITY_PAGE;
+                                this.agent_ui.page.activity_shown += ACTIVITY_PAGE;
                                 cx.notify();
                             })),
                     )
@@ -180,8 +180,7 @@ impl QuillApp {
                         .tooltip(tr(keys::Q_AGENT_ACTIVITY_CLEAR_HINT))
                         .on_click(cx.listener(|this, _, _, cx| {
                             activity::clear();
-                            this.agent_bridge.activity_shown = ACTIVITY_PAGE;
-                            this.agent_ui.page.filter = Default::default();
+                            this.agent_ui.page.reset_activity();
                             cx.notify();
                         })),
                 )
@@ -238,7 +237,7 @@ impl QuillApp {
                         menu = menu.item(PopupMenuItem::new(label).checked(checked).on_click(
                             move |_, _, cx| {
                                 let _ = owner.update(cx, |this, cx| {
-                                    this.agent_ui.page.filter.agent = choice.clone();
+                                    this.agent_ui.page.set_filter(|f| f.agent = choice.clone());
                                     cx.notify();
                                 });
                             },
@@ -266,7 +265,7 @@ impl QuillApp {
                                 .checked(choice == current)
                                 .on_click(move |_, _, cx| {
                                     let _ = owner.update(cx, |this, cx| {
-                                        this.agent_ui.page.filter.chat = choice;
+                                        this.agent_ui.page.set_filter(|f| f.chat = choice);
                                         cx.notify();
                                     });
                                 }),
@@ -294,7 +293,7 @@ impl QuillApp {
                         menu = menu.item(PopupMenuItem::new(label).checked(checked).on_click(
                             move |_, _, cx| {
                                 let _ = owner.update(cx, |this, cx| {
-                                    this.agent_ui.page.filter.tool = choice.clone();
+                                    this.agent_ui.page.set_filter(|f| f.tool = choice.clone());
                                     cx.notify();
                                 });
                             },
@@ -497,13 +496,16 @@ impl QuillApp {
         let account = shown.clone();
         match undo {
             Undo::Unreact { message_id, emoji } => {
-                self.toggle_reaction(
+                // Marked only when the change went out: Premium opening
+                // instead, or a failed send, leaves the reaction on.
+                if self.toggle_reaction(
                     ChatId(chat_id),
                     MessageId(*message_id),
                     ReactionChoice::Emoji(emoji.clone()),
                     cx,
-                );
-                activity::mark_undone(&account, entry);
+                ) {
+                    activity::mark_undone(&account, entry);
+                }
             }
             Undo::Delete(ids) => {
                 let ids: Vec<MessageId> = ids.iter().copied().map(MessageId).collect();
@@ -528,8 +530,12 @@ impl QuillApp {
                                 if active_account() != account {
                                     return;
                                 }
-                                this.delete_selection(ChatId(chat_id), &ids, true, cx);
-                                activity::mark_undone(&account, entry);
+                                // The user's own selection and forward in
+                                // another chat are not this undo's to end;
+                                // the entry is marked once the delete went out.
+                                if this.delete_messages(ChatId(chat_id), &ids, true) {
+                                    activity::mark_undone(&account, entry);
+                                }
                                 cx.notify();
                             });
                             true

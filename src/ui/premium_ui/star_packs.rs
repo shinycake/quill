@@ -11,7 +11,7 @@ use quill::star_packs::StarPacksState;
 use quill::telegram::envelope::format_payment_price;
 
 impl QuillApp {
-    fn packs_mut(&mut self) -> Option<&mut StarPacksState> {
+    pub(super) fn packs_mut(&mut self) -> Option<&mut StarPacksState> {
         if let Some(live) = self.live.as_mut() {
             Some(&mut live.driver.session.payments.star_packs)
         } else {
@@ -51,16 +51,16 @@ pub(super) fn star_packs_section(session: &Session, cx: &mut Context<QuillApp>) 
     if !packs.open {
         return section.into_any_element();
     }
-    if packs.loading {
+    if packs.options.is_loading() {
         section = section.child(
             div()
                 .text_sm()
                 .text_color(muted)
                 .child(tr(keys::Q_MONEY_LOADING_OPTIONS)),
         );
-    } else if let Some(error) = packs.error.as_ref() {
-        section = section.child(div().text_sm().child(error.clone()));
-    } else if packs.options.is_empty() && packs.loaded {
+    } else if let Some(error) = packs.options.error() {
+        section = section.child(div().text_sm().child(error.to_string()));
+    } else if packs.options.items().is_empty() && !packs.options.is_idle() {
         section = section.child(
             div()
                 .text_sm()
@@ -68,7 +68,7 @@ pub(super) fn star_packs_section(session: &Session, cx: &mut Context<QuillApp>) 
                 .child(tr(keys::Q_MONEY_NO_OPTIONS_AVAILABLE)),
         );
     }
-    for (ix, pack) in packs.options.iter().enumerate() {
+    for (ix, pack) in packs.options.items().iter().enumerate() {
         section = section.child(
             div()
                 .id(("stars-pack", ix as u64))

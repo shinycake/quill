@@ -29,6 +29,9 @@ use serde_json::{Value, json};
 pub struct ToolOutput {
     pub text: String,
     pub data: Value,
+    /// Image content blocks that follow the text (screenshots); dropped
+    /// when Quill locked during the call.
+    pub images: Vec<Value>,
 }
 
 /// A failed call, worded as the next step for the agent.
@@ -333,7 +336,7 @@ thread_local! {
     /// The agent whose request this thread runs, for prompts.
     static AGENT: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     /// What held when the current call began; `None` off a call, which
-    /// [`still_allowed`] then refuses.
+    /// [`still_allowed`] then refuses. Only [`CallScope`] writes it.
     static CALL: std::cell::Cell<Option<CallStart>> = const { std::cell::Cell::new(None) };
 }
 
@@ -361,24 +364,40 @@ impl CallStart {
     }
 }
 
+/// The connection the current call came on (0 off a call).
+pub(crate) fn current_conn() -> u64 {
+    call_start().map_or(0, |began| began.conn)
+}
+
 fn call_start() -> Option<CallStart> {
     CALL.try_with(std::cell::Cell::get).ok().flatten()
 }
 
-/// Marks the thread as running a call for as long as it lives, and off a
-/// call again when the call ends (or unwinds).
-struct CallScope;
+/// Marks the thread as running a call for `agent` for as long as it lives.
+/// When the call ends (or unwinds) the thread goes back to what it was
+/// before, so a call made inside another leaves the outer one in place.
+struct CallScope {
+    call: Option<CallStart>,
+    agent: String,
+}
 
 impl CallScope {
-    fn begin(start: CallStart) -> Self {
-        let _ = CALL.try_with(|current| current.set(Some(start)));
-        CallScope
+    fn begin(start: CallStart, agent: &str) -> Self {
+        let call = CALL
+            .try_with(|current| current.replace(Some(start)))
+            .ok()
+            .flatten();
+        let agent = AGENT
+            .try_with(|current| current.replace(agent.to_string()))
+            .unwrap_or_default();
+        CallScope { call, agent }
     }
 }
 
 impl Drop for CallScope {
     fn drop(&mut self) {
-        let _ = CALL.try_with(|current| current.set(None));
+        let _ = CALL.try_with(|current| current.set(self.call));
+        let _ = AGENT.try_with(|agent| agent.replace(std::mem::take(&mut self.agent)));
     }
 }
 
@@ -400,6 +419,11 @@ pub(crate) fn still_allowed() -> Result<(), ToolError> {
     let Some(began) = call_start() else {
         return Err(ToolError::new(LOCKED_BEFORE_SENDING_MESSAGE));
     };
+    if began.conn != 0 && !crate::agent::activity::is_connected(began.conn) {
+        return Err(ToolError::new(
+            "The agent disconnected while this waited, so nothing was sent or changed.",
+        ));
+    }
     if began.conn != 0 && crate::agent::activity::is_revoked(began.conn) {
         return Err(ToolError::new(crate::agent::server::REVOKED_MESSAGE));
     }
@@ -481,11 +505,8 @@ pub fn granted_message_arrived(
     let mut known = std::collections::HashMap::new();
     let (arrived, checked) = crate::agent::events::wait_for(ctx.client.id(), *since, wait, |new| {
         !new.outgoing
-            && *known.entry(new.chat_id).or_insert_with(|| {
-                target::granted(&ctx, new.chat_id, me)
-                    .ok()
-                    .flatten()
-                    .is_some()
+            && target::remember_grant(&mut known, new.chat_id, || {
+                target::granted(&ctx, new.chat_id, me).map(|found| found.is_some())
             })
     });
     *since = checked.max(*since);
@@ -505,11 +526,9 @@ pub fn call(name: &str, arguments: &Value, agent: &str) -> Value {
 /// [`call`] for a request on connection `conn`, which then lists the tool
 /// among those it used ([`crate::agent::activity::note_tool`]).
 pub fn call_on(conn: u64, name: &str, arguments: &Value, agent: &str) -> Value {
-    let _ = AGENT.try_with(|current| current.replace(agent.to_string()));
-    let _ = ui_shot::take_attached();
     let start = CallStart::now(conn);
     let locks = start.locks;
-    let _call = CallScope::begin(start);
+    let _call = CallScope::begin(start, agent);
     let result = match all_tools().find(|tool| tool.name == name) {
         // Locked: no read, send or window step, `quill_status` included
         // (it reads the account).
@@ -524,16 +543,14 @@ pub fn call_on(conn: u64, name: &str, arguments: &Value, agent: &str) -> Value {
             "There is no tool named {name}. Call tools/list, or quill_status, to see the tools."
         ))),
     };
-    // Screenshots ride along as image blocks after the text, never once
-    // Quill has locked.
-    let mut images = ui_shot::take_attached();
-    if crate::agent::access::locked_since(locks) {
-        images.clear();
-    }
     match result {
         Ok(output) => {
             let mut content = vec![json!({"type": "text", "text": output.text})];
-            content.extend(images);
+            // Screenshots ride along as image blocks after the text, never
+            // once Quill has locked.
+            if !crate::agent::access::locked_since(locks) {
+                content.extend(output.images);
+            }
             json!({
                 "content": content,
                 "structuredContent": output.data,
@@ -545,6 +562,11 @@ pub fn call_on(conn: u64, name: &str, arguments: &Value, agent: &str) -> Value {
             "isError": true,
         }),
     }
+}
+
+/// Whether the tool called `name` can change things (anything but read-only).
+pub(crate) fn changes_things(name: &str) -> bool {
+    all_tools().any(|tool| tool.name == name && !tool.read_only)
 }
 
 /// A tool's result, unless Quill locked at any point since `locks` was
@@ -608,7 +630,7 @@ mod tests {
         crate::fast_buttons::set_persistence(false);
         access::set_enabled(true);
         access::set_paused_by_lock(false);
-        let begin = || super::CallScope::begin(super::CallStart::now(0));
+        let begin = || super::CallScope::begin(super::CallStart::now(0), "");
         let call = begin();
         assert!(super::still_allowed().is_ok(), "nothing changed");
         access::set_paused_by_lock(true);
@@ -625,6 +647,7 @@ mod tests {
             refused.map(|()| super::ToolOutput {
                 text: "sent".into(),
                 data: serde_json::json!({}),
+                images: Vec::new(),
             }),
         );
         assert!(
@@ -648,7 +671,7 @@ mod tests {
         crate::fast_buttons::set_persistence(false);
         access::set_enabled(true);
         access::set_paused_by_lock(false);
-        let call = super::CallScope::begin(super::CallStart::now(0));
+        let call = super::CallScope::begin(super::CallStart::now(0), "");
         assert!(super::still_allowed().is_ok());
         crate::agent::grants::bump_generation_for_test();
         assert!(matches!(
@@ -656,10 +679,33 @@ mod tests {
             Err(super::ToolError(message)) if message == super::GRANTS_CHANGED_MESSAGE
         ));
         drop(call);
-        let call = super::CallScope::begin(super::CallStart::now(0));
+        let call = super::CallScope::begin(super::CallStart::now(0), "");
         assert!(super::still_allowed().is_ok(), "a call begun after it");
         drop(call);
         access::set_enabled(false);
+    }
+
+    /// A call inside another leaves the outer one in place when it ends.
+    #[test]
+    fn a_nested_call_restores_the_outer_one() {
+        let outer = super::CallScope::begin(super::CallStart::now(7), "Outer");
+        let inner = super::CallScope::begin(super::CallStart::now(8), "Inner");
+        assert_eq!(super::current_conn(), 8);
+        assert_eq!(super::current_agent(), "Inner");
+        drop(inner);
+        assert_eq!(super::current_conn(), 7);
+        assert_eq!(super::current_agent(), "Outer");
+        drop(outer);
+        assert_eq!(super::current_conn(), 0);
+    }
+
+    /// The agent's name belongs to the call: off a call it is the generic one.
+    #[test]
+    fn the_agent_name_does_not_outlive_its_call() {
+        let call = super::CallScope::begin(super::CallStart::now(0), "Agent A");
+        assert_eq!(super::current_agent(), "Agent A");
+        drop(call);
+        assert_eq!(super::current_agent(), "An agent");
     }
 
     /// An Allow on a one-off confirmation runs a grants update that changes
@@ -671,11 +717,11 @@ mod tests {
         access::set_enabled(true);
         access::set_paused_by_lock(false);
         let account = crate::ids::AccountKey("grants-noop-test".into());
-        let call = super::CallScope::begin(super::CallStart::now(0));
-        crate::agent::grants::update(&account, |_| {});
-        crate::agent::grants::update(&account, |g| g.contacts = false);
+        let call = super::CallScope::begin(super::CallStart::now(0), "");
+        let _ = crate::agent::grants::update(&account, |_| {});
+        let _ = crate::agent::grants::update(&account, |g| g.contacts = false);
         assert!(super::still_allowed().is_ok(), "nothing changed");
-        crate::agent::grants::update(&account, |g| g.contacts = true);
+        let _ = crate::agent::grants::update(&account, |g| g.contacts = true);
         assert!(matches!(
             super::still_allowed(),
             Err(super::ToolError(message)) if message == super::GRANTS_CHANGED_MESSAGE

@@ -12,6 +12,7 @@
 
 use super::app::QuillApp;
 use super::chat_row::chat_avatar;
+use super::group_call_state::CallBox;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::checkbox::Checkbox;
@@ -114,16 +115,26 @@ impl QuillApp {
     /// "Share Invite Link": ask for the links; the box shows once both
     /// are in (tdesktop `ShareInviteLinkAction`).
     pub(super) fn open_group_call_share_links(&mut self, cx: &mut Context<Self>) {
+        // Locked: nothing is asked and no box opens behind the lock; the
+        // main window asks for the passcode.
+        if self.group_call_needs_unlock(cx) {
+            return;
+        }
         let asked = match self.live.as_mut() {
             Some(live) => live.driver.request_video_chat_share_links().is_ok(),
             // Screenshot demos and tests carry their links in the session.
             None => self.demo_session.is_some(),
         };
         if asked {
-            self.group_call_needs_unlock(cx);
-            self.group_call_boxes.share_open = true;
-            self.group_call_boxes.share_speaker = true;
-            self.group_call_boxes.share_copied = false;
+            let call = self
+                .session()
+                .and_then(|s| s.calls.active_group_call.as_ref())
+                .map(|call| call.id);
+            self.group_call_boxes.call_box = CallBox::Share {
+                call,
+                speaker: true,
+                copied: false,
+            };
         } else {
             self.set_note(StatusNote::error(tr(
                 keys::Q_AV_COULDNT_GET_THE_INVITE_LINK,
@@ -133,14 +144,14 @@ impl QuillApp {
     }
 
     pub(super) fn close_group_call_share_links(&mut self, cx: &mut Context<Self>) {
-        self.group_call_boxes.share_open = false;
+        self.group_call_boxes.close_call_box();
         cx.notify();
     }
 
     fn group_call_share_link(&self) -> Option<String> {
         let call = self.session()?.calls.active_group_call.as_ref()?;
         call.share_links
-            .current(self.group_call_boxes.share_speaker)
+            .current(self.group_call_boxes.share_speaker())
             .map(str::to_string)
     }
 
@@ -148,7 +159,7 @@ impl QuillApp {
     pub(super) fn copy_group_call_share_link(&mut self, cx: &mut Context<Self>) {
         if let Some(link) = self.group_call_share_link() {
             cx.write_to_clipboard(ClipboardItem::new_string(link));
-            self.group_call_boxes.share_copied = true;
+            self.group_call_boxes.mark_share_copied();
         }
         cx.notify();
     }
@@ -159,11 +170,19 @@ impl QuillApp {
         let Some(text) = self.group_call_share_link() else {
             return;
         };
-        self.links.pending_deep_link_open = Some(super::links_state::PendingOpen::user(
-            chat_id,
-            DeepLinkAction::ShareDraft { text },
-        ));
-        self.group_call_boxes.share_open = false;
+        // An open already waiting for its chat is not replaced: the box
+        // stays, and the pick works once that open has gone through.
+        if self.links.resolved.is_some() {
+            return;
+        }
+        self.links.resolved = Some(super::links_state::ResolvedLink {
+            window: None,
+            step: super::links_state::ResolvedStep::Open(super::links_state::PendingOpen::user(
+                chat_id,
+                DeepLinkAction::ShareDraft { text },
+            )),
+        });
+        self.group_call_boxes.close_call_box();
         self.raise_main_window_later(cx);
         cx.notify();
     }
@@ -174,14 +193,14 @@ impl QuillApp {
         call: &ActiveGroupCall,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if !self.group_call_boxes.share_open
+        if !self.group_call_boxes.share_open()
             || !call.share_links.ready()
             || self.account.passcode.is_locked()
         {
             return None;
         }
         let links = &call.share_links;
-        let speaker_checked = self.group_call_boxes.share_speaker;
+        let speaker_checked = self.group_call_boxes.share_speaker();
         let link = links
             .current(speaker_checked)
             .unwrap_or_default()
@@ -272,13 +291,12 @@ impl QuillApp {
                         .label(tr(keys::GROUP_CALL_SHARE_SPEAKER))
                         .checked(speaker_checked)
                         .on_click(cx.listener(|this, &on, _, cx| {
-                            this.group_call_boxes.share_speaker = on;
-                            this.group_call_boxes.share_copied = false;
+                            this.group_call_boxes.set_share_speaker(on);
                             cx.notify();
                         })),
                 )
             })
-            .when(self.group_call_boxes.share_copied, |card| {
+            .when(self.group_call_boxes.share_copied(), |card| {
                 card.child(
                     div()
                         .id("group-call-share-copied")

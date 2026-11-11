@@ -69,6 +69,24 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The Failed list's Retry: asks again for what the box shows now.
+    fn retry_add_special(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.admin.add_special.as_ref() else {
+            return;
+        };
+        let chat_id = dialog.chat_id;
+        let (filter, query) = Self::add_special_filter(dialog, cx);
+        if let Some(live) = self.live.as_mut()
+            && live
+                .driver
+                .refresh_supergroup_members(chat_id, filter, &query)
+                .is_err()
+        {
+            self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_LOAD_MEMBERS)));
+        }
+        cx.notify();
+    }
+
     fn add_special_filter(dialog: &AddSpecialDialog, cx: &App) -> (MemberListFilter, String) {
         let query = dialog.search.read(cx).value().trim().to_string();
         let filter = if query.is_empty() {
@@ -100,7 +118,7 @@ impl QuillApp {
         let Some(role) = self.admin.add_special.as_ref().map(|dialog| dialog.role) else {
             return;
         };
-        let step = pick_step(role, member.status, member.can_be_edited);
+        let step = pick_step(role, member.status(), member.can_be_edited());
         self.run_special_step(user_id, step, window, cx);
     }
 
@@ -150,8 +168,10 @@ impl QuillApp {
             },
             None => StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE)),
         };
+        // The member page is fetched again when the request answers
+        // (`member_list_stale`), not before the change applies.
         self.set_note(note);
-        self.refresh_member_dialog(cx);
+        cx.notify();
     }
 
     fn special_member_name(&self, user_id: i64) -> String {
@@ -232,8 +252,25 @@ impl QuillApp {
             None | Some(SupergroupMembersFetch::Loading) => {
                 list = list.child(message(tr(keys::CONTACTS_LOADING)));
             }
-            Some(SupergroupMembersFetch::Failed(error)) => {
-                list = list.child(div().px_2().text_sm().text_color(muted).child(error));
+            Some(
+                SupergroupMembersFetch::Failed(error) | SupergroupMembersFetch::NotSent(error),
+            ) => {
+                list = list.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .px_2()
+                        .child(div().flex_1().text_sm().text_color(muted).child(error))
+                        .child(
+                            Button::new("add-special-retry")
+                                .label(tr(keys::Q_PEOPLE_RETRY))
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.retry_add_special(cx);
+                                })),
+                        ),
+                );
             }
             Some(SupergroupMembersFetch::Loaded { members, .. }) => {
                 let rows: Vec<ParsedChatMember> = members
@@ -265,11 +302,11 @@ impl QuillApp {
             return div().into_any_element();
         };
         let muted = cx.theme().muted_foreground;
-        let status = match member.restriction {
+        let status = match member.restriction() {
             Some(restriction) => {
                 super::super::restricted_exceptions::restricted_row_status(restriction)
             }
-            None => Self::member_status_label(member.status).to_string(),
+            None => Self::member_status_label(member.status()).to_string(),
         };
         action_row(
             SharedString::from(format!("add-special-{user_id}")),

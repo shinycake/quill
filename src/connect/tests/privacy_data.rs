@@ -56,10 +56,10 @@ fn new_chat_privacy_round_trip_keeps_the_paid_price() {
     // Writing before the answer would reset the paid-message price.
     assert_invalid(f.1.set_new_chat_privacy(false));
     f.1.fetch_new_chat_privacy().unwrap();
-    assert_eq!(
+    assert!(matches!(
         f.1.session.settings.privacy_data.new_chat,
-        Some(NewChatPrivacyState::Loading)
-    );
+        Some(NewChatPrivacyState::Loading(_))
+    ));
     let request = last_request(&f);
     assert_eq!(request["@type"], "getNewChatPrivacySettings");
     ingest(
@@ -95,7 +95,52 @@ fn new_chat_privacy_round_trip_keeps_the_paid_price() {
         f.1.session.settings.privacy_data.new_chat,
         Some(NewChatPrivacyState::Ready(s)) if s.allow_from_unknown
     ));
-    assert!(f.1.session.settings.privacy_data.error.is_some());
+    assert!(
+        f.1.session
+            .settings
+            .privacy_data
+            .error(crate::state::PrivacyControl::NewChat)
+            .is_some()
+    );
+    cleanup(f);
+}
+
+#[test]
+fn a_refresh_keeps_the_value_and_an_older_answer_never_beats_a_save() {
+    let mut f = fixture();
+    f.1.fetch_new_chat_privacy().unwrap();
+    let first = last_request(&f);
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"newChatPrivacySettings","allow_new_chats_from_unknown_users":true,"incoming_paid_message_star_count":"25","@extra":"{}"}}"#,
+            extra_of(&first)
+        ),
+    );
+    // Reopening refreshes without turning the row back into Loading, and
+    // a second open while it is out sends nothing.
+    f.1.fetch_new_chat_privacy().unwrap();
+    let refresh = last_request(&f);
+    f.1.fetch_new_chat_privacy().unwrap();
+    assert_eq!(last_request(&f), refresh);
+    assert!(matches!(
+        f.1.session.settings.privacy_data.new_chat,
+        Some(NewChatPrivacyState::Ready(_))
+    ));
+    // A save goes out while the refresh is in flight; the refresh then
+    // answers with the old server value and must not overwrite the save.
+    f.1.set_new_chat_privacy(false).unwrap();
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"newChatPrivacySettings","allow_new_chats_from_unknown_users":true,"incoming_paid_message_star_count":"25","@extra":"{}"}}"#,
+            extra_of(&refresh)
+        ),
+    );
+    assert!(matches!(
+        f.1.session.settings.privacy_data.new_chat,
+        Some(NewChatPrivacyState::Ready(s)) if !s.allow_from_unknown
+    ));
     cleanup(f);
 }
 
@@ -166,7 +211,13 @@ fn inactive_session_ttl_comes_from_sessions_and_is_set_optimistically() {
         f.1.session.settings.privacy_data.inactive_session_ttl_days,
         Some(180)
     );
-    assert!(f.1.session.settings.privacy_data.error.is_some());
+    assert!(
+        f.1.session
+            .settings
+            .privacy_data
+            .error(crate::state::PrivacyControl::SessionTtl)
+            .is_some()
+    );
     cleanup(f);
 }
 
@@ -205,13 +256,60 @@ fn sensitive_content_switch_follows_the_options_only() {
 }
 
 #[test]
+fn a_failed_setting_keeps_its_line_when_another_control_succeeds() {
+    use crate::state::PrivacyControl;
+    let mut f = fixture();
+    f.1.maybe_fetch_active_sessions().unwrap();
+    let fetch = last_request(&f);
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"sessions","sessions":[],"inactive_session_ttl_days":180,"@extra":"{}"}}"#,
+            extra_of(&fetch)
+        ),
+    );
+    f.1.set_inactive_session_ttl(30).unwrap();
+    let set = last_request(&f);
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"error","code":400,"message":"TTL_INVALID","@extra":"{}"}}"#,
+            extra_of(&set)
+        ),
+    );
+    // Network usage loads fine: the timeout's line stays.
+    f.1.fetch_network_statistics().unwrap();
+    let stats = last_request(&f);
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"networkStatistics","since_date":1,"entries":[],"@extra":"{}"}}"#,
+            extra_of(&stats)
+        ),
+    );
+    let data = &f.1.session.settings.privacy_data;
+    assert!(data.error(PrivacyControl::SessionTtl).is_some());
+    assert!(data.network.error().is_none());
+    // The next timeout attempt clears only its own line.
+    f.1.set_inactive_session_ttl(60).unwrap();
+    assert!(
+        f.1.session
+            .settings
+            .privacy_data
+            .error(PrivacyControl::SessionTtl)
+            .is_none()
+    );
+    cleanup(f);
+}
+
+#[test]
 fn network_usage_fetch_and_reset() {
     let mut f = fixture();
     f.1.fetch_network_statistics().unwrap();
     let request = last_request(&f);
     assert_eq!(request["@type"], "getNetworkStatistics");
     assert_eq!(request["only_current"], false);
-    assert!(f.1.session.settings.privacy_data.network_loading);
+    assert!(f.1.session.settings.privacy_data.network.is_loading());
     ingest(
         &mut f,
         &format!(
@@ -223,11 +321,12 @@ fn network_usage_fetch_and_reset() {
         f.1.session
             .settings
             .privacy_data
-            .network_usage
-            .clone()
+            .network
+            .data()
+            .cloned()
             .unwrap();
     assert_eq!(usage.grand_total().total(), 100);
-    assert!(!f.1.session.settings.privacy_data.network_loading);
+    assert!(!f.1.session.settings.privacy_data.network.is_loading());
     // Reset sends the request and asks for the fresh start date.
     f.1.reset_network_statistics().unwrap();
     let sent: Vec<String> =
@@ -237,7 +336,42 @@ fn network_usage_fetch_and_reset() {
             .collect();
     assert!(sent.contains(&"\"resetNetworkStatistics\"".to_string()));
     assert_eq!(sent.last().unwrap(), "\"getNetworkStatistics\"");
-    assert!(f.1.session.settings.privacy_data.network_usage.is_none());
+    assert!(f.1.session.settings.privacy_data.network.data().is_none());
+    cleanup(f);
+}
+
+#[test]
+fn a_late_password_answer_after_dismissing_changes_nothing() {
+    let mut f = fixture();
+    f.1.check_remembered_password("late").unwrap();
+    let request = last_request(&f);
+    // The box was dismissed before the answer: the check is Idle again.
+    f.1.session.settings.privacy_data.password_check = PasswordCheck::Idle;
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"recoveryEmailAddress","recovery_email_address":"a@b.c","@extra":"{}"}}"#,
+            extra_of(&request)
+        ),
+    );
+    assert_eq!(
+        f.1.session.settings.privacy_data.password_check,
+        PasswordCheck::Idle
+    );
+    f.1.check_remembered_password("late").unwrap();
+    let request = last_request(&f);
+    f.1.session.settings.privacy_data.password_check = PasswordCheck::Idle;
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"error","code":400,"message":"PASSWORD_HASH_INVALID","@extra":"{}"}}"#,
+            extra_of(&request)
+        ),
+    );
+    assert_eq!(
+        f.1.session.settings.privacy_data.password_check,
+        PasswordCheck::Idle
+    );
     cleanup(f);
 }
 
@@ -255,9 +389,12 @@ fn password_check_distinguishes_wrong_from_right_and_dismisses() {
     let request = last_request(&f);
     assert_eq!(request["@type"], "getRecoveryEmailAddress");
     assert_eq!(request["password"], "wrong");
-    assert_eq!(
-        f.1.session.settings.privacy_data.password_check,
-        PasswordCheck::Checking
+    assert!(
+        f.1.session
+            .settings
+            .privacy_data
+            .password_check
+            .is_checking()
     );
     ingest(
         &mut f,
@@ -349,7 +486,7 @@ fn suggestions_follow_updates_and_hide_with_rollback() {
             .contains(ACTION_PHOTO)
     );
     assert_eq!(
-        f.1.session.chats_state.chat_action_error.as_deref(),
+        f.1.session.chats_state.chat_action_error.last(),
         Some("could not hide the suggestion (error 400)")
     );
 
@@ -357,13 +494,31 @@ fn suggestions_follow_updates_and_hide_with_rollback() {
     f.1.hide_suggestion(&Suggestion::Birthdays(vec![9]))
         .unwrap();
     assert_eq!(last_request(&f)["@type"], "hideContactCloseBirthdays");
-    assert!(f.1.session.chat_list.suggestions.birthdays_hidden);
+    assert!(f.1.session.chat_list.suggestions.birthdays_hidden());
+    // A refusal of an older request does not bring the card back; its own
+    // refusal does.
+    let hide = last_request(&f);
+    ingest(
+        &mut f,
+        r#"{"@type":"error","@extra":"999999","code":400,"message":"NO"}"#,
+    );
+    assert!(f.1.session.chat_list.suggestions.birthdays_hidden());
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"NO"}}"#,
+            extra_of(&hide)
+        ),
+    );
+    assert!(!f.1.session.chat_list.suggestions.birthdays_hidden());
+    f.1.hide_suggestion(&Suggestion::Birthdays(vec![9]))
+        .unwrap();
     // A fresh list from TDLib shows them again.
     ingest(
         &mut f,
         r#"{"@type":"updateContactCloseBirthdays","close_birthday_users":[]}"#,
     );
-    assert!(!f.1.session.chat_list.suggestions.birthdays_hidden);
+    assert!(!f.1.session.chat_list.suggestions.birthdays_hidden());
     cleanup(f);
 }
 
@@ -375,13 +530,7 @@ fn phone_number_suggestion_is_hidden_with_the_phone_action() {
         &mut f,
         r#"{"@type":"updateSuggestedActions","added_actions":[{"@type":"suggestedActionCheckPhoneNumber"}],"removed_actions":[]}"#,
     );
-    assert!(
-        f.1.session
-            .chat_list
-            .suggestions
-            .actions
-            .contains(ACTION_PHONE)
-    );
+    assert!(f.1.session.chat_list.suggestions.has_action(ACTION_PHONE));
     f.1.hide_suggestion(&Suggestion::CheckPhone).unwrap();
     let request = last_request(&f);
     assert_eq!(request["@type"], "hideSuggestedAction");
@@ -389,12 +538,6 @@ fn phone_number_suggestion_is_hidden_with_the_phone_action() {
         request["action"]["@type"],
         "suggestedActionCheckPhoneNumber"
     );
-    assert!(
-        !f.1.session
-            .chat_list
-            .suggestions
-            .actions
-            .contains(ACTION_PHONE)
-    );
+    assert!(!f.1.session.chat_list.suggestions.has_action(ACTION_PHONE));
     cleanup(f);
 }

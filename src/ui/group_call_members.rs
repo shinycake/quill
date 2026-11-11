@@ -132,7 +132,7 @@ impl QuillApp {
                 };
                 if call.is_joined && screen_source {
                     menu = menu.item(item(
-                        if call.screen_sharing || call.screen_share_pending { tr(keys::Q_AV_STOP_SHARING_SCREEN) } else { tr(keys::GROUP_CALL_TOOLTIP_SCREEN) },
+                        if call.screen_share.is_on() { tr(keys::Q_AV_STOP_SHARING_SCREEN) } else { tr(keys::GROUP_CALL_TOOLTIP_SCREEN) },
                         |this, _, cx| this.toggle_group_call_screen_share(cx),
                     ));
                 }
@@ -148,7 +148,7 @@ impl QuillApp {
                 // tdesktop's menu: "Settings" opens the call settings box.
                 menu = menu.item(item(tr(keys::GROUP_CALL_SETTINGS), |this, _, cx| this.open_group_call_settings(cx)));
                 if call.can_be_managed {
-                    if call.share_links.listener.is_some() {
+                    if call.share_links.listener_link().is_some() {
                         menu = menu.item(item(tr(keys::Q_AV_REVOKE_INVITE_LINK), |this, _, cx| this.revoke_group_call_invite_link(cx)));
                     }
                     menu = menu.item(item(tr(keys::MENU_START_GROUP_CALL_WITH), |this, _, cx| this.fetch_video_chat_rtmp_url(cx)));

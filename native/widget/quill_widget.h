@@ -61,8 +61,6 @@ void qw_set_visible(qw_widget *widget, bool visible);
 void qw_set_theme(qw_widget *widget, const char *theme, size_t len);
 /// WidgetData as JSON: {"chatData":…,"publicData":…}, null for none.
 void qw_set_data(qw_widget *widget, const char *data, size_t len);
-/// WidgetContentSafeArea as JSON.
-void qw_set_safe_area(qw_widget *widget, const char *area, size_t len);
 void qw_set_width(qw_widget *widget, double width);
 void qw_set_max_height(qw_widget *widget, double height);
 /// The answer to request `token` (an event "request"): failure 0 answered (result may be NULL), 1 timeout,

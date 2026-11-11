@@ -44,11 +44,28 @@ impl StepSlider {
     }
 }
 
+/// The two storage limit sliders between a drag step and the release that
+/// sends them: if the release never arrives (the pointer was lost), the
+/// page's leave sends what the sliders were left on.
+#[derive(Default)]
+pub(crate) enum StorageDrag {
+    #[default]
+    Settled,
+    Moved {
+        account: quill::ids::AccountKey,
+        size: Option<i64>,
+        keep: Option<i64>,
+    },
+}
+
 /// The live slider entities, by role.
 #[derive(Default)]
 pub(crate) struct IndexSliders {
     map: HashMap<StepSlider, Entity<SliderState>>,
+    pub(super) storage: StorageDrag,
 }
+
+impl crate::ui::on_screen::Farewell for IndexSliders {}
 
 impl IndexSliders {
     pub(super) fn get(&self, key: StepSlider) -> Option<&Entity<SliderState>> {
@@ -97,7 +114,7 @@ impl QuillApp {
             this.on_step_slider(key, event, cx);
         })
         .detach();
-        self.preferences.index_sliders.map.insert(key, slider);
+        self.index_sliders.map.insert(key, slider);
     }
 
     /// A slider moved (`Change`, while dragging) or was let go (`Release`).
@@ -106,15 +123,24 @@ impl QuillApp {
         let index = position(value.end(), key.steps());
         match key {
             StepSlider::DataCap(kind) => {
-                if let Some((_, draft)) = self.settings.data_storage_editor.as_mut() {
+                if let Some(draft) = self.settings.data_storage_editor.draft_mut() {
                     draft.set_cap(kind, cap_at(index));
                 }
             }
             StepSlider::StorageSize | StepSlider::StorageKeep => {
                 // tdesktop applies on every move; one `setOption` round per
-                // drag step would flood TDLib, so the release applies.
+                // drag step would flood TDLib, so the release applies, or
+                // the page's leave if no release came.
                 if matches!(event, SliderEvent::Release(_)) {
+                    self.index_sliders.storage = StorageDrag::Settled;
                     self.apply_storage_sliders(cx);
+                } else if let Some(account) = self.session().map(|s| s.account.clone()) {
+                    let (size, keep) = self.storage_slider_limits(cx);
+                    self.index_sliders.storage = StorageDrag::Moved {
+                        account,
+                        size,
+                        keep,
+                    };
                 }
             }
             StepSlider::AutoDelete => {}
@@ -124,7 +150,7 @@ impl QuillApp {
 
     /// The limits the two storage sliders are on.
     pub(super) fn storage_slider_limits(&self, cx: &App) -> (Option<i64>, Option<i64>) {
-        let sliders = &self.preferences.index_sliders;
+        let sliders = &self.index_sliders;
         let size = sliders
             .index(StepSlider::StorageSize, cx)
             .and_then(size_limit_at);
@@ -144,7 +170,7 @@ impl QuillApp {
         value: String,
         cx: &App,
     ) -> Option<AnyElement> {
-        let slider = self.preferences.index_sliders.get(key)?;
+        let slider = self.index_sliders.get(key)?;
         Some(
             div()
                 .id(id)

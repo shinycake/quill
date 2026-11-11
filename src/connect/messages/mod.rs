@@ -4,7 +4,7 @@ use crate::composer::{
     AttachmentKind, ComposerEdit, ComposerEditKind, ComposerScheduling, ComposerSnapshot,
     DeleteConfirm, EditMediaKind, ForwardDraft, LinkPreviewChoice, SendOptions,
 };
-use crate::ids::{ChatId, MessageId, RequestId};
+use crate::ids::{ChatId, ChatMessage, MessageId, RequestId};
 use crate::rich::RichBlock;
 use crate::state::MessagesPurpose;
 use crate::state::{ForwardFlight, RequestPurpose, WindowEdge};
@@ -39,7 +39,7 @@ pub use send_place::SendPlace;
 impl<S: JsonSender> ConnectDriver<S> {
     /// Load another page of history for the open chat (`from_message_id` = oldest, or 0).
     pub fn fetch_history(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         self.fetch_history_for(chat_id)
@@ -58,17 +58,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .histories
             .get(&chat_id.0)
-            .is_some_and(|h| h.loaded_complete)
+            .is_some_and(|h| h.loaded_complete())
         {
             return Ok(None);
         }
-        // R5: a failed first page waits for the explicit Retry row
-        // (`retry_history`) instead of re-sending on every render.
+        // A failed page (the first, or an older one on a window that holds
+        // messages) waits for the explicit Retry row (`retry_history`) or a
+        // scroll away from the edge, instead of re-sending on every render.
         if self
             .session
             .histories
             .get(&chat_id.0)
-            .is_some_and(|h| h.load_failed && h.messages.is_empty())
+            .is_some_and(|h| h.load_failed())
         {
             return Ok(None);
         }
@@ -142,7 +143,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Load the page after the window's newest message while the window
     /// stops short of the chat's latest message (`Session::history_has_newer`).
     pub fn fetch_history_newer(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         self.fetch_history_newer_for(chat_id)
@@ -164,7 +165,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .histories
             .get(&chat_id.0)
-            .filter(|h| !h.newer_failed)
+            .filter(|h| !h.newer_failed())
             .and_then(|h| h.newest_id())
         else {
             return Ok(None);
@@ -193,11 +194,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(Some(extra))
     }
 
+    /// The Retry strip at the newer end: ask for the failed newer page again.
+    pub fn retry_history_newer(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        let Some(chat_id) = self.session.open_chat_id() else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if let Some(history) = self.session.histories.get_mut(&chat_id.0) {
+            history.clear_newer_failed();
+        }
+        self.fetch_history_newer_for(chat_id)
+    }
+
     /// Jump the open chat to its latest messages: replace a window that
     /// stops short of them (and drop the unread divider) and load the
     /// newest page.
     pub fn jump_to_latest(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         self.session.history_entry(chat_id).end_unread_open();
@@ -213,7 +225,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// read boundary when it is not loaded); otherwise jump to the latest
     /// (tdesktop `CornerButtons::downClick` → `ShowAtUnreadMsgId`).
     pub fn jump_down(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         match self.session.show_first_unread(chat_id) {
@@ -273,6 +285,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         snapshot: &ComposerSnapshot,
     ) -> Result<RequestId, ConnectSendError> {
+        let place = self.send_place(snapshot.chat_id());
+        self.send_snapshot_to(&place, snapshot)
+    }
+
+    /// [`Self::send_snapshot`] to `place`: the topic and thread fixed when
+    /// the user pressed Send, not whatever is open when the send runs.
+    pub fn send_snapshot_to(
+        &mut self,
+        place: &SendPlace,
+        snapshot: &ComposerSnapshot,
+    ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -281,10 +304,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // The send box's price: photos and videos behind Stars.
         if snapshot.media.paid_stars > 0 {
-            return self.send_paid_media_snapshot(snapshot);
+            return self.send_paid_media_snapshot_to(place, snapshot);
         }
         if snapshot.is_album() {
-            return self.send_album_snapshot(snapshot);
+            return self.send_album_snapshot_to(place, snapshot);
         }
         let chat_id = snapshot.chat_id();
         // Phase 2.3: channel posting is admin-gated (`can_post` derives the
@@ -300,36 +323,36 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // Parity slice 4: never send into a closed forum topic (the
         // composer is hidden there; this guards a stale-snapshot race).
-        if self.topic_send_is_closed(chat_id) {
+        if self.place_is_closed(chat_id, place) {
             return Err(ConnectSendError::InvalidRequest);
         }
         let caption = snapshot.caption();
-        if snapshot.attachment.is_none() && caption.is_empty() {
+        if snapshot.attachment().is_none() && caption.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
         // MED4: caption-length gate (runtime option; the counter in the
         // composer shows the same limit). Only the caption-carrying
         // paths are gated — plain text has its own (untracked) limit.
-        if snapshot.attachment.is_some() || snapshot.is_album() {
+        if snapshot.attachment().is_some() || snapshot.is_album() {
             self.check_caption_length(caption)?;
         }
         // Slice G1: quote-carrying reply (`inputTextQuote`).
         let reply_to = snapshot.send_reply();
         // Validate the picked path before allocating `@extra`.
-        let media_path = match snapshot.attachment.as_ref() {
+        let media_path = match snapshot.attachment().as_ref() {
             Some(att) => Some(
                 media_options::media_send_path(att, snapshot)
                     .ok_or(ConnectSendError::InvalidRequest)?,
             ),
             None => None,
         };
-        let video_probe = match snapshot.attachment.as_ref() {
-            Some(att) if att.kind == AttachmentKind::Video && !att.extras.gif => {
+        let video_probe = match snapshot.attachment().as_ref() {
+            Some(att) if att.kind == AttachmentKind::Video && !att.extras.is_gif() => {
                 Some(media_options::video_probe(att, snapshot)?)
             }
             _ => None,
         };
-        let video_note = match snapshot.attachment.as_ref() {
+        let video_note = match snapshot.attachment().as_ref() {
             Some(att) if att.kind == AttachmentKind::VideoNote => {
                 Some(media_options::video_note(att, snapshot)?)
             }
@@ -339,7 +362,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::SendMessage, Some(chat_id));
         // Parity slice 4: sends from a topic view address the open topic.
-        let topic_id = self.send_topic(chat_id);
+        let topic_id = place.topic;
         // Phase B3: TDLib accepts `inputMessagePhoto`/`inputMessageVideo`
         // `self_destruct_type` only in `chatTypePrivate` chats (its runtime
         // check is `dialog_id.get_type() != DialogType::User` → 400, and the
@@ -361,11 +384,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chats
             .get(&chat_id.0)
             .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
-        let spoiler = snapshot.attachment.as_ref().is_some_and(|att| {
+        let spoiler = snapshot.attachment().as_ref().is_some_and(|att| {
             att.spoiler && matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video)
         });
         // Contains caption / path — do not log `json`.
-        let json = match (snapshot.attachment.as_ref(), media_path.as_deref()) {
+        let json = match (snapshot.attachment().as_ref(), media_path.as_deref()) {
             (Some(att), Some(path)) => {
                 match att.kind {
                     AttachmentKind::Photo => send_photo(
@@ -399,7 +422,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         )
                     }
                     // A GIF keeps its caption as an animation.
-                    AttachmentKind::Video if att.extras.gif => send_local_animation(
+                    AttachmentKind::Video if att.extras.is_gif() => send_local_animation(
                         extra,
                         chat_id,
                         topic_id,
@@ -484,12 +507,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         let json = if spoiler { with_spoiler(json) } else { json };
         // Silent and scheduled sends reach media too (text builds its own).
-        let json = if snapshot.attachment.is_some() {
+        let json = if snapshot.attachment().is_some() {
             crate::telegram::requests::with_message_send_options(json, &snapshot.send_options, true)
         } else {
             json
         };
-        let json = self.thread_routed(chat_id, json);
+        let json = self.place_routed(chat_id, place, json);
         match self.sender.send_json(&json) {
             Ok(()) => {
                 let _ = self.cancel_outgoing_typing();

@@ -37,15 +37,10 @@ fn ended_without_rating(call_id: i32) -> CallSummary {
         duration_secs: 30,
         had_audio: true,
         end_line: String::new(),
-        need_rating: false,
         busy: false,
-        need_debug_information: false,
-        need_log: false,
-        rating_sent: false,
-        debug_information_sent: false,
-        debug_information_error: None,
-        log_sent: false,
-        log_error: None,
+        rating: quill::state::CallRating::NotNeeded,
+        debug_information: quill::state::CallUpload::NotNeeded,
+        log: quill::state::CallUpload::NotNeeded,
         final_transport: None,
         reconnect_attempts: 0,
         muted: false,
@@ -70,6 +65,7 @@ fn an_invitation_after_an_ended_call_rings_in_the_call_window(cx: &mut TestAppCo
             user_id: 41,
             is_video: false,
             others: Vec::new(),
+            rings_until: i64::MAX,
         });
         app.sync_call_sounds();
         app.sync_call_windows(cx);
@@ -82,7 +78,10 @@ fn an_invitation_after_an_ended_call_rings_in_the_call_window(cx: &mut TestAppCo
     });
     vcx.run_until_parked();
     app.update(&mut vcx, |app, _| {
-        assert!(app.calls.window.is_some(), "the call window is open");
+        assert!(
+            app.calls.window.handle().is_some(),
+            "the call window is open"
+        );
     });
 }
 
@@ -104,15 +103,22 @@ fn an_invitation_alone_keeps_the_call_tick(cx: &mut TestAppContext) {
             user_id: 41,
             is_video: false,
             others: Vec::new(),
+            rings_until: i64::MAX,
         });
         app.ensure_call_tick(cx);
-        assert!(app.calls.tick_active, "the tick starts");
+        assert!(
+            (app.calls.tick == crate::ui::calls_state::CallTick::Running),
+            "the tick starts"
+        );
     });
     vcx.executor()
         .advance_clock(std::time::Duration::from_secs(3));
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
-        assert!(app.calls.tick_active, "and keeps beating");
+        assert!(
+            (app.calls.tick == crate::ui::calls_state::CallTick::Running),
+            "and keeps beating"
+        );
         assert_eq!(app.calls.sounds.looping(), Some(CallSound::Incoming));
     });
 }

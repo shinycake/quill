@@ -246,7 +246,7 @@ fn voice_playback_keeps_the_rows_and_follows_the_position(cx: &mut TestAppContex
     };
     for secs in [1.0, 2.5] {
         app.update(vcx, |app, cx| {
-            app.playback.seek_preview_secs = Some(secs);
+            app.playback.scrub = crate::ui::playback_state::Scrub::Dragging(secs);
             cx.notify();
         });
         frames(vcx);
@@ -409,7 +409,7 @@ fn a_narrow_window_rewraps_the_bubbles_without_rebuilding_the_rows(cx: &mut Test
         ],
     );
     let width = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
-        app.read_with(vcx, |app, _| app.history.width.get())
+        app.read_with(vcx, |app, _| app.history.measure.get().width())
     };
     assert_eq!(width(&app, vcx), HistoryWidth::WIDE);
     let (wide_row, wide_bubble) = painted(204);
@@ -419,7 +419,7 @@ fn a_narrow_window_rewraps_the_bubbles_without_rebuilding_the_rows(cx: &mut Test
     // Widening a wide history changes nothing (short of the wide layout,
     // which rebuilds the rows on purpose).
     resize(&app, vcx, 1150., 800.);
-    let layout = app.read_with(vcx, |app, _| app.history.chat_layout.get());
+    let layout = app.read_with(vcx, |app, _| app.history.measure.get().layout());
     assert_eq!(layout, quill::chat_wide::ChatLayout::Normal);
     assert_eq!(width(&app, vcx), HistoryWidth::WIDE);
     assert_eq!(painted(204), (wide_row, wide_bubble));
@@ -460,11 +460,15 @@ fn an_unpainted_history_is_seeded_from_its_pane_until_the_probe_measures(cx: &mu
     let (app, mut vcx) = new_app(cx, "ready-chats");
     let vcx = &mut vcx;
     let width = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
-        app.read_with(vcx, |app, _| app.history.width.get())
+        app.read_with(vcx, |app, _| app.history.measure.get().width())
     };
     app.read_with(vcx, |app, _| {
         // The harness already painted once; start as a fresh history.
-        app.history.width_probed.set(false);
+        app.history
+            .measure
+            .set(crate::ui::history_anchor::HistoryMeasure::Seeded(
+                HistoryWidth::default(),
+            ));
         app.seed_history_width(403.);
     });
     assert_eq!(width(&app, vcx), HistoryWidth::new(400.));
@@ -472,7 +476,13 @@ fn an_unpainted_history_is_seeded_from_its_pane_until_the_probe_measures(cx: &mu
     assert_eq!(width(&app, vcx), HistoryWidth::WIDE);
     // Once the history measured itself, a seed no longer overrides it.
     app.read_with(vcx, |app, _| {
-        app.history.width_probed.set(true);
+        app.history
+            .measure
+            .set(crate::ui::history_anchor::HistoryMeasure::Measured {
+                width: HistoryWidth::WIDE,
+                layout: quill::chat_wide::ChatLayout::Normal,
+                pane: gpui_kit::px(0.),
+            });
         app.seed_history_width(380.);
     });
     assert_eq!(width(&app, vcx), HistoryWidth::WIDE);
@@ -536,3 +546,6 @@ mod paragraph_cache_scroll;
 
 #[path = "file_album_tests.rs"]
 mod file_album;
+
+#[path = "album_row_tests.rs"]
+mod album_row;

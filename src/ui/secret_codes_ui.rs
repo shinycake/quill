@@ -5,6 +5,7 @@
 //! and on the sign-in screen itself.
 #![deny(clippy::indexing_slicing)]
 
+use super::advanced_state::DebugConfirm;
 use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
@@ -48,6 +49,17 @@ impl QuillApp {
         let Some(screen) = self.code_screen() else {
             return;
         };
+        // On the sign-in screen the keys of a text field are its own: a 2FA
+        // password or an email address that holds "testmode" must not run
+        // it. The phone step takes digits only, so letters typed there
+        // were never going into the field.
+        if screen == CodeScreen::SignIn
+            && window.focused_text_input()
+            && !matches!(self.current_auth(), AuthorizationState::WaitPhoneNumber)
+        {
+            self.preferences.advanced.codes.clear();
+            return;
+        }
         if let Some(code) = self.preferences.advanced.codes.feed(text) {
             self.in_window_scope(None, cx, |this, cx| {
                 this.run_secret_code(code, screen, window, cx)
@@ -75,7 +87,9 @@ impl QuillApp {
     ) {
         match code {
             Code::DebugMode => {
-                self.preferences.advanced.debug_confirm = Some(debug_mode::enabled());
+                self.preferences.advanced.debug_confirm = DebugConfirm::Asking {
+                    logs_on: debug_mode::enabled(),
+                };
                 self.open_box(DialogKind::DebugModeConfirm);
                 cx.notify();
             }
@@ -186,27 +200,31 @@ impl QuillApp {
     pub(super) fn switch_debug_mode(&mut self, cx: &mut Context<Self>) {
         let root = safe_app_root();
         let api = quill::telegram::hub::TdHub::shared_api();
-        if debug_mode::enabled() {
+        let was_on = debug_mode::enabled();
+        if was_on {
             debug_mode::debug_log(tr(keys::Q_OPS_DEBUG_LOGS_STOPPED));
-            debug_mode::set_enabled(false);
-            if let Some(api) = api {
-                let _ = debug_mode::stop_tdlib_log(&api);
+        }
+        // The flag moves only once TDLib's native stream has answered.
+        let state = debug_mode::switch(was_on, |turn_on| match (api, root.as_deref()) {
+            (Some(api), Some(root)) if turn_on => debug_mode::start_tdlib_log(&api, root),
+            (Some(api), _) if !turn_on => {
+                debug_mode::stop_tdlib_log(&api).map_err(|error| format!("{error:?}"))
             }
-        } else {
-            debug_mode::set_enabled(true);
-            if let (Some(api), Some(root)) = (api, root.as_deref())
-                && let Err(error) = debug_mode::start_tdlib_log(&api, root)
-            {
-                self.set_note(StatusNote::error(tr_with(
-                    keys::Q_OPS_TDLIB_DEBUG_LOG_DID_NOT,
-                    &[("error", &error.to_string())],
-                )));
-            }
+            _ => Ok(()),
+        });
+        debug_mode::set_enabled(state.flag());
+        if let debug_mode::DebugLog::TdlibRefused { error, .. } = &state {
+            self.set_note(StatusNote::error(tr_with(
+                keys::Q_OPS_TDLIB_DEBUG_LOG_DID_NOT,
+                &[("error", error)],
+            )));
+        }
+        if !was_on {
             debug_mode::debug_log(tr(keys::Q_OPS_DEBUG_LOGS_STARTED));
             self.close_settings();
         }
         if let Some(root) = root.as_deref()
-            && let Err(error) = debug_mode::persist(root, debug_mode::enabled())
+            && let Err(error) = debug_mode::persist(root, state.flag())
         {
             self.set_note(StatusNote::error(tr_with(
                 keys::Q_OPS_COULD_NOT_REMEMBER_THE_DEBUG,
@@ -224,12 +242,13 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::DebugModeConfirm, |this, _, cx| {
-                this.preferences.advanced.debug_confirm = None;
+                this.preferences.advanced.debug_confirm.close();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
-            let text =
-                debug_mode::confirm_text(this.preferences.advanced.debug_confirm == Some(true));
+            let text = debug_mode::confirm_text(
+                this.preferences.advanced.debug_confirm == DebugConfirm::Asking { logs_on: true },
+            );
             let footer = div()
                 .flex()
                 .justify_end()
@@ -239,7 +258,7 @@ impl QuillApp {
                         .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.preferences.advanced.debug_confirm = None;
+                            this.preferences.advanced.debug_confirm.close();
                             this.close_kit_dialog_if_done(DialogKind::DebugModeConfirm, window, cx);
                             cx.notify();
                         })),
@@ -249,7 +268,7 @@ impl QuillApp {
                         .label(tr(keys::BOX_OK))
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.preferences.advanced.debug_confirm = None;
+                            this.preferences.advanced.debug_confirm.close();
                             this.switch_debug_mode(cx);
                             this.close_kit_dialog_if_done(DialogKind::DebugModeConfirm, window, cx);
                         })),
@@ -278,8 +297,8 @@ crate::ui::shell::register_dialogs! {
     /// The `debugmode` code's question: turn the debug logs on or off.
     DebugModeConfirm => DialogSpec::new(
         1050,
-        |app| app.preferences.advanced.debug_confirm.is_some(),
+        |app| app.preferences.advanced.debug_confirm != DebugConfirm::Closed,
         QuillApp::build_debug_mode_dialog,
     )
-    .close(|app, _, cx| { app.preferences.advanced.debug_confirm = None; cx.notify(); }),
+    .close(|app, _, cx| { app.preferences.advanced.debug_confirm.close(); cx.notify(); }),
 }

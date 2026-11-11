@@ -278,3 +278,74 @@ fn word_at_offset() {
     assert_eq!(word_at(text, 6), Some(6..9));
     assert_eq!(word_at("a @mention", 5), None);
 }
+
+/// A backend whose first answer for a word is "could not tell" (a check
+/// that timed out): nothing is cached, and the next ask gets the real one.
+struct SlowOnceBackend(std::sync::atomic::AtomicUsize);
+impl SpellBackend for SlowOnceBackend {
+    fn handles(&self, _: Script, _: &str) -> bool {
+        true
+    }
+    fn is_correct(&self, word: &str) -> bool {
+        word != "bad"
+    }
+    fn judge(&self, word: &str) -> Option<bool> {
+        let asked = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        (asked > 0).then(|| self.is_correct(word))
+    }
+    fn suggestions(&self, _: &str, _: usize) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+#[test]
+fn an_unanswered_check_is_not_cached_as_correct() {
+    let sc = SpellChecker::new(Arc::new(SlowOnceBackend(Default::default())));
+    assert!(sc.is_correct("bad"), "no underline while the check is out");
+    assert!(
+        !sc.is_correct("bad"),
+        "the word is asked again and flagged once the backend answers"
+    );
+    assert!(!sc.is_correct("bad"), "and now it is remembered");
+}
+
+/// Clears the checker's cache from inside its own judgement, as an Add to
+/// Dictionary does while a background re-check is in the backend.
+struct ClearsDuringJudge {
+    checker: std::sync::OnceLock<std::sync::Weak<SpellChecker>>,
+    calls: std::sync::atomic::AtomicUsize,
+}
+impl SpellBackend for ClearsDuringJudge {
+    fn handles(&self, _: Script, _: &str) -> bool {
+        true
+    }
+    fn is_correct(&self, _: &str) -> bool {
+        false
+    }
+    fn judge(&self, _: &str) -> Option<bool> {
+        let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if call == 0
+            && let Some(checker) = self.checker.get().and_then(std::sync::Weak::upgrade)
+        {
+            checker.set_app_words(Vec::<String>::new());
+        }
+        Some(call == 0)
+    }
+    fn suggestions(&self, _: &str, _: usize) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+#[test]
+fn a_verdict_asked_before_a_cache_clear_is_not_stored_after_it() {
+    let backend = Arc::new(ClearsDuringJudge {
+        checker: std::sync::OnceLock::new(),
+        calls: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let checker = Arc::new(SpellChecker::new(backend.clone()));
+    let _ = backend.checker.set(Arc::downgrade(&checker));
+    assert!(checker.is_correct("wrold"), "the old verdict is returned");
+    // Not remembered: the next ask is judged afresh.
+    assert!(!checker.is_correct("wrold"));
+    assert_eq!(backend.calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+}

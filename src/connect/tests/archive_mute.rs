@@ -26,7 +26,7 @@ fn due(f: &Fixture) -> bool {
     let chat_list = &f.1.session.chat_list;
     chat_list.archive_mute.suggestion_due(
         &chat_list.suggestions.actions,
-        chat_list.archive_chat_list_settings.as_ref(),
+        chat_list.archive_settings.data(),
     )
 }
 
@@ -79,7 +79,7 @@ fn no_suggestion_when_the_setting_is_on_and_the_switch_stays() {
     suggest(&mut f);
     answer_settings(&mut f, true);
     assert!(!due(&f));
-    let settings = f.1.session.chat_list.archive_chat_list_settings.unwrap();
+    let settings = f.1.session.chat_list.archive_chat_list_settings().unwrap();
     let off = crate::telegram::requests::ArchiveChatListSettings {
         archive_and_mute_new_chats_from_unknown_users: false,
         ..settings
@@ -115,5 +115,41 @@ fn a_refused_hide_brings_the_suggestion_back() {
         &format!(r#"{{"@type":"error","code":400,"message":"BAD","@extra":"{extra}"}}"#),
     );
     assert!(due(&f));
+    cleanup(f);
+}
+
+#[test]
+fn a_failed_reload_stops_waiting_and_a_new_suggestion_reloads_again() {
+    let mut f = fixture();
+    suggest(&mut f);
+    answer_settings(&mut f, false);
+    f.1.hide_suggested_action(ACTION).unwrap();
+    suggest(&mut f);
+    assert!(!due(&f), "waits for the reload");
+    let fetches = requests(&f, "getArchiveChatListSettings");
+    let extra = extra_of(fetches.last().expect("a settings fetch"));
+    ingest(
+        &mut f,
+        &format!(r#"{{"@type":"error","code":500,"message":"FLOOD","@extra":"{extra}"}}"#),
+    );
+    assert!(due(&f), "the cached copy decides once the reload failed");
+    suggest(&mut f);
+    assert_eq!(requests(&f, "getArchiveChatListSettings").len(), 3);
+    cleanup(f);
+}
+
+#[test]
+fn a_dismissal_that_cannot_be_sent_still_drops_the_suggestion() {
+    let mut f = fixture();
+    suggest(&mut f);
+    answer_settings(&mut f, false);
+    assert!(due(&f));
+    ingest(
+        &mut f,
+        r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateClosing"}}"#,
+    );
+    assert!(f.1.hide_suggested_action(ACTION).is_err());
+    assert!(!due(&f), "the box does not come back");
+    assert!(requests(&f, "hideSuggestedAction").is_empty());
     cleanup(f);
 }

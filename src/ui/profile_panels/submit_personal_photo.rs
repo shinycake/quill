@@ -1,24 +1,26 @@
 //! Methods moved out of `profile_panels.rs` to keep files under 1000 lines.
 
 use super::*;
-use crate::ui::dialogs::ContactNote;
+use crate::ui::danger_dark;
+use crate::ui::dialogs::{ContactNote, ContactSave};
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
+    /// Whether the box closes now (`false`: it waits for the answer).
     pub(super) fn submit_personal_photo(
         &mut self,
         user_id: i64,
         mode: PersonalPhotoMode,
         path: Option<&str>,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let Some(live) = self.live.as_mut() else {
             self.set_note(StatusNote::info(tr(
                 keys::Q_PEOPLE_DEMO_MODE_PHOTO_CHANGES_NEED,
             )));
             cx.notify();
-            return;
+            return true;
         };
         let sent = match (mode, path) {
             (PersonalPhotoMode::Set, Some(path)) => {
@@ -28,16 +30,25 @@ impl QuillApp {
             (PersonalPhotoMode::Suggest, Some(path)) => {
                 live.driver.suggest_user_photo(user_id, path)
             }
-            _ => return,
+            _ => return true,
         };
-        self.set_note(match sent {
-            Ok(_) => StatusNote::info(mode.done_note()),
-            Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
-        });
-        cx.notify();
+        match sent {
+            Ok(request) => {
+                self.finish_profile_request(Some(request), StatusNote::info(mode.done_note()), cx)
+            }
+            Err(_) => {
+                self.set_note(StatusNote::error(tr(
+                    keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
+                )));
+                cx.notify();
+                true
+            }
+        }
     }
 
     pub(in crate::ui) fn close_profile_dialog(&mut self, cx: &mut Context<Self>) {
+        self.forget_profile_saving();
+        self.forget_box_send();
         self.dialogs.profile_dialog = None;
         cx.notify();
     }
@@ -68,14 +79,10 @@ impl QuillApp {
         dialog
             .first_name_input
             .update(cx, |input, cx| input.focus(window, cx));
-        self.dialogs.profile_dialog = Some(ProfileDialog::EditContact(dialog));
-        self.open_box(DialogKind::ProfilePanel);
+        self.open_profile_dialog(ProfileDialog::EditContact(dialog));
         cx.notify();
     }
 
-    /// Save the edit-contact box. Only the note changed: `setUserNote`;
-    /// otherwise `addContact` (add-or-edit) with the current note so the
-    /// note is not cleared.
     /// The edit-contact box opened before the full user info: its note
     /// goes in at the first frame after the info lands, in the window that
     /// hosts the box (the field needs that window). A note the user typed
@@ -112,78 +119,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    pub(super) fn submit_edit_contact(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(ProfileDialog::EditContact(dialog)) = &self.dialogs.profile_dialog else {
-            return false;
-        };
-        let read = |input: &Entity<TextareaState>| {
-            input
-                .read(cx)
-                .value()
-                .replace(['\n', '\r'], " ")
-                .trim()
-                .to_string()
-        };
-        let (user_id, first, last, note, share) = (
-            dialog.user_id,
-            read(&dialog.first_name_input),
-            read(&dialog.last_name_input),
-            dialog.note_input.read(cx).value().trim().to_string(),
-            dialog.share_phone,
-        );
-        // An empty field before the note is known is not "no note": saving
-        // it would erase the contact's note. It is sent as "keep the note"
-        // (null), so Save works even when the note never loads (a failed
-        // full-info fetch has no stage to wait out).
-        let note = (dialog.note == ContactNote::Seeded || !note.is_empty()).then_some(note);
-        if first.is_empty() && last.is_empty() {
-            self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_ENTER_A_NAME_FOR_THE)));
-            cx.notify();
-            return false;
-        }
-        let Some((phone, old_first, old_last)) = self.session().and_then(|s| {
-            s.user(user_id).map(|u| {
-                (
-                    u.phone_number.clone(),
-                    u.first_name.clone(),
-                    u.last_name.clone(),
-                )
-            })
-        }) else {
-            return false;
-        };
-        let Some(live) = self.live.as_mut() else {
-            self.set_note(StatusNote::info(tr(
-                keys::Q_PEOPLE_DEMO_MODE_CONTACT_EDITS_NEED,
-            )));
-            cx.notify();
-            return true;
-        };
-        let names_unchanged = first == old_first && last == old_last;
-        let sent = match (&note, names_unchanged && !share) {
-            (Some(note), true) => live.driver.set_user_note(user_id, note).map(|_| ()),
-            // Nothing to change: the note is kept and the names are the same.
-            (None, true) => Ok(()),
-            (note, false) => live
-                .driver
-                .edit_contact(user_id, &phone, &first, &last, note.as_deref(), share)
-                .map(|_| ()),
-        };
-        match sent {
-            Ok(()) => {
-                self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_CONTACT_SAVED)));
-                true
-            }
-            Err(_) => {
-                self.set_note(StatusNote::error(tr(
-                    keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
-                )));
-                cx.notify();
-                false
-            }
-        }
-    }
-
     pub(in crate::ui) fn open_birthday_dialog(
         &mut self,
         window: &mut Window,
@@ -218,8 +153,7 @@ impl QuillApp {
         dialog
             .day_input
             .update(cx, |input, cx| input.focus(window, cx));
-        self.dialogs.profile_dialog = Some(ProfileDialog::Birthday(dialog));
-        self.open_box(DialogKind::ProfilePanel);
+        self.open_profile_dialog(ProfileDialog::Birthday(dialog));
         cx.notify();
     }
 
@@ -229,9 +163,11 @@ impl QuillApp {
     pub(in crate::ui) fn open_birthday_privacy(&mut self, cx: &mut Context<Self>) {
         self.dialogs.profile_dialog = None;
         self.open_privacy(cx);
-        self.privacy.editor = Some(super::super::privacy::PrivacyEditorTarget::Rule(
-            quill::telegram::requests_privacy::PrivacySettingKey::ShowBirthdate,
-        ));
+        self.privacy
+            .layer
+            .open_editor(super::super::privacy::PrivacyEditorTarget::Rule(
+                quill::telegram::requests_privacy::PrivacySettingKey::ShowBirthdate,
+            ));
         cx.notify();
     }
 
@@ -273,13 +209,13 @@ impl QuillApp {
             return true;
         };
         match live.driver.set_birthdate(parts) {
-            Ok(_) => {
-                self.set_note(if remove {
+            Ok(request) => {
+                let saved = if remove {
                     StatusNote::silent(tr(keys::Q_PEOPLE_BIRTHDAY_REMOVED))
                 } else {
                     StatusNote::silent(tr(keys::Q_PEOPLE_BIRTHDAY_SAVED))
-                });
-                true
+                };
+                self.finish_profile_request(Some(request), saved, cx)
             }
             Err(_) => {
                 self.set_note(StatusNote::error(tr(
@@ -295,8 +231,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_suitable_personal_chats();
         }
-        self.dialogs.profile_dialog = Some(ProfileDialog::PersonalChannel);
-        self.open_box(DialogKind::ProfilePanel);
+        self.open_profile_dialog(ProfileDialog::PersonalChannel);
         cx.notify();
     }
 
@@ -307,13 +242,13 @@ impl QuillApp {
             return true;
         };
         match live.driver.set_personal_chat(chat_id) {
-            Ok(_) => {
-                self.set_note(if chat_id == 0 {
+            Ok(request) => {
+                let saved = if chat_id == 0 {
                     StatusNote::silent(tr(keys::Q_PEOPLE_PERSONAL_CHANNEL_REMOVED))
                 } else {
                     StatusNote::silent(tr(keys::Q_PEOPLE_PERSONAL_CHANNEL_SAVED))
-                });
-                true
+                };
+                self.finish_profile_request(Some(request), saved, cx)
             }
             Err(_) => {
                 self.set_note(StatusNote::error(tr(
@@ -330,11 +265,10 @@ impl QuillApp {
         user_id: i64,
         cx: &mut Context<Self>,
     ) {
-        self.dialogs.profile_dialog = Some(ProfileDialog::ShareContact {
+        self.open_profile_dialog(ProfileDialog::ShareContact {
             user_id,
             target: None,
         });
-        self.open_box(DialogKind::ProfilePanel);
         cx.notify();
     }
 
@@ -359,12 +293,12 @@ impl QuillApp {
             .map(|c| c.title.clone())
             .unwrap_or_default();
         match live.driver.send_contact_message(ChatId(chat_id), user_id) {
-            Ok(_) => {
-                self.set_note(StatusNote::silent(tr_with(
+            Ok(request) => {
+                let saved = StatusNote::silent(tr_with(
                     keys::Q_PEOPLE_CONTACT_SHARED_WITH,
                     &[("title", &title.to_string())],
-                )));
-                true
+                ));
+                self.finish_profile_request(Some(request), saved, cx)
             }
             Err(_) => {
                 self.set_note(StatusNote::error(tr(
@@ -401,6 +335,12 @@ impl QuillApp {
         };
         if matches!(
             self.dialogs.profile_dialog,
+            Some(ProfileDialog::Saving { .. })
+        ) {
+            return self.saving_dialog_parts(cx);
+        }
+        if matches!(
+            self.dialogs.profile_dialog,
             Some(ProfileDialog::AddBot { .. })
         ) {
             return self.add_bot_dialog_parts(cx);
@@ -412,7 +352,9 @@ impl QuillApp {
             return self.share_game_dialog_parts(cx);
         }
         match self.dialogs.profile_dialog.as_ref()? {
-            ProfileDialog::AddBot { .. } | ProfileDialog::ShareGame { .. } => None,
+            ProfileDialog::AddBot { .. }
+            | ProfileDialog::ShareGame { .. }
+            | ProfileDialog::Saving { .. } => None,
             ProfileDialog::EditContact(dialog) => {
                 let user_id = dialog.user_id;
                 let (phone, show_share, name) = self
@@ -428,7 +370,18 @@ impl QuillApp {
                     })
                     .unwrap_or_default();
                 let share_phone = dialog.share_phone;
+                let save = dialog.save.clone();
+                let saving = matches!(save, ContactSave::Saving(_));
                 let mut body = div().flex().flex_col().gap_3();
+                if let ContactSave::Failed(line) = save {
+                    body = body.child(
+                        div()
+                            .id("edit-contact-error")
+                            .text_xs()
+                            .text_color(danger_dark())
+                            .child(line),
+                    );
+                }
                 body = body.child(
                     div()
                         .text_sm()
@@ -485,6 +438,8 @@ impl QuillApp {
                     .child(
                         Button::new("edit-contact-save")
                             .label(tr(keys::SETTINGS_SAVE))
+                            .loading(saving)
+                            .disabled(saving)
                             .on_click(cx.listener(|this, _, window, cx| {
                                 if this.submit_edit_contact(cx) {
                                     this.close_profile_dialog(cx);
@@ -610,7 +565,7 @@ impl QuillApp {
                         .child(tr(keys::Q_PEOPLE_SHOW_A_CHANNEL_ON_YOUR)),
                 );
                 match fetch {
-                    None | Some(ProfileChatsFetch::Loading) => {
+                    None | Some(ProfileChatsFetch::Loading(_)) => {
                         body = body.child(
                             div()
                                 .text_sm()
@@ -636,7 +591,7 @@ impl QuillApp {
                             })),
                         );
                     }
-                    Some(ProfileChatsFetch::Loaded(ids)) if ids.is_empty() => {
+                    Some(ProfileChatsFetch::Loaded { ids, .. }) if ids.is_empty() => {
                         body = body.child(
                             div()
                                 .text_sm()
@@ -644,7 +599,7 @@ impl QuillApp {
                                 .child(tr(keys::Q_PEOPLE_YOU_DONT_HAVE_ANY_CHANNELS)),
                         );
                     }
-                    Some(ProfileChatsFetch::Loaded(ids)) => {
+                    Some(ProfileChatsFetch::Loaded { ids, .. }) => {
                         for id in ids {
                             let Some(title) = session.chats.get(&id).map(|c| c.title.clone())
                             else {
@@ -830,8 +785,9 @@ impl QuillApp {
                         Button::new("personal-photo-confirm")
                             .label(mode.button())
                             .on_click(cx.listener(move |this, _, window, cx| {
-                                this.submit_personal_photo(user_id, mode, path.as_deref(), cx);
-                                this.close_profile_dialog(cx);
+                                if this.submit_personal_photo(user_id, mode, path.as_deref(), cx) {
+                                    this.close_profile_dialog(cx);
+                                }
                                 this.close_kit_dialog_if_done(DialogKind::ProfilePanel, window, cx);
                             })),
                     )

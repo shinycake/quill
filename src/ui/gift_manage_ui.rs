@@ -62,10 +62,11 @@ impl QuillApp {
             let session = self.session();
             let manage = session.map(|s| &s.payments.gifts_manage);
             let price = match (&flow, session) {
-                (Some(GiftFlow::Resale { id }), Some(s)) => s
+                (Some(GiftFlow::Resale { id, .. }), Some(s)) => s
                     .payments
                     .hub
-                    .gifts
+                    .received
+                    .rows
                     .iter()
                     .find(|g| g.id == *id)
                     .filter(|g| g.manage.listed && !g.manage.resale_gram_only)
@@ -73,7 +74,7 @@ impl QuillApp {
                 _ => None,
             };
             let name = match (&flow, manage) {
-                (Some(GiftFlow::RenameCollection(id)), Some(m)) => {
+                (Some(GiftFlow::RenameCollection(id, _)), Some(m)) => {
                     m.collection(*id).map(|c| c.name.clone())
                 }
                 _ => None,
@@ -190,7 +191,9 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let app = cx.entity().downgrade();
+        // The alert acts for the account and window it was opened in: after
+        // a switch, pressing Delete does nothing.
+        let app = self.scoped_app(cx);
         let id = id.to_string();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let (app, id) = (app.clone(), id.clone());
@@ -209,14 +212,21 @@ impl QuillApp {
     }
 
     pub(super) fn confirm_delete_gift(&mut self, id: &str, cx: &mut Context<Self>) {
+        // The list moved on (a refresh dropped the gift): there is nothing
+        // to delete, and a stale id is never sent.
+        let listed = self
+            .session()
+            .is_some_and(|s| s.payments.hub.received.rows.iter().any(|g| g.id == id));
+        if !listed {
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
             if live.driver.delete_received_gift(id).is_err() {
                 self.note_gift_refused(tr(keys::Q_MONEY_DELETE_GIFT_NOT_SENT));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             // The demo has no connection: answer as the server would.
-            session.payments.gifts_manage.deleting = Some(id.to_string());
-            session.finish_gift_delete();
+            session.finish_gift_delete(Some(id.to_string()), None);
         }
         cx.notify();
     }
@@ -242,7 +252,7 @@ pub(super) fn gift_collection_tabs(
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let manage = &session.payments.gifts_manage;
-    let busy = session.payments.hub.gift_mutating;
+    let busy = session.payments.hub.received.op.is_mutating();
     if manage.collections.is_empty() && !mine {
         return div().into_any_element();
     }
@@ -274,7 +284,11 @@ pub(super) fn gift_collection_tabs(
                 .ghost()
                 .disabled(busy)
                 .on_click(cx.listener(|this, _, window, cx| {
-                    this.set_gift_flow(Some(GiftFlow::NewCollection), window, cx)
+                    this.set_gift_flow(
+                        Some(GiftFlow::NewCollection(Default::default())),
+                        window,
+                        cx,
+                    )
                 })),
         );
     }
@@ -291,7 +305,11 @@ pub(super) fn gift_collection_tabs(
                         .ghost()
                         .disabled(busy)
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.set_gift_flow(Some(GiftFlow::RenameCollection(active)), window, cx)
+                            this.set_gift_flow(
+                                Some(GiftFlow::RenameCollection(active, Default::default())),
+                                window,
+                                cx,
+                            )
                         })),
                 )
                 .child(
@@ -301,19 +319,23 @@ pub(super) fn gift_collection_tabs(
                         .ghost()
                         .disabled(busy)
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.set_gift_flow(Some(GiftFlow::DeleteCollection(active)), window, cx)
+                            this.set_gift_flow(
+                                Some(GiftFlow::DeleteCollection(active, Default::default())),
+                                window,
+                                cx,
+                            )
                         })),
                 ),
         );
     }
     match &manage.flow {
-        Some(GiftFlow::NewCollection) => {
+        Some(GiftFlow::NewCollection(_)) => {
             col = col.child(collection_name_form(None, busy, name_input, cx));
         }
-        Some(GiftFlow::RenameCollection(id)) => {
+        Some(GiftFlow::RenameCollection(id, _)) => {
             col = col.child(collection_name_form(Some(*id), busy, name_input, cx));
         }
-        Some(GiftFlow::DeleteCollection(id)) => {
+        Some(GiftFlow::DeleteCollection(id, _)) => {
             let id = *id;
             let name = manage
                 .collection(id)

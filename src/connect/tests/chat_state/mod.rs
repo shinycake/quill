@@ -101,7 +101,7 @@ fn forum_flow_topics_then_topic_history() {
     );
     // Selecting the topic fetches per-topic history.
     driver.select_topic(2).unwrap();
-    assert_eq!(driver.session.open_topic, Some(2));
+    assert_eq!(driver.session.open_forum_topic(), Some(2));
     let sent = recorder.snapshot();
     let search_json = sent
         .iter()
@@ -137,11 +137,11 @@ fn forum_flow_topics_then_topic_history() {
         .topic_histories
         .get(&(16, 2))
         .unwrap();
-    assert!(history.loaded_complete);
+    assert!(history.loaded_complete());
     assert!(history.messages.contains_key(&50));
     // Back to the topic list.
     driver.deselect_topic();
-    assert_eq!(driver.session.open_topic, None);
+    assert_eq!(driver.session.open_forum_topic(), None);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -182,12 +182,47 @@ impl JsonSender for Arc<ViewCtlSender> {
         if request.contains("viewMessages") && *self.fail_view.lock().expect("view ctl sender") {
             return Err(ConnectSendError::Native);
         }
+        if request.contains("\"@type\":\"openChat\"")
+            && *self.fail_open_chat.lock().expect("view ctl sender")
+        {
+            return Err(ConnectSendError::Native);
+        }
         self.sent
             .lock()
             .expect("view ctl sender")
             .push(request.to_string());
         Ok(())
     }
+}
+
+#[test]
+fn a_refused_open_chat_leaves_the_chat_unopened_so_a_retry_sends_it() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let sender = ViewCtlSender::new();
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, sender.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    ready_private_chat(&mut driver, &seq, &dyn_sink);
+    sender.set_fail_open_chat(true);
+    assert!(driver.select_chat(ChatId(7)).is_err());
+    assert_eq!(
+        driver.session.open_chat_id(),
+        None,
+        "not open without openChat"
+    );
+    sender.set_fail_open_chat(false);
+    driver.select_chat(ChatId(7)).expect("retry");
+    assert_eq!(driver.session.open_chat_id(), Some(ChatId(7)));
+    let opens = sender
+        .snapshot()
+        .iter()
+        .filter(|j| j.contains("\"@type\":\"openChat\""))
+        .count();
+    assert_eq!(opens, 1, "the retry sent openChat");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

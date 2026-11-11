@@ -206,7 +206,7 @@ pub(in crate::ui) fn spoiler_cover(
         .tab_index(0)
         .cursor_pointer()
         .on_click(cx.listener(move |this, _, _, cx| {
-            this.message_ui.spoiler_revealed.insert(key);
+            this.message_ui.revealed.reveal_spoiler(key);
             crate::ui::spoiler_fx::mark_revealed(key);
             if let Some(file_id) = download {
                 this.request_media_download(file_id, None, cx);
@@ -330,6 +330,19 @@ fn blur(jpeg: &[u8]) -> Option<Arc<RenderImage>> {
     Some(Arc::new(RenderImage::new(smallvec::SmallVec::from_buf([
         image::Frame::new(blurred),
     ]))))
+}
+
+/// A playing clip at `(w, h)` outside a message (the bot intro card), with
+/// `still` under it until its first picture.
+pub(in crate::ui) fn clip_tile(
+    inline: crate::ui::inline_video::InlineFrame,
+    still: Option<AnyElement>,
+    (w, h): (Pixels, Pixels),
+    corners: MediaCorners,
+) -> AnyElement {
+    live_tile(inline, still, (w, h), move |frame| {
+        inline_surface(frame, w, h, corners)
+    })
 }
 
 #[cfg(test)]

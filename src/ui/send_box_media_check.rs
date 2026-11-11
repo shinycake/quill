@@ -10,14 +10,14 @@ use super::image_decode::{self, DecodeSize};
 use super::send_box_thumbnails::{GIVE_UP_AFTER, write_jpeg};
 use gpui_kit::*;
 use quill::composer::{
-    AttachmentKind, ComposerAttachment, PHOTO_SIDE_LARGE, fitted_photo_size,
+    AttachmentKind, ComposerAttachment, PHOTO_SIDE_LARGE, PhotoPrep, fitted_photo_size,
     media_dimensions_valid, photo_needs_jpeg,
 };
 use quill::media_viewer::READ_BYTES_LIMIT;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
-/// What reading a tray file found. Kept by path (`SendBoxUi::media_checked`),
+/// What reading a tray file found. Kept by path (`TrayReads::media`),
 /// so the same file in a second tray gets the same answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum MediaCheck {
@@ -39,17 +39,16 @@ impl QuillApp {
             .map(|attachment| (attachment.path.clone(), attachment.kind))
             .collect();
         for (path, kind) in unread {
-            if let Some(check) = self.composer_ui.send_box.media_checked.get(&path).cloned() {
+            if let Some(check) = self.composer_sends.reads.media.done(&path).cloned() {
                 self.apply_media_check(&path, &check);
                 continue;
             }
-            if self.composer_ui.send_box.media_checking.contains_key(&path) {
+            if self.composer_sends.reads.media.is_reading(&path) {
                 continue;
             }
-            let send_box = &mut self.composer_ui.send_box;
+            let send_box = &mut self.composer_sends.reads;
             send_box.media_check_jobs += 1;
             let job = send_box.media_check_jobs;
-            send_box.media_checking.insert(path.clone(), job);
             let source = path.clone();
             let worker = cx.background_spawn(async move {
                 match kind {
@@ -59,29 +58,38 @@ impl QuillApp {
             });
             let timer = cx.background_executor().timer(GIVE_UP_AFTER);
             let waited = path.clone();
-            self.spawn_scoped(cx, async move |this, cx| {
+            // The reads belong to the app (`TrayReads`), as the sound reads
+            // do: a closed window or a switched account must not drop the
+            // answer and leave the read running for good.
+            // screen-scope: the tray reads are the app's; the answer lands for
+            // every window and account whichever screen is on screen.
+            let give_up = Self::spawn_app(cx, async move |this, cx| {
                 timer.await;
                 let _ = this.update(cx, |this, cx| {
                     this.finish_media_check(&waited, job, MediaCheck::FileOnly, cx);
                 });
-            })
-            .detach();
-            self.spawn_scoped(cx, async move |this, cx| {
+            });
+            let key = path.clone();
+            // screen-scope: as the give-up above.
+            let answer = Self::spawn_app(cx, async move |this, cx| {
                 let check = worker.await;
                 let _ = this.update(cx, |this, cx| {
                     this.finish_media_check(&path, job, check, cx);
                 });
-            })
-            .detach();
+            });
+            self.composer_sends
+                .reads
+                .media
+                .start(key, job, vec![give_up, answer]);
         }
     }
 
     /// Files of the open slot's tray are still being read.
     pub(super) fn tray_media_checks_pending(&self) -> bool {
-        let reading = &self.composer_ui.send_box.media_checking;
+        let reading = &self.composer_sends.reads.media;
         self.pending_attachments()
             .iter()
-            .any(|attachment| reading.contains_key(&attachment.path))
+            .any(|attachment| reading.is_reading(&attachment.path))
     }
 
     fn finish_media_check(
@@ -91,17 +99,15 @@ impl QuillApp {
         check: MediaCheck,
         cx: &mut Context<Self>,
     ) {
-        let send_box = &mut self.composer_ui.send_box;
-        if send_box.media_checking.get(path) != Some(&job) {
+        let send_box = &mut self.composer_sends.reads;
+        if !send_box.media.finish(path, job, check.clone()) {
             return;
         }
-        send_box.media_checking.remove(path);
-        send_box
-            .media_checked
-            .insert(path.to_path_buf(), check.clone());
         self.apply_media_check(path, &check);
-        // A file now needs its thumbnail.
+        // A file now needs its thumbnail, and a photo that became a JPEG
+        // its size (the JPEG is the picture the offer is about).
         self.prepare_tray_file_thumbnails(cx);
+        self.check_tray_photo_sizes(cx);
         cx.notify();
     }
 
@@ -109,7 +115,9 @@ impl QuillApp {
         for attachment in self.composer_sends.attachments_at_mut(path) {
             match check {
                 MediaCheck::AsIs => {}
-                MediaCheck::Jpeg(jpeg) => attachment.extras.photo_jpeg = Some(jpeg.clone()),
+                MediaCheck::Jpeg(jpeg) => {
+                    attachment.extras.set_photo(PhotoPrep::Jpeg(jpeg.clone()))
+                }
                 MediaCheck::FileOnly => attachment.keep_as_file(),
             }
         }
@@ -118,8 +126,8 @@ impl QuillApp {
 
 fn needs_media_check(attachment: &ComposerAttachment) -> bool {
     match attachment.kind {
-        AttachmentKind::Photo => attachment.extras.photo_jpeg.is_none(),
-        AttachmentKind::Video => !attachment.extras.gif,
+        AttachmentKind::Photo => attachment.extras.photo_jpeg().is_none(),
+        AttachmentKind::Video => !attachment.extras.is_gif(),
         AttachmentKind::Document | AttachmentKind::VideoNote => false,
     }
 }

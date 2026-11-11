@@ -96,7 +96,7 @@ fn charging_user_is_asked_once_and_gates_the_composer() {
         ),
     );
     assert_eq!(
-        f.1.session.payments.paid_messages.gate_answer(501),
+        f.1.session.payments.paid_messages.gate_answer(501, false),
         Some(CanSend::HasPaidMessages { stars: 25 })
     );
     assert_eq!(
@@ -246,6 +246,16 @@ fn direct_messages_group_is_clamped_to_the_server_limit() {
     );
     f.1.set_direct_messages_group(ChatId(-1001), true, 5000)
         .unwrap();
+    // A second press while the first save is out sends nothing and answers
+    // with the save that is out.
+    let out = f.1.set_direct_messages_group(ChatId(-1001), false, 40);
+    assert_eq!(requests(&f, "setChatDirectMessagesGroup").len(), 1);
+    let first = requests(&f, "setChatDirectMessagesGroup").remove(0);
+    assert_eq!(out.ok().map(|id| id.0.to_string()), Some(extra_of(&first)));
+    ingest(
+        &mut f,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra_of(&first)),
+    );
     f.1.set_direct_messages_group(ChatId(-1001), false, 40)
         .unwrap();
     let sent = requests(&f, "setChatDirectMessagesGroup");
@@ -255,6 +265,48 @@ fn direct_messages_group_is_clamped_to_the_server_limit() {
     assert_eq!(sent[1]["is_enabled"], false);
     assert_eq!(sent[1]["paid_message_star_count"], 0);
     cleanup(f);
+}
+
+/// A Direct Messages save that another save replaced: its `ok` or error
+/// leaves the newer save waiting; only the newer one's answer settles it.
+#[test]
+fn each_target_has_its_own_save_that_only_its_answer_settles() {
+    use crate::paid_messages::PaidTarget;
+    for older_fails in [false, true] {
+        let mut f = fixture();
+        f.1.set_direct_messages_group(ChatId(-1001), true, 10)
+            .unwrap();
+        // A Remove Fee for a user goes out while the channel's save is
+        // still out: neither disables or settles the other.
+        f.1.allow_unpaid_messages(700, false).unwrap();
+        let older = requests(&f, "setChatDirectMessagesGroup").remove(0);
+        let newer = requests(&f, "allowUnpaidMessagesFromUser").remove(0);
+        let save = &f.1.session.payments.paid_messages.save;
+        assert!(save.is_saving_for(PaidTarget::Channel(-1001)));
+        assert!(save.is_saving_for(PaidTarget::User(700)));
+        let answer = if older_fails {
+            r#"{"@type":"error","code":400,"message":"CHAT_ADMIN_REQUIRED","@extra":"EXTRA"}"#
+        } else {
+            r#"{"@type":"ok","@extra":"EXTRA"}"#
+        };
+        ingest(&mut f, &answer.replace("EXTRA", &extra_of(&older)));
+        let save = &f.1.session.payments.paid_messages.save;
+        assert!(
+            save.is_saving_for(PaidTarget::User(700)),
+            "the other save still waits: {save:?}"
+        );
+        assert_eq!(
+            save.error_for(PaidTarget::Channel(-1001)).is_some(),
+            older_fails
+        );
+        assert!(!save.is_saving_for(PaidTarget::Channel(-1001)));
+        ingest(
+            &mut f,
+            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra_of(&newer)),
+        );
+        assert!(!f.1.session.payments.paid_messages.save.is_saving());
+        cleanup(f);
+    }
 }
 
 #[test]

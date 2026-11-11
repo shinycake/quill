@@ -18,8 +18,9 @@ impl Session {
             // Slice B2: refused `sendBotStartMessage` / `getBotSimilarBots` —
             // a refusal is never shown as success.
             Some(RequestPurpose::SendBotStartMessage) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not start the bot (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not start the bot (error {})", err.code));
             }
             Some(RequestPurpose::GetBotSimilarBots) => {
                 // The section goes back to its button, so it can ask again
@@ -32,21 +33,32 @@ impl Session {
                 {
                     self.bots.similar_bots.remove(&bot);
                 }
-                self.chats_state.chat_action_error =
-                    Some(format!("could not load similar bots (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not load similar bots (error {})", err.code));
+            }
+            // The chat shows the keyboard among its loaded messages and
+            // does not ask again at every re-select.
+            Some(RequestPurpose::GetChatReplyMarkupMessage) => {
+                if let Some(pending) = pending
+                    && let Some(chat) = pending.chat_id
+                {
+                    self.fail_reply_markup_fetch(chat, pending.id);
+                }
             }
             Some(RequestPurpose::SetMessageSenderBotVerification) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not verify the account (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not verify the account (error {})", err.code));
             }
             Some(RequestPurpose::RemoveMessageSenderBotVerification) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not remove the verification (error {})",
                     err.code
                 ));
             }
             Some(RequestPurpose::ShareWithBot) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "the bot could not receive what you shared (error {})",
                     err.code
                 ));
@@ -54,23 +66,28 @@ impl Session {
             // Bots slice: a failed first page lands in the slot so
             // the picker shows an honest error; a failed "load
             // more" keeps the loaded page retryable.
-            Some(RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
-                chat_id,
-                bot_user_id,
-                first_page,
-            })) => {
-                let failed_first_page = first_page
-                    && matches!(
-                        &self.bots.inline_query,
-                        Some(slot)
-                            if slot.chat_id == chat_id
-                                && slot.bot_user_id == bot_user_id
-                    );
-                if failed_first_page && let Some(slot) = self.bots.inline_query.as_mut() {
-                    slot.fetch = InlineQueryFetch::Failed(call_request_error_line(
-                        err,
-                        "Could not load inline results",
-                    ));
+            Some(RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults { .. })) => {
+                let asked = pending.map(|p| p.id);
+                if let Some(slot) = self.bots.inline_query.as_mut() {
+                    match &mut slot.fetch {
+                        InlineQueryFetch::Loading { request } if Some(*request) == asked => {
+                            slot.fetch = InlineQueryFetch::Failed(call_request_error_line(
+                                err,
+                                "Could not load inline results",
+                            ));
+                        }
+                        InlineQueryFetch::Loaded {
+                            next_offset, more, ..
+                        } => {
+                            if matches!(more, InlineMore::Asking { request } if Some(*request) == asked)
+                            {
+                                *more = InlineMore::Failed {
+                                    offset: next_offset.clone(),
+                                };
+                            }
+                        }
+                        _ => {}
+                    }
                 }
             }
             // Bots slice: a failed `@botname` lookup lands in the
@@ -118,18 +135,24 @@ impl Session {
                 .pending_bot_messages
                 .get_mut(&(chat_id.0, topic_id))
             && draft.draft_id == draft_id
+            && draft.stop == BotStopStage::Stopping(request.id)
         {
-            draft.stop_failed = true;
+            draft.stop = BotStopStage::Failed;
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetGameHighScores) {
-            // Slice bots-games: a refused `getGameHighScores` closes the
-            // scores panel (it never spins forever) and surfaces as a
-            // status note via the callback-answer channel.
+            // Slice bots-games: a refused `getGameHighScores` leaves the
+            // panel `Failed` (it never spins forever; the panel draws Retry)
+            // and surfaces as a status note via the callback-answer channel.
             if let Some(pending) = pending
                 && let (Some(chat_id), Some(message_id)) =
                     (pending.chat_id, pending.around_message_id)
+                && let Some(scores) = self.bots.game_scores.get_mut(&(chat_id.0, message_id.0))
             {
-                self.bots.game_scores.remove(&(chat_id.0, message_id.0));
+                scores.failed(
+                    Some(pending.id),
+                    crate::lang::tr(crate::lang::keys::Q_MISC_COULDNT_LOAD_THE_SCORES),
+                    false,
+                );
             }
             self.note_callback_answer(
                 pending.and_then(|p| p.chat_id),
@@ -140,7 +163,12 @@ impl Session {
                 },
             );
         }
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCallbackQueryAnswer) {
+        if matches!(
+            pending.map(|p| p.purpose),
+            Some(
+                RequestPurpose::GetCallbackQueryAnswer | RequestPurpose::GetCallbackQueryAnswerGame
+            )
+        ) {
             // TDLib returns error 502 when the bot misses the query
             // timeout: surface it as an answer note (no TDLib text is
             // echoed) so the press gets visible feedback.
@@ -178,13 +206,7 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::GetLoginUrlInfo) | Some(RequestPurpose::GetLoginUrl)
         ) {
-            let fallback_url = self
-                .bots
-                .login_url_request
-                .take()
-                .map(|request| request.raw_url)
-                .unwrap_or_default();
-            self.bots.last_login_url_info = Some(LoginUrlInfo::Failed { fallback_url });
+            self.bots.login_url.fail(pending.map(|p| p.id));
         }
         self.apply_web_app_error(pending, err);
     }

@@ -112,7 +112,9 @@ impl Passkey {
 /// [`PasskeysState::removing`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PasskeysPurpose {
-    /// `getLoginPasskeys`; the answer is `passkeys`.
+    /// `getLoginPasskeys`; the answer is `passkeys`. Only the request the
+    /// list stage waits for ([`PasskeyList::Asking`]) is taken for the
+    /// list, so the answer of a look older than a removal is dropped.
     List,
     /// `removeLoginPasskey`; the answer is `ok`.
     Remove,
@@ -139,6 +141,8 @@ pub enum PasskeysPayload {
     List(Vec<Passkey>),
     /// `passkey` (the answer to `addLoginPasskey`).
     Added(Passkey),
+    /// A `passkey` without an id: the registration cannot be finished.
+    AddedUnreadable,
 }
 
 /// Parse `type_name`, or `None` for a type this module does not own.
@@ -151,7 +155,9 @@ pub fn parse_payload(type_name: &str, value: &Value) -> Option<PasskeysPayload> 
                 .map(|list| list.iter().filter_map(Passkey::parse).collect())
                 .unwrap_or_default(),
         )),
-        "passkey" => Passkey::parse(value).map(PasskeysPayload::Added),
+        "passkey" => Some(
+            Passkey::parse(value).map_or(PasskeysPayload::AddedUnreadable, PasskeysPayload::Added),
+        ),
         _ => None,
     }
 }
@@ -210,36 +216,172 @@ impl PendingRegistration {
     }
 }
 
+/// "Create Passkey" (tdesktop `Passkeys::initRegistration`): one stage at
+/// a time. A request stage carries the id of its request, and only that
+/// answer moves it on; the error, a dropped request and the box closing
+/// (`PasskeysState::cancel_register`) each leave it.
+#[derive(Debug, Clone, Default)]
+pub enum PasskeyAdd {
+    #[default]
+    Idle,
+    /// `getPasskeyParameters` is on its way.
+    FetchingOptions(RequestId),
+    /// Options ready for a ceremony the UI has not started yet; the UI
+    /// takes them.
+    Starting(PendingRegistration),
+    /// The ceremony runs or ended; tdesktop keeps the options for their
+    /// timeout and reuses them on the next try.
+    Cached(PendingRegistration),
+    /// `addLoginPasskey` is on its way.
+    Sending(RequestId),
+    /// A passkey was just added; the UI takes it and closes the box.
+    Added,
+    /// The attempt failed (the error, an unreadable answer); the About box
+    /// says why. The next try or the box closing leaves it.
+    Failed(String),
+}
+
+/// Deleting a passkey: one at a time, and why the last try failed. `Removing`
+/// leaves on its own answer (`finish_remove`) or its error; `Failed` leaves
+/// on the next try or when the confirmation is dismissed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum RemoveStage {
+    #[default]
+    Idle,
+    Removing(Removal),
+    Failed(String),
+}
+
+/// The list a fetch in flight (or a failed one) stands on: what the screen
+/// shows meanwhile, and whether an answer made it (tdesktop `listKnown`).
+/// A re-ask keeps `Answered`, so the row stays usable while it runs and
+/// after it fails.
+#[derive(Debug, Clone)]
+pub enum Basis {
+    /// Not answered since the last change (never, or a removal or an add).
+    Unanswered(Vec<Passkey>),
+    /// The last answer.
+    Answered(Vec<Passkey>),
+}
+
+impl Basis {
+    fn list(&self) -> &[Passkey] {
+        match self {
+            Self::Unanswered(list) | Self::Answered(list) => list,
+        }
+    }
+
+    fn list_mut(&mut self) -> &mut Vec<Passkey> {
+        match self {
+            Self::Unanswered(list) | Self::Answered(list) => list,
+        }
+    }
+}
+
+/// The passkey list as last fetched. The list the screen shows stays
+/// through every stage, so it does not blank out under "Loading..." or an
+/// error line. Each stage that asked remembers when (`at`, the 5 s throttle
+/// of tdesktop `requestList`).
+#[derive(Debug, Clone, Default)]
+pub enum PasskeyList {
+    /// Never asked.
+    #[default]
+    Unknown,
+    /// A removal or an add made it out of date: the driver asks again at
+    /// once.
+    Stale(Vec<Passkey>),
+    /// `getLoginPasskeys` is on its way as `request` (tdesktop `listKnown`
+    /// is false only when no answer is behind it).
+    Asking {
+        at: Instant,
+        basis: Basis,
+        request: RequestId,
+    },
+    /// An answer arrived since the last change (tdesktop `listKnown`).
+    Known { at: Instant, list: Vec<Passkey> },
+    /// The ask failed with `error`; it is tried again with the next look
+    /// after the throttle.
+    Failed {
+        at: Instant,
+        basis: Basis,
+        error: String,
+    },
+}
+
+impl PasskeyList {
+    /// The passkeys to show, in the server's order.
+    pub fn shown(&self) -> &[Passkey] {
+        match self {
+            Self::Unknown => &[],
+            Self::Stale(list) | Self::Known { list, .. } => list,
+            Self::Asking { basis, .. } | Self::Failed { basis, .. } => basis.list(),
+        }
+    }
+
+    /// Whether an answer stands behind the list shown.
+    fn answered(&self) -> bool {
+        match self {
+            Self::Known { .. } => true,
+            Self::Asking { basis, .. } | Self::Failed { basis, .. } => {
+                matches!(basis, Basis::Answered(_))
+            }
+            Self::Unknown | Self::Stale(_) => false,
+        }
+    }
+
+    fn shown_mut(&mut self) -> Option<&mut Vec<Passkey>> {
+        match self {
+            Self::Unknown => None,
+            Self::Stale(list) | Self::Known { list, .. } => Some(list),
+            Self::Asking { basis, .. } | Self::Failed { basis, .. } => Some(basis.list_mut()),
+        }
+    }
+
+    fn take_basis(&mut self) -> Basis {
+        match std::mem::take(self) {
+            Self::Unknown => Basis::Unanswered(Vec::new()),
+            Self::Stale(list) => Basis::Unanswered(list),
+            Self::Known { list, .. } => Basis::Answered(list),
+            Self::Asking { basis, .. } | Self::Failed { basis, .. } => basis,
+        }
+    }
+
+    fn take_shown(&mut self) -> Vec<Passkey> {
+        match self.take_basis() {
+            Basis::Unanswered(list) | Basis::Answered(list) => list,
+        }
+    }
+
+    fn asked_at(&self) -> Option<Instant> {
+        match self {
+            Self::Unknown | Self::Stale(_) => None,
+            Self::Asking { at, .. } | Self::Known { at, .. } | Self::Failed { at, .. } => Some(*at),
+        }
+    }
+}
+
+/// A `removeLoginPasskey` in flight: the passkey and the request whose
+/// answer settles it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Removal {
+    pub passkey_id: String,
+    pub request: RequestId,
+}
+
 /// The account's passkeys as last fetched (tdesktop `Data::Passkeys`).
 #[derive(Debug, Clone, Default)]
 pub struct PasskeysState {
-    /// The passkeys of the last answer, in the server's order.
-    pub list: Vec<Passkey>,
-    /// An answer arrived since the last change (tdesktop `listKnown`).
-    pub known: bool,
-    /// When the last list request went out.
-    pub requested_at: Option<Instant>,
-    /// A removal succeeded: the driver asks for the list again.
-    pub stale: bool,
-    /// The passkey a `removeLoginPasskey` is in flight for.
-    pub removing: Option<String>,
-    /// Why the last fetch or removal failed; cleared on the next try.
-    pub error: Option<String>,
+    /// The passkey list and where its fetch stands.
+    pub list: PasskeyList,
+    /// The removal in flight; one at a time.
+    pub removing: RemoveStage,
     /// The server lets the app show passkeys (`settings_display_passkeys`
     /// in the application config; off until it says so).
     pub display_allowed: bool,
     /// `passkeys_account_passkeys_max`; `None` until the app config said.
     pub max_passkeys: Option<usize>,
-    /// The options of the registration in progress (tdesktop keeps them
-    /// for their timeout and reuses them on the next try).
-    pub registration: Option<PendingRegistration>,
-    /// Options ready for a ceremony the UI has not started yet; the UI
-    /// takes them.
-    pub ceremony: Option<CreationOptions>,
-    /// `addLoginPasskey` is on its way.
-    pub adding: bool,
-    /// A passkey was just added; the UI takes it and closes the box.
-    pub added: bool,
+    /// "Create Passkey" from the options to the server's answer.
+    pub add: PasskeyAdd,
     /// Signing in with a passkey (`login`).
     pub login: login::LoginState,
 }
@@ -248,37 +390,160 @@ impl PasskeysState {
     /// Whether a look at the list should fetch it again (tdesktop
     /// `requestList`: never asked, or asked more than 5 s ago).
     pub fn wants_fetch(&self, now: Instant) -> bool {
-        self.stale
+        matches!(self.list, PasskeyList::Stale(_))
             || self
-                .requested_at
+                .list
+                .asked_at()
                 .is_none_or(|at| now.saturating_duration_since(at) > LIST_FRESH_FOR)
     }
 
-    /// The list answer arrived.
-    pub fn accept_list(&mut self, list: Vec<Passkey>) {
-        self.list = list;
-        self.known = true;
-        self.stale = false;
+    /// The passkeys to show.
+    pub fn passkeys(&self) -> &[Passkey] {
+        self.list.shown()
+    }
+
+    /// A removal or an add made the list out of date.
+    pub fn is_stale(&self) -> bool {
+        matches!(self.list, PasskeyList::Stale(_))
+    }
+
+    /// An answer stands behind the list (tdesktop `listKnown`); a re-ask
+    /// or a failed one keeps it.
+    pub fn is_known(&self) -> bool {
+        self.list.answered()
+    }
+
+    /// `getLoginPasskeys` went out as `request` at `now`: the list on
+    /// screen stays, the last list error is gone.
+    pub fn list_asked(&mut self, request: RequestId, now: Instant) {
+        let basis = self.list.take_basis();
+        self.list = PasskeyList::Asking {
+            at: now,
+            basis,
+            request,
+        };
+    }
+
+    /// Whether the list ask is out as `request`.
+    pub fn list_waits_for(&self, request: RequestId) -> bool {
+        matches!(&self.list, PasskeyList::Asking { request: asked, .. } if *asked == request)
+    }
+
+    /// The list ask `request` failed. One that is not the ask the list
+    /// waits for (asked before a removal made the list stale) says nothing
+    /// about the list now.
+    pub fn list_failed(&mut self, request: RequestId, error: String) {
+        if !self.list_waits_for(request) {
+            return;
+        }
+        let at = self.list.asked_at().unwrap_or_else(Instant::now);
+        let basis = self.list.take_basis();
+        self.list = PasskeyList::Failed { at, basis, error };
+    }
+
+    /// The list answer to `request` arrived. One that is not the ask the
+    /// list waits for is dropped: an ask older than the last removal still
+    /// has the removed passkey, and the list stays stale for the look that
+    /// follows.
+    pub fn accept_list(&mut self, request: RequestId, list: Vec<Passkey>) {
+        if !self.list_waits_for(request) {
+            return;
+        }
+        let at = self.list.asked_at().unwrap_or_else(Instant::now);
+        self.list = PasskeyList::Known { at, list };
+    }
+
+    /// Why the last list ask failed.
+    pub fn list_error(&self) -> Option<&str> {
+        match &self.list {
+            PasskeyList::Failed { error, .. } => Some(error),
+            _ => None,
+        }
+    }
+
+    /// `removeLoginPasskey` for `passkey_id` went out as `request`.
+    pub fn remove_started(&mut self, passkey_id: String, request: RequestId) {
+        self.removing = RemoveStage::Removing(Removal {
+            passkey_id,
+            request,
+        });
+    }
+
+    /// A removal is out and unanswered (one at a time).
+    pub fn is_removing(&self) -> bool {
+        matches!(self.removing, RemoveStage::Removing(_))
+    }
+
+    /// Why the last removal failed.
+    pub fn remove_error(&self) -> Option<&str> {
+        match &self.removing {
+            RemoveStage::Failed(error) => Some(error),
+            _ => None,
+        }
+    }
+
+    /// The confirmation was dismissed or opened afresh: a failed removal's
+    /// error goes; a removal in flight stays.
+    pub fn dismiss_remove_error(&mut self) {
+        if matches!(self.removing, RemoveStage::Failed(_)) {
+            self.removing = RemoveStage::Idle;
+        }
+    }
+
+    /// The `ok` of removal `request`: the passkey leaves the list. Only the
+    /// removal in flight settles it.
+    pub fn removal_answered(&mut self, request: Option<RequestId>) {
+        let RemoveStage::Removing(removal) = &self.removing else {
+            return;
+        };
+        if Some(removal.request) != request {
+            return;
+        }
+        let passkey_id = removal.passkey_id.clone();
+        self.finish_remove(&passkey_id);
+    }
+
+    /// The error of removal `request`: only the removal in flight fails.
+    pub fn removal_failed(&mut self, request: Option<RequestId>, error: String) {
+        if matches!(&self.removing, RemoveStage::Removing(removal) if Some(removal.request) == request)
+        {
+            self.removing = RemoveStage::Failed(error);
+        }
+    }
+
+    /// Why the last add failed.
+    pub fn add_error(&self) -> Option<&str> {
+        match &self.add {
+            PasskeyAdd::Failed(error) => Some(error),
+            _ => None,
+        }
+    }
+
+    /// The line the list screen shows under its header: the last removal,
+    /// add or list failure.
+    pub fn error(&self) -> Option<&str> {
+        self.remove_error()
+            .or_else(|| self.add_error())
+            .or_else(|| self.list_error())
     }
 
     /// `removeLoginPasskey` succeeded: drop the passkey and ask again
-    /// (tdesktop forgets the list and reloads it).
+    /// (tdesktop forgets the list and reloads it). The list is stale, so a
+    /// list answer asked before the removal is dropped.
     pub fn finish_remove(&mut self, passkey_id: &str) {
-        self.list.retain(|p| p.id != passkey_id);
-        self.removing = None;
-        self.error = None;
-        self.known = false;
-        self.stale = true;
-        self.requested_at = None;
+        let mut list = self.list.take_shown();
+        list.retain(|p| p.id != passkey_id);
+        self.list = PasskeyList::Stale(list);
+        self.removing = RemoveStage::Idle;
     }
 
     pub fn find(&self, passkey_id: &str) -> Option<&Passkey> {
-        self.list.iter().find(|p| p.id == passkey_id)
+        self.passkeys().iter().find(|p| p.id == passkey_id)
     }
 
     /// Custom emoji ids of the software icons in the list.
     pub fn icon_ids(&self) -> impl Iterator<Item = i64> + '_ {
-        self.list
+        self.passkeys()
             .iter()
             .map(|p| p.software_icon_custom_emoji_id)
             .filter(|id| *id != 0)
@@ -288,7 +553,7 @@ impl PasskeysState {
     /// the server allows it, and the app can create passkeys or the
     /// account already has some.
     pub fn row_shown(&self) -> bool {
-        self.display_allowed && (webauthn_supported() || !self.list.is_empty())
+        self.display_allowed && (webauthn_supported() || !self.passkeys().is_empty())
     }
 
     /// Whether the QR sign-in screen shows "Log in using passkey" (tdesktop
@@ -299,10 +564,10 @@ impl PasskeysState {
 
     /// The value on the right of the row.
     pub fn row_label(&self) -> RowLabel {
-        if !self.known {
+        if !self.is_known() {
             return RowLabel::Loading;
         }
-        match self.list.as_slice() {
+        match self.passkeys() {
             [] => RowLabel::Off,
             [one] => RowLabel::Name(one.name.clone()),
             many => RowLabel::Count(many.len()),
@@ -312,9 +577,9 @@ impl PasskeysState {
     /// Where a click on the row goes (tdesktop: nothing while loading,
     /// the "Protect your account" box without passkeys, else the list).
     pub fn row_target(&self) -> Option<RowTarget> {
-        if !self.known {
+        if !self.is_known() {
             None
-        } else if self.list.is_empty() {
+        } else if self.passkeys().is_empty() {
             Some(RowTarget::About)
         } else {
             Some(RowTarget::List)
@@ -324,32 +589,110 @@ impl PasskeysState {
     /// Whether "Create Passkey" works (tdesktop `canRegister`: WebAuthn,
     /// and fewer passkeys than `passkeys_account_passkeys_max`).
     pub fn can_register(&self) -> bool {
-        webauthn_supported() && self.list.len() < self.max_passkeys.unwrap_or(DEFAULT_MAX_PASSKEYS)
+        webauthn_supported()
+            && self.passkeys().len() < self.max_passkeys.unwrap_or(DEFAULT_MAX_PASSKEYS)
     }
 
     /// The new passkey from `addLoginPasskey` joins the list (tdesktop
     /// appends it) and the registration is over.
     pub fn accept_added(&mut self, passkey: Passkey) {
-        self.list.retain(|p| p.id != passkey.id);
-        self.list.push(passkey);
-        self.registration = None;
-        self.adding = false;
-        self.added = true;
-        self.error = None;
+        // A list never asked for becomes one that asks again.
+        if matches!(self.list, PasskeyList::Unknown) {
+            self.list = PasskeyList::Stale(Vec::new());
+        }
+        if let Some(list) = self.list.shown_mut() {
+            list.retain(|p| p.id != passkey.id);
+            list.push(passkey);
+        }
+        self.add = PasskeyAdd::Added;
     }
 
-    /// The creation options arrived: keep them and start the ceremony.
-    /// `false` when they cannot be read (tdesktop then does nothing).
-    pub fn accept_parameters(&mut self, json: &str, now: Instant) -> bool {
+    /// The creation options of request `id` arrived: keep them and start
+    /// the ceremony. `false` when they cannot be read (the stage fails with
+    /// a line the box shows; tdesktop does nothing). An answer to anything but the request the stage waits for
+    /// (the box was closed, a newer ask went out) is ignored.
+    pub fn accept_parameters(&mut self, id: Option<RequestId>, json: &str, now: Instant) -> bool {
+        if !matches!(&self.add, PasskeyAdd::FetchingOptions(waiting) if Some(*waiting) == id) {
+            return true;
+        }
         let Some(options) = CreationOptions::parse(json) else {
+            self.add =
+                PasskeyAdd::Failed("Could not add the passkey: unreadable parameters".into());
             return false;
         };
-        self.registration = Some(PendingRegistration {
-            options: options.clone(),
+        self.add = PasskeyAdd::Starting(PendingRegistration {
+            options,
             fetched_at: now,
         });
-        self.ceremony = Some(options);
         true
+    }
+
+    /// Whether "Create Passkey" has options, an options request or the
+    /// result on its way.
+    pub fn add_busy(&self) -> bool {
+        matches!(
+            self.add,
+            PasskeyAdd::FetchingOptions(_) | PasskeyAdd::Starting(_) | PasskeyAdd::Sending(_)
+        )
+    }
+
+    /// The UI starts the ceremony with the options that landed; they stay
+    /// cached for the next try.
+    pub fn take_starting(&mut self) -> Option<CreationOptions> {
+        match std::mem::take(&mut self.add) {
+            PasskeyAdd::Starting(pending) => {
+                let options = pending.options.clone();
+                self.add = PasskeyAdd::Cached(pending);
+                Some(options)
+            }
+            other => {
+                self.add = other;
+                None
+            }
+        }
+    }
+
+    /// The UI consumes "just added".
+    pub fn take_added(&mut self) -> bool {
+        if matches!(self.add, PasskeyAdd::Added) {
+            self.add = PasskeyAdd::Idle;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// The box was closed (or the lock closed it): options still on their
+    /// way or waiting to start are dropped, so no ceremony starts for a
+    /// box nobody sees. Cached options stay for the next try, and a result
+    /// already sent stays sent.
+    pub fn cancel_register(&mut self) {
+        if matches!(
+            self.add,
+            PasskeyAdd::FetchingOptions(_)
+                | PasskeyAdd::Starting(_)
+                | PasskeyAdd::Added
+                | PasskeyAdd::Failed(_)
+        ) {
+            self.add = PasskeyAdd::Idle;
+        }
+    }
+
+    /// The request `id` of the registration failed (error, unreadable
+    /// answer, or lost): the stage waiting for it ends and the options are
+    /// dropped (tdesktop does); the box shows `error`. `false` when `id` is
+    /// not what the stage waits for (the box was closed, a newer ask went
+    /// out).
+    pub fn fail_register(&mut self, id: Option<RequestId>, error: String) -> bool {
+        match &self.add {
+            PasskeyAdd::FetchingOptions(waiting) | PasskeyAdd::Sending(waiting)
+                if Some(*waiting) == id =>
+            {
+                self.add = PasskeyAdd::Failed(error);
+                true
+            }
+            _ => false,
+        }
     }
 }
 

@@ -30,7 +30,7 @@ pub(crate) fn about_text(country: &str) -> String {
 /// loaded, else the ISO code (tdesktop `LookupFactcheckCountryName`).
 pub(crate) fn country_name(session: Option<&Session>, iso2: &str) -> String {
     session
-        .and_then(|session| session.auth_state.countries.as_ref())
+        .and_then(|session| session.auth_state.countries.data())
         .and_then(|countries| {
             countries
                 .iter()
@@ -45,7 +45,7 @@ pub(crate) fn country_name(session: Option<&Session>, iso2: &str) -> String {
 pub(in crate::ui) fn fact_check_block(
     message: &HistoryMessage,
     expanded: bool,
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &crate::ui::message_text::revealed::Revealed,
     font: Pixels,
     session: Option<&Session>,
     cx: &mut Context<QuillApp>,
@@ -173,9 +173,13 @@ impl QuillApp {
         message_id: MessageId,
         cx: &mut Context<Self>,
     ) {
-        let key = (chat_id.0, message_id.0);
-        if !self.message_ui.fact_check_expanded.remove(&key) {
-            self.message_ui.fact_check_expanded.insert(key);
+        // The chat's own value: a click on a row of another chat's stale
+        // frame changes nothing.
+        if self.chat_ui.made_for() != Some(chat_id) {
+            return;
+        }
+        if !self.chat_ui.fact_check_expanded.remove(&message_id.0) {
+            self.chat_ui.fact_check_expanded.insert(message_id.0);
         }
         cx.notify();
     }

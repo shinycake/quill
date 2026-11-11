@@ -16,56 +16,69 @@ pub const DURATION: Duration = Duration::from_millis(150);
 
 /// One 0..1 value that eases toward a boolean target.
 #[derive(Debug, Clone, Copy)]
-struct Toggle {
-    target: bool,
-    from: f32,
-    /// When the current ease started; `None` once settled.
-    since: Option<Instant>,
+enum Toggle {
+    /// At the target, no ease running.
+    Settled(bool),
+    /// Easing from `from` toward `target`, since `since`; it collapses to
+    /// `Settled` once [`DURATION`] has passed.
+    Easing {
+        target: bool,
+        from: f32,
+        since: Instant,
+    },
 }
 
 impl Toggle {
     fn snapped(target: bool) -> Self {
-        Self {
-            target,
-            from: if target { 1. } else { 0. },
-            since: None,
+        Self::Settled(target)
+    }
+
+    fn target(&self) -> bool {
+        match self {
+            Self::Settled(target) | Self::Easing { target, .. } => *target,
         }
     }
 
     fn goal(&self) -> f32 {
-        if self.target { 1. } else { 0. }
+        if self.target() { 1. } else { 0. }
     }
 
     fn value(&self, now: Instant) -> f32 {
-        let Some(since) = self.since else {
+        let Self::Easing { from, since, .. } = *self else {
             return self.goal();
         };
         let t = (now.saturating_duration_since(since).as_secs_f32() / DURATION.as_secs_f32())
             .clamp(0., 1.);
         // Ease-out cubic.
         let eased = 1. - (1. - t).powi(3);
-        self.from + (self.goal() - self.from) * eased
+        from + (self.goal() - from) * eased
     }
 
     fn settled(&self, now: Instant) -> bool {
-        self.since
-            .is_none_or(|since| now.saturating_duration_since(since) >= DURATION)
+        match self {
+            Self::Settled(_) => true,
+            Self::Easing { since, .. } => now.saturating_duration_since(*since) >= DURATION,
+        }
     }
 
     /// Move to `target`. `animate` false snaps. Returns the new value.
     fn set(&mut self, target: bool, animate: bool, now: Instant) -> f32 {
-        if target != self.target {
+        if target != self.target() {
             *self = if animate {
-                Self {
+                Self::Easing {
                     target,
                     from: self.value(now),
-                    since: Some(now),
+                    since: now,
                 }
             } else {
                 Self::snapped(target)
             };
         }
-        self.value(now)
+        let value = self.value(now);
+        if self.settled(now) {
+            *self = Self::Settled(self.target());
+        }
+        value
     }
 }
 
@@ -85,15 +98,36 @@ pub struct RowFx {
 struct Entry {
     online: Toggle,
     badge: Toggle,
+    /// The list pass that last drew the row.
+    pass: u64,
 }
+
+/// Entries kept before the ones out of sight are dropped.
+const KEPT: usize = 512;
 
 /// Per-chat animation state for the visible rows.
 #[derive(Debug, Default)]
 pub struct RowFxMap {
     rows: HashMap<i64, Entry>,
+    /// Counts list builds (`begin_pass`). A row drawn in no pass between two
+    /// of its sightings left the screen: it snaps on return instead of
+    /// animating from what it showed back then. Time plays no part, so an
+    /// idle list still animates a change that arrives later.
+    pass: u64,
 }
 
 impl RowFxMap {
+    /// Start a list build. Rows the pass before did not draw are dropped
+    /// once the map is past its cap.
+    pub fn begin_pass(&mut self) {
+        self.pass = self.pass.wrapping_add(1);
+        if self.rows.len() >= KEPT {
+            let pass = self.pass;
+            self.rows
+                .retain(|_, entry| entry.pass.wrapping_add(1) >= pass);
+        }
+    }
+
     /// Record this frame's targets for `chat` and read the animated
     /// values. The first sight of a chat, or an inactive window
     /// (`animate` false), snaps instead of animating.
@@ -105,10 +139,17 @@ impl RowFxMap {
         animate: bool,
         now: Instant,
     ) -> RowFx {
-        let entry = self.rows.entry(chat).or_insert_with(|| Entry {
+        let pass = self.pass;
+        let fresh = || Entry {
             online: Toggle::snapped(online),
             badge: Toggle::snapped(badge),
-        });
+            pass,
+        };
+        let entry = self.rows.entry(chat).or_insert_with(fresh);
+        if entry.pass.wrapping_add(1) < pass {
+            *entry = fresh();
+        }
+        entry.pass = pass;
         let online_value = entry.online.set(online, animate, now);
         // Falling edge: snap, the badge row has no exit animation.
         let badge_animate = animate && badge;
@@ -182,6 +223,45 @@ mod tests {
         let gone = map.observe(1, false, false, true, t1 + Duration::from_millis(80));
         assert_eq!(gone.badge, 0.);
         assert!(!gone.animating);
+    }
+
+    #[test]
+    fn an_idle_list_still_animates_a_later_change() {
+        let mut map = RowFxMap::default();
+        let t0 = Instant::now();
+        map.begin_pass();
+        map.observe(1, false, false, true, t0);
+        // The list sat idle; the next build finds the contact online.
+        let later = t0 + Duration::from_secs(30);
+        map.begin_pass();
+        let fx = map.observe(1, true, true, true, later);
+        assert_eq!((fx.online, fx.badge, fx.animating), (0., 0., true));
+    }
+
+    #[test]
+    fn a_row_absent_for_a_pass_snaps_when_it_returns() {
+        let mut map = RowFxMap::default();
+        let t0 = Instant::now();
+        map.begin_pass();
+        map.observe(1, false, false, true, t0);
+        map.begin_pass();
+        map.begin_pass();
+        let back = map.observe(1, true, true, true, t0);
+        assert_eq!((back.online, back.badge, back.animating), (1., 1., false));
+    }
+
+    #[test]
+    fn rows_not_drawn_last_pass_are_dropped_past_the_cap() {
+        let mut map = RowFxMap::default();
+        let t0 = Instant::now();
+        map.begin_pass();
+        for chat in 0..super::KEPT as i64 {
+            map.observe(chat, false, false, true, t0);
+        }
+        map.begin_pass();
+        map.observe(-1, false, false, true, t0);
+        map.begin_pass();
+        assert_eq!(map.rows.len(), 1);
     }
 
     #[test]

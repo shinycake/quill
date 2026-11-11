@@ -4,17 +4,32 @@
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::paid_reaction::PaidSender;
-use crate::state::{PaymentsPurpose, RequestPurpose};
+use crate::state::{NoticeKind, PaymentsPurpose, RequestPurpose};
 use crate::telegram::requests::{
     add_pending_paid_message_reaction, commit_pending_paid_message_reactions,
     get_chat_available_paid_message_reaction_senders, get_star_payment_options,
     remove_pending_paid_message_reactions,
 };
 
+/// Why a Star reaction was not added.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaidAddError {
+    /// The balance or the cap says no.
+    Refused(crate::paid_reaction::Refusal),
+    /// The request could not go out.
+    Send(ConnectSendError),
+}
+
+impl From<ConnectSendError> for PaidAddError {
+    fn from(err: ConnectSendError) -> Self {
+        Self::Send(err)
+    }
+}
+
 impl<S: JsonSender> ConnectDriver<S> {
     /// Adds `stars` to the pending Star reaction of a message and starts
-    /// (or restarts) its Undo window. A refusal (balance, cap) is left in
-    /// `session.payments.paid.note`.
+    /// (or restarts) its Undo window. A refusal (balance, cap) comes back
+    /// as the error.
     pub fn add_paid_reaction(
         &mut self,
         chat_id: ChatId,
@@ -22,17 +37,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         stars: i64,
         sender: Option<PaidSender>,
         now_ms: u64,
-    ) -> Result<(), ConnectSendError> {
+    ) -> Result<(), PaidAddError> {
         if !self.chats_path_active() || message_id.0 <= 0 {
-            return Err(ConnectSendError::InvalidRequest);
+            return Err(ConnectSendError::InvalidRequest.into());
         }
         let balance = self.session.payments.hub.balance.map(|b| b.stars);
         let paid = &mut self.session.payments.paid;
         if let Some(refusal) = paid.refusal(chat_id.0, message_id.0, stars, balance) {
-            paid.note = Some(refusal.message().to_string());
-            return Err(ConnectSendError::InvalidRequest);
+            return Err(PaidAddError::Refused(refusal));
         }
-        paid.note = None;
         let extra = self.session.request(
             RequestPurpose::Payments(PaymentsPurpose::AddPendingPaidReaction {
                 message_id: message_id.0,
@@ -45,17 +58,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session
             .payments
             .paid
-            .add(chat_id.0, message_id.0, stars, sender, now_ms);
+            .add(chat_id.0, message_id.0, stars, sender, now_ms, Some(extra));
         Ok(())
     }
 
-    /// The toast's Undo: forgets the waiting Stars and tells TDLib.
+    /// The toast's Undo: tells TDLib; the Stars leave on its answer.
     pub fn undo_paid_reaction(
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
     ) -> Result<(), ConnectSendError> {
-        if !self.session.payments.paid.undo(chat_id.0, message_id.0) {
+        if self
+            .session
+            .payments
+            .paid
+            .pending_stars(chat_id.0, message_id.0)
+            == 0
+        {
             return Ok(());
         }
         let extra = self.session.request(
@@ -65,13 +84,22 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(chat_id),
         );
         let json = remove_pending_paid_message_reactions(extra, chat_id, message_id);
-        self.send_json_request(extra, &json).map(|_| ())
+        // The Stars leave the list on TDLib's answer: a send that failed, or
+        // an error answer, leaves them waiting (and their Undo on screen).
+        self.send_json_request(extra, &json)?;
+        self.session
+            .payments
+            .paid
+            .begin_undo(chat_id.0, message_id.0, extra);
+        Ok(())
     }
 
     /// Commits every Star reaction whose Undo window is over. Returns
-    /// whether anything was sent (the toast needs a redraw).
+    /// whether anything was due (the toast needs a redraw). A reaction stays
+    /// until TDLib answers its commit; one that cannot be sent is released
+    /// and the user told, never retried on its own.
     pub fn paid_reaction_tick(&mut self, now_ms: u64) -> bool {
-        let due = self.session.payments.paid.take_due(now_ms);
+        let due = self.session.payments.paid.due(now_ms);
         let any = !due.is_empty();
         for pending in due {
             let chat_id = ChatId(pending.chat_id);
@@ -83,8 +111,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Some(chat_id),
             );
             let json = commit_pending_paid_message_reactions(extra, chat_id, message_id);
-            if self.send_json_request(extra, &json).is_err() {
-                self.session.payments.paid.note = Some("Stars were not sent".to_string());
+            let sent = self.send_json_request(extra, &json).is_ok();
+            let paid = &mut self.session.payments.paid;
+            if sent {
+                paid.begin_commit(pending.chat_id, pending.message_id, extra);
+            } else if paid.commit_unsent(pending.chat_id, pending.message_id) {
+                self.session.payments.notify(
+                    NoticeKind::Error,
+                    crate::lang::tr(crate::lang::keys::Q_MONEY_STARS_NOT_SENT),
+                );
             }
         }
         any
@@ -99,14 +134,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.payments.paid.senders.as_ref().map(|(c, _)| *c) == Some(chat_id.0) {
+        if !self.session.payments.paid.can_ask_senders(chat_id.0) {
             return Ok(None);
         }
         let extra = self
             .session
             .request(RequestPurpose::GetPaidReactionSenders, Some(chat_id));
         let json = get_chat_available_paid_message_reaction_senders(extra, chat_id);
-        self.send_json_request(extra, &json).map(Some)
+        self.send_json_request(extra, &json)?;
+        self.session.payments.paid.senders_asked(chat_id.0);
+        Ok(Some(extra))
     }
 
     /// Fetches the Star packs once for the "Buy more Stars" list.
@@ -114,22 +151,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let packs = &mut self.session.payments.star_packs;
-        if packs.loaded || packs.loading {
+        if !self.session.payments.star_packs.options.can_ask() {
             return Ok(None);
         }
-        packs.loading = true;
-        packs.error = None;
         let extra = self
             .session
             .request(RequestPurpose::GetStarPackOptions, None);
         let json = get_star_payment_options(extra);
         match self.send_json_request(extra, &json) {
-            Ok(id) => Ok(Some(id)),
-            Err(err) => {
-                self.session.payments.star_packs.loading = false;
-                Err(err)
+            Ok(id) => {
+                self.session.payments.star_packs.options.begin();
+                Ok(Some(id))
             }
+            Err(err) => Err(err),
         }
     }
 }

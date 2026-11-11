@@ -46,24 +46,24 @@ pub(super) fn seed_gift_delete_session(sink: Arc<MemorySink>) -> Session {
     seed_channels(&mut session, &sink);
     let channel = std::env::var("QUILL_DEMO_GIFT_DELETE").ok();
     let hub = &mut session.payments.hub;
-    hub.gifts_open = true;
-    hub.gifts_owner = Some(match channel.as_deref() {
+    hub.received.open();
+    hub.received.owner = Some(match channel.as_deref() {
         Some("channel") => MessageSender::Chat { chat_id: CHANNEL },
         Some("admin") => MessageSender::Chat {
             chat_id: ADMIN_CHANNEL,
         },
         _ => MessageSender::User { user_id: ME },
     });
-    hub.gifts = [
+    hub.received.rows = [
         regular_gift(DELETABLE, 100, true),
         regular_gift(KEPT, 250, false),
     ]
     .iter()
     .filter_map(parse_received_gift)
     .collect();
-    hub.gifts_total = 2;
-    hub.gifts_loaded = true;
-    hub.gift_selected = Some(DELETABLE.into());
+    hub.received.total = 2;
+    hub.received.page = quill::premium_hub::page_stage::PageStage::Ready;
+    hub.received.view.select(Some(DELETABLE.into()));
     session
 }
 
@@ -87,7 +87,7 @@ fn seed_channels(session: &mut Session, sink: &Arc<MemorySink>) {
         (ADMIN_CHANNEL, ChannelMemberStatus::Administrator),
     ] {
         if let Some(chat) = session.chats.get_mut(&id) {
-            chat.my_member_status = Some(status);
+            chat.assume_member_status(Some(status));
         }
     }
 }

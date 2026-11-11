@@ -25,12 +25,36 @@ use quill::group_type::{GroupTypeData, USERNAME_MAX, plan_group_type_save};
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::new_chat::{
-    NewChatBack, NewChatInvalid, NewChatKind, NewChatStage, NewChatStep, NewChatView,
-    plan_new_chat, view,
+    CreateProgress, NewChatBack, NewChatInvalid, NewChatKind, NewChatStage, NewChatStep,
+    NewChatView, TypeSaveStage, plan_new_chat, view,
 };
 
 /// The description shows three lines and grows to eight.
 const DESCRIPTION_ROWS: (usize, usize) = (3, 8);
+
+/// The name the last Confirm judged, so the name field's error is about that
+/// text: typing anything else ends it with no reset, whoever refused it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum TitleCheck {
+    /// Nothing judged yet.
+    Fine,
+    /// Confirm found this name empty or too long.
+    Rejected(String),
+    /// This name went to TDLib; its `NO_CHAT_TITLE` refusal is about it.
+    Sent(String),
+}
+
+impl TitleCheck {
+    /// The error shows while the field still holds the judged text and it
+    /// was refused by the dialog's own check or by TDLib.
+    pub(crate) fn shows_error(&self, server_rejected: bool, current: &str) -> bool {
+        match self {
+            Self::Fine => false,
+            Self::Rejected(text) => text == current,
+            Self::Sent(text) => server_rejected && text == current,
+        }
+    }
+}
 
 pub(crate) struct NewChatDialog {
     pub(crate) kind: NewChatKind,
@@ -50,8 +74,9 @@ pub(crate) struct NewChatDialog {
     pub(crate) auto_delete: Option<i32>,
     /// The auto-delete step's picker over [`TTL_CHOICES`].
     auto_delete_picker: Entity<SelectState<Vec<SharedString>>>,
-    /// Confirm found the name empty or too long.
-    title_error: bool,
+    /// What the name field shows: the dialog's own check on Confirm, or
+    /// TDLib's `NO_CHAT_TITLE` (`NewChatView::failure`), one verdict.
+    title: TitleCheck,
     /// The type step of a supergroup or channel (tdesktop
     /// `SetupChannelBox`, which starts on Public).
     type_box: Option<GroupTypeBox>,
@@ -61,11 +86,19 @@ impl QuillApp {
     /// What the open New Group / New Channel dialog shows.
     pub(crate) fn new_chat_view(&self) -> Option<NewChatView> {
         let dialog = self.admin.create_chat_dialog.as_ref()?;
-        let facts = self
-            .session()
-            .map(|session| session.new_chat_facts(&dialog.stage))
-            .unwrap_or_default();
-        Some(view(dialog.kind, &dialog.stage, &facts))
+        let settled = self.settled_new_chat_stage(&dialog.stage);
+        Some(view(&settled))
+    }
+
+    /// `stage` with the session's answers to its requests folded in.
+    fn settled_new_chat_stage(&self, stage: &NewChatStage) -> NewChatStage {
+        let Some(kind) = self.admin.create_chat_dialog.as_ref().map(|d| d.kind) else {
+            return stage.clone();
+        };
+        match self.session() {
+            Some(session) => session.settled_new_chat(kind, stage),
+            None => stage.clone(),
+        }
     }
 
     fn new_chat_step(&self) -> Option<NewChatStep> {
@@ -114,7 +147,7 @@ impl QuillApp {
     fn new_chat_auto_delete(&self, dialog: &NewChatDialog) -> i32 {
         dialog.auto_delete.unwrap_or_else(|| {
             self.session()
-                .and_then(|s| s.settings.default_auto_delete_secs)
+                .and_then(|s| s.settings.default_auto_delete.data().copied())
                 .unwrap_or(0)
         })
     }
@@ -149,11 +182,8 @@ impl QuillApp {
             .map(|secs| SharedString::from(quill::auto_delete::format_ttl(*secs)))
             .collect();
         let auto_delete_picker = cx.new(|cx| SelectState::new(choices, None, window, cx));
-        cx.subscribe(&title_input, |this, _, event: &InputEvent, cx| {
+        cx.subscribe(&title_input, |_, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
-                if let Some(dialog) = this.admin.create_chat_dialog.as_mut() {
-                    dialog.title_error = false;
-                }
                 cx.notify();
             }
         })
@@ -196,6 +226,7 @@ impl QuillApp {
             };
         }
         title_input.update(cx, |input, cx| input.focus(window, cx));
+        self.drop_new_chat_dialog();
         self.admin.create_chat_dialog = Some(NewChatDialog {
             kind,
             stage: NewChatStage::Info,
@@ -208,16 +239,39 @@ impl QuillApp {
             sources: PhotoSources::default(),
             auto_delete: None,
             auto_delete_picker,
-            title_error: false,
+            title: TitleCheck::Fine,
             type_box,
         });
         self.open_box(DialogKind::CreateChat);
         cx.notify();
     }
 
+    /// Poll drain: a plain group that was made ends its dialog, which
+    /// takes its creation row with it.
+    pub(in crate::ui) fn drain_new_chat_done(&mut self, cx: &mut Context<Self>) -> bool {
+        // The answers the stage waits for are taken into it here.
+        self.settle_new_chat_stage();
+        if !matches!(self.new_chat_step(), Some(NewChatStep::Done(_))) {
+            return false;
+        }
+        self.close_new_chat(cx);
+        true
+    }
+
     pub(in crate::ui) fn close_new_chat(&mut self, cx: &mut Context<Self>) {
-        self.admin.create_chat_dialog = None;
+        self.drop_new_chat_dialog();
         cx.notify();
+    }
+
+    /// The dialog goes: a create still out does not open its chat over what
+    /// the person does next, and an answered one is forgotten.
+    fn drop_new_chat_dialog(&mut self) {
+        if let Some(dialog) = self.admin.create_chat_dialog.take()
+            && let NewChatStage::Creating { request, .. } = dialog.stage
+            && let Some(live) = self.live.as_mut()
+        {
+            live.driver.abandon_new_chat(request);
+        }
     }
 
     pub(in crate::ui) fn toggle_new_chat_user(&mut self, user_id: i64, cx: &mut Context<Self>) {
@@ -231,10 +285,43 @@ impl QuillApp {
         }
     }
 
+    /// Take the session's answers into the dialog's stage. The create
+    /// request the stage held is let go once the stage has left it.
+    fn settle_new_chat_stage(&mut self) {
+        let Some(settled) = self
+            .admin
+            .create_chat_dialog
+            .as_ref()
+            .map(|dialog| self.settled_new_chat_stage(&dialog.stage))
+        else {
+            return;
+        };
+        let Some(dialog) = self.admin.create_chat_dialog.as_mut() else {
+            return;
+        };
+        let left = std::mem::replace(&mut dialog.stage, settled);
+        if let NewChatStage::Creating { request, .. } = left
+            && !matches!(&dialog.stage, NewChatStage::Creating { request: now, .. } if *now == request)
+            && let Some(live) = self.live.as_mut()
+        {
+            live.driver.abandon_new_chat(request);
+        }
+    }
+
     fn set_new_chat_stage(&mut self, stage: NewChatStage, cx: &mut Context<Self>) {
-        if let Some(dialog) = self.new_chat_dialog_mut() {
-            dialog.stage = stage;
+        let left = self.new_chat_dialog_mut().and_then(|dialog| {
+            let left = std::mem::replace(&mut dialog.stage, stage);
             dialog.search_input.update(cx, |_, cx| cx.notify());
+            match left {
+                NewChatStage::Creating { request, .. } => Some(request),
+                _ => None,
+            }
+        });
+        // The answer of the create the stage waited for is in the next step.
+        if let Some(request) = left
+            && let Some(live) = self.live.as_mut()
+        {
+            live.driver.abandon_new_chat(request);
         }
         cx.notify();
     }
@@ -244,7 +331,7 @@ impl QuillApp {
         let Some(dialog) = self.new_chat_dialog() else {
             return;
         };
-        if self.new_chat_view().is_some_and(|view| view.busy) {
+        if self.new_chat_view().is_some_and(|view| view.busy()) {
             return;
         }
         let kind = dialog.kind;
@@ -253,7 +340,7 @@ impl QuillApp {
         match plan_new_chat(kind, &title, &description, &[], None, 0) {
             Err(NewChatInvalid::EmptyTitle | NewChatInvalid::TitleTooLong) => {
                 if let Some(dialog) = self.new_chat_dialog_mut() {
-                    dialog.title_error = true;
+                    dialog.title = TitleCheck::Rejected(title);
                     let input = dialog.title_input.clone();
                     input.update(cx, |input, cx| input.focus(window, cx));
                 }
@@ -300,7 +387,17 @@ impl QuillApp {
         };
         match live.driver.create_new_chat(&request, photo) {
             Ok(Some(request)) => {
-                self.set_new_chat_stage(NewChatStage::Creating { request, back }, cx);
+                if let Some(dialog) = self.admin.create_chat_dialog.as_mut() {
+                    dialog.title = TitleCheck::Sent(title);
+                }
+                self.set_new_chat_stage(
+                    NewChatStage::Creating {
+                        request,
+                        back,
+                        progress: CreateProgress::InFlight,
+                    },
+                    cx,
+                );
             }
             Ok(None) => {}
             Err(err) => {
@@ -337,13 +434,16 @@ impl QuillApp {
             Ok(sent) if sent.is_empty() => {
                 self.set_new_chat_stage(NewChatStage::Subscribers { chat }, cx);
             }
-            Ok(sent) => self.set_new_chat_stage(
-                NewChatStage::Type {
-                    chat,
-                    saving: Some(sent),
-                },
-                cx,
-            ),
+            Ok(sent) => {
+                live.driver.watch_new_chat_type_save(&sent);
+                self.set_new_chat_stage(
+                    NewChatStage::Type {
+                        chat,
+                        save: TypeSaveStage::Saving(sent),
+                    },
+                    cx,
+                );
+            }
             Err(err) => {
                 self.set_note(StatusNote::error(user_error_for(
                     keys::Q_NOTES_FAILED_SAVE_GROUP_INFO,
@@ -354,34 +454,28 @@ impl QuillApp {
         }
     }
 
-    /// A typed link hides the refusal of the last Save.
+    /// A typed link hides the refusal of the last Save; a Save still out
+    /// stays, so its answer moves the step on.
     pub(super) fn new_chat_link_edited(&mut self) {
+        self.settle_new_chat_stage();
         if let Some(dialog) = self.admin.create_chat_dialog.as_mut()
-            && let NewChatStage::Type { saving, .. } = &mut dialog.stage
+            && let NewChatStage::Type { save, .. } = &mut dialog.stage
+            && matches!(save, TypeSaveStage::Refused(_))
         {
-            *saving = None;
+            *save = TypeSaveStage::Editing;
         }
     }
 
     /// Why TDLib refused the type step's link.
     pub(super) fn new_chat_username_failure(&self) -> Option<String> {
         let dialog = self.new_chat_dialog()?;
-        let NewChatStage::Type {
-            chat,
-            saving: Some(_),
-        } = &dialog.stage
-        else {
-            return None;
-        };
-        let session = self.session()?;
-        if !session.new_chat_facts(&dialog.stage).type_failed {
-            return None;
+        match self.settled_new_chat_stage(&dialog.stage) {
+            NewChatStage::Type {
+                save: TypeSaveStage::Refused(reason),
+                ..
+            } => Some(reason),
+            _ => None,
         }
-        session
-            .groups
-            .info_edit_errors
-            .get(&chat.0)
-            .map(|error| error.reason.clone())
     }
 
     /// The subscribers step's Add (tdesktop `inviteSelectedUsers`).
@@ -396,10 +490,17 @@ impl QuillApp {
         if users.is_empty() {
             return;
         }
+        // tdesktop closes the box as the invite goes out; one the driver
+        // refused (no right, no connection) keeps the box and the picks.
         if let Some(live) = self.live.as_mut()
-            && live.driver.add_chat_members(chat, &users).is_err()
+            && !live
+                .driver
+                .add_chat_members(chat, &users)
+                .is_ok_and(|sent| sent.is_some())
         {
             self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_ADD_MEMBERS)));
+            cx.notify();
+            return;
         }
         self.finish_new_chat(chat, window, cx);
     }
@@ -407,7 +508,7 @@ impl QuillApp {
     /// The last step closed: open the new chat (tdesktop `boxClosing` ->
     /// `showPeerHistory`).
     fn finish_new_chat(&mut self, chat: ChatId, window: &mut Window, cx: &mut Context<Self>) {
-        self.admin.create_chat_dialog = None;
+        self.drop_new_chat_dialog();
         if self
             .session()
             .is_some_and(|s| s.chats.contains_key(&chat.0))

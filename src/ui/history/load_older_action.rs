@@ -12,7 +12,7 @@ impl QuillApp {
                 let topic_open = self
                     .live
                     .as_ref()
-                    .and_then(|live| live.driver.session.open_topic)
+                    .and_then(|live| live.driver.session.open_forum_topic())
                     .is_some();
                 let thread_active = self.thread_active();
                 if let Some(live) = self.live.as_mut() {

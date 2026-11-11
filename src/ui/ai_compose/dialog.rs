@@ -118,7 +118,7 @@ impl QuillApp {
             .ai_compose
             .open
             .as_ref()
-            .is_some_and(|open| open.ai.loading() && !open.ai.premium_flooded());
+            .is_some_and(|open| open.ai.loading());
         let primary = cx.theme().primary;
         h_flex()
             .w_full()
@@ -152,7 +152,7 @@ impl QuillApp {
         let Some(open) = self.ai_compose.open.as_ref() else {
             return div().into_any_element();
         };
-        let loading = open.ai.loading() && !open.ai.premium_flooded();
+        let loading = open.ai.loading();
         let footer = open.ai.footer();
         let main = match footer {
             FooterAction::IncreaseLimit => {

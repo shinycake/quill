@@ -12,10 +12,10 @@
 //! `telegram::requests::suggested_posts`, the driver in
 //! `connect::suggested_posts`, the screens in `ui::suggested_posts_ui`.
 
-use crate::ids::{ChatId, MessageId};
+use crate::ids::{ChatId, MessageId, RequestId};
 use crate::local_time::{CivilTime, hhmm, month_name};
 use serde_json::{Value, json};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Nano-Grams in one Gram cent (TDLib prices Grams in 1/100 Gram).
 const NANOS_PER_GRAM_CENT: i64 = 10_000_000;
@@ -660,23 +660,96 @@ impl DirectMessagesRole {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SuggestBar {
     pub terms: SuggestTerms,
-    pub mode: SuggestMode,
-    /// "Edit Message" of this suggestion: saving the edit sends a new
-    /// message that replies to it, with these terms.
-    pub edit_of: Option<MessageId>,
+    pub kind: BarKind,
+}
+
+/// What the bar is for. Only an edit has a message and a send to wait for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BarKind {
+    /// A new offer in the composer.
+    New,
+    /// "Edit Message" of a suggestion: saving the edit sends a new message
+    /// that replies to it, with these terms.
+    Edit {
+        of: MessageId,
+        /// Where the edit's send stands: the bar stays up until the send
+        /// answers, so a refusal leaves the terms to send again.
+        send: BarSend,
+    },
+}
+
+/// The send of a bar's edit.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BarSend {
+    #[default]
+    Idle,
+    /// Sent under this request; its answer takes the bar down, its error
+    /// returns the bar to `Idle`.
+    Sending(RequestId),
+}
+
+impl BarSend {
+    pub fn is_sending(self) -> bool {
+        matches!(self, Self::Sending(_))
+    }
+
+    pub fn waits_for(self, request: Option<RequestId>) -> bool {
+        matches!(self, Self::Sending(waiting) if Some(waiting) == request)
+    }
 }
 
 impl SuggestBar {
     pub fn new(terms: SuggestTerms) -> Self {
         Self {
             terms,
-            mode: SuggestMode::New,
-            edit_of: None,
+            kind: BarKind::New,
+        }
+    }
+
+    /// The bar of an edit of `of`, not sent yet.
+    pub fn editing(terms: SuggestTerms, of: MessageId) -> Self {
+        Self {
+            terms,
+            kind: BarKind::Edit {
+                of,
+                send: BarSend::Idle,
+            },
+        }
+    }
+
+    /// The box mode the bar's price and time boxes use.
+    pub fn mode(&self) -> SuggestMode {
+        match self.kind {
+            BarKind::New => SuggestMode::New,
+            BarKind::Edit { .. } => SuggestMode::Change,
+        }
+    }
+
+    /// The suggestion this bar edits.
+    pub fn edit_of(&self) -> Option<MessageId> {
+        match self.kind {
+            BarKind::New => None,
+            BarKind::Edit { of, .. } => Some(of),
+        }
+    }
+
+    /// Where the edit's send stands (idle for a new offer).
+    pub fn send(&self) -> BarSend {
+        match self.kind {
+            BarKind::New => BarSend::Idle,
+            BarKind::Edit { send, .. } => send,
+        }
+    }
+
+    /// Record the edit's send; a new offer has none.
+    pub fn set_send(&mut self, now: BarSend) {
+        if let BarKind::Edit { send, .. } = &mut self.kind {
+            *send = now;
         }
     }
 
     pub fn title(&self) -> &'static str {
-        match self.mode {
+        match self.mode() {
             SuggestMode::Change => CHANGE_TITLE,
             SuggestMode::New | SuggestMode::Publish => BAR_TITLE,
         }
@@ -691,13 +764,11 @@ pub struct SuggestedPostsState {
     pub bars: HashMap<i64, SuggestBar>,
     /// `updateOwnedGramCount`: the account's Grams in nano-Grams.
     pub gram_balance: Option<i64>,
-    /// Suggestions with an approve or decline in flight.
-    pub busy: HashSet<(i64, i64)>,
     /// One-shot errors the UI shows as toasts.
     pub notes: Vec<String>,
-    /// A request refused with `BALANCE_TOO_LOW`: the UI asks for a top-up
-    /// instead of a toast.
-    pub balance_low: Option<SuggestedPostPurpose>,
+    /// Requests refused with `BALANCE_TOO_LOW`: the UI asks for a top-up
+    /// for each instead of a toast.
+    pub balance_low: Vec<SuggestedPostPurpose>,
 }
 
 impl SuggestedPostsState {
@@ -711,7 +782,7 @@ impl SuggestedPostsState {
         if self
             .bars
             .get(&chat_id.0)
-            .is_some_and(|bar| bar.edit_of.is_some())
+            .is_some_and(|bar| bar.edit_of().is_some())
         {
             return;
         }
@@ -733,7 +804,7 @@ impl SuggestedPostsState {
     pub fn draft_terms(&self, chat_id: ChatId) -> Option<SuggestTerms> {
         self.bars
             .get(&chat_id.0)
-            .filter(|bar| bar.edit_of.is_none())
+            .filter(|bar| bar.edit_of().is_none())
             .map(|bar| bar.terms)
     }
 }

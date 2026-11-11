@@ -10,8 +10,10 @@ use quill::lang::prefs::LanguageChoice;
 pub(crate) struct LanguageBox {
     pub(super) search: Entity<TextareaState>,
     pub(super) _search_subscription: Subscription,
-    /// Recent packs deleted in this box (shown dimmed with "Restore").
-    pub(super) removed: Vec<String>,
+    /// Recent packs deleted in this box, with the place each had, shown
+    /// dimmed with "Restore". They are already out of `LanguageUi::recent`,
+    /// so every save writes the one list.
+    pub(super) removed: Vec<(usize, LanguageChoice)>,
 }
 
 /// The files the Language box writes, each kept in the order of the

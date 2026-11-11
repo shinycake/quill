@@ -87,13 +87,13 @@ impl QuillApp {
             flavor,
             target_is_user,
             target_is_self: session.my_user_id == Some(user_id),
-            target_status: member.status,
-            target_can_be_edited: member.can_be_edited,
+            target_status: member.status(),
+            target_can_be_edited: member.can_be_edited(),
             viewer_can_promote: session.chat_can_manage_admins(chat_id),
             viewer_can_restrict: session.chat_can_restrict_members(chat_id),
             viewer_can_manage_tags: session.chat_can_manage_tags(chat_id),
             viewer_can_add: session.chat_can_add_members(chat_id),
-            chat_is_open: session.open_chat == Some(chat_id),
+            chat_is_open: session.open_chat_id() == Some(chat_id),
         })
     }
 
@@ -192,7 +192,7 @@ impl QuillApp {
             }
             MemberAction::Ban => self.open_restrict_dialog(chat_id, user_id, true, window, cx),
             MemberAction::Remove => {
-                self.open_group_confirm(chat_id, GroupConfirmAction::RemoveMember { user_id }, cx)
+                self.open_group_confirm(GroupConfirmAction::RemoveMember { chat_id, user_id }, cx)
             }
             MemberAction::AddToGroup => self.add_removed_member(chat_id, user_id, cx),
             MemberAction::Unban => self.remove_from_banned(chat_id, user_id, cx),
@@ -216,8 +216,10 @@ impl QuillApp {
             },
             None => StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE)),
         };
+        // The member page is fetched again when the request answers
+        // (`member_list_stale`), not before the change applies.
         self.set_note(note);
-        self.refresh_member_dialog(cx);
+        cx.notify();
     }
 
     /// "Delete" for a removed user (tdesktop `removeKicked`).
@@ -229,8 +231,10 @@ impl QuillApp {
             },
             None => StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE)),
         };
+        // The member page is fetched again when the request answers
+        // (`member_list_stale`), not before the change applies.
         self.set_note(note);
-        self.refresh_member_dialog(cx);
+        cx.notify();
     }
 
     /// "Mention": `@username` (or a text mention) goes into the composer.
@@ -263,7 +267,9 @@ impl QuillApp {
     /// sender filter (the same "From:" filter the search bar offers).
     fn search_messages_from(&mut self, user_id: i64, window: &mut Window, cx: &mut Context<Self>) {
         self.open_chat_search_ui(window, cx);
-        let open = self.session().is_some_and(|s| s.search.chat_search.open);
+        let open = self
+            .session()
+            .is_some_and(|s| s.search.chat_search.is_open());
         if open {
             self.chat_search_pick_sender(Some(MessageSender::User { user_id }), window, cx);
         }

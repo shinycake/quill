@@ -93,7 +93,8 @@ pub enum GroupsPurpose {
     DeleteRevokedChatInviteLink,
     /// B8: `deleteAllRevokedChatInviteLinks`.
     DeleteAllRevokedChatInviteLinks,
-    /// `processChatJoinRequests` for one invite link.
+    /// `processChatJoinRequests` for one invite link; the link is
+    /// `PendingRequest::invite_link`.
     ProcessLinkJoinRequests {
         approve: bool,
     },
@@ -257,7 +258,7 @@ pub enum GroupsPurpose {
     GetBoostsPerGift,
     /// `setSupergroupUnrestrictBoostCount` (schema 1.8.68, line 15571).
     /// Response `ok`; the value is applied then, see
-    /// `GroupsState::unrestrict_boost_pending`.
+    /// `GroupsState::unrestrict_boost_saves`.
     SetSupergroupUnrestrictBoostCount,
     /// Slice G2: `getAvailableChatBoostSlots` as the first half of the
     /// boost action (schema 1.8.67, line 13914). Response is

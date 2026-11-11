@@ -115,7 +115,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         content: serde_json::Value,
     ) -> serde_json::Value {
         let cover = cover_path(&self.session, chat_id, attachment);
-        with_video_options(content, cover.as_deref(), attachment.extras.start_timestamp)
+        with_video_options(
+            content,
+            cover.as_deref(),
+            attachment.extras.start_timestamp(),
+        )
     }
 
     /// [`Self::with_attachment_video_options`] for a built `sendMessage`.
@@ -142,23 +146,20 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `sendMessage` + `inputMessagePaidMedia`: the photos and videos of the
     /// snapshot go out as one message behind a price in Stars. Only for a
     /// channel that allows paid media (tdesktop `canPostPaidMedia`).
-    pub(super) fn send_paid_media_snapshot(
+    pub(super) fn send_paid_media_snapshot_to(
         &mut self,
+        place: &SendPlace,
         snapshot: &ComposerSnapshot,
     ) -> Result<RequestId, ConnectSendError> {
         let chat_id = snapshot.chat_id();
         let stars = snapshot.media.paid_stars;
         if !(1..=self.session.messages.paid_media_star_max).contains(&stars)
             || !session_allows_paid_media(&self.session, chat_id)
-            || self.topic_send_is_closed(chat_id)
+            || self.place_is_closed(chat_id, place)
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let attachments: &[ComposerAttachment] = if !snapshot.album.is_empty() {
-            &snapshot.album
-        } else {
-            snapshot.attachment.as_slice()
-        };
+        let attachments: &[ComposerAttachment] = snapshot.content.attachments();
         if !paid_media_fits(attachments, true) {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -192,7 +193,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     height: probe.height,
                     supports_streaming: probe.supports_streaming,
                     cover: cover.as_deref(),
-                    start_timestamp: attachment.extras.start_timestamp,
+                    start_timestamp: attachment.extras.start_timestamp(),
                 },
                 None => PaidMediaItem::Photo { path },
             })
@@ -212,9 +213,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::SendMessage, Some(chat_id));
-        let topic_id = self.send_topic(chat_id);
+        let topic_id = place.topic;
         let json = send_paid_media(extra, chat_id, topic_id, snapshot.send_reply(), content);
-        let json = self.thread_routed(chat_id, json);
+        let json = self.place_routed(chat_id, place, json);
         match self.sender.send_json(&json) {
             Ok(()) => {
                 let _ = self.cancel_outgoing_typing();

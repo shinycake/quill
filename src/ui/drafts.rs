@@ -30,11 +30,11 @@ impl QuillApp {
     pub(super) fn open_chat_id(&self) -> Option<ChatId> {
         self.live
             .as_ref()
-            .and_then(|live| live.driver.session.open_chat)
+            .and_then(|live| live.driver.session.open_chat_id())
             .or_else(|| {
                 self.demo_session
                     .as_ref()
-                    .and_then(|session| session.open_chat)
+                    .and_then(|session| session.open_chat_id())
             })
     }
 
@@ -58,7 +58,7 @@ impl QuillApp {
     /// with no chat open.
     pub(in crate::ui) fn open_conversation(&self) -> Option<quill::ids::ConversationKey> {
         let session = self.session()?;
-        Some(session.open_conversation(session.open_chat?))
+        Some(session.open_conversation(session.open_chat_id()?))
     }
 
     pub(super) fn note_open_draft(&mut self, delayed: bool, cx: &mut Context<Self>) {
@@ -78,7 +78,7 @@ impl QuillApp {
         let chat_id = self.open_chat_id()?;
         let session = self.session()?;
         let topic = session.open_draft_topic(chat_id);
-        session.draft_for(chat_id, topic)?.rich.as_ref()
+        session.draft_for(chat_id, topic)?.rich()
     }
 
     /// What the composer saves for the open slot, and the reply it keeps:
@@ -104,7 +104,7 @@ impl QuillApp {
         }
         let reply = self.draft_reply(self.chat_ui.reply(), chat_id);
         let markup = self.composer_markup(cx);
-        let content = if self.chat_ui.rich_editor_open {
+        let content = if self.chat_ui.rich.editor_open() {
             let blocks = self
                 .composer_ui
                 .rich_draft
@@ -151,12 +151,18 @@ impl QuillApp {
     /// frame (the input needs `&mut Window`, which topic and thread
     /// switches triggered from menus don't have).
     pub(super) fn request_draft_restore(&mut self) {
-        self.composer_ui.draft_restore_pending = true;
+        let slot = self
+            .open_chat_id()
+            .map(|chat| (chat, self.open_draft_topic(chat)));
+        self.composer_ui.draft_load.request_restore(slot);
     }
 
     /// Frame upkeep: run a requested restore.
     pub(super) fn restore_draft_if_pending(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if std::mem::take(&mut self.composer_ui.draft_restore_pending) {
+        let open = self
+            .open_chat_id()
+            .map(|chat| (chat, self.open_draft_topic(chat)));
+        if self.composer_ui.draft_load.take_restore(open) {
             self.restore_open_draft(window, cx);
         }
     }
@@ -184,7 +190,7 @@ impl QuillApp {
             let held = session.draft_is_dirty(chat_id, topic)
                 || !session.accepts_composer_draft(chat_id, topic);
             // The rich editor holds what the user is writing.
-            let held = held || self.chat_ui.rich_editor_open;
+            let held = held || self.chat_ui.rich.editor_open();
             (topic, draft, held)
         }) else {
             return;
@@ -195,8 +201,8 @@ impl QuillApp {
         // link put there stays.
         let previous = self
             .composer_ui
-            .shown_draft
-            .replace((chat_id, topic, draft.clone()));
+            .draft_load
+            .replace_shown((chat_id, topic, draft.clone()));
         if held {
             return;
         }
@@ -215,9 +221,9 @@ impl QuillApp {
             return;
         }
         // A rich draft shows in place of the field, which it empties.
-        if draft.as_ref().is_some_and(|draft| draft.rich.is_some())
-            || draft.as_ref().map(|draft| draft.text.as_str()) != shown
-            || draft.and_then(|draft| draft.reply_to_message_id) != shown.and(reply)
+        if draft.as_ref().is_some_and(|draft| draft.rich().is_some())
+            || draft.as_ref().map(|draft| draft.text()) != shown
+            || draft.and_then(|draft| draft.reply_to_message_id()) != shown.and(reply)
         {
             self.restore_open_draft(window, cx);
         }
@@ -325,40 +331,38 @@ impl QuillApp {
                 return Some((None, None));
             }
             let draft = session.draft_for(chat_id, topic).cloned();
-            let preview = draft.as_ref().and_then(|draft| draft.reply_to_message_id);
+            let preview = draft.as_ref().and_then(|draft| draft.reply_to_message_id());
             Some((draft, preview))
         });
         let Some((draft, preview)) = restored else {
             return;
         };
-        self.composer_ui.shown_draft = self
+        let shown = self
             .session()
             .map(|session| (chat_id, session.open_draft_topic(chat_id), draft.clone()));
+        self.composer_ui.draft_load.set_shown(shown);
         let text = draft
             .as_ref()
-            .map(|draft| draft.text.clone())
+            .map(|draft| draft.text().to_string())
             .unwrap_or_default();
-        let item = draft
-            .as_ref()
-            .map(|draft| draft.item.clone())
-            .unwrap_or_default();
+        let item = draft.as_ref().map(|draft| draft.item()).unwrap_or_default();
         let restored_reply = preview.map(|id| {
             // Slice G1: a draft saved with a partial quote restores the
             // quote picker state, not just the replied-to message.
-            match draft.as_ref().and_then(|draft| draft.quote.clone()) {
+            match draft.as_ref().and_then(|draft| draft.quote().cloned()) {
                 Some(quote) => ComposerReplyTo::with_quote(chat_id, id, quote),
                 None => ComposerReplyTo::new(chat_id, id),
             }
             .to_item(item)
         });
         self.chat_ui.set_reply(restored_reply);
-        if draft.as_ref().is_some_and(|draft| draft.rich.is_some()) {
-            self.chat_ui.rich_editor_open = false;
+        if draft.as_ref().is_some_and(|draft| draft.rich().is_some()) {
+            self.chat_ui.rich.set_editor(false);
         }
         self.set_composer_markup(&text, window, cx);
         // `set_value` emits no Change: re-check the restored draft.
         let text = self.composer.read(cx).value();
-        self.composer_ui.prev_text = text.clone();
+        self.composer_ui.echo.set(text.clone());
         self.sync_spellcheck(&text, cx);
         self.sync_suggest_menu(false, cx);
     }
@@ -380,15 +384,5 @@ impl QuillApp {
 /// `send_draft` stores the same after `setChatDraftMessage`).
 pub(super) fn demo_draft(content: DraftContent, reply_to: Option<SendReply>) -> Option<ChatDraft> {
     let content = content.to_store(reply_to.is_some())?;
-    Some(ChatDraft {
-        text: content.text().to_string(),
-        rich: content.rich().cloned(),
-        reply_to_message_id: reply_to.as_ref().map(|reply| reply.message_id),
-        item: reply_to
-            .as_ref()
-            .map(|reply| reply.item.clone())
-            .unwrap_or_default(),
-        quote: reply_to.and_then(|reply| reply.quote),
-        suggested_post: None,
-    })
+    Some(ChatDraft::of(&content, reply_to.as_ref(), None))
 }

@@ -38,7 +38,7 @@ impl QuillApp {
             self.sync_viewer_volume_slider(window, cx);
             // The controls redraw when the transport changes (the player
             // notifies the views drawing them, at most every 100 ms).
-            if let Some(player) = &self.viewer.player {
+            if let Some(player) = self.viewer.clip.player() {
                 player.watch(window.current_view());
             }
         }
@@ -114,7 +114,7 @@ impl QuillApp {
             .iter()
             .chain(std::iter::once(&item.download_file_id))
             .any(|id| file_is_downloading(*id, &files, &downloading));
-        let profile_view = self.viewer.state.source() == ViewerSource::Profile;
+        let profile_view = self.viewer.state.source().is_profile();
         let kind_label = if ttl.is_some() {
             quill::media_viewer::disappearing_label(item.kind)
         } else {
@@ -142,9 +142,9 @@ impl QuillApp {
             // the main window's video layer draws it above the panel.
             let inline_video = (part == ViewerPart::Inline
                 && item.plays_clip()
-                && self.viewer.video == Some(item.message_id))
+                && self.viewer.clip.video() == Some(item.message_id))
             .then(|| {
-                if let Some(player) = &self.viewer.player {
+                if let Some(player) = self.viewer.clip.player() {
                     player.set_orientation(self.viewer.orientation.turns, false);
                 }
                 self.viewer_inline_video()
@@ -182,7 +182,7 @@ impl QuillApp {
                 let rotated: Option<ImageSource> = item
                     .kind
                     .is_picture()
-                    .then_some(self.viewer.rotated.as_ref())
+                    .then_some(self.viewer.reorient.shown())
                     .flatten()
                     .filter(|(path, turns, _)| {
                         *turns == self.viewer.orientation.code()

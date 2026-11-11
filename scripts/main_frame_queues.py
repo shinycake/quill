@@ -16,6 +16,13 @@ says why it needs neither on the line or one of the three above:
 
     // main-frame: <why the main window's frame runs without help>
 
+A resolve started from src/ui goes through the same seam (round 18 B
+#8): `driver.resolve_deep_link(` is called only in src/ui/deep_links.rs,
+by `QuillApp::resolve_deep_link_here`, which names the asking window as
+the flow's window so the resolved chat opens there and the main window
+comes forward for it. A bare call left the flow with no window: the chat
+opened in a minimized main window, behind the window that asked.
+
 Run by scripts/check-window-scope.py.
 """
 
@@ -25,6 +32,8 @@ import re
 QUEUES = re.compile(
     r"\b(?:mini_apps\s*\.\s*render_action|links\s*\.\s*pending_deep_link_open)\s*=\s*Some\s*\("
 )
+BARE_RESOLVE = re.compile(r"\.\s*resolve_deep_link\s*\(")
+RESOLVE_SEAM = "src/ui/deep_links.rs"
 RAISE = re.compile(r"\b(?:raise_main_window_later|hold_resolved_link)\s*\(")
 MARKER = re.compile(r"//\s*main-frame:\s*\S")
 WITHIN = 12
@@ -54,6 +63,14 @@ def problems(root="."):
             with open(path, encoding="utf-8") as handle:
                 text = strip_test_modules(handle.read())
             lines = text.split("\n")
+            if rel != RESOLVE_SEAM:
+                for m in BARE_RESOLVE.finditer(text):
+                    line = text.count("\n", 0, m.start()) + 1
+                    out.append(
+                        f"{rel}:{line}: a deep link resolved outside its seam; call "
+                        "resolve_deep_link_here (or queue_deep_link), so the flow names "
+                        "the window that asked"
+                    )
             for m in QUEUES.finditer(text):
                 line = text.count("\n", 0, m.start()) + 1
                 above = lines[max(0, line - 4) : line]

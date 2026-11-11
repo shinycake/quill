@@ -211,7 +211,6 @@
 "qll_media_bot_3" = "Bot {user_id}";
 "qll_media_bot_about_text" = "Bot about text";
 "qll_media_bot_actions" = "Bot actions";
-"qll_media_bot_answered" = "Bot answered";
 "qll_media_bot_link_copied" = "Bot link copied";
 "qll_media_bot_menu" = "Bot menu";
 "qll_media_bot_started_demo" = "Bot started (demo)";
@@ -262,6 +261,7 @@
 "qll_media_could_not_add_the_tasks" = "Couldn't add the tasks";
 "qll_media_could_not_archive_the_sticker" = "Couldn't archive the sticker set";
 "qll_media_could_not_change_the_bot" = "Couldn't change the bot";
+"qll_media_could_not_change_the_caption" = "Couldn't change the caption";
 "qll_media_could_not_change_the_profile" = "Could not change the profile post";
 "qll_media_could_not_change_the_sticker" = "Couldn't change the sticker set";
 "qll_media_could_not_change_the_stories" = "Could not change the stories list";
@@ -273,14 +273,18 @@
 "qll_media_could_not_install_sticker_set" = "Couldn't install sticker set";
 "qll_media_could_not_join_the_live" = "could not join the live story";
 "qll_media_could_not_load_animated_emoji" = "Couldn't load animated emoji suggestion";
+"qll_media_could_not_enable_stealth_mode_because" = "Could not enable Stealth Mode: {reason}";
+"qll_media_could_not_load_close_friends" = "Could not load close friends";
 "qll_media_could_not_load_emoji_packs" = "Couldn't load emoji packs";
 "qll_media_could_not_load_members" = "Couldn't load members";
+"qll_media_could_not_load_more_media" = "Could not load more media";
 "qll_media_could_not_load_more_emoji" = "Couldn't load more emoji packs";
 "qll_media_could_not_load_more_stickers" = "Couldn't load more stickers";
 "qll_media_could_not_load_more_trending" = "Couldn't load more trending stickers";
 "qll_media_could_not_load_more_voters" = "Couldn't load more voters";
 "qll_media_could_not_load_poll_stats" = "Couldn't load poll stats";
 "qll_media_could_not_load_public_shares" = "Couldn't load public shares";
+"qll_media_could_not_load_sticker_categories" = "Couldn't load sticker categories. Retry the action.";
 "qll_media_could_not_load_sticker_suggestions" = "Couldn't load sticker suggestions";
 "qll_media_could_not_load_sticker_tab" = "Couldn't load sticker tab";
 "qll_media_could_not_load_story_reactions" = "Couldn't load story reactions";
@@ -289,6 +293,7 @@
 "qll_media_could_not_load_the_bot" = "Could not load the bot.";
 "qll_media_could_not_load_the_bots" = "Could not load the bot's details.";
 "qll_media_could_not_load_voters" = "Couldn't load voters";
+"qll_media_could_not_load_inline_results" = "Couldn't load results";
 "qll_media_could_not_look_up_the" = "could not look up the bot";
 "qll_media_could_not_open_map" = "could not open map";
 "qll_media_could_not_open_message" = "Couldn't open message";
@@ -368,6 +373,7 @@
 "qll_media_demo_live_stories_join_with" = "Demo — live stories join with live TDLib";
 "qll_media_demo_mode_adding_a_bot" = "Demo mode: adding a bot needs a live session.";
 "qll_media_demo_mode_creating_a_bot" = "Demo mode: creating a bot needs a live session.";
+"qll_media_still_creating_a_bot" = "Still creating a bot. Wait for it to finish.";
 "qll_media_demo_mode_editing_a_bot" = "Demo mode: editing a bot needs a live session.";
 "qll_media_demo_mode_sharing_needs_a" = "Demo mode: sharing needs a live session.";
 "qll_media_demo_mode_verifying_needs_a" = "Demo mode: verifying needs a live session.";
@@ -402,7 +408,6 @@
 "qll_media_edit_close_friends" = "Edit close friends…";
 "qll_media_edit_name" = "Edit name";
 "qll_media_edit_story" = "Edit story";
-"qll_media_eligible_to_post" = "✓ Eligible to post";
 "qll_media_emoji" = "Emoji";
 "qll_media_emoji_packs" = "Emoji Packs";
 "qll_media_emoji_set" = "Emoji set";
@@ -490,6 +495,7 @@
 "qll_media_next" = "Next story";
 "qll_media_no_apps_match" = "No apps match “{trim}”.";
 "qll_media_no_apps_to_show_right" = "No apps to show right now.";
+"qll_media_could_not_load_apps" = "Couldn't load apps";
 "qll_media_no_archived_sticker_sets" = "No archived sticker sets.";
 "qll_media_no_chats_found" = "No chats found";
 "qll_media_no_chats_loaded_yet" = "No chats loaded yet.";
@@ -557,6 +563,7 @@
 "qll_media_post_to_chat_page_keep" = "Post to chat page (keep accessible after expiry)";
 "qll_media_posted_it_will_appear_in" = "✓ Posted — it will appear in your story tray";
 "qll_media_posting" = "Posting…";
+"qll_media_still_posting_story" = "The story is still going out. It stays open until that finishes.";
 "qll_media_posting_to_profile" = "Posting to profile…";
 "qll_media_premium" = "Premium";
 "qll_media_preparing" = "Preparing {file_name}…";
@@ -790,3 +797,7 @@
 "qll_media_cover_choose" = "Choose video cover";
 "qll_media_cover_preview_loading" = "Reading the video…";
 "qll_media_cover_unreadable" = "Quill could not read this video, so the cover cannot be chosen.";
+"qll_media_couldnt_load_the_emoji_set" = "Couldn't load the emoji set.";
+"qll_media_couldnt_load_the_bot_info" = "Couldn't load the bot's details.";
+
+"qll_media_cover_waiting_for_video" = "Waiting for the video to finish downloading…";

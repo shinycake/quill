@@ -34,6 +34,28 @@ pub enum WebAppOpenResult {
     },
 }
 
+/// A write-access answer: for which bot, to which request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WriteAnswer {
+    pub request: crate::ids::RequestId,
+    pub bot_user_id: i64,
+    pub result: WriteAccessResult,
+}
+
+impl WriteAnswer {
+    pub fn new(
+        request: crate::ids::RequestId,
+        bot_user_id: i64,
+        result: WriteAccessResult,
+    ) -> Self {
+        Self {
+            request,
+            bot_user_id,
+            result,
+        }
+    }
+}
+
 /// Where a bot stands on messaging the person (`canBotSendMessages`,
 /// `allowBotToSendMessages`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,12 +70,66 @@ pub enum WriteAccessResult {
     Denied,
 }
 
-/// `sendWebAppCustomRequest` answers, keyed by the app's `req_id`.
+/// The outcome of one contact-card send for a mini app's phone request.
+/// It names the `sendMessage` request it answers: only the flow that sent
+/// that request takes it, so a late answer never finishes a later one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhoneShare {
+    Sent(crate::ids::RequestId),
+    Refused(crate::ids::RequestId),
+}
+
+impl PhoneShare {
+    pub fn request(self) -> crate::ids::RequestId {
+        match self {
+            Self::Sent(request) | Self::Refused(request) => request,
+        }
+    }
+
+    pub fn is_sent(self) -> bool {
+        matches!(self, Self::Sent(_))
+    }
+}
+
+/// The outcome of one `toggleBotIsAddedToAttachmentMenu`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttachmentToggle {
+    pub bot_user_id: i64,
+    /// Whether the bot is in the menu now, or why the change failed.
+    pub result: Result<bool, String>,
+}
+
+/// `sendWebAppCustomRequest` answers, keyed by the app's `req_id` and the
+/// launch that asked: another app's window never takes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CustomRequestReply {
+    pub launch_id: i64,
     pub req_id: String,
     /// The JSON result, or an error word for the app.
     pub result: Result<String, String>,
+}
+
+impl WebApps {
+    /// The mini app launch `launch_id` closed: its custom requests in
+    /// flight and the answers nobody took go with it.
+    pub fn forget_custom_requests_of(&mut self, launch_id: i64) {
+        self.custom_requests
+            .retain(|_, (launch, _)| *launch != launch_id);
+        self.custom_replies
+            .retain(|reply| reply.launch_id != launch_id);
+    }
+
+    /// Replace the unconsumed open answer. An `Opened` answer it pushes out
+    /// was never shown, but TDLib started that app: its launch is queued
+    /// for `closeWebApp`, so the bot keeps no live session.
+    pub fn replace_open_result(&mut self, result: Option<WebAppOpenResult>) {
+        if let Some(WebAppOpenResult::Opened { launch_id, .. }) =
+            std::mem::replace(&mut self.open_result, result)
+            && launch_id != 0
+        {
+            self.dropped_launches.push(launch_id);
+        }
+    }
 }
 
 /// Everything mini-app related on the session.
@@ -72,11 +148,12 @@ pub struct WebApps {
     /// failure message, with the bot it was asked for: the flow waiting
     /// takes only its own bot's answer.
     pub attachment_menu_bot: Option<(i64, Result<AttachmentMenuBot, String>)>,
-    /// One-shot: `toggleBotIsAddedToAttachmentMenu` outcome,
-    /// `(bot_user_id, added)` or a failure message.
-    pub attachment_menu_toggled: Option<Result<(i64, bool), String>>,
-    /// One-shot: write-access answers, `(bot_user_id, result)`.
-    pub write_access: Option<(i64, WriteAccessResult)>,
+    /// One-shot: `toggleBotIsAddedToAttachmentMenu` outcomes, oldest
+    /// first, each with the bot it answers: the flow waiting takes only its
+    /// own bot's.
+    pub attachment_menu_toggled: Vec<AttachmentToggle>,
+    /// One-shot: the write-access answer, with the request it answers.
+    pub write_access: Option<WriteAnswer>,
     /// One-shot: `toggleBotCanManageEmojiStatus` outcome,
     /// `(bot_user_id, done)`.
     pub emoji_access: Option<(i64, bool)>,
@@ -84,16 +161,17 @@ pub struct WebApps {
     /// or a failure message, with the bot it was asked for: a second link
     /// clicked before the first answered takes only its own answer.
     pub found: Option<(i64, Result<FoundWebApp, String>)>,
-    /// `req_id`s of custom requests in flight, by `RequestId`.
-    pub custom_requests: HashMap<u64, String>,
+    /// `(launch_id, req_id)` of custom requests in flight, by `RequestId`.
+    pub custom_requests: HashMap<u64, (i64, String)>,
     /// One-shot: custom request answers.
     pub custom_replies: Vec<CustomRequestReply>,
-    /// Apps tab: `getGrossingWebAppBots` bot ids (`None` until loaded).
-    pub grossing_bots: Option<Vec<i64>>,
-    pub grossing_loading: bool,
+    /// Apps tab: `getGrossingWebAppBots` bot ids. One request at a time,
+    /// so its answer and its error need no key; a failure is drawn with
+    /// the tab's reopen as the retry.
+    pub grossing: crate::state::fetch::Fetch<Vec<i64>>,
     /// One-shot: `sendWebAppData` outcome (`Ok` or a failure message).
     pub data_sent: Option<Result<(), String>>,
     /// One-shot: the contact card sent for `web_app_request_phone` was
-    /// taken by TDLib (`true`) or refused (`false`), `(bot_user_id, sent)`.
-    pub phone_share: Option<(i64, bool)>,
+    /// taken by TDLib or refused, with the request it answers.
+    pub phone_share: Option<PhoneShare>,
 }

@@ -26,7 +26,7 @@ use gpui_kit::*;
 use quill::lang::{keys, tr};
 use quill::link_policy::{OpenDecision, open_decision};
 use quill::premium_hub::gift_value::{
-    Availability, GiftValueLookup, Platform, ValueRow, about_text, availability,
+    Availability, GiftValueLookup, GiftValueStage, Platform, ValueRow, about_text, availability,
     format_value_price, fragment_link, row_value, table_rows,
 };
 use quill::premium_hub::upgraded::Collectible;
@@ -58,8 +58,8 @@ pub(super) fn gift_value_row(
         .gift_value
         .as_ref()
         .filter(|lookup| lookup.name == gift.name);
-    let loading = lookup.is_some_and(|lookup| lookup.loading);
-    let error = lookup.and_then(|lookup| lookup.error.clone());
+    let loading = lookup.is_some_and(|lookup| lookup.is_loading());
+    let error = lookup.and_then(|lookup| lookup.error().map(str::to_string));
     let muted = cx.theme().muted_foreground;
     let target = GiftValueLookup::new(gift);
     let learn_more = Button::new("gift-value-learn-more")
@@ -148,7 +148,8 @@ impl QuillApp {
 
     /// "learn more": ask for the value (tdesktop asks once per box and
     /// reopens from what it has). Offline (demos), a known value reopens
-    /// and anything else just shows the loading pill.
+    /// and anything else cannot be asked: the box says so, with a way out
+    /// (it is not left on the loading pill for good).
     pub(super) fn open_gift_value(&mut self, lookup: GiftValueLookup, cx: &mut Context<Self>) {
         match self.live.as_mut() {
             Some(live) => {
@@ -157,12 +158,15 @@ impl QuillApp {
             None => {
                 if let Some(slot) = self.gift_value_mut() {
                     match slot.as_mut() {
-                        Some(known) if known.name == lookup.name && known.info.is_some() => {
-                            known.open = true;
+                        Some(known) if known.name == lookup.name && known.info().is_some() => {
+                            known.reopen();
                         }
                         _ => {
                             *slot = Some(GiftValueLookup {
-                                loading: true,
+                                stage: GiftValueStage::Failed(quill::lang::tr_with(
+                                    quill::lang::keys::Q_GIFT_VALUE_COULDNT_LOAD,
+                                    &[("reason", "not connected")],
+                                )),
                                 ..lookup
                             })
                         }
@@ -174,10 +178,49 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// A "learn more" asked from a box that is gone (the gift box closed or
+    /// another gift was picked, the resale buy box left) must not open the
+    /// value box over whatever is on screen when its answer lands, and its
+    /// error does not wait under a row nobody sees. The host must show this
+    /// very gift: another gift's box does not keep it. A value that is already
+    /// known stays for the next "learn more".
+    pub(super) fn drop_orphaned_gift_value(&mut self) {
+        let Some(session) = self.session() else {
+            return;
+        };
+        let hub = &session.payments.hub;
+        let name = hub.gift_value.as_ref().map(|lookup| lookup.name.as_str());
+        let named =
+            |gift: Option<&Collectible>| gift.is_some_and(|g| Some(g.name.as_str()) == name);
+        let host_shown = named(
+            hub.selected_gift()
+                .and_then(|g| g.gift.collectible.as_deref()),
+        ) || (self.gift_market.top()
+            == Some(&super::gift_market_state::MarketBox::Buy)
+            && named(
+                session
+                    .payments
+                    .gift_market
+                    .buy
+                    .as_ref()
+                    .map(|buy| &buy.listing.gift),
+            ));
+        let pending = hub
+            .gift_value
+            .as_ref()
+            .is_some_and(GiftValueLookup::is_pending);
+        if host_shown || !pending {
+            return;
+        }
+        if let Some(slot) = self.gift_value_mut() {
+            *slot = None;
+        }
+    }
+
     /// Closes the box; the value stays known for the next "learn more".
     pub(super) fn close_gift_value(&mut self, cx: &mut Context<Self>) {
         if let Some(Some(lookup)) = self.gift_value_mut() {
-            lookup.open = false;
+            lookup.close();
         }
         cx.notify();
     }
@@ -202,7 +245,7 @@ impl QuillApp {
         let Some(url) = self
             .session()
             .and_then(|s| s.payments.hub.gift_value.as_ref())
-            .and_then(|lookup| lookup.info.as_ref())
+            .and_then(|lookup| lookup.info())
             .and_then(|info| fragment_link(info).map(str::to_string))
         else {
             return;
@@ -249,7 +292,7 @@ impl QuillApp {
             let Some(lookup) = session.payments.hub.gift_value.clone() else {
                 return dialog.on_close(on_close);
             };
-            let Some(info) = lookup.info.clone() else {
+            let Some(info) = lookup.info().cloned() else {
                 return dialog.on_close(on_close);
             };
             let theme = cx.theme();
@@ -478,7 +521,7 @@ crate::ui::shell::register_dialogs! {
                     .hub
                     .gift_value
                     .as_ref()
-                    .is_some_and(|lookup| lookup.open && lookup.info.is_some())
+                    .is_some_and(|lookup| lookup.is_open())
             })
         },
         QuillApp::build_gift_value_dialog,

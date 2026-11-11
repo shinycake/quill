@@ -21,6 +21,10 @@ pub(super) struct Canvas {
     whole: bool,
     /// The mouse moved: read the cursor again.
     hovered: bool,
+    /// A window shows it. Off screen it does not paint (round 18 C #2: a
+    /// hidden widget's 1 Hz timers painted and redrew the history it left);
+    /// coming back paints a whole frame.
+    shown: bool,
 }
 
 impl Canvas {
@@ -30,6 +34,7 @@ impl Canvas {
             background,
             whole: true,
             hovered: false,
+            shown: true,
         }
     }
 }
@@ -104,7 +109,7 @@ pub(super) fn run(
             break;
         }
         let state = native.state();
-        if state.dirty || canvas.whole {
+        if canvas.shown && (state.dirty || canvas.whole) {
             let frame = paint_frame(&mut native, &resources, &mut canvas);
             if let Some(frame) = frame {
                 quill::locks::lock_or_recover(&outbox).frame = Some(frame);
@@ -145,7 +150,11 @@ fn apply(
                 publish(event);
             }
         }
-        Inbox::Visible(visible) => native.set_visible(visible),
+        Inbox::Visible(visible) => {
+            native.set_visible(visible);
+            canvas.shown = visible;
+            canvas.whole |= visible;
+        }
         Inbox::Theme { theme, background } => {
             native.set_theme(&theme);
             if canvas.background != background {

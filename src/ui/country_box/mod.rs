@@ -6,6 +6,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::dialogs::{PaymentPage, PollPage};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -78,7 +79,8 @@ impl QuillApp {
                 .session
                 .auth_state
                 .countries
-                .clone()
+                .data()
+                .cloned()
                 .unwrap_or_default(),
             None => crate::ui::signin_ui::demo_country_fixtures(),
         }
@@ -91,20 +93,85 @@ impl QuillApp {
             .unwrap_or(POLL_COUNTRIES_FALLBACK)
     }
 
-    fn country_box_slot(&mut self, host: CountryHost) -> Option<&mut Option<CountryBox>> {
+    /// The box open for `host`, if any.
+    fn country_box_mut(&mut self, host: CountryHost) -> Option<&mut CountryBox> {
         match host {
-            CountryHost::Payment => self.payments.dialog.as_mut().map(|d| &mut d.country_box),
+            CountryHost::Payment => self
+                .payments
+                .dialog
+                .as_mut()
+                .and_then(|d| d.country_box_mut()),
             CountryHost::PaymentCard => self
                 .payments
                 .dialog
                 .as_mut()
-                .and_then(|d| d.card_form.as_mut())
-                .map(|form| &mut form.country_box),
+                .and_then(|d| d.card_form_mut())
+                .and_then(|form| form.country_box.as_mut()),
             CountryHost::Poll => self
                 .chat_ui
                 .poll_dialog
                 .as_mut()
-                .map(|d| &mut d.country_box),
+                .and_then(|d| d.country_box_mut()),
+        }
+    }
+
+    /// Open `country_box` for `host` (when its dialog is up).
+    fn put_country_box(&mut self, host: CountryHost, country_box: CountryBox) {
+        match host {
+            CountryHost::Payment => {
+                if let Some(dialog) = self.payments.dialog.as_mut()
+                    && matches!(dialog.page, PaymentPage::Checkout)
+                {
+                    dialog.page = PaymentPage::Country(country_box);
+                }
+            }
+            CountryHost::PaymentCard => {
+                if let Some(form) = self
+                    .payments
+                    .dialog
+                    .as_mut()
+                    .and_then(|d| d.card_form_mut())
+                {
+                    form.country_box = Some(country_box);
+                }
+            }
+            CountryHost::Poll => {
+                if let Some(dialog) = self.chat_ui.poll_dialog.as_mut()
+                    && matches!(dialog.page, PollPage::Opening | PollPage::Form)
+                {
+                    dialog.page = PollPage::Country(country_box);
+                }
+            }
+        }
+    }
+
+    /// Close the box open for `host`.
+    fn drop_country_box(&mut self, host: CountryHost) {
+        match host {
+            CountryHost::Payment => {
+                if let Some(dialog) = self.payments.dialog.as_mut()
+                    && matches!(dialog.page, PaymentPage::Country(_))
+                {
+                    dialog.page = PaymentPage::Checkout;
+                }
+            }
+            CountryHost::PaymentCard => {
+                if let Some(form) = self
+                    .payments
+                    .dialog
+                    .as_mut()
+                    .and_then(|d| d.card_form_mut())
+                {
+                    form.country_box = None;
+                }
+            }
+            CountryHost::Poll => {
+                if let Some(dialog) = self.chat_ui.poll_dialog.as_mut()
+                    && dialog.country_box().is_some()
+                {
+                    dialog.show_form();
+                }
+            }
         }
     }
 
@@ -122,11 +189,9 @@ impl QuillApp {
                     return;
                 };
                 if let Some(live) = self.live.as_mut() {
-                    let _ = live.driver.fetch_countries();
+                    let _ = live.driver.retry_countries();
                 }
-                if let Some(slot) = self.country_box_slot(host) {
-                    *slot = Some(country_box);
-                }
+                self.put_country_box(host, country_box);
                 cx.notify();
                 return;
             }
@@ -152,27 +217,63 @@ impl QuillApp {
         };
         let country_box = CountryBox::new(mode, &chosen, window, cx);
         if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.fetch_countries();
+            let _ = live.driver.retry_countries();
         }
-        if let Some(slot) = self.country_box_slot(host) {
-            *slot = Some(country_box);
+        self.put_country_box(host, country_box);
+        cx.notify();
+    }
+
+    /// The country list could not be loaded: what the boxes draw instead of
+    /// "Loading countries", with Retry.
+    pub(super) fn countries_failed_row(&self, id: &str, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .p_3()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .text_sm()
+            .text_color(cx.theme().muted_foreground)
+            .child(tr(keys::Q_MONEY_COUNTRIES_FAILED))
+            .child(
+                Button::new(SharedString::from(format!("countries-retry-{id}")))
+                    .label(tr(keys::Q_MONEY_RETRY))
+                    .ghost()
+                    .small()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.retry_countries(cx);
+                    })),
+            )
+            .into_any_element()
+    }
+
+    /// Ask for the country list again after it failed.
+    pub(super) fn retry_countries(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.retry_countries();
         }
         cx.notify();
+    }
+
+    /// Whether the live country list failed to load.
+    pub(super) fn countries_failed(&self) -> bool {
+        self.live
+            .as_ref()
+            .is_some_and(|live| live.driver.session.auth_state.countries.error().is_some())
     }
 
     /// A country box is up (Esc closes it before its host).
     pub(super) fn country_box_open(&self) -> bool {
         self.payments.dialog.as_ref().is_some_and(|dialog| {
-            dialog.country_box.is_some()
+            dialog.country_box().is_some()
                 || dialog
-                    .card_form
-                    .as_ref()
+                    .card_form()
                     .is_some_and(|form| form.country_box.is_some())
         }) || self
             .chat_ui
             .poll_dialog
             .as_ref()
-            .is_some_and(|dialog| dialog.country_box.is_some())
+            .is_some_and(|dialog| dialog.country_box().is_some())
     }
 
     pub(super) fn close_open_country_boxes(&mut self, cx: &mut Context<Self>) {
@@ -182,9 +283,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_country_box(&mut self, host: CountryHost, cx: &mut Context<Self>) {
-        if let Some(slot) = self.country_box_slot(host) {
-            *slot = None;
-        }
+        self.drop_country_box(host);
         cx.notify();
     }
 
@@ -195,7 +294,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(country_box) = self.country_box_slot(host).and_then(Option::as_mut) else {
+        let Some(country_box) = self.country_box_mut(host) else {
             return;
         };
         match country_box.selection.click(iso) {
@@ -219,7 +318,7 @@ impl QuillApp {
     }
 
     fn country_box_remove(&mut self, host: CountryHost, iso: &str, cx: &mut Context<Self>) {
-        if let Some(country_box) = self.country_box_slot(host).and_then(Option::as_mut) {
+        if let Some(country_box) = self.country_box_mut(host) {
             country_box.selection.remove(iso);
         }
         cx.notify();
@@ -227,8 +326,7 @@ impl QuillApp {
 
     fn country_box_save(&mut self, host: CountryHost, cx: &mut Context<Self>) {
         let chosen = self
-            .country_box_slot(host)
-            .and_then(|slot| slot.as_ref())
+            .country_box_mut(host)
             .map(|country_box| country_box.selection.chosen().to_vec());
         if let (Some(chosen), CountryHost::Poll) = (chosen, host)
             && let Some(dialog) = self.chat_ui.poll_dialog.as_mut()
@@ -311,9 +409,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let country_box = match host {
-            CountryHost::Payment => self.payments.dialog.as_ref()?.country_box.as_ref()?,
+            CountryHost::Payment => self.payments.dialog.as_ref()?.country_box()?,
             CountryHost::PaymentCard => self.card_form()?.country_box.as_ref()?,
-            CountryHost::Poll => self.chat_ui.poll_dialog.as_ref()?.country_box.as_ref()?,
+            CountryHost::Poll => self.chat_ui.poll_dialog.as_ref()?.country_box()?,
         };
         let countries = self.country_box_countries();
         let query = country_box.search.read(cx).value().to_string();
@@ -331,13 +429,20 @@ impl QuillApp {
             .flex()
             .flex_col();
         if hits.is_empty() {
-            list = list.child(div().p_3().text_sm().text_color(muted).child(
-                if countries.is_empty() {
-                    tr(keys::Q_MONEY_LOADING_COUNTRIES)
-                } else {
-                    tr(keys::Q_OPS_COUNTRY_NOT_FOUND)
-                },
-            ));
+            list = list.child(if countries.is_empty() && self.countries_failed() {
+                self.countries_failed_row(id, cx)
+            } else {
+                div()
+                    .p_3()
+                    .text_sm()
+                    .text_color(muted)
+                    .child(if countries.is_empty() {
+                        tr(keys::Q_MONEY_LOADING_COUNTRIES)
+                    } else {
+                        tr(keys::Q_OPS_COUNTRY_NOT_FOUND)
+                    })
+                    .into_any_element()
+            });
         }
         for country in hits {
             let iso = country.iso.clone();

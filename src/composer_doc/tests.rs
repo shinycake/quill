@@ -385,3 +385,25 @@ fn touching_code_spans_write_as_the_one_span_they_merge_into() {
     assert_eq!(touching.to_markup(), "`abcdef`");
     assert_eq!(touching.to_markup(), merged.to_markup());
 }
+
+#[test]
+fn quotes_on_adjacent_lines_are_one_quote_and_survive_the_markup() {
+    let mut separate = ComposerDoc::plain("a\nb\n\nc");
+    separate.spans = vec![
+        DocSpan::new(0..1, ComposerTag::Quote),
+        DocSpan::new(2..3, ComposerTag::Quote),
+        DocSpan::new(5..6, ComposerTag::Quote),
+    ];
+    separate.normalize();
+    assert_eq!(
+        separate.spans,
+        [
+            DocSpan::new(0..3, ComposerTag::Quote),
+            DocSpan::new(5..6, ComposerTag::Quote)
+        ]
+    );
+    assert_eq!(
+        ComposerDoc::from_markup(&separate.to_final_markup()),
+        separate
+    );
+}

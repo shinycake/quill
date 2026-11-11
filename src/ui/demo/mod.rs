@@ -72,8 +72,7 @@ pub(super) fn seed_ready_custom_emoji_session(sink: Arc<MemorySink>) -> Session 
             thumb_file_id: None,
             thumb_width: 0,
             thumb_height: 0,
-            requires_premium: false,
-            premium_animation: None,
+            premium: None,
         });
     });
     session.open_chat(ChatId(11));
@@ -307,7 +306,6 @@ pub(super) fn seed_ready_downloads_session(sink: Arc<MemorySink>) -> Session {
         .media
         .downloads
         .end_as(26, quill::state::DownloadOrigin::User);
-    session.media.downloads_panel_open = true;
     session
 }
 
@@ -713,8 +711,7 @@ pub(super) fn seed_demo_session(sink: Arc<MemorySink>, kind: DemoSeed) -> Sessio
                 thumb_file_id: None,
                 thumb_width: 0,
                 thumb_height: 0,
-                requires_premium: false,
-                premium_animation: None,
+                premium: None,
             });
         });
     }

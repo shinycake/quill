@@ -64,6 +64,149 @@ fn user_download_send_failure_marks_failed_download() {
 }
 
 #[test]
+fn a_sound_whose_download_cannot_be_sent_is_not_left_waiting() {
+    // 02-210: the pending marker is kept only while the download is out.
+    use crate::connect::SoundResolution;
+    use crate::notify::NotificationSoundKind;
+    use crate::telegram::envelope::{NotificationSound, ParsedFile};
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let sender = Arc::new(FailDownloadSender {
+        sent: Mutex::new(Vec::new()),
+    });
+    let mut driver = ConnectDriver::new(
+        Session::new(AccountKey::primary(), sink.clone()),
+        sender,
+        test_credentials(),
+        prepared,
+    );
+    let seq = AtomicU64::new(0);
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    driver
+        .session
+        .settings
+        .saved_sounds
+        .succeed(vec![NotificationSound {
+            id: 7,
+            duration: 1,
+            date: 0,
+            title: "Chime".into(),
+            data: String::new(),
+            sound: ParsedFile {
+                id: FileId(31),
+                size: 10,
+                expected_size: 10,
+                local: crate::telegram::envelope::LocalFileState::from_parts(
+                    String::new(),
+                    true,
+                    false,
+                    false,
+                    0,
+                ),
+            },
+        }]);
+    let resolved = driver.resolve_notification_sound(NotificationSoundKind::Custom(7));
+    assert!(matches!(resolved, SoundResolution::Pending));
+    assert!(driver.session.settings.pending_sound_downloads.is_empty());
+    assert!(driver.session.settings.sound_file_ids.is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Refuses the send that names one network; records the rest.
+struct RefuseNetworkSender {
+    refuse: &'static str,
+    sent: Mutex<Vec<String>>,
+}
+
+impl JsonSender for Arc<RefuseNetworkSender> {
+    fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
+        if request.contains(self.refuse) {
+            return Err(ConnectSendError::Native);
+        }
+        self.sent
+            .lock()
+            .expect("refuse network sender")
+            .push(request.to_string());
+        Ok(())
+    }
+}
+
+#[test]
+fn less_data_for_calls_reaches_every_network_when_one_send_fails() {
+    // 02-207: one refused send does not leave the later networks out.
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let sender = Arc::new(RefuseNetworkSender {
+        refuse: r#""@type":"networkTypeMobile""#,
+        sent: Mutex::new(Vec::new()),
+    });
+    let mut driver = ConnectDriver::new(
+        Session::new(AccountKey::primary(), sink.clone()),
+        sender.clone(),
+        test_credentials(),
+        prepared,
+    );
+    let seq = AtomicU64::new(0);
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    driver.session.settings.data_storage.seeded = crate::data_settings::PresetsSeed::Seeded;
+    assert!(driver.set_less_data_for_calls(true).is_err());
+    let sent = sender.sent.lock().expect("sent").clone();
+    let sent_sets = sent
+        .iter()
+        .filter(|json| json.contains("setAutoDownloadSettings"))
+        .count();
+    assert_eq!(sent_sets, 2, "roaming and wifi still went out");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_badge_pref_that_cannot_be_saved_is_not_applied() {
+    // 11-p5-010: the session changes only once the file is written.
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let mut driver = ConnectDriver::new(
+        Session::new(AccountKey::primary(), sink),
+        recorder,
+        test_credentials(),
+        prepared,
+    );
+    let before = driver.session.settings.badge_prefs;
+    let mut next = before;
+    next.include_muted = !before.include_muted;
+    assert!(driver.set_badge_prefs(next).is_ok());
+    assert_eq!(driver.session.settings.badge_prefs, next);
+    // A directory where the file goes: the write fails.
+    let file = driver.paths.root.join("badge_prefs.json");
+    let _ = std::fs::remove_file(&file);
+    std::fs::create_dir_all(&file).unwrap();
+    assert!(driver.set_badge_prefs(before).is_err());
+    assert_eq!(driver.session.settings.badge_prefs, next);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn user_downloads_use_list_api_pause_and_cancel() {
     // Slice media-downloads-pause: user-initiated downloads go through
     // `addFileToDownloads` (not one-shot `downloadFile`); pause/resume
@@ -356,8 +499,9 @@ fn sessions_terminate_ok_triggers_authoritative_refetch() {
     assert_eq!(snapshot.len(), sent + 1);
     assert!(snapshot[sent].contains("\"@type\":\"getActiveSessions\""));
     assert_eq!(driver.session.settings.sessions.data().unwrap().len(), 2);
-    assert!(driver.session.settings.sessions_stale);
-    assert!(!driver.session.settings.sessions_mutating);
+    // The refetch took the mark when it went out.
+    assert!(!driver.session.settings.sessions_op.is_stale());
+    assert!(!driver.session.settings.sessions_op.is_mutating());
     // The authoritative answer lands — the @extra comes from the
     // recorded outbound JSON (what TDLib would echo back).
     let fetch_extra: i64 = {
@@ -385,7 +529,7 @@ fn sessions_terminate_ok_triggers_authoritative_refetch() {
     let sessions = driver.session.settings.sessions.data().expect("refetched");
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0].id, 11);
-    assert!(!driver.session.settings.sessions_stale);
+    assert!(!driver.session.settings.sessions_op.is_stale());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -454,7 +598,8 @@ fn session_toggle_ok_triggers_authoritative_refetch() {
     assert_eq!(snapshot.len(), sent + 1);
     assert!(snapshot[sent].contains("\"@type\":\"getActiveSessions\""));
     assert!(driver.session.settings.sessions.data().unwrap()[1].can_accept_calls);
-    assert!(driver.session.settings.sessions_stale);
+    // The refetch took the mark when it went out.
+    assert!(!driver.session.settings.sessions_op.is_stale());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -481,7 +626,7 @@ fn websites_fetch_guards() {
     );
     assert_eq!(recorder.snapshot().len(), sent_after_first);
     // Cached: no refetch.
-    driver.session.settings.connected_websites = Some(vec![]);
+    driver.session.settings.connected_websites = crate::state::fetch::Fetch::Ready(vec![]);
     assert!(
         driver
             .maybe_fetch_connected_websites()
@@ -502,20 +647,21 @@ fn websites_disconnect_guards() {
     // nothing sent.
     let sent_before = recorder.snapshot().len();
     assert_invalid(driver.disconnect_all_websites());
-    driver.session.settings.connected_websites = Some(vec![]);
+    driver.session.settings.connected_websites = crate::state::fetch::Fetch::Ready(vec![]);
     assert_invalid(driver.disconnect_all_websites());
     assert_eq!(recorder.snapshot().len(), sent_before);
-    driver.session.settings.connected_websites = Some(vec![ParsedWebsite {
-        id: 55,
-        domain_name: "example.com".into(),
-        bot_user_id: 77,
-        browser: "Chrome".into(),
-        platform: "Web".into(),
-        log_in_date: 1758900000,
-        last_active_date: 1759000000,
-        ip_address: "9.9.9.9".into(),
-        location: "Boston, United States".into(),
-    }]);
+    driver.session.settings.connected_websites =
+        crate::state::fetch::Fetch::Ready(vec![ParsedWebsite {
+            id: 55,
+            domain_name: "example.com".into(),
+            bot_user_id: 77,
+            browser: "Chrome".into(),
+            platform: "Web".into(),
+            log_in_date: 1758900000,
+            last_active_date: 1759000000,
+            ip_address: "9.9.9.9".into(),
+            location: "Boston, United States".into(),
+        }]);
     // Unknown id: refused, nothing sent.
     let sent_before = recorder.snapshot().len();
     assert_invalid(driver.disconnect_website(66));
@@ -541,17 +687,18 @@ fn websites_disconnect_guards() {
 #[test]
 fn disconnect_all_websites_ok_triggers_authoritative_refetch() {
     let (dir, mut driver, recorder, _sink, dyn_sink, seq) = sessions_driver();
-    driver.session.settings.connected_websites = Some(vec![ParsedWebsite {
-        id: 55,
-        domain_name: "example.com".into(),
-        bot_user_id: 77,
-        browser: "Chrome".into(),
-        platform: "Web".into(),
-        log_in_date: 1758900000,
-        last_active_date: 1759000000,
-        ip_address: "9.9.9.9".into(),
-        location: "Boston, United States".into(),
-    }]);
+    driver.session.settings.connected_websites =
+        crate::state::fetch::Fetch::Ready(vec![ParsedWebsite {
+            id: 55,
+            domain_name: "example.com".into(),
+            bot_user_id: 77,
+            browser: "Chrome".into(),
+            platform: "Web".into(),
+            log_in_date: 1758900000,
+            last_active_date: 1759000000,
+            ip_address: "9.9.9.9".into(),
+            location: "Boston, United States".into(),
+        }]);
     let extra = driver.disconnect_all_websites().expect("disconnect send");
     let sent = recorder.snapshot().len();
     driver
@@ -575,12 +722,13 @@ fn disconnect_all_websites_ok_triggers_authoritative_refetch() {
             .session
             .settings
             .connected_websites
-            .as_ref()
+            .data()
             .unwrap()
             .len(),
         1
     );
-    assert!(driver.session.settings.websites_stale);
+    // The refetch took the mark when it went out.
+    assert!(!driver.session.settings.websites_op.is_stale());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -613,8 +761,11 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
             serde_json::json!({"@type":"session","id":11}),
         ))
         .unwrap();
-    assert!(driver.session.settings.sessions_mutating);
-    assert_eq!(driver.session.settings.device_login_result, None);
+    assert!(driver.session.settings.sessions_op.is_mutating());
+    assert_eq!(
+        driver.session.settings.device_login,
+        crate::state::DeviceLogin::InFlight(request)
+    );
     driver
         .ingest(response(
             request,
@@ -622,10 +773,13 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         ))
         .unwrap();
     assert_eq!(
-        driver.session.settings.device_login_result,
-        Some(crate::auth::DeviceLoginResult::Linked)
+        driver.session.settings.device_login,
+        crate::state::DeviceLogin::Done {
+            request,
+            result: crate::auth::DeviceLoginResult::Linked
+        }
     );
-    assert!(!driver.session.settings.sessions_mutating);
+    assert!(!driver.session.settings.sessions_op.is_mutating());
     assert!(
         recorder.snapshot()[sent..]
             .iter()
@@ -638,10 +792,13 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         let request = driver.confirm_device_login(link).unwrap();
         driver.ingest(response(request, body)).unwrap();
         assert_eq!(
-            driver.session.settings.device_login_result,
-            Some(crate::auth::DeviceLoginResult::Failed)
+            driver.session.settings.device_login,
+            crate::state::DeviceLogin::Done {
+                request,
+                result: crate::auth::DeviceLoginResult::Failed
+            }
         );
-        assert!(!driver.session.settings.sessions_mutating);
+        assert!(!driver.session.settings.sessions_op.is_mutating());
     }
     let request = driver.confirm_device_login(link).unwrap();
     driver
@@ -651,7 +808,27 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         ))
         .unwrap();
     assert_eq!(
-        driver.session.settings.device_login_result,
+        driver.session.settings.device_login,
+        crate::state::DeviceLogin::Done {
+            request,
+            result: crate::auth::DeviceLoginResult::PasswordRequired
+        }
+    );
+    assert_eq!(
+        driver
+            .session
+            .settings
+            .device_login
+            .take_result_for(crate::ids::RequestId(request.0 + 1)),
+        None,
+        "another request's result is not this asker's"
+    );
+    assert_eq!(
+        driver
+            .session
+            .settings
+            .device_login
+            .take_result_for(request),
         Some(crate::auth::DeviceLoginResult::PasswordRequired)
     );
     driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
@@ -720,7 +897,7 @@ fn default_auto_delete_fetch_and_set() {
         .ingest(copy_and_parse(&answer, &seq, &dyn_sink).unwrap())
         .unwrap();
     assert_eq!(
-        driver.session.settings.default_auto_delete_secs,
+        driver.session.settings.default_auto_delete.data().copied(),
         Some(86_400)
     );
     // Cached: no refetch.
@@ -746,8 +923,26 @@ fn default_auto_delete_fetch_and_set() {
         .ingest(copy_and_parse(&ok, &seq, &dyn_sink).unwrap())
         .unwrap();
     assert_eq!(
-        driver.session.settings.default_auto_delete_secs,
+        driver.session.settings.default_auto_delete.data().copied(),
         Some(604_800)
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_account_ttl_write_goes_out_while_the_read_is_in_flight_but_not_beside_another_write() {
+    let (dir, mut driver, recorder, _sink, _dyn_sink, _seq) = sessions_driver();
+    driver.get_account_ttl().expect("send").expect("request id");
+    assert!(driver.session.settings.account_ttl.is_loading());
+    // The read does not block the write.
+    let sent = recorder.snapshot().len();
+    driver.set_account_ttl(180).expect("the write is sent");
+    let snapshot = recorder.snapshot();
+    assert_eq!(snapshot.len(), sent + 1);
+    assert!(snapshot[sent].contains("\"@type\":\"setAccountTtl\""));
+    // One write at a time.
+    assert_invalid(driver.set_account_ttl(365));
+    assert_invalid(driver.delete_account("", ""));
+    assert_eq!(recorder.snapshot().len(), sent + 1);
     let _ = std::fs::remove_dir_all(&dir);
 }

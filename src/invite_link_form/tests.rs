@@ -128,10 +128,10 @@ fn approval_drops_the_member_limit_and_the_fee() {
     let mut form = InviteLinkForm::new_link(channel());
     form.usage = Usage::Limit(100);
     assert_eq!(form.toggle_subscription(), SubscriptionToggle::Toggled);
-    assert!(form.subscription);
+    assert!(form.is_subscription());
     form.toggle_approval();
-    assert!(form.request_approval);
-    assert!(!form.subscription);
+    assert!(form.approving());
+    assert!(!form.is_subscription());
     assert!(!form.shows_usage());
     assert_eq!(
         form.request("", 0, NOW),
@@ -143,7 +143,7 @@ fn approval_drops_the_member_limit_and_the_fee() {
         }
     );
     form.toggle_subscription();
-    assert!(!form.request_approval);
+    assert!(!form.approving());
     assert!(!form.shows_limits());
 }
 
@@ -190,14 +190,14 @@ fn a_public_chat_locks_approval_off() {
     let mut form = InviteLinkForm::new_link(public);
     assert!(form.approval_locked());
     form.toggle_approval();
-    assert!(!form.request_approval);
+    assert!(!form.approving());
     let approving = ChatFacts {
         global_request_approval: true,
         ..public
     };
     let mut form = InviteLinkForm::new_link(approving);
     form.toggle_approval();
-    assert!(form.request_approval);
+    assert!(form.approving());
 }
 
 #[test]
@@ -221,12 +221,12 @@ fn editing_prefills_and_sends_edit() {
 #[test]
 fn a_subscription_link_only_renames() {
     let mut form = InviteLinkForm::edit_link(channel(), &link(0, 0, Some(100)));
-    assert_eq!(form.locked_stars, Some(100));
+    assert_eq!(form.locked_stars(), Some(100));
     assert!(!form.shows_limits());
     assert!(!form.shows_approval());
     assert_eq!(form.toggle_subscription(), SubscriptionToggle::Locked);
     form.toggle_approval();
-    assert!(!form.request_approval);
+    assert!(!form.approving());
     assert_eq!(
         form.request("Gold", 999, NOW),
         InviteLinkRequest::EditSubscription {
@@ -265,4 +265,19 @@ fn the_dollar_rate_comes_from_the_app_config() {
     assert_eq!(stars_usd(100, 1.3).as_deref(), Some("$1.30"));
     assert_eq!(stars_usd(2500, 1.3).as_deref(), Some("$32.50"));
     assert_eq!(stars_usd(0, 1.3), None);
+}
+
+#[test]
+fn an_ordinary_link_cannot_become_a_subscription() {
+    let mut form = InviteLinkForm::edit_link(channel(), &link(0, 25, None));
+    assert!(!form.offers_subscription());
+    assert_eq!(form.toggle_subscription(), SubscriptionToggle::Locked);
+    assert!(!form.is_subscription());
+    assert!(matches!(
+        form.request("", 0, NOW),
+        InviteLinkRequest::Edit {
+            member_limit: 25,
+            ..
+        }
+    ));
 }

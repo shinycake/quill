@@ -90,7 +90,7 @@ fn the_info_box_asks_tdlib_and_keeps_the_answer() {
             .info
             .as_ref()
             .unwrap()
-            .loading
+            .is_loading()
     );
     feed(
         &mut driver,
@@ -100,9 +100,9 @@ fn the_info_box_asks_tdlib_and_keeps_the_answer() {
             "status":{"@type":"giveawayParticipantStatusParticipating"},"is_ended":false}),
     );
     let lookup = driver.session.payments.giveaway.info.as_ref().unwrap();
-    assert!(!lookup.loading);
+    assert!(!lookup.is_loading());
     assert!(matches!(
-        lookup.info,
+        lookup.info(),
         Some(GiveawayInfoData::Ongoing { .. })
     ));
 
@@ -114,7 +114,7 @@ fn the_info_box_asks_tdlib_and_keeps_the_answer() {
         json!({"@type":"error","@extra":extra.as_extra(),"code":400,"message":"MESSAGE_ID_INVALID"}),
     );
     let lookup = driver.session.payments.giveaway.info.as_ref().unwrap();
-    assert!(!lookup.loading && lookup.info.is_none() && lookup.error.is_some());
+    assert!(!lookup.is_loading() && lookup.info().is_none() && lookup.error().is_some());
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -141,10 +141,62 @@ fn the_info_box_takes_only_its_own_answer() {
     );
     let lookup = driver.session.payments.giveaway.info.as_ref().unwrap();
     assert_eq!(lookup.message_id, 56);
-    assert!(lookup.loading && lookup.info.is_none() && lookup.error.is_none());
+    assert!(lookup.is_loading() && lookup.info().is_none() && lookup.error().is_none());
     feed(&mut driver, &seq, &sink, ongoing(&b));
     let lookup = driver.session.payments.giveaway.info.as_ref().unwrap();
-    assert!(!lookup.loading && lookup.info.is_some());
+    assert!(!lookup.is_loading() && lookup.info().is_some());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// Sweep s4-payments-2, 10-010: asking the prices for another channel drops
+/// the first channel's at once, and the first's late answer does not fill
+/// the second's form.
+#[test]
+fn the_prices_of_another_channel_are_not_shown_for_this_one() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    driver.request_giveaway_options(-100).unwrap();
+    let first = sent_request(&recorder, "getPremiumGiveawayPaymentOptions")["@extra"].clone();
+    let answer = |extra: &serde_json::Value| {
+        json!({"@type":"premiumGiveawayPaymentOptions","@extra":extra,
+            "options":[{"currency":"USD","amount":1500,"winner_count":5,"month_count":3}]})
+    };
+    feed(&mut driver, &seq, &sink, answer(&first));
+    assert_eq!(
+        driver
+            .session
+            .payments
+            .giveaway
+            .options
+            .premium_options()
+            .len(),
+        1
+    );
+    driver.request_giveaway_options(-200).unwrap();
+    assert!(
+        driver
+            .session
+            .payments
+            .giveaway
+            .options
+            .premium_options()
+            .is_empty(),
+        "the first channel's prices are gone while the second's load"
+    );
+    // The first channel's answer comes late: not the second's.
+    feed(&mut driver, &seq, &sink, answer(&first));
+    assert!(
+        driver
+            .session
+            .payments
+            .giveaway
+            .options
+            .premium_options()
+            .is_empty()
+    );
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -177,8 +229,8 @@ fn price_options_only_inform() {
     );
     let options = &driver.session.payments.giveaway.options;
     assert!(!options.loading());
-    assert_eq!(options.premium.len(), 1);
-    assert!(options.stars.is_empty() && options.stars_error.is_some());
+    assert_eq!(options.premium_options().len(), 1);
+    assert!(options.stars_options().is_empty() && options.stars.error().is_some());
     for ty in ["getPaymentForm", "sendPaymentForm", "launchPrepaidGiveaway"] {
         assert_eq!(count_sent(&recorder, ty), 0);
     }
@@ -213,8 +265,8 @@ fn a_prepaid_giveaway_launches_only_on_the_explicit_call() {
     assert_eq!(sent["parameters"]["prize_description"], "A mug");
     assert_eq!(sent["parameters"]["boosted_chat_id"], -100);
     assert!(matches!(
-        driver.session.payments.giveaway.launch,
-        GiveawayLaunch::Launching { chat_id: -100, .. }
+        driver.session.payments.giveaway.launches.stage(-100),
+        GiveawayLaunch::Launching { .. }
     ));
     // A second click while it runs sends nothing.
     assert!(driver.launch_prepaid_giveaway(&draft, NOW).is_err());
@@ -227,14 +279,94 @@ fn a_prepaid_giveaway_launches_only_on_the_explicit_call() {
         json!({"@type":"ok","@extra":extra.as_extra()}),
     );
     assert_eq!(
-        driver.session.payments.giveaway.launch,
-        GiveawayLaunch::Launched
+        driver.session.payments.giveaway.launches.stage(-100),
+        &GiveawayLaunch::Launched
     );
     // The cached boost numbers are dropped so the page asks again.
     assert!(!driver.session.groups.chat_boost_status.contains_key(&-100));
     for ty in ["getPaymentForm", "sendPaymentForm"] {
         assert_eq!(count_sent(&recorder, ty), 0);
     }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// Start in chat A, open B's form while the launch is out: B's form shows
+/// neither the launch in flight nor its answer or error; A's cached boost
+/// status is still dropped.
+#[test]
+fn a_launch_answer_for_one_chat_does_not_land_in_another_chats_form() {
+    for fail in [false, true] {
+        let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+        let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+        let recorder = Arc::new(RecordingSender::new());
+        let seq = AtomicU64::new(0);
+        let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+        driver.session.groups.chat_boost_status.insert(-100, (1, 2));
+        driver.session.groups.chat_boost_status.insert(-200, (3, 4));
+        let extra = driver
+            .launch_prepaid_giveaway(&prepaid_draft(), NOW)
+            .unwrap();
+        // The form for chat B opens (what `open_giveaway_form` does).
+        let giveaway = &mut driver.session.payments.giveaway;
+        giveaway.launches.for_form(-200);
+        assert!(!giveaway.launches.is_launching_for(-200));
+        let answer = if fail {
+            json!({"@type":"error","@extra":extra.as_extra(),"code":400,"message":"GIVEAWAY_ID_INVALID"})
+        } else {
+            json!({"@type":"ok","@extra":extra.as_extra()})
+        };
+        feed(&mut driver, &seq, &sink, answer);
+        let launch = &driver.session.payments.giveaway.launches;
+        assert!(
+            !launch.is_done_for(-200) && launch.failure_for(-200).is_none(),
+            "B's form shows nothing of A's launch"
+        );
+        assert_eq!(launch.is_done_for(-100), !fail);
+        assert_eq!(launch.failure_for(-100).is_some(), fail);
+        assert_eq!(
+            driver.session.groups.chat_boost_status.contains_key(&-100),
+            fail,
+            "A's boost status is dropped when its launch succeeded"
+        );
+        assert!(driver.session.groups.chat_boost_status.contains_key(&-200));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+/// Start in chat A, open B's form, then A's again while the launch is
+/// out: A's launch is still in flight there, so its Start stays disabled
+/// and a second press sends nothing.
+#[test]
+fn going_back_to_a_chat_keeps_its_launch_in_flight() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let extra = driver
+        .launch_prepaid_giveaway(&prepaid_draft(), NOW)
+        .unwrap();
+    // A's form closes, B's opens and closes, A's opens again (what
+    // `close_giveaway_form` and `open_giveaway_form` do each time).
+    for chat in [-100, -200, -200, -100] {
+        driver.session.payments.giveaway.launches.for_form(chat);
+    }
+    let launch = &driver.session.payments.giveaway.launches;
+    assert!(launch.is_launching_for(-100), "A's Start stays disabled");
+    assert!(!launch.is_launching_for(-200), "B's Start is not");
+    assert!(
+        driver
+            .launch_prepaid_giveaway(&prepaid_draft(), NOW)
+            .is_err()
+    );
+    assert_eq!(count_sent(&recorder, "launchPrepaidGiveaway"), 1);
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type":"ok","@extra":extra.as_extra()}),
+    );
+    assert!(driver.session.payments.giveaway.launches.is_done_for(-100));
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -255,8 +387,8 @@ fn a_failed_launch_reports_the_reason() {
         json!({"@type":"error","@extra":extra.as_extra(),"code":400,"message":"GIVEAWAY_ID_INVALID"}),
     );
     assert!(matches!(
-        driver.session.payments.giveaway.launch,
-        GiveawayLaunch::Failed(ref text) if text.starts_with("Couldn't start")
+        driver.session.payments.giveaway.launches.stage(-100),
+        GiveawayLaunch::Failed { reason } if reason.starts_with("Couldn't start")
     ));
     // After a failure the user can try again.
     assert!(

@@ -7,7 +7,8 @@
 //! width, drawing the pictures itself.
 
 use super::super::model::{
-    self, CIRCLE_DIAMETER, Command, Pin, PinKind, drop_index, index_at, pin_x,
+    self, CIRCLE_DIAMETER, Command, Echo, Pin, PinKey, PinKind, PinTouch, TouchEnd, drop_index,
+    index_at, pin_x,
 };
 use super::super::{Palette, initials, initials_colors};
 use super::draw;
@@ -26,8 +27,6 @@ use std::time::{Duration, Instant};
 
 /// tdesktop `st::slideWrapDuration` and `st::dialogsOnlineBadgeDuration`.
 const ANIMATION: Duration = Duration::from_millis(150);
-/// Qt's start drag distance: a touch that moves less is a tap.
-const DRAG_START: f64 = 10.;
 /// tdesktop `kOnlineCircleSize`, `kOnlineCircleStrokeWidth`.
 const ONLINE_SIZE: f64 = 8.;
 const ONLINE_STROKE: f64 = 1.5;
@@ -41,7 +40,15 @@ const BADGE_PADDING: f64 = 4.;
 struct Slide {
     from: f64,
     to: f64,
-    started: Option<Instant>,
+    run: SlideRun,
+}
+
+/// Whether a slide is moving.
+#[derive(Clone, Copy, Debug)]
+enum SlideRun {
+    Still,
+    /// Moving since this instant.
+    Since(Instant),
 }
 
 impl Slide {
@@ -49,12 +56,12 @@ impl Slide {
         Self {
             from: value,
             to: value,
-            started: None,
+            run: SlideRun::Still,
         }
     }
 
     fn value(&self, now: Instant) -> f64 {
-        let Some(started) = self.started else {
+        let SlideRun::Since(started) = self.run else {
             return self.to;
         };
         let t = (now.saturating_duration_since(started).as_secs_f64() / ANIMATION.as_secs_f64())
@@ -65,8 +72,10 @@ impl Slide {
     }
 
     fn animating(&self, now: Instant) -> bool {
-        self.started
-            .is_some_and(|started| now.saturating_duration_since(started) < ANIMATION)
+        match self.run {
+            SlideRun::Since(started) => now.saturating_duration_since(started) < ANIMATION,
+            SlideRun::Still => false,
+        }
     }
 
     fn go(&mut self, to: f64, now: Instant, animate: bool) {
@@ -75,7 +84,11 @@ impl Slide {
         }
         self.from = if animate { self.value(now) } else { to };
         self.to = to;
-        self.started = animate.then_some(now);
+        self.run = if animate {
+            SlideRun::Since(now)
+        } else {
+            SlideRun::Still
+        };
     }
 }
 
@@ -85,19 +98,24 @@ struct Entry {
     online: Slide,
 }
 
-/// A drag in progress.
-struct Drag {
-    index: usize,
-    start_x: f64,
-    x: f64,
-    started: bool,
+/// Where the order of the pictures comes from.
+#[derive(Default)]
+enum Order {
+    /// The model's.
+    #[default]
+    Model,
+    /// A drop put this order on screen and asked for it; the model's old
+    /// order is not drawn until it shows this one, the pins change, or the
+    /// request is refused ([`PinnedPanel::reorder_refused`]).
+    Reordering(Vec<PinKey>),
 }
 
 #[derive(Default)]
 pub(super) struct Ivars {
+    order: RefCell<Order>,
     entries: RefCell<Vec<Entry>>,
     palette: Cell<Option<Palette>>,
-    touch: RefCell<Option<Drag>>,
+    touch: RefCell<Option<PinTouch>>,
     timer: RefCell<Option<Retained<NSTimer>>>,
 }
 
@@ -161,6 +179,14 @@ impl PinnedPanel {
         let now = Instant::now();
         let mtm = MainThreadMarker::from(self);
         let active = NSApplication::sharedApplication(mtm).isActive();
+        let arranged;
+        let pins = match self.dropped_order_holds(pins) {
+            Some(local) => {
+                arranged = local;
+                arranged.as_slice()
+            }
+            None => pins,
+        };
         let same_order = {
             let Ok(entries) = self.ivars().entries.try_borrow() else {
                 return;
@@ -231,12 +257,7 @@ impl PinnedPanel {
     fn touch_began(&self, x: f64) {
         let index = index_at(x, self.count());
         if let Ok(mut touch) = self.ivars().touch.try_borrow_mut() {
-            *touch = index.map(|index| Drag {
-                index,
-                start_x: x,
-                x,
-                started: false,
-            });
+            *touch = index.map(|index| PinTouch::Pressed { index, start_x: x });
         }
     }
 
@@ -249,18 +270,51 @@ impl PinnedPanel {
         let Some(drag) = touch.as_mut() else {
             return;
         };
-        drag.x = x;
         // Only pinned chats move, and only with another one to swap with.
-        let movable = drag.index >= first && count.saturating_sub(first) >= 2;
-        if !drag.started {
-            if !movable || (x - drag.start_x).abs() < DRAG_START {
-                return;
+        let movable = match *drag {
+            PinTouch::Pressed { index, .. } | PinTouch::Dragging { index, .. } => {
+                index >= first && count.saturating_sub(first) >= 2
             }
-            drag.started = true;
-        }
-        let (index, shift) = (drag.index, x - drag.start_x);
+        };
+        *drag = drag.moved(x, movable);
+        let PinTouch::Dragging { index, start_x } = *drag else {
+            return;
+        };
         drop(touch);
-        self.layout_drag(index, shift, first, count);
+        self.layout_drag(index, x - start_x, first, count);
+    }
+
+    /// While a dropped order waits for the server, `pins` (the model's,
+    /// still in the old order) in the order on screen. `None` when the
+    /// model's order is the one to draw.
+    fn dropped_order_holds(&self, pins: &[Pin]) -> Option<Vec<Pin>> {
+        let keys: Vec<PinKey> = pins.iter().map(Pin::key).collect();
+        let mut order = self.ivars().order.try_borrow_mut().ok()?;
+        let Order::Reordering(dropped) = &*order else {
+            return None;
+        };
+        if model::reorder_echo(dropped, &keys) != Echo::Waiting {
+            *order = Order::Model;
+            return None;
+        }
+        let entries = self.ivars().entries.try_borrow().ok()?;
+        let local: Vec<Pin> = entries
+            .iter()
+            .filter_map(|entry| {
+                pins.iter()
+                    .find(|pin| pin.key() == entry.pin.key())
+                    .cloned()
+            })
+            .collect();
+        (local.len() == pins.len()).then_some(local)
+    }
+
+    /// The server refused the order a drop asked for: the model's order is
+    /// drawn again at the next sync.
+    pub(super) fn reorder_refused(&self) {
+        if let Ok(mut order) = self.ivars().order.try_borrow_mut() {
+            *order = Order::Model;
+        }
     }
 
     /// The dragged picture follows the touch; the others step aside.
@@ -295,29 +349,44 @@ impl PinnedPanel {
         let Some(drag) = drag else {
             return;
         };
-        if drag.started {
-            self.finish_drag(&drag, x);
-        } else if ended && (x - drag.start_x).abs() < DRAG_START {
-            self.open(drag.index);
+        match drag.end(x, ended) {
+            TouchEnd::Drop { index, start_x } => self.finish_drag(index, start_x, x),
+            TouchEnd::SnapBack => self.cancel_drag(),
+            TouchEnd::Open(index) => self.open(index),
+            TouchEnd::Nothing => {}
         }
     }
 
+    /// A drag that did not end: the pictures slide back, nothing is sent.
+    fn cancel_drag(&self) {
+        let now = Instant::now();
+        if let Ok(mut entries) = self.ivars().entries.try_borrow_mut() {
+            for entry in entries.iter_mut() {
+                entry.shift.go(0., now, true);
+            }
+        }
+        NSView::setNeedsDisplay(self, true);
+        self.animate_if_needed();
+    }
+
     /// Drop the dragged chat into its slot and save the order.
-    fn finish_drag(&self, drag: &Drag, x: f64) {
+    fn finish_drag(&self, index: usize, start_x: f64, x: f64) {
         let now = Instant::now();
         let first = self.first_reorderable();
         let count = self.count();
-        let target = drop_index(drag.index, x - drag.start_x, first, count);
+        let target = drop_index(index, x - start_x, first, count);
         let pitch = CIRCLE_DIAMETER + model::PINNED_SPACE;
         let mut ids = None;
+        let mut dropped = None;
         if let Ok(mut entries) = self.ivars().entries.try_borrow_mut() {
             let pins: Vec<Pin> = entries.iter().map(|entry| entry.pin.clone()).collect();
-            ids = model::reordered_ids(&pins, drag.index, target);
-            if target != drag.index && drag.index < entries.len() && target < entries.len() {
+            ids = model::reordered_ids(&pins, index, target);
+            if target != index && index < entries.len() && target < entries.len() {
                 // The dragged picture lands from where the touch left it.
-                let landed = (x - drag.start_x) - (target as f64 - drag.index as f64) * pitch;
-                let moved = entries.remove(drag.index);
+                let landed = (x - start_x) - (target as f64 - index as f64) * pitch;
+                let moved = entries.remove(index);
                 entries.insert(target, moved);
+                dropped = Some(entries.iter().map(|entry| entry.pin.key()).collect());
                 for (i, entry) in entries.iter_mut().enumerate() {
                     if i == target {
                         entry.shift = Slide::at(landed);
@@ -333,6 +402,10 @@ impl PinnedPanel {
         NSView::setNeedsDisplay(self, true);
         self.animate_if_needed();
         if let Some(ids) = ids {
+            // The new order stays on screen until the model shows it.
+            if let (Some(keys), Ok(mut order)) = (dropped, self.ivars().order.try_borrow_mut()) {
+                *order = Order::Reordering(keys);
+            }
             super::send(Command::ReorderPinned(ids));
         }
     }
@@ -411,10 +484,10 @@ impl PinnedPanel {
         };
         let now = Instant::now();
         let dragged = self.ivars().touch.try_borrow().ok().and_then(|touch| {
-            touch
-                .as_ref()
-                .filter(|drag| drag.started)
-                .map(|drag| drag.index)
+            touch.as_ref().and_then(|drag| match *drag {
+                PinTouch::Dragging { index, .. } => Some(index),
+                PinTouch::Pressed { .. } => None,
+            })
         });
         // The dragged picture is drawn last, over the others.
         for (i, entry) in entries.iter().enumerate() {

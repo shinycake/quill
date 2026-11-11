@@ -199,7 +199,7 @@ impl QuillApp {
             Some(tr(history_value(visible)).to_string()),
             cx.listener(move |this, _, _, cx| {
                 if let Some(edit) = this.group_edit_box_mut() {
-                    edit.history_box = Some(visible);
+                    edit.sub = super::EditSub::History(visible);
                 }
                 cx.notify();
             }),

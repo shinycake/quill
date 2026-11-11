@@ -24,9 +24,9 @@ fn chat_member_status_constructors_parse() {
         match env.payload {
             EnvelopePayload::Groups(GroupsPayload::ChatMember { member }) => {
                 assert_eq!(member.member_id, MessageSender::User { user_id: 777 });
-                assert_eq!(member.status, expected);
+                assert_eq!(member.status(), expected);
                 // Bare status constructors carry no rights block.
-                assert_eq!(member.admin_can_post_messages, None);
+                assert_eq!(member.admin_can_post_messages(), None);
             }
             other => panic!("{other:?}"),
         }
@@ -50,8 +50,8 @@ fn chat_member_administrator_rights_can_post_messages() {
         let env = parse_envelope(&json).unwrap();
         match env.payload {
             EnvelopePayload::Groups(GroupsPayload::ChatMember { member }) => {
-                assert_eq!(member.status, ChannelMemberStatus::Administrator);
-                assert_eq!(member.admin_can_post_messages, expected);
+                assert_eq!(member.status(), ChannelMemberStatus::Administrator);
+                assert_eq!(member.admin_can_post_messages(), expected);
             }
             other => panic!("{other:?}"),
         }
@@ -61,8 +61,8 @@ fn chat_member_administrator_rights_can_post_messages() {
     let env = parse_envelope(json).unwrap();
     match env.payload {
         EnvelopePayload::Groups(GroupsPayload::ChatMember { member }) => {
-            assert_eq!(member.status, ChannelMemberStatus::Administrator);
-            assert_eq!(member.admin_can_post_messages, None);
+            assert_eq!(member.status(), ChannelMemberStatus::Administrator);
+            assert_eq!(member.admin_can_post_messages(), None);
         }
         other => panic!("{other:?}"),
     }
@@ -71,8 +71,8 @@ fn chat_member_administrator_rights_can_post_messages() {
     let env = parse_envelope(json).unwrap();
     match env.payload {
         EnvelopePayload::Groups(GroupsPayload::ChatMember { member }) => {
-            assert_eq!(member.status, ChannelMemberStatus::Member);
-            assert_eq!(member.admin_can_post_messages, None);
+            assert_eq!(member.status(), ChannelMemberStatus::Member);
+            assert_eq!(member.admin_can_post_messages(), None);
         }
         other => panic!("{other:?}"),
     }
@@ -90,8 +90,8 @@ fn chat_member_administrator_rights_can_invite_users() {
         let env = parse_envelope(&json).unwrap();
         match env.payload {
             EnvelopePayload::Groups(GroupsPayload::ChatMember { member }) => {
-                assert_eq!(member.status, ChannelMemberStatus::Administrator);
-                assert_eq!(member.admin_can_invite_users, expected);
+                assert_eq!(member.status(), ChannelMemberStatus::Administrator);
+                assert_eq!(member.admin_can_invite_users(), expected);
             }
             other => panic!("{other:?}"),
         }
@@ -101,8 +101,8 @@ fn chat_member_administrator_rights_can_invite_users() {
     let env = parse_envelope(json).unwrap();
     match env.payload {
         EnvelopePayload::Groups(GroupsPayload::ChatMember { member }) => {
-            assert_eq!(member.status, ChannelMemberStatus::Administrator);
-            assert_eq!(member.admin_can_invite_users, None);
+            assert_eq!(member.status(), ChannelMemberStatus::Administrator);
+            assert_eq!(member.admin_can_invite_users(), None);
         }
         other => panic!("{other:?}"),
     }
@@ -111,8 +111,8 @@ fn chat_member_administrator_rights_can_invite_users() {
     let env = parse_envelope(json).unwrap();
     match env.payload {
         EnvelopePayload::Groups(GroupsPayload::ChatMember { member }) => {
-            assert_eq!(member.status, ChannelMemberStatus::Member);
-            assert_eq!(member.admin_can_invite_users, None);
+            assert_eq!(member.status(), ChannelMemberStatus::Member);
+            assert_eq!(member.admin_can_invite_users(), None);
         }
         other => panic!("{other:?}"),
     }
@@ -125,7 +125,7 @@ fn update_chat_member_keeps_new_member() {
     match env.payload {
         EnvelopePayload::Groups(GroupsPayload::UpdateChatMember { chat_id, member }) => {
             assert_eq!(chat_id, ChatId(13));
-            assert_eq!(member.status, ChannelMemberStatus::Member);
+            assert_eq!(member.status(), ChannelMemberStatus::Member);
         }
         other => panic!("{other:?}"),
     }
@@ -197,13 +197,15 @@ fn update_basic_group_keeps_own_status_and_rights() {
         EnvelopePayload::Groups(GroupsPayload::UpdateBasicGroup {
             basic_group_id,
             status,
-            can_restrict_members,
-            can_promote_members,
             ..
         }) => {
             assert_eq!(basic_group_id, 5);
-            assert_eq!(status, ChannelMemberStatus::Administrator);
-            assert!(can_restrict_members && !can_promote_members);
+            assert_eq!(status.kind(), ChannelMemberStatus::Administrator);
+            assert!(
+                status
+                    .rights()
+                    .is_some_and(|r| r.can_restrict_members && !r.can_promote_members)
+            );
         }
         other => panic!("{other:?}"),
     }
@@ -223,8 +225,8 @@ fn own_restricted_status_keeps_rights_and_end_date() {
     let json = r#"{"@type":"updateChatMember","chat_id":-100,"new_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":7},"status":{"@type":"chatMemberStatusRestricted","is_member":true,"restricted_until_date":1800000000,"permissions":{"@type":"chatPermissions","can_send_basic_messages":true,"can_send_photos":false}}}}"#;
     match parse_envelope(json).unwrap().payload {
         EnvelopePayload::Groups(GroupsPayload::UpdateChatMember { member, .. }) => {
-            assert_eq!(member.status, ChannelMemberStatus::Restricted);
-            let restriction = member.restriction.expect("restriction");
+            assert_eq!(member.status(), ChannelMemberStatus::Restricted);
+            let restriction = member.restriction().expect("restriction");
             assert_eq!(restriction.until_date, 1_800_000_000);
             assert!(restriction.permissions.can_send_basic_messages);
             assert!(!restriction.permissions.can_send_photos);
@@ -235,7 +237,7 @@ fn own_restricted_status_keeps_rights_and_end_date() {
     let json = r#"{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":7},"status":{"@type":"chatMemberStatusMember"}}"#;
     match parse_envelope(json).unwrap().payload {
         EnvelopePayload::Groups(GroupsPayload::ChatMember { member }) => {
-            assert_eq!(member.restriction, None)
+            assert_eq!(member.restriction(), None)
         }
         other => panic!("{other:?}"),
     }
@@ -245,18 +247,17 @@ fn own_restricted_status_keeps_rights_and_end_date() {
 fn update_basic_group_keeps_the_video_chat_right() {
     let json = r#"{"@type":"updateBasicGroup","basic_group":{"@type":"basicGroup","id":5,"member_count":9,"status":{"@type":"chatMemberStatusAdministrator","rights":{"@type":"chatAdministratorRights","can_manage_video_chats":true}}}}"#;
     match parse_envelope(json).unwrap().payload {
-        EnvelopePayload::Groups(GroupsPayload::UpdateBasicGroup {
-            can_manage_video_chats,
-            ..
-        }) => assert_eq!(can_manage_video_chats, Some(true)),
+        EnvelopePayload::Groups(GroupsPayload::UpdateBasicGroup { status, .. }) => assert_eq!(
+            status.rights().map(|r| r.can_manage_video_chats),
+            Some(true)
+        ),
         other => panic!("{other:?}"),
     }
     let member = r#"{"@type":"updateBasicGroup","basic_group":{"@type":"basicGroup","id":5,"member_count":9,"status":{"@type":"chatMemberStatusMember"}}}"#;
     match parse_envelope(member).unwrap().payload {
-        EnvelopePayload::Groups(GroupsPayload::UpdateBasicGroup {
-            can_manage_video_chats,
-            ..
-        }) => assert_eq!(can_manage_video_chats, None),
+        EnvelopePayload::Groups(GroupsPayload::UpdateBasicGroup { status, .. }) => {
+            assert_eq!(status.rights().map(|r| r.can_manage_video_chats), None)
+        }
         other => panic!("{other:?}"),
     }
 }

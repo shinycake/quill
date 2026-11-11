@@ -20,8 +20,8 @@ use crate::ui::video_player::{PlayState, STALL_AFTER, bgra_only, take_made_image
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
-    AppContext, Bounds, Entity, Modifiers, Pixels, TestAppContext, VisualTestContext, point, px,
-    size,
+    AppContext, Bounds, Entity, Modifiers, Pixels, Task, TestAppContext, VisualTestContext, point,
+    px, size,
 };
 use quill::calls::engine::StreamState;
 use quill::calls::live_video::convert::i420_size;
@@ -73,7 +73,7 @@ fn open_stream(
     frames(&mut main);
     frames(&mut main);
     let window = app
-        .read_with(&main, |app, _| app.group_call.window)
+        .read_with(&main, |app, _| app.group_call.window.handle())
         .expect("the stream window opens");
     let mut call = VisualTestContext::from_window(window, cx);
     frames(&mut call);
@@ -175,7 +175,7 @@ fn the_admin_sees_the_server_hint_and_an_ended_stream_closes(cx: &mut TestAppCon
     });
     frames(&mut main);
     assert!(
-        app.read_with(&main, |app, _| app.group_call.window.is_none()),
+        app.read_with(&main, |app, _| app.group_call.window.handle().is_none()),
         "the window closes with the stream"
     );
     assert_eq!(
@@ -217,7 +217,7 @@ fn leaving_then_reopening_the_stream_joins_it_again(cx: &mut TestAppContext) {
         app.sync_group_call_window(cx);
     });
     frames(main);
-    assert!(app.read_with(main, |app, _| app.group_call.window.is_none()));
+    assert!(app.read_with(main, |app, _| app.group_call.window.handle().is_none()));
     // Right after Leave the call comes back unjoined (updateGroupCall
     // with is_joined false): nothing joins it by itself.
     track_unjoined(&app, main);
@@ -230,7 +230,7 @@ fn leaving_then_reopening_the_stream_joins_it_again(cx: &mut TestAppContext) {
     frames(main);
     assert!(joined(&app, main), "reopening joins again");
     assert!(
-        app.read_with(main, |app, _| app.group_call_screen.stream_join.is_none()),
+        app.read_with(main, |app, _| app.group_call_screen.stream_wish().is_none()),
         "the wish is used once"
     );
     // Leave and reopen once more: it still joins.
@@ -255,7 +255,7 @@ fn an_unjoined_stream_offers_join(cx: &mut TestAppContext) {
     frames(&mut main);
     track_unjoined(&app, &mut main);
     let window = app
-        .read_with(&main, |app, _| app.group_call.window)
+        .read_with(&main, |app, _| app.group_call.window.handle())
         .expect("the unjoined stream's window");
     let mut call = VisualTestContext::from_window(window, cx);
     frames(&mut call);
@@ -285,7 +285,7 @@ fn the_settings_box_opens_and_esc_closes_it(cx: &mut TestAppContext) {
     let (app, _main, mut call) = open_stream(cx, StreamState::Live);
     let call = &mut call;
     app.update(call, |app, cx| {
-        app.open_stream_overlay(super::StreamOverlay::Settings, cx)
+        app.open_stream_overlay(super::StreamOverlay::Settings { key_shown: false }, cx)
     });
     frames(call);
     assert!(
@@ -307,7 +307,7 @@ fn under_the_lock_only_the_leave_box_opens(cx: &mut TestAppContext) {
     app.update(call, |app, cx| {
         app.account.passcode.enabled = true;
         app.lock_by_passcode(cx);
-        app.open_stream_overlay(super::StreamOverlay::Settings, cx);
+        app.open_stream_overlay(super::StreamOverlay::Settings { key_shown: false }, cx);
         assert!(app.group_call.stream.overlay.is_none(), "Settings waits");
         app.open_stream_overlay(super::StreamOverlay::Leave { end: false }, cx);
     });
@@ -449,14 +449,14 @@ fn a_wish_for_a_call_that_another_call_replaced_is_dropped(cx: &mut TestAppConte
         app.note_stream_join_intent(StreamJoinIntent::Call(999));
         app.sync_group_call_window(cx);
     });
-    assert!(app.read_with(main, |app, _| app.group_call_screen.stream_join.is_some()));
+    assert!(app.read_with(main, |app, _| app.group_call_screen.stream_wish().is_some()));
     // Another call takes its place: the wish goes.
     app.update(main, |app, cx| {
         let session = app.demo_session.as_mut().expect("demo");
         session.calls.active_group_call = Some(ActiveGroupCall::fresh(777));
         app.sync_group_call_window(cx);
     });
-    assert!(app.read_with(main, |app, _| app.group_call_screen.stream_join.is_none()));
+    assert!(app.read_with(main, |app, _| app.group_call_screen.stream_wish().is_none()));
 }
 
 #[gpui_kit::test]
@@ -468,7 +468,7 @@ fn a_join_that_never_lands_stops_waiting(cx: &mut TestAppContext) {
     });
     track_unjoined(&app, &mut main);
     let window = app
-        .read_with(&main, |app, _| app.group_call.window)
+        .read_with(&main, |app, _| app.group_call.window.handle())
         .expect("the unjoined stream's window");
     let mut call = VisualTestContext::from_window(window, cx);
     let error = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
@@ -478,11 +478,13 @@ fn a_join_that_never_lands_stops_waiting(cx: &mut TestAppContext) {
     };
     // The timer runs out with the call still unjoined.
     app.update(&mut call, |app, cx| {
-        app.group_call_screen.stream_joining = Some(CALL);
+        app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
+            crate::ui::group_call_state::StreamJoining::new(CALL, Task::ready(())),
+        );
         app.stream_join_ended(CALL, cx);
     });
     assert!(app.read_with(&call, |app, _| {
-        app.group_call_screen.stream_joining.is_none()
+        app.group_call_screen.joining_call().is_none()
     }));
     assert!(error(&app, &mut call).is_some(), "the failure shows");
     // The native connect fails without a join error: the next sync stops
@@ -491,16 +493,52 @@ fn a_join_that_never_lands_stops_waiting(cx: &mut TestAppContext) {
         let session = app.demo_session.as_mut().expect("demo");
         session.calls.group_call_error = None;
         if let Some(active) = session.calls.active_group_call.as_mut() {
-            active.transport_error = Some("connect failed".into());
+            active.transport.fail("connect failed");
         }
-        app.group_call_screen.stream_joining = Some(CALL);
+        app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
+            crate::ui::group_call_state::StreamJoining::new(CALL, Task::ready(())),
+        );
         app.sync_group_call_window(cx);
     });
     frames(&mut call);
     assert!(app.read_with(&call, |app, _| {
-        app.group_call_screen.stream_joining.is_none()
+        app.group_call_screen.joining_call().is_none()
     }));
     assert!(error(&app, &mut call).is_some());
+}
+
+/// Asking for another stream while a join is on its way keeps that join:
+/// the Join button stays hidden and its failure still shows.
+#[gpui_kit::test]
+fn a_new_wish_keeps_the_join_on_its_way(cx: &mut TestAppContext) {
+    let (app, mut main, _call) = open_stream(cx, StreamState::Live);
+    app.update(&mut main, |app, cx| {
+        app.leave_active_group_call(cx);
+        app.sync_group_call_window(cx);
+    });
+    track_unjoined(&app, &mut main);
+    app.update(&mut main, |app, _| {
+        app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
+            crate::ui::group_call_state::StreamJoining::new(CALL, Task::ready(())),
+        );
+        app.note_stream_join_intent(StreamJoinIntent::Call(999));
+    });
+    app.read_with(&main, |app, _| {
+        assert_eq!(app.group_call_screen.joining_call(), Some(CALL));
+        assert!(app.group_call_screen.stream_wish().is_some());
+    });
+    app.update(&mut main, |app, cx| app.stream_join_ended(CALL, cx));
+    app.read_with(&main, |app, _| {
+        assert_eq!(app.group_call_screen.joining_call(), None);
+        assert!(
+            app.group_call_screen.stream_wish().is_some(),
+            "the wish stays"
+        );
+        assert!(
+            app.session()
+                .is_some_and(|s| s.calls.group_call_error.is_some())
+        );
+    });
 }
 
 /// A screen share that failed earlier is not a failed join: the join on
@@ -514,7 +552,7 @@ fn a_failed_share_does_not_fail_the_join(cx: &mut TestAppContext) {
     });
     track_unjoined(&app, &mut main);
     let window = app
-        .read_with(&main, |app, _| app.group_call.window)
+        .read_with(&main, |app, _| app.group_call.window.handle())
         .expect("the unjoined stream's window");
     let mut call = VisualTestContext::from_window(window, cx);
     app.update(&mut call, |app, cx| {
@@ -523,14 +561,16 @@ fn a_failed_share_does_not_fail_the_join(cx: &mut TestAppContext) {
             active.screen_share_error = Some("screen share failed".into());
         }
         // Join was pressed; TDLib has not answered yet.
-        app.group_call_screen.stream_joining = Some(CALL);
+        app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
+            crate::ui::group_call_state::StreamJoining::new(CALL, Task::ready(())),
+        );
         app.sync_group_call_window(cx);
     });
     frames(&mut call);
     let state = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
         app.read_with(vcx, |app, _| {
             (
-                app.group_call_screen.stream_joining,
+                app.group_call_screen.joining_call(),
                 app.session().and_then(|s| s.calls.group_call_error.clone()),
             )
         })
@@ -607,7 +647,7 @@ fn the_live_keys_mute_and_toggle_full_screen(cx: &mut TestAppContext) {
     frames(call);
     assert!(!full(call), "Esc leaves full screen");
     assert!(
-        app.read_with(call, |app, _| app.group_call.window.is_some()),
+        app.read_with(call, |app, _| app.group_call.window.handle().is_some()),
         "and does not close the window"
     );
 }
@@ -840,5 +880,35 @@ fn a_low_disk_shows_its_bar_in_the_voice_chat_window(cx: &mut TestAppContext) {
     assert!(
         bar(&mut call),
         "the warning is in the voice chat window too"
+    );
+}
+
+/// The End and Revoke boxes act on the call tracked when they are
+/// confirmed: a window that switches to another stream must not carry
+/// them over, nor the key revealed for the first.
+#[gpui_kit::test]
+fn a_switch_to_another_stream_closes_the_boxes(cx: &mut TestAppContext) {
+    let (app, _main, mut call) = open_stream(cx, StreamState::Live);
+    frames(&mut call);
+    app.update(&mut call, |app, cx| {
+        app.open_stream_overlay(super::StreamOverlay::Settings { key_shown: true }, cx);
+    });
+    frames(&mut call);
+    assert!(app.read_with(&call, |app, _| {
+        app.group_call.stream.overlay == Some(super::StreamOverlay::Settings { key_shown: true })
+    }));
+    app.update(&mut call, |app, cx| {
+        let session = app.demo_session.as_mut().expect("demo");
+        session.calls.active_group_call = Some(ActiveGroupCall {
+            is_rtmp_stream: true,
+            stream: StreamState::Live,
+            ..ActiveGroupCall::fresh(CALL + 1)
+        });
+        app.sync_group_call_window(cx);
+    });
+    frames(&mut call);
+    assert!(
+        app.read_with(&call, |app, _| { app.group_call.stream.overlay.is_none() }),
+        "the other stream starts with no box and the key hidden"
     );
 }

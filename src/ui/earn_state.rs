@@ -7,12 +7,10 @@ use super::app::QuillApp;
 use gpui_kit::component::input::InputState;
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::*;
-use quill::earn::{EarnPeer, TonTx};
-use quill::ids::OfAccount;
+use quill::earn::{EarnPeer, ProgramInfo, TonTx};
 use quill::lang::{keys, tr};
 use quill::premium_hub::StarTx;
 use quill::state::InfoPanelTarget;
-use std::collections::HashSet;
 
 /// What a locked switch needs boosts for (tdesktop `AskBoostReason`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +27,39 @@ pub(crate) struct AskBoost {
     pub(crate) chat_id: i64,
     pub(crate) level: i32,
     pub(crate) reason: AskBoostReason,
+}
+
+/// The setup page's two sliders and the stops each moves over, for the
+/// page of `bot_user_id` as `program` stood when it opened.
+pub(crate) struct SetupSliders {
+    pub(super) bot_user_id: i64,
+    pub(super) program: Option<ProgramInfo>,
+    pub(super) commission: (Entity<SliderState>, Vec<i32>),
+    pub(super) duration: (Entity<SliderState>, Vec<i32>),
+}
+
+/// The history row box that is open; one at a time, and it leaves to `None`
+/// when closed.
+pub(crate) enum TxBox {
+    None,
+    Ton(TonTx),
+    Star(StarTx),
+}
+
+impl TxBox {
+    pub(super) fn ton(&self) -> Option<&TonTx> {
+        match self {
+            TxBox::Ton(tx) => Some(tx),
+            TxBox::None | TxBox::Star(_) => None,
+        }
+    }
+
+    pub(super) fn star(&self) -> Option<&StarTx> {
+        match self {
+            TxBox::Star(tx) => Some(tx),
+            TxBox::None | TxBox::Ton(_) => None,
+        }
+    }
 }
 
 pub(crate) struct EarnUi {
@@ -51,24 +82,18 @@ pub(crate) struct EarnUi {
     pub(super) learn: bool,
     /// The learn box's TON easter egg (tdesktop counts diamonds).
     pub(super) diamonds: u32,
-    /// A TON history row's details box.
-    pub(super) ton_tx: Option<TonTx>,
-    /// A Stars history row's receipt.
-    pub(super) star_tx: Option<StarTx>,
+    /// A history row's details box: a TON row's details, or a Stars row's
+    /// receipt.
+    pub(super) tx_box: TxBox,
     /// The boost box a locked switch opens.
     pub(super) ask_boost: Option<AskBoost>,
-    /// The setup page's sliders and the stops they move over.
-    pub(super) commission: Option<(Entity<SliderState>, Vec<i32>)>,
-    pub(super) duration: Option<(Entity<SliderState>, Vec<i32>)>,
-    /// Bots whose photo was asked for by a program list.
-    pub(super) photos_asked: HashSet<OfAccount<i64>>,
+    /// The setup page's sliders, built for one bot's program and rebuilt
+    /// when the page shows another.
+    pub(super) sliders: Option<Box<SetupSliders>>,
     /// The earn page's scroll; its end loads the next programs page.
     pub(super) scroll: ScrollHandle,
     /// The programs box's list.
     pub(super) box_scroll: ScrollHandle,
-    /// When the referral link box appeared: its link icon plays once
-    /// (tdesktop's `starref_link` animation).
-    pub(super) link_shown: Option<std::time::Instant>,
 }
 
 /// The earn boxes (setup confirm, programs, join, link, revoke, the
@@ -110,15 +135,11 @@ impl EarnUi {
             fade: None,
             learn: false,
             diamonds: 0,
-            ton_tx: None,
-            star_tx: None,
+            tx_box: TxBox::None,
             ask_boost: None,
-            commission: None,
-            duration: None,
-            photos_asked: HashSet::new(),
+            sliders: None,
             scroll: ScrollHandle::new(),
             box_scroll: ScrollHandle::new(),
-            link_shown: None,
         }
     }
 }

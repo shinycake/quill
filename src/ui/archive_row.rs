@@ -11,6 +11,7 @@ use super::chat_row::chat_row_height;
 use super::context_menu_keys::context_menu_item;
 use super::pressable::PressableDiv;
 use super::*;
+use crate::ui::chat_list_state::SidebarTab;
 use crate::ui::dismiss_layer::DismissLayer;
 use crate::ui::menu_surface::MenuSurface;
 use crate::ui::status_note::StatusNote;
@@ -111,8 +112,7 @@ impl QuillApp {
     /// view (tdesktop `openFolder`).
     pub(super) fn open_archive_folder(&mut self, cx: &mut Context<Self>) {
         self.set_chat_list_view(ChatListFilter::Archived, None);
-        self.chat_list.contacts_tab_open = false;
-        self.chat_list.calls_tab_open = false;
+        self.chat_list.tab = SidebarTab::Chats;
         cx.notify();
     }
 

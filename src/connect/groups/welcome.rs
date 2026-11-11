@@ -9,24 +9,26 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        if !matches!(
+        let supergroup = matches!(
             self.session.chats.get(&chat_id.0).map(|chat| &chat.kind),
             Some(ChatKind::Supergroup { .. })
-        ) {
+        );
+        if !self.chats_path_active() {
+            // Only a chat that has welcome messages gets a pack to retry.
+            if supergroup {
+                self.fail_welcome_load_send(chat_id);
+            }
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !supergroup {
             return Ok(None);
         }
         if self
             .session
             .groups
             .welcome_messages
-            .contains_key(&chat_id.0)
-            || self
-                .session
-                .requests
-                .has_purpose_for_chat(RequestPurpose::LoadChatWelcomeMessages, chat_id)
+            .get(&chat_id.0)
+            .is_some_and(|pack| !pack.can_ask())
         {
             return Ok(None);
         }
@@ -38,13 +40,29 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&load_chat_welcome_messages(extra, chat_id))
         {
             self.session.requests.take(extra);
+            self.fail_welcome_load_send(chat_id);
             return Err(err);
         }
         self.session
             .groups
-            .welcome_message_fetches
-            .insert(chat_id.0, WelcomeMessagesFetch::Loading);
+            .welcome_messages
+            .entry(chat_id.0)
+            .or_default()
+            .begin();
         Ok(Some(extra))
+    }
+
+    /// The load never left: the pack is `Failed`, so the box shows the
+    /// reason with Retry instead of an empty list.
+    fn fail_welcome_load_send(&mut self, chat_id: ChatId) {
+        self.session
+            .groups
+            .welcome_messages
+            .entry(chat_id.0)
+            .or_default()
+            .fail(crate::state::send_failed_line(
+                "Could not load welcome messages",
+            ));
     }
 
     /// Slice G2: shared gate for welcome-message mutations — requires
@@ -76,7 +94,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self
             .session
             .requests
-            .has_purpose(RequestPurpose::AddChatWelcomeMessage)
+            .has_purpose_for_chat(RequestPurpose::AddChatWelcomeMessage, chat_id)
         {
             return Ok(None);
         }

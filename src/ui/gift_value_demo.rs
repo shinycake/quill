@@ -13,7 +13,9 @@ use super::screenshot_demo::{DemoSpec, register_demos};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::diagnostics::MemorySink;
-use quill::premium_hub::gift_value::{GiftValueInfo, GiftValueLookup, parse_gift_value_info};
+use quill::premium_hub::gift_value::{
+    GiftValueInfo, GiftValueLookup, GiftValueStage, parse_gift_value_info,
+};
 use quill::premium_hub::parse_received_gift;
 use quill::state::Session;
 use quill::telegram::envelope::MessageSender;
@@ -68,12 +70,12 @@ fn received_gift() -> Value {
 pub(super) fn seed_gift_value_session(sink: Arc<MemorySink>) -> Session {
     let mut session = seed_gift_market_session(sink);
     let hub = &mut session.payments.hub;
-    hub.gifts = parse_received_gift(&received_gift()).into_iter().collect();
-    hub.gifts_total = 1;
-    hub.gifts_loaded = true;
-    hub.gifts_owner = Some(MessageSender::User { user_id: ME });
-    hub.gifts_open = true;
-    hub.gift_selected = Some(RECEIVED_ID.into());
+    hub.received.rows = parse_received_gift(&received_gift()).into_iter().collect();
+    hub.received.total = 1;
+    hub.received.page = quill::premium_hub::page_stage::PageStage::Ready;
+    hub.received.owner = Some(MessageSender::User { user_id: ME });
+    hub.received.open();
+    hub.received.view.select(Some(RECEIVED_ID.into()));
     session
 }
 
@@ -87,7 +89,7 @@ impl QuillApp {
         let gift = session.payments.hub.selected_gift()?;
         let collectible = gift.gift.collectible.as_deref()?;
         Some(GiftValueLookup {
-            info,
+            stage: info.map_or(GiftValueStage::Idle, GiftValueStage::Known),
             ..GiftValueLookup::new(collectible)
         })
     }
@@ -99,30 +101,29 @@ impl QuillApp {
             "loading" => self
                 .demo_gift_value_lookup(None)
                 .map(|lookup| GiftValueLookup {
-                    loading: true,
+                    stage: GiftValueStage::Loading(0),
                     ..lookup
                 }),
             "error" => self
                 .demo_gift_value_lookup(None)
                 .map(|lookup| GiftValueLookup {
-                    error: Some(quill::lang::tr_with(
+                    stage: GiftValueStage::Failed(quill::lang::tr_with(
                         quill::lang::keys::Q_GIFT_VALUE_COULDNT_LOAD,
                         &[("reason", "STARGIFT_SLUG_INVALID")],
                     )),
                     ..lookup
                 }),
-            "average" => {
-                self.demo_gift_value_lookup(fixture(AVERAGE))
-                    .map(|lookup| GiftValueLookup {
-                        open: true,
-                        ..lookup
-                    })
-            }
+            "average" => self
+                .demo_gift_value_lookup(fixture(AVERAGE))
+                .map(|mut lookup| {
+                    lookup.reopen();
+                    lookup
+                }),
             _ => self
                 .demo_gift_value_lookup(fixture(LAST))
-                .map(|lookup| GiftValueLookup {
-                    open: true,
-                    ..lookup
+                .map(|mut lookup| {
+                    lookup.reopen();
+                    lookup
                 }),
         };
         if let Some(session) = self.demo_session.as_mut() {

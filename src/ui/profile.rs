@@ -79,6 +79,15 @@ impl QuillApp {
                 return dialog.on_close(on_close);
             };
             let can_save = this.profile_form_can_save(cx);
+            let saving = this
+                .dialogs
+                .edit_profile_dialog
+                .as_ref()
+                .is_some_and(|dialog| {
+                    dialog
+                        .save
+                        .is_sending(this.session().map(|session| &session.requests))
+                });
             let footer = div()
                 .flex()
                 .justify_end()
@@ -96,7 +105,8 @@ impl QuillApp {
                     Button::new("edit-profile-save")
                         .label(tr(keys::SETTINGS_SAVE))
                         .primary()
-                        .disabled(!can_save)
+                        .loading(saving)
+                        .disabled(!can_save || saving)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.save_profile_form(cx);
                             this.close_kit_dialog_if_done(DialogKind::EditProfile, window, cx);
@@ -148,8 +158,7 @@ impl QuillApp {
             .unwrap_or_default();
         if let Some(live) = self.live.as_mut() {
             live.driver.session.users_state.profile_edit_error = None;
-            live.driver.session.users_state.username_check = None;
-            live.driver.session.users_state.username_check_pending = None;
+            live.driver.session.users_state.username_check = Default::default();
         }
         self.dialogs.edit_profile_dialog = Some(EditProfileDialog::new(
             window, cx, &first, &last, &bio, &username,
@@ -216,10 +225,8 @@ impl QuillApp {
             .unwrap_or_default();
         let checked_ok = self
             .session()
-            .and_then(|s| s.users_state.username_check.clone())
-            .is_some_and(|(text, result)| {
-                text == username && result == UsernameCheckResult::Available
-            });
+            .and_then(|s| s.users_state.username_check.verdict_for(&username))
+            .is_some_and(|result| result == UsernameCheckResult::Available);
         if !username.is_empty() && username != editable && !checked_ok {
             self.set_note(StatusNote::silent(tr(
                 keys::Q_PEOPLE_CHECK_AVAILABILITY_FIRST_THE_TEXT,
@@ -381,14 +388,11 @@ impl QuillApp {
         let username_text = dialog.username_text(cx);
         let verdict = self
             .session()
-            .and_then(|s| s.users_state.username_check.clone())
-            .filter(|(text, _)| *text == username_text)
-            .map(|(_, result)| result);
+            .and_then(|s| s.users_state.username_check.verdict_for(&username_text));
         let checking = verdict.is_none()
             && self
                 .session()
-                .and_then(|s| s.users_state.username_check_pending.clone())
-                .is_some_and(|(_, text)| text == username_text);
+                .is_some_and(|s| s.users_state.username_check.is_checking(&username_text));
         let error = self
             .session()
             .and_then(|s| s.users_state.profile_edit_error.clone());
@@ -538,7 +542,15 @@ impl QuillApp {
         // kit Phase 2 (redo): plain form content — the kit `Dialog`
         // provides the title, padding, and chrome via `.title()`.
         let mut panel = div().id("edit-profile-panel").flex().flex_col().gap_3();
-        if let Some(error) = error {
+        // The reason the last Save was refused, when the session kept none.
+        let refused = match &dialog.save {
+            quill::state::Submit::Failed(reason) => Some(quill::lang::tr_with(
+                keys::Q_PEOPLE_COULDNT_SAVE_REASON,
+                &[("reason", reason)],
+            )),
+            _ => None,
+        };
+        if let Some(error) = error.or(refused) {
             panel = panel.child(div().text_sm().text_color(danger()).child(error));
         }
         panel = panel

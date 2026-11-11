@@ -10,9 +10,8 @@ impl QuillApp {
     /// that ends the long press, or Escape). Also cancels a pending
     /// long press.
     pub(in crate::ui) fn close_chat_preview(&mut self, cx: &mut Context<Self>) {
-        if self.chat_list.preview.is_some() || self.chat_list.preview_press.is_some() {
-            self.chat_list.preview = None;
-            self.chat_list.preview_press = None;
+        if !self.chat_list.peek.is_idle() {
+            self.chat_list.peek = crate::ui::chat_list_state::PeekPreview::Idle;
             cx.notify();
         }
     }
@@ -56,19 +55,14 @@ impl QuillApp {
                     .collect()
             })
             .unwrap_or_default();
-        let fetch = session.and_then(|session| {
-            session
-                .chat_list
-                .chat_preview_fetch
-                .as_ref()
-                .filter(|fetch| fetch.chat_id == chat_id)
-        });
+        let fetch = session.and_then(|session| session.chat_list.chat_preview_fetch.get(&chat_id));
         if lines.is_empty()
             && let Some(fetch) = fetch
         {
             lines = fetch
-                .messages
-                .iter()
+                .data()
+                .into_iter()
+                .flatten()
                 .map(|message| {
                     chat_preview_line(
                         &title,
@@ -81,7 +75,7 @@ impl QuillApp {
                 })
                 .collect();
         }
-        let failed = fetch.and_then(|fetch| fetch.failed.clone());
+        let failed = fetch.and_then(|fetch| fetch.error().map(str::to_owned));
         let in_flight = session.is_some_and(|session| {
             session
                 .requests
@@ -600,8 +594,10 @@ impl QuillApp {
                 cx,
                 {
                     this.open_group_confirm(
-                        chat_id,
-                        GroupConfirmAction::BlockUser { block: !blocked },
+                        GroupConfirmAction::BlockUser {
+                            chat_id,
+                            block: !blocked,
+                        },
                         cx,
                     );
                     this.chat_list.menu = None;
@@ -641,7 +637,7 @@ impl QuillApp {
 
     /// MED4: Instant View reader overlay (TGX behavior — attempt IV
     /// when the card offers it, fall back to the browser on 404 /
-    /// unsupported). Drains `Session::instant_view_fallback_url` into
+    /// unsupported). Drains `Session::messages.instant_view_fallbacks` into
     /// the browser and renders `Session::instant_view` page blocks via
     /// `message_rich_block`. A refusal is never rendered as a reader. A
     /// fallback for a link an agent's step clicked opens as part of that
@@ -650,17 +646,18 @@ impl QuillApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if let Some(live) = self.live.as_mut()
-            && let Some(url) = live
-                .driver
-                .session
-                .messages
-                .instant_view_fallback_url
-                .take()
-        {
-            let messages = &mut live.driver.session.messages;
-            let from_agent = std::mem::take(&mut messages.instant_view_fallback_from_agent);
-            self.agent_step(from_agent, |this| this.open_link(&url, cx));
+        // Only the window that asked opens the link: each window draws
+        // with its own view in place, so the one that matches takes it.
+        if let Some(live) = self.live.as_mut() {
+            let session = &mut live.driver.session;
+            let window = session.view_in_place();
+            let fallbacks = &mut session.messages.instant_view_fallbacks;
+            if let Some(at) = fallbacks.iter().position(|f| f.window == window) {
+                let fallback = fallbacks.remove(at);
+                self.agent_step(fallback.from_agent, |this| {
+                    this.open_link(&fallback.url, cx)
+                });
+            }
         }
         self.session()?.messages.instant_view.as_ref()?;
         self.instant_view_overlay_body(cx)
@@ -726,7 +723,8 @@ impl QuillApp {
                             ChatId(0),
                             MessageId(0),
                             &page.rich,
-                            &std::collections::HashSet::new(),
+                            &crate::ui::message_text::revealed::Revealed::default(),
+                            false,
                             // Settings → Appearance: message font size.
                             self.msg_font(),
                             cx,
@@ -825,11 +823,15 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(live) = self.live.as_mut() {
-            let result = live.driver.send_callback_query(chat_id, message_id, &data);
-            self.set_note(match result {
-                Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_SENDING)),
-                Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_CALLBACK)),
-            });
+            // The pressed button spins until the answer
+            // (`Session::callback_button_waiting`).
+            if live
+                .driver
+                .send_callback_query(chat_id, message_id, &data)
+                .is_err()
+            {
+                self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEND_CALLBACK)));
+            }
             cx.notify();
             return;
         }
@@ -857,13 +859,13 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if !self.composer_ui.inline_bot_alert_shown && self.open_chat_is_secret() {
-            self.composer_ui.pending_inline_bot_alert = Some(query.to_string());
+            self.chat_ui.bot_alert = crate::ui::inline_mode::BotAlert::Switch(query.to_string());
             cx.notify();
             return;
         }
         // A stash left over from another chat (the open chat changed
         // since the gated press) never survives an ungated insert.
-        self.composer_ui.pending_inline_bot_alert = None;
+        self.chat_ui.bot_alert = crate::ui::inline_mode::BotAlert::None;
         let next = quill::composer::insert_switch_inline_text(&self.composer_markup(cx), query);
         self.set_composer_markup(&next, window, cx);
         self.sync_command_menu(cx);
@@ -882,8 +884,11 @@ impl QuillApp {
         if !self.open_chat_is_secret() {
             return;
         }
-        let Some(query) = self.composer_ui.pending_inline_bot_alert.take() else {
-            return;
+        let alert = std::mem::take(&mut self.chat_ui.bot_alert);
+        let query = match alert {
+            crate::ui::inline_mode::BotAlert::None => return,
+            crate::ui::inline_mode::BotAlert::Typed => String::new(),
+            crate::ui::inline_mode::BotAlert::Switch(query) => query,
         };
         self.composer_ui.inline_bot_alert_shown = true;
         if !query.is_empty() {
@@ -906,7 +911,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.close_chat_preview(cx);
-        let open = self.session().and_then(|session| session.open_chat);
+        let open = self.session().and_then(|session| session.open_chat_id());
         match go_to_target(open, chat_id, message_id) {
             GoToTarget::OtherChat {
                 chat_id,

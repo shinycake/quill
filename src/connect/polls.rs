@@ -37,7 +37,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         // The row may live only in a forum topic or a comment thread.
-        let poll = self
+        let mut poll = self
             .session
             .loaded_message(chat_id, message_id)
             .filter(|message| !message.pending() && message.id.0 > 0)
@@ -46,12 +46,46 @@ impl<S: JsonSender> ConnectDriver<S> {
                 _ => None,
             })
             .ok_or(ConnectSendError::InvalidRequest)?;
+        // Rapid taps on a multiple-answer poll: the marks on screen may be
+        // an older answer's (an `updatePoll` landed in between), so build
+        // on the newest answer still in flight, or the first choice goes.
+        if let Some(shown) = self
+            .session
+            .requests
+            .poll_vote_in_flight(chat_id, message_id)
+        {
+            for (option, mark) in poll.options.iter_mut().zip(shown) {
+                option.is_chosen = *mark;
+            }
+        }
         if !poll.can_vote() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let option_ids =
             poll_answer_for_tap(&poll, option_index).ok_or(ConnectSendError::InvalidRequest)?;
         self.send_poll_option_ids(chat_id, message_id, option_ids)
+    }
+
+    /// A tap on the option with this id: the index is looked up in the poll
+    /// as it is now, so an option added or moved after the row was drawn
+    /// cannot send the vote to a neighbour.
+    pub fn send_poll_answer_for_option(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        option_id: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        let index = self
+            .session
+            .loaded_message(chat_id, message_id)
+            .and_then(|message| match &message.content {
+                MessageContent::Poll(poll) => {
+                    poll.poll.options.iter().position(|o| o.id == option_id)
+                }
+                _ => None,
+            })
+            .ok_or(ConnectSendError::InvalidRequest)?;
+        self.send_poll_answer(chat_id, message_id, index)
     }
 
     /// The menu's "Retract vote": `setPollAnswer` with no options, only
@@ -283,9 +317,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let can_stop = self
             .session
-            .histories
-            .get(&chat_id.0)
-            .and_then(|history| history.messages.get(&message_id.0))
+            .loaded_message(chat_id, message_id)
             .filter(|message| !message.pending() && message.id.0 > 0)
             .and_then(|message| match &message.content {
                 // F4: defense in depth — the UI menu already gates on
@@ -364,7 +396,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let topic_id = self.send_topic(chat_id);
         // `validate()` above guarantees a marked option in quiz mode.
         let mut correct_option_ids: Vec<i32> = draft
-            .quiz_correct
+            .quiz_correct()
             .iter()
             .map(|index| i32::try_from(*index).unwrap_or(0))
             .collect();
@@ -391,12 +423,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 } else {
                     PollTypeSend::Regular
                 },
-                open_period: draft.open_period_secs(),
                 // B15: "Allow Adding Options" is a regular-poll flag.
                 allow_adding_options: draft.allow_adding_options && !draft.is_quiz,
                 hide_results_until_closes: draft.hide_results_until_closes,
                 members_only: draft.members_only,
-                close_date: draft.close_date.clamp(0, i64::from(i32::MAX)) as i32,
+                deadline: draft.deadline,
                 reply_to,
                 topic_id,
             },

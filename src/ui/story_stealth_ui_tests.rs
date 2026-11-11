@@ -84,7 +84,7 @@ fn box_open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
 
 fn toast(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<(Option<String>, String)> {
     app.read_with(vcx, |app, _| {
-        app.stories.stealth_toast.as_ref().map(|shown| {
+        app.stories.viewer_ui().stealth_toast.as_ref().map(|shown| {
             (
                 shown.toast.title.map(str::to_string),
                 shown.toast.text.clone(),
@@ -102,6 +102,7 @@ fn button_label(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> String {
             session.my_is_premium(),
             app.stories
                 .stealth_box
+                .as_ref()
                 .is_some_and(|stealth_box| stealth_box.open_after.is_some()),
         )
         .label()
@@ -177,7 +178,8 @@ fn a_free_account_unlocks_through_the_premium_preview(cx: &mut TestAppContext) {
     click(vcx, "story-stealth-button");
     assert!(box_open(&app, vcx), "Unlock keeps the box");
     let page = app.read_with(vcx, |app, _| {
-        app.session().map(|session| session.payments.hub.promo_page)
+        app.session()
+            .map(|session| session.payments.hub.promo_page())
     });
     assert_eq!(
         page,
@@ -230,6 +232,22 @@ fn while_stealth_is_on_an_entry_point_only_toasts(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn the_toast_goes_with_the_viewer_it_was_shown_over(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let on = StoryStealthMode {
+        active_until_date: now() + 125,
+        cooldown_until_date: now() + 3600,
+    };
+    seed(&app, vcx, true, on);
+    open_box(&app, vcx, None);
+    assert!(toast(&app, vcx).is_some(), "shown over the open viewer");
+    app.update(vcx, |app, cx| app.close_story_viewer(cx));
+    frames(vcx);
+    assert!(toast(&app, vcx).is_none(), "closing the viewer drops it");
+}
+
+#[gpui_kit::test]
 fn view_anonymously_on_a_tile_opens_the_stories_once_on(cx: &mut TestAppContext) {
     let (app, shell, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
@@ -267,5 +285,52 @@ fn view_anonymously_on_a_tile_opens_the_stories_once_on(cx: &mut TestAppContext)
     assert!(
         toast(&app, vcx).is_some(),
         "the toast shows over the stories"
+    );
+}
+
+/// The server refuses the activation: the box stays, shows why, and its
+/// button asks again (the box does not wait for an answer that came); a
+/// refusal of an older box's request is not this box's.
+#[gpui_kit::test]
+fn a_refused_activation_shows_its_reason_and_asks_again(cx: &mut TestAppContext) {
+    use crate::ui::story_stealth_ui::StealthStage;
+    use quill::ids::RequestId;
+    let (app, shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx, true, StoryStealthMode::default());
+    open_box(&app, vcx, None);
+    assert_eq!(dialog(&shell, vcx), Some(DialogKind::StoryStealth));
+    app.update(vcx, |app, cx| {
+        if let Some(stealth_box) = app.stories.stealth_box.as_mut() {
+            stealth_box.stage = StealthStage::Activating(RequestId(70));
+        }
+        if let Some(session) = app.demo_session.as_mut() {
+            session.stories.stealth_refusal =
+                Some((RequestId(69), "Could not enable Stealth Mode: old".into()));
+        }
+        assert!(!app.drain_story_stealth(cx));
+        assert_eq!(
+            app.stories.stealth_box.as_ref().map(|b| b.stage.clone()),
+            Some(StealthStage::Activating(RequestId(70))),
+            "an older request's refusal is not this box's"
+        );
+        if let Some(session) = app.demo_session.as_mut() {
+            session.stories.stealth_refusal =
+                Some((RequestId(70), "Could not enable Stealth Mode: FLOOD".into()));
+        }
+        assert!(!app.drain_story_stealth(cx));
+        assert_eq!(
+            app.stories.stealth_box.as_ref().map(|b| b.stage.clone()),
+            Some(StealthStage::Failed(
+                "Could not enable Stealth Mode: FLOOD".into()
+            ))
+        );
+    });
+    frames(vcx);
+    assert!(box_open(&app, vcx), "the box stays open");
+    assert!(find(vcx, "story-stealth-failure"), "and says why");
+    assert!(
+        find(vcx, "story-stealth-button"),
+        "with the button to retry"
     );
 }

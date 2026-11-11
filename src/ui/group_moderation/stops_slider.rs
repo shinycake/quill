@@ -74,6 +74,17 @@ pub(super) const BOOSTS_KEYS: SliderKeys = SliderKeys {
     release: "boosts-release",
 };
 
+/// Where the thumb stands against the caller's value. `Dragging` is the
+/// start and the state after a release: the thumb is the user's, and the
+/// next frame puts it on the caller's value (so a refused save moves it
+/// back).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Thumb {
+    Dragging,
+    /// The thumb was put on this value.
+    Synced(i32),
+}
+
 /// A slider over fixed stops with their labels.
 #[derive(IntoElement)]
 pub(super) struct StopsSlider {
@@ -133,7 +144,8 @@ impl RenderOnce for StopsSlider {
         let slider = window.use_keyed_state((self.keys.slider, self.chat), cx, |_, _| {
             SliderState::new().min(0.0).max(last).step(1.0)
         });
-        let reported = window.use_keyed_state((self.keys.reported, self.chat), cx, |_, _| i32::MIN);
+        let reported =
+            window.use_keyed_state((self.keys.reported, self.chat), cx, |_, _| Thumb::Dragging);
         #[cfg(test)]
         if let Some(probe) = &self.probe {
             *probe.borrow_mut() = Some(slider.clone());
@@ -145,14 +157,19 @@ impl RenderOnce for StopsSlider {
             cx.subscribe(&slider, move |_, _, event: &SliderEvent, cx| {
                 if let SliderEvent::Release(position) = event {
                     let value = value_for(stops, position.end());
-                    if value != *release_reported.read(cx) {
+                    if *release_reported.read(cx) != Thumb::Synced(value) {
                         on_change(value, cx);
+                        // The caller may not have taken the stop (the save
+                        // was refused): the next frame puts the thumb back
+                        // on the caller's value.
+                        release_reported.update(cx, |reported, _| *reported = Thumb::Dragging);
+                        cx.refresh_windows();
                     }
                 }
             })
         });
-        if *reported.read(cx) != self.value {
-            reported.update(cx, |reported, _| *reported = self.value);
+        if *reported.read(cx) != Thumb::Synced(self.value) {
+            reported.update(cx, |reported, _| *reported = Thumb::Synced(self.value));
             let index = stop_index(self.stops, self.value) as f32;
             slider.update(cx, |state, cx| state.set_value(index, window, cx));
         }

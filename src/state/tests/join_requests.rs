@@ -1,6 +1,7 @@
 //! State reducer tests: join requests after bulk and single actions.
 use super::common::*;
 use super::*;
+use crate::state::PageStage;
 
 fn requests_json(extra: RequestId, total: i32, users: &[i64]) -> String {
     let rows: Vec<String> = users
@@ -39,7 +40,9 @@ fn approve_all_drops_the_chat_wide_page_in_flight() {
     let first = session.request(RequestPurpose::GetChatJoinRequests, Some(ChatId(13)));
     apply_json(&mut session, &seq, &sink, &requests_json(first, 4, &[1, 2]));
     let more = session.request(RequestPurpose::GetMoreChatJoinRequests, Some(ChatId(13)));
-    session.groups.join_request_latest.insert(13, more);
+    if let Some(JoinRequestFetch::Loaded(list)) = session.groups.join_requests.get_mut(&13) {
+        list.more = Some(more);
+    }
     let all = session.request(
         RequestPurpose::Groups(GroupsPurpose::ProcessAllChatJoinRequests { approve: true }),
         Some(ChatId(13)),
@@ -47,7 +50,10 @@ fn approve_all_drops_the_chat_wide_page_in_flight() {
     apply_json(&mut session, &seq, &sink, &ok_json(all));
     apply_json(&mut session, &seq, &sink, &requests_json(more, 4, &[3, 4]));
     assert_eq!(listed(&session, 13), Some((0, Vec::new())));
-    assert!(!session.groups.join_request_latest.contains_key(&13));
+    assert!(!matches!(
+        session.groups.join_requests.get(&13),
+        Some(JoinRequestFetch::Loaded(list)) if list.more.is_some()
+    ));
 }
 
 /// The same for one link's list: its page in flight is dropped and the
@@ -66,13 +72,13 @@ fn approve_all_for_a_link_drops_its_page_in_flight() {
             invite_link: "https://t.me/+abc".into(),
             total_count: 4,
             requests: Vec::new(),
-            error: None,
-            request: Some(page),
+            stage: PageStage::Loading(page),
         },
     );
-    let all = session.request(
+    let all = session.request_for_invite_link(
         RequestPurpose::Groups(GroupsPurpose::ProcessLinkJoinRequests { approve: false }),
-        Some(ChatId(13)),
+        ChatId(13),
+        "https://t.me/+abc",
     );
     apply_json(&mut session, &seq, &sink, &ok_json(all));
     apply_json(&mut session, &seq, &sink, &requests_json(page, 4, &[3, 4]));
@@ -81,6 +87,41 @@ fn approve_all_for_a_link_drops_its_page_in_flight() {
     };
     assert!(state.requests.is_empty());
     assert_eq!(state.total_count, 0);
+    assert!(!state.loading());
+}
+
+/// Approve all on one link, answered after another link's list opened,
+/// leaves that list alone: its first page still lands.
+#[test]
+fn approve_all_for_one_link_keeps_another_links_list() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let all = session.request_for_invite_link(
+        RequestPurpose::Groups(GroupsPurpose::ProcessLinkJoinRequests { approve: true }),
+        ChatId(13),
+        "https://t.me/+first",
+    );
+    let page = session.request(
+        RequestPurpose::GetLinkJoinRequests { append: false },
+        Some(ChatId(13)),
+    );
+    session.groups.invite_pages.set_join_requests(
+        13,
+        LinkRequestsState {
+            invite_link: "https://t.me/+second".into(),
+            total_count: 0,
+            requests: Vec::new(),
+            stage: PageStage::Loading(page),
+        },
+    );
+    apply_json(&mut session, &seq, &sink, &ok_json(all));
+    apply_json(&mut session, &seq, &sink, &requests_json(page, 2, &[5, 6]));
+    let Some(state) = session.groups.invite_pages.join_requests(13) else {
+        panic!("the second link's list stays open");
+    };
+    assert_eq!(state.invite_link, "https://t.me/+second");
+    assert_eq!(state.requests.len(), 2);
+    assert_eq!(state.total_count, 2);
     assert!(!state.loading());
 }
 

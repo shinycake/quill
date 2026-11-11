@@ -29,9 +29,9 @@ fn forwardable(session: &Session, chat: ChatId, id: MessageId) -> bool {
         && !session.is_secret_chat(chat)
         && session
             .messages
-            .message_menu_actions
-            .filter(|(menu_chat, menu_id, _)| *menu_chat == chat && *menu_id == id)
-            .is_none_or(|(_, _, actions)| actions.can_be_forwarded)
+            .menu_actions
+            .get(chat, id)
+            .is_none_or(|actions| actions.can_be_forwarded)
 }
 
 /// The drag a press on `pressed` in `chat` starts, or `None` when the chat
@@ -126,22 +126,21 @@ pub(super) fn media_block(
     }
 }
 
-/// Set while a lifted message drag is in flight, so the history can tell it
-/// from any other drag. Cleared when the button comes up.
-#[derive(Default)]
-struct ForwardLift(bool);
+/// Present while a lifted message drag is in flight, so the history can tell
+/// it from any other drag. Removed when the button comes up.
+struct ForwardLift;
 
 impl Global for ForwardLift {}
 
 /// A message drag was lifted and has not ended.
 pub(super) fn forward_lift_live(cx: &App) -> bool {
-    cx.try_global::<ForwardLift>().is_some_and(|lift| lift.0) && cx.has_active_drag()
+    cx.has_global::<ForwardLift>() && cx.has_active_drag()
 }
 
 /// The button came up: the lifted drag, if any, is over.
 pub(super) fn end_forward_lift(cx: &mut App) {
     if cx.has_global::<ForwardLift>() {
-        cx.set_global(ForwardLift(false));
+        cx.remove_global::<ForwardLift>();
     }
 }
 
@@ -209,7 +208,7 @@ where
     match drag {
         Some(drag) => element
             .on_drag(drag, |drag: &ForwardDrag, _, _, cx| {
-                cx.set_global(ForwardLift(true));
+                cx.set_global(ForwardLift);
                 cx.new(|_| ForwardGhost::new(drag))
             })
             // tdesktop starts a drag after `QApplication::startDragDistance`;

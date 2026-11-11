@@ -33,12 +33,12 @@ impl CallEngine for TgcallsEngine {
         if data.is_empty() {
             return Ok(());
         }
-        match call.handle {
+        match &mut call.stage {
             // SAFETY: a live call; `data` outlives this synchronous call.
-            Some(handle) => unsafe {
+            P2pStage::Live { handle } => unsafe {
                 (api.qc_p2p_receive_signaling)(handle.as_ptr(), data.as_ptr(), data.len());
             },
-            None => call.pending_signaling.push(data.to_vec()),
+            P2pStage::Waiting { pending_signaling } => pending_signaling.push(data.to_vec()),
         }
         Ok(())
     }
@@ -77,16 +77,13 @@ impl CallEngine for TgcallsEngine {
         let max_layer = self.protocol.max_layer;
         let reaper = Arc::clone(&self.reaper);
         let call = self.call_mut(call_id)?;
-        if call.handle.is_some() {
+        if call.handle().is_some() {
             // A retry: tgcalls can't connect a call twice, so start over
             // with a fresh instance and the same choices.
             call.retire_instance(api, &reaper);
         } else {
             // A share turned on before connect carries into the call.
             call.media = retained_call_media(params, Some(&call.media));
-            if call.media.screen_share_on {
-                call.media.camera = None;
-            }
         }
         let config = config::p2p_config(params, max_layer).map_err(|err| {
             crate::advanced::debug_mode::call_log(&format!(
@@ -121,12 +118,16 @@ impl CallEngine for TgcallsEngine {
             op: "qc_p2p_create",
             code: -1,
         })?;
-        call.handle = Some(handle);
+        let waiting = std::mem::replace(&mut call.stage, P2pStage::Live { handle });
         call.gate.open(api, handle.as_ptr());
         call.gate.set_screen(call.screen.map(Native::as_ptr));
         // SAFETY: a live call.
         unsafe { (api.qc_p2p_set_muted)(handle.as_ptr(), i32::from(call.muted)) };
-        for data in std::mem::take(&mut call.pending_signaling) {
+        let pending = match waiting {
+            P2pStage::Waiting { pending_signaling } => pending_signaling,
+            P2pStage::Live { .. } => Vec::new(),
+        };
+        for data in pending {
             // SAFETY: a live call; `data` outlives this synchronous call.
             unsafe { (api.qc_p2p_receive_signaling)(handle.as_ptr(), data.as_ptr(), data.len()) };
         }
@@ -144,7 +145,7 @@ impl CallEngine for TgcallsEngine {
         call.media.mic = microphone.map(str::to_owned);
         let reopen = call.media.speaker.as_deref() != speaker;
         call.media.speaker = speaker.map(str::to_owned);
-        if reopen && call.handle.is_some() {
+        if reopen && call.handle().is_some() {
             self.open_sound(call_id)?;
         }
         Ok(())
@@ -161,7 +162,7 @@ impl CallEngine for TgcallsEngine {
         let api = self.api;
         let call = self.call_mut(call_id)?;
         call.muted = muted;
-        if let Some(handle) = call.handle {
+        if let Some(handle) = call.handle() {
             // SAFETY: a live call.
             unsafe { (api.qc_p2p_set_muted)(handle.as_ptr(), i32::from(muted)) };
         }
@@ -171,18 +172,21 @@ impl CallEngine for TgcallsEngine {
     fn set_camera(&mut self, call_id: i32, camera: Option<&str>) -> Result<(), EngineError> {
         let api = self.api;
         let call = self.call_mut(call_id)?;
-        let previous = call.media.camera.clone();
-        call.media.camera = camera.map(str::to_owned);
+        let previous = call.media.video.clone();
+        // The camera replaces a screen share in the call, as in tdesktop;
+        // no camera leaves a share as it is.
+        match camera {
+            Some(device) => call.media.video = VideoSource::Camera(device.to_owned()),
+            None if call.media.video.screen() => {}
+            None => call.media.video = VideoSource::Off,
+        }
         if let Err(err) = self.apply_camera(call_id) {
-            self.call_mut(call_id)?.media.camera = previous;
+            self.call_mut(call_id)?.media.video = previous;
             return Err(err);
         }
         if camera.is_some() {
-            // The camera replaced a screen share in the call, as in
-            // tdesktop; its source can go now.
-            let call = self.call_mut(call_id)?;
-            call.media.screen_share_on = false;
-            release_screen(api, call);
+            // Its source can go now.
+            release_screen(api, self.call_mut(call_id)?);
         }
         Ok(())
     }
@@ -191,8 +195,10 @@ impl CallEngine for TgcallsEngine {
         let api = self.api;
         if !enabled {
             let call = self.call_mut(call_id)?;
-            call.media.screen_share_on = false;
-            if let (Some(handle), Some(_)) = (call.handle, call.screen) {
+            if call.media.video.screen() {
+                call.media.video = VideoSource::Off;
+            }
+            if let (Some(handle), Some(_)) = (call.handle(), call.screen) {
                 // SAFETY: a live call; NULL stops sending video.
                 unsafe { (api.qc_p2p_set_video_capture)(handle.as_ptr(), std::ptr::null_mut()) };
             }
@@ -208,11 +214,11 @@ impl CallEngine for TgcallsEngine {
         let screen = unsafe { (api.qc_video_capture_external)(1) };
         let screen = Native::new(screen).ok_or(EngineError::NoScreenSource)?;
         self.call_mut(call_id)?.screen = Some(screen);
-        self.call_mut(call_id)?.media.camera = None;
+        self.call_mut(call_id)?.media.video = VideoSource::Off;
         self.apply_camera(call_id)?;
         let call = self.call_mut(call_id)?;
-        call.media.screen_share_on = true;
-        if let Some(handle) = call.handle {
+        call.media.video = VideoSource::Screen;
+        if let Some(handle) = call.handle() {
             // SAFETY: both live; the call takes its own reference.
             unsafe { (api.qc_p2p_set_video_capture)(handle.as_ptr(), screen.as_ptr()) };
             call.gate.set_screen(Some(screen.as_ptr()));
@@ -255,7 +261,7 @@ impl CallEngine for TgcallsEngine {
         group_call_id: i32,
         answer_payload: &str,
         camera: Option<&str>,
-    ) -> Result<(), EngineError> {
+    ) -> Result<Option<EngineError>, EngineError> {
         self.connect_group(group_call_id, answer_payload, camera)
     }
 
@@ -393,7 +399,7 @@ impl CallEngine for TgcallsEngine {
             CaptureTarget::Group(group_call_id) => return self.group_sender(group_call_id),
         };
         let call = self.calls.get(&call_id)?;
-        call.handle?;
+        call.handle()?;
         Some(Arc::clone(&call.gate) as Arc<dyn ExternalFrameSender>)
     }
 

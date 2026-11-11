@@ -5,8 +5,8 @@ use super::actions::{
     CancelSearch, CloseWindow, FirstChat, FocusSidebar, LastChat, LockApp, MarkChatRead,
     MinimizeWindow, NextChat, NextFolder, OpenArchive, OpenContacts, OpenHelp, OpenPinnedChat,
     OpenSavedMessages, OpenSearch, OpenSettings, OpenShortcuts, PrevChat, PrevFolder, QuitApp,
-    ShowChatMenu, ShowChatPreview, StoryTogglePause, SubmitCode, SubmitPassword, SubmitPhone,
-    ToggleFullscreen, ToggleSidebar, ToggleTheme, ZoomWindow,
+    ShowAccount, ShowChatMenu, ShowChatPreview, StoryTogglePause, SubmitCode, SubmitPassword,
+    SubmitPhone, ToggleFullscreen, ToggleSidebar, ToggleTheme, ZoomWindow,
 };
 use super::app::QuillApp;
 use super::command_shortcuts::CommandActions;
@@ -44,7 +44,6 @@ impl QuillApp {
         let display = self.frame.clock_timing.get().map(|timing| timing.display);
         super::sticker_player::note_display(None, display, window, cx);
         super::glyph_sweep::start_frame(window, cx);
-        super::spoiler_fx::release_media_tile(Some(window), cx);
         if let Some(cache) = self.slices.image_cache() {
             cache.update(cx, |cache, cx| cache.trim(window, cx));
         }
@@ -71,7 +70,9 @@ impl Render for QuillApp {
         self.sync_capture_block(window);
         self.sync_viewer_hdr(window);
         self.sync_window_title(window);
-        super::window_frame::sync(window, self.appearance.native_window_frame);
+        self.sync_proxy_list_box();
+        self.sync_premium_preview_files();
+        super::window_frame::sync(window, cx, self.appearance.native_window_frame);
         // Rows the history list painted last frame are what the user saw.
         self.passcode_frame(window, cx);
         self.report_visible_history(
@@ -88,7 +89,7 @@ impl Render for QuillApp {
         }
         let history_drawn = self.slices.window.history_drawn();
         self.players.inline_videos.set_scale(window.scale_factor());
-        self.widgets.scale = window.scale_factor();
+        self.widgets.scales.insert(None, window.scale_factor());
         self.widgets_frame_start(None, cx);
         // Picture-in-Picture outlives neither its message, the account
         // nor an unlocked app.
@@ -239,6 +240,11 @@ impl Render for QuillApp {
                     cx.propagate();
                 }
             }))
+            .on_action(cx.listener(|this, action: &ShowAccount, window, cx| {
+                if !this.show_account_by_key(action.index, window, cx) {
+                    cx.propagate();
+                }
+            }))
             .on_action(cx.listener(|this, _: &OpenSavedMessages, window, cx| {
                 if !this.open_saved_by_key(window, cx) {
                     cx.propagate();
@@ -332,8 +338,11 @@ impl Render for QuillApp {
             .when(
                 matches!(
                     self.preferences.update_state,
-                    quill::updater::UpdateState::Installed(_)
-                ) && !self.preferences.update_banner_dismissed,
+                    quill::updater::UpdateState::Installed(
+                        _,
+                        quill::updater::ChangelogBanner::Shown
+                    )
+                ),
                 |this| this.child(self.update_banner(cx)),
             )
             // Slice parity:platform-offline-indicator — slim connection
@@ -465,7 +474,7 @@ impl Render for QuillApp {
                 }
             })
             // Phase 9.3: story composer overlay above the story viewer.
-            .when(self.stories.composer.open, |this| {
+            .when(self.stories.composer.is_open(), |this| {
                 this.child(self.story_composer_overlay(cx))
             })
             // Phase 9.7: chat story page overlay (albums / chat page /
@@ -525,7 +534,7 @@ impl Render for QuillApp {
             // kit Phase 2 (redo): scheduled messages now hosted in a kit
             // Dialog via the shell sync — render wiring deleted.
             // M1: right-click message context menu.
-            .when_some(self.message_ui.menu, |this, menu| {
+            .when_some(self.message_ui.menu.at(), |this, menu| {
                 this.child(self.message_menu_overlay(menu, cx))
             })
             // The expanded reaction selector, where the menu was, or the
@@ -557,7 +566,7 @@ impl Render for QuillApp {
                     this.child(self.story_menu_overlay(chat_id, position, cx))
                 },
             )
-            .when_some(self.playback.playlist_menu, |this, menu| {
+            .when_some(self.playback.playlist.menu(), |this, menu| {
                 this.child(self.playlist_menu_overlay(menu, cx))
             })
             .when_some(self.chat_list.archive_menu, |this, position| {
@@ -573,7 +582,7 @@ impl Render for QuillApp {
             // messages beside the pressed chat-list row. Rendered above
             // the row menu; any click or the long-press release closes
             // it.
-            .when_some(self.chat_list.preview, |this, preview| {
+            .when_some(self.chat_list.peek.open(), |this, preview| {
                 this.child(self.chat_preview_overlay(preview, cx))
             })
             // MED4: Instant View reader overlay (above the menu).

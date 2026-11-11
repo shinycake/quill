@@ -32,9 +32,17 @@ impl Session {
             CallsPayload::GroupCallId { id } => {
                 if let Some(RequestPurpose::Calls(CallsPurpose::CreateVideoChat { .. })) =
                     pending.map(|p| p.purpose)
-                    && !self.calls.group_call_fetch_queue.contains(&id)
                 {
-                    self.calls.group_call_fetch_queue.push(id);
+                    if !self.calls.group_call_fetch_queue.contains(&id) {
+                        self.calls.group_call_fetch_queue.push(id);
+                    }
+                    if let Some(request) = extra {
+                        self.calls.answered_creates.push(request);
+                        // Nobody drains this for an account off screen: keep
+                        // the latest few.
+                        let old = self.calls.answered_creates.len().saturating_sub(8);
+                        self.calls.answered_creates.drain(..old);
+                    }
                 }
                 self.calls.group_call_error = None;
             }

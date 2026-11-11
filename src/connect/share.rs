@@ -24,7 +24,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.messages.share_search.clear();
             return Ok(());
         }
-        if self.session.messages.share_search.query == query {
+        if self.session.messages.share_search.query() == query {
             return Ok(());
         }
         let local = self.session.request(RequestPurpose::SearchShareChats, None);
@@ -70,10 +70,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::GetChatAvailableMessageSenders,
             Some(chat_id),
         );
+        self.session.message_senders_loading(chat_id);
         self.sender
             .send_json(&get_chat_available_message_senders(extra, chat_id))
             .inspect_err(|_| {
                 self.session.requests.take(extra);
+                self.session
+                    .fail_message_senders(chat_id, "Could not send the request.".into());
             })
     }
 

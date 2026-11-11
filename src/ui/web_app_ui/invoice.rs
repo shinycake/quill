@@ -21,10 +21,22 @@ use quill::payment_invoice::invoice_link_invoice;
 #[derive(Default, Debug, PartialEq, Eq)]
 pub(super) struct InvoiceWatch {
     slug: String,
+    attempt: Attempt,
+}
+
+/// How the last payment attempt of a watched checkout stands. `Sending`
+/// leaves on the next look that does not see the payment out: `Failed` (an
+/// error on the form), `Pending` (a verification step) or `Idle`; a new
+/// attempt starts it over.
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+enum Attempt {
+    /// No attempt yet, or one that ended without paying.
+    #[default]
+    Idle,
     /// A payment was being sent on the last look.
-    sending: bool,
-    failed: bool,
-    pending: bool,
+    Sending,
+    Failed,
+    Pending,
 }
 
 /// What the payment state shows right now.
@@ -56,25 +68,26 @@ impl InvoiceWatch {
             // A payment still being sent when the checkout closed (Esc, or
             // the 3-D Secure page taking over before the next look) may
             // still go through: that is pending, never cancelled.
-            return Some(if self.failed {
-                "failed"
-            } else if self.pending || self.sending || view.sending {
-                "pending"
-            } else {
-                "cancelled"
+            return Some(match self.attempt {
+                Attempt::Failed => "failed",
+                Attempt::Pending | Attempt::Sending => "pending",
+                Attempt::Idle if view.sending => "pending",
+                Attempt::Idle => "cancelled",
             });
         }
         if view.sending {
-            self.sending = true;
-            self.failed = false;
-            self.pending = false;
-        } else if self.sending {
+            self.attempt = Attempt::Sending;
+        } else if self.attempt == Attempt::Sending {
             // The attempt ended without paying: an error on the form means it
             // failed, a verification step means it is pending, and anything
             // else leaves it cancelled.
-            self.sending = false;
-            self.failed = view.note;
-            self.pending = view.verification && !view.note;
+            self.attempt = if view.note {
+                Attempt::Failed
+            } else if view.verification {
+                Attempt::Pending
+            } else {
+                Attempt::Idle
+            };
         }
         None
     }
@@ -84,7 +97,9 @@ impl QuillApp {
     /// `web_app_open_invoice`: open the checkout at render time (it needs the
     /// window) and bring Quill in front of the mini app.
     pub(super) fn request_mini_app_invoice(&mut self, slug: String, cx: &mut Context<Self>) {
-        self.mini_apps.render_action = Some(RenderAction::OpenInvoice { slug });
+        self.mini_apps
+            .render_actions
+            .push(RenderAction::OpenInvoice { slug });
         self.raise_main_window_later(cx);
         cx.notify();
     }
@@ -131,10 +146,10 @@ impl QuillApp {
         let shown = payments.is_some_and(|p| p.shows(&invoice));
         let view = CheckoutView {
             dialog_open: self.payments.dialog.is_some(),
-            paid: shown && payments.is_some_and(|p| p.form_paid),
+            paid: shown && payments.is_some_and(|p| p.checkout.is_paid()),
             sending: payments.is_some_and(|p| p.is_paying(&invoice)),
-            note: shown && payments.is_some_and(|p| p.note.is_some()),
-            verification: shown && payments.is_some_and(|p| p.verification_started),
+            note: shown && payments.is_some_and(|p| p.checkout.note().is_some()),
+            verification: shown && payments.is_some_and(|p| p.checkout.is_verifying()),
         };
         let Some(window) = self.mini_apps.window.as_mut() else {
             return;
@@ -300,13 +315,18 @@ mod demo {
         fn demo_mini_app_invoice(&mut self, window: &mut Window, cx: &mut Context<Self>) {
             if let Some(session) = self.demo_session.as_mut() {
                 // box-host: demo
-                session.payments.form = Some(PaymentFormData {
-                    id: 1,
-                    form_type: PaymentFormTypeData::Stars { star_count: 50 },
-                    seller_bot_user_id: 900,
-                    product_title: "Premium skin pack".into(),
-                    product_description: "Ordered from the Quillbot mini app.".into(),
-                });
+                session.payments.checkout = quill::state::CheckoutForm::ready(
+                    PaymentFormData {
+                        id: 1,
+                        form_type: PaymentFormTypeData::Stars { star_count: 50 },
+                        seller_bot_user_id: 900,
+                        product_title: "Premium skin pack".into(),
+                        product_description: "Ordered from the Quillbot mini app.".into(),
+                    },
+                    quill::state::PaymentRequest {
+                        invoice: quill::payment_invoice::InputInvoice::Name("demo".into()),
+                    },
+                );
             }
             self.open_payment_dialog(window, cx);
         }

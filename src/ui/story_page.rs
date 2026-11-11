@@ -16,11 +16,13 @@ use quill::story_album_picker::AlbumPicker;
 /// chat-page stories (pin/unpin), and the paginated archive list for one
 /// chat. All mutations round-trip through TDLib; the honest
 /// Checking/Sending/Succeeded/Failed states live in
-/// `Session::story_page_op` and render as the page's status line.
+/// `Session::story_page_ops` and render as the page's status line.
 pub(crate) struct StoryPage {
     pub(crate) chat_id: ChatId,
-    /// Opened album id, or `None` for the album list.
-    pub(crate) open_album: Option<i32>,
+    /// The album list, or one opened album and where its delete stands.
+    pub(crate) view: AlbumView,
+    /// The mutation the page waits on and what its answer does.
+    pub(crate) wait: PageWait,
     /// "New album" form inputs.
     pub(crate) new_album_name: Entity<TextareaState>,
     /// Rename input on the opened album.
@@ -36,8 +38,68 @@ pub(crate) struct StoryPage {
     pub(crate) archive_scroll: ScrollHandle,
     pub(crate) posted_asked: crate::ui::scroll_load::Asked,
     pub(crate) archive_asked: crate::ui::scroll_load::Asked,
-    /// Album id awaiting the second delete click (two-click confirm).
-    pub(crate) delete_confirm: Option<i32>,
+}
+
+/// What the story page shows below its header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AlbumView {
+    List,
+    Album { id: i32, delete: AlbumDelete },
+}
+
+/// The two-click album delete: the first click arms it, the second sends
+/// it. Part of the album view, so leaving the view (back, the picker, an
+/// answer) disarms it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AlbumDelete {
+    Idle,
+    Armed,
+}
+
+impl AlbumView {
+    pub(crate) fn album(id: i32) -> Self {
+        Self::Album {
+            id,
+            delete: AlbumDelete::Idle,
+        }
+    }
+
+    /// The opened album, if any.
+    pub(crate) fn open_album(self) -> Option<i32> {
+        match self {
+            Self::List => None,
+            Self::Album { id, .. } => Some(id),
+        }
+    }
+
+    /// Whether the delete of album `album_id` waits for its second click.
+    pub(crate) fn delete_armed(self, album_id: i32) -> bool {
+        matches!(
+            self,
+            Self::Album { id, delete: AlbumDelete::Armed } if id == album_id
+        )
+    }
+
+    /// Something else was pressed: a delete armed before does not carry on.
+    pub(crate) fn disarm(&mut self) {
+        if let Self::Album { delete, .. } = self {
+            *delete = AlbumDelete::Idle;
+        }
+    }
+}
+
+/// The one mutation of the page still on its way. It ends with its answer:
+/// `Succeeded` runs the follow-up, a failure or a lost call leaves the page
+/// as it was, with the failure on the status line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PageWait {
+    Idle,
+    /// `createStoryAlbum`: the name and the picker go once it is made.
+    Creating(quill::ids::RequestId),
+    /// The picker's adds and removes on an opened album.
+    SavingPicker(Vec<quill::ids::RequestId>),
+    /// `deleteStoryAlbum`: the album view goes once it is deleted.
+    Deleting(quill::ids::RequestId),
 }
 
 impl StoryPage {
@@ -52,7 +114,8 @@ impl StoryPage {
         };
         Self {
             chat_id,
-            open_album: None,
+            view: AlbumView::List,
+            wait: PageWait::Idle,
             new_album_name: input(tr(keys::Q_MEDIA_ALBUM_NAME_1_12_CHARACTERS)),
             rename_input: input(tr(keys::Q_MEDIA_ALBUM_NAME_1_12_CHARACTERS)),
             picker: None,
@@ -61,7 +124,6 @@ impl StoryPage {
             archive_scroll: ScrollHandle::new(),
             posted_asked: Default::default(),
             archive_asked: Default::default(),
-            delete_confirm: None,
         }
     }
 }

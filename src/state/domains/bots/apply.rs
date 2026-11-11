@@ -9,7 +9,7 @@ impl Session {
         chat_id: Option<ChatId>,
         answer: crate::telegram::envelope::CallbackQueryAnswer,
     ) {
-        self.bots.last_callback_answer = Some(CallbackAnswer {
+        self.bots.callback_answers.push_back(CallbackAnswer {
             answer,
             chat: chat_id,
         });
@@ -79,15 +79,10 @@ impl Session {
                         (pending.chat_id, pending.around_message_id)
                 {
                     // Guard: a panel the user closed while the answer was in
-                    // flight must stay closed — only fill the loading entry.
-                    if self
-                        .bots
-                        .game_scores
-                        .contains_key(&(chat_id.0, message_id.0))
-                    {
-                        self.bots
-                            .game_scores
-                            .insert((chat_id.0, message_id.0), Some(scores));
+                    // flight must stay closed, and only the request the
+                    // panel waits for fills it.
+                    if let Some(panel) = self.bots.game_scores.get_mut(&(chat_id.0, message_id.0)) {
+                        panel.answered(Some(pending.id), scores);
                     }
                 }
             }
@@ -109,7 +104,7 @@ impl Session {
                 // B1: `getLoginUrlInfo` response to our own login-button
                 // press (matched by `@extra`).
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetLoginUrlInfo) {
-                    self.bots.last_login_url_info = Some(info);
+                    self.bots.login_url.answer(pending.map(|p| p.id), info);
                 }
             }
         }

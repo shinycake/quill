@@ -73,7 +73,7 @@ impl QuillApp {
             seed_video_call(session, false, &sink, &self.demo_ui.seq);
             if let Some(call) = session.calls.active_call.as_mut() {
                 call.is_video = false;
-                call.camera_on = false;
+                call.set_camera_on(false);
                 call.remote_video = RemoteVideoState::Inactive;
             }
             seed_people(session, &query, &sink, &self.demo_ui.seq);
@@ -131,7 +131,7 @@ fn seed_people(
     }
     let mut contacts = vec![PEER];
     contacts.extend(CONTACTS.iter().map(|(id, ..)| *id));
-    session.users_state.contacts = Some(contacts);
+    session.users_state.contacts = quill::state::fetch::Fetch::Ready(contacts);
     if !query.trim().is_empty() {
         let search = &mut session.calls.add_people_search;
         search.begin(query, RequestId(1), RequestId(2));

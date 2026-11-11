@@ -69,14 +69,19 @@ fn new_salt() -> String {
     hex(bytes.iter())
 }
 
+/// The salt saved in `dir`, if there is a valid one.
+fn saved_salt(dir: &Path) -> Option<String> {
+    let saved = std::fs::read_to_string(dir.join(WEBVIEW_SALT)).ok()?;
+    let saved = saved.trim();
+    (saved.len() == 32 && saved.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then(|| saved.to_owned())
+}
+
 /// The salt saved in `dir`, made and saved first when there is none.
 fn webview_salt(dir: &Path) -> Option<String> {
     let file = dir.join(WEBVIEW_SALT);
-    if let Ok(saved) = std::fs::read_to_string(&file) {
-        let saved = saved.trim();
-        if saved.len() == 32 && saved.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            return Some(saved.to_owned());
-        }
+    if let Some(saved) = saved_salt(dir) {
+        return Some(saved);
     }
     let salt = new_salt();
     std::fs::create_dir_all(dir).ok()?;
@@ -128,13 +133,24 @@ pub fn forget_after_helper(
         return;
     };
     let later = dir.clone();
+    // Whose folder this is: its salt now. The helper can outlive a sign-in
+    // under the same key, whose folder carries another salt.
+    let owner = saved_salt(&dir);
     let spawned = std::thread::Builder::new()
         .name("quill-webview-forget".into())
         .spawn(move || {
             let _ = helper_gone.recv();
-            let _ = std::fs::remove_dir_all(later);
+            remove_webview_dir_of(&later, owner.as_deref());
         });
     if spawned.is_err() {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// Delete `dir` unless a later sign-in made it its own (it then holds a
+/// different salt than `owner`, the one read when the old account left).
+fn remove_webview_dir_of(dir: &Path, owner: Option<&str>) {
+    if saved_salt(dir).as_deref() == owner {
         let _ = std::fs::remove_dir_all(dir);
     }
 }
@@ -155,29 +171,99 @@ fn forget_folder_data(paths: &AccountPaths) {
 
 const RECENT_HASHTAGS: &str = "recent_hashtags.json";
 
-/// A client of `key` learned it is signed in as `user_id`. When the folder
-/// was last signed in as someone else, what they left is dropped first.
-/// Returns whether it was.
-pub fn claim(app_root: &Path, key: &AccountKey, user_id: i64) -> bool {
-    let paths = AccountPaths::for_root(app_root, key);
-    let file = paths.root.join(OWNER_FILE);
-    let previous = std::fs::read(&file)
+/// Who an account folder was last signed in as.
+enum Previous {
+    /// No readable `owner.json`: never written, deleted, or corrupt.
+    Unknown,
+    Known(i64),
+}
+
+fn read_owner(file: &Path) -> Previous {
+    std::fs::read(file)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Owner>(&bytes).ok())
-        .map(|owner| owner.user_id);
-    if previous == Some(user_id) {
-        return false;
-    }
-    let someone_else = previous.is_some();
+        .map_or(Previous::Unknown, |owner| Previous::Known(owner.user_id))
+}
+
+/// Whether something the last user could have left is on disk for `key`
+/// (what [`forget`] drops from the folder and the app root).
+fn has_leftovers(app_root: &Path, paths: &AccountPaths, account: &str) -> bool {
+    has_recent_hashtags(&paths.root.join(RECENT_HASHTAGS))
+        || paths.root.join(crate::connect::PAID_TRUST_FILE).exists()
+        || widget_dir(app_root, account).exists()
+        || webview_dir(app_root, account).exists()
+}
+
+/// Whether the recent hashtags file holds a tag. The empty list that
+/// [`forget`] writes is not a leftover, so a wipe whose owner write fails
+/// does not find "leftovers" again at the next start.
+fn has_recent_hashtags(file: &Path) -> bool {
+    std::fs::read(file)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<crate::suggest::RecentHashtags>(&bytes).ok())
+        .is_some_and(|list| !list.tags.is_empty())
+}
+
+/// How this run's client got to be signed in.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SignInOrigin {
+    /// TDLib resumed a session it already had: whose it is was settled
+    /// when it signed in, possibly by a release that kept no `owner.json`.
+    #[default]
+    Resumed,
+    /// This process took the user through a phone, code, QR or password
+    /// step: a person just signed in, and may not be who the folder held.
+    Fresh,
+}
+
+/// What [`claim`] did.
+pub struct Claimed {
+    /// The folder was last signed in as someone else (or as someone who
+    /// cannot be told), and what they left was dropped first.
+    pub dropped: bool,
+    /// Why the new owner could not be saved; until it is, the next start
+    /// cannot tell whose the folder is.
+    pub owner_error: Option<std::io::Error>,
+}
+
+/// A client of `key` learned it is signed in as `user_id`. When the folder
+/// was last signed in as someone else, what they left is dropped first. An
+/// owner that cannot be read (no file, a corrupt one) with leftovers in the
+/// folder counts as someone else only after a [`SignInOrigin::Fresh`]
+/// sign-in; a resumed session is the folder's own account (an older release
+/// kept no owner file), so its data stays and the owner is written.
+pub fn claim(app_root: &Path, key: &AccountKey, user_id: i64, origin: SignInOrigin) -> Claimed {
+    let paths = AccountPaths::for_root(app_root, key);
+    let file = paths.root.join(OWNER_FILE);
+    let someone_else = match read_owner(&file) {
+        Previous::Known(previous) if previous == user_id => {
+            return Claimed {
+                dropped: false,
+                owner_error: None,
+            };
+        }
+        Previous::Known(_) => true,
+        Previous::Unknown => {
+            origin == SignInOrigin::Fresh && has_leftovers(app_root, &paths, key.0.as_str())
+        }
+    };
     if someone_else {
         forget(app_root, key);
     }
-    if std::fs::create_dir_all(&paths.root).is_ok()
-        && let Err(err) = crate::settings::write_json_atomic(&file, &Owner { user_id })
-    {
-        eprintln!("quill: could not save {OWNER_FILE}: {err}");
+    Claimed {
+        dropped: someone_else,
+        owner_error: write_owner(app_root, key, user_id).err(),
     }
-    someone_else
+}
+
+/// Save `user_id` as the folder's owner. Only the write: a retry after a
+/// failed save must not run [`claim`] again, which would take the new
+/// owner's own files for leftovers of someone else.
+pub fn write_owner(app_root: &Path, key: &AccountKey, user_id: i64) -> std::io::Result<()> {
+    let paths = AccountPaths::for_root(app_root, key);
+    std::fs::create_dir_all(&paths.root).and_then(|()| {
+        crate::settings::write_json_atomic(&paths.root.join(OWNER_FILE), &Owner { user_id })
+    })
 }
 
 #[cfg(test)]

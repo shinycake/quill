@@ -267,12 +267,11 @@ fn style_requests_respect_the_option_limits() {
 #[test]
 fn style_list_update_populates_the_tabs() {
     let mut h = Harness::new();
-    assert!(!h.ai().styles_received);
+    assert!(h.ai().styles.is_empty());
     h.feed(json!({
         "@type": "updateTextCompositionStyles",
         "styles": [style_json("formal", false), style_json("pirate", true)]
     }));
-    assert!(h.ai().styles_received);
     assert_eq!(h.ai().styles.names(), ["formal", "pirate"]);
 }
 
@@ -320,7 +319,7 @@ fn fixed_text_for_the_box_lands_with_its_diff() {
             },
         ]
     );
-    assert!(h.driver.session.messages.ai_composer_text.is_none());
+    assert!(h.driver.session.messages.ai_answers.is_empty());
 }
 
 #[test]
@@ -342,7 +341,7 @@ fn formatted_text_for_the_box_never_touches_the_draft() {
     assert_eq!(result.text, "Hello");
     assert_eq!(result.entities.len(), 1);
     assert!(result.diff.is_none());
-    assert!(h.driver.session.messages.ai_composer_text.is_none());
+    assert!(h.driver.session.messages.ai_answers.is_empty());
     assert!(h.ai().apply_in_place.is_none());
 }
 
@@ -367,7 +366,7 @@ fn box_errors_map_to_box_error_kinds() {
         assert_eq!(answer.token, 41);
         assert_eq!(answer.outcome, Err(expected), "{message}");
     }
-    assert!(h.driver.session.messages.ai_error.is_none());
+    assert!(h.driver.session.messages.ai_error.is_empty());
 }
 
 #[test]
@@ -434,10 +433,10 @@ fn style_lookup_fills_on_answer_or_error() {
         .unwrap();
     let lookup = h.ai().style_lookup.clone().expect("lookup");
     assert_eq!((lookup.token, lookup.name.as_str()), (61, "pirate"));
-    assert!(lookup.outcome.is_none());
+    assert!(!lookup.outcome.is_done());
     h.answer(extra, style_json("pirate", true));
     assert!(matches!(
-        h.ai().style_lookup.clone().and_then(|lookup| lookup.outcome),
+        h.ai().style_lookup.clone().and_then(|lookup| lookup.outcome.done()),
         Some(Ok(style)) if style.name == "pirate"
     ));
 
@@ -447,7 +446,7 @@ fn style_lookup_fills_on_answer_or_error() {
         h.ai()
             .style_lookup
             .clone()
-            .and_then(|lookup| lookup.outcome),
+            .and_then(|lookup| lookup.outcome.done()),
         Some(Err(StyleError::Invalid))
     );
 }
@@ -477,36 +476,39 @@ fn created_style_goes_to_the_front_and_answers_the_box() {
 }
 
 /// Save style X, press Back, open the editor for Y: X's late answer (or
-/// error) does not close Y's editor; X still joins the list.
+/// error) carries X's request, so the editor of Y, which waits on its own,
+/// does not take it; X still joins the list.
 #[test]
-fn a_left_editors_save_does_not_answer_the_next_editor() {
+fn a_save_answer_names_the_request_it_answers() {
     let mut h = Harness::new();
     let x = h
         .driver
         .create_text_composition_style("X", 0, "arr", true)
         .unwrap();
-    h.driver.session.messages.ai_compose.forget_style_save();
     h.answer(x, style_json("x", true));
-    assert!(h.ai().style_edit.is_none());
+    assert_eq!(
+        h.ai().style_edit.clone().map(|answer| answer.request),
+        Some(x)
+    );
     assert_eq!(h.ai().styles.names(), ["x"]);
 
     let failed = h
         .driver
         .edit_text_composition_style("x", "X", 0, "arr", false)
         .unwrap();
-    h.driver.session.messages.ai_compose.forget_style_save();
     h.fail(failed, "TONES_SAVED_TOO_MANY");
-    assert!(h.ai().style_edit.is_none() && h.ai().style_notice.is_none());
+    let answer = h.ai().style_edit.clone();
+    assert_eq!(answer.as_ref().map(|answer| answer.request), Some(failed));
+    assert_ne!(Some(x), answer.map(|answer| answer.request));
 
-    // The open editor's own save still answers it.
     let y = h
         .driver
         .create_text_composition_style("Y", 0, "arr", true)
         .unwrap();
     h.answer(y, style_json("y", true));
     assert!(matches!(
-        h.ai().style_edit.clone().map(|answer| answer.outcome),
-        Some(Ok(style)) if style.name == "y"
+        h.ai().style_edit.clone(),
+        Some(answer) if answer.request == y && matches!(&answer.outcome, Ok(style) if style.name == "y")
     ));
 }
 
@@ -521,23 +523,37 @@ fn add_remove_and_delete_answers() {
     h.answer(extra, json!({"@type": "ok"}));
     assert_eq!(
         h.ai().style_notice,
-        Some(StyleNotice::Added("shared".into()))
+        Some(StyleNotice::Added {
+            name: "shared".into(),
+            request: extra
+        })
     );
     assert_eq!(h.ai().styles.names(), ["shared", "formal"]);
 
     let extra = h.driver.remove_text_composition_style("shared").unwrap();
     h.answer(extra, json!({"@type": "ok"}));
-    assert_eq!(h.ai().style_notice, Some(StyleNotice::Removed));
+    assert_eq!(
+        h.ai().style_notice,
+        Some(StyleNotice::Removed { request: extra })
+    );
     assert_eq!(h.ai().styles.names(), ["formal"]);
 
     let extra = h.driver.delete_text_composition_style("mine").unwrap();
     h.answer(extra, json!({"@type": "ok"}));
-    assert_eq!(h.ai().style_notice, Some(StyleNotice::Deleted));
+    assert_eq!(
+        h.ai().style_notice,
+        Some(StyleNotice::Deleted { request: extra })
+    );
 
     h.driver.session.messages.ai_compose.style_notice = None;
     let extra = h.driver.delete_text_composition_style("mine").unwrap();
     h.fail(extra, "SOMETHING_ELSE");
     assert_eq!(h.ai().style_notice, None, "a failed delete is silent");
+    assert_eq!(
+        h.ai().style_op_failures,
+        [extra],
+        "but the preview waiting on it is told"
+    );
     assert!(h.ai().op_names.is_empty());
 }
 
@@ -558,5 +574,5 @@ fn style_example_answers_its_token() {
     );
     let example = h.ai().example.clone().expect("example");
     assert_eq!((example.token, example.style_name.as_str()), (71, "pirate"));
-    assert!(matches!(example.outcome, Some(Ok(e)) if e.result_text == "Ahoy"));
+    assert!(matches!(example.outcome.answer(), Some(Ok(e)) if e.result_text == "Ahoy"));
 }

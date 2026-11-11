@@ -1,5 +1,5 @@
 //! Failed requests for the chat list: loading, folders, archive and pins.
-use crate::folder_limits::{FolderOp, limit_kind_for_error};
+use crate::folder_limits::limit_kind_for_error;
 use crate::state::*;
 
 impl Session {
@@ -17,60 +17,110 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::ToggleChatIsPinned | RequestPurpose::SetPinnedChats)
         ) && self.note_premium_limit(err, pending);
+        // A limit pair that did not come is asked again at the next box,
+        // unless the server refused it.
+        if let Some(p) = pending.filter(|p| p.purpose == RequestPurpose::GetPremiumLimit) {
+            self.payments
+                .hub
+                .limits
+                .fail_ask(p.id, matches!(err.code, 400 | 403 | 404));
+        }
         // A folder request that hit a limit opens the limit box (tdesktop
         // `ShowImportError` / the `*LimitBox`es) instead of an error line.
-        let folder_op = match pending.map(|p| p.purpose) {
-            Some(RequestPurpose::CreateChatFolder) => Some(FolderOp::Create),
-            Some(RequestPurpose::EditChatFolder) => Some(FolderOp::Edit),
-            Some(RequestPurpose::CreateChatFolderInviteLink) => Some(FolderOp::CreateLink),
-            Some(RequestPurpose::AddChatFolderByInviteLink) => Some(FolderOp::AddByLink),
-            _ => None,
-        };
+        let folder_op = pending.and_then(|p| p.purpose.folder_op());
         let limit_kind = folder_op
             .zip(err.limit_hint)
             .map(|(op, hint)| limit_kind_for_error(op, hint));
         if let Some(kind) = limit_kind {
-            self.chat_list.folder_limit_hit = Some(kind);
+            // The box that sent the request gets the limit box in its own
+            // window; its own answer (`DialogAnswers`) ends its wait.
+            self.chat_list
+                .folder_limit_hits
+                .push_back((kind, pending.map(|p| p.id)));
         }
-        // Share Folder / recommended folders / "Add folder" by link: the
-        // dialog shows the reason instead of spinning.
+        // Share Folder: a failed fetch ends its stage in the error the box
+        // draws with a Retry, and recommended folders say so in the toast.
+        // (The box's own requests answer through `DialogAnswers`.)
+        match pending.map(|p| (p.purpose, p.folder_id)) {
+            Some((RequestPurpose::GetChatFolderInviteLinks, Some(folder_id))) => {
+                self.chat_list
+                    .folder_shares
+                    .entry(folder_id)
+                    .or_default()
+                    .links
+                    .fail(error_reason(err));
+            }
+            // The Delete folder box ends in the error with a Retry instead
+            // of waiting for a list that never comes.
+            Some((RequestPurpose::GetChatFolderChatsToLeave, Some(folder_id))) => {
+                self.chat_list
+                    .folder_chats_to_leave
+                    .entry(folder_id)
+                    .or_default()
+                    .fail(error_reason(err));
+            }
+            Some((RequestPurpose::GetChatsForFolderInviteLink, Some(folder_id))) => {
+                self.chat_list
+                    .folder_shares
+                    .entry(folder_id)
+                    .or_default()
+                    .chats
+                    .fail(error_reason(err));
+            }
+            Some((RequestPurpose::DeleteChatFolderInviteLink, Some(folder_id))) => {
+                // The link left the list at send time: what the box holds is
+                // wrong now, so it shows the error with a Retry that asks
+                // the list again.
+                self.chat_list
+                    .folder_shares
+                    .entry(folder_id)
+                    .or_default()
+                    .links
+                    .fail_dropping_data(error_reason(err));
+            }
+            // The tab order or the tags switch snapped back (its rollback):
+            // the toast says why.
+            Some((
+                RequestPurpose::ReorderChatFolders | RequestPurpose::ToggleChatFolderTags,
+                _,
+            )) => {
+                self.chats_state.chat_action_error.push(error_reason(err));
+            }
+            Some((RequestPurpose::GetRecommendedChatFolders, _)) => {
+                self.chats_state.chat_action_error.push(error_reason(err));
+            }
+            _ => {}
+        }
+        // The Add to folder box ends in the error with a Retry.
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatListsToAddChat)
+            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+        {
+            self.chat_list
+                .chat_lists_for_add
+                .entry(chat_id.0)
+                .or_default()
+                .fail(error_reason(err));
+        }
         match pending.map(|p| p.purpose) {
-            Some(RequestPurpose::CreateChatFolderInviteLink) if limit_kind.is_some() => {}
-            Some(RequestPurpose::AddChatFolderByInviteLink) if limit_kind.is_some() => {}
-            Some(
-                RequestPurpose::GetChatFolderInviteLinks
-                | RequestPurpose::GetChatsForFolderInviteLink
-                | RequestPurpose::CreateChatFolderInviteLink
-                | RequestPurpose::EditChatFolderInviteLink
-                | RequestPurpose::DeleteChatFolderInviteLink
-                | RequestPurpose::GetRecommendedChatFolders,
-            ) => {
-                self.chat_list.folder_share_error = Some(error_reason(err));
-            }
-            Some(
-                RequestPurpose::CheckChatFolderInviteLink
-                | RequestPurpose::AddChatFolderByInviteLink,
-            ) => {
-                if self.chat_list.take_folder_invite_answer(pending) {
-                    self.chat_list.folder_invite_error = Some(error_reason(err));
-                }
-            }
             // Slice CL1: refused chat-list actions surface in the
             // status note (the UI drains `chat_action_error`) —
             // the optimistic state was already rolled back above.
             // Only the numeric code is shown; TDLib's message is
             // never stored.
             Some(RequestPurpose::ToggleChatIsPinned) if !pins_box => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not pin the chat (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not pin the chat (error {})", err.code));
             }
             Some(RequestPurpose::ToggleChatIsMarkedAsUnread) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not change read state (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not change read state (error {})", err.code));
             }
             Some(RequestPurpose::DeleteChatHistory) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not clear history (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not clear history (error {})", err.code));
             }
             // tdesktop deletes the history whether or not leaving worked.
             Some(RequestPurpose::LeaveBeforeDelete) => {
@@ -79,18 +129,26 @@ impl Session {
                 }
             }
             Some(RequestPurpose::RemoveChatFromList) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not delete the chat (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not delete the chat (error {})", err.code));
             }
             // The removals waiting for this spec are dropped: asking again
             // on every ingest would loop at round-trip speed.
             Some(RequestPurpose::GetChatFolder) => {
                 if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
+                    self.chat_list.folder_specs.fail(
+                        folder_id,
+                        call_request_error_line(
+                            err,
+                            crate::lang::tr(crate::lang::keys::Q_NOTES_FAILED_FOLDER),
+                        ),
+                    );
                     let queue = &mut self.chat_list.folder_remove_queue;
                     let before = queue.len();
                     queue.retain(|(_, folder)| *folder != folder_id);
                     if queue.len() != before {
-                        self.chats_state.chat_action_error = Some(format!(
+                        self.chats_state.chat_action_error.push(format!(
                             "{} (error {})",
                             crate::lang::tr(
                                 crate::lang::keys::Q_CHATLIST_COULD_NOT_REMOVE_FROM_FOLDER
@@ -100,8 +158,25 @@ impl Session {
                     }
                 }
             }
+            // The bar stays: the offer is still open and can be tried again.
+            Some(RequestPurpose::ProcessChatFolderNewChats) => {
+                self.chats_state.chat_action_error.push(format!(
+                    "{} (error {})",
+                    crate::lang::tr(crate::lang::keys::Q_NOTES_FAILED_PROCESS_NEW_CHATS),
+                    err.code
+                ));
+            }
+            // Asked, so the poll waits out the update period instead of
+            // asking again on every tick.
+            Some(RequestPurpose::GetChatFolderNewChats) => {
+                if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
+                    self.chat_list
+                        .folder_new_chats_asked
+                        .insert(folder_id, std::time::Instant::now());
+                }
+            }
             Some(RequestPurpose::HidePromotion) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "{} (error {})",
                     crate::lang::tr(crate::lang::keys::Q_CHAT_COULD_NOT_HIDE_THE_ANNOUNCEMENT),
                     err.code
@@ -111,38 +186,45 @@ impl Session {
             // status note like the CL1 ones — a refusal is never
             // shown as success.
             Some(RequestPurpose::SetPinnedChats) if !pins_box => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not reorder pinned chats (error {})",
                     err.code
                 ));
             }
             Some(RequestPurpose::ReadChatInbox) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not mark the chat as read (error {})",
                     err.code
                 ));
             }
             Some(RequestPurpose::ReadChatList) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not mark all chats as read (error {})",
                     err.code
                 ));
             }
             Some(RequestPurpose::ClearRecentlyFoundChats) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not clear recent searches (error {})",
                     err.code
                 ));
             }
             Some(RequestPurpose::GetArchiveChatListSettings) => {
-                self.chat_list.archive_settings_loading = false;
-                self.chats_state.chat_action_error = Some(format!(
+                self.chat_list.archive_settings.failed(
+                    pending.map(|p| p.id),
+                    format!("error {}", err.code),
+                    false,
+                );
+                self.chat_list
+                    .archive_mute
+                    .note_reload_failed(pending.map(|p| p.id));
+                self.chats_state.chat_action_error.push(format!(
                     "could not load archive settings (error {})",
                     err.code
                 ));
             }
             Some(RequestPurpose::SetArchiveChatListSettings) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not save archive settings (error {})",
                     err.code
                 ));
@@ -154,19 +236,9 @@ impl Session {
         let now = std::time::Instant::now();
         let list = &mut self.chat_list;
         match pending.map(|p| p.purpose) {
-            Some(RequestPurpose::LoadChats) if err.code == 404 => {
-                list.chats_exhausted = true;
-                list.chats_retry = None;
-            }
-            Some(RequestPurpose::LoadChats) => {
-                list.chats_retry = Some(ChatListState::next_page_retry(list.chats_retry, now));
-            }
-            Some(RequestPurpose::LoadArchiveChats) if err.code == 404 => {
-                list.archive_chats_exhausted = true;
-                list.archive_retry = None;
-            }
+            Some(RequestPurpose::LoadChats) => list.main_paging.page_failed(err.code, now),
             Some(RequestPurpose::LoadArchiveChats) => {
-                list.archive_retry = Some(ChatListState::next_page_retry(list.archive_retry, now));
+                list.archive_paging.page_failed(err.code, now)
             }
             _ => {}
         }
@@ -183,11 +255,11 @@ impl Session {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatPreview)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
-            self.chat_list.chat_preview_fetch = Some(PreviewHistoryFetch {
-                chat_id,
-                messages: Vec::new(),
-                failed: Some(call_request_error_line(err, "Could not load preview")),
-            });
+            self.chat_list
+                .chat_preview_fetch
+                .entry(chat_id)
+                .or_default()
+                .fail_dropping_data(call_request_error_line(err, "Could not load preview"));
         }
     }
 }

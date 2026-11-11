@@ -63,6 +63,8 @@ struct Account {
     files: HashMap<i64, PathBuf>,
     saved_contacts: bool,
     fail_history: Option<i64>,
+    /// `getFile` of this file id times out.
+    time_out_file: Option<i64>,
     cancel_after: Option<usize>,
     calls: Vec<String>,
 }
@@ -166,6 +168,7 @@ impl Account {
             files,
             saved_contacts: true,
             fail_history: None,
+            time_out_file: None,
             cancel_after: None,
             calls: Vec::new(),
         }
@@ -348,8 +351,13 @@ impl Tdlib for Account {
                 {"domain_name": "example.org", "bot_user_id": 3, "browser": "Firefox",
                     "platform": "Linux", "ip_address": "198.51.100.7", "location": "Elsewhere",
                     "log_in_date": 1_680_000_000, "last_active_date": 1_690_000_000}]}),
-            "getFile" => json!({"@type": "file", "id": request["file_id"],
-                "local": {"is_downloading_completed": true}}),
+            "getFile" => {
+                if self.time_out_file == request["file_id"].as_i64() {
+                    return Err(ExportError::Tdlib("the request timed out".into()));
+                }
+                json!({"@type": "file", "id": request["file_id"],
+                    "local": {"is_downloading_completed": true}})
+            }
             "downloadFile" => {
                 let id = request["file_id"].as_i64().unwrap();
                 match self.files.get(&id) {
@@ -546,17 +554,27 @@ fn a_full_export_follows_tdesktops_layout() {
     assert!(!root.join(".spool").exists());
     // Progress walked through every step and ended on the last chat.
     let stages: Vec<&AccountStage> = run.reports.iter().map(|p| &p.stage).collect();
-    for wanted in [
-        AccountStage::ChatsList,
-        AccountStage::PersonalInfo,
-        AccountStage::Userpics,
-        AccountStage::Stories,
-        AccountStage::ProfileMusic,
-        AccountStage::Contacts,
-        AccountStage::Sessions,
-        AccountStage::Chats,
-    ] {
-        assert!(stages.contains(&&wanted), "{wanted:?}");
+    let walked = |wanted: fn(&AccountStage) -> bool| stages.iter().any(|s| wanted(s));
+    assert!(walked(|s| matches!(s, AccountStage::ChatsList { .. })));
+    assert!(walked(|s| matches!(s, AccountStage::PersonalInfo)));
+    assert!(walked(|s| matches!(s, AccountStage::Userpics)));
+    assert!(walked(|s| matches!(s, AccountStage::Stories)));
+    assert!(walked(|s| matches!(s, AccountStage::ProfileMusic)));
+    assert!(walked(|s| matches!(s, AccountStage::Contacts)));
+    assert!(walked(|s| matches!(s, AccountStage::Sessions)));
+    assert!(walked(|s| matches!(s, AccountStage::Chats { .. })));
+    // Each chat starts from its own first step: no report shows the
+    // previous chat's writing counts under the next chat's name.
+    let mut last_writing = None;
+    for report in &run.reports {
+        if let AccountStage::Chats { index, chat, .. } = &report.stage {
+            if matches!(chat.stage, crate::export::Stage::Starting) {
+                assert_ne!(last_writing, Some(*index), "stale writing counts");
+            }
+            if matches!(chat.stage, crate::export::Stage::Writing { .. }) {
+                last_writing = Some(*index);
+            }
+        }
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -663,6 +681,51 @@ fn a_chat_telegram_refuses_does_not_end_the_export() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// r2-05 (03-B003): a file call that times out leaves the file out, not the
+/// chat, so the chat is not marked failed.
+#[test]
+fn a_file_call_that_times_out_skips_the_file_not_the_chat() {
+    let (dir, td, mut account) = setup("file-timeout");
+    account.time_out_file = Some(100);
+    let settings = everything(&dir);
+    let run = export(&mut account, &settings, &td);
+    let summary = run.result.unwrap();
+    assert_eq!(summary.failed_chats, 0);
+    assert_eq!(summary.partial_chats, 0);
+    assert!(summary.skipped >= 1);
+    let page = read(&run.root.join("chats/chat_1/messages.html"));
+    assert!(page.contains("hi Bo") && page.contains("hello"), "{page}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_error_after_some_messages_were_saved_is_a_partial_chat() {
+    use super::worker::ChatOutcome;
+    use crate::export::{Progress, Stage};
+    let mut progress = Progress::starting();
+    progress.stage = Stage::Collecting { read: 40 };
+    assert_eq!(
+        ChatOutcome::after_error(&progress, "x".into()),
+        ChatOutcome::Failed { reason: "x".into() },
+        "nothing was written yet"
+    );
+    progress.stage = Stage::Writing { done: 0, total: 9 };
+    assert!(matches!(
+        ChatOutcome::after_error(&progress, "x".into()),
+        ChatOutcome::Failed { .. }
+    ));
+    progress.stage = Stage::Writing { done: 7, total: 9 };
+    let partial = ChatOutcome::after_error(&progress, "x".into());
+    assert_eq!(
+        partial,
+        ChatOutcome::Partial {
+            messages: 7,
+            reason: "x".into()
+        }
+    );
+    assert_eq!(partial.messages(), 7, "the row counts what was written");
+}
+
 #[test]
 fn cancelling_stops_the_export_and_removes_the_spool() {
     let (dir, td, mut account) = setup("cancel");
@@ -673,6 +736,9 @@ fn cancelling_stops_the_export_and_removes_the_spool() {
     assert!(matches!(run.result, Err(ExportError::Cancelled)));
     assert!(!run.root.join(".spool").exists());
     assert!(!run.root.join("export_results.html").exists());
+    // No `result.json` cut off mid-array: the partial one says it is.
+    assert!(!run.root.join("result.json").exists());
+    assert!(run.root.join("result.json.part").exists());
     assert_eq!(account.calls.len(), 61);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -682,18 +748,20 @@ fn progress_labels_and_fraction() {
     let mut p = AccountProgress::starting();
     assert_eq!(p.label(), "Initializing…");
     assert_eq!(p.fraction(), None);
-    p.stage = AccountStage::ChatsList;
-    p.found = 12;
+    p.stage = AccountStage::ChatsList { found: 12 };
     assert_eq!(p.label(), "Processing chats… 12");
-    p.stage = AccountStage::Chats;
-    p.chat_index = 1;
-    p.chat_count = 4;
-    p.chat_name = "Team".into();
+    let mut chat = crate::export::Progress::starting();
+    let on_chat = |chat: &crate::export::Progress| AccountStage::Chats {
+        index: 1,
+        count: 4,
+        name: "Team".into(),
+        chat: chat.clone(),
+    };
+    p.stage = on_chat(&chat);
     assert_eq!(p.label(), "Chats: 2 of 4 · Team");
     assert_eq!(p.fraction(), Some(0.25));
-    p.chat.stage = crate::export::Stage::Writing;
-    p.chat.total = 10;
-    p.chat.done = 5;
+    chat.stage = crate::export::Stage::Writing { done: 5, total: 10 };
+    p.stage = on_chat(&chat);
     assert_eq!(p.fraction(), Some(0.375));
     assert_eq!(p.detail().unwrap(), "Saving messages… 5 of 10 · 0 files");
     assert!(!p.is_settled());

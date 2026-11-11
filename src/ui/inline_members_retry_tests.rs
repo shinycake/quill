@@ -2,17 +2,23 @@
 //! one is not (round 12, area B, finding 6).
 
 use crate::ui::app::QuillApp;
+use crate::ui::inline_members_state::{AdminsFallback, Paging};
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, px, size};
+use quill::ids::ChatId;
 use quill::state::{InfoPanelTarget, MemberListFilter};
 use quill::telegram::envelope::ChatKind;
 
 fn demo(cx: &mut TestAppContext) -> Entity<QuillApp> {
+    demo_window(cx).0
+}
+
+fn demo_window(cx: &mut TestAppContext) -> (Entity<QuillApp>, gpui_kit::WindowHandle<Root>) {
     cx.update(gpui_kit::init);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
-    cx.open_window(size(px(1100.), px(700.)), move |window, cx| {
+    let handle = cx.open_window(size(px(1100.), px(700.)), move |window, cx| {
         let view = cx.new(|cx| {
             QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named("ready-chats")))
         });
@@ -20,7 +26,8 @@ fn demo(cx: &mut TestAppContext) -> Entity<QuillApp> {
         Root::new(view, window, cx)
     });
     cx.run_until_parked();
-    slot.take().expect("the window builder fills the slot")
+    let app = slot.take().expect("the window builder fills the slot");
+    (app, handle)
 }
 
 /// Opens the info panel of the demo's first supergroup or channel;
@@ -46,15 +53,17 @@ fn a_failed_page_is_asked_for_again_at_the_next_scroll(cx: &mut TestAppContext) 
     let app = demo(cx);
     let chat = open_group_panel(&app, cx);
     let failed_offset = |app: &Entity<QuillApp>, cx: &mut TestAppContext| {
-        app.read_with(cx, |app, _| app.inline_members.failed_offset)
+        app.read_with(cx, |app, _| app.inline_members.paging.blocked())
     };
     app.update(cx, |app, cx| {
-        app.inline_members.failed_offset = Some(20);
+        app.inline_members.paging = Paging::Asked { offset: 20 };
         if let Some(session) = app.session_mut() {
             session
                 .groups
-                .member_more_failed
-                .insert((chat, MemberListFilter::Recent));
+                .member_asks
+                .entry((chat, MemberListFilter::Recent))
+                .or_default()
+                .more = quill::state::MoreMembers::Failed;
         }
         // A frame looks again: it does not ask a failing server in a loop.
         app.maybe_load_more_inline(false, cx);
@@ -65,7 +74,7 @@ fn a_failed_page_is_asked_for_again_at_the_next_scroll(cx: &mut TestAppContext) 
 
     // A page that came back empty stays where it stopped.
     app.update(cx, |app, cx| {
-        app.inline_members.failed_offset = Some(20);
+        app.inline_members.paging = Paging::Asked { offset: 20 };
         app.maybe_load_more_inline(true, cx);
     });
     assert_eq!(failed_offset(&app, cx), Some(20));
@@ -79,7 +88,9 @@ fn the_administrators_fallback_is_asked_once_until_retry(cx: &mut TestAppContext
     let app = demo(cx);
     let chat = open_group_panel(&app, cx);
     let asked = |app: &Entity<QuillApp>, cx: &mut TestAppContext| {
-        app.read_with(cx, |app, _| app.inline_members.admins_asked)
+        app.read_with(cx, |app, _| {
+            app.inline_members.admins != AdminsFallback::NotAsked
+        })
     };
     app.update(cx, |app, cx| {
         if let Some(session) = app.session_mut() {
@@ -94,9 +105,90 @@ fn the_administrators_fallback_is_asked_once_until_retry(cx: &mut TestAppContext
     });
     assert!(asked(&app, cx), "the fallback was asked");
     app.update(cx, |app, cx| {
-        app.inline_members.admins_asked = true;
+        app.inline_members.admins = AdminsFallback::Asked(ChatId(chat));
         app.maybe_load_more_inline(false, cx);
         app.inline_members_stale(&[chat], cx);
     });
     assert!(!asked(&app, cx), "Retry may ask again");
+}
+
+/// A failed page of an earlier visit does not stay latched when the panel
+/// of the same group opens again, and closing the panel drops the block.
+#[gpui_kit::test]
+fn the_block_starts_over_each_time_the_panel_opens(cx: &mut TestAppContext) {
+    let (app, window) = demo_window(cx);
+    open_group_panel(&app, cx);
+    let target = app.read_with(cx, |app, _| {
+        app.session().and_then(|s| s.users_state.open_info_panel)
+    });
+    let target = target.expect("the open group panel");
+    let stale = |app: &Entity<QuillApp>, cx: &mut TestAppContext| {
+        app.update(cx, |app, _| {
+            app.inline_members.paging = Paging::Failed { offset: 40 };
+            app.inline_members.admins = AdminsFallback::Asked(ChatId(1));
+            app.inline_members.shown = 120;
+        });
+    };
+    let fresh = |app: &Entity<QuillApp>, cx: &mut TestAppContext| {
+        app.read_with(cx, |app, _| {
+            assert_eq!(app.inline_members.paging, Paging::Idle);
+            assert_eq!(app.inline_members.admins, AdminsFallback::NotAsked);
+            assert_eq!(app.inline_members.shown, quill::inline_members::ROWS_STEP);
+        });
+    };
+    stale(&app, cx);
+    app.update(cx, |app, cx| {
+        app.close_info_panel(cx);
+    });
+    fresh(&app, cx);
+    app.read_with(cx, |app, _| assert_eq!(app.inline_members.chat, None));
+
+    // Opening the same panel again starts over too.
+    stale(&app, cx);
+    window
+        .update(cx, |_, window, cx| {
+            app.update(cx, |app, cx| app.inline_members_opened(target, window, cx))
+        })
+        .expect("the window is open");
+    fresh(&app, cx);
+    app.read_with(cx, |app, _| assert!(app.inline_members.chat.is_some()));
+}
+
+/// A send the app refused locally says nothing about whether the viewer may
+/// see the members: the list stays on Recent (with its Retry) and does not
+/// switch to the administrators. Only TDLib's refusal does (sweep r2-01).
+#[gpui_kit::test]
+fn a_locally_refused_send_keeps_the_recent_list(cx: &mut TestAppContext) {
+    let app = demo(cx);
+    let chat = open_group_panel(&app, cx);
+    let filter_after = |app: &Entity<QuillApp>,
+                        cx: &mut TestAppContext,
+                        fetch: quill::state::SupergroupMembersFetch| {
+        app.update(cx, |app, _| {
+            let shape = app.inline_members_current().expect("the open group");
+            if let Some(session) = app.session_mut() {
+                session
+                    .groups
+                    .supergroup_members
+                    .insert((chat, MemberListFilter::Recent), fetch);
+            }
+            app.inline_members_filter(shape)
+        })
+    };
+    assert_eq!(
+        filter_after(
+            &app,
+            cx,
+            quill::state::SupergroupMembersFetch::NotSent("offline".into())
+        ),
+        MemberListFilter::Recent
+    );
+    assert_eq!(
+        filter_after(
+            &app,
+            cx,
+            quill::state::SupergroupMembersFetch::Failed("CHANNEL_PRIVATE".into())
+        ),
+        MemberListFilter::Administrators
+    );
 }

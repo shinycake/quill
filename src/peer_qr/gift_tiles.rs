@@ -91,7 +91,7 @@ pub fn empty_height(browse: bool) -> f64 {
 pub fn content_height(layout: GiftsLayout, width: f64, count: usize, browse: bool) -> f64 {
     let size = square_size(width);
     let content = match layout {
-        GiftsLayout::Loading => return 0.,
+        GiftsLayout::Loading | GiftsLayout::Failed => return 0.,
         GiftsLayout::Empty => return empty_height(browse),
         layout if wide(layout) => size * WIDE_TILE_RATIO,
         _ => {
@@ -121,7 +121,7 @@ pub fn grid_row(width: f64, row: usize, rows: usize) -> (f64, f64) {
 pub fn gifts_panel_height(layout: GiftsLayout, width: f64, count: usize, browse: bool) -> f64 {
     let cap = panel_height(width);
     match layout {
-        GiftsLayout::Loading | GiftsLayout::Grid => cap,
+        GiftsLayout::Loading | GiftsLayout::Failed | GiftsLayout::Grid => cap,
         _ => content_height(layout, width, count, browse).min(cap),
     }
 }

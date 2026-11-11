@@ -8,7 +8,6 @@
 //! per-chat flag there) and lets its history page and its rows report as
 //! viewed while the main window shows something else.
 use super::*;
-use crate::composer::DraftSaveClock;
 use crate::ids::{ChatId, RequestId};
 use crate::state::{RequestPurpose, ViewJump};
 use crate::telegram::requests::close_chat;
@@ -25,9 +24,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let in_main = self.session.open_chat == Some(chat_id);
-        if self.session.open_window_chat(chat_id) && !in_main {
-            self.send_open_chat(chat_id)?;
+        let in_main = self.session.open_chat_id() == Some(chat_id);
+        if self.session.open_window_chat(chat_id)
+            && !in_main
+            && let Err(err) = self.send_open_chat(chat_id)
+        {
+            // The window's chat never opened in TDLib: drop its view so a
+            // retry opens it again.
+            self.session.close_window_chat(chat_id);
+            return Err(err);
         }
         if in_main {
             return self.fetch_history_for(chat_id);
@@ -82,7 +87,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .search
                 .chat_search
                 .chat_id
-                .or(driver.session.open_chat);
+                .or(driver.session.open_chat_id());
             if shown != Some(jump.chat_id) {
                 return Ok(None);
             }
@@ -98,13 +103,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.close_window_chat(chat_id) {
             return Ok(());
         }
-        if self.session.open_chat == Some(chat_id) || !self.chats_path_active() {
+        if self.session.open_chat_id() == Some(chat_id) || !self.chats_path_active() {
             return Ok(());
         }
         let extra = self
             .session
             .request(RequestPurpose::CloseChat, Some(chat_id));
-        self.sender.send_json(&close_chat(extra, chat_id))?;
+        self.send_json_request(extra, &close_chat(extra, chat_id))?;
         Ok(())
     }
 
@@ -112,18 +117,23 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// section stack when the active chat moves to its own window). The
     /// chat is closed in TDLib unless a window still shows it.
     pub fn deselect_chat(&mut self) -> Result<(), ConnectSendError> {
-        if self.session.open_chat.is_none() {
+        if self.session.open_chat_id().is_none() {
             return Ok(());
         }
         // Text noted within the save's quiet second goes out now: nothing
         // else would save it, and its slot would stay dirty (ignoring the
         // drafts other devices save) until something stored it.
         let flushed = self.flush_pending_draft();
-        self.cancel_outgoing_typing()?;
-        self.close_open_chat()?;
-        self.draft_clock = DraftSaveClock::idle();
-        self.pending_draft = None;
+        // The goodbyes to TDLib are best effort: the local teardown below
+        // runs whatever they answer, or the session would keep treating the
+        // chat as shown (and read its new messages) after the main window
+        // cleared it.
+        let typing = self.cancel_outgoing_typing();
+        let closed = self.close_open_chat();
+        self.cancel_pending_draft();
         self.session.leave_open_chat();
+        typing?;
+        closed?;
         flushed.map(|_| ())
     }
 

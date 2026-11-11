@@ -15,8 +15,9 @@ pub(crate) struct TopicEditor {
     pub(crate) color: i32,
     /// `forumTopicIcon.custom_emoji_id`; 0 keeps the colored letter icon.
     pub(crate) icon_emoji: i64,
-    /// The emoji the topic had when the editor opened.
-    pub(crate) original_emoji: i64,
+    /// The last Create/Save: the editor closes on its answer, stays on
+    /// its error.
+    pub(crate) submit: quill::state::Submit,
 }
 
 /// Slice G2: forum-topic management dialog (info panel → "Manage

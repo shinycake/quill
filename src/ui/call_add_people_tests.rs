@@ -45,7 +45,7 @@ fn open_box(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     app.update(&mut main, |app, cx| app.sync_call_window(cx));
     frames(&mut main);
     let window = app
-        .read_with(&main, |app, _| app.calls.window)
+        .read_with(&main, |app, _| app.calls.window.handle())
         .expect("the call window opens");
     let mut call = VisualTestContext::from_window(window, cx);
     frames(&mut call);
@@ -185,12 +185,12 @@ fn closing_a_reused_call_window_keeps_it_shut_for_the_new_call(cx: &mut TestAppC
         }
         app.sync_call_window(cx);
     });
-    assert!(app.read_with(call, |app, _| app.calls.window.is_some()));
+    assert!(app.read_with(call, |app, _| app.calls.window.handle().is_some()));
     assert!(call.simulate_close(), "the window closes");
     call.run_until_parked();
     app.update(call, |app, cx| app.sync_call_window(cx));
     app.read_with(call, |app, _| {
         assert_eq!(app.call_screen.window_closed_by_user, Some(second));
-        assert!(app.calls.window.is_none(), "it stays shut");
+        assert!(app.calls.window.handle().is_none(), "it stays shut");
     });
 }

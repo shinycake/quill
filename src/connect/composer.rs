@@ -75,8 +75,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         // within this quiet window) goes out now instead of being replaced.
         if self
             .pending_draft
-            .as_ref()
-            .is_some_and(|pending| (pending.chat_id, pending.topic) != (chat_id, topic))
+            .armed()
+            .is_some_and(|held| (held.draft().chat_id, held.draft().topic) != (chat_id, topic))
         {
             self.settle_pending_draft()?;
         }
@@ -84,29 +84,29 @@ impl<S: JsonSender> ConnectDriver<S> {
         let stored = content.to_store(reply_to.is_some() || terms.is_some());
         let reply_to = stored.as_ref().and(reply_to);
         if self.draft_matches(chat_id, topic, stored.as_ref(), reply_to.as_ref(), terms) {
-            self.pending_draft = None;
-            self.draft_clock = DraftSaveClock::idle();
+            self.pending_draft.take();
             let existing = self.session.draft_for(chat_id, topic).cloned();
             self.session.store_composer_draft(chat_id, topic, existing);
             return Ok(DraftSaveOutcome::Skipped);
         }
         self.session.mark_draft_dirty(chat_id, topic);
-        match schedule_draft_save(self.draft_clock, now_ms, delayed) {
+        let clock = self
+            .pending_draft
+            .armed()
+            .map_or(DraftSaveClock::idle(), HeldDraft::clock);
+        match schedule_draft_save(clock, now_ms, delayed) {
             DraftSaveStep::Wait {
                 delay_ms,
                 started_ms,
             } => {
-                self.draft_clock = DraftSaveClock {
-                    started_ms: Some(started_ms),
-                };
-                self.draft_save_token = self.draft_save_token.saturating_add(1);
-                let token = self.draft_save_token;
-                self.pending_draft = Some(PendingDraft {
-                    token,
-                    chat_id,
-                    topic,
-                    content: stored.unwrap_or(DraftContent::Text(String::new())),
-                    reply_to,
+                let token = self.pending_draft.arm(HeldDraft::Quiet {
+                    started_ms,
+                    draft: PendingDraft {
+                        chat_id,
+                        topic,
+                        content: stored.unwrap_or(DraftContent::Text(String::new())),
+                        reply_to,
+                    },
                 });
                 Ok(DraftSaveOutcome::Debounced {
                     token,
@@ -114,9 +114,23 @@ impl<S: JsonSender> ConnectDriver<S> {
                 })
             }
             DraftSaveStep::Write => {
-                self.pending_draft = None;
-                self.draft_clock = DraftSaveClock::idle();
-                self.send_draft(chat_id, topic, stored.as_ref(), reply_to.as_ref(), terms)?;
+                self.pending_draft.take();
+                let sent =
+                    self.send_draft(chat_id, topic, stored.as_ref(), reply_to.as_ref(), terms);
+                if let Err(err) = sent {
+                    // The slot stays dirty, so the draft waits for the next
+                    // flush instead of being forgotten.
+                    self.keep_failed_draft(
+                        err,
+                        PendingDraft {
+                            chat_id,
+                            topic,
+                            content: stored.unwrap_or(DraftContent::Text(String::new())),
+                            reply_to,
+                        },
+                    );
+                    return Err(err);
+                }
                 Ok(DraftSaveOutcome::Sent)
             }
         }
@@ -127,19 +141,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         token: u64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some(pending) = self.pending_draft.take() else {
+        let Some(pending) = self.pending_draft.take_if(token).map(HeldDraft::into_draft) else {
             return Ok(None);
         };
-        if pending.token != token {
-            self.pending_draft = Some(pending);
-            return Ok(None);
-        }
-        self.draft_clock = DraftSaveClock::idle();
         let terms = self.draft_suggestion(pending.chat_id, pending.topic);
         let content = pending
             .content
+            .clone()
             .to_store(pending.reply_to.is_some() || terms.is_some());
-        let reply_to = content.as_ref().and(pending.reply_to);
+        let reply_to = content.as_ref().and(pending.reply_to.clone());
         if self.draft_matches(
             pending.chat_id,
             pending.topic,
@@ -155,14 +165,40 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .store_composer_draft(pending.chat_id, pending.topic, existing);
             return Ok(None);
         }
-        self.send_draft(
+        match self.send_draft(
             pending.chat_id,
             pending.topic,
             content.as_ref(),
             reply_to.as_ref(),
             terms,
-        )
-        .map(Some)
+        ) {
+            Ok(request) => Ok(Some(request)),
+            Err(err) => {
+                self.keep_failed_draft(err, pending);
+                Err(err)
+            }
+        }
+    }
+
+    /// A draft save that did not go out: its slot is still dirty (drafts
+    /// saved from other devices are ignored meanwhile), so the save waits
+    /// for the next flush, typing or chat leave. A request TDLib can never
+    /// take is not kept.
+    fn keep_failed_draft(&mut self, err: ConnectSendError, pending: PendingDraft) {
+        if err != ConnectSendError::InvalidRequest && self.pending_draft.is_idle() {
+            self.pending_draft.arm(HeldDraft::Kept(pending));
+            return;
+        }
+        // Not kept: the slot's unsaved mark must not outlive its save, or
+        // drafts written on another device would never show there.
+        let slot = (pending.chat_id, pending.topic);
+        if !self
+            .pending_draft
+            .armed()
+            .is_some_and(|waiting| (waiting.draft().chat_id, waiting.draft().topic) == slot)
+        {
+            self.session.clear_draft_dirty(slot.0, slot.1);
+        }
     }
 
     /// Successful send into `topic` of `chat_id`: drop that slot's draft
@@ -182,8 +218,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.draft_for(chat_id, topic).is_none() {
             return Ok(None);
         }
-        self.pending_draft = None;
-        self.draft_clock = DraftSaveClock::idle();
+        self.cancel_pending_draft_of(chat_id);
         self.send_draft(chat_id, topic, None, None, None).map(Some)
     }
 
@@ -196,7 +231,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         topic: DraftTopic,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.cancel_pending_draft();
+        self.cancel_pending_draft_of(chat_id);
         if !self.session.accepts_composer_draft(chat_id, topic) {
             self.session.store_composer_draft(chat_id, topic, None);
             return Ok(None);
@@ -206,15 +241,18 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Send the draft waiting for its quiet window now.
     pub fn flush_pending_draft(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        match self.pending_draft.as_ref().map(|pending| pending.token) {
+        match self.pending_draft.token() {
             Some(token) => self.commit_debounced_draft(token),
             None => Ok(None),
         }
     }
 
     pub fn cancel_pending_draft(&mut self) {
-        self.pending_draft = None;
-        self.draft_clock = DraftSaveClock::idle();
+        if let Some(held) = self.pending_draft.take() {
+            let pending = held.draft();
+            self.session
+                .clear_draft_dirty(pending.chat_id, pending.topic);
+        }
     }
 
     /// [`Self::cancel_pending_draft`] when the waiting save is `chat_id`'s
@@ -223,8 +261,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn cancel_pending_draft_of(&mut self, chat_id: ChatId) {
         if self
             .pending_draft
-            .as_ref()
-            .is_none_or(|pending| pending.chat_id == chat_id)
+            .armed()
+            .is_none_or(|held| held.draft().chat_id == chat_id)
         {
             self.cancel_pending_draft();
         }
@@ -234,9 +272,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// window of its own: the main window's chat changes, or another slot
     /// is typed in. Dropping it would lose text typed in a chat window.
     pub(crate) fn settle_pending_draft(&mut self) -> Result<(), ConnectSendError> {
-        let flushed = self.flush_pending_draft();
-        self.draft_clock = DraftSaveClock::idle();
-        flushed.map(|_| ())
+        self.flush_pending_draft().map(|_| ())
     }
 
     /// The suggest bar's terms a chat draft carries (only the chat slot
@@ -259,17 +295,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         match (current, content) {
             (None, None) => true,
             (Some(draft), Some(content)) => {
-                draft.text == content.text()
-                    && draft.rich.as_ref() == content.rich()
-                    && draft.reply_to_message_id == reply_to.map(|reply| reply.message_id)
+                draft.text() == content.text()
+                    && draft.rich() == content.rich()
+                    && draft.reply_to_message_id() == reply_to.map(|reply| reply.message_id)
                     // The same part of the message: TDLib may echo the
                     // formatting in another shape.
-                    && match (&draft.quote, reply_to.and_then(|reply| reply.quote.as_ref())) {
+                    && match (draft.quote(), reply_to.and_then(|reply| reply.quote.as_ref())) {
                         (None, None) => true,
                         (Some(saved), Some(quote)) => saved.same_part(quote),
                         _ => false,
                     }
-                    && draft.item == reply_to.map(|reply| reply.item.clone()).unwrap_or_default()
+                    && draft.item() == reply_to.map(|reply| reply.item.clone()).unwrap_or_default()
                     && draft.suggested_post == terms
             }
             _ => false,
@@ -314,14 +350,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                             || reply_to.is_some()
                             || terms.is_some()
                     })
-                    .map(|content| ChatDraft {
-                        text: content.text().to_string(),
-                        rich: content.rich().cloned(),
-                        reply_to_message_id: reply_to.map(|reply| reply.message_id),
-                        quote: reply_to.and_then(|reply| reply.quote.clone()),
-                        item: reply_to.map(|reply| reply.item.clone()).unwrap_or_default(),
-                        suggested_post: terms,
-                    });
+                    .map(|content| ChatDraft::of(content, reply_to, terms));
                 self.session.store_composer_draft(chat_id, topic, draft);
                 Ok(extra)
             }
@@ -333,7 +362,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     pub(crate) fn close_open_chat(&mut self) -> Result<(), ConnectSendError> {
-        let Some(prev) = self.session.open_chat else {
+        let Some(prev) = self.session.open_chat_id() else {
             return Ok(());
         };
         // A chat that is also shown in its own window stays open in TDLib
@@ -346,7 +375,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // chat, so every opened chat gets its paired `closeChat` (Telegram
         // X `Tdlib.closeChatImpl`).
         let extra = self.session.request(RequestPurpose::CloseChat, Some(prev));
-        self.sender.send_json(&close_chat(extra, prev))?;
+        self.send_json_request(extra, &close_chat(extra, prev))?;
         Ok(())
     }
 
@@ -357,7 +386,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::OpenChat, Some(chat_id));
-        self.sender.send_json(&open_chat(extra, chat_id))?;
+        if let Err(err) = self.sender.send_json(&open_chat(extra, chat_id)) {
+            self.session.requests.take(extra);
+            return Err(err);
+        }
         Ok(extra)
     }
 
@@ -366,7 +398,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// (`Session::message_ids_to_view`). Unread counts change only when
     /// `updateChatReadInbox` arrives.
     pub fn maybe_view_open_messages(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Ok(None);
         };
         self.maybe_view_messages_for(chat_id)
@@ -411,7 +443,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             source
         } else if self.session.thread_for_chat(chat_id).is_some() {
             "messageSourceMessageThreadHistory"
-        } else if self.session.open_chat == Some(chat_id) && self.session.open_topic.is_some() {
+        } else if self.session.open_chat_id() == Some(chat_id)
+            && self.session.open_forum_topic().is_some()
+        {
             "messageSourceForumTopicHistory"
         } else {
             "messageSourceChatHistory"
@@ -421,7 +455,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&view_messages(extra, chat_id, &ids, source, true))
         {
             Ok(()) => {
-                self.session.begin_viewing(chat_id, &ids);
+                self.session.begin_viewing(chat_id, extra, &ids);
                 Ok(Some(extra))
             }
             Err(err) => {
@@ -460,7 +494,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         leaving_reply: Option<SendReply>,
         now_ms: u64,
     ) -> Result<(), ConnectSendError> {
-        let Some(prev) = self.session.open_chat else {
+        let Some(prev) = self.session.open_chat_id() else {
             return Ok(());
         };
         if prev == next_chat {
@@ -477,7 +511,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// (groups only; private chats and channels have no one to mention).
     /// `None` clears the suggestions.
     pub fn search_mentions(&mut self, query: Option<&str>) -> Result<(), ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             self.session.messages.mention_search = None;
             return Ok(());
         };

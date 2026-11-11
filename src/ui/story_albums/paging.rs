@@ -7,16 +7,21 @@
 use super::*;
 use crate::ui::scroll_load::{load_due, scrolled_near_end};
 use quill::state::RequestPurpose;
-use quill::story_page::{StoryPageOpState, story_page_op_label};
+use quill::story_page::story_page_op_label;
 
 impl QuillApp {
-    /// A page of `purpose` is on its way.
+    /// A page of `purpose` is on its way for the chat whose story page is
+    /// open, read from that chat's own ops (another chat's page or a
+    /// mutation never hides it).
     fn story_page_loading(&self, purpose: RequestPurpose) -> bool {
-        self.session()
-            .and_then(|s| s.stories.page_op.as_ref())
-            .is_some_and(|op| {
-                op.state == StoryPageOpState::Checking && op.label == story_page_op_label(purpose)
-            })
+        let Some(chat) = self.stories.page.as_ref().map(|page| page.chat_id.0) else {
+            return false;
+        };
+        self.session().is_some_and(|s| {
+            s.stories
+                .page_ops
+                .loading(chat, &story_page_op_label(purpose))
+        })
     }
 
     pub(super) fn archived_loading(&self) -> bool {
@@ -39,7 +44,7 @@ impl QuillApp {
             })
     }
 
-    fn archived_loaded(&self) -> usize {
+    pub(super) fn archived_loaded(&self) -> usize {
         let chat = self.stories.page.as_ref().map(|page| page.chat_id.0);
         chat.and_then(|chat| self.session()?.stories.archived_stories.get(&chat))
             .map_or(0, |archived| archived.story_ids.len())
@@ -61,7 +66,7 @@ impl QuillApp {
         let Some(page) = self.stories.page.as_ref() else {
             return;
         };
-        if page.open_album.is_some()
+        if page.view.open_album().is_some()
             || !load_due(
                 scrolled_near_end(&page.archive_scroll),
                 self.picker_has_more(),
@@ -84,7 +89,7 @@ impl QuillApp {
         let Some(page) = self.stories.page.as_ref() else {
             return;
         };
-        if page.open_album.is_some()
+        if page.view.open_album().is_some()
             || !load_due(
                 scrolled_near_end(&page.posted_scroll),
                 self.chat_page_has_more(),

@@ -14,8 +14,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::screen::{
-    PreviewSlot, ScreenAccess, ScreenBackend, ScreenCapture, ScreenOptions, ScreenSource, SourceId,
-    SourceKind, Thumbnail, fit_capture_size, nv12_to_i420,
+    PreviewSlot, ScreenAccess, ScreenBackend, ScreenCapture, ScreenOptions, ScreenSource,
+    ShareVisibility, SourceId, SourceKind, Thumbnail, fit_capture_size, nv12_to_i420,
 };
 use super::{CaptureError, CaptureEvent, FrameSink, VideoFrame};
 use block2::RcBlock;
@@ -203,8 +203,20 @@ impl ScreenBackend for MacScreen {
         });
         // SAFETY: the stream is configured; the block only sends.
         unsafe { stream.startCaptureWithCompletionHandler(Some(&block)) };
-        rx.recv_timeout(REPLY_TIMEOUT)
-            .map_err(|_| CaptureError::Device("Screen capture did not start.".into()))??;
+        let started = rx
+            .recv_timeout(REPLY_TIMEOUT)
+            .map_err(|_| CaptureError::Device("Screen capture did not start.".into()))
+            .and_then(|reply| reply);
+        if let Err(err) = started {
+            // A start that answered late (or with an error) may still be
+            // running: stop it, or the system keeps capturing, with its
+            // recording indicator on, for a share Quill reports as failed.
+            shared.stopped.store(true, Ordering::Release);
+            // SAFETY: stopping a stream that may have started; no handler
+            // needed.
+            unsafe { stream.stopCaptureWithCompletionHandler(None) };
+            return Err(err);
+        }
         let monitor = window_number(source)
             .and_then(|window| WindowMonitor::start(window, sink.clone(), shared.clone()).ok());
         Ok(Box::new(MacCapture {
@@ -267,6 +279,13 @@ impl StreamShared {
         self.sink.push(frame);
     }
 
+    /// The source closed: `Ended`, once.
+    fn end(&self) {
+        if !self.stopped.swap(true, Ordering::AcqRel) {
+            self.sink.push_event(CaptureEvent::Ended);
+        }
+    }
+
     fn on_stopped(&self, error: &NSError) {
         if self.stopped.swap(true, Ordering::AcqRel) {
             return;
@@ -326,9 +345,13 @@ fn nv12_frame(pixel: &CVPixelBuffer) -> Option<VideoFrame> {
 /// Watches a shared window: `Paused` while it is off screen (minimised,
 /// hidden, on another space), `Resumed` when it is back, `Ended` once it
 /// is closed.
+///
+/// Dropping it tells the thread to stop and returns at once: the thread
+/// may be inside a ScreenCaptureKit wait of up to [`REPLY_TIMEOUT`], and
+/// ending a share must not block on that. It checks the stop right after
+/// the wait, so it never reports anything for a share that ended.
 struct WindowMonitor {
-    stop: mpsc::Sender<()>,
-    worker: Option<std::thread::JoinHandle<Option<()>>>,
+    _stop: mpsc::Sender<()>,
 }
 
 impl WindowMonitor {
@@ -338,42 +361,32 @@ impl WindowMonitor {
         shared: Arc<StreamShared>,
     ) -> std::io::Result<Self> {
         let (stop, stopped) = mpsc::channel::<()>();
-        let worker = crate::thread_guard::spawn_guarded("quill-screen-pause", move || {
-            let mut paused = false;
+        crate::thread_guard::spawn_guarded("quill-screen-pause", move || {
+            let mut visibility = ShareVisibility::default();
             while let Err(mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(PAUSE_POLL) {
                 if shared.stopped.load(Ordering::Acquire) {
                     return;
                 }
-                match window_state(window) {
-                    WindowState::OnScreen if paused => {
-                        paused = false;
-                        sink.push_event(CaptureEvent::Resumed);
-                    }
-                    WindowState::OffScreen if !paused => {
-                        paused = true;
-                        sink.push_event(CaptureEvent::Paused);
+                let state = window_state(window);
+                if !matches!(stopped.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+                    return;
+                }
+                match state {
+                    state @ (WindowState::OnScreen | WindowState::OffScreen) => {
+                        let visible = matches!(state, WindowState::OnScreen);
+                        if let Some(event) = visibility.seen(visible) {
+                            sink.push_event(event);
+                        }
                     }
                     WindowState::Gone => {
-                        sink.push_event(CaptureEvent::Ended);
+                        shared.end();
                         return;
                     }
-                    WindowState::OnScreen | WindowState::OffScreen | WindowState::Unknown => {}
+                    WindowState::Unknown => {}
                 }
             }
         })?;
-        Ok(Self {
-            stop,
-            worker: Some(worker),
-        })
-    }
-}
-
-impl Drop for WindowMonitor {
-    fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
+        Ok(Self { _stop: stop })
     }
 }
 

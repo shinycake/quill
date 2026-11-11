@@ -12,6 +12,7 @@
 
 use super::app::QuillApp;
 use super::scheduled::{ScheduleTarget, using_test_dc};
+use crate::ui::composer_sends::SendOnce;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
@@ -106,6 +107,7 @@ impl QuillApp {
     /// is confirmed, as tdesktop's schedule box does.
     pub(super) fn send_composer_after_schedule(
         &mut self,
+        once: SendOnce,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -117,6 +119,6 @@ impl QuillApp {
             return;
         }
         let markup = self.composer_markup(cx);
-        self.submit_composer(markup, window, cx);
+        self.submit_composer(markup, once, window, cx);
     }
 }

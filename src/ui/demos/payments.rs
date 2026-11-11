@@ -69,7 +69,7 @@ impl QuillApp {
         // deterministic; otherwise (or with `QUILL_DEMO_REAL_PLAYER=1`,
         // to capture real playback and seeks) it really plays (with sound).
         self.open_media_viewer(ChatId(11), MessageId(204), cx);
-        if let Some(player) = &self.viewer.player {
+        if let Some(player) = self.viewer.clip.player() {
             // A seek there and back: the picture shown is the decoded
             // first one, after the seek path ran.
             player.seek(5.0);

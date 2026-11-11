@@ -53,7 +53,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.open_chat == Some(chat_id) {
+        if self.session.open_chat_id() == Some(chat_id) {
             // Re-selecting the open chat leaves its reply thread.
             if self.session.threads.thread.is_some() {
                 self.session.close_thread();
@@ -74,8 +74,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Channels are ungated since Phase 2.2: they follow the normal
         // openChat / history path; sponsored rows fetch for every channel.
         // A chat shown in its own window is open in TDLib already.
-        if !self.session.window_chats.contains(&chat_id) {
-            self.send_open_chat(chat_id)?;
+        if !self.session.window_chats.contains(&chat_id)
+            && let Err(err) = self.send_open_chat(chat_id)
+        {
+            // TDLib never heard of the chat: it must not stay "open" here,
+            // or selecting it again would skip `openChat` for good.
+            self.session.leave_open_chat();
+            return Err(err);
         }
         self.fetch_open_chat_extras(chat_id)?;
         self.fetch_pinned_messages(chat_id)?;
@@ -112,7 +117,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Parity slice: channel/supergroup header extras.
         self.maybe_fetch_supergroup_profile(chat_id)?;
         self.maybe_fetch_supergroup_full_info_for_header(chat_id)?;
+        // Opening the chat retries a failed topic list; the rows never do.
+        self.session.threads.forum_topics.clear_failure(chat_id.0);
         self.maybe_fetch_forum_topics(chat_id)?;
+        self.retry_direct_topics_on_open(chat_id);
         Ok(())
     }
 
@@ -188,11 +196,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if let Some(chat) = self.session.chats.get_mut(&chat_id.0) {
             let rollback = RequestRollback::ChatPin {
+                chat_id: chat_id.0,
                 previous: if archived {
                     chat.archive_is_pinned
                 } else {
                     chat.is_pinned
                 },
+                shown: pin,
                 archived,
             };
             if archived {
@@ -240,7 +250,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if let Some(chat) = self.session.chats.get_mut(&chat_id.0) {
             let rollback = RequestRollback::ChatMarkedAsUnread {
+                chat_id: chat_id.0,
                 previous: chat.is_marked_as_unread,
+                shown: marked,
             };
             chat.is_marked_as_unread = marked;
             if let Some(pending) = self.session.requests.pending_mut(extra) {
@@ -346,7 +358,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.has_purpose(purpose) {
             return Ok(None);
         }
-        if !(self.session.search.search.recents && !self.session.search.search.chat_ids.is_empty())
+        if !(self.session.search.search.is_recents()
+            && !self.session.search.search.chat_ids.is_empty())
         {
             return Ok(None);
         }
@@ -361,7 +374,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Slice CL2: `getArchiveChatListSettings` (schema 1.8.67, line
     /// 13421) — one-shot fetch feeding
-    /// `Session::archive_chat_list_settings` (TGX
+    /// `ChatListState::archive_settings` (TGX
     /// `SettingsArchiveChatListController` fetches on open the same
     /// way). `Ok(None)` = already fetched or a fetch in flight.
     pub fn fetch_archive_chat_list_settings(
@@ -370,7 +383,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.chat_list.archive_chat_list_settings.is_some() {
+        if self
+            .session
+            .chat_list
+            .archive_chat_list_settings()
+            .is_some()
+            || self.session.chat_list.archive_settings_loading()
+        {
             return Ok(None);
         }
         self.reload_archive_chat_list_settings()
@@ -378,28 +397,30 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// `getArchiveChatListSettings` even when a copy is cached, as
     /// tdesktop reloads its global privacy settings for the "Hide new
-    /// chats?" suggestion. `Ok(None)` = a fetch in flight.
+    /// chats?" suggestion. A fetch already in flight predates the
+    /// suggestion, so a new one goes out and takes its place (the older
+    /// answer no longer matches the stage).
     pub fn reload_archive_chat_list_settings(
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            self.session.chat_list.archive_mute.note_reload_failed(None);
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::GetArchiveChatListSettings;
-        if self.session.requests.has_purpose(purpose) {
-            return Ok(None);
-        }
         let extra = self.session.request(purpose, None);
         if let Err(err) = self
             .sender
             .send_json(&get_archive_chat_list_settings(extra))
         {
             self.session.requests.take(extra);
+            self.session.chat_list.archive_mute.note_reload_failed(None);
             return Err(err);
         }
         // A cached copy stays on screen while it reloads.
-        let chat_list = &mut self.session.chat_list;
-        chat_list.archive_settings_loading = chat_list.archive_chat_list_settings.is_none();
+        self.session.chat_list.archive_settings.begin();
+        self.session.chat_list.archive_settings.sent(extra);
+        self.session.chat_list.archive_mute.note_sent(extra);
         Ok(Some(extra))
     }
 
@@ -418,7 +439,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.has_purpose(purpose) {
             return Ok(None);
         }
-        let Some(current) = self.session.chat_list.archive_chat_list_settings else {
+        let Some(current) = self.session.chat_list.archive_chat_list_settings() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         if current == settings {
@@ -432,7 +453,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.chat_list.archive_chat_list_settings = Some(settings);
+        self.session.chat_list.edit_archive_settings(Some(settings));
         if let Some(pending) = self.session.requests.pending_mut(extra) {
             pending.rollback = Some(RequestRollback::ArchiveChatListSettings {
                 previous: Some(current),
@@ -582,8 +603,16 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// finished.
     pub(crate) fn maybe_finish_leave_deletes(&mut self) -> Result<(), ConnectSendError> {
         let queue = std::mem::take(&mut self.session.chat_list.delete_after_leave);
-        for chat_id in queue {
-            self.remove_chat_from_list(chat_id)?;
+        let mut queue = queue.into_iter();
+        while let Some(chat_id) = queue.next() {
+            if let Err(err) = self.remove_chat_from_list(chat_id) {
+                // The chats that did not go out wait for the next ingest,
+                // as the folder removals do.
+                let waiting = &mut self.session.chat_list.delete_after_leave;
+                waiting.push(chat_id);
+                waiting.extend(queue);
+                return Err(err);
+            }
         }
         Ok(())
     }

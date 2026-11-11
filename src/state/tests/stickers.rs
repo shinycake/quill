@@ -98,6 +98,8 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { first_page: true }),
         None,
     );
+    with_purpose.stickers.gifs.search_begun("cat".into());
+    with_purpose.stickers.gifs.search_sent(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -107,9 +109,12 @@ fn s9_gif_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.gifs.search_results.len(), 1);
-    assert_eq!(with_purpose.stickers.gifs.search_results[0].file_id.0, 101);
-    assert_eq!(with_purpose.stickers.gifs.search_next_offset, "50");
+    assert_eq!(with_purpose.stickers.gifs.search_results().len(), 1);
+    assert_eq!(
+        with_purpose.stickers.gifs.search_results()[0].file_id.0,
+        101
+    );
+    assert_eq!(with_purpose.stickers.gifs.search_next_offset(), "50");
     assert!(with_purpose.bots.inline_query.is_none());
 
     // Second page appends new entries (deduped by file id) and
@@ -118,6 +123,7 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { first_page: false }),
         None,
     );
+    with_purpose.stickers.gifs.search_sent(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -129,9 +135,12 @@ fn s9_gif_backend_purpose_gated_dispatch() {
     );
     // g1 (file 101) was already on page one — deduped; g2 (file 102)
     // appends; the offset advances to "" (exhausted).
-    assert_eq!(with_purpose.stickers.gifs.search_results.len(), 2);
-    assert_eq!(with_purpose.stickers.gifs.search_results[1].file_id.0, 102);
-    assert_eq!(with_purpose.stickers.gifs.search_next_offset, "");
+    assert_eq!(with_purpose.stickers.gifs.search_results().len(), 2);
+    assert_eq!(
+        with_purpose.stickers.gifs.search_results()[1].file_id.0,
+        102
+    );
+    assert_eq!(with_purpose.stickers.gifs.search_next_offset(), "");
 
     // A stray inlineQueryResults (no matching purpose) is ignored.
     let (mut without_purpose, sink2) = session();
@@ -142,11 +151,14 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         &sink2,
         r#"{"@type":"inlineQueryResults","inline_query_id":7,"button":null,"results":[],"next_offset":"9"}"#,
     );
-    assert!(without_purpose.stickers.gifs.search_results.is_empty());
+    assert!(without_purpose.stickers.gifs.search_results().is_empty());
 
     // An addSavedAnimation `ok` clears the saved-GIF cache so it
     // refetches the server-confirmed list.
-    with_purpose.stickers.gifs.animations = with_purpose.stickers.gifs.search_results.clone();
+    with_purpose
+        .stickers
+        .gifs
+        .saved_answered(with_purpose.stickers.gifs.search_results().to_vec());
     let extra = with_purpose.request(RequestPurpose::AddSavedAnimation, None);
     apply_json(
         &mut with_purpose,
@@ -157,7 +169,10 @@ fn s9_gif_backend_purpose_gated_dispatch() {
     assert!(with_purpose.stickers.gifs.animations.is_empty());
 
     // A removeSavedAnimation `ok` invalidates the same way.
-    with_purpose.stickers.gifs.animations = with_purpose.stickers.gifs.search_results.clone();
+    with_purpose
+        .stickers
+        .gifs
+        .saved_answered(with_purpose.stickers.gifs.search_results().to_vec());
     let extra = with_purpose.request(RequestPurpose::RemoveSavedAnimation, None);
     apply_json(
         &mut with_purpose,
@@ -195,9 +210,41 @@ fn sound_list_refetch_prunes_file_ids() {
             sound_file, extra.0
         ),
     );
-    assert!(session.settings.saved_sounds_loaded);
+    assert!(session.settings.saved_sounds.data().is_some());
     assert!(!session.settings.sound_file_ids.contains_key(&91));
     assert_eq!(session.settings.sound_file_ids.get(&92), Some(&8));
+}
+
+#[test]
+fn a_sound_list_answer_older_than_the_stale_mark_is_dropped() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let old = session.request(RequestPurpose::GetSavedNotificationSounds, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateSavedNotificationSounds","notification_sound_ids":["1"]}"#,
+    );
+    assert!(session.saved_sounds_owed());
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"notificationSounds","notification_sounds":[],"@extra":"{}"}}"#,
+            old.0
+        ),
+    );
+    assert!(
+        session.saved_sounds_owed() && session.settings.saved_sounds.data().is_none(),
+        "the older answer must not clear the mark"
+    );
+    assert!(
+        !session
+            .requests
+            .has_purpose(RequestPurpose::GetSavedNotificationSounds)
+    );
 }
 
 #[test]
@@ -217,8 +264,7 @@ fn message_emoji_packs_are_distinct_and_skip_unresolved_emoji() {
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,
-        requires_premium: false,
-        premium_animation: None,
+        premium: None,
     };
     session.stickers.emoji.custom_emoji_stickers =
         vec![sticker(1, 70), sticker(2, 70), sticker(3, 71)].into();
@@ -260,14 +306,14 @@ fn gif_panel_downloads_stills_then_preview_loops_then_unpreviewed_clips() {
         minithumbnail: None,
         thumb_still: still,
     };
-    session.stickers.gifs.animations = vec![
+    session.stickers.gifs.saved_answered(vec![
         // An MP4 preview loop: the loop plays, the GIF itself waits.
         gif(1, Some(11), false),
         // A still JPEG and no loop: the GIF itself plays.
         gif(2, Some(12), true),
         // Nothing but the GIF.
         gif(3, None, true),
-    ];
+    ]);
     // A closed panel fetches nothing.
     assert!(session.gif_panel_file_ids_to_download().is_empty());
     session.stickers.gifs.open = true;
@@ -342,6 +388,7 @@ fn a_failed_refetch_keeps_the_shown_sticker_set() {
         is_emoji: false,
         is_owned: true,
         stickers: Vec::new(),
+        files: Default::default(),
     };
     let mut view = StickerSetView::loading(5);
     view.stage = ready.clone();
@@ -358,4 +405,57 @@ fn a_failed_refetch_keeps_the_shown_sticker_set() {
     session.stickers.sticker_set_view = Some(StickerSetView::loading(5));
     session.fail_sticker_set_view(5);
     assert_eq!(stage(&session), Some(StickerSetViewStage::Failed));
+}
+
+fn saved_gif(id: i32) -> crate::telegram::envelope::AnimationItem {
+    crate::telegram::envelope::AnimationItem {
+        duration: 1,
+        width: 1,
+        height: 1,
+        file_name: String::new(),
+        mime_type: "video/mp4".into(),
+        file_id: crate::ids::FileId(id),
+        thumb_file_id: None,
+        thumb_width: 0,
+        thumb_height: 0,
+        minithumbnail: None,
+        thumb_still: true,
+    }
+}
+
+#[test]
+fn an_update_during_the_request_survives_its_answer_and_asks_again() {
+    let mut gifs = crate::state::GifPanel::default();
+    gifs.saved_asked();
+    // `updateSavedAnimations` while the request is out: the answer may
+    // predate the change.
+    gifs.stale = true;
+    gifs.saved_answered(vec![saved_gif(1)]);
+    assert!(gifs.loaded() && gifs.stale, "the list is asked for again");
+    assert_eq!(gifs.animations.len(), 1, "the list does not blank");
+    // A failure keeps the list and counts as loaded until the next opening.
+    gifs.stale = false;
+    gifs.saved_failed();
+    assert!(gifs.failed() && gifs.loaded());
+    assert_eq!(gifs.animations.len(), 1);
+    gifs.saved_retry();
+    assert!(!gifs.failed() && !gifs.loaded());
+}
+
+#[test]
+fn a_new_gif_search_starts_with_no_results_or_paging() {
+    let mut gifs = crate::state::GifPanel::default();
+    gifs.search_begun("cats".into());
+    gifs.search_page_asked(String::new());
+    gifs.search_sent(crate::ids::RequestId(1));
+    gifs.search_page_answered(vec![saved_gif(1)], "50".into(), true);
+    assert_eq!(gifs.search_results().len(), 1);
+    assert_eq!(gifs.search_next_offset(), "50");
+    // A different search replaces the results and the paging whole.
+    gifs.search_begun("dogs".into());
+    assert!(gifs.search_results().is_empty());
+    assert_eq!(gifs.search_next_offset(), "");
+    // Back on the saved GIFs there is no search to page.
+    gifs.search_left();
+    assert!(gifs.search_results().is_empty());
 }

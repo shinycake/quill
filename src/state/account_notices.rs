@@ -26,6 +26,165 @@ pub enum LoginReview {
     Prevented { places: Vec<String> },
 }
 
+/// The new-login review ("Yes, it's me" / "No, it's not me!"): one
+/// `confirmSession` / `terminateSession` per unconfirmed session. A session
+/// leaves the alert when its own request succeeds, so a retry after a
+/// partial failure sends only the ones still unreviewed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ReviewStage {
+    #[default]
+    Idle,
+    /// Requests are out; `done` are the sessions already reviewed, `error`
+    /// the first failure so far.
+    Reviewing {
+        confirmed: bool,
+        waiting: usize,
+        done: Vec<UnconfirmedEntry>,
+        error: Option<String>,
+    },
+    /// Every request answered and one failed: the alert stays with the
+    /// failure line until the next press (which starts `Reviewing` again).
+    Failed {
+        error: String,
+        done: Vec<UnconfirmedEntry>,
+    },
+    /// Every request succeeded: the follow-up waits for the UI, which takes
+    /// it once ([`ReviewStage::take_outcome`]).
+    Reviewed(LoginReview),
+}
+
+impl ReviewStage {
+    /// Requests are still in flight.
+    pub fn busy(&self) -> bool {
+        matches!(self, Self::Reviewing { .. })
+    }
+
+    /// The failure line the alert draws.
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            Self::Reviewing { error, .. } => error.as_deref(),
+            Self::Failed { error, .. } => Some(error),
+            Self::Idle | Self::Reviewed(_) => None,
+        }
+    }
+
+    /// The sessions reviewed so far, kept when the press is retried.
+    pub fn done(&self) -> Vec<UnconfirmedEntry> {
+        match self {
+            Self::Reviewing { done, .. } | Self::Failed { done, .. } => done.clone(),
+            Self::Idle | Self::Reviewed(_) => Vec::new(),
+        }
+    }
+
+    /// The follow-up of a finished review, until the UI takes it.
+    pub fn outcome(&self) -> Option<&LoginReview> {
+        match self {
+            Self::Reviewed(outcome) => Some(outcome),
+            _ => None,
+        }
+    }
+
+    /// The follow-up of a finished review, once.
+    pub fn take_outcome(&mut self) -> Option<LoginReview> {
+        match std::mem::take(self) {
+            Self::Reviewed(outcome) => Some(outcome),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+}
+
+/// The terms of service the user must accept, and the accept round trip.
+/// The failure and the wait belong to the terms they were asked for.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum TermsState {
+    #[default]
+    None,
+    Offered(TermsOfService),
+    /// `acceptTermsOfService` is out for these terms.
+    Accepting(TermsOfService),
+    /// The send or the request failed; the box draws the line.
+    Failed {
+        terms: TermsOfService,
+        error: String,
+    },
+}
+
+impl TermsState {
+    /// The server pushed `terms`. The same terms already being accepted (or
+    /// failed) keep that stage: the accept in flight is not undone.
+    pub fn offer(&mut self, terms: TermsOfService) {
+        if self.terms().map(|t| t.id.as_str()) == Some(terms.id.as_str())
+            && !matches!(self, Self::None)
+        {
+            return;
+        }
+        *self = Self::Offered(terms);
+    }
+
+    /// The terms the box shows.
+    pub fn terms(&self) -> Option<&TermsOfService> {
+        match self {
+            Self::None => None,
+            Self::Offered(terms) | Self::Accepting(terms) | Self::Failed { terms, .. } => {
+                Some(terms)
+            }
+        }
+    }
+
+    pub fn is_accepting(&self) -> bool {
+        matches!(self, Self::Accepting(_))
+    }
+
+    /// The failure line of the accept.
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            Self::Failed { error, .. } => Some(error),
+            _ => None,
+        }
+    }
+
+    /// The accept goes out (again, after a failure).
+    pub fn begin_accept(&mut self) {
+        if let Self::Offered(terms) | Self::Failed { terms, .. } = self {
+            *self = Self::Accepting(terms.clone());
+        }
+    }
+
+    /// The accept failed to go out or came back with `error`.
+    pub fn fail_accept(&mut self, error: &str) {
+        if let Self::Offered(terms) | Self::Accepting(terms) | Self::Failed { terms, .. } = self {
+            *self = Self::Failed {
+                terms: terms.clone(),
+                error: error.to_string(),
+            };
+        }
+    }
+
+    /// `id` was accepted (here or elsewhere): only those terms go; newer
+    /// ones pushed meanwhile stay for the user to answer.
+    pub fn accepted(&mut self, id: Option<&str>) {
+        if self.terms().map(|t| t.id.as_str()) == id {
+            *self = Self::None;
+        }
+    }
+
+    /// The terms are gone (a demo session answers them directly).
+    pub fn dismiss(&mut self) {
+        *self = Self::None;
+    }
+
+    /// The failure of the accept for `id`; an older terms' answer is not
+    /// the current box's.
+    pub fn fail_accept_of(&mut self, id: Option<&str>, error: &str) {
+        if self.terms().map(|t| t.id.as_str()) == id {
+            self.fail_accept(error);
+        }
+    }
+}
+
 /// A server popup (`updateServiceNotification`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServiceNotice {
@@ -49,32 +208,68 @@ pub struct AccountNotices {
     pub unconfirmed_count: i32,
     /// Sessions behind the alert, resolved from `getActiveSessions`.
     pub unconfirmed_entries: Vec<UnconfirmedEntry>,
-    /// `confirmSession` / `terminateSession` requests still in flight.
-    pub review_pending: usize,
-    pub review_confirmed: bool,
-    pub review_error: Option<String>,
-    /// The follow-up after a finished review; the UI takes it once.
-    pub review_outcome: Option<LoginReview>,
+    /// `confirmSession` / `terminateSession` requests of the review.
+    pub review: ReviewStage,
     /// Popups in arrival order; the UI shows the front one.
     pub service: VecDeque<ServiceNotice>,
     /// Terms the user must accept, and the accept round-trip.
-    pub terms: Option<TermsOfService>,
-    pub terms_in_flight: bool,
-    pub terms_error: Option<String>,
+    pub terms: TermsState,
 }
 
 /// Where the two-step recovery/reset flow is, as the dialog needs it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TwofaFlow {
-    /// `requestPasswordRecovery` answered: the emailed code is awaited.
-    pub recovery_code_sent_to: Option<String>,
-    /// `setLoginEmailAddress` answered: the emailed code is awaited.
-    pub login_email_code_sent_to: Option<String>,
+    /// The emailed code the open step awaits.
+    pub code_wait: CodeWait,
     /// A finished step the dialog reports once.
     pub notice: Option<TwofaNotice>,
     /// The cached password state is out of date (cancel reset, login
     /// email changed): the driver refetches it.
     pub refetch: bool,
+}
+
+/// The emailed code a two-step step waits for, with the pattern of the
+/// address it went to. One step waits at a time: a new one replaces it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum CodeWait {
+    #[default]
+    None,
+    /// `requestPasswordRecovery` answered.
+    Recovery(String),
+    /// `setLoginEmailAddress` answered.
+    LoginEmail(String),
+}
+
+impl CodeWait {
+    /// Where the recovery code went, while it is awaited.
+    pub fn recovery(&self) -> Option<&str> {
+        match self {
+            Self::Recovery(to) => Some(to),
+            _ => None,
+        }
+    }
+
+    /// Where the login-email code went, while it is awaited.
+    pub fn login_email(&self) -> Option<&str> {
+        match self {
+            Self::LoginEmail(to) => Some(to),
+            _ => None,
+        }
+    }
+
+    /// The recovery step is over; another step's wait stays.
+    pub fn end_recovery(&mut self) {
+        if matches!(self, Self::Recovery(_)) {
+            *self = Self::None;
+        }
+    }
+
+    /// The login-email step is over; another step's wait stays.
+    pub fn end_login_email(&mut self) {
+        if matches!(self, Self::LoginEmail(_)) {
+            *self = Self::None;
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,7 +303,7 @@ impl Session {
         } else {
             // The update carries no session id: refetch the list; its
             // answer fills `unconfirmed_entries`.
-            self.settings.sessions_stale = true;
+            self.settings.sessions_op.mark_stale();
         }
     }
 
@@ -143,53 +338,82 @@ impl Session {
         self.settings.notices.service.pop_front();
     }
 
-    /// One `confirmSession` / `terminateSession` finished.
-    pub(crate) fn finish_login_review(&mut self, confirmed: bool, error: Option<String>) {
-        self.settings.notices.review_pending =
-            self.settings.notices.review_pending.saturating_sub(1);
-        if let Some(error) = error {
-            self.settings.notices.review_error = Some(error);
+    /// The review starts: one request per session still unreviewed.
+    pub(crate) fn begin_login_review(&mut self, confirmed: bool, waiting: usize) {
+        let done = self.settings.notices.review.done();
+        self.settings.notices.review = ReviewStage::Reviewing {
+            confirmed,
+            waiting,
+            done,
+            error: None,
+        };
+    }
+
+    /// The `confirmSession` / `terminateSession` for session `id` finished.
+    pub(crate) fn finish_login_review(&mut self, id: i64, error: Option<String>) {
+        let notices = &mut self.settings.notices;
+        let ReviewStage::Reviewing {
+            confirmed,
+            waiting,
+            done,
+            error: failed,
+        } = &mut notices.review
+        else {
+            return;
+        };
+        *waiting = waiting.saturating_sub(1);
+        match error {
+            Some(error) => {
+                failed.get_or_insert(error);
+            }
+            None => {
+                if let Some(at) = notices.unconfirmed_entries.iter().position(|e| e.id == id) {
+                    done.push(notices.unconfirmed_entries.remove(at));
+                }
+            }
         }
-        if self.settings.notices.review_pending > 0 {
+        if *waiting > 0 {
             return;
         }
-        if self.settings.notices.review_error.is_none() {
-            let places = if confirmed {
-                Vec::new()
-            } else {
-                self.settings
-                    .notices
-                    .unconfirmed_entries
-                    .iter()
-                    .map(|entry| unconfirmed_place(&entry.device, &entry.location))
-                    .collect()
-            };
-            self.settings.notices.review_outcome = Some(if confirmed {
-                LoginReview::Allowed
-            } else {
-                LoginReview::Prevented { places }
-            });
-            self.settings.notices.unconfirmed = None;
-            self.settings.notices.unconfirmed_count = 0;
-            self.settings.notices.unconfirmed_entries.clear();
+        let confirmed = *confirmed;
+        let done = std::mem::take(done);
+        match failed.take() {
+            Some(error) => notices.review = ReviewStage::Failed { error, done },
+            None => {
+                let places = if confirmed {
+                    Vec::new()
+                } else {
+                    done.iter()
+                        .map(|entry| unconfirmed_place(&entry.device, &entry.location))
+                        .collect()
+                };
+                notices.review = ReviewStage::Reviewed(if confirmed {
+                    LoginReview::Allowed
+                } else {
+                    LoginReview::Prevented { places }
+                });
+                notices.unconfirmed = None;
+                notices.unconfirmed_count = 0;
+                notices.unconfirmed_entries.clear();
+            }
         }
-        self.settings.sessions_stale = true;
+        self.settings.sessions_op.mark_stale();
     }
 
     pub(crate) fn apply_email_code_info(&mut self, op: PasswordOp, pattern: String) {
         match op {
             PasswordOp::RequestRecoveryCode => {
-                self.auth_state.twofa_flow.recovery_code_sent_to = Some(pattern);
+                self.auth_state.twofa_flow.code_wait = CodeWait::Recovery(pattern);
             }
             PasswordOp::SetLoginEmail => {
-                self.auth_state.twofa_flow.login_email_code_sent_to = Some(pattern);
+                self.auth_state.twofa_flow.code_wait = CodeWait::LoginEmail(pattern);
             }
             _ => {}
         }
     }
 
     pub(crate) fn apply_reset_password_result(&mut self, outcome: ResetPasswordOutcome) {
-        self.auth_state.twofa_flow.recovery_code_sent_to = None;
+        self.auth_state.twofa_flow.code_wait.end_recovery();
         self.auth_state.twofa_flow.notice = Some(match outcome {
             ResetPasswordOutcome::Ok => TwofaNotice::PasswordRemoved,
             ResetPasswordOutcome::Pending { reset_date } => {
@@ -207,7 +431,7 @@ impl Session {
     pub(crate) fn apply_password_state_op(&mut self, op: PasswordOp) {
         match op {
             PasswordOp::RecoverPassword => {
-                self.auth_state.twofa_flow.recovery_code_sent_to = None;
+                self.auth_state.twofa_flow.code_wait.end_recovery();
                 let still_on = self
                     .auth_state
                     .password_state
@@ -227,16 +451,15 @@ impl Session {
     }
 
     /// A `PasswordStateOp` answered `ok`.
-    pub(crate) fn apply_password_op_ok(&mut self, op: PasswordOp) {
-        self.auth_state.password_state_loading = false;
-        self.auth_state.password_op_error = None;
+    pub(crate) fn apply_password_op_ok(&mut self, op: PasswordOp, request: Option<RequestId>) {
+        self.auth_state.settle_password_op(request);
         match op {
             PasswordOp::CancelPasswordReset => {
                 self.auth_state.twofa_flow.notice = Some(TwofaNotice::ResetCancelled);
                 self.auth_state.twofa_flow.refetch = true;
             }
             PasswordOp::CheckLoginEmailCode => {
-                self.auth_state.twofa_flow.login_email_code_sent_to = None;
+                self.auth_state.twofa_flow.code_wait.end_login_email();
                 self.auth_state.twofa_flow.notice = Some(TwofaNotice::LoginEmailChanged);
                 self.auth_state.twofa_flow.refetch = true;
             }
@@ -323,6 +546,50 @@ mod tests {
             device: device.into(),
             location: location.into(),
         }
+    }
+
+    fn terms(id: &str) -> TermsOfService {
+        TermsOfService {
+            id: id.into(),
+            text: "Be nice.".into(),
+            min_user_age: 0,
+            show_popup: true,
+        }
+    }
+
+    #[test]
+    fn terms_pushed_again_keep_the_accept_in_flight() {
+        let mut state = TermsState::Offered(terms("tos-1"));
+        state.begin_accept();
+        state.offer(terms("tos-1"));
+        assert!(state.is_accepting(), "no second accept is offered");
+        state.fail_accept("no");
+        state.offer(terms("tos-1"));
+        assert_eq!(state.error(), Some("no"));
+        state.offer(terms("tos-2"));
+        assert_eq!(state, TermsState::Offered(terms("tos-2")));
+    }
+
+    #[test]
+    fn a_failed_send_does_not_leave_the_review_pending() {
+        let sink: std::sync::Arc<dyn crate::diagnostics::DiagnosticSink> =
+            std::sync::Arc::new(crate::diagnostics::MemorySink::new());
+        let mut session = Session::new(crate::ids::AccountKey::primary(), sink);
+        // Three sends planned: the first went out, the second failed, so it
+        // and the third are finished with the error; the answer still out
+        // settles the review as failed.
+        session.begin_login_review(true, 3);
+        session.finish_login_review(2, Some("failed".into()));
+        session.finish_login_review(3, Some("failed".into()));
+        assert!(matches!(
+            session.settings.notices.review,
+            ReviewStage::Reviewing { waiting: 1, .. }
+        ));
+        session.finish_login_review(1, None);
+        assert!(matches!(
+            session.settings.notices.review,
+            ReviewStage::Failed { .. }
+        ));
     }
 
     #[test]

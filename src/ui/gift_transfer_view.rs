@@ -63,20 +63,35 @@ pub(super) fn stage_view(app: &QuillApp, cx: &mut Context<QuillApp>) -> Option<S
     let gift = session
         .payments
         .hub
-        .gifts
+        .received
+        .rows
         .iter()
         .find(|g| g.id == picker.id);
     let name = picker.gift_name.clone();
     Some(match &picker.stage {
         TransferStage::Pick => pick_view(app, session, picker, gift, cx),
-        TransferStage::ConfirmPeer { user_id, name: to } => {
-            confirm_peer_view(app, session, gift, &name, *user_id, to, cx)
-        }
+        TransferStage::ConfirmPeer {
+            user_id,
+            name: to,
+            error,
+        } => confirm_peer_view(
+            app,
+            session,
+            gift,
+            &name,
+            *user_id,
+            to,
+            error.as_deref(),
+            cx,
+        ),
+        TransferStage::Transferring {
+            user_id, name: to, ..
+        } => confirm_peer_view(app, session, gift, &name, *user_id, to, None, cx),
         TransferStage::Locked { hours } => locked_view(*hours, cx),
         TransferStage::ConfirmExport => confirm_export_view(&name, false, cx),
-        TransferStage::Probing => confirm_export_view(&name, true, cx),
-        TransferStage::Password { sending, error } => {
-            password_view(app, session, *sending, error.as_ref(), cx)
+        TransferStage::Probing(_) => confirm_export_view(&name, true, cx),
+        TransferStage::Password { send, error } => {
+            password_view(app, session, send.is_out(), error.as_ref(), cx)
         }
         TransferStage::SecurityCheck { later } => security_check_view(*later, cx),
         TransferStage::ActionLocked => action_locked_view(cx),
@@ -99,7 +114,7 @@ fn cached_candidates(app: &QuillApp, session: &Session, query: &str) -> Rc<Vec<T
         return Rc::new(candidates(session, query));
     };
     if let Some(hit) = cache.as_ref().filter(|c| {
-        c.revision == session.revision && c.query == query && c.open_chat == session.open_chat
+        c.revision == session.revision && c.query == query && c.open_chat == session.open_chat_id()
     }) {
         return hit.people.clone();
     }
@@ -107,7 +122,7 @@ fn cached_candidates(app: &QuillApp, session: &Session, query: &str) -> Rc<Vec<T
     *cache = Some(CandidateCache {
         revision: session.revision,
         query: query.to_string(),
-        open_chat: session.open_chat,
+        open_chat: session.open_chat_id(),
         people: people.clone(),
     });
     people
@@ -121,7 +136,7 @@ pub(super) fn candidates(session: &Session, query: &str) -> Vec<TransferCandidat
     let is_bot = |id: i64| session.users.get(&id).is_some_and(|u| u.is_bot);
     let contacts = session.contact_rows();
     let open_user = session
-        .open_chat
+        .open_chat_id()
         .and_then(|id| session.chats.get(&id.0))
         .and_then(|chat| match chat.kind {
             ChatKind::Private { user_id } => session.users.get(&user_id.0),
@@ -333,6 +348,7 @@ fn confirm_peer_view(
     gift_name: &str,
     user_id: i64,
     to: &str,
+    error: Option<&str>,
     cx: &mut Context<QuillApp>,
 ) -> StageView {
     let star_count = match gift.map(|g| g.transfer_gate(true, now_unix())) {
@@ -342,7 +358,7 @@ fn confirm_peer_view(
     let price = transfer_price(star_count);
     let balance = session.payments.hub.balance.map(|b| b.stars);
     let too_poor = star_count > 0 && balance.is_some_and(|b| b < star_count);
-    let busy = session.payments.hub.gift_mutating;
+    let busy = session.payments.hub.received.op.is_mutating();
     let roots = app.media_display_roots();
     let collectible = gift.and_then(|g| g.gift.collectible.as_deref());
     let photo = session
@@ -378,6 +394,15 @@ fn confirm_peer_view(
     let mut body = v_flex().gap_3().child(pair).child(text_block(question));
     if too_poor {
         body = body.child(balance_hint(cx, balance));
+    }
+    if let Some(reason) = error {
+        body = body.child(
+            div()
+                .id("gift-transfer-error")
+                .text_sm()
+                .text_color(cx.theme().danger)
+                .child(reason.to_string()),
+        );
     }
     if let Some(c) = collectible {
         body = body.child(

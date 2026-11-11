@@ -10,26 +10,65 @@ use quill::profile_photo_camera::{CameraStream, LIVE_FPS, LIVE_SIDE};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// Where the camera panel stands: one value for the start, the live
+/// preview, the photo being saved and the photo taken.
+#[derive(Default)]
+enum CameraStage {
+    /// No camera running and no picture: before a start, or after a start
+    /// that failed or a camera that stopped before any frame.
+    #[default]
+    Idle,
+    /// The camera is being opened on a worker thread.
+    Starting,
+    /// The stream runs and the newest frame is drawn.
+    Live {
+        stream: CameraStream,
+        /// Serial of the newest frame drawn.
+        drawn: u64,
+        /// The newest frame as RGB24 bytes, for "Take photo".
+        rgb: Vec<u8>,
+        /// The newest frame drawn; none before the first one.
+        image: Option<Arc<RenderImage>>,
+    },
+    /// "Take photo" keeps the frame on screen while its JPEG is written.
+    Saving { frozen: Arc<RenderImage> },
+    /// A photo was taken: the frozen picture and its file.
+    Taken {
+        path: PathBuf,
+        image: Arc<RenderImage>,
+    },
+    /// The stream is gone with a frame on screen (the camera stopped, or
+    /// the save failed): only a new camera run can take another.
+    Stopped { image: Arc<RenderImage> },
+}
+
+impl CameraStage {
+    /// The picture on screen, if any.
+    fn picture(&self) -> Option<Arc<RenderImage>> {
+        match self {
+            Self::Live { image, .. } => image.clone(),
+            Self::Saving { frozen } => Some(frozen.clone()),
+            Self::Taken { image, .. } | Self::Stopped { image } => Some(image.clone()),
+            Self::Idle | Self::Starting => None,
+        }
+    }
+}
+
 /// The live preview and the photo taken from it.
 #[derive(Default)]
 pub(crate) struct CameraDraft {
-    stream: Option<CameraStream>,
-    /// Serial of the newest frame drawn.
-    drawn: u64,
-    /// The newest frame as RGB24 bytes, for "Take photo".
-    rgb: Vec<u8>,
-    live: Option<Arc<RenderImage>>,
-    /// A photo was taken: the frozen picture and its file.
-    shot: Option<(PathBuf, Arc<RenderImage>)>,
-    starting: bool,
+    stage: CameraStage,
 }
 
 impl Drop for CameraDraft {
     fn drop(&mut self) {
-        if let Some(image) = self.live.take() {
-            super::super::image_budget::retire_all([image]);
-        }
-        if let Some((_, image)) = self.shot.take() {
+        let image = match std::mem::take(&mut self.stage) {
+            CameraStage::Live { image, .. } => image,
+            CameraStage::Saving { frozen } => Some(frozen),
+            CameraStage::Taken { image, .. } | CameraStage::Stopped { image } => Some(image),
+            CameraStage::Idle | CameraStage::Starting => None,
+        };
+        if let Some(image) = image {
             super::super::image_budget::retire_all([image]);
         }
     }
@@ -46,30 +85,38 @@ impl QuillApp {
             return;
         };
         sources.camera = CameraDraft::default();
-        sources.camera.starting = true;
+        sources.camera.stage = CameraStage::Starting;
         sources.note = None;
         sources.serial += 1;
         let serial = sources.serial;
+        let target = self.photo_target();
         let log = work_dir().join("camera.log");
         let choice = self.capture_choice();
         let worker = cx.background_spawn(async move { CameraStream::start(&log, &choice) });
         self.spawn_screen_in(window, cx, async move |this, cx| {
             let result = worker.await;
             let _ = this.update(cx, |this, cx| {
-                if this.sources().map(|s| s.serial) != Some(serial) {
+                // The serial counts per `PhotoSources`: the answer is for
+                // the sources of the box that asked.
+                if this.photo_target() != target || this.sources().map(|s| s.serial) != Some(serial)
+                {
                     return;
                 }
                 match result {
                     Ok(stream) => {
                         if let Some(sources) = this.sources_mut() {
-                            sources.camera.stream = Some(stream);
-                            sources.camera.starting = false;
+                            sources.camera.stage = CameraStage::Live {
+                                stream,
+                                drawn: 0,
+                                rgb: Vec::new(),
+                                image: None,
+                            };
                         }
                         cx.notify();
                     }
                     Err(message) => {
                         if let Some(sources) = this.sources_mut() {
-                            sources.camera.starting = false;
+                            sources.camera.stage = CameraStage::Idle;
                         }
                         this.photo_source_note(message, cx);
                     }
@@ -87,50 +134,70 @@ impl QuillApp {
             return;
         };
         let camera = &mut sources.camera;
-        let Some(stream) = camera.stream.as_ref() else {
+        let CameraStage::Live {
+            stream,
+            drawn,
+            rgb,
+            image,
+        } = &mut camera.stage
+        else {
             return;
         };
-        if let Some((serial, rgb)) = stream.frame_after(camera.drawn) {
-            camera.drawn = serial;
-            let mut rgba = Vec::with_capacity(rgb.len() / 3 * 4);
-            for pixel in rgb.as_chunks::<3>().0 {
+        if let Some((serial, frame)) = stream.frame_after(*drawn) {
+            *drawn = serial;
+            let mut rgba = Vec::with_capacity(frame.len() / 3 * 4);
+            for pixel in frame.as_chunks::<3>().0 {
                 rgba.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
             }
-            camera.rgb = rgb;
-            replace_image(&mut camera.live, render_rgba(LIVE_SIDE, LIVE_SIDE, rgba));
+            *rgb = frame;
+            replace_image(image, render_rgba(LIVE_SIDE, LIVE_SIDE, rgba));
         }
         let ended = stream.finished();
-        let no_picture = camera.drawn == 0;
-        let failure = (ended && no_picture).then(|| stream.failure());
+        let failure = (ended && *drawn == 0).then(|| stream.failure());
         if let Some(message) = failure {
-            camera.stream = None;
+            camera.stage = CameraStage::Idle;
             sources.note = Some(message);
         } else if ended {
-            camera.stream = None;
+            // The camera stopped with a picture on screen.
+            camera.stage = match std::mem::take(&mut camera.stage) {
+                CameraStage::Live {
+                    image: Some(image), ..
+                } => CameraStage::Stopped { image },
+                _ => CameraStage::Idle,
+            };
             sources.note = Some(tr(keys::Q_PEOPLE_THE_CAMERA_STOPPED).into());
         } else {
             self.request_animation_tick(LIVE_FPS, cx);
         }
     }
 
-    /// Keep the frame on screen as a JPEG and release the camera.
+    /// Keep the newest frame on screen as a JPEG and release the camera.
     fn take_camera_photo(&mut self, cx: &mut Context<Self>) {
         let Some(sources) = self.sources_mut() else {
             return;
         };
         let camera = &mut sources.camera;
-        if camera.rgb.len() != quill::profile_photo_camera::frame_len(LIVE_SIDE)
-            || camera.live.is_none()
-            || sources.busy
-        {
+        let CameraStage::Live {
+            rgb,
+            image: Some(frozen),
+            ..
+        } = &camera.stage
+        else {
+            return;
+        };
+        if rgb.len() != quill::profile_photo_camera::frame_len(LIVE_SIDE) {
             return;
         }
-        sources.busy = true;
+        let (rgb, frozen) = (rgb.clone(), frozen.clone());
         sources.serial += 1;
         let serial = sources.serial;
-        let rgb = camera.rgb.clone();
-        // Removed unless the shot is taken (`camera.shot`), also when the
-        // screen is gone before the save answers.
+        // The frame kept is the one on screen: the stream stops now (it is
+        // dropped with the live stage), so no newer frame replaces the
+        // picture the JPEG is saved from.
+        camera.stage = CameraStage::Saving { frozen };
+        let owner = self.photo_target();
+        // Removed unless the shot is taken (`CameraStage::Taken`), also when
+        // the screen is gone before the save answers.
         let output =
             quill::scratch::OwnedFile::new(work_dir().join(format!("camera-{serial}.jpg")));
         let target = output.path().to_path_buf();
@@ -144,22 +211,36 @@ impl QuillApp {
         self.spawn_screen(cx, async move |this, cx| {
             let result = worker.await;
             let _ = this.update(cx, |this, cx| {
-                if this.sources().map(|s| s.serial) != Some(serial) {
+                if this.photo_target() != owner || this.sources().map(|s| s.serial) != Some(serial)
+                {
                     return;
                 }
                 match result {
                     Ok(()) => {
                         if let Some(sources) = this.sources_mut() {
                             let camera = &mut sources.camera;
-                            if let Some(frozen) = camera.live.take() {
-                                camera.shot = Some((output.keep(), frozen));
-                            }
-                            camera.stream = None;
-                            sources.busy = false;
+                            camera.stage = match std::mem::take(&mut camera.stage) {
+                                CameraStage::Saving { frozen } => CameraStage::Taken {
+                                    path: output.keep(),
+                                    image: frozen,
+                                },
+                                other => other,
+                            };
                         }
                         cx.notify();
                     }
-                    Err(message) => this.photo_source_note(message, cx),
+                    Err(message) => {
+                        if let Some(sources) = this.sources_mut() {
+                            let camera = &mut sources.camera;
+                            camera.stage = match std::mem::take(&mut camera.stage) {
+                                CameraStage::Saving { frozen } => {
+                                    CameraStage::Stopped { image: frozen }
+                                }
+                                other => other,
+                            };
+                        }
+                        this.photo_source_note(message, cx);
+                    }
                 }
             });
         })
@@ -168,10 +249,10 @@ impl QuillApp {
     }
 
     fn use_camera_photo(&mut self, cx: &mut Context<Self>) {
-        let Some(path) = self
-            .sources()
-            .and_then(|s| s.camera.shot.as_ref().map(|(path, _)| path.clone()))
-        else {
+        let Some(path) = self.sources().and_then(|s| match &s.camera.stage {
+            CameraStage::Taken { path, .. } => Some(path.clone()),
+            _ => None,
+        }) else {
             return;
         };
         let Some(target) = self.photo_target() else {
@@ -189,15 +270,17 @@ impl QuillApp {
     ) -> AnyElement {
         let theme = cx.theme();
         let camera = &sources.camera;
-        let taken = camera.shot.is_some();
-        let picture = camera
-            .shot
-            .as_ref()
-            .map(|(_, image)| image.clone())
-            .or_else(|| camera.live.clone());
+        let taken = matches!(camera.stage, CameraStage::Taken { .. });
+        // A frame frozen by a camera that stopped, or a Take photo whose
+        // save failed: only a new camera run can take another.
+        let stopped = matches!(camera.stage, CameraStage::Stopped { .. });
+        let picture = camera.stage.picture();
         let status = if picture.is_some() {
             None
-        } else if camera.starting || camera.stream.is_some() {
+        } else if matches!(
+            camera.stage,
+            CameraStage::Starting | CameraStage::Live { .. }
+        ) {
             Some(tr(keys::Q_PEOPLE_OPENING_THE_CAMERA))
         } else {
             Some(tr(keys::Q_PEOPLE_NO_CAMERA_PICTURE))
@@ -214,14 +297,14 @@ impl QuillApp {
                     .child(text)
                     .into_any_element()
             }));
-        let can_take = camera.live.is_some() && camera.stream.is_some() && !sources.busy;
+        let can_take = matches!(camera.stage, CameraStage::Live { image: Some(_), .. });
         div()
             .flex()
             .flex_col()
             .gap_3()
             .child(div().font_semibold().child(tr(keys::Q_PEOPLE_TAKE_A_PHOTO)))
             .child(div().flex().justify_center().child(circle))
-            .child(div().flex().justify_center().child(if taken {
+            .child(div().flex().justify_center().child(if taken || stopped {
                 Button::new("profile-photo-retake")
                     .label(tr(keys::Q_PEOPLE_RETAKE))
                     .ghost()
@@ -236,7 +319,7 @@ impl QuillApp {
             }))
             .child(self.source_buttons(
                 tr(keys::PROFILE_SET_PHOTO_BUTTON),
-                taken && !sources.busy,
+                taken,
                 |this, cx| this.use_camera_photo(cx),
                 cx,
             ))

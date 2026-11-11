@@ -24,25 +24,61 @@ impl<S: JsonSender> ConnectDriver<S> {
         let group_call = self.pump_group_call_transport(group_calls_before);
         self.pump_call_media(std::time::Instant::now());
         let parameters = self.maybe_send_parameters();
-        let membership = self.maybe_probe_channel_membership();
+        let membership = self.probe_membership_everywhere();
         self.claim_account_owner();
         call.and(group_call).and(parameters).and(membership)
     }
 
+    /// The own membership probe for the main window's chat and for every
+    /// chat window's, each under its own view (a window's probe waits for
+    /// `getMe` like the main one, and runs on whatever answered).
+    fn probe_membership_everywhere(&mut self) -> Result<(), ConnectSendError> {
+        let mut result = self.maybe_probe_channel_membership();
+        let windows: Vec<ChatId> = self.session.window_chats.iter().copied().collect();
+        for chat_id in windows {
+            let probe =
+                self.with_window_chat(chat_id, |driver| driver.maybe_probe_channel_membership());
+            result = result.and(probe);
+        }
+        result
+    }
+
     /// The account's user id is known: a folder last signed in as someone
     /// else drops what they left (`account_data::claim`), once per user.
-    fn claim_account_owner(&mut self) {
+    pub(in crate::connect) fn claim_account_owner(&mut self) {
         let Some(me) = self.session.my_user_id else {
             return;
         };
-        if self.claimed_owner == Some(me) {
+        if self.owner_claim == OwnerClaim::Saved(me) {
             return;
         }
-        self.claimed_owner = Some(me);
         // `<app root>/accounts/<key>`.
         let Some(app_root) = self.paths.root.parent().and_then(std::path::Path::parent) else {
             return;
         };
-        crate::account_data::claim(app_root, &self.session.account, me);
+        let owner_error = if self.owner_claim == OwnerClaim::Unsaved(me) {
+            crate::account_data::write_owner(app_root, &self.session.account, me).err()
+        } else {
+            crate::account_data::claim(
+                app_root,
+                &self.session.account,
+                me,
+                self.session.sign_in_origin,
+            )
+            .owner_error
+        };
+        self.owner_claim = match owner_error {
+            None => OwnerClaim::Saved(me),
+            Some(err) => {
+                // Not silent: without the owner file the next start cannot
+                // tell whose the folder is, so it drops what is in it. The
+                // next ingest retries the write; it is reported once, not
+                // on every ingest while the folder cannot be written.
+                if self.owner_claim != OwnerClaim::Unsaved(me) {
+                    eprintln!("quill: could not save the account owner: {err}");
+                }
+                OwnerClaim::Unsaved(me)
+            }
+        };
     }
 }

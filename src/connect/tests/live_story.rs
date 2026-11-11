@@ -121,7 +121,7 @@ fn the_join_answer_asks_for_streamer_donors_and_senders_together() {
     );
     let live = h.driver.session.stories.live.clone().unwrap();
     assert_eq!(live.stars_total(), 120);
-    assert_eq!(live.message_senders.map(|s| s.len()), Some(2));
+    assert_eq!(live.message_senders.data().map(|s| s.len()), Some(2));
     // The streamer is a channel: its video is subscribed anyway, and the
     // native call is keyed by the poster's chat.
     let sources = h.driver.live_story_video_sources(4242);
@@ -531,6 +531,30 @@ fn ban_user_bans_from_the_channel_or_blocks() {
     );
 }
 
+#[test]
+fn ban_user_waits_for_the_delete_to_go_out() {
+    let mut h = watching();
+    h.ingest(&LIVE_CALL.replace("JOINED", "true").replace(
+        r#""can_send_messages""#,
+        r#""can_be_managed":true,"can_send_messages""#,
+    ));
+    let sender = MessageSender::User { user_id: 9 };
+    // The delete cannot go out: nobody is banned or blocked.
+    h.recorder.refuse(Some("deleteGroupCallMessages"));
+    assert!(matches!(
+        h.driver
+            .delete_live_story_comment_then_ban(3, false, None, Some(sender)),
+        Err(crate::connect::LiveDeleteFailed::Delete(_))
+    ));
+    assert_eq!(h.sent("setMessageSenderBlockList"), 0);
+    // Once it goes out, the ban follows.
+    h.recorder.refuse(None);
+    h.driver
+        .delete_live_story_comment_then_ban(3, false, None, Some(sender))
+        .unwrap();
+    assert_eq!(h.sent("setMessageSenderBlockList"), 1);
+}
+
 const LOOKED_AT_CHAT: &str = r#"{"@type":"updateGroupCall","group_call":{"@type":"groupCall","id":555,"title":"Chat","is_active":true,"is_video_chat":true,"is_joined":false,"need_rejoin":NEED}}"#;
 
 #[test]
@@ -611,7 +635,14 @@ fn a_late_joined_update_for_the_call_just_left_does_not_return() {
     assert_eq!(current_id(&h), None);
     // TDLib confirms the leave; the call counts as any other again.
     h.ingest(&LIVE_CALL.replace("JOINED", "false"));
-    assert_eq!(h.driver.session.calls.left_group_call, None);
+    let calls = &h.driver.session.calls;
+    assert!(
+        calls
+            .group_call_ids()
+            .into_iter()
+            .flatten()
+            .all(|id| !calls.group_call_left(id))
+    );
 }
 
 #[test]
@@ -638,7 +669,9 @@ fn joined_answer(h: &mut Harness) {
 
 fn rejoin(h: &mut Harness) {
     if let Some(live) = h.driver.session.stories.live.as_mut() {
-        live.extras_requested = false;
+        live.streamer = Default::default();
+        live.donors = Default::default();
+        live.message_senders = Default::default();
     }
     h.ingest(&LIVE_CALL.replace("JOINED", "true"));
 }
@@ -649,10 +682,10 @@ fn the_first_join_asks_for_the_star_bursts_once() {
     assert_eq!(h.sent("getCustomEmojiReactionAnimations"), 0);
     joined_answer(&mut h);
     assert_eq!(h.sent("getCustomEmojiReactionAnimations"), 1);
-    assert_eq!(
+    assert!(matches!(
         h.driver.session.stories.live_bursts,
-        crate::state::LiveBursts::Requested
-    );
+        crate::state::LiveBursts::Requested(_)
+    ));
     h.answer(
         "getCustomEmojiReactionAnimations",
         r#"{"@type":"stickers","stickers":[{"@type":"sticker","id":"77","set_id":"5","width":512,"height":512,"emoji":"✨","format":{"@type":"stickerFormatTgs"},"full_type":{"@type":"stickerFullTypeRegular","premium_animation":null},"thumbnail":null,"sticker":{"@type":"file","id":901,"size":2000,"expected_size":2000,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":2000}}}]}"#,
@@ -677,10 +710,28 @@ fn a_failed_burst_request_is_asked_again_on_the_next_join() {
     );
     assert_eq!(
         h.driver.session.stories.live_bursts,
-        crate::state::LiveBursts::Unasked
+        crate::state::LiveBursts::Failed
     );
+    // Not asked again by the next ingest, only by the next Join.
+    h.ingest(&LIVE_CALL.replace("JOINED", "true"));
+    assert_eq!(h.sent("getCustomEmojiReactionAnimations"), 1);
     rejoin(&mut h);
     assert_eq!(h.sent("getCustomEmojiReactionAnimations"), 2);
+}
+
+#[test]
+fn a_refused_burst_send_is_asked_with_the_other_extras_already_begun() {
+    let mut h = watching();
+    h.recorder.refuse(Some("getCustomEmojiReactionAnimations"));
+    joined_answer(&mut h);
+    assert_eq!(
+        h.driver.session.stories.live_bursts,
+        crate::state::LiveBursts::Failed
+    );
+    assert_eq!(h.sent("getLiveStoryTopDonors"), 1);
+    h.recorder.refuse(None);
+    rejoin(&mut h);
+    assert_eq!(h.sent("getCustomEmojiReactionAnimations"), 1);
 }
 
 /// Stars tapped on a live story commit from the poll, for an account in
@@ -703,4 +754,24 @@ fn live_story_stars_commit_from_the_poll_with_no_viewer() {
     h.driver
         .poll_ticks(TickScope::Background, std::time::Instant::now(), network);
     assert_eq!(h.sent("commitPendingLiveStoryReactions"), 1);
+}
+
+#[test]
+fn a_failed_extra_waits_for_the_next_join_and_is_not_asked_every_update() {
+    let mut h = watching();
+    joined_answer(&mut h);
+    assert_eq!(h.sent("getLiveStoryStreamer"), 1);
+    h.answer(
+        "getLiveStoryStreamer",
+        r#"{"@type":"error","code":500,"message":"x"}"#,
+    );
+    let live = h.driver.session.stories.live.clone().unwrap();
+    assert!(live.streamer.error().is_some());
+    // Later updates do not ask again.
+    h.ingest(&LIVE_CALL.replace("JOINED", "true"));
+    assert_eq!(h.sent("getLiveStoryStreamer"), 1);
+    // The next Join does.
+    h.driver.join_live_story(ChatId(7), 6).unwrap();
+    h.ingest(&LIVE_CALL.replace("JOINED", "true"));
+    assert_eq!(h.sent("getLiveStoryStreamer"), 2);
 }

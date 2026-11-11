@@ -64,7 +64,7 @@ fn card_shown(vcx: &mut VisualTestContext) -> bool {
 fn gift_for(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<String> {
     app.read_with(vcx, |app, _| {
         let send = &app.session()?.payments.gifts_manage.send;
-        send.open
+        send.is_open()
             .then(|| send.recipient.as_ref().map(|r| r.name.clone()))
             .flatten()
     })
@@ -116,7 +116,7 @@ fn hiding_the_card_says_where_gifts_wait(cx: &mut TestAppContext) {
         );
         assert!(
             app.session()
-                .is_some_and(|s| s.chat_list.suggestions.birthdays_hidden)
+                .is_some_and(|s| s.chat_list.suggestions.birthdays_hidden())
         );
     });
     assert!(!card_shown(vcx));

@@ -1,15 +1,20 @@
 //! State reducer tests: groups.
 use super::common::*;
 use super::*;
+use crate::telegram::envelope::ParsedCommunityFullInfo;
 
 #[test]
 fn custom_title_failure_surfaces_in_member_dialog() {
     // Slice G1 replay: a TDLib `error` for `setChatMemberTag` lands
-    // in `member_action_error` (the member-management dialog reads
-    // the member-list fetch states, not `admin_lists`) as well as
-    // `admin_lists` for the info panel.
+    // in `member_action_error`, which the member-management dialog and
+    // the Administrators page show; a loaded administrators list is not
+    // replaced by it (round 5, 083).
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
+    session
+        .groups
+        .admin_lists
+        .insert(13, AdminListFetch::Loaded(Vec::new()));
     let extra = session.request(
         RequestPurpose::Groups(GroupsPurpose::SetChatMemberTag { user_id: 42 }),
         Some(ChatId(13)),
@@ -31,7 +36,38 @@ fn custom_title_failure_surfaces_in_member_dialog() {
     assert!(message.contains("Could not set custom title"));
     assert!(matches!(
         session.groups.admin_lists.get(&13),
-        Some(AdminListFetch::Failed(_))
+        Some(AdminListFetch::Loaded(_))
+    ));
+}
+
+#[test]
+fn a_refused_member_status_change_keeps_the_loaded_administrators() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session
+        .groups
+        .admin_lists
+        .insert(13, AdminListFetch::Loaded(Vec::new()));
+    let extra = session.request(
+        RequestPurpose::Groups(GroupsPurpose::SetChatMemberStatus {
+            user_id: 42,
+            kind: MemberStatusChange::Demote,
+        }),
+        Some(ChatId(13)),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_ADMIN_REQUIRED"}}"#,
+            extra.0
+        ),
+    );
+    assert!(session.groups.member_action_error.contains_key(&13));
+    assert!(matches!(
+        session.groups.admin_lists.get(&13),
+        Some(AdminListFetch::Loaded(_))
     ));
 }
 
@@ -102,6 +138,43 @@ fn bulk_add_members_response_replaces_count() {
         );
     }
     assert_eq!(session.groups.add_members_failed.get(&13), Some(&1));
+}
+
+/// An older list request's error does not fail a list a newer request
+/// already filled (05-085); an empty list still fails.
+#[test]
+fn a_list_error_does_not_cover_a_loaded_list() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.groups.invite_links.insert(
+        13,
+        InviteLinkFetch::Loaded(InviteLinkList {
+            total_count: 1,
+            links: Vec::new(),
+        }),
+    );
+    let older = session.request(RequestPurpose::GetChatInviteLinks, Some(ChatId(13)));
+    let error = |extra: RequestId| {
+        format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_ADMIN_REQUIRED"}}"#,
+            extra.0
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &error(older));
+    assert!(matches!(
+        session.groups.invite_links.get(&13),
+        Some(InviteLinkFetch::Loaded(_))
+    ));
+    let asked = session.request(RequestPurpose::GetChatInviteLinks, Some(ChatId(13)));
+    session
+        .groups
+        .invite_links
+        .insert(13, InviteLinkFetch::Loading(asked));
+    apply_json(&mut session, &seq, &sink, &error(asked));
+    assert!(matches!(
+        session.groups.invite_links.get(&13),
+        Some(InviteLinkFetch::Failed(_))
+    ));
 }
 
 #[test]
@@ -324,7 +397,7 @@ fn set_community_name_ok_drops_full_info_for_refetch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!session.groups.community_full_infos.contains_key(&42));
+    assert!(session.groups.community_full_infos.wants_fetch(42));
     // Error path: the cache stays.
     session.groups.community_full_infos.insert(
         42,
@@ -346,7 +419,7 @@ fn set_community_name_ok_drops_full_info_for_refetch() {
             extra.0
         ),
     );
-    assert!(session.groups.community_full_infos.contains_key(&42));
+    assert!(!session.groups.community_full_infos.wants_fetch(42));
 }
 
 #[test]
@@ -783,6 +856,40 @@ fn join_request_update_prepends_and_dedupes() {
     );
 
     assert!(!session.groups.join_requests.contains_key(&14));
+}
+
+#[test]
+fn a_join_request_hidden_by_a_search_does_not_bump_the_total() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request(RequestPurpose::GetChatJoinRequests, Some(ChatId(13)));
+    session.groups.join_requests.insert(
+        13,
+        JoinRequestFetch::Loading {
+            query: "x".into(),
+            request: extra,
+        },
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"chatJoinRequests","@extra":"{}","total_count":1,"requests":[{{"@type":"chatJoinRequest","user_id":7001,"date":1788500000,"bio":"Hi"}}]}}"#,
+            extra.0
+        ),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewChatJoinRequest","chat_id":13,"request":{"@type":"chatJoinRequest","user_id":7003,"date":1788600000,"bio":"New"},"user_chat_id":0,"invite_link":{"@type":"chatInviteLink","invite_link":"https://t.me/+join","name":"Join","creator_user_id":777,"date":1788000000,"edit_date":0,"expiration_date":0,"subscription_pricing":null,"member_limit":25,"member_count":8,"expired_member_count":0,"pending_join_request_count":0,"creates_join_request":false,"is_primary":false,"is_revoked":false},"query_id":"42"}"#,
+    );
+    let JoinRequestFetch::Loaded(list) = session.groups.join_requests.get(&13).unwrap() else {
+        panic!("join requests were not loaded");
+    };
+    assert_eq!(list.total_count, 1);
+    assert_eq!(list.requests.len(), 1);
 }
 
 #[test]

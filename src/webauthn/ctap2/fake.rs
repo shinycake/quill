@@ -49,6 +49,9 @@ pub struct Script {
     /// Requests seen: command byte and decoded parameters.
     pub seen: Vec<(u8, Value)>,
     pub cancels: usize,
+    /// The key is waiting for a touch (set while `hold` keeps it waiting,
+    /// cleared by a cancel), so a test can act once the ceremony got there.
+    pub held: bool,
 }
 
 impl Default for Script {
@@ -64,6 +67,7 @@ impl Default for Script {
             fail_next: None,
             seen: Vec::new(),
             cancels: 0,
+            held: false,
         }
     }
 }
@@ -245,6 +249,7 @@ impl FakeKey {
                 }
                 if self.script.lock().unwrap().hold {
                     self.holding = true;
+                    self.script.lock().unwrap().held = true;
                     return;
                 }
                 self.presence();
@@ -315,6 +320,7 @@ impl HidDevice for FakeKey {
                 self.script.lock().unwrap().cancels += 1;
                 if self.holding {
                     self.holding = false;
+                    self.script.lock().unwrap().held = false;
                     self.out.clear();
                     self.cbor_reply(status::KEEPALIVE_CANCEL, None);
                 }
@@ -328,7 +334,7 @@ impl HidDevice for FakeKey {
         if let Some(report) = self.out.pop_front() {
             return Ok(Some(report));
         }
-        std::thread::sleep(Duration::from_millis(2));
+        std::thread::yield_now();
         if self.holding {
             let mut keepalive = frame(CID, CMD_KEEPALIVE, &[KEEPALIVE_UP_NEEDED], 64).unwrap();
             return Ok(keepalive.pop());

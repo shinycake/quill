@@ -9,13 +9,20 @@ use crate::ids::UserId;
 /// `HistoryItem::requestReply`). Keyed by the *replying* message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReplyTarget {
-    /// `getRepliedMessage` sent, answer pending.
-    Loading,
+    /// `getRepliedMessage` sent as this request, answer pending.
+    Loading(RequestId),
     /// The answer: the replied message (own chat or another one).
     Loaded(Box<HistoryMessage>),
     /// TDLib said it does not exist (deleted, or no access).
     Missing,
+    /// The ask failed with an error that may pass (network, timeout, rate
+    /// limit, a 500): the strip keeps loading, and the row is asked for
+    /// again once `until` is over.
+    Retry { until: std::time::Instant },
 }
+
+/// The wait before a failed `getRepliedMessage` is asked again.
+pub const REPLY_RETRY_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 pub const MAX_REPLY_TARGETS_OUTSIDE_WINDOW: usize = 256;
 
@@ -237,15 +244,15 @@ impl Session {
         message: &HistoryMessage,
         reply: &MessageReplyTo,
     ) -> (ChatId, Option<&'a HistoryMessage>) {
-        let target_chat = if reply.chat_id.0 == 0 {
+        let target_chat = if reply.chat_id().0 == 0 {
             message.chat_id
         } else {
-            reply.chat_id
+            reply.chat_id()
         };
         let original = self
             .histories
             .get(&target_chat.0)
-            .and_then(|history| history.messages.get(&reply.message_id.0))
+            .and_then(|history| history.messages.get(&reply.message_id().0))
             .or(
                 match self
                     .messages
@@ -263,10 +270,10 @@ impl Session {
     /// [`Self::reply_header`]'s `background_emoji` without building the rest.
     fn reply_background_emoji(&self, message: &HistoryMessage) -> Option<i64> {
         let reply = message.reply_to.as_ref()?;
-        if reply.story_id != 0 {
-            return self.sender_background_emoji(Some(self.story_poster(reply.chat_id).1));
+        if reply.is_story() {
+            return self.sender_background_emoji(Some(self.story_poster(reply.chat_id()).1));
         }
-        match (self.reply_original(message, reply).1, &reply.origin) {
+        match (self.reply_original(message, reply).1, &reply.origin()) {
             (Some(found), _) => self.sender_background_emoji(found.sender),
             (None, Some(origin)) => self.origin_background_emoji(origin),
             (None, None) => None,
@@ -276,7 +283,7 @@ impl Session {
     /// The strip of a reply to a story (tdesktop draws the poster's name
     /// over "Story" and the story's picture).
     fn story_reply_header(&self, reply: &MessageReplyTo) -> ReplyHeader {
-        let poster = reply.chat_id;
+        let poster = reply.chat_id();
         let (user, sender) = self.story_poster(poster);
         let (name, accent) = match user {
             Some(_) => self.sender_name_and_accent(Some(sender)),
@@ -285,11 +292,11 @@ impl Session {
                 self.sender_name_and_accent(Some(sender)).1,
             ),
         };
-        let story = self.stories.stories.get(&(poster.0, reply.story_id));
+        let story = self.stories.stories.get(&(poster.0, reply.story_id()));
         let in_tray = self.stories.tray.get(&poster.0).is_some_and(|tray| {
             tray.stories
                 .iter()
-                .any(|info| info.story_id == reply.story_id)
+                .any(|info| info.story_id == reply.story_id())
         });
         ReplyHeader {
             target_chat: poster,
@@ -304,7 +311,7 @@ impl Session {
             thumb: story.map(story_thumb_candidates).unwrap_or_default(),
             clickable: in_tray,
             background_emoji: self.sender_background_emoji(Some(sender)),
-            story: Some(reply.story_id),
+            story: Some(reply.story_id()),
         }
     }
 
@@ -326,7 +333,7 @@ impl Session {
     /// The reply strip of `message`, or `None` when it replies to nothing.
     pub fn reply_header(&self, message: &HistoryMessage) -> Option<ReplyHeader> {
         let reply = message.reply_to.as_ref()?;
-        if reply.story_id != 0 {
+        if reply.is_story() {
             return Some(self.story_reply_header(reply));
         }
         let (target_chat, original) = self.reply_original(message, reply);
@@ -338,11 +345,11 @@ impl Session {
         let tombstoned = self
             .histories
             .get(&target_chat.0)
-            .is_some_and(|history| history.is_tombstone(reply.message_id));
-        let (quote, quote_entities) = match reply.quote_text.as_deref() {
+            .is_some_and(|history| history.is_tombstone(reply.message_id()));
+        let (quote, quote_entities) = match reply.quote_text().as_deref() {
             Some(text) => {
                 let (trimmed, entities) =
-                    crate::text::quote::trim_with_entities(text, &reply.quote_entities);
+                    crate::text::quote::trim_with_entities(text, reply.quote_entities());
                 if trimmed.is_empty() {
                     (None, Vec::new())
                 } else {
@@ -354,8 +361,8 @@ impl Session {
         let original_preview = original.map(effective_preview);
         let preview = original_preview
             .clone()
-            .or_else(|| reply.content_preview.clone());
-        let (name, accent) = match (original, &reply.origin) {
+            .or_else(|| reply.content_preview().clone());
+        let (name, accent) = match (original, &reply.origin()) {
             (Some(found), _) => self.sender_name_and_accent(found.sender),
             (None, Some(origin)) => self.origin_name_and_accent(origin),
             (None, None) => (None, None),
@@ -384,7 +391,7 @@ impl Session {
             thumb_candidates(effective_content(&found.content, found.ephemeral.as_ref()))
         } else {
             reply
-                .content
+                .content()
                 .as_deref()
                 .map(thumb_candidates)
                 .unwrap_or_default()
@@ -400,7 +407,7 @@ impl Session {
             state == ReplyState::Ready && (!external || self.chats.contains_key(&target_chat.0));
         Some(ReplyHeader {
             target_chat,
-            target_id: reply.message_id,
+            target_id: reply.message_id(),
             state,
             name,
             accent,
@@ -534,25 +541,27 @@ impl Session {
             let Some(reply) = &message.reply_to else {
                 continue;
             };
-            if reply.story_id != 0 {
+            if reply.is_story() {
                 continue;
             }
-            if self
+            match self
                 .messages
                 .reply_targets
-                .contains_key(&(message.chat_id.0, message.id.0))
+                .get(&(message.chat_id.0, message.id.0))
             {
-                continue;
+                None => {}
+                Some(ReplyTarget::Retry { until }) if std::time::Instant::now() >= *until => {}
+                Some(_) => continue,
             }
-            let target_chat = if reply.chat_id.0 == 0 {
+            let target_chat = if reply.chat_id().0 == 0 {
                 message.chat_id
             } else {
-                reply.chat_id
+                reply.chat_id()
             };
             let known = self.histories.get(&target_chat.0).is_some_and(|history| {
-                history.contains(reply.message_id) || history.is_tombstone(reply.message_id)
+                history.contains(reply.message_id()) || history.is_tombstone(reply.message_id())
             });
-            if known || (target_chat != message.chat_id && reply.content_preview.is_some()) {
+            if known || (target_chat != message.chat_id && reply.content_preview().is_some()) {
                 continue;
             }
             // A quote carries its own text; the original is only needed for
@@ -578,6 +587,33 @@ impl Session {
             (chat_id.0, message_id.0),
             ReplyTarget::Loaded(Box::new(history_message(message, false))),
         );
+    }
+
+    /// `getRepliedMessage` for the row `(chat_id, message_id)`: the request
+    /// is registered and the row marked loading in one step, so the two
+    /// never disagree. The caller sends it, and calls
+    /// [`Self::cancel_reply_fetch`] when the send is refused.
+    pub fn begin_reply_fetch(&mut self, chat_id: ChatId, message_id: MessageId) -> RequestId {
+        let request = self.request(
+            RequestPurpose::GetRepliedMessage {
+                chat_id,
+                message_id,
+            },
+            Some(chat_id),
+        );
+        self.messages
+            .reply_targets
+            .insert((chat_id.0, message_id.0), ReplyTarget::Loading(request));
+        request
+    }
+
+    /// The request of [`Self::begin_reply_fetch`] never left: the row is
+    /// asked for again later.
+    pub fn cancel_reply_fetch(&mut self, request: RequestId) {
+        self.requests.take(request);
+        self.messages
+            .reply_targets
+            .retain(|_, target| *target != ReplyTarget::Loading(request));
     }
 
     /// Keep at most [`MAX_REPLY_TARGETS_OUTSIDE_WINDOW`] of `chat_id`'s
@@ -639,11 +675,26 @@ impl Session {
         }
     }
 
-    /// `getRepliedMessage` failed: the original is gone or unreachable.
-    pub(crate) fn reject_replied_message(&mut self, chat_id: ChatId, message_id: MessageId) {
+    /// `getRepliedMessage` failed with `code`. Only a not-found or invalid
+    /// answer means the original is gone; any other error is asked for
+    /// again after a wait, and the strip keeps loading meanwhile.
+    pub(crate) fn reject_replied_message(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        code: i32,
+        now: std::time::Instant,
+    ) {
+        let target = if matches!(code, 400 | 404) {
+            ReplyTarget::Missing
+        } else {
+            ReplyTarget::Retry {
+                until: now.checked_add(REPLY_RETRY_WAIT).unwrap_or(now),
+            }
+        };
         self.messages
             .reply_targets
-            .insert((chat_id.0, message_id.0), ReplyTarget::Missing);
+            .insert((chat_id.0, message_id.0), target);
     }
 
     /// Whether a shown chat's row replies to `message_id` of `chat_id`, a
@@ -670,12 +721,15 @@ impl Session {
                 )));
             }
         }
-        if let Some(history) = self.open_chat.and_then(|chat| self.histories.get(&chat.0)) {
+        if let Some(history) = self
+            .open_chat_id()
+            .and_then(|chat| self.histories.get(&chat.0))
+        {
             for message in history.messages.values() {
                 if let Some(content) = message
                     .reply_to
                     .as_ref()
-                    .and_then(|reply| reply.content.as_deref())
+                    .and_then(|reply| reply.content().as_deref())
                 {
                     ids.extend(thumb_candidates(content));
                 }
@@ -692,8 +746,12 @@ impl Session {
                 if let Some(story) = message
                     .reply_to
                     .as_ref()
-                    .filter(|reply| reply.story_id != 0)
-                    .and_then(|reply| self.stories.stories.get(&(reply.chat_id.0, reply.story_id)))
+                    .filter(|reply| reply.is_story())
+                    .and_then(|reply| {
+                        self.stories
+                            .stories
+                            .get(&(reply.chat_id().0, reply.story_id()))
+                    })
                 {
                     ids.extend(story_thumb_candidates(story));
                 }
@@ -713,17 +771,17 @@ impl Session {
             .filter_map(|chat| self.histories.get(&chat.0))
             .flat_map(|history| history.messages.values())
             .filter_map(|message| message.reply_to.as_ref())
-            .filter(|reply| reply.story_id != 0 && reply.chat_id.0 != 0)
-            .map(|reply| (reply.chat_id, reply.story_id))
+            .filter(|reply| reply.is_story() && reply.chat_id().0 != 0)
+            .map(|reply| (reply.chat_id(), reply.story_id()))
             .filter(|(chat, story)| {
                 !self.stories.stories.contains_key(&(chat.0, *story))
-                    && !self.stories.reply_attempted.contains(&(chat.0, *story))
+                    && !self.stories.story_fetch.is_asked((chat.0, *story))
             })
             .collect();
         wanted.extend(self.message_story_candidates());
         wanted.retain(|(chat, story)| {
             let key = (chat.0, *story);
-            !self.stories.missing.contains(&key) && !self.stories.story_fetch_waiting(key, now)
+            !self.stories.story_fetch.is_gone(key) && !self.stories.story_fetch_waiting(key, now)
         });
         wanted.sort_by_key(|(chat, story)| (chat.0, *story));
         wanted.dedup();
@@ -733,7 +791,10 @@ impl Session {
 
     /// Custom emoji behind the reply strips of the open chat.
     pub fn reply_background_emoji_ids(&self) -> Vec<i64> {
-        let Some(history) = self.open_chat.and_then(|chat| self.histories.get(&chat.0)) else {
+        let Some(history) = self
+            .open_chat_id()
+            .and_then(|chat| self.histories.get(&chat.0))
+        else {
             return Vec::new();
         };
         history

@@ -6,7 +6,7 @@ use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
 use crate::ids::{AccountKey, ChatId};
 use crate::platform::MemorySecretStore;
-use crate::state::{Session, WebAppOpenResult, WriteAccessResult};
+use crate::state::{Session, WebAppOpenResult, WriteAccessResult, WriteAnswer};
 use crate::telegram::client::copy_and_parse;
 use crate::web_app::LaunchSource;
 use crate::web_app::theme::ThemeParams;
@@ -141,35 +141,48 @@ fn a_refused_open_reports_a_failure_and_clears_the_context() {
 }
 
 /// Two keyboard-button launches before either answers (a double click):
-/// each answer keeps its own source and chat; the first answer does not
-/// take the second launch's context.
+/// the latest asked is the current one. The first answer opens nothing and
+/// its app is closed; the second keeps its own source and chat.
 #[test]
-fn overlapping_launches_keep_their_own_context() {
+fn only_the_latest_launch_asked_opens() {
     let mut h = Harness::ready();
     let theme = ThemeParams::light_default();
     let first = h
         .driver
-        .get_web_app_url(ChatId(5), 42, "https://bot.example/a", "Open", &theme)
+        .open_web_app(
+            ChatId(5),
+            42,
+            "https://bot.example/a",
+            LaunchSource::InlineButton,
+            &theme,
+        )
         .expect("sent");
     let second = h
         .driver
-        .get_web_app_url(ChatId(5), 42, "https://bot.example/a", "Open", &theme)
+        .get_web_app_url(ChatId(5), 43, "https://bot.example/b", "Open", &theme)
         .expect("sent");
-    assert_eq!(h.driver.session.bots.web_apps.pending.len(), 2);
-    for extra in [first, second] {
-        h.ingest(&format!(
-            r#"{{"@type":"webAppUrl","@extra":"{}","url":"https://bot.example/a?x","require_same_origin":false}}"#,
-            extra.as_extra()
-        ));
-        let Some(WebAppOpenResult::Opened {
-            source, chat_id, ..
-        }) = h.driver.session.bots.web_apps.open_result.take()
-        else {
-            panic!("not opened");
-        };
-        assert!(source.allows_data_send(), "still the keyboard button");
-        assert_eq!(chat_id, Some(5));
-    }
+    assert_eq!(h.driver.session.bots.web_apps.pending.len(), 1);
+    h.ingest(&format!(
+        r#"{{"@type":"webAppInfo","@extra":"{}","launch_id":"801","url":{{"@type":"webAppUrl","url":"https://bot.example/a?x","require_same_origin":false}}}}"#,
+        first.as_extra()
+    ));
+    assert_eq!(h.driver.session.bots.web_apps.open_result, None);
+    assert_eq!(h.last("closeWebApp")["web_app_launch_id"], 801);
+    h.ingest(&format!(
+        r#"{{"@type":"webAppUrl","@extra":"{}","url":"https://bot.example/b?x","require_same_origin":false}}"#,
+        second.as_extra()
+    ));
+    let Some(WebAppOpenResult::Opened {
+        source,
+        chat_id,
+        bot_user_id,
+        ..
+    }) = h.driver.session.bots.web_apps.open_result.take()
+    else {
+        panic!("not opened");
+    };
+    assert!(source.allows_data_send(), "still the keyboard button");
+    assert_eq!((chat_id, bot_user_id), (Some(5), 43));
     assert!(h.driver.session.bots.web_apps.pending.is_empty());
 }
 
@@ -217,7 +230,7 @@ fn write_access_goes_through_consent_on_404() {
     ));
     assert_eq!(
         h.driver.session.bots.web_apps.write_access,
-        Some((42, WriteAccessResult::NeedsConsent))
+        Some(WriteAnswer::new(extra, 42, WriteAccessResult::NeedsConsent))
     );
     let extra = h.driver.allow_bot_to_send_messages(42).expect("sent");
     assert_eq!(h.last("allowBotToSendMessages")["bot_user_id"], 42);
@@ -231,7 +244,7 @@ fn write_access_goes_through_consent_on_404() {
     ));
     assert_eq!(
         h.driver.session.bots.web_apps.write_access,
-        Some((42, WriteAccessResult::Granted))
+        Some(WriteAnswer::new(extra, 42, WriteAccessResult::Granted))
     );
     let extra = h.driver.can_bot_send_messages(42).expect("sent");
     h.ingest(&format!(
@@ -240,7 +253,7 @@ fn write_access_goes_through_consent_on_404() {
     ));
     assert_eq!(
         h.driver.session.bots.web_apps.write_access,
-        Some((42, WriteAccessResult::Allowed))
+        Some(WriteAnswer::new(extra, 42, WriteAccessResult::Allowed))
     );
 }
 
@@ -309,7 +322,7 @@ fn grossing_apps_load_once_and_land_in_the_session() {
         .fetch_grossing_web_app_bots()
         .expect("sent")
         .expect("request");
-    assert!(h.driver.session.bots.web_apps.grossing_loading);
+    assert!(h.driver.session.bots.web_apps.grossing.is_loading());
     assert_eq!(
         h.driver.fetch_grossing_web_app_bots().unwrap(),
         None,
@@ -320,10 +333,10 @@ fn grossing_apps_load_once_and_land_in_the_session() {
         extra.as_extra()
     ));
     assert_eq!(
-        h.driver.session.bots.web_apps.grossing_bots,
-        Some(vec![42, 43])
+        h.driver.session.bots.web_apps.grossing.data(),
+        Some(&vec![42, 43])
     );
-    assert!(!h.driver.session.bots.web_apps.grossing_loading);
+    assert!(!h.driver.session.bots.web_apps.grossing.is_loading());
     assert_eq!(
         h.driver.fetch_grossing_web_app_bots().unwrap(),
         None,
@@ -373,12 +386,15 @@ fn attachment_menu_bots_and_custom_requests_round_trip() {
     ));
     assert_eq!(
         h.driver.session.bots.web_apps.attachment_menu_toggled,
-        Some(Ok((43, true)))
+        [crate::state::AttachmentToggle {
+            bot_user_id: 43,
+            result: Ok(true)
+        }]
     );
 
     let extra = h
         .driver
-        .send_web_app_custom_request(42, "r9", "getRequestedContact", "{}")
+        .send_web_app_custom_request(42, 77, "r9", "getRequestedContact", "{}")
         .expect("sent");
     assert_eq!(
         h.last("sendWebAppCustomRequest")["method"],
@@ -391,6 +407,7 @@ fn attachment_menu_bots_and_custom_requests_round_trip() {
     let replies = std::mem::take(&mut h.driver.session.bots.web_apps.custom_replies);
     assert_eq!(replies.len(), 1);
     assert_eq!(replies[0].req_id, "r9");
+    assert_eq!(replies[0].launch_id, 77, "the answer names the launch");
     assert_eq!(replies[0].result, Ok("{\"ok\":true}".into()));
     assert!(h.driver.session.bots.web_apps.custom_requests.is_empty());
 }
@@ -534,7 +551,11 @@ fn sharing_the_phone_sends_my_contact_card_to_the_bot() {
         r#"{{"@type":"message","@extra":"{}","id":9,"chat_id":42,"is_outgoing":true,"date":1700000000,"content":{{"@type":"messageContact","contact":{{"@type":"contact","phone_number":"+15550100","first_name":"Ada","last_name":"L","user_id":7}}}}}}"#,
         extra.as_extra()
     ));
-    assert_eq!(h.driver.session.bots.web_apps.phone_share, Some((42, true)));
+    assert_eq!(
+        h.driver.session.bots.web_apps.phone_share,
+        Some(crate::state::PhoneShare::Sent(extra)),
+        "the answer names the send it answers"
+    );
 }
 
 #[test]
@@ -550,7 +571,7 @@ fn a_refused_phone_share_reports_failure() {
     ));
     assert_eq!(
         h.driver.session.bots.web_apps.phone_share,
-        Some((42, false))
+        Some(crate::state::PhoneShare::Refused(extra))
     );
 }
 
@@ -604,4 +625,83 @@ fn an_unshown_answer_is_closed_on_a_switch() {
     h.driver.forget_web_app_launches();
     assert_eq!(h.driver.session.bots.web_apps.open_result, None);
     assert_eq!(h.last("closeWebApp")["web_app_launch_id"], 778);
+}
+
+/// A second launch while the first answer is unshown must not leave the
+/// first app running at the bot: its launch is queued for `closeWebApp`.
+#[test]
+fn a_new_launch_closes_the_app_of_an_unshown_answer() {
+    let mut h = Harness::ready();
+    let theme = ThemeParams::light_default();
+    let first = h
+        .driver
+        .open_web_app(ChatId(5), 42, "", LaunchSource::InlineButton, &theme)
+        .expect("sent");
+    h.ingest(&format!(
+        r#"{{"@type":"webAppInfo","@extra":"{}","launch_id":"779","url":{{"@type":"webAppUrl","url":"https://bot.example/a","require_same_origin":false}}}}"#,
+        first.as_extra()
+    ));
+    assert!(matches!(
+        h.driver.session.bots.web_apps.open_result,
+        Some(WebAppOpenResult::Opened { launch_id: 779, .. })
+    ));
+    h.driver
+        .open_web_app(ChatId(5), 43, "", LaunchSource::InlineButton, &theme)
+        .expect("sent");
+    assert_eq!(h.driver.session.bots.web_apps.open_result, None);
+    assert_eq!(h.driver.session.bots.web_apps.dropped_launches, vec![779]);
+}
+
+/// A switch flip whose request never left has no error answer coming: it
+/// goes back at once.
+#[test]
+fn emoji_status_access_is_put_back_when_the_send_fails() {
+    use super::support::toggle_driver;
+    let (_dir, mut driver, sender, _sink, _seq) = toggle_driver();
+    driver.session.bots.bot_info.insert(
+        42,
+        Some(crate::telegram::envelope::BotInfo {
+            can_manage_emoji_status: true,
+            ..Default::default()
+        }),
+    );
+    sender.refuse(true);
+    assert!(driver.set_bot_emoji_status_access(42, false).is_err());
+    let value = driver
+        .session
+        .bots
+        .bot_info
+        .get(&42)
+        .and_then(|info| info.as_ref())
+        .map(|info| info.can_manage_emoji_status);
+    assert_eq!(value, Some(true));
+    assert!(
+        !sender
+            .snapshot()
+            .iter()
+            .any(|json| json.contains("toggleBotCanManageEmojiStatus"))
+    );
+}
+
+#[test]
+fn closing_a_mini_app_drops_its_custom_requests_and_answers() {
+    use crate::state::{CustomRequestReply, WebApps};
+    let mut apps = WebApps::default();
+    apps.custom_requests.insert(1, (10, "a".into()));
+    apps.custom_requests.insert(2, (20, "b".into()));
+    apps.custom_replies.push(CustomRequestReply {
+        launch_id: 10,
+        req_id: "x".into(),
+        result: Ok("{}".into()),
+    });
+    apps.custom_replies.push(CustomRequestReply {
+        launch_id: 20,
+        req_id: "y".into(),
+        result: Ok("{}".into()),
+    });
+    apps.forget_custom_requests_of(10);
+    assert_eq!(apps.custom_requests.len(), 1);
+    assert!(apps.custom_requests.contains_key(&2));
+    assert_eq!(apps.custom_replies.len(), 1);
+    assert_eq!(apps.custom_replies[0].launch_id, 20);
 }

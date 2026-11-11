@@ -227,7 +227,7 @@ pub(super) fn seed_gift_market_session(sink: Arc<MemorySink>) -> Session {
     }
     market.acquired.insert(
         AUCTION_GIFT,
-        parse_acquired_gifts(&json!({"@type": "giftAuctionAcquiredGifts", "gifts": [
+        quill::state::fetch::Fetch::Ready(parse_acquired_gifts(&json!({"@type": "giftAuctionAcquiredGifts", "gifts": [
             {"@type": "giftAuctionAcquiredGift",
                 "receiver_id": {"@type": "messageSenderUser", "user_id": 502},
                 "date": now - 5_000, "star_count": 3_900, "bid_date": now - 5_400,
@@ -235,6 +235,7 @@ pub(super) fn seed_gift_market_session(sink: Arc<MemorySink>) -> Session {
                 "unique_gift_number": 14, "text": {"@type": "formattedText", "text": "For your desk!", "entities": []},
                 "is_private": false}
         ]})),
+        ),
     );
     session
 }
@@ -267,7 +268,7 @@ impl QuillApp {
                 },
                 false,
             );
-            buy.step = step;
+            buy.go(step);
             market.buy = Some(buy);
             self.gift_market.stack.push(MarketBox::Buy);
         }
@@ -280,7 +281,7 @@ impl QuillApp {
             .unwrap_or_default()
             .as_str()
         {
-            "bid" => Some(MarketBox::AuctionBid { gift_id }),
+            "bid" => Some(MarketBox::bid(gift_id)),
             "info" => Some(MarketBox::AuctionInfo { gift_id }),
             "about" => Some(MarketBox::AuctionAbout { gift_id }),
             "send" => Some(MarketBox::AuctionSend { gift_id }),

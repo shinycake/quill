@@ -246,7 +246,7 @@ impl QuillApp {
             videos.leave_window(window);
             return;
         }
-        if !self.chat_ui.inline_results_open {
+        if !self.chat_ui.inline.is_open() {
             videos.leave_panel(window, Panel::InlineResults);
         }
         // This window's own media panel: the session's GIF flag is one for
@@ -369,10 +369,11 @@ impl QuillApp {
             cx,
         );
         if demand == Some(Demand::Sound) && frame.is_some() {
-            if videos.start_demand(key) {
+            if videos.demand_waiting(key) {
                 // Clicked: once from the start with sound, as a click on a
-                // muted loop does.
+                // muted loop does. A refused start leaves the click asked.
                 if videos.toggle_sound(key.0, key.1) {
+                    videos.demand_started(key);
                     let viewed = viewed.unwrap_or(true);
                     // The history drawing it is the window's.
                     let scope = self.windows.scope;

@@ -295,7 +295,10 @@ pub(crate) fn seed_channel_statistics(session: &mut Session, chat_id: i64) {
     };
     session.groups.chat_statistics.insert(
         chat_id,
-        ChatStatisticsFetch::Loaded(Box::new(ChatStatistics::Channel(Box::new(stats)))),
+        ChatStatisticsFetch::Loaded {
+            stats: std::sync::Arc::new(ChatStatistics::Channel(Box::new(stats))),
+            is_dark: false,
+        },
     );
     session.groups.stats.graphs.insert(
         GraphKey {
@@ -392,24 +395,26 @@ pub(crate) fn seed_message_statistics(session: &mut Session, chat_id: i64, from_
             token: "message-reactions".into(),
         },
     });
-    state.forwards.total = 2;
-    state.forwards.forwards = vec![
-        PublicForwardView {
-            kind: PublicForwardKind::Message {
-                chat_id: from_chat,
-                message_id: 5 << 20,
+    state.forwards.set(
+        vec![
+            PublicForwardView {
+                kind: PublicForwardKind::Message {
+                    chat_id: from_chat,
+                    message_id: 5 << 20,
+                },
+                date: 1,
+                view_count: 640,
             },
-            date: 1,
-            view_count: 640,
-        },
-        PublicForwardView {
-            kind: PublicForwardKind::Message {
-                chat_id: from_chat,
-                message_id: 6 << 20,
+            PublicForwardView {
+                kind: PublicForwardKind::Message {
+                    chat_id: from_chat,
+                    message_id: 6 << 20,
+                },
+                date: 2,
+                view_count: 0,
             },
-            date: 2,
-            view_count: 0,
-        },
-    ];
+        ],
+        2,
+    );
     message_id
 }

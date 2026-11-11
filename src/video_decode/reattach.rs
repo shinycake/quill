@@ -29,7 +29,6 @@ impl AudioTap {
             gap: 0,
             gap_at: 0,
             generation: 0,
-            sounding: false,
         }
     }
 }

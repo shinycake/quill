@@ -20,7 +20,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
-use quill::state::RequestPurpose;
+use quill::state::{RequestPurpose, Submit, SubmitView};
 use quill::telegram::envelope::ForumTopic;
 use quill::telegram::requests::TOPIC_ICON_COLORS;
 use std::cell::RefCell;
@@ -89,6 +89,21 @@ impl QuillApp {
             .session()
             .map(|s| s.ordered_forum_topics(chat_id))
             .unwrap_or_default();
+        // A save is on its way: its answer lands in this editor, so a new
+        // form must not replace it (the duplicate would send again).
+        if self
+            .admin
+            .forum_manage_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.editor.as_ref())
+            .is_some_and(|editor| {
+                editor
+                    .submit
+                    .is_sending(self.session().map(|session| &session.requests))
+            })
+        {
+            return;
+        }
         let existing = topic_id.and_then(|id| topics.iter().find(|t| t.forum_topic_id == id));
         let (name, color, emoji) = match existing {
             Some(topic) => (
@@ -107,6 +122,9 @@ impl QuillApp {
         };
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.load_forum_topic_icons();
+            // The list may be cached already: its thumbnails come now
+            // (a list still loading downloads them when it lands).
+            live.driver.download_forum_topic_icons();
         }
         if let Some(dialog) = self.admin.forum_manage_dialog.as_mut() {
             dialog.name_input.update(cx, |input, cx| {
@@ -116,7 +134,7 @@ impl QuillApp {
                 target: topic_id,
                 color,
                 icon_emoji: emoji,
-                original_emoji: emoji,
+                submit: Submit::default(),
             });
         }
         cx.notify();
@@ -188,36 +206,95 @@ impl QuillApp {
                     })
             })
         });
-        if let Some(live) = self.live.as_mut() {
-            let result = match editor.target {
-                None => live.driver.create_forum_topic_with_icon(
-                    chat_id,
-                    &name,
-                    editor.color,
-                    editor.icon_emoji,
-                ),
-                // The General topic only has a name.
-                Some(id) if general => live.driver.edit_forum_topic(chat_id, id, &name),
-                Some(id) => {
-                    live.driver
-                        .edit_forum_topic_with_icon(chat_id, id, &name, editor.icon_emoji)
-                }
-            };
-            self.set_note(match (result, editor.target) {
-                (Ok(_), None) => StatusNote::silent(tr(keys::Q_PEOPLE_TOPIC_CREATED)),
-                (Ok(_), Some(_)) => StatusNote::silent(tr(keys::Q_PEOPLE_TOPIC_SAVED)),
-                (Err(_), None) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_CREATE_TOPIC)),
-                (Err(_), Some(_)) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_SAVE_TOPIC)),
-            });
-        } else {
-            self.set_note(StatusNote::info(tr(
-                keys::Q_PEOPLE_TOPICS_NEED_A_LIVE_CONNECTION,
-            )));
+        if editor
+            .submit
+            .is_sending(self.session().map(|session| &session.requests))
+        {
+            return;
         }
-        if let Some(dialog) = self.admin.forum_manage_dialog.as_mut() {
-            dialog.editor = None;
+        let sent = match self.live.as_mut() {
+            Some(live) => {
+                let result = match editor.target {
+                    None => live.driver.create_forum_topic_with_icon(
+                        chat_id,
+                        &name,
+                        editor.color,
+                        editor.icon_emoji,
+                    ),
+                    // The General topic only has a name.
+                    Some(id) if general => live.driver.edit_forum_topic(chat_id, id, &name),
+                    Some(id) => live.driver.edit_forum_topic_with_icon(
+                        chat_id,
+                        id,
+                        &name,
+                        editor.icon_emoji,
+                    ),
+                };
+                match (result, editor.target) {
+                    (Ok(Some(id)), _) => Ok(id),
+                    (_, None) => Err(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_CREATE_TOPIC))),
+                    (_, Some(_)) => Err(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_SAVE_TOPIC))),
+                }
+            }
+            None => Err(StatusNote::info(tr(
+                keys::Q_PEOPLE_TOPICS_NEED_A_LIVE_CONNECTION,
+            ))),
+        };
+        match sent {
+            // The editor stays, saving: it closes when TDLib answers and
+            // keeps the typed name and icon when it refuses.
+            Ok(id) => {
+                if let Some(editor) = self
+                    .admin
+                    .forum_manage_dialog
+                    .as_mut()
+                    .and_then(|dialog| dialog.editor.as_mut())
+                {
+                    editor.submit = Submit::sent(vec![id]);
+                }
+            }
+            Err(note) => self.set_note(note),
         }
         cx.notify();
+    }
+
+    /// The topic editor leaves its Sending stage on TDLib's answer.
+    pub(in crate::ui) fn settle_topic_editor(&mut self, cx: &mut Context<Self>) {
+        let requests = self.session().map(|session| &session.requests);
+        let Some((view, target)) = self
+            .admin
+            .forum_manage_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.editor.as_ref())
+            .map(|editor| (editor.submit.view(requests), editor.target))
+        else {
+            return;
+        };
+        match view {
+            SubmitView::Done => {
+                if let Some(dialog) = self.admin.forum_manage_dialog.as_mut() {
+                    dialog.editor = None;
+                }
+                self.set_note(StatusNote::silent(tr(if target.is_none() {
+                    keys::Q_PEOPLE_TOPIC_CREATED
+                } else {
+                    keys::Q_PEOPLE_TOPIC_SAVED
+                })));
+                cx.notify();
+            }
+            SubmitView::Failed(reason) => {
+                if let Some(editor) = self
+                    .admin
+                    .forum_manage_dialog
+                    .as_mut()
+                    .and_then(|dialog| dialog.editor.as_mut())
+                    && editor.submit.keep_failure(reason)
+                {
+                    cx.notify();
+                }
+            }
+            SubmitView::Editing | SubmitView::Sending => {}
+        }
     }
 
     /// Slice G2: one-shot forum-topic action (close/reopen,
@@ -229,6 +306,16 @@ impl QuillApp {
         action: ForumTopicAction,
         cx: &mut Context<Self>,
     ) {
+        if action == ForumTopicAction::Delete {
+            self.open_group_confirm(
+                crate::ui::dialogs::group_confirm::GroupConfirmAction::DeleteForumTopic {
+                    chat_id,
+                    forum_topic_id: topic_id,
+                },
+                cx,
+            );
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
             let result = match action {
                 ForumTopicAction::Close => live
@@ -243,7 +330,7 @@ impl QuillApp {
                 ForumTopicAction::Unpin => live
                     .driver
                     .toggle_forum_topic_pinned(chat_id, topic_id, false),
-                ForumTopicAction::Delete => live.driver.delete_forum_topic(chat_id, topic_id),
+                ForumTopicAction::Delete => return,
                 ForumTopicAction::HideGeneral => {
                     live.driver.toggle_general_forum_topic_hidden(chat_id, true)
                 }
@@ -295,11 +382,6 @@ impl QuillApp {
             let dialog = dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(title));
-            if editor.is_some()
-                && let Some(live) = this.live.as_mut()
-            {
-                live.driver.download_forum_topic_icons();
-            }
             let body = match editor {
                 Some(editor) => this.topic_editor_body(&editor, cx),
                 None => {
@@ -341,8 +423,9 @@ impl QuillApp {
                     let body = Rc::new(RefCell::new(Some(body)));
                     move |content, _, _| {
                         let body = body
-                            .borrow_mut()
-                            .take()
+                            .try_borrow_mut()
+                            .ok()
+                            .and_then(|mut body| body.take())
                             .unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
@@ -460,6 +543,16 @@ impl QuillApp {
                     .has_purpose(RequestPurpose::GetForumTopicDefaultIcons)
         });
         let creating = editor.target.is_none();
+        let sending = editor
+            .submit
+            .is_sending(session.map(|session| &session.requests));
+        let refused = match &editor.submit {
+            Submit::Failed(reason) => Some(tr_with(
+                keys::Q_PEOPLE_COULDNT_SAVE_REASON,
+                &[("reason", reason)],
+            )),
+            _ => None,
+        };
         div()
             .flex()
             .flex_col()
@@ -513,6 +606,15 @@ impl QuillApp {
                         .child(tr(keys::Q_PEOPLE_LOADING_ICONS)),
                 )
             })
+            .when_some(refused, |this, line| {
+                this.child(
+                    div()
+                        .id("topic-editor-refused")
+                        .text_xs()
+                        .text_color(cx.theme().danger)
+                        .child(line),
+                )
+            })
             .child(
                 div()
                     .flex()
@@ -532,6 +634,8 @@ impl QuillApp {
                                 tr(keys::SETTINGS_SAVE)
                             })
                             .primary()
+                            .loading(sending)
+                            .disabled(sending)
                             .on_click(cx.listener(|this, _, _, cx| this.submit_topic_editor(cx))),
                     ),
             )
@@ -685,7 +789,7 @@ impl QuillApp {
                     .tooltip(tr(keys::Q_PEOPLE_TOPIC_INFO))
                     .accessibility_label(tr(keys::Q_PEOPLE_TOPIC_INFO))
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.chat_ui.topic_info_open = !this.chat_ui.topic_info_open;
+                        this.chat_ui.info_card.toggle_topic();
                         cx.notify();
                     })),
             )
@@ -811,3 +915,8 @@ mod forum_editor_tests {
         assert_eq!(topic_letter(""), "#");
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "topic_editor_tests.rs"]
+mod tests;

@@ -4,23 +4,37 @@
 use crate::composer::{DraftKey, DraftTopic};
 use crate::state::*;
 
+/// One optimistic reaction change, kept until TDLib answers its request.
+/// A refusal puts `before` back only while the chips still show `after`;
+/// once another change landed on top, it takes back just this one.
+#[derive(Debug, Clone)]
+pub struct ReactionUndo {
+    pub chat_id: ChatId,
+    pub message_id: MessageId,
+    pub before: Option<crate::telegram::envelope::MessageInteractionInfo>,
+    pub after: Option<crate::telegram::envelope::MessageInteractionInfo>,
+    pub reaction: crate::telegram::envelope::ReactionType,
+    pub add: bool,
+}
+
+/// A `messageLink` answer. `is_public`: a public link works for anyone, a
+/// private one only for chat members (Telegram Desktop words the
+/// copied-toast differently).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageLinkAnswer {
+    pub link: String,
+    pub is_public: bool,
+}
+
 pub struct MessagesState {
     /// The composer's `@` suggestions for the open chat.
     pub mention_search: Option<MentionSearch>,
     pub rows_on_screen: Option<RowsOnScreen>,
     /// What the open message context menu may offer (`messageProperties`).
-    pub message_menu_actions:
-        Option<(ChatId, MessageId, crate::telegram::envelope::MessageActions)>,
+    pub menu_actions: MenuActions,
     /// The chips under a message before a reaction request changed them,
     /// put back if TDLib refuses it.
-    pub reaction_undo: std::collections::HashMap<
-        RequestId,
-        (
-            ChatId,
-            MessageId,
-            Option<crate::telegram::envelope::MessageInteractionInfo>,
-        ),
-    >,
+    pub reaction_undo: std::collections::HashMap<RequestId, ReactionUndo>,
     /// What the open poll-option menu may offer (`pollOptionProperties`).
     pub poll_option_menu: Option<PollOptionMenu>,
     /// The message menu's Report flow (`reportChat` with message ids).
@@ -33,34 +47,27 @@ pub struct MessagesState {
     /// One-shot result of an admin moderation call from the delete box
     /// (ban, delete all, report spam); the UI drains it into the status
     /// note.
-    pub message_action_note: Option<String>,
-    /// M1: parsed `messageLink.link` from the last `getMessageLink` response
-    /// (one-shot; the UI copies it to the clipboard and clears it).
-    pub message_link_result: Option<String>,
-    /// `messageLink.is_public` of that answer: a public link works for
-    /// anyone, a private one only for chat members (Telegram Desktop
-    /// words the copied-toast differently).
-    pub message_link_public: bool,
+    pub message_action_note: Notes,
+    /// M1: parsed `messageLink` from the last `getMessageLink` response
+    /// (the link and whether it is public, as one value; the UI copies it
+    /// to the clipboard and takes it, so it is read once).
+    pub message_link: Option<MessageLinkAnswer>,
     /// M1 fix-up: one-shot; set when "Share link" is gated off by
     /// `messageProperties.can_get_link == false` or the `getMessageLink`
     /// request errors. The UI drains it into the status note so the
     /// click never silently does nothing.
-    pub message_link_error: Option<String>,
-    /// Slice msg-richtext-ai-tools: one-shot `fixTextWithAi` /
-    /// `composeTextWithAi` answer for the open chat's composer. The UI
-    /// drains it (replacing the draft) on the next frame; the chat id
-    /// guards against applying to a chat the user has since left.
-    pub ai_composer_text: Option<(ChatId, String)>,
-    /// Slice msg-richtext-ai-tools: one-shot `composeRichMessageWithAi`
-    /// / `createRichMessageWithAi` / `fixRichMessageWithAi` answer for
-    /// the open chat's composer. Same drain contract as
-    /// `ai_composer_text`. The UI writes the blocks back as editor markup
-    /// (`blocks_to_markup`); the note distinguishes create / fix / rewrite.
-    pub ai_composer_blocks: Option<(ChatId, RichMessageContent, &'static str)>,
+    pub message_link_error: Notes,
+    /// Slice msg-richtext-ai-tools: answers of `fixTextWithAi` /
+    /// `composeTextWithAi` / the rich-message AI methods (and their
+    /// failures) for the composers. Each window's frame takes the answers
+    /// of its own asks and applies one only while it holds that request
+    /// (`AiAsk::Asked`); a queue, so two answers in one frame are both
+    /// kept.
+    pub ai_answers: Vec<AiAnswer>,
     /// Slice msg-richtext-ai-tools: one-shot; set when an AI request
     /// errors. The UI drains it into the status note so the click never
     /// silently does nothing.
-    pub ai_error: Option<String>,
+    pub ai_error: Notes,
     /// MED4: `getOption("message_caption_length_max")` via `updateOption`
     /// (TDLib 1.8.67, `schema/td_api.tl:10926`); default 1024 is TDLib's
     /// compiled default. Guards caption edits and media-send captions.
@@ -77,41 +84,39 @@ pub struct MessagesState {
     /// MED4: one-shot `getWebPageInstantView` answer for the IV reader.
     /// The UI drains it (opens the reader) and clears it.
     pub instant_view: Option<InstantViewPage>,
-    /// MED4: one-shot fallback URL when `getWebPageInstantView` errors
-    /// (TDLib 404s when the page has no Instant View). The UI drains it
-    /// into the browser — TGX behaves the same.
-    pub instant_view_fallback_url: Option<String>,
-    /// The fallback above answers a request an agent's step sent
-    /// (`instant_view_agent_requests`): the UI opens it as part of that
-    /// step (`guard::with_injecting`), so the browser stays closed.
-    pub instant_view_fallback_from_agent: bool,
-    /// `getWebPageInstantView` requests sent while the agent UI driver
-    /// injected input (`guard::injecting`).
-    pub instant_view_agent_requests: HashSet<RequestId>,
-    /// MED4: pending `getWebPageInstantView` URLs by `RequestId`
-    /// (`RequestPurpose` stays `Copy`, so the URL rides here).
-    pub instant_view_urls: HashMap<RequestId, String>,
+    /// MED4: links whose `getWebPageInstantView` errored (TDLib 404s when
+    /// the page has no Instant View), each for the window that asked. A
+    /// window drains its own into the browser (TGX does the same).
+    pub instant_view_fallbacks: Vec<InstantViewFallback>,
+    /// MED4: pending `getWebPageInstantView` requests by `RequestId`, with
+    /// the URL asked and whether an agent's step sent it
+    /// ([`InstantViewAsk`]).
+    pub instant_view_requests: HashMap<RequestId, InstantViewAsk>,
     /// MED4b: composer `getLinkPreview` prefetch state, by URL: each
     /// window's chip reads the preview of its own composer's URL.
     pub composer_previews: crate::state::ComposerLinkPreviews,
     /// MED4b: pending `getLinkPreview` URLs by `RequestId` (same
-    /// `Copy`-purpose pattern as `instant_view_urls`).
+    /// `Copy`-purpose pattern as `instant_view_requests`).
     pub composer_preview_urls: HashMap<RequestId, String>,
     /// MED2 fix-up: one-shot; set when TDLib refuses a `recognizeSpeech`
     /// request. The UI drains it into the status note — previously the
     /// error fell into the `_ => {}` swallower and the user saw
     /// "transcription requested" followed by silence.
-    pub recognize_speech_error: Option<String>,
+    pub recognize_speech_error: Notes,
+    /// "Load full message" of a partial rich message, per message: loading
+    /// from the send until the answer (which removes the entry, the message
+    /// is full now) or the error (`Failed`, tap again to retry).
+    pub full_rich_loads: HashMap<crate::ids::ChatMessage, crate::state::fetch::Fetch<()>>,
     /// M1 fix-up: one-shot; set when a `resendMessages` request errors.
     /// The UI drains it into the status note — previously the error fell
     /// into the `_ => {}` swallower and the user saw "retrying send…"
     /// followed by silence.
-    pub resend_error: Option<String>,
-    pub send_permission_error: Option<String>,
+    pub resend_error: Notes,
+    pub send_permission_error: Notes,
     /// Q1: one-shot; "Too many attempts. Try again in N seconds." after a
     /// user action (send, edit, join, ...) hit a rate limit. The UI drains
     /// it into the status note; the composer text is left untouched.
-    pub flood_notice: Option<String>,
+    pub flood_notice: Notes,
     /// M1: `getChatScheduledMessages` results — scheduled sends, with
     /// `scheduling_state` showing the planned send time. Rows of every chat
     /// asked for: read one chat's through `Session::scheduled_in`.
@@ -121,7 +126,7 @@ pub struct MessagesState {
     pub reply_targets: HashMap<(i64, i64), ReplyTarget>,
     /// Messages the composer's reply bar points at that were not in memory,
     /// fetched with `getMessage`, keyed by `(chat_id, message_id)`.
-    pub composer_reply_fetch: HashMap<(i64, i64), ComposerReplyFetch>,
+    pub composer_reply_fetch: ReplyFetches,
     pub pending_bot_messages: HashMap<(i64, i32), PendingBotMessage>,
     pub pending_bot_period_secs: u64,
     /// `poll.id` → `(chat_id, message_id)` of rows loaded with that poll,
@@ -129,19 +134,17 @@ pub struct MessagesState {
     /// its rows. Entries can be stale; `apply_update_poll` re-checks and
     /// prunes them.
     pub(crate) poll_messages: HashMap<i64, HashSet<(i64, i64)>>,
-    /// In-flight `forwardMessages` (dest / source / requested count).
-    pub in_flight_forward: Option<ForwardFlight>,
-    /// Further `forwardMessages` in flight while the share box sends to
-    /// several chats at once (`in_flight_forward` holds the first).
-    pub queued_forward_flights: Vec<ForwardFlight>,
+    /// In-flight `forwardMessages` (dest / source / requested count) and
+    /// the outcomes the dest picker's success surface has not shown yet.
+    pub forwards: Forwards,
     /// Share box search (local `searchChats` + `searchChatsOnServer`).
     pub share_search: ShareSearch,
-    /// Last `forwardMessages` outcome for the dest picker success surface.
-    pub last_forward: Option<ForwardResult>,
     /// Each chat's pinned messages, newest first, as last fetched
-    /// (`RequestPurpose::GetPinnedMessages`). Absent until fetched; the
-    /// pinned bar then falls back to pinned rows in loaded history.
-    pub pinned_messages: HashMap<i64, Vec<HistoryMessage>>,
+    /// (`RequestPurpose::GetPinnedMessages`). Absent or not answered yet,
+    /// the pinned bar falls back to pinned rows in loaded history; a failed
+    /// fetch stays `Failed` and is not asked again by the next pull, only by
+    /// the chat opening.
+    pub pinned_messages: HashMap<i64, crate::state::fetch::Fetch<Vec<HistoryMessage>>>,
     /// The oldest unread mention/reaction found for the corner buttons,
     /// for the window and chat that asked; the driver takes it and jumps
     /// in that window (`ConnectDriver::ingest`).
@@ -171,13 +174,10 @@ pub struct MessagesState {
     /// Set once Telegram confirmed `reportSponsoredResultAdsHidden`: no ads
     /// are fetched or shown for the rest of this session.
     pub sponsored_hidden: bool,
-    /// In-flight sponsored-message report waiting on an option choice.
-    pub sponsored_report: Option<SponsoredReportFlight>,
-    /// Report target chosen by the user (chat + sponsored message id); cleared
-    /// when the flow resolves.
-    pub(crate) sponsored_report_target: Option<(ChatId, i64)>,
-    /// Last `reportChatSponsoredMessage` outcome note.
-    pub last_sponsored_report: Option<SponsoredReportOutcome>,
+    /// The sponsored-message report flow: its target and the request
+    /// awaited, the option picker, or the last outcome note
+    /// ([`SponsoredReportFlow`]).
+    pub sponsored_report: SponsoredReportFlow,
     /// Translation state (`translateText` / `translateMessageText`, the
     /// chat translate bar).
     pub translate: TranslateState,
@@ -187,47 +187,47 @@ pub struct MessagesState {
 }
 
 impl MessagesState {
+    /// The fetched pinned messages of a chat, when an answer is held.
+    pub fn pinned_data(&self, chat_id: i64) -> Option<&Vec<HistoryMessage>> {
+        self.pinned_messages.get(&chat_id)?.data()
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             mention_search: None,
             rows_on_screen: None,
-            message_menu_actions: None,
+            menu_actions: MenuActions::default(),
             reaction_undo: Default::default(),
             poll_option_menu: None,
             message_report: None,
             message_audience: None,
             wanted_reactor_tab: None,
-            message_action_note: None,
-            message_link_result: None,
-            message_link_public: false,
-            message_link_error: None,
-            ai_composer_text: None,
-            ai_composer_blocks: None,
-            ai_error: None,
+            message_action_note: Notes::default(),
+            message_link: None,
+            message_link_error: Notes::default(),
+            ai_answers: Vec::new(),
+            ai_error: Notes::default(),
             message_caption_length_max: 1024,
             paid_media_star_max: crate::composer::PAID_MEDIA_MAX_STARS,
             message_text_length_max: 4096,
             instant_view: None,
-            instant_view_fallback_url: None,
-            instant_view_fallback_from_agent: false,
-            instant_view_agent_requests: HashSet::new(),
-            instant_view_urls: HashMap::new(),
+            instant_view_fallbacks: Vec::new(),
+            instant_view_requests: HashMap::new(),
             composer_previews: Default::default(),
             composer_preview_urls: HashMap::new(),
-            recognize_speech_error: None,
-            resend_error: None,
-            send_permission_error: None,
-            flood_notice: None,
+            recognize_speech_error: Notes::default(),
+            full_rich_loads: HashMap::new(),
+            resend_error: Notes::default(),
+            send_permission_error: Notes::default(),
+            flood_notice: Notes::default(),
             scheduled_messages: Vec::new(),
             reply_targets: HashMap::new(),
-            composer_reply_fetch: HashMap::new(),
+            composer_reply_fetch: Default::default(),
             pending_bot_messages: HashMap::new(),
             pending_bot_period_secs: 30,
             poll_messages: HashMap::new(),
-            in_flight_forward: None,
-            queued_forward_flights: Vec::new(),
+            forwards: Forwards::default(),
             share_search: ShareSearch::default(),
-            last_forward: None,
             pinned_messages: HashMap::new(),
             unread_jump: None,
             poll_voters: HashMap::new(),
@@ -238,12 +238,84 @@ impl MessagesState {
             deferred_captions: Vec::new(),
             sponsored: HashMap::new(),
             sponsored_hidden: false,
-            sponsored_report: None,
-            sponsored_report_target: None,
-            last_sponsored_report: None,
+            sponsored_report: SponsoredReportFlow::Idle,
             translate: TranslateState::default(),
             tone_limits: crate::message_menu::ToneLimits::default(),
             ai_compose: AiComposeState::default(),
+        }
+    }
+}
+
+/// The ad being reported and the `reportChatSponsoredMessage` request the
+/// flow waits on. An answer for any other request (a report the user
+/// dismissed, or an earlier step) is dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SponsoredReportTarget {
+    pub chat_id: ChatId,
+    pub message_id: i64,
+    /// `None` between choosing the target and the request going out.
+    pub request: Option<RequestId>,
+}
+
+/// The `reportChatSponsoredMessage` flow, one stage at a time.
+///
+/// `Asking` leaves on the answer of its request (`Picking` when TDLib
+/// wants an option, `Done` otherwise), on the request's error (`Idle`), or
+/// on Cancel / a failed send (`Idle`, `dismiss`). `Picking` leaves on the
+/// answer of the option sent from it, on Cancel, or on an error. `Done`
+/// leaves when the UI dismisses the note or a new report starts. An answer
+/// for any other request is dropped.
+#[derive(Debug, Clone, Default)]
+pub enum SponsoredReportFlow {
+    #[default]
+    Idle,
+    /// The ad being reported and the request its answer is awaited as.
+    Asking(SponsoredReportTarget),
+    /// TDLib wants an option; the option sent from here is the request in
+    /// the target.
+    Picking {
+        flight: SponsoredReportFlight,
+        target: SponsoredReportTarget,
+    },
+    /// The last outcome note (also `AdsHidden` from "Hide ads").
+    Done(SponsoredReportOutcome),
+}
+
+impl SponsoredReportFlow {
+    /// The report waiting on an option choice.
+    pub fn flight(&self) -> Option<&SponsoredReportFlight> {
+        match self {
+            Self::Picking { flight, .. } => Some(flight),
+            _ => None,
+        }
+    }
+
+    /// The outcome note of the last report.
+    pub fn outcome(&self) -> Option<&SponsoredReportOutcome> {
+        match self {
+            Self::Done(outcome) => Some(outcome),
+            _ => None,
+        }
+    }
+
+    pub fn target(&self) -> Option<SponsoredReportTarget> {
+        match self {
+            Self::Asking(target) | Self::Picking { target, .. } => Some(*target),
+            Self::Idle | Self::Done(_) => None,
+        }
+    }
+
+    pub fn target_mut(&mut self) -> Option<&mut SponsoredReportTarget> {
+        match self {
+            Self::Asking(target) | Self::Picking { target, .. } => Some(target),
+            Self::Idle | Self::Done(_) => None,
+        }
+    }
+
+    /// The report picker or the request goes; an outcome note stays.
+    pub fn dismiss(&mut self) {
+        if self.target().is_some() {
+            *self = Self::Idle;
         }
     }
 }

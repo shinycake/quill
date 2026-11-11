@@ -289,7 +289,8 @@ impl QuillApp {
                 })
                 .collect()
         };
-        if let Some(picker) = self.agent_ui.page.picker.as_ref() {
+        if let Some(built) = self.agent_ui.page.picker.as_ref() {
+            let picker = &built.select;
             let add = action_row(
                 tr(keys::Q_AGENT_PAGE_ADD_CHAT),
                 Some(tr(keys::Q_AGENT_PAGE_ADD_CHAT_HINT).into()),
@@ -351,7 +352,7 @@ impl QuillApp {
         }
         let account = self.agent_settings_account();
         let title = self.agent_chat_title(chat_id);
-        grants::update(&account, |g| {
+        self.update_grants(&account, |g| {
             g.chats.entry(chat_id).or_insert(ChatGrant {
                 scope: Some(Scope::Read),
                 title,
@@ -373,7 +374,7 @@ impl QuillApp {
             return;
         }
         let title = self.agent_chat_title(chat_id);
-        grants::update(&account, |g| {
+        self.update_grants(&account, |g| {
             g.chats.insert(chat_id, ChatGrant { scope, title });
         });
         cx.notify();
@@ -412,7 +413,7 @@ impl QuillApp {
                             .checked(key == &selected)
                             .on_click(move |_, _, cx| {
                                 let _ = owner.update(cx, |this, cx| {
-                                    this.agent_ui.picked = Some(picked.clone());
+                                    this.agent_ui.pick_account(Some(picked.clone()));
                                     cx.notify();
                                 });
                             }),

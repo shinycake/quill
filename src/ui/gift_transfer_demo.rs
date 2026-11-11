@@ -80,20 +80,20 @@ pub(super) fn seed_gift_transfer_session(sink: Arc<MemorySink>) -> Session {
     let mut session = seed_gift_market_session(sink);
     let mode = demo_mode();
     let now = now_unix();
-    session.users_state.contacts = Some(CONTACTS.to_vec());
+    session.users_state.contacts = quill::state::fetch::Fetch::Ready(CONTACTS.to_vec());
     session.ton_wallet.set_can_use(mode == "wallet");
     let hub = &mut session.payments.hub;
-    hub.gifts_open = true;
-    hub.gifts_owner = Some(MessageSender::User { user_id: ME });
-    hub.gifts = parse_received_gift(&own_received_gift(
+    hub.received.open();
+    hub.received.owner = Some(MessageSender::User { user_id: ME });
+    hub.received.rows = parse_received_gift(&own_received_gift(
         export_date(&mode, now),
         mode == "action-locked",
     ))
     .into_iter()
     .collect();
-    hub.gifts_total = 1;
-    hub.gifts_loaded = true;
-    hub.gift_selected = Some(DEMO_GIFT.into());
+    hub.received.total = 1;
+    hub.received.page = quill::premium_hub::page_stage::PageStage::Ready;
+    hub.received.view.select(Some(DEMO_GIFT.into()));
     // The chat with Maya is open: her row comes first.
     if mode == "open-chat" {
         session.open_chat(quill::ids::ChatId(502));
@@ -107,19 +107,20 @@ impl QuillApp {
         self.open_gift_transfer(DEMO_GIFT, window, cx);
         let export = self
             .session()
-            .and_then(|s| s.payments.hub.gifts.first())
+            .and_then(|s| s.payments.hub.received.rows.first())
             .map_or(ExportState::Unavailable, |g| g.export_state(now_unix()));
         let edit = |picker: &mut TransferPicker| match mode.as_str() {
             "locked" | "confirm" => picker.tap_export(export),
             "password" => {
                 picker.tap_export(export);
-                picker.open_fragment();
-                picker.probe_failed(ProbeOutcome::Other, Some(true));
+                let probe = quill::ids::RequestId(0);
+                picker.open_fragment(probe);
+                picker.probe_failed(Some(probe), ProbeOutcome::Other, Some(true));
             }
             // The password-less probe after "Open Fragment" is out.
             "probing" => {
                 picker.tap_export(export);
-                picker.open_fragment();
+                picker.open_fragment(quill::ids::RequestId(0));
             }
             "peer" => picker.choose(502, "Maya Chen"),
             _ => {}

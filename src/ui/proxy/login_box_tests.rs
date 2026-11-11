@@ -52,3 +52,38 @@ fn the_strip_link_opens_the_proxy_list_over_sign_in(cx: &mut TestAppContext) {
         assert!(app.settings.proxy.editor.is_some(), "the edit box opens");
     });
 }
+
+/// The box belongs to the sign-in screen: once the account is Ready it
+/// is gone, and does not return if the pane connects again.
+#[gpui_kit::test]
+fn the_proxy_list_box_ends_with_the_sign_in_screen(cx: &mut TestAppContext) {
+    let (app, mut vcx) = sign_in_via_proxy(cx);
+    vcx.run_until_parked();
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.update(|window, cx| window.click("proxy-strip-settings", cx));
+    vcx.run_until_parked();
+    vcx.update(|window, cx| window.render_frame(cx));
+    assert!(app.read_with(&vcx, |app, _| app.proxy_list_box_shown()));
+
+    app.update(&mut vcx, |app, cx| {
+        if let Some(session) = app.session_mut() {
+            session.auth = quill::telegram::envelope::AuthorizationState::Ready;
+        }
+        cx.notify();
+    });
+    vcx.run_until_parked();
+    vcx.update(|window, cx| window.render_frame(cx));
+    assert!(!app.read_with(&vcx, |app, _| app.proxy_list_box_shown()));
+    assert!(!app.read_with(&vcx, |app, _| app.settings.proxy.list_box));
+    assert!(!vcx.update(|window, cx| window.has_active_dialog(cx)));
+
+    app.update(&mut vcx, |app, cx| {
+        if let Some(session) = app.session_mut() {
+            session.auth = quill::telegram::envelope::AuthorizationState::WaitPhoneNumber;
+        }
+        cx.notify();
+    });
+    vcx.run_until_parked();
+    vcx.update(|window, cx| window.render_frame(cx));
+    assert!(!app.read_with(&vcx, |app, _| app.proxy_list_box_shown()));
+}

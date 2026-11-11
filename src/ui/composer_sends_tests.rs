@@ -84,7 +84,7 @@ fn assert_nothing_chosen(app: &QuillApp, path: &str) {
     let send = app.pending_send();
     assert!(send.self_destruct.is_none(), "{path}: self-destruct leaked");
     assert!(!send.caption_above, "{path}: caption-above leaked");
-    let options = app.composer_send_options();
+    let options = app.composer_send_options(Default::default());
     assert!(
         matches!(options.scheduling, ComposerScheduling::None),
         "{path}: schedule leaked"
@@ -97,7 +97,7 @@ fn assert_nothing_chosen(app: &QuillApp, path: &str) {
 }
 
 fn open_chat(app: &QuillApp) -> Option<ChatId> {
-    app.session().and_then(|session| session.open_chat)
+    app.session().and_then(|session| session.open_chat_id())
 }
 
 #[gpui_kit::test]
@@ -114,7 +114,7 @@ fn a_chat_switch_shows_the_other_chats_choices_and_back_restores_them(cx: &mut T
         // tdesktop keeps per chat).
         app.select_listed_chat(A, window, cx);
         assert_eq!(app.pending_attachments().len(), 1);
-        let options = app.composer_send_options();
+        let options = app.composer_send_options(Default::default());
         assert!(matches!(
             options.scheduling,
             ComposerScheduling::SendWhenOnline
@@ -181,7 +181,7 @@ fn a_send_starts_its_chat_over_and_keeps_the_silent_choice(cx: &mut TestAppConte
         });
         assert!(app.just_send_by_key(window, cx));
         // tdesktop clears the draft and its preview choice after a send.
-        let options = app.composer_send_options();
+        let options = app.composer_send_options(Default::default());
         assert!(matches!(options.scheduling, ComposerScheduling::None));
         assert!(!options.link_preview_disabled);
         // The silent choice is the chat's, not the message's.
@@ -335,7 +335,7 @@ fn another_account_never_sees_this_accounts_choices_for_the_same_chat_id(cx: &mu
             .map(|attachment| attachment.file_name.clone())
             .collect();
         assert_eq!(names, ["a.jpg"]);
-        let options = app.composer_send_options();
+        let options = app.composer_send_options(Default::default());
         assert!(matches!(
             options.scheduling,
             ComposerScheduling::SendWhenOnline
@@ -481,14 +481,12 @@ fn a_schedule_in_the_repeated_hour_confirmed_unchanged_keeps_its_pass(cx: &mut T
             WallClock::CHICAGO_FALL_BACK - 6 * 3600,
         ));
         app.select_listed_chat(A, window, cx);
-        app.update_pending_send(|send| {
-            send.scheduling = ComposerScheduling::SendAtDate(second_pass)
-        });
+        app.update_pending_send(|send| send.scheduling = ComposerScheduling::at(second_pass));
         app.open_schedule_picker(ScheduleTarget::Composer, window, cx);
         app.confirm_schedule_picker(window, cx);
         assert_eq!(
             app.pending_send().scheduling,
-            ComposerScheduling::SendAtDate(second_pass)
+            ComposerScheduling::at(second_pass)
         );
     });
 }
@@ -515,7 +513,7 @@ fn a_time_picked_just_before_its_first_showing_takes_the_second(cx: &mut TestApp
         assert!(app.chat_ui.schedule_picker.is_none(), "no \"too soon\"");
         assert_eq!(
             app.pending_send().scheduling,
-            ComposerScheduling::SendAtDate(WallClock::CHICAGO_FALL_BACK + 1800)
+            ComposerScheduling::at(WallClock::CHICAGO_FALL_BACK + 1800)
         );
     });
 }
@@ -553,9 +551,10 @@ fn pay_sends_only_in_the_chat_and_account_it_was_asked_in(cx: &mut TestAppContex
             A.0,
             CanSend::HasPaidMessages { stars: 25 },
             1,
+            false,
         );
         // Another chat by the time Pay is pressed: nothing is sent there.
-        assert!(app.paid_send_waits(A, "hello", cx));
+        assert!(app.paid_send_waits(A, "hello", Default::default(), cx));
         app.select_listed_chat(B, window, cx);
         let before = history_len(app, B);
         app.confirm_paid_send(window, cx);
@@ -564,14 +563,14 @@ fn pay_sends_only_in_the_chat_and_account_it_was_asked_in(cx: &mut TestAppContex
         // Another account with the same chat id open: nothing either.
         app.select_listed_chat(A, window, cx);
         let first = app.session().expect("demo").account.clone();
-        assert!(app.paid_send_waits(A, "hello", cx));
+        assert!(app.paid_send_waits(A, "hello", Default::default(), cx));
         become_account(app, &second_account());
         let before = history_len(app, A);
         app.confirm_paid_send(window, cx);
         assert_eq!(history_len(app, A), before);
         // In the chat it was asked in, Pay sends.
         become_account(app, &first);
-        assert!(app.paid_send_waits(A, "hello", cx));
+        assert!(app.paid_send_waits(A, "hello", Default::default(), cx));
         app.confirm_paid_send(window, cx);
         assert_eq!(history_len(app, A), before + 1);
     });
@@ -605,26 +604,18 @@ fn a_file_another_tray_holds_keeps_its_checks_when_one_tray_drops_it(cx: &mut Te
         app.update_pending_attachments(|tray| tray.push(shared.clone()));
         app.select_listed_chat(B, window, cx);
         app.update_pending_attachments(|tray| tray.push(shared.clone()));
-        app.composer_ui
-            .send_box
-            .sound_checked
-            .insert(shared.path.clone());
+        app.composer_sends
+            .reads
+            .sound
+            .set_done(shared.path.clone(), ());
         app.clear_attachment(cx);
         assert!(
-            app.composer_ui
-                .send_box
-                .sound_checked
-                .contains(&shared.path),
+            !app.composer_sends.reads.sound.is_unread(&shared.path),
             "A's tray still holds it"
         );
         app.select_listed_chat(A, window, cx);
         app.clear_attachment(cx);
-        assert!(
-            !app.composer_ui
-                .send_box
-                .sound_checked
-                .contains(&shared.path)
-        );
+        assert!(app.composer_sends.reads.sound.is_unread(&shared.path));
     });
 }
 
@@ -701,9 +692,9 @@ fn a_pending_check_for_another_chats_file_does_not_block_a_send_here(cx: &mut Te
         let in_a = photo("checking-a.mp4");
         app.update_pending_send(|send| send.attachments.push(in_a.clone()))
             .expect("an open chat");
-        let send_box = &mut app.composer_ui.send_box;
-        send_box.sound_checking.insert(in_a.path.clone(), 1);
-        send_box.thumbnailing.insert(in_a.path.clone(), 1);
+        let send_box = &mut app.composer_sends.reads;
+        send_box.sound.start(in_a.path.clone(), 1, Vec::new());
+        send_box.thumbnails.start(in_a.path.clone(), 1, Vec::new());
         assert!(app.tray_videos_checking(), "A waits on its own file");
         assert!(app.tray_thumbnails_pending());
         app.select_listed_chat(B, window, cx);
@@ -800,7 +791,7 @@ fn slow_mode_refuses_a_send_of_more_than_one_message_and_keeps_the_tray(cx: &mut
     app.update_in(&mut vcx, |app, window, cx| {
         let group = slow_group(app);
         let before = history_len(app, group);
-        app.submit_composer("caption".into(), window, cx);
+        app.submit_composer("caption".into(), Default::default(), window, cx);
         assert_eq!(history_len(app, group), before, "nothing went");
         assert_eq!(app.pending_attachments().len(), 11, "the tray stays");
         assert_eq!(
@@ -809,7 +800,47 @@ fn slow_mode_refuses_a_send_of_more_than_one_message_and_keeps_the_tray(cx: &mut
         );
         // One album is one message, which slow mode lets through.
         app.update_pending_attachments(|tray| tray.truncate(10));
-        app.submit_composer("caption".into(), window, cx);
+        app.submit_composer("caption".into(), Default::default(), window, cx);
         assert!(app.pending_attachments().is_empty(), "the album went");
+    });
+}
+
+/// A send whose files were still being prepared when another account came
+/// on screen fails: the error belongs to that account, so the account on
+/// screen is not told (docs/decisions/account-scoped-ui-state.md).
+#[gpui_kit::test]
+fn a_background_accounts_failed_preparation_does_not_toast_the_screen(cx: &mut TestAppContext) {
+    use crate::ui::send_prep::SendOrigin;
+    let (app, mut vcx) = new_app(cx);
+    app.update(&mut vcx, |app, cx| {
+        let screen = app.session().expect("demo session").account.clone();
+        let other = AccountKey(format!("{}-other", screen.0));
+        let finish = |app: &mut QuillApp, account: AccountKey, cx: &mut Context<QuillApp>| {
+            let slot = SendSlot {
+                account,
+                draft: quill::composer::DraftTopic::Chat.key(A.0),
+            };
+            let job = app.composer_sends.prep.begin(slot.clone()).expect("a job");
+            let origin = SendOrigin::new(slot, A, String::new(), &[]);
+            app.finish_media_prep(
+                job,
+                origin,
+                Err(quill::composer::PrepareError::Unreadable),
+                None,
+                cx,
+            );
+        };
+        finish(app, other, cx);
+        assert_ne!(
+            app.connection.note().kind(),
+            crate::ui::status_note::NoteKind::Error,
+            "the other account's failure is not the screen's"
+        );
+        finish(app, screen, cx);
+        assert_eq!(
+            app.connection.note().kind(),
+            crate::ui::status_note::NoteKind::Error,
+            "the screen's own failure still shows"
+        );
     });
 }

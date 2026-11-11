@@ -12,6 +12,7 @@ use super::app::QuillApp;
 use super::chat_theme::{danger, text_muted, warning};
 use super::paid_messages_state::{ComposerPaidConfirm, RemoveFeeBox};
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::composer_sends::SendOnce;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -22,8 +23,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::paid_messages::{
-    PaidConfirm, SendGate, needs_confirmation, pays_bar_text, refund_label, remove_fee_text,
-    stars_text,
+    PaidConfirm, SendGate, pays_bar_text, refund_label, remove_fee_text, stars_text,
 };
 use quill::state::Session;
 use std::cell::RefCell;
@@ -43,13 +43,18 @@ impl QuillApp {
         &mut self,
         chat_id: ChatId,
         text: &str,
+        once: SendOnce,
         cx: &mut Context<Self>,
     ) -> bool {
         let Some(session) = self.session() else {
             return false;
         };
         let stars = session.send_gate(chat_id).stars();
-        if !needs_confirmation(&session.payments.paid_messages.trust, chat_id.0, stars) {
+        if !session
+            .payments
+            .paid_messages
+            .needs_confirmation(chat_id.0, stars)
+        {
             return false;
         }
         let name = session.chats.get(&chat_id.0).map_or_else(
@@ -69,7 +74,7 @@ impl QuillApp {
                 text: text.to_string(),
             },
             slot,
-            once: self.send_once(),
+            once,
         });
         self.open_box(DialogKind::PaidSendConfirm);
         self.paid_messages.confirm_trust = None;
@@ -158,16 +163,25 @@ impl QuillApp {
         if remember {
             if let Some(live) = self.live.as_mut() {
                 live.driver.remember_paid_trust(chat, confirm.per_message);
+                if let Some(error) = live
+                    .driver
+                    .session
+                    .payments
+                    .paid_messages
+                    .trust_save_error()
+                    .map(str::to_string)
+                {
+                    self.set_note(StatusNote::error(error));
+                }
             } else if let Some(session) = self.paid_session_mut() {
                 session
                     .payments
                     .paid_messages
-                    .trust
-                    .trust(chat.0, confirm.per_message);
+                    .remember_trust(chat.0, confirm.per_message);
             }
         }
         let total = confirm.total();
-        self.with_send_once(once, |this| this.submit_composer(confirm.text, window, cx));
+        self.submit_composer(confirm.text, once, window, cx);
         // Not trusted: what the send left held is released up to the total
         // the user just agreed to, never more.
         let mut budget = total;
@@ -177,7 +191,10 @@ impl QuillApp {
             && next.total() <= budget
         {
             budget -= next.total();
-            let _ = live.driver.release_paid_send(false);
+            // A refused send stays held: stop, or this would not end.
+            if live.driver.release_paid_send(false).is_err() {
+                break;
+            }
         }
         cx.notify();
     }
@@ -186,7 +203,7 @@ impl QuillApp {
     /// they pay the account with the Remove Fee button.
     pub(super) fn paid_messages_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         let title = session.chats.get(&chat_id.0)?.title.clone();
         // A channel's direct messages say the price in the empty chat's card
         // and the field's placeholder, as tdesktop does.
@@ -269,7 +286,11 @@ impl QuillApp {
             |u| u.display_name(),
         );
         if let Some(session) = self.paid_session_mut() {
-            session.payments.paid_messages.save = quill::paid_messages::PaidSave::Idle;
+            session
+                .payments
+                .paid_messages
+                .save
+                .forget_failure(quill::paid_messages::PaidTarget::User(user_id));
         }
         self.paid_messages.remove_fee = Some(RemoveFeeBox {
             user_id,
@@ -312,6 +333,10 @@ impl QuillApp {
                 )));
             }
         } else if let Some(demo) = self.demo_session.as_mut() {
+            demo.payments
+                .paid_messages
+                .save
+                .clear(quill::paid_messages::PaidTarget::User(boxed.user_id));
             demo.finish_unpaid_exception(boxed.user_id);
         }
         cx.notify();

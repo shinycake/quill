@@ -180,45 +180,104 @@ fn speck_coverage(px: f32, py: f32, cx: f32, cy: f32, w: f32, h: f32) -> f32 {
 }
 
 /// The media tile while media spoilers show (16 MB decoded, and as much
-/// in the atlas): built on first use, released once nothing painted it for
-/// `TILE_UNUSED` and no cached frame can still show it.
+/// in the atlas): built once off the UI thread on first use and released
+/// when the app trims idle images (`release_media_tile`), not by a short
+/// timer of its own, so scrolling away and back does not rebuild it.
 struct MediaTile {
     image: Arc<RenderImage>,
     painted: Instant,
     stamp: super::image_budget::PaintStamp,
 }
 
+/// Where the media tile stands. `Building` ends in `Ready` when the build
+/// answers; the app owns the build, so a closed window does not strand it.
+/// The build is claimed by the frame callback itself (`claim_build`), not
+/// by the ask: a window that closes before its next frame leaves the tile
+/// `Idle`, and the next window to paint asks again.
+enum TileState {
+    Idle,
+    Building,
+    Ready(MediaTile),
+}
+
 thread_local! {
-    static TILE: std::cell::RefCell<Option<MediaTile>> = const { std::cell::RefCell::new(None) };
+    static TILE: std::cell::RefCell<TileState> = const { std::cell::RefCell::new(TileState::Idle) };
 }
 
 const TILE_UNUSED: std::time::Duration = std::time::Duration::from_secs(3);
 
-/// The media tile, built if needed; marks it painted now.
-fn image_tile() -> Arc<RenderImage> {
-    TILE.with(|tile| {
-        let mut tile = tile.borrow_mut();
-        let tile = tile.get_or_insert_with(|| MediaTile {
-            image: build_image_tile(),
-            painted: Instant::now(),
-            stamp: super::image_budget::paint_stamp(),
+/// The media tile when it is built, marked painted now. While it is not,
+/// the ask schedules the build for the window's next frame and the specks
+/// wait (the spoiler's cover is already drawn under them).
+fn image_tile(window: &mut Window) -> Option<Arc<RenderImage>> {
+    let ready = TILE.with(|tile| match &mut *tile.borrow_mut() {
+        TileState::Ready(ready) => {
+            ready.painted = Instant::now();
+            ready.stamp = super::image_budget::paint_stamp();
+            Some(Some(ready.image.clone()))
+        }
+        TileState::Building => Some(None),
+        TileState::Idle => None,
+    });
+    ready.unwrap_or_else(|| {
+        window.on_next_frame(|_, cx| {
+            if claim_build() {
+                build_tile_in_background(cx);
+            }
         });
-        tile.painted = Instant::now();
-        tile.stamp = super::image_budget::paint_stamp();
-        tile.image.clone()
+        None
     })
 }
 
+/// Idle to `Building`: true for the one frame callback that starts it.
+fn claim_build() -> bool {
+    TILE.with(|tile| {
+        let mut tile = tile.borrow_mut();
+        let idle = matches!(&*tile, TileState::Idle);
+        if idle {
+            *tile = TileState::Building;
+        }
+        idle
+    })
+}
+
+/// Build the tile on the background executor and install it.
+fn build_tile_in_background(cx: &mut App) {
+    let task = cx.background_spawn(async move { build_image_tile() });
+    // window-scope: the tile is shared by every window; its arrival
+    // redraws them all.
+    // screen-scope: the tile belongs to no account.
+    cx.spawn(async move |cx| {
+        let image = task.await;
+        cx.update(|cx| {
+            TILE.with(|tile| {
+                *tile.borrow_mut() = TileState::Ready(MediaTile {
+                    image,
+                    painted: Instant::now(),
+                    stamp: super::image_budget::paint_stamp(),
+                });
+            });
+            cx.refresh_windows();
+        });
+    })
+    .detach();
+}
+
 /// Drop the media tile (and its atlas copy) once media spoilers have been
-/// off screen for a while. `window`: the window being drawn, if any.
+/// off screen for a while: the app's idle trim asks, not every frame.
+/// `window`: the window being drawn, if any.
 pub(super) fn release_media_tile(window: Option<&mut Window>, cx: &mut App) {
     let unused = TILE.with(|tile| {
         let mut tile = tile.borrow_mut();
-        let idle = tile.as_ref().is_some_and(|tile| {
-            tile.painted.elapsed() >= TILE_UNUSED
-                && !super::image_budget::may_still_show(tile.stamp)
-        });
-        if idle { tile.take() } else { None }
+        let idle = matches!(&*tile, TileState::Ready(tile) if tile.painted.elapsed() >= TILE_UNUSED
+                && !super::image_budget::may_still_show(tile.stamp));
+        if !idle {
+            return None;
+        }
+        match std::mem::replace(&mut *tile, TileState::Idle) {
+            TileState::Ready(tile) => Some(tile),
+            _ => None,
+        }
     });
     if let Some(tile) = unused {
         cx.drop_image(tile.image, window);
@@ -276,7 +335,9 @@ fn build_image_tile() -> Arc<RenderImage> {
 /// Paint the media spoiler's specks over `bounds` (tiles anchored at its
 /// top-left; the caller's clip trims the edges).
 pub(super) fn paint_media_specks(bounds: Bounds<Pixels>, window: &mut Window) {
-    let tile = image_tile();
+    let Some(tile) = image_tile(window) else {
+        return;
+    };
     let frame = ((loop_ms() / FRAME_MS) as usize).min(FRAMES - 1);
     let step = px(CANVAS);
     let mut y = bounds.top();
@@ -464,6 +525,12 @@ pub(super) fn mark_revealed(key: RevealKey) {
     });
 }
 
+/// A switch of account ends every fade: a key names a chat and message of
+/// the account on screen, and the same chat can be open in the next one.
+pub(super) fn forget_reveals() {
+    REVEALS.with(|reveals| reveals.borrow_mut().clear());
+}
+
 /// The cover's remaining opacity while `key` fades out after a reveal.
 pub(super) fn reveal_fade(key: RevealKey) -> Option<f32> {
     REVEALS.with(|reveals| {
@@ -495,11 +562,11 @@ pub(super) enum MediaCover {
 pub(super) fn media_cover(
     content: &quill::telegram::envelope::MessageContent,
     key: RevealKey,
-    revealed: &std::collections::HashSet<RevealKey>,
+    revealed: &crate::ui::message_text::revealed::Revealed,
 ) -> Option<MediaCover> {
     if !quill::media_spoiler::has_media_spoiler(content) {
         None
-    } else if revealed.contains(&key) {
+    } else if revealed.spoiler_shown(&key) {
         reveal_fade(key).map(MediaCover::Fading)
     } else {
         Some(MediaCover::Covered)
@@ -524,6 +591,16 @@ mod tests {
     };
     use gpui_kit::{Bounds, Pixels, point, px, size};
     use std::collections::HashSet;
+
+    #[test]
+    fn a_switch_of_account_ends_the_reveal_fades() {
+        let key = (1, 2, 3, false);
+        super::mark_revealed(key);
+        assert!(super::reveal_fade(key).is_some());
+        super::forget_reveals();
+        assert_eq!(super::reveal_fade(key), None);
+        assert!(!super::revealing());
+    }
 
     #[test]
     fn specks_fade_in_and_out_over_their_life() {
@@ -648,6 +725,13 @@ mod tests {
         assert_eq!(speck_coverage(10., 10., 10., 10., 4., 4.), 1.);
         assert_eq!(speck_coverage(14., 10., 10., 10., 4., 4.), 0.);
     }
+}
+
+/// Whether the tile is neither built nor being built (tests).
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+fn tile_is_idle() -> bool {
+    TILE.with(|tile| matches!(&*tile.borrow(), TileState::Idle))
 }
 
 #[cfg(test)]

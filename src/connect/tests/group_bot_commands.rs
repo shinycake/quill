@@ -85,3 +85,33 @@ fn unknown_bots_in_a_group_are_asked_for_once_and_fill_the_menu() {
         Some("/go@gobot".to_string())
     );
 }
+
+/// Sweep 02-084: a lookup whose send failed is asked again once the bot is
+/// named again, not skipped for the session.
+#[test]
+fn a_bot_lookup_that_failed_to_send_is_asked_again() {
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink;
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+    let full_info = r#"{"@type":"updateSupergroupFullInfo","supergroup_id":2,"supergroup_full_info":{"description":"","bot_commands":[{"@type":"botCommands","bot_user_id":77,"commands":[{"@type":"botCommand","command":"go","description":"","is_ephemeral":false}]}]}}"#;
+    for json in [
+        r#"{"@type":"updateNewChat","chat":{"id":-1002,"title":"Mega","type":{"@type":"chatTypeSupergroup","supergroup_id":2,"is_channel":false},"unread_count":0}}"#,
+        full_info,
+    ] {
+        driver
+            .ingest(copy_and_parse(json, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    }
+    recorder.refuse_sends(true);
+    assert!(!driver.group_bot_users_tick());
+    recorder.refuse_sends(false);
+    driver
+        .ingest(copy_and_parse(full_info, &seq, &dyn_sink).unwrap())
+        .unwrap();
+    assert!(driver.group_bot_users_tick(), "asked again");
+    assert_eq!(count_sent(&recorder, "getUser"), 1);
+}

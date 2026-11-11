@@ -20,21 +20,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let backdrops = &mut self.session.users_state.peer_qr.backdrops;
+        let backdrops = &self.session.users_state.peer_qr.backdrops;
         if !backdrops.due(now) {
             return Ok(());
         }
-        backdrops.start(now);
         let extra = self
             .session
             .request(RequestPurpose::GetProfileShareThemeBackdrops, None);
+        self.session.users_state.peer_qr.backdrops.start(extra, now);
         let request = json!({
             "@type": "getProfileShareThemeBackdrops",
             "@extra": extra.as_extra(),
         });
         if let Err(err) = self.sender.send_json(&request.to_string()) {
             self.session.requests.take(extra);
-            self.session.users_state.peer_qr.backdrops.fail();
+            self.session.users_state.peer_qr.backdrops.fail(extra);
             return Err(err);
         }
         Ok(())
@@ -62,13 +62,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         more: bool,
         now: i64,
     ) -> Result<(), ConnectSendError> {
-        if !self.chats_path_active() || !can_save(self.session.qr_save_rights(peer)) {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        let owner = self
-            .session
-            .qr_theme_owner(peer)
-            .ok_or(ConnectSendError::InvalidRequest)?;
+        let owner = self.session.qr_theme_owner(peer);
+        let owner = match owner {
+            Some(owner)
+                if self.chats_path_active() && can_save(self.session.qr_save_rights(peer)) =>
+            {
+                owner
+            }
+            _ => {
+                // Refused here, so the panel must not ask again on every
+                // frame (`wants_more` stays true until something settles).
+                self.session.users_state.peer_qr.gifts.refuse(now);
+                return Err(ConnectSendError::InvalidRequest);
+            }
+        };
         let gifts_owner = match peer {
             QrPeer::User(user_id) => GiftsOwner::User(user_id),
             QrPeer::Chat(chat_id) => GiftsOwner::Chat(chat_id),

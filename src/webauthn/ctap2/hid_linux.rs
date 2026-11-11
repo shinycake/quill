@@ -73,12 +73,22 @@ fn summary(sys_entry: &Path) -> Option<DescriptorSummary> {
 }
 
 pub(super) fn open_all() -> Vec<Box<dyn HidDevice>> {
+    match find() {
+        super::Found::Keys(keys) => keys,
+        super::Found::Denied(_) => Vec::new(),
+    }
+}
+
+/// The keys present, or the first one Quill may not open (no udev rule
+/// gives this user access to its `/dev/hidraw*`) when none else opened.
+pub(super) fn find() -> super::Found {
     let Ok(entries) = std::fs::read_dir("/sys/class/hidraw") else {
-        return Vec::new();
+        return super::Found::Keys(Vec::new());
     };
     let mut names: Vec<_> = entries.filter_map(Result::ok).collect();
     names.sort_by_key(std::fs::DirEntry::file_name);
     let mut devices: Vec<Box<dyn HidDevice>> = Vec::new();
+    let mut denied = None;
     for entry in names {
         let Some(summary) = summary(&entry.path()) else {
             continue;
@@ -94,8 +104,14 @@ pub(super) fn open_all() -> Vec<Box<dyn HidDevice>> {
             Ok(file) => devices.push(Box::new(Hidraw { file, report_len })),
             Err(error) => {
                 crate::webauthn::log(&format!("cannot open {}: {error}", node.display()));
+                if error.kind() == std::io::ErrorKind::PermissionDenied && denied.is_none() {
+                    denied = Some(node.display().to_string());
+                }
             }
         }
     }
-    devices
+    match denied {
+        Some(path) if devices.is_empty() => super::Found::Denied(path),
+        _ => super::Found::Keys(devices),
+    }
 }

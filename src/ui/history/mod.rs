@@ -183,11 +183,13 @@ pub(super) fn album_history_row(
     sender_status: Option<AnyElement>,
     receipt: OutboxReceipt,
     sender_avatar: Option<SenderAvatar>,
+    // "via @bot", "Forwarded from" and the reply quote (`row_header`).
+    header: Option<AnyElement>,
     // Settings → Appearance: font size + bubble/plain style.
     look: BubbleLook,
     session: Option<&Session>,
     // Revealed spoilers: tiles keep their cover until clicked.
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &crate::ui::message_text::revealed::Revealed,
     corner: CornerActions,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
@@ -205,13 +207,22 @@ pub(super) fn album_history_row(
         quill::album::ALBUM_SPACING,
     );
     // A narrow history scales the mosaic down (`GroupedMedia::countCurrentSize`).
-    let media_max =
-        bubble_width::BubbleRoom::new(look.history, sender_avatar.is_some(), look.plain)
-            .media(true);
+    // Under a header the mosaic sits inside the bubble's padding, and the
+    // bubble keeps to `msgMaxWidth`.
+    let room = bubble_width::BubbleRoom::new(look.history, sender_avatar.is_some(), look.plain);
+    let media_max = match header {
+        None => room.media(true),
+        Some(_) if look.plain => room.media(false),
+        Some(_) => room
+            .media(false)
+            .min(room.outer() - bubble_width::PADDED_CHROME)
+            .max(1),
+    };
     let layout = quill::album::scale_layout(&layout, media_max, quill::album::ALBUM_SPACING);
     let (box_w, box_h) = quill::album::layout_bounds(&layout);
     let mut mosaic = div()
         .id(("album", album_id as u64))
+        .debug_selector(move || format!("album-mosaic-{album_id}"))
         .relative()
         .w(px(box_w as f32))
         .h(px(box_h as f32))
@@ -221,15 +232,36 @@ pub(super) fn album_history_row(
         MessageContent::Video(video) => !video.caption.is_empty(),
         _ => false,
     });
-    // Without a caption or a sender name the mosaic stands on its own
-    // (`GroupedMedia::computeNeedBubble`; `quill::media_bubble`).
+    // The comments or replies bar of the album: on the first item that
+    // has one (Telegram Desktop reads the group's first item).
+    let reply_bar = messages
+        .iter()
+        .find_map(|message| row_reply_bar(message, session, media_roots, cx));
+    // Without a caption, a header, a bar or a sender name the mosaic stands
+    // on its own (`GroupedMedia::computeNeedBubble`; `quill::media_bubble`).
     let bubbleless = !look.plain
         && !quill::media_bubble::MediaSurroundings {
             caption: album_has_caption,
+            header: header.is_some(),
+            comments_bar: reply_bar.is_some(),
             sender_name: sender.is_some(),
             ..Default::default()
         }
         .needs_bubble();
+    // Reactions sit under the mosaic, on the chat background when the
+    // album has no bubble (`quill::media_bubble`).
+    let footer_meta = row_footer_meta(first, receipt, session, files, media_roots);
+    let chip_row = album_reactions_owner(messages).and_then(|owner| {
+        message_reactions_row(
+            owner,
+            &footer_meta,
+            bubbleless,
+            session,
+            files,
+            media_roots,
+            cx,
+        )
+    });
     let corner_base = if bubbleless {
         MediaCorners::bare(
             cx,
@@ -241,9 +273,13 @@ pub(super) fn album_history_row(
             cx,
             first.is_outgoing,
             look.plain,
-            true,
-            sender.is_none(),
-            !album_has_caption,
+            header.is_none(),
+            sender.is_none() && header.is_none(),
+            !album_has_caption && chip_row.is_none(),
+        )
+        .joined(
+            quill::chat_wide::has_right_layout(first.is_outgoing, look.wide),
+            look.joined_above,
         )
     };
     for (index, message) in messages.iter().enumerate() {
@@ -292,10 +328,29 @@ pub(super) fn album_history_row(
         chrome.avatar = Some(link.wrap(avatar));
     }
     chrome.sender_status = sender_status;
-    chrome.media_led = true;
+    chrome.footer = message_footer_meta(&footer_meta);
+    chrome.media_led = header.is_none();
     chrome.bubbleless = bubbleless;
     chrome.media_width = Some(media_content_width(px(box_w as f32), px(0.), media_max));
-    chrome.footer_overlay = !has_caption;
+    chrome.footer_overlay =
+        !has_caption && chip_row.is_none() && reply_bar.is_none() && header.is_none();
+    // Bubble-less, the time stays on the picture with reactions under it;
+    // in a bubble it moves to the reactions' line.
+    let pill = (bubbleless && chip_row.is_some())
+        .then(|| message_footer_meta(&footer_meta))
+        .flatten()
+        .map(|footer| {
+            let meta = footer_meta.mirrored();
+            crate::ui::synthetic::media_footer_pill(
+                footer,
+                Some(std::rc::Rc::new(move || message_footer_meta(&meta))),
+            )
+        });
+    if chip_row.is_some() {
+        chrome.footer = None;
+    }
+    let mosaic = div().relative().child(mosaic).children(pill);
+    chrome.bottom_bar = reply_bar;
     chrome.actions = corner.mount(|| message_actions_button(first.chat_id, first.id, cx));
     let emoji: HashMap<i64, ImageSource> = HashMap::new();
     let layered: HashMap<i64, super::sticker_player::StickerView> = HashMap::new();
@@ -328,6 +383,9 @@ pub(super) fn album_history_row(
                     )),
             )
         })
+        .when_some(chip_row, |this, chips| {
+            this.child(chips.when(!bubbleless, |chips| chips.px_2().pb_1()))
+        })
         .into_any_element();
     session_bubble_quoted(
         first.chat_id,
@@ -336,7 +394,7 @@ pub(super) fn album_history_row(
         String::new(),
         first.is_outgoing,
         Some(extra),
-        None,
+        header,
         // Settings → Appearance: font size + bubble/plain style.
         look,
     )
@@ -511,10 +569,13 @@ pub(in crate::ui) mod bubble_width;
 #[path = "demo_chat_tests.rs"]
 pub(in crate::ui) mod demo_chat;
 mod reaction_chip_row;
+mod row_parts;
+pub(in crate::ui) use row_parts::row_header;
+use row_parts::{row_footer_meta, row_reply_bar};
 mod row_hover;
 pub(in crate::ui) use row_hover::{CornerActions, RowHover};
 pub(in crate::ui) mod text_measure;
-use reaction_chip_row::reaction_chip_row;
+use reaction_chip_row::{album_reactions_owner, message_reactions_row};
 mod album_tile;
 pub(in crate::ui) use album_tile::album_tile;
 mod community_rows;
@@ -529,6 +590,7 @@ pub use session_history_row::*;
 mod custom_emoji_chip_glyph;
 mod fact_check_block;
 mod load_older_action;
+pub(in crate::ui) mod new_bot_thread;
 pub(in crate::ui) mod sharing_request;
 pub(in crate::ui) mod suggested_post_block;
 #[allow(unused_imports)]

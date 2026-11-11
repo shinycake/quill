@@ -61,8 +61,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(chat_id) = self.session.groups.private_sharing.request_box_chat() else {
             return Ok(None);
         };
-        self.session.groups.private_sharing.enable = None;
-        self.set_chat_protected_content(chat_id, false)
+        // The box goes once the request is out: a send that failed or was
+        // refused leaves it open to try again.
+        let sent = self.set_chat_protected_content(chat_id, false);
+        if matches!(sent, Ok(Some(_))) {
+            self.session.groups.private_sharing.enable = None;
+        }
+        sent
     }
 
     pub fn close_sharing_request_box(&mut self) {
@@ -82,9 +87,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let answerable = self
             .session
-            .histories
-            .get(&chat_id.0)
-            .and_then(|history| history.messages.get(&message_id.0))
+            .loaded_message(chat_id, message_id)
             .and_then(|message| self.session.sharing_request_view(message))
             .is_some_and(|view| view.buttons);
         if !answerable || self.session.sharing_request_answering(chat_id, message_id) {

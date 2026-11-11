@@ -349,29 +349,32 @@ impl QuillApp {
     }
 
     /// The handler is read on a thread (Linux): draw again when it lands.
-    fn repaint_when_link_handler_read(&self, cx: &mut Context<Self>) {
-        use std::sync::atomic::{AtomicBool, Ordering};
-        static WATCHING: AtomicBool = AtomicBool::new(false);
-        if !quill::link_handler::refreshing() || WATCHING.swap(true, Ordering::AcqRel) {
+    fn repaint_when_link_handler_read(&mut self, cx: &mut Context<Self>) {
+        let (landed, wait) = futures_channel::oneshot::channel::<()>();
+        // One watcher at a time; none when no read runs.
+        if !quill::link_handler::wake_when_read(move || {
+            let _ = landed.send(());
+        }) {
             return;
         }
-        cx.spawn(async move |this, cx| {
-            while quill::link_handler::refreshing() {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(100))
-                    .await;
-            }
-            WATCHING.store(false, Ordering::Release);
-            let _ = this.update(cx, |_, cx| cx.notify());
-        })
-        .detach();
+        self.preferences.link_handler_watch = Some(cx.spawn(async move |this, cx| {
+            // A read that died drops the sender: draw again then too.
+            let _ = wait.await;
+            let _ = this.update(cx, |this, cx| {
+                this.preferences.link_handler_watch = None;
+                cx.notify();
+            });
+        }));
     }
 
     /// "Open Telegram links with Quill": opt-in default handler for `tg:`
     /// links (`quill::link_handler`). Quill never claims it on its own.
     /// Windows/Linux get a switch; macOS cannot hand the scheme back to
     /// another app, so it gets a one-way "Make default" button.
-    pub(in crate::ui) fn general_link_handler_section(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::ui) fn general_link_handler_section(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         use quill::link_handler::{self, ControlKind, LinkHandlerState};
         let state = link_handler::state();
         self.repaint_when_link_handler_read(cx);
@@ -510,8 +513,7 @@ impl QuillApp {
                     .accessibility_label(tr(keys::Q_PREFS_CHECK_SPELLING))
                     .on_click(cx.listener(|this, &on, _, cx| {
                         this.set_chat_prefs(cx, |c| c.spellcheck_enabled = on);
-                        let text = this.composer.read(cx).value().to_string();
-                        this.sync_spellcheck(&text, cx);
+                        this.sync_spellcheck_everywhere(cx);
                     })),
             );
         let languages_shown = checked && !self.spell.info.available.is_empty();

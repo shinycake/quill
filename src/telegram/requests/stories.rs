@@ -259,7 +259,7 @@ pub fn send_text_story_reply(
             "@type": "inputMessageText",
             "text": formatted_caption(text, false),
             "link_preview_options": Value::Null,
-            "clear_draft": true
+            "clear_draft": false
         }
     })
     .to_string()

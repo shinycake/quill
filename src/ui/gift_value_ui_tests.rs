@@ -10,7 +10,7 @@ use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext, px, size};
-use quill::premium_hub::gift_value::{GiftValueInfo, GiftValueLookup};
+use quill::premium_hub::gift_value::{GiftValueInfo, GiftValueLookup, GiftValueStage};
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     quill::gift_market::set_gift_market_persistence(false);
@@ -90,8 +90,13 @@ fn with_info(
 ) -> impl FnOnce(GiftValueLookup) -> Option<GiftValueLookup> {
     move |lookup| {
         Some(GiftValueLookup {
-            info,
-            open,
+            stage: info.map_or(GiftValueStage::Idle, |info| {
+                if open {
+                    GiftValueStage::Open(info)
+                } else {
+                    GiftValueStage::Known(info)
+                }
+            }),
             ..lookup
         })
     }
@@ -118,7 +123,7 @@ fn the_box_shows_price_about_table_and_links_and_ok_closes_it(cx: &mut TestAppCo
 
     click(vcx, "gift-value-ok");
     let lookup = lookup_of(&app, vcx).expect("lookup");
-    assert!(!lookup.open && lookup.info.is_some());
+    assert!(!lookup.is_open() && lookup.info().is_some());
     assert!(vcx.debug_bounds("gift-value-box").is_none());
     assert!(vcx.debug_bounds("gift-value-row").is_some());
 }
@@ -131,18 +136,30 @@ fn learn_more_spins_while_loading_and_reopens_a_known_value(cx: &mut TestAppCont
     assert!(vcx.debug_bounds("gift-value-row").is_some());
     assert!(vcx.debug_bounds("gift-value-box").is_none());
 
-    // Nothing known: the pill loads, the box stays closed.
+    // Nothing known and nobody to ask (no live account): the lookup does
+    // not spin for good, it says it could not load; the box stays closed.
     click(vcx, "gift-value-learn-more");
     let lookup = lookup_of(&app, vcx).expect("lookup");
-    assert!(lookup.loading && !lookup.open);
+    assert!(!lookup.is_loading() && !lookup.is_open());
+    assert!(lookup.error().is_some());
     assert_eq!(lookup.name, "PlushPepe-1204");
-    assert!(vcx.debug_bounds("gift-value-spinner").is_some());
+    assert!(vcx.debug_bounds("gift-value-spinner").is_none());
     assert!(vcx.debug_bounds("gift-value-box").is_none());
+
+    // A lookup in flight spins.
+    set_lookup(&app, vcx, |lookup| {
+        Some(GiftValueLookup {
+            stage: GiftValueStage::Loading(7),
+            ..lookup
+        })
+    });
+    assert!(lookup_of(&app, vcx).is_some_and(|lookup| lookup.is_loading()));
+    assert!(vcx.debug_bounds("gift-value-spinner").is_some());
 
     // Known and closed: the click opens the box again.
     set_lookup(&app, vcx, with_info(fixture(AVERAGE), false));
     click(vcx, "gift-value-learn-more");
-    assert!(lookup_of(&app, vcx).is_some_and(|lookup| lookup.open));
+    assert!(lookup_of(&app, vcx).is_some_and(|lookup| lookup.is_open()));
     assert!(vcx.debug_bounds("gift-value-box").is_some());
     // The average answer: no last price, no Fragment listings.
     assert!(vcx.debug_bounds("gift-value-on-telegram").is_some());
@@ -155,7 +172,7 @@ fn a_failed_request_shows_under_the_row(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     set_lookup(&app, vcx, |lookup| {
         Some(GiftValueLookup {
-            error: Some("Couldn't load the value: STARGIFT_SLUG_INVALID".into()),
+            stage: GiftValueStage::Failed("Couldn't load the value: STARGIFT_SLUG_INVALID".into()),
             ..lookup
         })
     });
@@ -169,7 +186,7 @@ fn telegram_listings_open_the_resale_list(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     set_lookup(&app, vcx, with_info(fixture(LAST), true));
     click(vcx, "gift-value-on-telegram");
-    assert!(lookup_of(&app, vcx).is_some_and(|lookup| !lookup.open));
+    assert!(lookup_of(&app, vcx).is_some_and(|lookup| !lookup.is_open()));
     let top = app.read_with(vcx, |app, _| app.gift_market.top().cloned());
     assert_eq!(top, Some(MarketBox::Resale));
     assert!(vcx.debug_bounds("gift-value-box").is_none());
@@ -208,4 +225,68 @@ fn a_look_alike_fragment_address_asks_before_opening(cx: &mut TestAppContext) {
     // Nothing was opened yet; the confirm box covers the value box.
     assert_eq!(note, note_before);
     assert!(vcx.debug_bounds("gift-value-box").is_none());
+}
+
+#[gpui_kit::test]
+fn a_lookup_asked_from_a_box_that_is_gone_does_not_open_later(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    // A lookup in flight, as a live account's "learn more" leaves it.
+    set_lookup(&app, vcx, |lookup| {
+        Some(GiftValueLookup {
+            stage: GiftValueStage::Loading(7),
+            ..lookup
+        })
+    });
+    assert!(lookup_of(&app, vcx).is_some_and(|lookup| lookup.is_loading()));
+    // The gift box is left before the answer lands.
+    app.update_in(vcx, |app, _, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.payments.hub.received.view.select(None);
+        }
+        app.gift_market.stack.clear();
+        cx.notify();
+    });
+    settle(vcx);
+    assert!(
+        lookup_of(&app, vcx).is_none(),
+        "the pending lookup is dropped"
+    );
+}
+
+/// X's "learn more" is pending and the host now shows gift Y (another
+/// gift was picked): the lookup is dropped, not opened over Y's box.
+#[gpui_kit::test]
+fn a_lookup_for_one_gift_is_dropped_when_the_box_shows_another(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    // A lookup in flight, as a live account's "learn more" leaves it.
+    set_lookup(&app, vcx, |lookup| {
+        Some(GiftValueLookup {
+            stage: GiftValueStage::Loading(7),
+            ..lookup
+        })
+    });
+    assert!(lookup_of(&app, vcx).is_some_and(|lookup| lookup.is_loading()));
+    app.update_in(vcx, |app, _, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            let hub = &mut session.payments.hub;
+            let selected = hub.received.view.selected().map(str::to_string);
+            if let Some(c) = hub
+                .received
+                .rows
+                .iter_mut()
+                .find(|g| Some(&g.id) == selected.as_ref())
+                .and_then(|g| g.gift.collectible.as_deref_mut())
+            {
+                c.name = "another-gift-1".into();
+            }
+        }
+        cx.notify();
+    });
+    settle(vcx);
+    assert!(
+        lookup_of(&app, vcx).is_none(),
+        "another gift's box does not keep this lookup"
+    );
 }

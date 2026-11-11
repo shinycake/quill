@@ -37,7 +37,9 @@ static LIBRARY: OnceLock<Result<Loader, String>> = OnceLock::new();
 
 fn library() -> Result<&'static Loader, EngineError> {
     LIBRARY
-        .get_or_init(|| Loader::load_default().map_err(|err| err.to_string()))
+        .get_or_init(|| {
+            Loader::load_default_after(crate::first_load::settle).map_err(|err| err.to_string())
+        })
         .as_ref()
         .map_err(|err| {
             crate::advanced::debug_mode::call_log(&format!("[call] tgcalls: {err}"));
@@ -79,12 +81,23 @@ impl<T> Native<T> {
     }
 }
 
+/// Whether a 1:1 call has its tgcalls instance. A call that is hung up is
+/// gone from the engine's table, so there is no ended stage here.
+enum P2pStage {
+    /// Before `connect`, or after a retry retired the instance: TDLib
+    /// signaling that arrived meanwhile waits here, in order.
+    Waiting {
+        pending_signaling: Vec<Vec<u8>>,
+    },
+    Live {
+        handle: Native<qc_p2p>,
+    },
+}
+
 /// One 1:1 call, by TDLib call id.
 struct P2pCall {
     context: Arc<CallContext>,
-    /// TDLib signaling that arrived before `connect`, in order.
-    pending_signaling: Vec<Vec<u8>>,
-    handle: Option<Native<qc_p2p>>,
+    stage: P2pStage,
     /// Feeder threads' way in; cleared before the handle goes away.
     gate: Arc<sender::Gate>,
     media: CallMediaConfig,
@@ -177,7 +190,7 @@ impl TgcallsEngine {
     fn apply_camera(&mut self, call_id: i32) -> Result<(), EngineError> {
         let api = self.api;
         let call = self.call_mut(call_id)?;
-        let wanted = call.media.camera.clone();
+        let wanted = call.media.video.camera().map(str::to_owned);
         match (wanted, call.camera) {
             (Some(device), Some(capture)) => {
                 let device = text("qc_video_capture_switch_camera", &device)?;
@@ -206,7 +219,7 @@ impl TgcallsEngine {
             }
             (None, None) => return Ok(()),
         }
-        if let (Some(handle), Some(capture)) = (call.handle, call.camera) {
+        if let (Some(handle), Some(capture)) = (call.handle(), call.camera) {
             // SAFETY: both are live; the call takes its own reference.
             unsafe { (api.qc_p2p_set_video_capture)(handle.as_ptr(), capture.as_ptr()) };
         }
@@ -218,7 +231,7 @@ impl TgcallsEngine {
 /// camera off does, so the next call can open the device without waiting
 /// for this one's destroy behind the reaper's backlog.
 fn stop_camera(api: &Loader, call: &mut P2pCall) {
-    if let (Some(handle), Some(_)) = (call.handle, call.camera) {
+    if let (Some(handle), Some(_)) = (call.handle(), call.camera) {
         // SAFETY: a live call; NULL stops sending video.
         unsafe { (api.qc_p2p_set_video_capture)(handle.as_ptr(), std::ptr::null_mut()) };
     }
@@ -243,9 +256,20 @@ fn release_screen(api: &Loader, call: &mut P2pCall) {
 }
 
 impl P2pCall {
+    /// The instance, once `connect` made it.
+    fn handle(&self) -> Option<Native<qc_p2p>> {
+        match self.stage {
+            P2pStage::Live { handle } => Some(handle),
+            P2pStage::Waiting { .. } => None,
+        }
+    }
+
     fn retire_instance(&mut self, api: &'static Loader, reaper: &Reaper) {
-        let Some(handle) = self.handle.take() else {
+        let Some(handle) = self.handle() else {
             return;
+        };
+        self.stage = P2pStage::Waiting {
+            pending_signaling: Vec::new(),
         };
         let fresh = CallContext::new(self.context.call_id, &self.context.shared);
         let old = std::mem::replace(&mut self.context, Arc::new(fresh));
@@ -283,7 +307,10 @@ fn retire(api: &'static Loader, reaper: &Reaper, mut call: P2pCall) {
 }
 
 fn destroy(api: &Loader, call: &mut P2pCall) {
-    if let Some(handle) = call.handle.take() {
+    if let Some(handle) = call.handle() {
+        call.stage = P2pStage::Waiting {
+            pending_signaling: Vec::new(),
+        };
         crate::advanced::debug_mode::call_log(&format!(
             "[call] {} tgcalls end: {}",
             call.context.call_id,
@@ -332,14 +359,14 @@ fn take_string(api: &Loader, raw: *mut std::ffi::c_char) -> Option<String> {
 fn new_call(call_id: i32, shared: &Arc<CallbackShared>) -> P2pCall {
     P2pCall {
         context: Arc::new(CallContext::new(call_id, shared)),
-        pending_signaling: Vec::new(),
-        handle: None,
+        stage: P2pStage::Waiting {
+            pending_signaling: Vec::new(),
+        },
         gate: Arc::new(sender::Gate::default()),
         media: CallMediaConfig {
             mic: None,
             speaker: None,
-            camera: None,
-            screen_share_on: false,
+            video: VideoSource::Off,
         },
         muted: false,
         camera: None,
@@ -431,7 +458,7 @@ mod tests {
         );
 
         engine.connect(1, &params).unwrap();
-        assert!(engine.calls[&1].pending_signaling.is_empty());
+        assert!(engine.calls[&1].handle().is_some(), "the signaling went in");
         engine.set_muted(1, true).unwrap();
         let sender = engine
             .external_frame_sender(CaptureTarget::Private(1))
@@ -552,7 +579,7 @@ mod tests {
         let picture = vec![128u8; 64 * 48 * 3 / 2];
         for _ in 0..2 {
             engine.connect(4, &params).unwrap();
-            assert!(engine.calls[&4].media.screen_share_on);
+            assert!(engine.calls[&4].media.video.screen());
             let sender = engine
                 .external_frame_sender(CaptureTarget::Private(4))
                 .unwrap();

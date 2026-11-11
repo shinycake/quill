@@ -235,6 +235,7 @@ impl ComposerDoc {
     /// and overlapping emoji.
     pub fn normalize(&mut self) {
         self.spans = normalize_spans(std::mem::take(&mut self.spans));
+        self.join_adjacent_quotes();
         self.emoji.sort_by_key(|e| e.range.start);
         let mut kept: Vec<DocEmoji> = Vec::with_capacity(self.emoji.len());
         for emoji in self.emoji.drain(..) {
@@ -247,6 +248,29 @@ impl ComposerDoc {
             }
         }
         self.emoji = kept;
+    }
+
+    /// Two quotes on adjacent lines are one quote: the markup writes them as
+    /// consecutive `> ` lines, which read back as one, so the document says
+    /// so too and the round trip keeps it.
+    fn join_adjacent_quotes(&mut self) {
+        let text = &self.text;
+        let mut joined: Vec<DocSpan> = Vec::with_capacity(self.spans.len());
+        let mut last_quote: Option<usize> = None;
+        for span in std::mem::take(&mut self.spans) {
+            if span.tag == ComposerTag::Quote {
+                let prev = last_quote.and_then(|at| joined.get_mut(at));
+                if let Some(prev) = prev
+                    && text.get(prev.range.end..span.range.start) == Some("\n")
+                {
+                    prev.range.end = span.range.end;
+                    continue;
+                }
+                last_quote = Some(joined.len());
+            }
+            joined.push(span);
+        }
+        self.spans = joined;
     }
 
     /// The part of the document over the byte range `range` (tdesktop

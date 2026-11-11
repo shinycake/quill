@@ -58,7 +58,6 @@ impl Session {
                     if self.calls.take_recent_calls_request(pending.id) {
                         self.calls.recent_calls.extend(messages);
                         self.calls.recent_calls_offset = next_offset;
-                        self.calls.recent_calls_error = false;
                     }
                 }
             }
@@ -76,9 +75,9 @@ impl Session {
                         self.remember_files(&message.files);
                     }
                     let hits = messages.iter().map(SearchMessageHit::from_parsed).collect();
-                    self.search.search.public_limits_exceeded = are_limits_exceeded;
                     self.search.search.set_first_page_offset(next_offset);
                     self.search.search.accept_messages(hits, false);
+                    self.search.search.note_public_limits(are_limits_exceeded);
                 } else if self.search.search.matches_generation(pending)
                     && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchPublicPostsMore)
                 {
@@ -86,8 +85,8 @@ impl Session {
                         self.remember_files(&message.files);
                     }
                     let hits = messages.iter().map(SearchMessageHit::from_parsed).collect();
-                    self.search.search.public_limits_exceeded = are_limits_exceeded;
                     self.search.search.append_page(hits, next_offset);
+                    self.search.search.note_public_limits(are_limits_exceeded);
                 }
             }
             SearchPayload::PublicPostLimits {
@@ -97,7 +96,11 @@ impl Session {
                 star_count,
                 current_query_free,
             } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPublicPostSearchLimits) {
+                // Only the quota of the query on screen: an answer of an
+                // older query would price and label this one wrongly.
+                if self.search.search.matches_generation(pending)
+                    && pending.map(|p| p.purpose) == Some(RequestPurpose::GetPublicPostSearchLimits)
+                {
                     self.search.search.tabs.limits = Some(PublicPostLimits {
                         daily_free,
                         remaining_free,

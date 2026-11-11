@@ -104,22 +104,23 @@ impl ComposerAttachment {
                 (true, Some(_)) => {
                     attachment.kind = AttachmentKind::Document;
                     attachment.spoiler = false;
-                    attachment.extras.gif = false;
+                    attachment.extras.hold_gif();
                 }
                 (false, Some(kind))
                     if attachment.kind == AttachmentKind::Document
-                        && !attachment.extras.file_only =>
+                        && !attachment.extras.file_only() =>
                 {
                     attachment.kind = kind;
+                    attachment.extras.release_gif();
                 }
-                (true, None) if gif && attachment.extras.gif => {
+                (true, None) if gif && attachment.extras.is_gif() => {
                     attachment.kind = AttachmentKind::Document;
-                    attachment.extras.gif = false;
+                    attachment.extras.hold_gif();
                     attachment.spoiler = false;
                 }
                 (false, None) if gif && attachment.kind == AttachmentKind::Document => {
                     attachment.kind = AttachmentKind::Video;
-                    attachment.extras.gif = true;
+                    attachment.extras.set_gif(true);
                 }
                 _ => {}
             }
@@ -129,33 +130,49 @@ impl ComposerAttachment {
     /// Whether the tray can switch between files and compressed media:
     /// some attachment is a photo, video or GIF file.
     pub fn can_send_as_files(list: &[Self]) -> bool {
-        list.iter().any(|attachment| {
-            !attachment.extras.file_only
-                && (media_kind_for(&attachment.path).is_some() || is_gif_path(&attachment.path))
-        })
+        list.iter().any(Self::switchable)
+    }
+
+    /// A photo, video or GIF file that could go either as media or as a
+    /// file. A file kept as a file (`keep_as_file`) cannot.
+    fn switchable(&self) -> bool {
+        !self.extras.file_only()
+            && (media_kind_for(&self.path).is_some() || is_gif_path(&self.path))
+    }
+
+    /// Whether the tray is in "Send without compression": it has files
+    /// that could go as media and all of those go as files. The one rule
+    /// for the checkbox, the next drop and the send options; a file kept
+    /// as a file and a plain document do not count either way.
+    pub fn sends_as_files(list: &[Self]) -> bool {
+        Self::can_send_as_files(list)
+            && list
+                .iter()
+                .filter(|att| att.switchable())
+                .all(|att| att.kind == AttachmentKind::Document)
     }
 
     /// What was read about the file showed it can only go as a file.
     pub fn keep_as_file(&mut self) {
         self.kind = AttachmentKind::Document;
         self.spoiler = false;
-        self.extras.gif = false;
-        self.extras.file_only = true;
+        self.extras.set_gif(false);
+        self.extras.set_photo(PhotoPrep::FileOnly);
     }
 
     /// The picture a photo shows and goes out as: the JPEG made for it, or
     /// the file itself.
     pub fn photo_file(&self) -> &Path {
-        self.extras.photo_jpeg.as_deref().unwrap_or(&self.path)
+        self.extras.photo_jpeg().unwrap_or(&self.path)
     }
 
     /// tdesktop `modifications.gif = !hasAudio`: an `.mp4` video may be a
     /// GIF when it has no sound track. This says whether the file is worth
     /// checking with [`without_sound_track`]; the check runs ffprobe, so the
-    /// UI does it in the background and then sets `extras.gif`.
+    /// UI does it in the background and then sets `extras.is_gif()`.
     pub fn needs_sound_check(&self) -> bool {
         self.kind == AttachmentKind::Video
-            && !self.extras.gif
+            && !self.extras.is_gif()
             && self
                 .path
                 .extension()
@@ -167,7 +184,7 @@ impl ComposerAttachment {
     /// sent: it is a GIF and goes alone (one file, separate messages, or a
     /// video whose sound was taken out, which leaves the album).
     pub fn sends_as_animation(&self, tray_len: usize, grouped: bool) -> bool {
-        self.extras.gif && (tray_len == 1 || !grouped || self.extras.sound_removed)
+        self.extras.is_gif() && (tray_len == 1 || !grouped || self.extras.sound_removed())
     }
 
     /// The album this attachment can share (tdesktop `GroupTypeForFile`):
@@ -177,7 +194,7 @@ impl ComposerAttachment {
     fn album_type(&self) -> Option<AlbumType> {
         match self.kind {
             AttachmentKind::VideoNote => None,
-            _ if self.extras.gif && self.extras.sound_removed => None,
+            _ if self.extras.sound_removed() => None,
             AttachmentKind::Photo | AttachmentKind::Video => Some(AlbumType::PhotoVideo),
             AttachmentKind::Document if is_audio_path(&self.path) => Some(AlbumType::Music),
             AttachmentKind::Document => Some(AlbumType::File),
@@ -229,9 +246,7 @@ impl ComposerAttachment {
         if paths.is_empty() {
             return Ok(0);
         }
-        let as_files = list
-            .iter()
-            .any(|att| att.kind == AttachmentKind::Document && media_kind_for(&att.path).is_some());
+        let as_files = Self::sends_as_files(list);
         // A lone `.gif` goes out as a GIF (an animation, with a caption
         // like any media); next to other files it stays a file.
         let gif_alone =
@@ -251,19 +266,19 @@ impl ComposerAttachment {
             .collect();
         let had_gif = list
             .iter()
-            .any(|att| is_gif_path(&att.path) && att.extras.gif);
+            .any(|att| is_gif_path(&att.path) && att.extras.is_gif());
         let added = Self::append_planned(list, &planned)?;
         if gif_alone && let Some(first) = list.first_mut() {
-            first.extras.gif = true;
+            first.extras.set_gif(true);
         }
         if had_gif {
             // An animated `.gif` file is only sent alone: next to other files it is a file.
             for att in list
                 .iter_mut()
-                .filter(|att| is_gif_path(&att.path) && att.extras.gif)
+                .filter(|att| is_gif_path(&att.path) && att.extras.is_gif())
             {
                 att.kind = AttachmentKind::Document;
-                att.extras.gif = false;
+                att.extras.set_gif(false);
             }
         }
         Ok(added)
@@ -335,24 +350,32 @@ impl ComposerAttachment {
     }
 }
 
-/// Parity slice (platform-paste-image): persist clipboard image bytes as a
-/// temp file and pick it as a photo attachment. The temp file lives until the
-/// OS reclaims it; the send path is canonicalized at pick time like any
+/// Parity slice (platform-paste-image): persist clipboard image bytes in a
+/// folder of the app's private work root (`quill-send-photos`, which the
+/// startup sweep empties of stale entries and which is removed at exit) and
+/// pick the file as a photo attachment. The file is made new, readable by
+/// its owner only; the send path is canonicalized at pick time like any
 /// user-picked file. Returns `None` when the bytes can't be persisted.
 pub fn clipboard_image_attachment(bytes: &[u8], extension: &str) -> Option<ComposerAttachment> {
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    // A process-wide counter keeps two pastes in the same clock tick apart.
+    use std::io::Write as _;
+    // A process-wide counter keeps two pastes apart.
     static PASTE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let seq = PASTE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!(
-        "quill-paste-{stamp}-{seq}-{}.{}",
-        std::process::id(),
-        extension
-    ));
-    std::fs::write(&path, bytes).ok()?;
+    let folder = crate::scratch::temp_work_dir("quill-send-photos")
+        .join(format!("paste-{}-{seq}", std::process::id()));
+    crate::local_path::secure_create_dir(&folder).ok()?;
+    crate::scratch::remove_at_exit(folder.clone());
+    let path = folder.join(format!("quill-paste-{seq}.{extension}"));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&path).ok()?;
+    file.write_all(bytes).ok()?;
+    drop(file);
     ComposerAttachment::pick(&path, AttachmentKind::Photo)
 }
 
@@ -427,6 +450,25 @@ mod tests {
     }
 
     #[test]
+    fn a_file_kept_as_a_file_does_not_switch_the_tray_to_files() {
+        let mut wide = attachment("wide.jpg", AttachmentKind::Photo);
+        wide.keep_as_file();
+        let mut list = vec![wide, attachment("a.jpg", AttachmentKind::Photo)];
+        assert!(
+            !ComposerAttachment::sends_as_files(&list),
+            "the checkbox and the next drop agree: compressed"
+        );
+        ComposerAttachment::set_send_as_files(&mut list, true);
+        assert!(ComposerAttachment::sends_as_files(&list));
+        ComposerAttachment::set_send_as_files(&mut list, false);
+        assert!(!ComposerAttachment::sends_as_files(&list));
+        assert_eq!(list[0].kind, AttachmentKind::Document, "still a file");
+        assert_eq!(list[1].kind, AttachmentKind::Photo);
+        let only_file = vec![attachment("b.pdf", AttachmentKind::Document)];
+        assert!(!ComposerAttachment::sends_as_files(&only_file));
+    }
+
+    #[test]
     fn files_and_media_do_not_share_an_album() {
         let item = |name: &str, kind| ComposerAttachment {
             path: PathBuf::from(name),
@@ -474,11 +516,23 @@ mod tests {
         assert!(att.path.extension().and_then(|e| e.to_str()) == Some("png"));
         assert!(att.path.is_file());
         assert_eq!(fs::read(&att.path).expect("read back"), bytes);
+        // In the swept work folder, readable by its owner only.
+        assert!(
+            att.path.to_string_lossy().contains("quill-send-photos"),
+            "{:?}",
+            att.path
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = fs::metadata(&att.path).expect("meta").permissions().mode();
+            assert_eq!(mode & 0o077, 0, "no access for group or others");
+        }
         fs::remove_file(&att.path).ok();
     }
 
     /// Parity slice (platform-paste-image): distinct pastes get distinct temp
-    /// files (timestamp + sequence + pid in the name), even in the same clock tick.
+    /// files (a folder of their own: sequence + pid), even in the same clock tick.
     #[test]
     fn clipboard_image_attachment_names_are_unique() {
         let bytes: &[u8] = &[0x89, b'P', b'N', b'G'];
@@ -499,20 +553,20 @@ mod tests {
         let mut list = Vec::new();
         ComposerAttachment::append_dropped_files(&mut list, std::slice::from_ref(&gif)).unwrap();
         assert_eq!(list[0].kind, AttachmentKind::Video);
-        assert!(list[0].extras.gif);
+        assert!(list[0].extras.is_gif());
         // As a file and back.
         assert!(ComposerAttachment::can_send_as_files(&list));
         ComposerAttachment::set_send_as_files(&mut list, true);
         assert_eq!(list[0].kind, AttachmentKind::Document);
-        assert!(!list[0].extras.gif);
+        assert!(!list[0].extras.is_gif());
         ComposerAttachment::set_send_as_files(&mut list, false);
         assert_eq!(list[0].kind, AttachmentKind::Video);
-        assert!(list[0].extras.gif);
+        assert!(list[0].extras.is_gif());
         // Another file turns the GIF into a file; the photo stays a photo.
         ComposerAttachment::append_dropped_files(&mut list, std::slice::from_ref(&photo)).unwrap();
         let kinds: Vec<_> = list.iter().map(|att| att.kind).collect();
         assert_eq!(kinds, [AttachmentKind::Document, AttachmentKind::Photo]);
-        assert!(list.iter().all(|att| !att.extras.gif));
+        assert!(list.iter().all(|att| !att.extras.is_gif()));
         // Dropped together with a photo, it is a file too.
         let mut both = Vec::new();
         ComposerAttachment::append_dropped_files(&mut both, &[gif, photo]).unwrap();
@@ -522,12 +576,31 @@ mod tests {
     }
 
     #[test]
+    fn a_gif_choice_survives_send_without_compression_on_and_off() {
+        let mut silent = attachment("a.mp4", AttachmentKind::Video);
+        silent.extras.set_gif(true);
+        let mut muted = attachment("b.mp4", AttachmentKind::Video);
+        muted.extras.gif = GifMode::SoundRemoved;
+        let mut list = [silent, muted];
+        ComposerAttachment::set_send_as_files(&mut list, true);
+        assert!(list.iter().all(|att| att.kind == AttachmentKind::Document));
+        assert!(
+            list.iter().all(|att| !att.extras.is_gif()),
+            "files, not animations"
+        );
+        assert!(list.iter().all(|att| !att.extras.sound_removed()));
+        ComposerAttachment::set_send_as_files(&mut list, false);
+        assert!(list.iter().all(|att| att.kind == AttachmentKind::Video));
+        assert_eq!(list[0].extras.gif, GifMode::Gif);
+        assert_eq!(list[1].extras.gif, GifMode::SoundRemoved);
+    }
+
+    #[test]
     fn gif_videos_leave_the_album_only_when_their_sound_was_taken_out() {
         let mut silent = attachment("a.mp4", AttachmentKind::Video);
-        silent.extras.gif = true;
+        silent.extras.set_gif(true);
         let mut muted = attachment("b.mp4", AttachmentKind::Video);
-        muted.extras.gif = true;
-        muted.extras.sound_removed = true;
+        muted.extras.gif = GifMode::SoundRemoved;
         let photo = attachment("c.jpg", AttachmentKind::Photo);
         let list = [silent.clone(), photo.clone(), muted.clone()];
         let groups = ComposerAttachment::split_for_send(&list, true);
@@ -664,7 +737,7 @@ mod tests {
         assert!(!without_sound_track(&root.join("missing.mp4")));
         let mut att = ComposerAttachment::pick(&silent, AttachmentKind::Video).unwrap();
         assert!(att.needs_sound_check());
-        att.extras.gif = true;
+        att.extras.set_gif(true);
         assert!(!att.needs_sound_check());
         let photo = ComposerAttachment::pick(&loud, AttachmentKind::Photo).unwrap();
         assert!(!photo.needs_sound_check());
@@ -680,11 +753,10 @@ mod tests {
         }
         let mut list = Vec::new();
         ComposerAttachment::append_dropped_files(&mut list, std::slice::from_ref(&clip)).unwrap();
-        list[0].extras.gif = true;
-        list[0].extras.sound_removed = true;
+        list[0].extras.gif = GifMode::SoundRemoved;
         ComposerAttachment::append_dropped_files(&mut list, std::slice::from_ref(&photo)).unwrap();
         assert_eq!(list.len(), 2);
-        assert!(list[0].extras.gif && list[0].extras.sound_removed);
+        assert!(list[0].extras.sound_removed());
         assert_eq!(list[0].kind, AttachmentKind::Video);
         let _ = fs::remove_dir_all(&root);
     }

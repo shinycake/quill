@@ -10,7 +10,7 @@
 //! clients; a raw ALSA `hw:` device may refuse, in which case the tap
 //! reports an error.
 
-use crate::calls::capture::mic_cpal::CpalMic;
+use crate::calls::capture::mic_cpal::{CpalMic, MicHealth};
 use crate::calls::capture::{
     AudioFrame, CaptureError, FrameSink, LevelCell, MicCapture, MicControls,
 };
@@ -34,7 +34,7 @@ pub trait LevelSource {
 pub struct LevelTap {
     _device: MicThread<Infallible>,
     controls: Arc<MicControls>,
-    error: Arc<Mutex<Option<String>>>,
+    health: MicHealth,
 }
 
 impl LevelTap {
@@ -44,7 +44,7 @@ impl LevelTap {
     pub fn open_default() -> Result<Self, String> {
         let controls = Arc::new(MicControls::new(false, Arc::new(LevelCell::default())));
         let mut mic = CpalMic::new(controls.clone());
-        let error = mic.error_slot();
+        let health = mic.health();
         let device = MicThread::open(
             "quill-level-tap",
             move || {
@@ -58,7 +58,7 @@ impl LevelTap {
         Ok(Self {
             _device: device,
             controls,
-            error,
+            health,
         })
     }
 }
@@ -69,7 +69,7 @@ impl LevelSource for LevelTap {
     }
 
     fn error(&self) -> Option<String> {
-        self.error.lock_or_recover().clone()
+        self.health.error()
     }
 }
 

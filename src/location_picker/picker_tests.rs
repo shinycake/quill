@@ -26,7 +26,7 @@ const SIZE: MapSize = MapSize {
 };
 
 fn fresh() -> LocationPicker {
-    LocationPicker::open(ChatId(7), None, point(31., 35.))
+    LocationPicker::open(ChatId(7), None, point(31., 35.), 0)
 }
 
 #[test]
@@ -45,7 +45,7 @@ fn without_a_fix_it_starts_at_the_country_and_waits() {
 #[test]
 fn a_previous_fix_starts_there_with_venues_and_address() {
     let here = point(40.7, -74.);
-    let mut picker = LocationPicker::open(ChatId(7), Some(here), point(31., 35.));
+    let mut picker = LocationPicker::open(ChatId(7), Some(here), point(31., 35.), 0);
     assert_eq!(picker.view().zoom(), START_ZOOM);
     assert!(picker.can_search());
     let (generation, at, query) = picker.venue_query_to_send().expect("venues");
@@ -96,6 +96,51 @@ fn moving_hides_the_address_and_returning_restores_it() {
     );
     assert!(!picker.address_postponed());
     assert!(!picker.places_in_area_shown());
+}
+
+/// Sweep 03-086: an address kept for place A is not shown for place B when
+/// the pin is moved again before B's address arrives.
+#[test]
+fn a_hidden_address_is_not_restored_for_another_place() {
+    let mut picker = fresh();
+    let a = point(48.85, 2.35);
+    picker.geolocated(GeoOutcome::Found(a), true);
+    let _ = picker.take_address_job();
+    picker.address_resolved(a, Some("A street".into()));
+    let start = picker.view();
+    // Drag to B and rest: B's lookup starts.
+    let b_view = start.panned(400., 0.);
+    picker.moved_to(b_view);
+    picker.move_ended();
+    picker.resolve_postponed();
+    let b = picker.take_address_job().expect("B is looked up");
+    // Drag slightly again before it answers and release at B.
+    picker.moved_to(b_view);
+    picker.move_ended();
+    assert_ne!(
+        picker.address_line(),
+        AddressLine::Text("A street"),
+        "not A's address under B"
+    );
+    picker.address_resolved(b, Some("B street".into()));
+    assert_eq!(picker.address_line(), AddressLine::Text("B street"));
+}
+
+/// An address that arrives while the pin is lifted is not drawn under it;
+/// it comes back when the pin rests at the place it is for.
+#[test]
+fn an_address_answered_while_the_pin_is_lifted_waits_for_its_return() {
+    let mut picker = fresh();
+    let here = point(48.85, 2.35);
+    picker.geolocated(GeoOutcome::Found(here), true);
+    let _ = picker.take_address_job();
+    let start = picker.view();
+    picker.moved_to(start.panned(40., 0.));
+    picker.address_resolved(here, Some("Street".into()));
+    assert_eq!(picker.address_line(), AddressLine::Loading);
+    picker.moved_to(start);
+    picker.move_ended();
+    assert_eq!(picker.address_line(), AddressLine::Text("Street"));
 }
 
 #[test]
@@ -175,6 +220,26 @@ fn search_debounces_and_restores_the_nearby_list() {
     assert!(!picker.search_debounce_pending());
 }
 
+/// Sweep 03-085: closing the search after a failed lookup asks again
+/// instead of leaving the list on the spinner with nothing pending.
+#[test]
+fn closing_the_search_after_a_failed_lookup_asks_again() {
+    let mut picker = fresh();
+    picker.geolocated(GeoOutcome::Found(point(48.85, 2.35)), true);
+    let (first, ..) = picker.venue_query_to_send().expect("nearby");
+    picker.venue_query_sent(first);
+    picker.venues_failed(first);
+    picker.search_changed(Some("p".into()));
+    assert_eq!(picker.venues(), &VenueList::Loading);
+    picker.search_changed(None);
+    assert_eq!(picker.venues(), &VenueList::Loading);
+    let (again, _, query) = picker.venue_query_to_send().expect("asked again");
+    assert_ne!(again, first);
+    assert_eq!(query, "");
+    picker.venues_answered(again, vec![venue("Near")]);
+    assert_eq!(picker.venues(), &VenueList::Found(vec![venue("Near")]));
+}
+
 #[test]
 fn tiles_follow_the_resting_view() {
     let mut picker = fresh();
@@ -209,4 +274,77 @@ fn tiles_are_bounded() {
         picker.tile_answered(n, Some(FileId(n as i32)));
     }
     assert!(picker.tiles().len() <= 24);
+}
+
+/// Fails every ask for the current view's tile until the picker stops
+/// asking, and returns the tile's key.
+fn fail_the_tile_until_it_rests(picker: &mut LocationPicker) -> TileKey {
+    let key = picker.tile_to_request().expect("tile");
+    let mut asks = 0u64;
+    while let Some(again) = picker.tile_to_request() {
+        assert_eq!(again, key);
+        asks += 1;
+        assert!(asks <= 3, "a failing tile is not asked for without end");
+        picker.tile_requested(key, asks);
+        assert_eq!(picker.tile_to_request(), None, "one ask at a time");
+        assert!(picker.tile_answered(asks, None));
+    }
+    assert_eq!(asks, 3, "a lost answer is asked again, a few times");
+    key
+}
+
+#[test]
+fn a_failed_tile_is_asked_a_few_times_then_again_once_the_map_rests() {
+    let mut picker = fresh();
+    picker.set_map_size(SIZE);
+    let view = picker.view();
+    let key = fail_the_tile_until_it_rests(&mut picker);
+    // Away and back to the very same view: the same tile, asked again.
+    picker.moved_to(view.panned(100., 0.));
+    picker.moved_to(view);
+    picker.move_ended();
+    assert_eq!(picker.tile_to_request(), Some(key), "asked after a move");
+    picker.tile_requested(key, 9);
+    assert!(picker.tile_answered(9, Some(FileId(5))));
+    assert_eq!(picker.tile_to_request(), None);
+    assert_eq!(picker.tiles(), vec![(key, FileId(5))]);
+}
+
+#[test]
+fn a_failed_tile_is_asked_again_after_a_resize() {
+    let mut picker = fresh();
+    picker.set_map_size(SIZE);
+    fail_the_tile_until_it_rests(&mut picker);
+    picker.set_map_size(SIZE);
+    assert_eq!(
+        picker.tile_to_request(),
+        None,
+        "same size keeps the failure"
+    );
+    picker.set_map_size(MapSize {
+        width: SIZE.width + 10,
+        ..SIZE
+    });
+    assert!(picker.tile_to_request().is_some());
+}
+
+#[test]
+fn a_tile_whose_ask_cannot_be_sent_is_not_asked_on_every_pass() {
+    let mut picker = fresh();
+    picker.set_map_size(SIZE);
+    let key = picker.tile_to_request().expect("tile");
+    for _ in 0..3 {
+        assert_eq!(picker.tile_to_request(), Some(key));
+        picker.tile_unsent(key);
+    }
+    assert_eq!(picker.tile_to_request(), None, "it waits for a move");
+    // A refused send between two failed answers counts with them.
+    let mut picker = fresh();
+    picker.set_map_size(SIZE);
+    picker.tile_requested(key, 1);
+    assert!(picker.tile_answered(1, None));
+    picker.tile_unsent(key);
+    picker.tile_requested(key, 2);
+    assert!(picker.tile_answered(2, None));
+    assert_eq!(picker.tile_to_request(), None);
 }

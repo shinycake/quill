@@ -6,7 +6,7 @@
 //! options of its storage optimizer.
 
 use super::super::app::QuillApp;
-use super::super::index_sliders::StepSlider;
+use super::super::index_sliders::{StepSlider, StorageDrag};
 use super::data_storage::format_storage_bytes;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -111,8 +111,10 @@ impl QuillApp {
             .sum();
         let clearing = session
             .as_ref()
-            .is_some_and(|s| s.settings.storage_clearing);
-        let freed = session.as_ref().and_then(|s| s.settings.storage_freed);
+            .is_some_and(|s| s.settings.storage_clear.is_clearing());
+        let freed = session
+            .as_ref()
+            .and_then(|s| s.settings.storage_clear.freed());
         let actions =
             self.local_storage_actions(cx, &categories_selected(self), selected_size, clearing);
         section = section.child(self.setting_spot(&["data.clear_cache"], actions, cx));
@@ -242,7 +244,7 @@ impl QuillApp {
     }
 
     /// Send the confirmed clear (`optimizeStorage`).
-    fn run_storage_clear(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn run_storage_clear(&mut self, cx: &mut Context<Self>) {
         let Some(pending) = self.settings.storage_confirm.take() else {
             return;
         };
@@ -254,16 +256,20 @@ impl QuillApp {
             ),
             StorageClear::Chat(chat_id) => (Vec::new(), vec![chat_id]),
         };
-        if pending == StorageClear::Selected {
-            self.settings.storage_selected.clear();
-        }
-        if let Some(live) = self.live.as_mut() {
+        let sent = if let Some(live) = self.live.as_mut() {
             // Send failures land on `data_storage_error`, shown on this
             // dialog (the S3 pattern).
-            let _ = live.driver.clear_storage(&types, &chats);
+            live.driver.clear_storage(&types, &chats).is_ok()
         } else if let Some(demo) = self.demo_session.as_mut() {
-            demo.settings.storage_stats = None;
-            demo.settings.storage_freed = Some(54_525_952);
+            demo.settings.storage_stats = Default::default();
+            demo.settings.storage_clear = quill::state::StorageClear::Freed(54_525_952);
+            true
+        } else {
+            false
+        };
+        // The ticks go with a clear that went out; a refused one keeps them.
+        if sent && pending == StorageClear::Selected {
+            self.settings.storage_selected.clear();
         }
         cx.notify();
     }
@@ -341,7 +347,7 @@ impl QuillApp {
     /// Start the two limit sliders on what TDLib reports. They are made
     /// once per visit (`open_data_storage` drops them).
     pub(super) fn ensure_storage_sliders(&mut self, cx: &mut Context<Self>) {
-        let sliders = &self.preferences.index_sliders;
+        let sliders = &self.index_sliders;
         if sliders.contains(StepSlider::StorageSize) && sliders.contains(StepSlider::StorageKeep) {
             return;
         }
@@ -411,12 +417,31 @@ impl QuillApp {
         self.apply_storage_limits(size, keep, cx);
     }
 
+    /// Leaving the page with a drag that never released: its limits go now.
+    pub(in crate::ui) fn apply_unreleased_storage_drag(&mut self) {
+        let drag = std::mem::take(&mut self.index_sliders.storage);
+        if let StorageDrag::Moved {
+            account,
+            size,
+            keep,
+        } = drag
+            && self.session().is_some_and(|s| s.account == account)
+        {
+            self.send_storage_limits(size, keep);
+        }
+    }
+
     fn apply_storage_limits(
         &mut self,
         size: Option<i64>,
         keep: Option<i64>,
         cx: &mut Context<Self>,
     ) {
+        self.send_storage_limits(size, keep);
+        cx.notify();
+    }
+
+    fn send_storage_limits(&mut self, size: Option<i64>, keep: Option<i64>) {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.set_storage_limits(size, keep);
         } else if let Some(demo) = self.demo_session.as_mut() {
@@ -432,7 +457,6 @@ impl QuillApp {
                 demo.settings.storage_limits.apply_option(name, &value);
             }
         }
-        cx.notify();
     }
 }
 

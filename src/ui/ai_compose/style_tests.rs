@@ -13,8 +13,12 @@ use gpui_kit::{
     Entity, Modifiers, ScrollDelta, ScrollEvent, TouchPhase, VisualTestContext, point, px,
 };
 use quill::ai_compose::{StyleChoice, StyleLimitNotice, prefs};
+use quill::ids::RequestId;
 use quill::settings::CustomKeybinding;
 use quill::state::{StyleEditAnswer, StyleNotice};
+
+/// The Create the editor under test waits on.
+const SAVE: RequestId = RequestId(41);
 
 fn toasts(vcx: &mut VisualTestContext) -> usize {
     vcx.update(|window, cx| window.notifications(cx).len())
@@ -103,7 +107,14 @@ fn a_saved_style_closes_the_editor_and_is_selected(cx: &mut gpui_kit::TestAppCon
         };
         let ai = &mut session.messages.ai_compose;
         let pirate = ai.styles.find("pirate").cloned();
-        ai.style_edit = pirate.map(|style| StyleEditAnswer { outcome: Ok(style) });
+        ai.style_edit = pirate.map(|style| StyleEditAnswer {
+            request: SAVE,
+            outcome: Ok(style),
+        });
+        // An answer to some other request would leave the editor open.
+        if let Some(editor) = app.ai_style_editor_mut() {
+            editor.save = StyleSave::Sent { request: SAVE };
+        }
         cx.notify();
     });
     frames(&mut main);
@@ -116,6 +127,36 @@ fn a_saved_style_closes_the_editor_and_is_selected(cx: &mut gpui_kit::TestAppCon
     });
     assert_eq!(picked, Some((true, StyleChoice::Style("pirate".into()))));
     assert_eq!(toasts(&mut main), before + 1, "the Created toast");
+}
+
+#[gpui_kit::test]
+fn another_requests_save_answer_leaves_the_editor_open(cx: &mut gpui_kit::TestAppContext) {
+    let (app, mut main) = open_main(cx);
+    open_editor(&app, &mut main);
+    app.update(&mut main, |app, cx| {
+        let Some(session) = app.demo_session.as_mut() else {
+            return;
+        };
+        let ai = &mut session.messages.ai_compose;
+        let pirate = ai.styles.find("pirate").cloned();
+        ai.style_edit = pirate.map(|style| StyleEditAnswer {
+            request: RequestId(SAVE.0 + 1),
+            outcome: Ok(style),
+        });
+        if let Some(editor) = app.ai_style_editor_mut() {
+            editor.save = StyleSave::Sent { request: SAVE };
+        }
+        cx.notify();
+    });
+    frames(&mut main);
+    assert_eq!(view(&app, &mut main), Some(AiComposeView::StyleEditor));
+    let waiting = app.read_with(&main, |app, _| {
+        app.ai_compose
+            .open
+            .as_ref()
+            .and_then(|open| open.editor.as_ref().map(|editor| editor.save))
+    });
+    assert_eq!(waiting, Some(StyleSave::Sent { request: SAVE }));
 }
 
 #[gpui_kit::test]
@@ -166,7 +207,10 @@ fn the_saved_style_limit_toasts_once(cx: &mut gpui_kit::TestAppContext) {
 fn the_apply_hotkey_without_a_style_only_toasts(cx: &mut gpui_kit::TestAppContext) {
     let (app, mut main) = open_main(cx);
     close_box(&app, &mut main);
-    prefs::update(|prefs| prefs.bound_style_name = None);
+    let account = app.read_with(&main, |app, _| app.current_account());
+    if let Some(account) = account {
+        prefs::update(|prefs| prefs.bind_style(&account, None));
+    }
     main.update(|_, cx| {
         apply_custom_bindings(
             cx,

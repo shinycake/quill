@@ -17,7 +17,7 @@ fn demo_grants(app: &mut QuillApp, _: &mut Window, cx: &mut Context<QuillApp>) {
         let _ = quill::settings::add_account(&root, "Work");
     }
     let account = crate::ui::agent_state::active_account();
-    grants::update(&account, |g| {
+    let _ = grants::update(&account, |g| {
         if empty {
             return;
         }

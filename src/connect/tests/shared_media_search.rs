@@ -38,7 +38,7 @@ fn searching_a_tab_sends_the_query_with_its_filter_and_pages_with_it() {
             .unwrap(),
         )
         .unwrap();
-    driver.session.open_chat = Some(ChatId(7));
+    driver.session.open = crate::state::OpenView::of(Some(ChatId(7)));
     assert!(driver.open_shared_media().unwrap());
     // The Media tab does not search.
     let before = recorder.snapshot().len();
@@ -78,7 +78,7 @@ fn searching_a_tab_sends_the_query_with_its_filter_and_pages_with_it() {
             .media
             .shared_media
             .tab_state(SharedMediaTab::Files);
-        state.status = SharedMediaTabStatus::Ready;
+        state.status = SharedMediaTabStatus::ready();
         state.next_from = MessageId(40);
     }
     driver

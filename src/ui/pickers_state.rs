@@ -103,5 +103,17 @@ impl PickerUi {
     }
 }
 
-/// Nothing to say: its state is the account's only app-side.
-impl super::on_screen::Farewell for PickerUi {}
+/// The account's session keeps the GIF gate and the status-choices
+/// resolver open while a panel shows them: both close on the client being
+/// left, so neither keeps downloading and resolving behind the next
+/// account (the next screen's first sync opens what it shows).
+impl super::on_screen::Farewell for PickerUi {
+    fn farewell(app: &mut QuillApp, _window: &mut Window, _cx: &mut Context<QuillApp>) {
+        if let Some(live) = app.live.as_mut() {
+            live.driver.close_gif_panel();
+            live.driver.close_emoji_status_choices();
+        } else if let Some(session) = app.demo_session.as_mut() {
+            session.stickers.gifs.close();
+        }
+    }
+}

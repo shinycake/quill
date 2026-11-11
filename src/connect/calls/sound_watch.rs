@@ -47,6 +47,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             health.frames, health.peak
         ));
         if let Err(err) = engine.reopen_call_sound(call_id) {
+            watch.reopen_failed(now);
             call_log(&format!(
                 "[call] {call_id} sound: reopening the output failed: {err}"
             ));

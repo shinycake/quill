@@ -105,7 +105,14 @@ fn leaving_the_story_leaves_only_its_slot() {
         vec![4242],
         "only its native call stops"
     );
-    assert_eq!(h.driver.session.calls.left_group_call, None);
+    let calls = &h.driver.session.calls;
+    assert!(
+        calls
+            .group_call_ids()
+            .into_iter()
+            .flatten()
+            .all(|id| !calls.group_call_left(id))
+    );
 }
 
 #[test]
@@ -193,7 +200,7 @@ fn a_late_join_answer_does_not_land_in_a_new_story_slot() {
         .calls
         .story_stream
         .as_ref()
-        .map(|call| call.join_payload.clone());
+        .map(|call| call.transport.answer().to_string());
     assert_eq!(payload, Some(String::new()), "the old answer is dropped");
 }
 

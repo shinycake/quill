@@ -89,7 +89,7 @@ pub(super) fn turn_on() {
 }
 
 pub(super) fn grant(chat_id: i64, scope: Scope) {
-    grants::update(&AccountKey::primary(), |g| {
+    let _ = grants::update(&AccountKey::primary(), |g| {
         g.chats.insert(
             chat_id,
             ChatGrant {
@@ -530,25 +530,35 @@ fn the_composer_send_goes_to_the_agent_path_and_read_only_refuses(cx: &mut TestA
                 session.store_composer_draft(
                     ChatId(11),
                     quill::composer::DraftTopic::Chat,
-                    Some(quill::telegram::ChatDraft {
-                        text: "hi there".into(),
-                        rich: None,
-                        reply_to_message_id: None,
-                        quote: None,
-                        item: Default::default(),
-                        suggested_post: None,
-                    }),
+                    Some(quill::telegram::ChatDraft::text_only("hi there")),
                 );
             }
         })
     });
     assert!(row_draft(vcx).is_some(), "the chat holds the draft");
 
+    // A clear meant for another account's chat of the same id leaves the box.
+    let reply = drive(
+        &app,
+        vcx,
+        UiCommand::ComposerSent {
+            account: quill::ids::AccountKey("another-account".into()),
+            chat_id: 11,
+            text: "hi there".into(),
+        },
+    );
+    assert!(matches!(reply, Ok(UiReply::Ok)), "{reply:?}");
+    assert_eq!(
+        vcx.update(|_, cx| app.read(cx).composer_markup(cx)),
+        "hi there"
+    );
+
     // The agent path reports the send: the box clears.
     let reply = drive(
         &app,
         vcx,
         UiCommand::ComposerSent {
+            account: send.account.clone(),
             chat_id: 11,
             text: "hi there".into(),
         },
@@ -624,6 +634,75 @@ fn a_tool_that_gave_up_gets_nothing_injected(cx: &mut TestAppContext) {
         .node(&search)
         .and_then(|n| n.value.clone());
     assert_eq!(value, None, "nothing was typed for a tool that gave up");
+}
+
+/// Two agents' input commands do not interleave: the second waits for the
+/// first to answer, and both do answer.
+#[gpui_kit::test]
+fn input_commands_run_one_at_a_time(cx: &mut TestAppContext) {
+    use crate::ui::agent_state::Driver;
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    turn_on();
+    grant(11, Scope::ReadWrite);
+    let _presence = activity::connect("Test agent");
+    settle(vcx);
+    let tree = read_tree(&app, vcx);
+    let search = tree
+        .nodes
+        .iter()
+        .find(|n| n.role.ends_with("Input") && n.bounds.is_some())
+        .map(|n| n.id.clone())
+        .unwrap_or_else(|| panic!("a text input"));
+    let _ = drive(&app, vcx, click(Target::Node(search.clone())));
+
+    let post = |text: &str| {
+        bridge::post("Test agent", UiCommand::TypeText { text: text.into() })
+            .unwrap_or_else(|_| panic!("posted"))
+    };
+    let (first, second) = (post("a"), post("b"));
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.agent_driver_tick(window, cx);
+        })
+    });
+    let waiting = app.read_with(vcx, |app, _| match &app.agent_bridge.driver {
+        Driver::Running { waiting, .. } => Some(waiting.len()),
+        Driver::Idle => None,
+    });
+    assert_eq!(waiting, Some(1), "one runs, the other waits its turn");
+    let mut answers = (None, None);
+    for _ in 0..80 {
+        pump(&app, vcx);
+        answers.0 = answers.0.or_else(|| first.poll());
+        answers.1 = answers.1.or_else(|| second.poll());
+        if answers.0.is_some() && answers.1.is_some() {
+            break;
+        }
+    }
+    assert!(
+        matches!(answers.0, Some(UiReply::Done { .. })),
+        "{:?}",
+        answers.0
+    );
+    assert!(
+        matches!(answers.1, Some(UiReply::Done { .. })),
+        "{:?}",
+        answers.1
+    );
+    let idle = app.read_with(vcx, |app, _| {
+        matches!(app.agent_bridge.driver, Driver::Idle)
+    });
+    assert!(idle, "nothing runs once both answered");
+    let value = read_tree(&app, vcx)
+        .node(&search)
+        .and_then(|n| n.value.clone());
+    assert_eq!(
+        value.as_deref(),
+        Some("ab"),
+        "typed in order, not interleaved"
+    );
 }
 
 /// The cost of building the tree every frame, printed for the decision
@@ -757,11 +836,14 @@ fn a_link_resolved_after_the_step_opens_a_granted_chat_only(cx: &mut TestAppCont
                     param: &str,
                     from_agent: bool| {
         app.update_in(vcx, |app, _, cx| {
-            app.links.pending_deep_link_open = Some(crate::ui::links_state::PendingOpen {
-                chat_id: ChatId(chat),
-                action: start(param),
-                from_agent,
-            });
+            app.links.resolved = Some(crate::ui::links_state::ResolvedLink::open(
+                crate::ui::links_state::PendingOpen {
+                    chat_id: ChatId(chat),
+                    action: start(param),
+                    from_agent,
+                },
+                None,
+            ));
             cx.notify();
         });
         settle(vcx);
@@ -813,16 +895,19 @@ fn a_share_the_user_picks_replaces_an_agents_waiting_open(cx: &mut TestAppContex
     let _ = guard::take_refusals();
     app.update_in(vcx, |app, _, cx| {
         // The agent's link led to chat 12, which is not granted.
-        app.links.pending_deep_link_open = Some(crate::ui::links_state::PendingOpen {
-            chat_id: ChatId(12),
-            action: DeepLinkAction::OpenUsername {
-                domain: "demo".into(),
-                start_param: Some("secret".into()),
-                post: None,
-                story_id: None,
+        app.links.resolved = Some(crate::ui::links_state::ResolvedLink::open(
+            crate::ui::links_state::PendingOpen {
+                chat_id: ChatId(12),
+                action: DeepLinkAction::OpenUsername {
+                    domain: "demo".into(),
+                    start_param: Some("secret".into()),
+                    post: None,
+                    story_id: None,
+                },
+                from_agent: true,
             },
-            from_agent: true,
-        });
+            None,
+        ));
         // Before the next frame the user shares a link to chat 12.
         app.share.link_text = Some("https://example.com/shared".into());
         app.choose_share_chat(ChatId(12), cx);

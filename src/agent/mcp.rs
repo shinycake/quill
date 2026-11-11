@@ -10,9 +10,8 @@ use super::link::SharedStream;
 use super::server::code;
 use crate::single_instance::{Connection, Endpoint};
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::io::{self, BufRead, BufReader, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 const LATEST_PROTOCOL: &str = "2025-06-18";
@@ -53,13 +52,57 @@ fn failure(id: &Value, is_tool: bool, message: &str) -> Value {
     }
 }
 
-/// Requests sent to Quill and not yet answered: id → whether it is a tool call.
-type Pending = Arc<Mutex<HashMap<String, (Value, bool)>>>;
+const LINK_CLOSED: &str = "Quill closed the connection: it quit, or Agent access was turned off. Retry; Quill is started again if needed.";
+
+/// Requests sent to Quill and not yet answered (id → the id and whether it is
+/// a tool call), or the link's end. One lock holds both, so a request cannot
+/// be filed after the reader drained the map.
+enum Waiting {
+    Open(HashMap<String, (Value, bool)>),
+    Dead,
+}
+
+type Pending = Arc<Mutex<Waiting>>;
+
+impl Waiting {
+    /// File a request; false when the link already ended.
+    fn file(&mut self, id: &Value, is_tool: bool) -> bool {
+        match self {
+            Waiting::Open(map) => {
+                map.insert(id.to_string(), (id.clone(), is_tool));
+                true
+            }
+            Waiting::Dead => false,
+        }
+    }
+
+    fn answered(&mut self, id: &Value) {
+        if let Waiting::Open(map) = self {
+            map.remove(&id.to_string());
+        }
+    }
+
+    /// End the link and hand back what was still waiting.
+    fn end(&mut self) -> Vec<(Value, bool)> {
+        match std::mem::replace(self, Waiting::Dead) {
+            Waiting::Open(map) => map.into_values().collect(),
+            Waiting::Dead => Vec::new(),
+        }
+    }
+}
 
 struct Link {
     send: SharedStream,
-    alive: Arc<AtomicBool>,
     pending: Pending,
+}
+
+impl Link {
+    fn alive(&self) -> bool {
+        matches!(
+            *crate::locks::lock_or_recover(&self.pending),
+            Waiting::Open(_)
+        )
+    }
 }
 
 /// The MCP client's name from `initialize`, which Quill shows in prompts.
@@ -116,6 +159,7 @@ fn friendly_client_name(name: &str) -> String {
 pub fn run() -> i32 {
     let out: Out = Arc::new(Mutex::new(io::stdout()));
     let mut link: Option<Link> = None;
+    let mut subscribed: BTreeSet<String> = BTreeSet::new();
     let stdin = io::stdin();
     for line in stdin.lock().lines() {
         let Ok(line) = line else {
@@ -159,7 +203,14 @@ pub fn run() -> i32 {
                 | "resources/read"
                 | "resources/subscribe"
                 | "resources/unsubscribe"),
-            ) => forward(&out, &mut link, &id, method == "tools/call", line),
+            ) => forward(
+                &out,
+                &mut link,
+                &mut subscribed,
+                &id,
+                (method, &params),
+                line,
+            ),
             Some(other) => emit(
                 &out,
                 &error(&id, code::NO_METHOD, &format!("Unknown method {other}.")),
@@ -170,11 +221,53 @@ pub fn run() -> i32 {
     0
 }
 
-fn forward(out: &Out, link: &mut Option<Link>, id: &Value, is_tool: bool, line: &str) {
-    if link
-        .as_ref()
-        .is_none_or(|l| !l.alive.load(Ordering::SeqCst))
-    {
+/// Id prefix of the subscribe requests the bridge replays on a new link; the
+/// agent never sent them, so their answers are not passed on.
+const RESUBSCRIBE_ID: &str = "quill-resubscribe-";
+
+/// The `resources/subscribe` lines that restore `subscribed` on a new link.
+fn resubscribe_lines(subscribed: &BTreeSet<String>) -> Vec<String> {
+    subscribed
+        .iter()
+        .enumerate()
+        .map(|(n, uri)| {
+            json!({
+                "jsonrpc": "2.0",
+                "id": format!("{RESUBSCRIBE_ID}{n}"),
+                "method": "resources/subscribe",
+                "params": {"uri": uri},
+            })
+            .to_string()
+        })
+        .collect()
+}
+
+/// Remember or forget the subscription `method` made, after it was sent.
+fn note_subscription(subscribed: &mut BTreeSet<String>, method: &str, params: &Value) {
+    let Some(uri) = params.get("uri").and_then(Value::as_str) else {
+        return;
+    };
+    match method {
+        "resources/subscribe" => {
+            subscribed.insert(uri.to_string());
+        }
+        "resources/unsubscribe" => {
+            subscribed.remove(uri);
+        }
+        _ => {}
+    }
+}
+
+fn forward(
+    out: &Out,
+    link: &mut Option<Link>,
+    subscribed: &mut BTreeSet<String>,
+    id: &Value,
+    (method, params): (&str, &Value),
+    line: &str,
+) {
+    let is_tool = method == "tools/call";
+    if link.as_ref().is_none_or(|l| !l.alive()) {
         *link = None;
         match open_link(out) {
             Ok(opened) => *link = Some(opened),
@@ -183,23 +276,43 @@ fn forward(out: &Out, link: &mut Option<Link>, id: &Value, is_tool: bool, line: 
                 return;
             }
         }
+        // The old watcher stopped with its connection: watch again.
+        if let Some(live) = link.as_mut() {
+            for resubscribe in resubscribe_lines(subscribed) {
+                let _ = live
+                    .send
+                    .write_all(resubscribe.as_bytes())
+                    .and_then(|()| live.send.write_all(b"\n"))
+                    .and_then(|()| live.send.flush());
+            }
+        }
     }
     let Some(live) = link.as_mut() else {
         return;
     };
-    crate::locks::lock_or_recover(&live.pending).insert(id.to_string(), (id.clone(), is_tool));
+    if !crate::locks::lock_or_recover(&live.pending).file(id, is_tool) {
+        emit(out, &failure(id, is_tool, LINK_CLOSED));
+        return;
+    }
     let sent = live
         .send
         .write_all(line.as_bytes())
         .and_then(|()| live.send.write_all(b"\n"))
         .and_then(|()| live.send.flush());
     if sent.is_err() {
-        crate::locks::lock_or_recover(&live.pending).remove(&id.to_string());
-        live.alive.store(false, Ordering::SeqCst);
-        emit(
-            out,
-            &failure(id, is_tool, "Lost the connection to Quill. Retry."),
-        );
+        let waiting = crate::locks::lock_or_recover(&live.pending).end();
+        for (waiting_id, waiting_tool) in waiting {
+            emit(
+                out,
+                &failure(
+                    &waiting_id,
+                    waiting_tool,
+                    "Lost the connection to Quill. Retry.",
+                ),
+            );
+        }
+    } else {
+        note_subscription(subscribed, method, params);
     }
 }
 
@@ -216,26 +329,20 @@ fn open_link(out: &Out) -> Result<Link, String> {
     .map_err(|refused| refused.message())?;
     let send = SharedStream::new(Connection::new(stream));
     let recv = send.clone();
-    let alive = Arc::new(AtomicBool::new(true));
-    let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
+    let pending: Pending = Arc::new(Mutex::new(Waiting::Open(HashMap::new())));
     let reader = {
         let out = out.clone();
-        let alive = alive.clone();
         let pending = pending.clone();
-        move || relay(recv, &out, &alive, &pending)
+        move || relay(recv, &out, &pending)
     };
     crate::thread_guard::spawn_guarded("quill-mcp-relay", reader)
         .map_err(|_| "Could not start the bridge thread. Retry.".to_string())?;
-    Ok(Link {
-        send,
-        alive,
-        pending,
-    })
+    Ok(Link { send, pending })
 }
 
 /// Copy Quill's answers to stdout; when Quill goes away, fail what is still
 /// waiting so the agent is never left hanging.
-fn relay(recv: SharedStream, out: &Out, alive: &AtomicBool, pending: &Pending) {
+fn relay(recv: SharedStream, out: &Out, pending: &Pending) {
     let reader = BufReader::new(recv);
     for line in reader.lines() {
         let Ok(line) = line else {
@@ -244,31 +351,37 @@ fn relay(recv: SharedStream, out: &Out, alive: &AtomicBool, pending: &Pending) {
         if let Ok(answer) = serde_json::from_str::<Value>(&line)
             && let Some(id) = answer.get("id")
         {
-            crate::locks::lock_or_recover(pending).remove(&id.to_string());
+            if id.as_str().is_some_and(|s| s.starts_with(RESUBSCRIBE_ID)) {
+                continue;
+            }
+            crate::locks::lock_or_recover(pending).answered(id);
         }
         emit_raw(out, &line);
     }
-    alive.store(false, Ordering::SeqCst);
-    let waiting: Vec<(Value, bool)> = crate::locks::lock_or_recover(pending)
-        .drain()
-        .map(|(_, v)| v)
-        .collect();
+    let waiting = crate::locks::lock_or_recover(pending).end();
     for (id, is_tool) in waiting {
-        emit(
-            out,
-            &failure(
-                &id,
-                is_tool,
-                "Quill closed the connection: it quit, or Agent access was turned off. Retry; Quill is started again if needed.",
-            ),
-        );
+        emit(out, &failure(&id, is_tool, LINK_CLOSED));
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{failure, initialize};
+    use super::{Waiting, failure, initialize, note_subscription, resubscribe_lines};
     use serde_json::json;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn a_new_link_replays_the_subscriptions_the_agent_made() {
+        let mut subscribed = BTreeSet::new();
+        let params = json!({"uri": "quill://unread"});
+        note_subscription(&mut subscribed, "resources/subscribe", &params);
+        note_subscription(&mut subscribed, "tools/call", &json!({"uri": "x"}));
+        let lines = resubscribe_lines(&subscribed);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("resources/subscribe") && lines[0].contains("quill://unread"));
+        note_subscription(&mut subscribed, "resources/unsubscribe", &params);
+        assert!(resubscribe_lines(&subscribed).is_empty());
+    }
 
     #[test]
     fn initialize_echoes_a_supported_version_and_orients() {
@@ -282,6 +395,15 @@ mod tests {
         );
         let answer = initialize(&json!(1), &json!({"protocolVersion": "1999-01-01"}));
         assert_eq!(answer["result"]["protocolVersion"], "2025-06-18");
+    }
+
+    #[test]
+    fn a_request_filed_after_the_link_ended_is_refused_not_kept() {
+        let mut waiting = Waiting::Open(std::collections::HashMap::new());
+        assert!(waiting.file(&json!(1), true));
+        assert_eq!(waiting.end().len(), 1);
+        assert!(!waiting.file(&json!(2), true));
+        assert!(waiting.end().is_empty());
     }
 
     #[test]

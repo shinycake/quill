@@ -153,7 +153,7 @@ pub fn emoji_status_expiration(now_secs: u64, duration_secs: i32) -> Option<i32>
 /// known qualify.
 pub fn is_my_created_chat(chat: &crate::state::ChatSummary, channels: bool) -> bool {
     use crate::telegram::envelope::{ChannelMemberStatus, ChatKind};
-    if chat.my_member_status != Some(ChannelMemberStatus::Creator) {
+    if chat.member_status() != Some(ChannelMemberStatus::Creator) {
         return false;
     }
     match chat.kind {
@@ -246,9 +246,9 @@ mod created_chat_tests {
             is_channel: true,
         };
         assert!(!is_my_created_chat(&chat, true), "membership unknown");
-        chat.my_member_status = Some(ChannelMemberStatus::Administrator);
+        chat.assume_member_status(Some(ChannelMemberStatus::Administrator));
         assert!(!is_my_created_chat(&chat, true));
-        chat.my_member_status = Some(ChannelMemberStatus::Creator);
+        chat.assume_member_status(Some(ChannelMemberStatus::Creator));
         assert!(is_my_created_chat(&chat, true));
         assert!(!is_my_created_chat(&chat, false));
         chat.kind = ChatKind::BasicGroup { basic_group_id: 2 };

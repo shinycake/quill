@@ -14,6 +14,8 @@ pub(in crate::ui) struct FileAlbum<'a> {
     pub(in crate::ui) sender_status: Option<AnyElement>,
     pub(in crate::ui) receipt: OutboxReceipt,
     pub(in crate::ui) sender_avatar: Option<SenderAvatar>,
+    /// "via @bot", "Forwarded from" and the reply quote (`row_header`).
+    pub(in crate::ui) header: Option<AnyElement>,
     pub(in crate::ui) look: BubbleLook,
 }
 
@@ -23,7 +25,7 @@ pub(in crate::ui) fn file_album_history_row(
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     session: Option<&Session>,
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &crate::ui::message_text::revealed::Revealed,
     corner: CornerActions,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
@@ -35,6 +37,7 @@ pub(in crate::ui) fn file_album_history_row(
         sender_status,
         receipt,
         sender_avatar,
+        header,
         look,
     } = album;
     let Some(first) = messages.first() else {
@@ -66,8 +69,7 @@ pub(in crate::ui) fn file_album_history_row(
                 cx,
             )),
             (MessageContent::Audio(audio), Some(seek_bar)) => Some(audio_row(
-                message.id,
-                message.is_outgoing,
+                message,
                 audio,
                 files,
                 downloading,
@@ -124,6 +126,19 @@ pub(in crate::ui) fn file_album_history_row(
         chrome.avatar = Some(link.wrap(avatar));
     }
     chrome.sender_status = sender_status;
+    // Reactions close the bubble and carry its time.
+    let footer_meta = row_footer_meta(first, receipt, session, files, media_roots);
+    chrome.footer = message_footer_meta(&footer_meta);
+    let chip_row = album_reactions_owner(messages).and_then(|owner| {
+        message_reactions_row(owner, &footer_meta, false, session, files, media_roots, cx)
+    });
+    if chip_row.is_some() {
+        chrome.footer = None;
+    }
+    let stack = stack.children(chip_row);
+    chrome.bottom_bar = messages
+        .iter()
+        .find_map(|message| row_reply_bar(message, session, media_roots, cx));
     chrome.actions = corner.mount(|| message_actions_button(first.chat_id, first.id, cx));
     session_bubble_quoted(
         first.chat_id,
@@ -132,7 +147,7 @@ pub(in crate::ui) fn file_album_history_row(
         String::new(),
         first.is_outgoing,
         Some(stack.into_any_element()),
-        None,
+        header,
         look,
     )
 }

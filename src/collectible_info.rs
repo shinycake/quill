@@ -7,7 +7,8 @@
 //! and for how much, with a "Learn More" button to Fragment.
 #![deny(clippy::indexing_slicing)]
 
-use crate::ids::ChatId;
+use crate::ids::{ChatId, RequestId};
+use crate::lang::{keys, tr};
 use serde_json::Value;
 
 /// A username or a phone number.
@@ -62,6 +63,19 @@ pub fn parse_collectible_info(value: &Value) -> CollectibleInfo {
     }
 }
 
+/// The tapped item, before any request exists for it. The sender turns it
+/// into a [`CollectibleLookup`] under its own request, so a lookup with no
+/// request to answer it cannot be stored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LookupSpec {
+    pub kind: CollectibleKind,
+    /// The username without "@", or the phone number as "+digits".
+    pub entity: String,
+    pub owner_name: String,
+    pub owner_chat: Option<ChatId>,
+    pub copy_text: String,
+}
+
 /// The tapped item and the progress of its lookup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CollectibleLookup {
@@ -73,13 +87,22 @@ pub struct CollectibleLookup {
     pub owner_chat: Option<ChatId>,
     /// What "Copy Link" copies; empty for phone numbers.
     pub copy_text: String,
-    pub info: Option<CollectibleInfo>,
-    pub loading: bool,
-    /// The TDLib error of a failed lookup, until the UI has dealt with it.
-    pub failed: Option<String>,
+    pub stage: LookupStage,
 }
 
-impl CollectibleLookup {
+/// Where a lookup is. An answer or an error applies only to the `Loading`
+/// stage whose request it answers, so a lookup replaced by another one never
+/// takes the earlier one's result.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LookupStage {
+    /// `getCollectibleItemInfo` is out under this request.
+    Loading(RequestId),
+    Ready(CollectibleInfo),
+    /// The TDLib error of a failed lookup, until the UI has dealt with it.
+    Failed(String),
+}
+
+impl LookupSpec {
     pub fn new(
         entity: &str,
         owner_name: &str,
@@ -92,9 +115,58 @@ impl CollectibleLookup {
             owner_name: owner_name.to_string(),
             owner_chat,
             copy_text,
-            info: None,
-            loading: true,
-            failed: None,
+        }
+    }
+
+    /// The lookup of this item at `stage` (`Loading` under the request the
+    /// sender made for it).
+    pub fn into_lookup(self, stage: LookupStage) -> CollectibleLookup {
+        CollectibleLookup {
+            kind: self.kind,
+            entity: self.entity,
+            owner_name: self.owner_name,
+            owner_chat: self.owner_chat,
+            copy_text: self.copy_text,
+            stage,
+        }
+    }
+}
+
+impl CollectibleLookup {
+    pub fn info(&self) -> Option<&CollectibleInfo> {
+        match &self.stage {
+            LookupStage::Ready(info) => Some(info),
+            _ => None,
+        }
+    }
+
+    pub fn failure(&self) -> Option<&str> {
+        match &self.stage {
+            LookupStage::Failed(reason) => Some(reason),
+            _ => None,
+        }
+    }
+
+    pub fn is_loading(&self) -> bool {
+        matches!(self.stage, LookupStage::Loading(_))
+    }
+
+    /// The answer of `request`: taken only while that request is the one
+    /// the lookup waits for.
+    pub fn answer(&mut self, request: Option<RequestId>, info: CollectibleInfo) {
+        if let (Some(request), LookupStage::Loading(waiting)) = (request, &self.stage)
+            && *waiting == request
+        {
+            self.stage = LookupStage::Ready(info);
+        }
+    }
+
+    /// The error of `request`, under the same rule as [`Self::answer`].
+    pub fn fail(&mut self, request: Option<RequestId>, reason: String) {
+        if let (Some(request), LookupStage::Loading(waiting)) = (request, &self.stage)
+            && *waiting == request
+        {
+            self.stage = LookupStage::Failed(reason);
         }
     }
 }
@@ -138,13 +210,22 @@ pub fn title_parts(kind: CollectibleKind) -> (&'static str, &'static str) {
     }
 }
 
-/// `lng_collectible_*_info` split around the date and the price:
-/// ("This username was bought on ", "Fragment", " on ", date, " for ").
+/// `lng_collectible_*_info` up to the date: "This username was bought on ".
 pub fn info_prefix(kind: CollectibleKind) -> &'static str {
     match kind {
-        CollectibleKind::Username => "This username was bought on ",
-        CollectibleKind::Phone => "This phone number was bought on ",
+        CollectibleKind::Username => tr(keys::Q_MONEY_COLLECTIBLE_USERNAME_BOUGHT),
+        CollectibleKind::Phone => tr(keys::Q_MONEY_COLLECTIBLE_PHONE_BOUGHT),
     }
+}
+
+/// The byte range of `word` in `sentence`, or `None` when a translation
+/// leaves it out, so a highlight never lands outside the text.
+pub fn word_range(sentence: &str, word: &str) -> Option<std::ops::Range<usize>> {
+    if word.is_empty() {
+        return None;
+    }
+    let start = sentence.find(word)?;
+    Some(start..start + word.len())
 }
 
 /// `lng_collectible_*_copy`.
@@ -198,6 +279,15 @@ mod tests {
     fn the_kind_follows_the_plus() {
         assert_eq!(CollectibleKind::detect("+8881234"), CollectibleKind::Phone);
         assert_eq!(CollectibleKind::detect("durov"), CollectibleKind::Username);
+    }
+
+    #[test]
+    fn the_highlight_is_found_in_any_template_and_dropped_when_absent() {
+        let sentence = "ça: Fragment le 5 pour";
+        let range = word_range(sentence, "Fragment").expect("present");
+        assert_eq!(sentence.get(range), Some("Fragment"));
+        assert_eq!(word_range("sans le mot", "Fragment"), None);
+        assert_eq!(word_range("x", ""), None);
     }
 
     #[test]

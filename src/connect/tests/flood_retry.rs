@@ -124,7 +124,7 @@ fn rate_limited_history_page_is_retried_after_the_wait() {
     // stays closed and no duplicate goes out meanwhile.
     assert!(h.driver.session.requests.get(extra).is_some());
     assert!(!h.driver.session.history_load_failed(ChatId(7)));
-    assert!(h.driver.session.messages.flood_notice.is_none());
+    assert!(h.driver.session.messages.flood_notice.is_empty());
     assert!(h.driver.fetch_history().unwrap().is_none());
     assert_eq!(h.sends_of(extra), 1);
 
@@ -199,7 +199,14 @@ fn user_actions_are_not_retried_and_show_the_flood_notice() {
         .request(RequestPurpose::SendMessage, Some(ChatId(7)));
     h.flood(extra, "Too Many Requests: retry after 12");
     assert_eq!(
-        h.driver.session.messages.flood_notice.take().as_deref(),
+        h.driver
+            .session
+            .messages
+            .flood_notice
+            .take_all()
+            .into_iter()
+            .next()
+            .as_deref(),
         Some("Too many attempts. Try again in 12 seconds.")
     );
     h.driver
@@ -220,7 +227,7 @@ fn background_lookups_stay_quiet_when_flood_persists() {
         .session
         .request(RequestPurpose::GetUserFullInfo, None);
     h.flood(extra, "FLOOD_WAIT_900");
-    assert!(h.driver.session.messages.flood_notice.is_none());
+    assert!(h.driver.session.messages.flood_notice.is_empty());
 }
 
 #[test]
@@ -230,7 +237,14 @@ fn failed_send_with_flood_keeps_the_retry_affordance() {
         r#"{"@type":"updateMessageSendFailed","old_message_id":-1,"error":{"code":429,"message":"Too Many Requests: retry after 9"},"message":{"@type":"message","id":5,"chat_id":7,"is_outgoing":true,"date":1700000000,"sending_state":{"@type":"messageSendingStateFailed","error":{"code":429,"message":"Too Many Requests: retry after 9"},"can_retry":true,"need_another_sender":false,"retry_after":9},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#,
     );
     assert_eq!(
-        h.driver.session.messages.flood_notice.take().as_deref(),
+        h.driver
+            .session
+            .messages
+            .flood_notice
+            .take_all()
+            .into_iter()
+            .next()
+            .as_deref(),
         Some("Too many attempts. Try again in 9 seconds.")
     );
     let row = h
@@ -265,6 +279,52 @@ fn stale_history_request_is_swept_into_the_retry_state() {
     assert_ne!(retry, extra);
     assert!(!h.driver.session.history_load_failed(ChatId(7)));
     assert!(h.driver.session.history_loading(ChatId(7)));
+}
+
+#[test]
+fn a_failed_older_page_of_a_window_with_rows_waits_for_retry() {
+    let mut h = Harness::new();
+    let first = h.open_history();
+    h.ingest(&format!(
+        r#"{{"@type":"messages","@extra":"{}","total_count":1,"messages":[{{"@type":"message","id":5242880,"chat_id":7,"is_outgoing":false,"date":1700000000,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"hi","entities":[]}}}}}}]}}"#,
+        first.0
+    ));
+    let page = h
+        .driver
+        .fetch_history()
+        .unwrap()
+        .expect("older page asked while rows are shown");
+    h.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":500,"message":"Timeout"}}"#,
+        page.0
+    ));
+    // Row 0 paints again and again: the failed page is not re-sent.
+    let before = h.recorder.snapshot().len();
+    for _ in 0..3 {
+        assert!(h.driver.fetch_history().unwrap().is_none());
+    }
+    assert_eq!(h.recorder.snapshot().len(), before);
+    // The Retry strip asks again.
+    assert!(h.driver.retry_history().unwrap().is_some());
+}
+
+#[test]
+fn folder_boxes_refused_before_a_request_end_in_an_error_with_retry() {
+    let mut h = Harness::new();
+    h.driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
+    assert!(h.driver.fetch_folder_share(5).is_err());
+    assert!(h.driver.fetch_chat_folder(5).is_err());
+    assert!(h.driver.fetch_chat_folder_chats_to_leave(5).is_err());
+    let chat_list = &h.driver.session.chat_list;
+    let share = chat_list.folder_shares.get(&5).expect("entry");
+    assert!(share.links.error().is_some() && share.chats.error().is_some());
+    assert!(chat_list.folder_specs.error(5).is_some());
+    assert!(
+        chat_list
+            .folder_chats_to_leave
+            .get(&5)
+            .is_some_and(|f| f.error().is_some())
+    );
 }
 
 #[test]
@@ -325,9 +385,18 @@ fn flooded_request_is_exempt_from_the_sweep_while_it_waits() {
 #[test]
 fn only_idempotent_reads_are_retained_for_retry() {
     let stash = RetryStash::default();
-    stash.note(r#"{"@type":"getChatHistory","@extra":"3","chat_id":7}"#);
-    stash.note(r#"{"@type":"sendMessage","@extra":"4","chat_id":7}"#);
-    stash.note(r#"{"@type":"checkAuthenticationPassword","@extra":"5","password":"x"}"#);
+    // The live sender stashes before `td_send` and takes the entry back by
+    // the id `note` returns when the send fails (sweep 02-231).
+    let noted = stash.note(r#"{"@type":"getChatHistory","@extra":"3","chat_id":7}"#);
+    assert_eq!(noted, Some(RequestId(3)));
+    assert_eq!(
+        stash.note(r#"{"@type":"sendMessage","@extra":"4","chat_id":7}"#),
+        None
+    );
+    assert_eq!(
+        stash.note(r#"{"@type":"checkAuthenticationPassword","@extra":"5","password":"x"}"#),
+        None
+    );
     assert_eq!(stash.len(), 1);
     assert!(stash.take(RequestId(4)).is_none());
     assert!(stash.take(RequestId(3)).is_some());
@@ -387,4 +456,22 @@ fn custom_emoji_rate_limit_retries_that_run_out_hold_lookups() {
     h.driver
         .request_tick(Instant::now() + Duration::from_secs(10));
     assert!(h.driver.lookup_custom_emoji(&[41]).unwrap().is_some());
+}
+
+/// A read re-sent after a 429 and then swept without an answer leaves no
+/// attempt count behind.
+#[test]
+fn a_swept_re_sent_read_forgets_its_flood_attempts() {
+    let mut h = Harness::new();
+    let extra = h.open_history();
+    h.flood(extra, "Too Many Requests: retry after 1");
+    let t0 = Instant::now();
+    h.driver.request_tick(t0 + Duration::from_secs(5));
+    assert_eq!(h.sends_of(extra), 2);
+    assert!(h.driver.flood_attempts.contains_key(&extra.0));
+    // No answer ever comes; the sweep drops the request.
+    h.driver
+        .request_tick(t0 + PENDING_REQUEST_TTL + Duration::from_secs(30));
+    assert!(h.driver.session.requests.get(extra).is_none());
+    assert!(h.driver.flood_attempts.is_empty());
 }

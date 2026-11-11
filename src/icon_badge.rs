@@ -40,11 +40,84 @@ pub fn app_uri() -> String {
     )
 }
 
-thread_local! {
-    /// Last count pushed to the OS. Starts unset so the first tick always
-    /// applies (clearing a stale badge when unread is 0). Only updated after
-    /// a successful push, so a failure retries on the next tick.
-    static LAST_SENT: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
+/// What the dock shows, from the UI's point of view: one stage for every
+/// platform. The count the UI wants is asked of the platform through
+/// [`BadgeStage::request`]; a platform that answers later (the Linux
+/// worker) settles it with [`BadgeStage::answered`], so a bus that is down
+/// or a failed emit is asked again on the next tick instead of leaving the
+/// badge wrong until the count changes. It starts `Idle`, so the first tick
+/// always pushes (clearing a stale badge when unread is 0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BadgeStage {
+    /// Nothing shown that we know of, or the OS may have lost it.
+    Idle,
+    /// Handed to the platform, not answered.
+    Pending(u32),
+    /// The platform showed it.
+    Delivered(u32),
+    /// The platform could not show it.
+    Failed(u32),
+}
+
+impl BadgeStage {
+    /// The UI wants `unread` shown: whether to push it now. A count already
+    /// shown, or in flight, is not pushed again.
+    fn request(&mut self, unread: u32) -> bool {
+        match *self {
+            BadgeStage::Delivered(shown) if shown == unread => false,
+            BadgeStage::Pending(asked) if asked == unread => false,
+            BadgeStage::Idle
+            | BadgeStage::Pending(_)
+            | BadgeStage::Delivered(_)
+            | BadgeStage::Failed(_) => {
+                *self = BadgeStage::Pending(unread);
+                true
+            }
+        }
+    }
+
+    /// The platform's answer for `count`; a newer request that overtook it
+    /// stays pending.
+    fn answered(&mut self, count: u32, shown: bool) {
+        if *self == BadgeStage::Pending(count) {
+            *self = if shown {
+                BadgeStage::Delivered(count)
+            } else {
+                BadgeStage::Failed(count)
+            };
+        }
+    }
+
+    /// The platform can no longer answer what is in flight (its worker is
+    /// gone): ask again on the next tick.
+    #[cfg(any(all(target_os = "linux", feature = "ui"), test))]
+    fn abandoned(&mut self) {
+        if let BadgeStage::Pending(count) = *self {
+            *self = BadgeStage::Failed(count);
+        }
+    }
+
+    /// The OS may have lost the badge: forget that anything was shown, so
+    /// the next `request` pushes the count again even if it is equal. A
+    /// count still in flight stays in flight.
+    fn invalidate(&mut self) {
+        if matches!(*self, BadgeStage::Delivered(_)) {
+            *self = BadgeStage::Idle;
+        }
+    }
+}
+
+static BADGE: std::sync::Mutex<BadgeStage> = std::sync::Mutex::new(BadgeStage::Idle);
+
+/// How a platform took a push.
+#[allow(dead_code, reason = "each target returns only some of the variants")]
+enum Push {
+    /// Shown (or nothing to show on this target).
+    Done,
+    /// Handed to a worker that settles it through `BADGE`.
+    Handed,
+    /// Could not be shown now: asked again on the next tick.
+    Failed,
 }
 
 /// Text for the macOS dock tile: the count capped at "99+", `None` (clear
@@ -75,52 +148,49 @@ fn trace(line: &str) {
 /// tray timer); emits only on change.
 pub fn sync_icon_badge(session: Option<&Session>) {
     let unread = crate::notify_accounts::total_unread(session).count;
-    let forced = INVALIDATED.swap(false, std::sync::atomic::Ordering::SeqCst);
-    sync_with(unread, forced, push_badge);
+    sync_with(&BADGE, unread, push_badge);
 }
 
 /// The OS may have lost or reset the badge without telling us (the app
 /// came back to the front, the account on screen changed, the user
 /// toggled badges in system settings), so the next sync pushes the count
-/// again even if it equals the last one pushed. The cache only dedupes.
+/// again even if it equals the last one pushed. The stage only dedupes.
 pub fn invalidate_icon_badge() {
-    INVALIDATED.store(true, std::sync::atomic::Ordering::SeqCst);
+    crate::locks::lock_or_recover(&BADGE).invalidate();
     crate::wake::CHROME.poke();
 }
 
-static INVALIDATED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-fn sync_with(unread: u32, forced: bool, push: impl FnOnce(u32) -> bool) {
-    LAST_SENT.with(|last| {
-        if forced {
-            last.set(None);
-        }
-        if last.get() == Some(unread) {
-            return;
-        }
-        let pushed = push(unread);
-        trace(&format!("icon-badge: unread={unread} pushed={pushed}"));
-        if pushed {
-            last.set(Some(unread));
-        }
-    });
+fn sync_with(badge: &std::sync::Mutex<BadgeStage>, unread: u32, push: impl FnOnce(u32) -> Push) {
+    if !crate::locks::lock_or_recover(badge).request(unread) {
+        return;
+    }
+    // The push runs without the lock: a worker answers through it.
+    let pushed = push(unread);
+    trace(&format!(
+        "icon-badge: unread={unread} pushed={}",
+        !matches!(pushed, Push::Failed)
+    ));
+    match pushed {
+        Push::Done => crate::locks::lock_or_recover(badge).answered(unread, true),
+        Push::Failed => crate::locks::lock_or_recover(badge).answered(unread, false),
+        Push::Handed => {}
+    }
 }
 
 #[cfg(target_os = "linux")]
-fn push_badge(unread: u32) -> bool {
-    emit_launcher_entry(unread);
-    true
+fn push_badge(unread: u32) -> Push {
+    emit_launcher_entry(unread)
 }
 
 #[cfg(all(target_os = "macos", feature = "ui"))]
-fn push_badge(unread: u32) -> bool {
+fn push_badge(unread: u32) -> Push {
     use objc2::MainThreadMarker;
     use objc2_app_kit::NSApplication;
     use objc2_foundation::NSString;
     request_badge_authorization();
     let Some(mtm) = MainThreadMarker::new() else {
         trace("icon-badge: not on the main thread, dock label skipped");
-        return false;
+        return Push::Failed;
     };
     let label = dock_badge_label(unread).map(|text| NSString::from_str(&text));
     let tile = NSApplication::sharedApplication(mtm).dockTile();
@@ -131,7 +201,7 @@ fn push_badge(unread: u32) -> bool {
         "icon-badge: dock label set={label:?} readback={held:?}",
         label = dock_badge_label(unread)
     ));
-    true
+    Push::Done
 }
 
 /// macOS draws a Dock badge only for apps the user allowed to badge
@@ -189,14 +259,18 @@ fn request_badge_authorization() {
 }
 
 #[cfg(windows)]
-fn push_badge(unread: u32) -> bool {
-    windows_overlay::set(unread)
+fn push_badge(unread: u32) -> Push {
+    if windows_overlay::set(unread) {
+        Push::Done
+    } else {
+        Push::Failed
+    }
 }
 
 /// Core-only builds (no AppKit) and other targets have no app-icon badge.
 #[cfg(not(any(target_os = "linux", all(target_os = "macos", feature = "ui"), windows)))]
-fn push_badge(_unread: u32) -> bool {
-    true
+fn push_badge(_unread: u32) -> Push {
+    Push::Done
 }
 
 /// Windows: remember the main window so the overlay can target its taskbar
@@ -258,7 +332,11 @@ mod windows_overlay {
         }
         let hwnd = HWND(hwnd as *mut _);
         TASKBAR.with(|slot| {
-            let mut slot = slot.borrow_mut();
+            // A COM call that came back into this one finds the cell taken:
+            // the next tick asks again.
+            let Ok(mut slot) = slot.try_borrow_mut() else {
+                return false;
+            };
             if slot.is_none() {
                 // SAFETY: plain COM activation on the UI thread, where GPUI
                 // has already initialized COM.
@@ -340,67 +418,175 @@ impl<T> LatestSlot<T> {
 #[cfg(all(target_os = "linux", feature = "ui"))]
 static LAUNCHER_SLOT: LatestSlot<u32> = LatestSlot::new();
 
+/// The launcher worker, while it runs.
+#[cfg(all(target_os = "linux", feature = "ui"))]
+static LAUNCHER_WORKER: std::sync::Mutex<Option<std::thread::JoinHandle<Option<()>>>> =
+    std::sync::Mutex::new(None);
+
+/// Settles what the worker had in flight when it ends, normal or by a panic
+/// that `spawn_guarded` catches: the badge is asked again on the next tick.
+#[cfg(any(all(target_os = "linux", feature = "ui"), test))]
+struct WorkerEnd<'a>(&'a std::sync::Mutex<BadgeStage>);
+
+#[cfg(any(all(target_os = "linux", feature = "ui"), test))]
+impl Drop for WorkerEnd<'_> {
+    fn drop(&mut self) {
+        crate::locks::lock_or_recover(self.0).abandoned();
+    }
+}
+
+/// Whether the launcher worker runs, starting it when it does not (never
+/// started, died by a panic, or the thread could not be spawned earlier).
+#[cfg(all(target_os = "linux", feature = "ui"))]
+fn launcher_worker_runs() -> bool {
+    let mut worker = crate::locks::lock_or_recover(&LAUNCHER_WORKER);
+    if worker.as_ref().is_some_and(|handle| !handle.is_finished()) {
+        return true;
+    }
+    *worker = crate::thread_guard::spawn_guarded("quill-launcher-badge", launcher_loop).ok();
+    worker.is_some()
+}
+
+/// The worker: owns the session-bus connection and emits the signal for the
+/// newest count handed over, answering through `BADGE`.
+#[cfg(all(target_os = "linux", feature = "ui"))]
+fn launcher_loop() {
+    let _end = WorkerEnd(&BADGE);
+    let mut connection: Option<zbus::blocking::Connection> = None;
+    let app_uri = app_uri();
+    loop {
+        let count = LAUNCHER_SLOT.take();
+        if connection.is_none() {
+            connection = zbus::blocking::Connection::session().ok();
+        }
+        let Some(conn) = &connection else {
+            crate::locks::lock_or_recover(&BADGE).answered(count, false);
+            continue;
+        };
+        let mut props: std::collections::HashMap<&str, zbus::zvariant::Value> =
+            std::collections::HashMap::new();
+        props.insert("count", zbus::zvariant::Value::from(i64::from(count)));
+        props.insert("count-visible", zbus::zvariant::Value::from(count > 0));
+        let sent = conn.emit_signal(
+            None::<&str>,
+            "/",
+            "com.canonical.Unity.LauncherEntry",
+            "Update",
+            &(app_uri.as_str(), props),
+        );
+        if sent.is_err() {
+            connection = None;
+        }
+        crate::locks::lock_or_recover(&BADGE).answered(count, sent.is_ok());
+    }
+}
+
 /// Hands the count to a worker thread that owns the session-bus connection
 /// and emits the signal, so the UI thread never waits on D-Bus. The worker
-/// starts on first use; any failure (no session bus, no listening dock) is
-/// silently ignored and retried on the next count change.
+/// starts on first use and again after it died; any failure (no session
+/// bus, no listening dock, no thread) is asked again on the next tick
+/// (`BadgeStage::Failed`).
 #[cfg(target_os = "linux")]
-fn emit_launcher_entry(unread: u32) {
+fn emit_launcher_entry(unread: u32) -> Push {
     #[cfg(feature = "ui")]
     {
-        use std::sync::Once;
-        static WORKER: Once = Once::new();
-        WORKER.call_once(|| {
-            let _ = crate::thread_guard::spawn_guarded("quill-launcher-badge", || {
-                let mut connection: Option<zbus::blocking::Connection> = None;
-                let app_uri = app_uri();
-                loop {
-                    let count = LAUNCHER_SLOT.take();
-                    if connection.is_none() {
-                        connection = zbus::blocking::Connection::session().ok();
-                    }
-                    let Some(conn) = &connection else { continue };
-                    let mut props: std::collections::HashMap<&str, zbus::zvariant::Value> =
-                        std::collections::HashMap::new();
-                    props.insert("count", zbus::zvariant::Value::from(i64::from(count)));
-                    props.insert("count-visible", zbus::zvariant::Value::from(count > 0));
-                    let sent = conn.emit_signal(
-                        None::<&str>,
-                        "/",
-                        "com.canonical.Unity.LauncherEntry",
-                        "Update",
-                        &(app_uri.as_str(), props),
-                    );
-                    if sent.is_err() {
-                        connection = None;
-                    }
-                }
-            });
-        });
+        if !launcher_worker_runs() {
+            return Push::Failed;
+        }
         LAUNCHER_SLOT.put(unread);
+        Push::Handed
     }
     #[cfg(not(feature = "ui"))]
-    let _ = unread;
+    {
+        let _ = unread;
+        Push::Done
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    use std::sync::Mutex;
+
     #[test]
     fn badge_is_repushed_after_invalidation_but_deduped_otherwise() {
+        let badge = Mutex::new(BadgeStage::Idle);
         let pushes = std::cell::Cell::new(0);
         let push = |_| {
             pushes.set(pushes.get() + 1);
-            true
+            Push::Done
         };
-        sync_with(4, false, push);
-        sync_with(4, false, push);
+        sync_with(&badge, 4, push);
+        sync_with(&badge, 4, push);
         assert_eq!(pushes.get(), 1, "same count is deduped");
-        sync_with(4, true, push);
+        badge.lock().unwrap().invalidate();
+        sync_with(&badge, 4, push);
         assert_eq!(pushes.get(), 2, "re-activation pushes the same count again");
-        sync_with(4, false, push);
+        sync_with(&badge, 4, push);
         assert_eq!(pushes.get(), 2);
+    }
+
+    #[test]
+    fn a_push_that_failed_is_asked_again_on_the_next_tick() {
+        let badge = Mutex::new(BadgeStage::Idle);
+        let pushes = std::cell::Cell::new(0);
+        sync_with(&badge, 2, |_| {
+            pushes.set(pushes.get() + 1);
+            Push::Failed
+        });
+        sync_with(&badge, 2, |_| {
+            pushes.set(pushes.get() + 1);
+            Push::Done
+        });
+        assert_eq!(pushes.get(), 2);
+        assert_eq!(*badge.lock().unwrap(), BadgeStage::Delivered(2));
+    }
+
+    #[test]
+    fn a_count_is_shown_only_once_the_worker_emitted_it() {
+        let badge = Mutex::new(BadgeStage::Idle);
+        let handed = std::cell::Cell::new(0);
+        let push = |_| {
+            handed.set(handed.get() + 1);
+            Push::Handed
+        };
+        sync_with(&badge, 3, push);
+        sync_with(&badge, 3, push);
+        assert_eq!(handed.get(), 1, "in flight: not asked twice");
+        badge.lock().unwrap().answered(3, false);
+        sync_with(&badge, 3, push);
+        assert_eq!(handed.get(), 2, "failed: asked again");
+        badge.lock().unwrap().answered(3, true);
+        sync_with(&badge, 3, push);
+        assert_eq!(handed.get(), 2, "emitted: known shown");
+        sync_with(&badge, 0, push);
+        assert_eq!(handed.get(), 3, "a new count goes out");
+    }
+
+    #[test]
+    fn an_old_answer_does_not_settle_a_newer_request() {
+        let mut stage = BadgeStage::Idle;
+        assert!(stage.request(1));
+        assert!(stage.request(2));
+        stage.answered(1, true);
+        assert!(!stage.request(2), "2 is still pending");
+        stage.answered(2, true);
+        assert!(!stage.request(2));
+    }
+
+    #[test]
+    fn a_worker_that_ends_hands_its_pending_count_back() {
+        let badge = Mutex::new(BadgeStage::Idle);
+        sync_with(&badge, 5, |_| Push::Handed);
+        drop(WorkerEnd(&badge));
+        assert_eq!(*badge.lock().unwrap(), BadgeStage::Failed(5));
+        let pushes = std::cell::Cell::new(0);
+        sync_with(&badge, 5, |_| {
+            pushes.set(pushes.get() + 1);
+            Push::Handed
+        });
+        assert_eq!(pushes.get(), 1, "asked again after the worker was lost");
     }
 
     #[test]
@@ -415,11 +601,15 @@ mod tests {
     #[test]
     fn latest_slot_wakes_a_blocked_consumer() {
         let slot = std::sync::Arc::new(LatestSlot::new());
+        let (started, hear) = std::sync::mpsc::channel();
         let reader = {
             let slot = slot.clone();
-            std::thread::spawn(move || slot.take())
+            std::thread::spawn(move || {
+                let _ = started.send(());
+                slot.take()
+            })
         };
-        std::thread::sleep(std::time::Duration::from_millis(20));
+        hear.recv().unwrap();
         slot.put(9u32);
         assert_eq!(reader.join().unwrap(), 9);
     }

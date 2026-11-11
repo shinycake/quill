@@ -5,6 +5,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::recording_state::PermissionAsk;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
@@ -117,6 +118,10 @@ fn denied_note(camera: bool) -> String {
     )
 }
 
+/// What runs once access is granted: it carries what asked, so an answer
+/// to one prompt never starts another request's work.
+type AfterAccess = Box<dyn FnOnce(&mut QuillApp, &mut Context<QuillApp>)>;
+
 impl QuillApp {
     /// Run `start` once the devices a recording needs are allowed: the
     /// microphone, plus the camera for a video message. Asks for any not
@@ -124,50 +129,60 @@ impl QuillApp {
     pub(super) fn with_capture_access(
         &mut self,
         camera: bool,
-        start: fn(&mut Self, &mut Context<Self>),
+        start: impl FnOnce(&mut Self, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) {
         let devices: &'static [bool] = if camera { &[true, false] } else { &[false] };
-        self.with_device_access(devices, start, cx);
+        self.with_device_access(devices, Box::new(start), cx);
     }
 
     /// Run `start` once the camera is allowed (a call turning it on), or
     /// say why it can't be used.
     pub(super) fn with_camera_access(
         &mut self,
-        start: fn(&mut Self, &mut Context<Self>),
+        start: impl FnOnce(&mut Self, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.with_device_access(&[true], start, cx);
+        self.with_device_access(&[true], Box::new(start), cx);
     }
 
     /// `devices`: `true` for the camera, `false` for the microphone.
     fn with_device_access(
         &mut self,
         devices: &'static [bool],
-        start: fn(&mut Self, &mut Context<Self>),
+        start: AfterAccess,
         cx: &mut Context<Self>,
     ) {
         for &device in devices {
             match access(device) {
                 Access::Granted => {}
+                // A prompt already up belongs to an earlier press: this one
+                // must not wipe it, or that prompt's Allow would be ignored.
                 Access::Denied => {
                     self.set_note(StatusNote::error(denied_note(device)));
                     cx.notify();
                     return;
                 }
                 Access::Undetermined => {
+                    // The system prompt is up for an earlier press: this one
+                    // would only queue a second start behind it.
+                    if !self.recording.permission.is_idle() {
+                        return;
+                    }
+                    let call = self.active_call_id();
+                    let id = self.next_permission_ask();
                     self.set_note(StatusNote::silent(tr(if device {
                         keys::Q_LEFTOVERS_ALLOW_CAMERA
                     } else {
                         keys::Q_LEFTOVERS_ALLOW_MICROPHONE
                     })));
-                    cx.notify();
                     let (sender, answer) = std::sync::mpsc::channel();
                     request(device, sender);
-                    // The recording starts in the window that asked, or
-                    // not at all once that window closed.
-                    self.spawn_scoped(cx, async move |this, cx| {
+                    // The wait belongs to the account on screen, so the stage
+                    // ends whichever window asked; the recording starts in
+                    // the window that asked, or not at all once it closed.
+                    let asker = self.scoped_app(cx);
+                    let task = self.spawn_screen(cx, async move |this, cx| {
                         let granted = loop {
                             match answer.try_recv() {
                                 Ok(granted) => break granted,
@@ -179,7 +194,23 @@ impl QuillApp {
                                 Err(_) => break false,
                             }
                         };
-                        let _ = this.update(cx, |this, cx| {
+                        let ended = this.update(cx, |this, cx| {
+                            let mine = this.recording.permission.is_asking(id);
+                            if mine {
+                                this.recording.permission = PermissionAsk::Idle;
+                                cx.notify();
+                            }
+                            mine
+                        });
+                        if !ended.is_ok_and(|mine| mine) {
+                            return;
+                        }
+                        let _ = asker.update(cx, |this, cx| {
+                            // The call the press was for ended or changed
+                            // while the prompt was up: nothing to start.
+                            if call.is_some() && this.active_call_id() != call {
+                                return;
+                            }
                             if granted {
                                 this.with_device_access(devices, start, cx);
                             } else {
@@ -187,12 +218,25 @@ impl QuillApp {
                                 cx.notify();
                             }
                         });
-                    })
-                    .detach();
+                    });
+                    self.recording.permission = PermissionAsk::Asking { id, _task: task };
+                    cx.notify();
                     return;
                 }
             }
         }
         start(self, cx);
+    }
+
+    /// The id of the call on screen, if any.
+    fn active_call_id(&self) -> Option<i32> {
+        self.live
+            .as_ref()
+            .and_then(|live| live.driver.session.calls.active_call.as_ref())
+            .map(|call| call.id)
+    }
+
+    fn next_permission_ask(&mut self) -> u64 {
+        self.recording.next_permission_ask()
     }
 }

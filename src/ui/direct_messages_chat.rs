@@ -29,7 +29,7 @@ impl QuillApp {
     /// The channel to go back to from its open direct messages.
     pub(super) fn direct_messages_channel(&self) -> Option<ChatId> {
         let session = self.session()?;
-        writer_channel(session, session.open_chat?)
+        writer_channel(session, session.open_chat_id()?)
     }
 
     /// The header's back arrow in a channel's direct messages.

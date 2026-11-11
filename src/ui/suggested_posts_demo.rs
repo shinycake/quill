@@ -144,7 +144,7 @@ impl QuillApp {
                     );
                 }
                 self.suggest_edit_price(chat_id, MessageId(COUNTER), window, cx);
-                if let Some(price) = self.suggested_posts.price.as_mut() {
+                if let Some(price) = self.suggested_posts.price_mut() {
                     price.admin = true;
                 }
             }

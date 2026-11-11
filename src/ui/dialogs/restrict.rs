@@ -20,6 +20,8 @@ pub struct RestrictDialog {
     pub(crate) custom: TimePicker,
     pub(crate) error: Option<&'static str>,
     pub(crate) permissions: ChatPermissions,
+    /// The last Submit: the box closes on its answer, stays on its error.
+    pub(crate) submit: quill::state::Submit,
 }
 
 impl RestrictDialog {
@@ -47,6 +49,7 @@ impl RestrictDialog {
             custom: new_date_time_picker(window, cx, tomorrow, 366 * 86_400),
             error: None,
             permissions: current,
+            submit: Default::default(),
         }
     }
 }

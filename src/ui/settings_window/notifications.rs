@@ -31,10 +31,11 @@ impl QuillApp {
     }
 
     /// Leaving the page drops its open pickers and the pending reset.
-    pub(super) fn leave_notification_settings(&mut self) {
+    pub(in crate::ui) fn leave_notification_settings(&mut self) {
         self.notify.defaults_sound_picker = None;
         self.notify.defaults_exceptions_scope = None;
         self.notify.notifications_confirm = None;
+        self.end_corner_preview();
     }
 
     pub(super) fn notifications_page(&mut self, cx: &mut Context<Self>) -> Div {
@@ -50,7 +51,7 @@ impl QuillApp {
         self.ensure_notification_volume_slider(cx);
         let saved_sounds: Vec<NotificationSound> = self
             .session()
-            .map(|s| s.settings.saved_notification_sounds.clone())
+            .map(|s| s.settings.saved_notification_sounds().to_vec())
             .unwrap_or_default();
         let view = self.notify_view_section(cx);
         let options = self.notify_options_section(cx);

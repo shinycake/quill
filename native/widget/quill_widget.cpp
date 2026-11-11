@@ -276,17 +276,6 @@ twidget::WidgetTheme parse_theme(const Json &j) {
 
 twidget::WidgetData parse_data(const Json &j) { return twidget::WidgetData{opt_string(j["chatData"]), opt_string(j["publicData"])}; }
 
-twidget::WidgetContentSafeArea parse_safe_area(const Json &j) {
-    twidget::WidgetContentSafeArea a;
-    a.top = j["top"].asNumber();
-    a.right = j["right"].asNumber();
-    a.bottom = j["bottom"].asNumber();
-    a.left = j["left"].asNumber();
-    a.cornerLeft = j["cornerLeft"].asNumber();
-    a.cornerRight = j["cornerRight"].asNumber();
-    return a;
-}
-
 twidget::StorageArea parse_area(const Json &j) {
     twidget::StorageArea area;
     for (const auto &[key, value] : j.obj()) {
@@ -465,7 +454,6 @@ qw_widget *qw_create(const char *html, size_t html_len, const char *options, siz
             viewer.isPremium = v["isPremium"].asBool();
             opts.context.viewer = viewer;
         }
-        opts.contentSafeArea = parse_safe_area(o["safeArea"]);
         twidget::WidgetTheme theme = parse_theme(o["theme"]);
 
         auto w = std::make_unique<qw_widget>();
@@ -547,13 +535,6 @@ void qw_set_data(qw_widget *w, const char *data, size_t len) {
     }
 }
 
-void qw_set_safe_area(qw_widget *w, const char *area, size_t len) {
-    if (!w) return;
-    try {
-        if (auto j = Json::parse(str(area, len))) w->host->setContentSafeArea(parse_safe_area(*j));
-    } catch (...) {
-    }
-}
 
 void qw_set_width(qw_widget *w, double width) {
     if (!w || !w->renderer) return;

@@ -12,7 +12,7 @@ use super::shot::{Shot, ShotOptions};
 use super::tree::{UiNode, UiTree};
 use serde_json::Value;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -68,6 +68,7 @@ pub enum UiCommand {
     /// clear the composer if it still holds `text` for `chat_id`. Answered
     /// at once.
     ComposerSent {
+        account: crate::ids::AccountKey,
         chat_id: i64,
         text: String,
     },
@@ -159,6 +160,9 @@ pub struct UiState {
 /// activity log) and tells the UI with [`UiCommand::ComposerSent`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiSend {
+    /// The account the window showed when the composer was asked to send:
+    /// the chat id means nothing in another account.
+    pub account: crate::ids::AccountKey,
     pub chat_id: i64,
     pub chat_title: String,
     /// The composer's text, as the draft holds it.
@@ -199,8 +203,34 @@ pub enum UiReply {
 pub struct Pending {
     pub request: UiRequest,
     reply: SyncSender<UiReply>,
-    /// Set when the tool stopped waiting: the UI must not inject any more.
-    cancelled: Arc<AtomicBool>,
+    /// How far the command got, shared with the tool waiting on it.
+    stage: Arc<Mutex<Stage>>,
+}
+
+/// How far one command got. The tool and the UI thread move it under one
+/// lock, so "the tool gave up" and "the UI injected input" can't both be
+/// true of the same moment: whichever comes first decides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stage {
+    /// In the queue; the UI has not taken it.
+    Queued,
+    /// The UI took it; no input went in yet.
+    Running,
+    /// The UI injected input (a click, keys, text) for it.
+    Injected,
+    /// The tool stopped waiting before any input went in.
+    GaveUp,
+    /// The tool stopped waiting after input went in: the command ran, its
+    /// answer is lost.
+    GaveUpAfterInjecting,
+}
+
+impl Stage {
+    fn change(stage: &Mutex<Stage>, next: impl FnOnce(Stage) -> Stage) -> Stage {
+        let mut stage = crate::locks::lock_or_recover(stage);
+        *stage = next(*stage);
+        *stage
+    }
 }
 
 impl Pending {
@@ -211,7 +241,21 @@ impl Pending {
     /// Whether the tool gave up on this command (a retry may be on its way,
     /// so injecting now would act twice).
     pub fn cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::SeqCst)
+        matches!(
+            *crate::locks::lock_or_recover(&self.stage),
+            Stage::GaveUp | Stage::GaveUpAfterInjecting
+        )
+    }
+
+    /// The UI is about to inject input for this command. `false` when the
+    /// tool gave up first, and nothing may be injected; otherwise the
+    /// command counts as run, so a timeout after this is reported as such.
+    pub fn begin_input(&self) -> bool {
+        let now = Stage::change(&self.stage, |stage| match stage {
+            Stage::Queued | Stage::Running | Stage::Injected => Stage::Injected,
+            gave_up => gave_up,
+        });
+        now == Stage::Injected
     }
 }
 
@@ -219,8 +263,11 @@ impl Pending {
 pub enum BridgeError {
     /// Too many commands wait already.
     Busy,
-    /// The UI thread did not answer in time.
+    /// The UI thread did not answer in time and ran nothing.
     Timeout,
+    /// The UI ran the command (input went in) but its answer did not come
+    /// in time: it must not be sent again.
+    RanNoAnswer,
 }
 
 static QUEUE: Mutex<VecDeque<Pending>> = Mutex::new(VecDeque::new());
@@ -249,7 +296,7 @@ pub fn send_with_shot(
 pub struct Ticket {
     id: u64,
     rx: Receiver<UiReply>,
-    cancelled: Arc<AtomicBool>,
+    stage: Arc<Mutex<Stage>>,
 }
 
 impl Ticket {
@@ -264,9 +311,18 @@ impl Ticket {
         if let Ok(reply) = self.rx.recv_timeout(timeout) {
             return Ok(reply);
         }
-        self.cancelled.store(true, Ordering::SeqCst);
+        let ran = Stage::change(&self.stage, |stage| match stage {
+            Stage::Injected | Stage::GaveUpAfterInjecting => Stage::GaveUpAfterInjecting,
+            _ => Stage::GaveUp,
+        }) == Stage::GaveUpAfterInjecting;
         withdraw(self.id);
-        self.rx.try_recv().map_err(|_| BridgeError::Timeout)
+        self.rx.try_recv().map_err(|_| {
+            if ran {
+                BridgeError::RanNoAnswer
+            } else {
+                BridgeError::Timeout
+            }
+        })
     }
 }
 
@@ -282,12 +338,15 @@ pub fn post_with_shot(
     shot: Option<ShotOptions>,
 ) -> Result<Ticket, BridgeError> {
     let mut queue = crate::locks::lock_or_recover(&QUEUE);
-    if queue.len() >= MAX_WAITING {
+    // The clear that follows a send that already went out is never turned
+    // away: dropping it would leave the text in the composer to be sent again.
+    let is_clear = matches!(command, UiCommand::ComposerSent { .. });
+    if queue.len() >= MAX_WAITING && !is_clear {
         return Err(BridgeError::Busy);
     }
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
     let (reply, rx) = mpsc::sync_channel(1);
-    let cancelled = Arc::new(AtomicBool::new(false));
+    let stage = Arc::new(Mutex::new(Stage::Queued));
     queue.push_back(Pending {
         request: UiRequest {
             id,
@@ -296,11 +355,11 @@ pub fn post_with_shot(
             shot,
         },
         reply,
-        cancelled: cancelled.clone(),
+        stage: stage.clone(),
     });
     drop(queue);
     crate::wake::AGENT.poke();
-    Ok(Ticket { id, rx, cancelled })
+    Ok(Ticket { id, rx, stage })
 }
 
 fn withdraw(id: u64) {
@@ -309,7 +368,14 @@ fn withdraw(id: u64) {
 
 /// Every command waiting, oldest first. The UI thread answers each.
 pub fn take() -> Vec<Pending> {
-    crate::locks::lock_or_recover(&QUEUE).drain(..).collect()
+    let taken: Vec<Pending> = crate::locks::lock_or_recover(&QUEUE).drain(..).collect();
+    for pending in &taken {
+        Stage::change(&pending.stage, |stage| match stage {
+            Stage::Queued => Stage::Running,
+            other => other,
+        });
+    }
+    taken
 }
 
 /// How many commands wait for the UI.
@@ -324,33 +390,31 @@ pub fn refuse_all(reason: &str) {
     }
 }
 
-fn epoch() -> Instant {
-    static EPOCH: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
-    *EPOCH.get_or_init(Instant::now)
+/// When an agent last read or drove the window, and when the user last gave
+/// it real input; `None` is "never".
+struct DriverClock {
+    drive: Option<Instant>,
+    real_input: Option<Instant>,
 }
 
-fn now_ms() -> u64 {
-    // Starts at 1 so "never" (0) stays distinct.
-    epoch().elapsed().as_millis() as u64 + 1
-}
-
-/// When an agent last read or drove the window (ms on the bridge clock).
-static LAST_DRIVE_MS: AtomicU64 = AtomicU64::new(0);
-/// When the user last gave the window real input.
-static LAST_REAL_INPUT_MS: AtomicU64 = AtomicU64::new(0);
+static CLOCK: Mutex<DriverClock> = Mutex::new(DriverClock {
+    drive: None,
+    real_input: None,
+});
 
 /// How long after the last command the tree keeps being built.
 pub const DRIVE_WINDOW: Duration = Duration::from_secs(30);
 
 /// Record that an agent used the driver now.
 pub fn note_drive() {
-    LAST_DRIVE_MS.store(now_ms(), Ordering::Relaxed);
+    crate::locks::lock_or_recover(&CLOCK).drive = Some(Instant::now());
 }
 
 /// Whether an agent used the driver within [`DRIVE_WINDOW`].
 pub fn drove_recently() -> bool {
-    let last = LAST_DRIVE_MS.load(Ordering::Relaxed);
-    last != 0 && now_ms().saturating_sub(last) < DRIVE_WINDOW.as_millis() as u64
+    crate::locks::lock_or_recover(&CLOCK)
+        .drive
+        .is_some_and(|at| at.elapsed() < DRIVE_WINDOW)
 }
 
 /// Whether the window should build its element tree every frame: the
@@ -364,13 +428,13 @@ pub fn wants_forced() -> bool {
 
 /// Record input that came from the user, not from the driver.
 pub fn note_real_input() {
-    LAST_REAL_INPUT_MS.store(now_ms(), Ordering::Relaxed);
+    crate::locks::lock_or_recover(&CLOCK).real_input = Some(Instant::now());
 }
 
 /// Milliseconds since the user's last real input, `None` if never seen.
 pub fn real_input_age_ms() -> Option<u64> {
-    let last = LAST_REAL_INPUT_MS.load(Ordering::Relaxed);
-    (last != 0).then(|| now_ms().saturating_sub(last))
+    let at = crate::locks::lock_or_recover(&CLOCK).real_input?;
+    Some(u64::try_from(at.elapsed().as_millis()).unwrap_or(u64::MAX))
 }
 
 /// Pause or resume the driver. Paused, every driver tool refuses. The
@@ -396,6 +460,45 @@ mod tests {
     /// these tests take turns with the switch-turning tests.
     fn lock() -> std::sync::MutexGuard<'static, ()> {
         crate::locks::lock_or_recover(&crate::agent::access::TEST_LOCK)
+    }
+
+    #[test]
+    fn a_timeout_after_input_went_in_says_it_ran() {
+        let _guard = lock();
+        // Taken, no input yet: giving up is a plain timeout and the UI may
+        // not inject afterwards.
+        let ticket = post("Test", UiCommand::State).unwrap_or_else(|e| panic!("post: {e:?}"));
+        let pending = take().pop().unwrap_or_else(|| panic!("queued"));
+        assert_eq!(ticket.wait(Duration::ZERO), Err(BridgeError::Timeout));
+        assert!(pending.cancelled());
+        assert!(!pending.begin_input(), "nothing injects after a give-up");
+        // Input went in first: the tool is told the command ran.
+        let ticket = post("Test", UiCommand::State).unwrap_or_else(|e| panic!("post: {e:?}"));
+        let pending = take().pop().unwrap_or_else(|| panic!("queued"));
+        assert!(pending.begin_input());
+        assert_eq!(ticket.wait(Duration::ZERO), Err(BridgeError::RanNoAnswer));
+        assert!(pending.cancelled(), "later steps stop");
+        assert!(!pending.begin_input());
+    }
+
+    #[test]
+    fn the_composer_clear_after_a_send_is_not_turned_away_when_the_queue_is_full() {
+        let _guard = lock();
+        let tickets: Vec<_> = (0..super::MAX_WAITING)
+            .map(|_| post("Test", UiCommand::ReadTree))
+            .collect();
+        assert!(tickets.iter().all(Result::is_ok));
+        assert_eq!(
+            post("Test", UiCommand::ReadTree).err(),
+            Some(BridgeError::Busy)
+        );
+        let clear = UiCommand::ComposerSent {
+            account: crate::ids::AccountKey("a".into()),
+            chat_id: 1,
+            text: "hi".into(),
+        };
+        assert!(post("Test", clear).is_ok());
+        let _ = take();
     }
 
     #[test]
@@ -441,10 +544,6 @@ mod tests {
     #[test]
     fn the_drive_clock_and_pause_flag() {
         let _guard = lock();
-        assert!(
-            !super::drove_recently()
-                || super::LAST_DRIVE_MS.load(std::sync::atomic::Ordering::Relaxed) != 0
-        );
         super::note_drive();
         assert!(super::drove_recently());
         assert!(super::real_input_age_ms().is_none_or(|age| age < u64::MAX));
@@ -465,6 +564,7 @@ mod tests {
         );
         assert!(
             !UiCommand::ComposerSent {
+                account: crate::ids::AccountKey("a".into()),
                 chat_id: 1,
                 text: String::new()
             }

@@ -1,7 +1,8 @@
 //! Connect driver: supergroups, channels, communities, forums, boosts.
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId, TopicId};
-use crate::state::{ChatStatisticsFetch, RequestPurpose, RequestRollback, WelcomeMessagesFetch};
+use crate::lang::{Key, keys, tr};
+use crate::state::{ChatStatisticsFetch, RequestPurpose, RequestRollback};
 use crate::state::{GroupsPurpose, ThreadsPurpose, WindowEnd};
 use crate::telegram::envelope::{ChatKind, ParsedCommunity};
 use crate::telegram::requests::{
@@ -36,8 +37,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || !self.session.chat_can_set_sticker_set(chat_id) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.stickers.stickers.failed = false;
-        self.session.stickers.emoji.failed = false;
+        self.session.stickers.stickers.lists.installed.clear_error();
+        self.session.stickers.emoji.lists.installed.clear_error();
         for (purpose, build) in [
             (
                 RequestPurpose::GetInstalledStickerSets,
@@ -49,7 +50,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                     as fn(RequestId) -> String,
             ),
         ] {
-            if self.session.requests.has_purpose(purpose) {
+            let fetch = if purpose == RequestPurpose::GetInstalledStickerSets {
+                &mut self.session.stickers.stickers.lists.installed
+            } else {
+                &mut self.session.stickers.emoji.lists.installed
+            };
+            if fetch.is_loading() {
                 continue;
             }
             let extra = self.session.request(purpose, None);
@@ -57,6 +63,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 return Err(err);
             }
+            let fetch = if purpose == RequestPurpose::GetInstalledStickerSets {
+                &mut self.session.stickers.stickers.lists.installed
+            } else {
+                &mut self.session.stickers.emoji.lists.installed
+            };
+            fetch.begin();
         }
         Ok(())
     }
@@ -134,7 +146,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(());
         }
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Ok(());
         };
         // Broadcast channels need the status for the composer gate;
@@ -145,24 +157,28 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         let Some(my_id) = self.session.my_user_id else {
-            if self.session.requests.has_purpose(RequestPurpose::GetMe) {
+            if !self.session.users_state.my_id_probe.is_idle()
+                || self.session.requests.has_purpose(RequestPurpose::GetMe)
+            {
                 return Ok(());
             }
             let extra = self.session.request(RequestPurpose::GetMe, None);
-            return self
-                .sender
-                .send_json(&get_me(extra))
-                .map(|_| ())
-                .inspect_err(|_| {
-                    self.session.requests.take(extra);
-                });
+            self.session.users_state.my_id_probe.begin();
+            if let Err(err) = self.sender.send_json(&get_me(extra)) {
+                self.session.requests.take(extra);
+                self.session
+                    .users_state
+                    .my_id_probe
+                    .fail_dropping_data("could not send the request");
+                return Err(err);
+            }
+            self.session.users_state.my_id_probe.sent(extra);
+            return Ok(());
         };
         if self.session.chats.get(&chat_id.0).is_some_and(|chat| {
-            if chat.is_channel() {
-                chat.my_member_status.is_some()
-            } else {
-                chat.my_rights_fetched
-            }
+            // A refused probe also settles it (`note_no_member_record`), so
+            // the poll does not send it again after a failure.
+            chat.rights_fetched() || (chat.is_channel() && chat.member_status().is_some())
         }) {
             return Ok(());
         }
@@ -204,7 +220,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// `leaveChat` for a channel. Own membership updates arrive via
     /// `updateChatMember`; the `ok` response flips status optimistically.
-    pub fn leave_channel(&mut self, chat_id: ChatId) -> Result<(), ConnectSendError> {
+    pub fn leave_channel(&mut self, chat_id: ChatId) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -215,7 +231,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        Ok(())
+        Ok(extra)
     }
 
     /// Phase B4: `setChatMessageAutoDeleteTime` (TDLib 1.8.67,
@@ -313,39 +329,72 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         is_dark: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.send_chat_statistics(chat_id, is_dark, false)
+    }
+
+    fn send_chat_statistics(
+        &mut self,
+        chat_id: ChatId,
+        is_dark: bool,
+        refresh: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let can_get = self
+        let supergroup_id = self
             .session
             .chats
             .get(&chat_id.0)
             .and_then(|chat| match chat.kind {
-                ChatKind::Supergroup { supergroup_id, .. } => self
-                    .session
-                    .groups
-                    .supergroup_full_infos
-                    .get(&supergroup_id),
+                ChatKind::Supergroup { supergroup_id, .. } => Some(supergroup_id),
                 _ => None,
-            })
-            .is_some_and(|info| info.can_get_statistics);
-        if !can_get {
+            });
+        let Some(supergroup_id) = supergroup_id else {
+            self.fail_chat_statistics(chat_id, keys::Q_MONEY_STATISTICS_UNAVAILABLE);
             return Ok(None);
-        }
-        if matches!(
-            self.session.groups.chat_statistics.get(&chat_id.0),
-            Some(ChatStatisticsFetch::Loading | ChatStatisticsFetch::Loaded(_))
-        ) || self
+        };
+        let can_get = self
             .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::GetChatStatistics, chat_id)
+            .groups
+            .supergroup_full_infos
+            .get(&supergroup_id)
+            .map(|info| info.can_get_statistics);
+        match can_get {
+            Some(true) => {}
+            Some(false) => {
+                self.fail_chat_statistics(chat_id, keys::Q_MONEY_STATISTICS_UNAVAILABLE);
+                return Ok(None);
+            }
+            None => {
+                // The full info says whether the chat can show statistics:
+                // ask for it (deduped) and wait; its arrival sends this.
+                self.session
+                    .groups
+                    .chat_statistics
+                    .insert(chat_id.0, ChatStatisticsFetch::WaitingForInfo { is_dark });
+                return match self.fetch_supergroup_full_info(supergroup_id) {
+                    Ok(_) => Ok(None),
+                    Err(err) => {
+                        self.fail_chat_statistics(chat_id, keys::Q_MONEY_STATISTICS_SEND_FAILED);
+                        Err(err)
+                    }
+                };
+            }
+        }
+        let held = self.session.groups.chat_statistics.get(&chat_id.0);
+        if matches!(held, Some(ChatStatisticsFetch::Loading { .. }))
+            || (!refresh && matches!(held, Some(ChatStatisticsFetch::Loaded { .. })))
+            || self
+                .session
+                .requests
+                .has_purpose_for_chat(RequestPurpose::GetChatStatistics, chat_id)
         {
             return Ok(None);
         }
         self.session
             .groups
             .chat_statistics
-            .insert(chat_id.0, ChatStatisticsFetch::Loading);
+            .insert(chat_id.0, ChatStatisticsFetch::Loading { is_dark });
         let extra = self
             .session
             .request(RequestPurpose::GetChatStatistics, Some(chat_id));
@@ -354,10 +403,38 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&get_chat_statistics(extra, chat_id.0, is_dark))
         {
             self.session.requests.take(extra);
-            self.session.groups.chat_statistics.remove(&chat_id.0);
+            self.session.groups.chat_statistics.insert(
+                chat_id.0,
+                ChatStatisticsFetch::Failed(tr(keys::Q_MONEY_STATISTICS_SEND_FAILED).into()),
+            );
             return Err(err);
         }
         Ok(Some(extra))
+    }
+
+    fn fail_chat_statistics(&mut self, chat_id: ChatId, key: Key) {
+        self.session
+            .groups
+            .chat_statistics
+            .insert(chat_id.0, ChatStatisticsFetch::Failed(tr(key).into()));
+    }
+
+    /// A `supergroupFullInfo` landed: every statistics panel that waited for
+    /// it now knows whether its chat can show them, and asks or fails.
+    pub(crate) fn resume_waiting_statistics(&mut self) {
+        let waiting: Vec<(i64, bool)> = self
+            .session
+            .groups
+            .chat_statistics
+            .iter()
+            .filter_map(|(chat, fetch)| match fetch {
+                ChatStatisticsFetch::WaitingForInfo { is_dark } => Some((*chat, *is_dark)),
+                _ => None,
+            })
+            .collect();
+        for (chat, is_dark) in waiting {
+            let _ = self.send_chat_statistics(ChatId(chat), is_dark, false);
+        }
     }
 
     /// Phase D2: explicit refresh of `getChatStatistics` — clears the
@@ -367,8 +444,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         is_dark: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.session.groups.chat_statistics.remove(&chat_id.0);
-        self.fetch_chat_statistics(chat_id, is_dark)
+        self.send_chat_statistics(chat_id, is_dark, true)
     }
 
     /// Slice G1: `toggleSupergroupIsBroadcastGroup` (schema 1.8.67, line
@@ -440,7 +516,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
-        self.session.chat_list.chat_preview_fetch = None;
+        // Peeks are kept by chat; a handful stay, the rest of the old ones
+        // go.
+        let previews = &mut self.session.chat_list.chat_preview_fetch;
+        if previews.len() >= 8 {
+            previews.clear();
+        }
+        previews.entry(chat_id).or_default().begin();
         let extra = self.session.request(purpose, Some(chat_id));
         if let Err(err) = self.sender.send_json(&get_chat_history(
             extra,
@@ -451,6 +533,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             false,
         )) {
             self.session.requests.take(extra);
+            self.session
+                .chat_list
+                .chat_preview_fetch
+                .entry(chat_id)
+                .or_default()
+                .fail_dropping_data(err.stage_line());
             return Err(err);
         }
         Ok(Some(extra))

@@ -23,14 +23,19 @@ use objc2_foundation::{
 };
 use quill::location_picker::{GeoOutcome, GeoPoint};
 use std::cell::RefCell;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 struct Ivars {
     answer: RefCell<Option<Sender<GeoOutcome>>>,
+    /// Set while the system's "Allow location" prompt is open.
+    prompt_open: Arc<AtomicBool>,
 }
 
 impl Ivars {
     fn answer(&self, outcome: GeoOutcome) {
+        self.prompt_open.store(false, Ordering::SeqCst);
         if let Some(answer) = self.answer.borrow_mut().take() {
             let _ = answer.send(outcome);
         }
@@ -99,9 +104,14 @@ define_class!(
 );
 
 impl Delegate {
-    fn new(mtm: MainThreadMarker, answer: Sender<GeoOutcome>) -> Retained<Self> {
+    fn new(
+        mtm: MainThreadMarker,
+        answer: Sender<GeoOutcome>,
+        prompt_open: Arc<AtomicBool>,
+    ) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(Ivars {
             answer: RefCell::new(Some(answer)),
+            prompt_open,
         });
         // SAFETY: NSObject's designated initializer.
         unsafe { msg_send![super(this), init] }
@@ -113,7 +123,12 @@ impl Delegate {
         }
         // SAFETY: plain calls on the manager on the thread that made it.
         unsafe {
-            match manager.authorizationStatus() {
+            let status = manager.authorizationStatus();
+            self.ivars().prompt_open.store(
+                status == CLAuthorizationStatus::NotDetermined,
+                Ordering::SeqCst,
+            );
+            match status {
                 CLAuthorizationStatus::NotDetermined => manager.requestWhenInUseAuthorization(),
                 CLAuthorizationStatus::AuthorizedAlways
                 | CLAuthorizationStatus::AuthorizedWhenInUse => manager.startUpdatingLocation(),
@@ -131,6 +146,8 @@ impl Delegate {
 struct Running {
     manager: Retained<CLLocationManager>,
     _delegate: Retained<Delegate>,
+    /// The flag of the lookup it serves, to tell it from a later one.
+    lookup: Arc<AtomicBool>,
 }
 
 thread_local! {
@@ -147,7 +164,7 @@ fn has_usage_description() -> bool {
             .is_some()
 }
 
-pub(super) fn locate() -> Receiver<GeoOutcome> {
+pub(super) fn locate(prompt_open: &Arc<AtomicBool>) -> Receiver<GeoOutcome> {
     let (answer, receiver) = channel();
     let Some(mtm) = MainThreadMarker::new() else {
         let _ = answer.send(GeoOutcome::Unavailable);
@@ -158,7 +175,7 @@ pub(super) fn locate() -> Receiver<GeoOutcome> {
         let _ = answer.send(GeoOutcome::Unavailable);
         return receiver;
     }
-    let delegate = Delegate::new(mtm, answer);
+    let delegate = Delegate::new(mtm, answer, prompt_open.clone());
     // SAFETY: made on the main thread, whose run loop delivers the
     // delegate calls; the delegate is kept alive with it in `RUNNING`.
     let manager = unsafe { CLLocationManager::new() };
@@ -172,6 +189,7 @@ pub(super) fn locate() -> Receiver<GeoOutcome> {
         if let Some(old) = running.borrow_mut().replace(Running {
             manager,
             _delegate: delegate,
+            lookup: prompt_open.clone(),
         }) {
             // SAFETY: detach and stop the replaced lookup on its thread.
             unsafe {
@@ -181,6 +199,25 @@ pub(super) fn locate() -> Receiver<GeoOutcome> {
         }
     });
     receiver
+}
+
+/// The lookup identified by `lookup` was dropped: stop its manager, unless a
+/// newer lookup has replaced it. Needs the thread that made the manager.
+pub(super) fn cancel(lookup: &Arc<AtomicBool>) {
+    RUNNING.with(|running| {
+        let mut running = running.borrow_mut();
+        if running
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(&current.lookup, lookup))
+            && let Some(old) = running.take()
+        {
+            // SAFETY: detach and stop on the thread that made the manager.
+            unsafe {
+                old.manager.setDelegate(None);
+                old.manager.stopUpdatingLocation();
+            }
+        }
+    });
 }
 
 /// `CLGeocoder` is deprecated for MapKit's `MKReverseGeocodingRequest`,

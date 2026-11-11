@@ -17,7 +17,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::gif_grid::{GIF_GRID_PADDING, layout_gifs};
-use quill::ids::{ChatId, FileId};
+use quill::ids::FileId;
 use quill::inline_grid::{MEDIA_HEIGHT, Placed, SKIP, should_load_more};
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{GifPanel, RequestPurpose};
@@ -46,7 +46,7 @@ fn empty_tile(color: Hsla) -> AnyElement {
 
 /// An answer for the session's GIF list is on its way.
 fn gifs_on_their_way(panel: &GifPanel) -> bool {
-    panel.loading || panel.search_loading
+    panel.loading() || panel.search_loading()
 }
 
 /// What the footer's sections choose.
@@ -121,8 +121,8 @@ impl GifWanted {
 
     /// What the session's list holds now.
     fn shown(panel: &GifPanel) -> Self {
-        if panel.search_mode {
-            Self::Search(panel.search_query.clone())
+        if panel.search_mode() {
+            Self::Search(panel.search_query().to_string())
         } else {
             Self::Saved
         }
@@ -169,19 +169,25 @@ impl QuillApp {
     fn request_gifs(&mut self, wanted: GifWanted, cx: &mut Context<Self>) {
         self.pickers.gif_wanted = wanted.clone();
         self.pickers.gif_asked = GifAsked::For(wanted.clone());
+        let chat = self.viewed_chat();
         let sent = if let Some(live) = self.live.as_mut() {
             match &wanted {
                 GifWanted::Saved => live.driver.show_saved_gifs().is_ok(),
-                GifWanted::Search(query) => live.driver.search_gifs(query).is_ok(),
+                GifWanted::Search(query) => live.driver.search_gifs(query, chat).is_ok(),
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             match &wanted {
-                GifWanted::Saved => session.stickers.gifs.search_mode = false,
+                GifWanted::Saved => session.stickers.gifs.search_left(),
                 GifWanted::Search(query) => {
                     // No search bot offline: the demo finds nothing.
-                    session.stickers.gifs.search_mode = true;
-                    session.stickers.gifs.search_query = query.clone();
-                    session.accept_gif_search_results(Vec::new(), String::new(), true);
+                    session.stickers.gifs.search_begun(query.clone());
+                    session.stickers.gifs.search_sent(quill::ids::RequestId(0));
+                    session.accept_gif_search_results(
+                        Some(quill::ids::RequestId(0)),
+                        Vec::new(),
+                        String::new(),
+                        true,
+                    );
                 }
             }
             true
@@ -277,7 +283,7 @@ impl QuillApp {
             return GifShown::Live;
         }
         match &self.pickers.gif_wanted {
-            GifWanted::Saved if panel.loaded || !panel.animations.is_empty() => {
+            GifWanted::Saved if panel.loaded() || !panel.animations.is_empty() => {
                 GifShown::Saved(&panel.animations)
             }
             GifWanted::Saved => GifShown::Missing,
@@ -316,8 +322,8 @@ impl QuillApp {
             scroll_top,
             viewport,
             content as f32,
-            panel.search_mode && !panel.search_next_offset.is_empty(),
-            panel.search_loading,
+            !panel.search_next_offset().is_empty(),
+            panel.search_loading(),
         ) {
             return;
         }
@@ -402,11 +408,11 @@ impl QuillApp {
             Some(tr(keys::Q_MISC_NO_GIFS_FOUND))
         } else if matches!(shown, GifShown::Missing) || gifs_on_their_way(panel) {
             None
-        } else if panel.search_mode && panel.search_failed && panel.search_bot_username.is_empty() {
+        } else if panel.search_failed() && panel.search_bot_username.is_empty() {
             Some(tr(keys::Q_MISC_GIF_SEARCH_IS_NOT_AVAILABLE))
-        } else if panel.failed || panel.search_mode && panel.search_failed {
+        } else if panel.failed() || panel.search_failed() {
             Some(tr(keys::Q_MISC_COULD_NOT_UPDATE_GIFS_TRY))
-        } else if panel.search_mode {
+        } else if panel.search_mode() {
             Some(tr(keys::Q_MISC_NO_GIFS_FOUND))
         } else {
             Some(tr(keys::Q_MISC_NO_SAVED_GIFS_YET_RIGHT))
@@ -569,7 +575,6 @@ impl QuillApp {
                         let _ = owner.update(cx, |this, cx| {
                             if saved {
                                 this.open_group_confirm(
-                                    ChatId(0),
                                     GroupConfirmAction::RemoveSavedGif { file_id },
                                     cx,
                                 );

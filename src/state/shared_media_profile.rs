@@ -9,8 +9,9 @@
 //! Voice, GIFs. A tab with no items is hidden (`shown = count > 0`). Saved
 //! Messages and the common-groups / similar tabs are not shared media.
 use super::*;
-use crate::ids::FileId;
+use crate::ids::{FileId, RequestId};
 use crate::premium_hub::GiftsPage;
+use crate::state::paged::{Page, Paged};
 use crate::telegram::envelope::{ChatKind, ProfileAudio, ProfileAudiosPage};
 use std::collections::HashMap;
 
@@ -155,7 +156,32 @@ pub fn visible_tabs(
         .collect()
 }
 
+/// One page of a profile tab (Stories, Gifts) as it landed.
+pub struct ProfilePage {
+    pub items: Vec<SharedMediaItem>,
+    pub total_count: i32,
+    pub has_more: bool,
+    /// Adds to the loaded items instead of replacing them.
+    pub append: bool,
+}
+
 impl SharedMediaState {
+    /// Whether an answer for `tab` of `chat_id` belongs to the open gallery:
+    /// the chat matches and, when the request carried a stamp, the tab still
+    /// waits on it. A request without a stamp (the stories page's own) only
+    /// has the chat to match.
+    pub(crate) fn accepts_profile(
+        &self,
+        chat_id: ChatId,
+        tab: SharedMediaTab,
+        generation: Option<u64>,
+    ) -> bool {
+        match generation {
+            Some(generation) => self.accepts(chat_id, tab, generation),
+            None => self.chat_id == Some(chat_id),
+        }
+    }
+
     /// Split (`true`) or merge Media into Photos and Videos. Returns the
     /// tab the gallery should now show when the active one went away, and
     /// whether it still has to be fetched.
@@ -184,71 +210,87 @@ impl SharedMediaState {
         Some((target, needs_fetch))
     }
 
-    /// A first page of a profile tab is on its way. No generation bump:
-    /// the profile tabs load side by side when the gallery opens.
-    pub fn begin_profile_fetch(&mut self, tab: SharedMediaTab) {
+    /// A first page of a profile tab is on its way: the tab gets a new
+    /// stamp, which the request carries so an older page (an append from
+    /// before the gallery was closed and reopened) is dropped. The other
+    /// tabs keep theirs, so they load side by side.
+    pub fn begin_profile_fetch(&mut self, tab: SharedMediaTab) -> u64 {
+        let stamp = self.next_generation();
         let state = self.tab_state(tab);
         state.status = SharedMediaTabStatus::Loading;
-        state.error.clear();
+        state.generation = stamp;
+        stamp
     }
 
-    /// The next page of a profile tab is on its way; `false` when there is
-    /// nothing more or a page is already loading.
-    pub fn begin_profile_more(&mut self, tab: SharedMediaTab) -> bool {
+    /// The next page of a profile tab is on its way, carrying the tab's
+    /// current stamp; `None` when there is nothing more or a page is
+    /// already loading.
+    pub fn begin_profile_more(&mut self, tab: SharedMediaTab) -> Option<u64> {
         let state = self.tab_state(tab);
-        if !state.can_load_more() {
-            return false;
+        if !state.start_more() {
+            return None;
         }
-        state.loading_more = true;
-        true
+        Some(state.generation)
     }
 
     /// A page of a profile tab landed. `append` adds to the loaded items.
+    /// `false` when the page was for a chat that is not the open gallery's,
+    /// so it changed nothing.
     pub fn accept_profile(
         &mut self,
         chat_id: ChatId,
         tab: SharedMediaTab,
-        items: Vec<SharedMediaItem>,
-        total_count: i32,
-        has_more: bool,
-        append: bool,
-    ) {
-        if !self.open || self.chat_id != Some(chat_id) {
-            return;
+        generation: Option<u64>,
+        page: ProfilePage,
+    ) -> bool {
+        if !self.accepts_profile(chat_id, tab, generation) {
+            return false;
         }
+        let ProfilePage {
+            items,
+            total_count,
+            has_more,
+            append,
+        } = page;
         let state = self.tab_state(tab);
+        let before = state.items.len();
         if append {
             state.items.extend(items);
         } else {
             state.items = items;
         }
         state.total_count = total_count.max(state.items.len() as i32);
-        state.has_more = has_more;
-        state.loading_more = false;
-        state.error.clear();
+        // A page with nothing new cannot make progress: stop asking.
+        state.has_more = has_more && !(append && state.items.len() == before);
         state.status = if state.items.is_empty() {
             SharedMediaTabStatus::Empty
         } else {
-            SharedMediaTabStatus::Ready
+            SharedMediaTabStatus::ready()
         };
+        true
     }
 
     /// A profile tab failed to load.
     /// A load of `tab` failed; `true` when the tab itself failed (a failed
     /// further page keeps a loaded tab as it is).
-    pub fn fail_profile(&mut self, chat_id: ChatId, tab: SharedMediaTab, error: String) -> bool {
-        if !self.open || self.chat_id != Some(chat_id) {
+    pub fn fail_profile(
+        &mut self,
+        chat_id: ChatId,
+        tab: SharedMediaTab,
+        generation: Option<u64>,
+        error: String,
+    ) -> bool {
+        if !self.accepts_profile(chat_id, tab, generation) {
             return false;
         }
         let state = self.tab_state(tab);
-        state.loading_more = false;
-        if state.status == SharedMediaTabStatus::Ready {
+        if state.status.is_ready() {
+            state.fail_more_page(error);
             return false;
         }
         state.items.clear();
         state.total_count = 0;
-        state.error = error;
-        state.status = SharedMediaTabStatus::Failed;
+        state.status = SharedMediaTabStatus::Failed(error);
         true
     }
 }
@@ -334,19 +376,93 @@ pub fn gift_item(gift: &crate::premium_hub::ReceivedGift) -> SharedMediaItem {
 /// page and as the profile's music button.
 #[derive(Debug, Clone, Default)]
 pub struct Playlist {
+    /// Not asked, a page in flight, answered, outdated (a change of the
+    /// playlist failed: the driver loads it again) or failed.
+    pub list: Paged<PlaylistData>,
+}
+
+/// The tracks of a playlist so far and the count the server reports.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PlaylistData {
     pub tracks: Vec<ProfileAudio>,
     pub total_count: i32,
-    /// The first page arrived (or failed).
-    pub loaded: bool,
-    pub loading: bool,
-    pub error: Option<String>,
-    /// A change of the playlist failed: the driver loads it again.
-    pub stale: bool,
+}
+
+impl PlaylistData {
+    /// A page of tracks; a track the page repeats is kept once.
+    pub fn from_page(audios: Vec<ProfileAudio>, total_count: i32) -> Self {
+        let mut data = Self::default();
+        data.add(audios);
+        data.total_count = total_count.max(data.tracks.len() as i32);
+        data
+    }
+
+    fn add(&mut self, audios: Vec<ProfileAudio>) {
+        for track in audios {
+            let known =
+                track.file_id.0 != 0 && self.tracks.iter().any(|old| old.file_id == track.file_id);
+            if !known {
+                self.tracks.push(track);
+            }
+        }
+    }
+}
+
+impl Page for PlaylistData {
+    /// The next page is asked by the number of tracks held, not an offset.
+    fn next_offset(&self) -> &str {
+        ""
+    }
+
+    fn append(&mut self, later: Self) {
+        self.add(later.tracks);
+        self.total_count = later.total_count.max(self.tracks.len() as i32);
+    }
 }
 
 impl Playlist {
+    /// Show `tracks` as the answered playlist.
+    pub fn set_ready(&mut self, tracks: Vec<ProfileAudio>) {
+        let total_count = tracks.len() as i32;
+        self.list = Paged::Ready(PlaylistData {
+            tracks,
+            total_count,
+        });
+    }
+
+    pub fn tracks(&self) -> &[ProfileAudio] {
+        self.list.data().map_or(&[], |d| d.tracks.as_slice())
+    }
+
+    pub fn total_count(&self) -> i32 {
+        self.list.data().map_or(0, |d| d.total_count)
+    }
+
+    pub fn loading(&self) -> bool {
+        self.list.loading()
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        self.list.error()
+    }
+
+    /// The first page arrived (or failed).
+    pub fn loaded(&self) -> bool {
+        match &self.list {
+            Paged::Idle => false,
+            Paged::Loading { append, .. } => *append,
+            _ => true,
+        }
+    }
+
+    /// The first page is due: never asked, or a change outdated the list.
+    /// An answer or a failure is not asked again (Retry resets it).
+    pub fn asks_first_page(&self) -> bool {
+        matches!(self.list, Paged::Idle | Paged::Outdated(_))
+    }
+
     pub fn has_more(&self) -> bool {
-        self.loaded && !self.loading && (self.tracks.len() as i32) < self.total_count
+        self.loaded() && !self.loading() && (self.tracks().len() as i32) < self.total_count()
     }
 }
 
@@ -410,7 +526,12 @@ impl Session {
 
     /// A page of `getChatPostedToChatPageStories` landed (the loaded ids
     /// are already merged into `stories.chat_page_stories`).
-    pub(crate) fn apply_profile_stories(&mut self, chat_id: ChatId, total_count: i32) {
+    pub(crate) fn apply_profile_stories(
+        &mut self,
+        chat_id: ChatId,
+        generation: Option<u64>,
+        total_count: i32,
+    ) {
         let ids = self
             .stories
             .chat_page_stories
@@ -434,10 +555,13 @@ impl Session {
         self.media.shared_media.accept_profile(
             chat_id,
             SharedMediaTab::Stories,
-            items,
-            total_count,
-            has_more,
-            false,
+            generation,
+            ProfilePage {
+                items,
+                total_count,
+                has_more,
+                append: false,
+            },
         );
     }
 
@@ -446,10 +570,11 @@ impl Session {
         let Some(chat_id) = pending.chat_id else {
             return;
         };
-        let append = matches!(
-            pending.purpose,
-            RequestPurpose::Media(MediaPurpose::GetProfileGifts { append: true })
-        );
+        let RequestPurpose::Media(MediaPurpose::GetProfileGifts { append, generation }) =
+            pending.purpose
+        else {
+            return;
+        };
         let files: Vec<_> = page
             .gifts
             .iter()
@@ -459,16 +584,21 @@ impl Session {
         self.want_profile_thumbs(files.iter().map(|file| file.id));
         let items = page.gifts.iter().map(gift_item).collect();
         self.set_profile_count(chat_id, COUNT_KEY_GIFTS, page.total_count);
-        self.media.shared_media.accept_profile(
+        let accepted = self.media.shared_media.accept_profile(
             chat_id,
             SharedMediaTab::Gifts,
-            items,
-            page.total_count,
-            !page.next_offset.is_empty(),
-            append,
+            Some(generation),
+            ProfilePage {
+                items,
+                total_count: page.total_count,
+                has_more: !page.next_offset.is_empty(),
+                append,
+            },
         );
-        let state = self.media.shared_media.tab_state(SharedMediaTab::Gifts);
-        state.next_offset = page.next_offset;
+        if accepted {
+            let state = self.media.shared_media.tab_state(SharedMediaTab::Gifts);
+            state.next_offset = page.next_offset;
+        }
     }
 
     /// A `getUserProfileAudios` page for the user's playlist.
@@ -480,45 +610,54 @@ impl Session {
         let Some(user_id) = pending.and_then(|p| p.user_id) else {
             return;
         };
-        let append = matches!(
-            pending.map(|p| p.purpose),
-            Some(RequestPurpose::Media(MediaPurpose::GetProfileAudios {
-                append: true
-            }))
-        );
         self.remember_files(&page.files);
-        let playlist = self.media.playlists.entry(user_id).or_default();
-        if !append {
-            playlist.tracks.clear();
-        }
-        for track in page.audios {
-            let known = track.file_id.0 != 0
-                && playlist
-                    .tracks
-                    .iter()
-                    .any(|old| old.file_id == track.file_id);
-            if !known {
-                playlist.tracks.push(track);
-            }
-        }
-        playlist.total_count = page.total_count.max(playlist.tracks.len() as i32);
-        playlist.loaded = true;
-        playlist.loading = false;
-        playlist.error = None;
+        let Some(request) = pending.map(|p| p.id) else {
+            return;
+        };
+        // Only the page in flight lands; a change that outdated the list
+        // meanwhile dropped it.
+        self.media
+            .playlists
+            .entry(user_id)
+            .or_default()
+            .list
+            .answer(
+                request,
+                PlaylistData::from_page(page.audios, page.total_count),
+            );
     }
 
-    /// A `getUserProfileAudios` request failed: no playlist for this user.
-    pub(crate) fn fail_profile_audios(&mut self, user_id: i64, error: String) {
-        let playlist = self.media.playlists.entry(user_id).or_default();
-        playlist.loaded = true;
-        playlist.loading = false;
-        playlist.error = Some(error);
+    /// A `getUserProfileAudios` request failed. `request` is the page that
+    /// failed; `None` is a page that never left, which fails whatever the
+    /// playlist was doing.
+    pub(crate) fn fail_profile_audios(
+        &mut self,
+        user_id: i64,
+        request: Option<RequestId>,
+        error: String,
+    ) {
+        let list = &mut self.media.playlists.entry(user_id).or_default().list;
+        match request {
+            Some(_) => {
+                list.fail(request, error);
+            }
+            None => list.send_failed(error),
+        }
     }
 
     /// A profile tab's request failed: the tab shows the error and hides
     /// from the bar unless it is the active one.
-    pub(crate) fn fail_profile_tab(&mut self, chat_id: ChatId, tab: SharedMediaTab, error: String) {
-        if self.media.shared_media.fail_profile(chat_id, tab, error)
+    pub(crate) fn fail_profile_tab(
+        &mut self,
+        chat_id: ChatId,
+        tab: SharedMediaTab,
+        generation: Option<u64>,
+        error: String,
+    ) {
+        if self
+            .media
+            .shared_media
+            .fail_profile(chat_id, tab, generation, error)
             && let Some(&key) = tab.count_keys().first()
         {
             self.set_profile_count(chat_id, key, 0);
@@ -675,24 +814,111 @@ mod tests {
         };
         let tab = SharedMediaTab::Gifts;
         gallery.begin_profile_fetch(tab);
-        gallery.accept_profile(ChatId(1), tab, vec![row("a")], 2, true, false);
-        assert_eq!(
-            gallery.tabs[tab.index()].status,
-            SharedMediaTabStatus::Ready
+        gallery.accept_profile(
+            ChatId(1),
+            tab,
+            None,
+            ProfilePage {
+                items: vec![row("a")],
+                total_count: 2,
+                has_more: true,
+                append: false,
+            },
         );
-        assert!(gallery.begin_profile_more(tab));
-        assert!(!gallery.begin_profile_more(tab));
-        gallery.accept_profile(ChatId(1), tab, vec![row("b")], 2, false, true);
+        assert!(gallery.tabs[tab.index()].status.is_ready());
+        assert!(gallery.begin_profile_more(tab).is_some());
+        assert!(gallery.begin_profile_more(tab).is_none());
+        gallery.accept_profile(
+            ChatId(1),
+            tab,
+            None,
+            ProfilePage {
+                items: vec![row("b")],
+                total_count: 2,
+                has_more: false,
+                append: true,
+            },
+        );
         assert_eq!(gallery.tabs[tab.index()].items.len(), 2);
         assert!(!gallery.tabs[tab.index()].can_load_more());
         // A late failure keeps the list; another chat's answer is ignored.
-        gallery.fail_profile(ChatId(1), tab, "boom".into());
+        gallery.fail_profile(ChatId(1), tab, None, "boom".into());
+        assert!(gallery.tabs[tab.index()].status.is_ready());
+        gallery.accept_profile(
+            ChatId(2),
+            tab,
+            None,
+            ProfilePage {
+                items: vec![],
+                total_count: 0,
+                has_more: false,
+                append: false,
+            },
+        );
+        assert_eq!(gallery.tabs[tab.index()].items.len(), 2);
+    }
+
+    #[test]
+    fn a_page_from_before_the_gallery_was_reopened_is_dropped() {
+        let mut gallery = SharedMediaState::default();
+        gallery.open_for(ChatId(1));
+        let tab = SharedMediaTab::Gifts;
+        let row = SharedMediaItem {
+            message_id: MessageId(0),
+            glyph: "",
+            label: "a".into(),
+            message: None,
+            date: 0,
+            action: SharedMediaAction::Gift,
+            visual: SharedMediaVisual::None,
+            meta: SharedMediaMeta::None,
+            file: FileId(0),
+        };
+        let first = gallery.begin_profile_fetch(tab);
+        gallery.accept_profile(
+            ChatId(1),
+            tab,
+            Some(first),
+            ProfilePage {
+                items: vec![row],
+                total_count: 5,
+                has_more: true,
+                append: false,
+            },
+        );
+        let more = gallery.begin_profile_more(tab);
+        assert_eq!(more, Some(first));
+        gallery.close();
+        gallery.open_for(ChatId(1));
+        let fresh = gallery.begin_profile_fetch(tab);
+        assert_ne!(fresh, first);
+        assert!(!gallery.accept_profile(
+            ChatId(1),
+            tab,
+            more,
+            ProfilePage {
+                items: vec![],
+                total_count: 5,
+                has_more: false,
+                append: true
+            }
+        ));
         assert_eq!(
             gallery.tabs[tab.index()].status,
-            SharedMediaTabStatus::Ready
+            SharedMediaTabStatus::Loading
         );
-        gallery.accept_profile(ChatId(2), tab, vec![], 0, false, false);
-        assert_eq!(gallery.tabs[tab.index()].items.len(), 2);
+        assert!(!gallery.fail_profile(ChatId(1), tab, more, "late".into()));
+        assert!(gallery.accept_profile(
+            ChatId(1),
+            tab,
+            Some(fresh),
+            ProfilePage {
+                items: vec![],
+                total_count: 5,
+                has_more: true,
+                append: false
+            }
+        ));
     }
 
     #[test]
@@ -720,19 +946,22 @@ mod tests {
     fn playlist_pages_until_the_total() {
         let mut playlist = Playlist::default();
         assert!(!playlist.has_more());
-        playlist.loaded = true;
-        playlist.total_count = 2;
+        let track = ProfileAudio {
+            file_id: crate::ids::FileId(1),
+            title: String::new(),
+            performer: String::new(),
+            file_name: "a.mp3".into(),
+            duration: 0,
+        };
+        playlist.list = Paged::Ready(PlaylistData {
+            tracks: vec![track.clone()],
+            total_count: 2,
+        });
         assert!(playlist.has_more());
-        playlist.tracks = vec![
-            ProfileAudio {
-                file_id: crate::ids::FileId(1),
-                title: String::new(),
-                performer: String::new(),
-                file_name: "a.mp3".into(),
-                duration: 0,
-            };
-            2
-        ];
+        playlist.list = Paged::Ready(PlaylistData {
+            tracks: vec![track; 2],
+            total_count: 2,
+        });
         assert!(!playlist.has_more());
     }
 }

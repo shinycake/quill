@@ -9,7 +9,6 @@ use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::rich::{MarkupBlocks, PreviewBlocks, RichBlock};
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::rc::Rc;
 
 /// The height the preview stops growing at, so a long draft can't squeeze the
@@ -75,7 +74,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         // Editor blocks never carry buttons, so the callback ids are unused.
-        let revealed = HashSet::new();
+        let revealed = crate::ui::message_text::revealed::Revealed::default();
         let ids = (ChatId(0), MessageId(0));
         rich_block_element(index, block, (0, 0), ids.0, ids.1, &revealed, font, cx)
     }

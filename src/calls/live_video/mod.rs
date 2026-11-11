@@ -118,30 +118,57 @@ pub enum LiveEnd {
 /// Called once, from any thread, when there is something new to draw.
 pub type LiveWaker = Box<dyn FnOnce() + Send>;
 
+/// The newest frame and whether the UI took it.
+#[derive(Default)]
+enum Feed {
+    #[default]
+    Empty,
+    /// Not taken by the UI yet.
+    Unshown(Arc<LiveFrame>),
+    Shown(Arc<LiveFrame>),
+}
+
+impl Feed {
+    fn frame(&self) -> Option<&Arc<LiveFrame>> {
+        match self {
+            Feed::Empty => None,
+            Feed::Unshown(frame) | Feed::Shown(frame) => Some(frame),
+        }
+    }
+}
+
+/// The UI's one-shot waker.
+#[derive(Default)]
+enum Waker {
+    #[default]
+    Idle,
+    Armed(LiveWaker),
+    /// Something changed while no waker was armed.
+    Pending,
+}
+
 #[derive(Default)]
 struct Latest {
-    frame: Option<Arc<LiveFrame>>,
-    /// `frame` was not taken by the UI yet.
-    unshown: bool,
+    feed: Feed,
     pushed: u64,
     /// Frames replaced before the UI took them.
     dropped: u64,
     state: Option<LiveState>,
     end: Option<LiveEnd>,
-    waker: Option<LiveWaker>,
-    /// Something changed while no waker was armed.
-    wake_pending: bool,
+    waker: Waker,
 }
 
 impl Latest {
     /// The waker to call once the lock is released, or a note for the
     /// next arm.
     fn wake(&mut self) -> Option<LiveWaker> {
-        let waker = self.waker.take();
-        if waker.is_none() {
-            self.wake_pending = true;
+        match std::mem::replace(&mut self.waker, Waker::Pending) {
+            Waker::Armed(waker) => {
+                self.waker = Waker::Idle;
+                Some(waker)
+            }
+            Waker::Idle | Waker::Pending => None,
         }
-        waker
     }
 }
 
@@ -186,17 +213,20 @@ impl LiveSink {
     /// stays for a later take.
     pub fn take_if(&self, wanted: impl FnOnce(&LiveFrame) -> bool) -> Option<Arc<LiveFrame>> {
         let mut latest = self.0.lock_or_recover();
-        if !latest.unshown {
+        let Feed::Unshown(frame) = &latest.feed else {
+            return None;
+        };
+        if !wanted(frame) {
             return None;
         }
-        let frame = latest.frame.clone().filter(|frame| wanted(frame))?;
-        latest.unshown = false;
+        let frame = frame.clone();
+        latest.feed = Feed::Shown(frame.clone());
         Some(frame)
     }
 
     /// The newest frame, taken or not.
     pub fn latest(&self) -> Option<Arc<LiveFrame>> {
-        self.0.lock_or_recover().frame.clone()
+        self.0.lock_or_recover().feed.frame().cloned()
     }
 
     pub fn snapshot(&self) -> LiveSnapshot {
@@ -206,10 +236,10 @@ impl LiveSink {
             end: latest.end.clone(),
             pushed: latest.pushed,
             dropped: latest.dropped,
-            unshown: latest.unshown,
+            unshown: matches!(latest.feed, Feed::Unshown(_)),
             latest: latest
-                .frame
-                .as_ref()
+                .feed
+                .frame()
                 .map(|frame| (frame.seq, frame.arrived_at)),
         }
     }
@@ -229,11 +259,12 @@ impl LiveSink {
     pub fn arm(&self, waker: LiveWaker) {
         let now = {
             let mut latest = self.0.lock_or_recover();
-            if std::mem::take(&mut latest.wake_pending) {
-                Some(waker)
-            } else {
-                latest.waker = Some(waker);
-                None
+            match std::mem::replace(&mut latest.waker, Waker::Idle) {
+                Waker::Pending => Some(waker),
+                Waker::Idle | Waker::Armed(_) => {
+                    latest.waker = Waker::Armed(waker);
+                    None
+                }
             }
         };
         if let Some(waker) = now {
@@ -268,17 +299,16 @@ impl LiveSource {
     /// The new frame is allocated and the old one freed (a few MB for a
     /// 1080p frame) outside the lock the UI thread takes.
     pub fn push(&self, frame: LiveFrame) {
-        let frame = Some(Arc::new(frame));
+        let frame = Arc::new(frame);
         let (waker, _replaced) = {
             let mut latest = self.0.lock_or_recover();
             if latest.end.is_some() {
                 return;
             }
-            if latest.unshown {
+            if matches!(latest.feed, Feed::Unshown(_)) {
                 latest.dropped = latest.dropped.saturating_add(1);
             }
-            let replaced = std::mem::replace(&mut latest.frame, frame);
-            latest.unshown = true;
+            let replaced = std::mem::replace(&mut latest.feed, Feed::Unshown(frame));
             latest.pushed = latest.pushed.saturating_add(1);
             (latest.wake(), replaced)
         };

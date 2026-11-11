@@ -6,7 +6,7 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
-use quill::collectible_info::{CollectibleInfo, CollectibleLookup};
+use quill::collectible_info::{CollectibleInfo, LookupSpec, LookupStage};
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
@@ -44,15 +44,16 @@ fn the_box_opens_with_the_answer_and_closes_with_the_lookup(cx: &mut TestAppCont
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
         let session = app.demo_session.as_mut().expect("demo session");
-        let mut lookup = CollectibleLookup::new("durov", "Pavel", None, String::new());
-        lookup.info = Some(CollectibleInfo {
-            purchase_date: 1_700_000_000,
-            currency: "USD".into(),
-            amount: 1250,
-            crypto_currency: "TON".into(),
-            crypto_amount: 5_500_000_000,
-            url: "https://fragment.com/username/durov".into(),
-        });
+        let lookup = LookupSpec::new("durov", "Pavel", None, String::new()).into_lookup(
+            LookupStage::Ready(CollectibleInfo {
+                purchase_date: 1_700_000_000,
+                currency: "USD".into(),
+                amount: 1250,
+                crypto_currency: "TON".into(),
+                crypto_amount: 5_500_000_000,
+                url: "https://fragment.com/username/durov".into(),
+            }),
+        );
         session.payments.hub.collectible = Some(lookup);
         cx.notify();
     });

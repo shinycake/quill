@@ -1,0 +1,3 @@
+# Purpose checks and unmatched answers that need no RequestId (scripts/check-request-match.py).
+# One per line: <rule>:<Type::function> <reason>
+unmatched:Session::apply_earn the own account's "has Stars statistics" fact (EarnState::self_stats, a Fetch<()>): any getStarRevenueStatistics answer for the own account proves it, the probe's or the open page's, so it is not tied to one request. The page's own data in the same arm is matched by waits_for

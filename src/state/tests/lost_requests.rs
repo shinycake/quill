@@ -2,6 +2,7 @@
 //! of its domain: no loading flag survives the sweep or the account.
 use super::common::*;
 use super::*;
+use crate::premium_hub::page_stage::{PageKind, PageStage};
 use std::time::{Duration, Instant};
 
 fn ready_session() -> Session {
@@ -23,11 +24,10 @@ fn sweeping_a_shared_media_page_allows_the_next_page_request() {
     let mut session = ready_session();
     let chat = ChatId(5);
     let media = &mut session.media.shared_media;
-    media.open = true;
     media.chat_id = Some(chat);
     let tab = SharedMediaTab::default();
     let state = media.tab_state(tab);
-    state.status = SharedMediaTabStatus::Ready;
+    state.status = SharedMediaTabStatus::ready();
     state.next_from = MessageId(40);
     let (generation, _) = media.begin_fetch_more(tab).expect("page starts");
     session.request(
@@ -39,23 +39,24 @@ fn sweeping_a_shared_media_page_allows_the_next_page_request() {
     assert!(sweep(&mut session));
 
     assert!(session.requests.is_empty());
-    assert!(session.media.shared_media.tab_state(tab).can_load_more());
+    let state = session.media.shared_media.tab_state(tab);
+    assert!(state.more_error().is_some(), "the list shows its retry row");
+    assert!(state.more_askable());
 }
 
 #[test]
 fn sweeping_an_in_chat_search_page_clears_its_loading_flag() {
     let mut session = ready_session();
     let chat = ChatId(5);
+    session.search.chat_search.open_for(chat);
     let generation = session.search.chat_search.generation;
-    session.search.chat_search.open = true;
-    session.search.chat_search.chat_id = Some(chat);
-    session.search.chat_search.next_from_message_id = MessageId(9);
-    session.search.chat_search.loading_more = true;
+    session.search.chat_search.begin_more(MessageId(9));
     session.request_chat_search(RequestPurpose::SearchChatMessagesMore, chat, generation);
 
     assert!(sweep(&mut session));
 
-    assert!(!session.search.chat_search.loading_more);
+    assert!(!session.search.chat_search.loading_more());
+    assert!(session.search.chat_search.more_failed(), "Retry is offered");
 }
 
 #[test]
@@ -69,6 +70,12 @@ fn every_sweepable_purpose_leaves_the_registry_and_the_session_alive() {
         RequestPurpose::SearchMessages,
         RequestPurpose::SearchChatMessages,
         RequestPurpose::SearchChatMessagesMore,
+        RequestPurpose::SearchMessagesMore,
+        RequestPurpose::SearchPublicPosts,
+        RequestPurpose::SearchPublicPostsMore,
+        RequestPurpose::SearchPublicMessagesByTag,
+        RequestPurpose::GetRecommendedChats,
+        RequestPurpose::CanTransferOwnership,
         RequestPurpose::SearchChats,
         RequestPurpose::SearchPublicChats,
         RequestPurpose::GetSharedMedia {
@@ -97,39 +104,175 @@ fn every_sweepable_purpose_leaves_the_registry_and_the_session_alive() {
 #[test]
 fn account_loss_resets_the_loading_flags_of_pending_lookups() {
     let mut session = ready_session();
-    session.settings.privacy_data.network_loading = true;
+    session.settings.privacy_data.network.begin();
     session.request(RequestPurpose::GetNetworkStatistics, None);
-    session.payments.star_subscriptions_loading = true;
-    session.request(
+    let subscriptions = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
         None,
     );
-    session.payments.hub.tx_loading = true;
-    session.request(
+    session
+        .payments
+        .star_subscriptions
+        .begin_load(subscriptions);
+    let history = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { append: false }),
         None,
     );
-    session.payments.hub.gifts_loading = true;
-    session.request(
+    session.payments.hub.stars.page = PageStage::Loading {
+        request: history,
+        kind: PageKind::First,
+    };
+    let gifts = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append: false }),
         None,
     );
-    session.media.playlists.entry(9).or_default().loading = true;
-    session.request_for_user(
+    session.payments.hub.received.page = PageStage::Loading {
+        request: gifts,
+        kind: PageKind::First,
+    };
+    let audios = session.request_for_user(
         RequestPurpose::Media(MediaPurpose::GetProfileAudios { append: false }),
         9,
     );
+    session
+        .media
+        .playlists
+        .entry(9)
+        .or_default()
+        .list
+        .begin(audios, false);
     let user_action = session.request(RequestPurpose::SendMessage, Some(ChatId(5)));
-    session.stale_history_requests.insert(77);
 
     session.begin_logout();
 
-    assert!(!session.settings.privacy_data.network_loading);
-    assert!(!session.payments.star_subscriptions_loading);
-    assert!(!session.payments.hub.tx_loading);
-    assert!(!session.payments.hub.gifts_loading);
-    assert!(!session.media.playlists[&9].loading);
+    assert!(!session.settings.privacy_data.network.is_loading());
+    assert!(!session.payments.star_subscriptions.is_loading());
+    assert!(!session.payments.hub.stars.page.is_loading());
+    assert!(!session.payments.hub.received.page.is_loading());
+    assert!(!session.media.playlists[&9].loading());
     assert!(session.requests.is_empty());
     assert!(session.requests.get(user_action).is_none());
-    assert!(session.stale_history_requests.is_empty());
+}
+
+/// Sweep 05-200: a request dropped by logout settles (its busy marker
+/// clears) without leaving a failure note that shows during logout or after
+/// the next login.
+#[test]
+fn logout_does_not_leave_failure_notes_of_dropped_user_actions() {
+    let mut session = ready_session();
+    session
+        .messages
+        .message_action_note
+        .push("earlier note".into());
+    session.request(RequestPurpose::SetChatMessageSender, Some(ChatId(5)));
+    session.request(RequestPurpose::SendMessage, Some(ChatId(5)));
+
+    session.begin_logout();
+
+    assert!(session.requests.is_empty());
+    assert_eq!(
+        session.messages.message_action_note.last(),
+        Some("earlier note"),
+        "no 'could not change the sender' note from the dropped request"
+    );
+    assert!(session.messages.flood_notice.is_empty());
+}
+
+/// A request lost to its TTL is the user's to hear about; only logout is
+/// quiet.
+#[test]
+fn a_swept_user_action_still_says_it_failed() {
+    let mut session = ready_session();
+    let id = session.request(RequestPurpose::SetChatMessageSender, Some(ChatId(5)));
+    let pending = session.requests.take(id).expect("registered");
+    session.settle_lost_request(pending);
+    assert!(!session.messages.message_action_note.is_empty());
+}
+
+#[test]
+fn sweeping_a_widget_public_data_poll_tells_the_widget_to_poll_again() {
+    let mut session = ready_session();
+    let (chat, message) = (ChatId(5), MessageId(9));
+    session.request_for_message(
+        RequestPurpose::Bots(BotsPurpose::GetWidgetPublicData),
+        chat,
+        message,
+    );
+
+    assert!(sweep(&mut session));
+
+    assert!(session.requests.is_empty());
+    assert!(
+        matches!(
+            session.bots.widget_answers.as_slice(),
+            [crate::message_widget::WidgetAnswer::PublicData { data: None, .. }]
+        ),
+        "the answer that returns the widget to Due"
+    );
+}
+
+/// Sweep 05-193: a lost `canTransferOwnership` answer settles as a failed
+/// check, so the next dialog open asks again.
+#[test]
+fn sweeping_a_lost_transfer_check_lets_the_next_open_ask_again() {
+    let mut session = ready_session();
+    session.begin_ownership_check();
+    session.request(RequestPurpose::CanTransferOwnership, None);
+
+    assert!(sweep(&mut session));
+
+    assert!(!session.groups.ownership.check.is_loading());
+    assert!(session.groups.ownership.check.error().is_some());
+}
+
+/// Sweep 05-202: a lost recommended-channels answer ends its loading state.
+#[test]
+fn sweeping_lost_recommended_channels_clears_their_loading_flag() {
+    let mut session = ready_session();
+    session.search.search.tabs.recommended.begin();
+    session.request(RequestPurpose::GetRecommendedChats, None);
+
+    assert!(sweep(&mut session));
+
+    assert!(!session.search.search.tabs.recommended.is_loading());
+}
+
+/// A swept upgrade or history toggle takes its waiting step with it and
+/// tells the person (02-074).
+#[test]
+fn a_swept_request_drops_its_admin_followups_and_says_so() {
+    let mut session = ready_session();
+    let id = session.request(RequestPurpose::UpgradeBasicGroup, Some(ChatId(5)));
+    session.queue_admin_followup(
+        id,
+        AdminFollowup::HistoryAfterUpgrade {
+            old: ChatId(5),
+            visible: true,
+        },
+    );
+    let pending = session.requests.take(id).expect("registered");
+    session.settle_lost_request(pending);
+    assert!(session.take_admin_followup(id).is_none());
+    assert!(!session.chats_state.chat_action_error.is_empty());
+}
+
+/// An answer dropped as out of order still settles what asked for it: the
+/// download is no longer counted as running, so the file can be asked again.
+#[test]
+fn an_answer_dropped_as_out_of_order_does_not_leave_its_download_running() {
+    let (mut session, sink) = session();
+    session.connection = ConnectionState::Ready;
+    session.last_seq = 50;
+    let file = FileId(7);
+    let extra = session.request_download(file);
+    assert!(session.requests.has_download(file));
+    let seq = AtomicU64::new(0);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
+    );
+    assert!(session.requests.is_empty());
+    assert!(!session.requests.has_download(file));
 }

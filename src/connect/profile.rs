@@ -49,9 +49,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// 1.8.67, line 11677; the private chat with self is the documented
     /// chat id — TGX `EditUsernameController` sends it with
     /// `tdlib.selfChatId()`). The verdict lands in
-    /// `Session::username_check`; the in-flight text in
-    /// `Session::username_check_pending` so the dialog can ignore stale
-    /// verdicts.
+    /// `Session::username_check`, which holds the text in flight so the
+    /// dialog can ignore stale verdicts.
     pub fn check_username(&mut self, username: &str) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -60,13 +59,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         };
         let extra = self.session.request(RequestPurpose::CheckUsername, None);
-        self.session.users_state.username_check_pending = Some((extra, username.to_string()));
+        self.session
+            .users_state
+            .username_check
+            .begin(extra, username);
         let json = check_chat_username(extra, ChatId(me), username);
         let sent = self.send_json_request(extra, &json);
         if sent.is_err() {
             // Don't leave the dialog showing "Checking…" for a request
             // that never went out.
-            self.session.users_state.username_check_pending = None;
+            self.session.users_state.username_check.end(extra);
         }
         sent
     }
@@ -141,12 +143,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let background_emoji_id = self
+        // Without the own user the icon is unknown: sending 0 would clear it.
+        let Some(background_emoji_id) = self
             .session
             .my_user_id
             .and_then(|me| self.session.user(me))
             .map(|u| u.profile_background_custom_emoji_id)
-            .unwrap_or(0);
+        else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
         let extra = self
             .session
             .request(RequestPurpose::SetProfileAccentColor, None);

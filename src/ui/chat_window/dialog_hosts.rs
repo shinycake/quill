@@ -37,24 +37,58 @@
 use super::ChatWindows;
 use crate::ui::app::QuillApp;
 use crate::ui::shell::{DialogKind, QuillShell};
-use quill::ids::ChatId;
+use quill::ids::{ChatId, RequestId};
 use std::collections::HashMap;
 
 /// The window a session-wide box belongs to (`None`: the main window),
 /// and how far it got there.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 enum Host {
     /// The window asked for it: it waits for the answer that sets its
-    /// flag, and shows there then.
-    Asked(Option<ChatId>),
+    /// flag, and shows there then. The ask ends when the requests it was
+    /// made with settle ([`AskWaits`]) without the flag set.
+    Asked {
+        window: Option<ChatId>,
+        waits: AskWaits,
+    },
     /// It showed in the window: free again once its flag is clear.
     Shown(Option<ChatId>),
 }
 
-impl Host {
-    fn window(self) -> Option<ChatId> {
+/// What an ask waits for: the requests in flight once the code that made
+/// it has run (the answer that sets its flag is one of them). Later
+/// requests are no part of it, so unrelated traffic neither ends nor holds
+/// the ask.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub(in crate::ui) enum AskWaits {
+    /// A demo stages its answers by hand: nothing to wait on, never expires.
+    Demo,
+    /// A live client's ask whose requests are not read yet. A box is asked
+    /// for before the request whose answer opens it is sent
+    /// ([`QuillApp::open_box`]), so the requests are read by the next
+    /// dialog sync, when that request is out
+    /// ([`ChatWindows::read_ask_waits`]). Until then it does not settle.
+    Unread,
+    /// A live client: the ask ends once none of these is in flight and the
+    /// flag is still clear.
+    Requests(Vec<RequestId>),
+}
+
+impl AskWaits {
+    /// Every request the ask was made with has settled (`in_flight` says
+    /// which are still out). A demo's ask never settles by itself.
+    pub(in crate::ui) fn settled(&self, in_flight: impl Fn(RequestId) -> bool) -> bool {
         match self {
-            Self::Asked(window) | Self::Shown(window) => window,
+            Self::Demo | Self::Unread => false,
+            Self::Requests(ids) => !ids.iter().any(|id| in_flight(*id)),
+        }
+    }
+}
+
+impl Host {
+    fn window(&self) -> Option<ChatId> {
+        match self {
+            Self::Asked { window, .. } | Self::Shown(window) => *window,
         }
     }
 }
@@ -109,7 +143,17 @@ impl QuillApp {
     /// (`scripts/dialog_hosts.py`).
     pub(in crate::ui) fn open_box(&mut self, kind: DialogKind) {
         let here = self.asking_window_or_last_press();
-        self.windows.open_box_in(kind, here);
+        let waits = self.ask_waits();
+        self.windows.open_box_in(kind, here, waits);
+    }
+
+    /// What an ask made now waits for: a live client's requests, read once
+    /// the asking code has sent its own ([`AskWaits::Unread`]).
+    pub(in crate::ui) fn ask_waits(&self) -> AskWaits {
+        match self.live.as_ref() {
+            Some(_) => AskWaits::Unread,
+            None => AskWaits::Demo,
+        }
     }
 
     /// The window of the action running now, or the window of the last
@@ -195,14 +239,21 @@ impl ChatWindows {
     /// `kind`: [`QuillApp::open_box`] for an answer whose flow knows the
     /// window that asked. A per-window kind needs no ask: its flag is in
     /// the window's own state.
-    pub(in crate::ui) fn open_box_in(&mut self, kind: DialogKind, window: Option<ChatId>) {
+    pub(in crate::ui) fn open_box_in(
+        &mut self,
+        kind: DialogKind,
+        window: Option<ChatId>,
+        waits: AskWaits,
+    ) {
         if QuillShell::is_per_window(kind) {
             return;
         }
         // A window that closed asks for nothing.
         let window = window.filter(|chat| self.has(*chat));
         self.dialogs.left.retain(|left| *left != kind);
-        self.dialogs.hosts.insert(kind, Host::Asked(window));
+        self.dialogs
+            .hosts
+            .insert(kind, Host::Asked { window, waits });
     }
 
     /// The window that shows, or asked for, the session-wide box `kind`
@@ -211,6 +262,26 @@ impl ChatWindows {
     /// limit) opens its own box where that one is.
     pub(in crate::ui) fn window_of_box(&self, kind: DialogKind) -> Option<ChatId> {
         match self.dialogs.hosts.get(&kind) {
+            Some(owner) => owner.window(),
+            None => self.last_press,
+        }
+    }
+
+    /// The window that asked for `kind`, else the one that asked for
+    /// `fallback` (the box `kind` follows from), else the window of the last
+    /// press. A result of the follow-up box goes to the window of the box
+    /// that started it, not to whichever window was pressed last.
+    pub(in crate::ui) fn window_of_box_or(
+        &self,
+        kind: DialogKind,
+        fallback: DialogKind,
+    ) -> Option<ChatId> {
+        match self
+            .dialogs
+            .hosts
+            .get(&kind)
+            .or_else(|| self.dialogs.hosts.get(&fallback))
+        {
             Some(owner) => owner.window(),
             None => self.last_press,
         }
@@ -250,6 +321,54 @@ impl ChatWindows {
         }
     }
 
+    /// The session-wide boxes a window asked for whose flag no answer set
+    /// yet.
+    pub(in crate::ui) fn asked_dialogs(&self) -> Vec<(DialogKind, AskWaits)> {
+        self.dialogs
+            .hosts
+            .iter()
+            .filter_map(|(kind, owner)| match owner {
+                Host::Asked { waits, .. } => Some((*kind, waits.clone())),
+                Host::Shown(_) => None,
+            })
+            .collect()
+    }
+
+    /// Whether an ask still waits for its requests to be read.
+    pub(in crate::ui) fn has_unread_asks(&self) -> bool {
+        self.dialogs.hosts.values().any(|owner| {
+            matches!(
+                owner,
+                Host::Asked {
+                    waits: AskWaits::Unread,
+                    ..
+                }
+            )
+        })
+    }
+
+    /// The asks made since the last dialog sync wait for `pending`, the
+    /// requests in flight now: the code that asked has run, so the request
+    /// whose answer opens the box is among them.
+    pub(in crate::ui) fn read_ask_waits(&mut self, pending: &[RequestId]) {
+        for owner in self.dialogs.hosts.values_mut() {
+            if let Host::Asked { waits, .. } = owner
+                && *waits == AskWaits::Unread
+            {
+                *waits = AskWaits::Requests(pending.to_vec());
+            }
+        }
+    }
+
+    /// The ask for `kind` ended with no box: its request settled (answered
+    /// without opening it, failed, or was cancelled), so the next open of
+    /// that kind goes to the window of its own ask, not to this one.
+    pub(in crate::ui) fn dialog_ask_expired(&mut self, kind: DialogKind) {
+        if matches!(self.dialogs.hosts.get(&kind), Some(Host::Asked { .. })) {
+            self.dialogs.hosts.remove(&kind);
+        }
+    }
+
     /// The session-wide boxes `host` showed.
     pub(in crate::ui) fn dialogs_shown_by(&self, host: Option<ChatId>) -> Vec<DialogKind> {
         self.dialogs
@@ -261,12 +380,17 @@ impl ChatWindows {
     }
 
     /// The session-wide boxes that belong to `chat`'s window, shown or
-    /// asked for.
+    /// asked for, that close with it. The account
+    /// notices are a queue about the account, not about the window: closing
+    /// the window must not dismiss them unseen (a force-logout notice among
+    /// them), so they stay open and the next window shows them.
     pub(in crate::ui) fn dialogs_of_window(&self, chat: ChatId) -> Vec<DialogKind> {
         self.dialogs
             .hosts
             .iter()
-            .filter(|(_, owner)| owner.window() == Some(chat))
+            .filter(|(kind, owner)| {
+                owner.window() == Some(chat) && **kind != DialogKind::AccountNotice
+            })
             .map(|(kind, _)| *kind)
             .collect()
     }
@@ -280,10 +404,17 @@ impl ChatWindows {
             .hosts
             .iter()
             .filter(|(_, owner)| owner.window() == Some(chat_id))
-            .map(|(kind, owner)| (*kind, *owner))
+            .map(|(kind, owner)| (*kind, owner.clone()))
             .collect();
         for (kind, owner) in mine {
             self.dialogs.hosts.remove(&kind);
+            // The account notices are a queue about the account, not about
+            // the window: they are freed like a box with no close of its own
+            // (the next window to show one takes it) and never closed
+            // unseen by the main window's sync.
+            if kind == DialogKind::AccountNotice {
+                continue;
+            }
             if matches!(owner, Host::Shown(_)) && !self.dialogs.left.contains(&kind) {
                 self.dialogs.left.push(kind);
             }

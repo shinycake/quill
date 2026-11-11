@@ -377,62 +377,103 @@ pub struct ViewerFrames {
     pub fps: f64,
 }
 
-fn wait_for_cancelable_child(
-    command: &mut Command,
-    slot: &std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
-    cancelled: &std::sync::atomic::AtomicBool,
-) -> Result<std::process::ExitStatus, String> {
-    use std::sync::atomic::Ordering;
-    if cancelled.load(Ordering::SeqCst) {
-        return Err("ffmpeg extraction was cancelled".to_string());
+/// A cancelable ffmpeg extraction, shared by the worker that runs it and
+/// the UI that may abandon it (viewer closed or stepped). One value under
+/// one lock, so a cancel never races the child's publication.
+#[derive(Default)]
+pub struct Extraction(std::sync::Mutex<ExtractionStage>);
+
+#[derive(Default)]
+enum ExtractionStage {
+    /// Not started, or the worker has not published its child yet.
+    #[default]
+    Starting,
+    Running(std::process::Child),
+    /// Abandoned: a child still to be published is killed on arrival, and
+    /// the worker reports the cancellation.
+    Cancelled,
+}
+
+impl Extraction {
+    /// A poisoned lock still guards the child: take it back rather than
+    /// leave ffmpeg running unreaped.
+    fn stage(&self) -> std::sync::MutexGuard<'_, ExtractionStage> {
+        self.0.lock().unwrap_or_else(|p| p.into_inner())
     }
-    let child = command.spawn().map_err(|err| {
-        eprintln!("quill: could not start ffmpeg: {err}");
-        crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_PLAYBACK_NEEDS_FFMPEG).to_string()
-    })?;
-    // Publish the running child so the UI can kill an abandoned
-    // extraction (viewer closed/stepped). The worker polls
-    // `try_wait` instead of blocking in `wait` so it never holds
-    // the slot lock while the UI killer needs it.
-    *slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(child);
-    if cancelled.load(Ordering::SeqCst) {
-        // The UI abandoned the run between spawn and publish and
-        // already took the (empty) slot: kill our own child instead
-        // of orphaning it.
-        if let Ok(mut guard) = slot.lock()
-            && let Some(mut child) = guard.take()
+
+    /// Abandon the run: a running ffmpeg is killed and reaped.
+    pub fn cancel(&self) {
+        let mut stage = self.stage();
+        if let ExtractionStage::Running(mut child) =
+            std::mem::replace(&mut *stage, ExtractionStage::Cancelled)
         {
             let _ = child.kill();
             let _ = child.wait();
         }
-        return Err("ffmpeg extraction was cancelled".to_string());
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        matches!(*self.stage(), ExtractionStage::Cancelled)
+    }
+
+    /// An ffmpeg is running (tests).
+    #[cfg(test)]
+    fn is_running(&self) -> bool {
+        matches!(*self.stage(), ExtractionStage::Running(_))
+    }
+}
+
+const EXTRACTION_CANCELLED: &str = "ffmpeg extraction was cancelled";
+
+fn wait_for_cancelable_child(
+    command: &mut Command,
+    extraction: &Extraction,
+) -> Result<std::process::ExitStatus, String> {
+    if extraction.is_cancelled() {
+        return Err(EXTRACTION_CANCELLED.to_string());
+    }
+    let mut child = command.spawn().map_err(|err| {
+        eprintln!("quill: could not start ffmpeg: {err}");
+        crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_PLAYBACK_NEEDS_FFMPEG).to_string()
+    })?;
+    // Publish the running child so the UI can kill an abandoned
+    // extraction. The worker polls `try_wait` instead of blocking in
+    // `wait` so it never holds the lock while the UI killer needs it.
+    {
+        let mut stage = extraction.stage();
+        if matches!(*stage, ExtractionStage::Cancelled) {
+            // Abandoned between spawn and publish: kill our own child
+            // instead of orphaning it.
+            drop(stage);
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(EXTRACTION_CANCELLED.to_string());
+        }
+        *stage = ExtractionStage::Running(child);
     }
     loop {
-        // A poisoned lock still guards the child: take it back rather than
-        // leave ffmpeg running unreaped.
-        let mut guard = slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some(child) = guard.as_mut() else {
-            // Slot emptied by the UI killer: it took the child and
-            // is killing/reaping it — report cancellation. (The UI
-            // drops stale completions by epoch instead of showing
-            // an error.)
-            return Err("ffmpeg extraction was cancelled".to_string());
+        let mut stage = extraction.stage();
+        let ExtractionStage::Running(child) = &mut *stage else {
+            // Cancelled: the killer took the child and reaped it. (The UI
+            // drops stale completions by epoch instead of showing an
+            // error.)
+            return Err(EXTRACTION_CANCELLED.to_string());
         };
         match child.try_wait() {
             Ok(Some(status)) => {
-                guard.take();
+                *stage = ExtractionStage::Starting;
                 return Ok(status);
             }
             Ok(None) => {}
             Err(err) => {
-                if let Some(mut child) = guard.take() {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                }
+                // The child cannot be polled: stop it and reap it here.
+                let _ = child.kill();
+                let _ = child.wait();
+                *stage = ExtractionStage::Starting;
                 return Err(err.to_string());
             }
         }
-        drop(guard);
+        drop(stage);
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
 }
@@ -444,10 +485,7 @@ pub(crate) fn extract_frames(
     fps: f64,
     width: i32,
     max_frames: i32,
-    child_slot: Option<(
-        &std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
-        &std::sync::atomic::AtomicBool,
-    )>,
+    extraction: Option<&Extraction>,
     input_decoder: Option<&str>,
 ) -> Result<Vec<PathBuf>, String> {
     crate::local_path::secure_create_dir(cache_dir).map_err(|err| err.to_string())?;
@@ -470,8 +508,8 @@ pub(crate) fn extract_frames(
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
-    let status = match child_slot {
-        Some((slot, cancelled)) => wait_for_cancelable_child(&mut command, slot, cancelled)?,
+    let status = match extraction {
+        Some(extraction) => wait_for_cancelable_child(&mut command, extraction)?,
         None => crate::child_timeout::status_within(
             &mut command,
             crate::child_timeout::transcode_limit(f64::from(max_frames) / fps.max(0.01)),
@@ -523,6 +561,9 @@ pub struct VideoNoteDraft {
     pub duration_secs: i32,
     /// Square side in pixels (`inputVideoNote.length`).
     pub length: i32,
+    /// First-frame still, made by `VideoNoteCapture::finish` on its
+    /// background task so sending never waits for ffmpeg.
+    pub thumbnail: Option<VideoNoteThumbnail>,
 }
 
 /// Side of the live camera preview frames, in pixels (BGRA).
@@ -543,9 +584,18 @@ pub struct VideoNoteCapture {
     path: PathBuf,
     log: PathBuf,
     started: std::time::Instant,
-    child: Option<std::process::Child>,
+    capture: Capture,
     preview: PreviewFrame,
     size: i32,
+}
+
+/// Where a capture is: recording, stopped (ffmpeg exited by itself or was
+/// stopped), or finished (its clip was handed over, so dropping it leaves
+/// the clip alone).
+enum Capture {
+    Recording(std::process::Child),
+    Stopped,
+    Finished,
 }
 
 impl VideoNoteCapture {
@@ -603,7 +653,7 @@ impl VideoNoteCapture {
             path,
             log,
             started: std::time::Instant::now(),
-            child: Some(child),
+            capture: Capture::Recording(child),
             preview: frames,
             size,
         })
@@ -630,9 +680,11 @@ impl VideoNoteCapture {
     /// Once ffmpeg has exited by itself: `Ok` when it reached the time
     /// limit with a clip, otherwise why it stopped (no camera access…).
     pub fn ended(&mut self) -> Option<Result<(), String>> {
-        let child = self.child.as_mut()?;
+        let Capture::Recording(child) = &mut self.capture else {
+            return None;
+        };
         let status = child.try_wait().ok().flatten()?;
-        self.child = None;
+        self.capture = Capture::Stopped;
         let recorded = std::fs::metadata(&self.path).is_ok_and(|meta| meta.len() > 0);
         Some(if status.success() && recorded {
             Ok(())
@@ -673,16 +725,20 @@ impl VideoNoteCapture {
                 crate::lang::tr(crate::lang::keys::Q_OPS_VIDEO_CLIP_NOT_SQUARE).to_string(),
             );
         }
+        let thumbnail = write_video_note_thumbnail(&self.path);
+        self.capture = Capture::Finished;
         Ok(VideoNoteDraft {
-            path: std::mem::take(&mut self.path),
+            path: self.path.clone(),
             duration_secs: probe.duration.clamp(1, ROUND_MAX_SECS),
             length: probe.width,
+            thumbnail,
         })
     }
 
     fn stop_child(&mut self, graceful: bool) {
-        if let Some(mut child) = self.child.take() {
-            crate::media_tools::stop_capture(&mut child, graceful);
+        if let Capture::Recording(child) = &mut self.capture {
+            crate::media_tools::stop_capture(child, graceful);
+            self.capture = Capture::Stopped;
         }
     }
 }
@@ -748,13 +804,10 @@ fn round_capture_args(
 
 impl Drop for VideoNoteCapture {
     fn drop(&mut self) {
-        if self.child.is_some() {
-            self.stop_child(false);
-        }
+        self.stop_child(false);
         let _ = std::fs::remove_file(&self.log);
-        // A capture dropped without `finish` leaves no clip behind (`finish`
-        // hands the path over, leaving it empty).
-        if !self.path.as_os_str().is_empty() {
+        // A capture dropped without `finish` leaves no clip behind.
+        if !matches!(self.capture, Capture::Finished) {
             let _ = std::fs::remove_file(&self.path);
         }
     }

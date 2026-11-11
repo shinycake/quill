@@ -40,14 +40,14 @@ fn masks_dialog_requests_mask_lists_and_serializes_changes() {
     let installed = driver.open_mask_sets().unwrap().unwrap();
     let sent = sent_request(&recorder, "getInstalledStickerSets");
     assert_eq!(sent["sticker_type"]["@type"], "stickerTypeMask");
-    assert!(driver.session.stickers.masks.open);
+    assert!(driver.session.stickers.masks.dialog_open());
     // A second open while the first is in flight sends nothing new.
     assert_eq!(driver.select_mask_tab(MasksTab::Installed).unwrap(), None);
 
     driver
         .ingest(copy_and_parse(&sets_answer(installed, &[11, 12]), &seq, &sink).unwrap())
         .unwrap();
-    assert_eq!(driver.session.stickers.masks.installed.len(), 2);
+    assert_eq!(driver.session.stickers.masks.installed.items().len(), 2);
     assert_eq!(count_sent(&recorder, "getInstalledStickerSets"), 1);
 
     let archived_request = driver.select_mask_tab(MasksTab::Archived).unwrap().unwrap();
@@ -57,7 +57,7 @@ fn masks_dialog_requests_mask_lists_and_serializes_changes() {
     driver
         .ingest(copy_and_parse(&sets_answer(archived_request, &[21]), &seq, &sink).unwrap())
         .unwrap();
-    assert_eq!(driver.session.stickers.masks.archived.len(), 1);
+    assert_eq!(driver.session.stickers.masks.archived.items().len(), 1);
 
     let reorder = driver.reorder_mask_set(12, 11).unwrap().unwrap();
     let sent = sent_request(&recorder, "reorderInstalledStickerSets");
@@ -79,7 +79,7 @@ fn masks_dialog_requests_mask_lists_and_serializes_changes() {
             .unwrap(),
         )
         .unwrap();
-    assert!(!driver.session.stickers.masks.installed_loaded);
+    assert!(driver.session.stickers.masks.installed.is_idle());
     assert_eq!(count_sent(&recorder, "getArchivedStickerSets"), 2);
 
     driver.change_mask_set(11, false, true).unwrap().unwrap();
@@ -98,7 +98,7 @@ fn editor_strip_loads_the_first_mask_sets_once() {
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
 
     driver.load_editor_masks().unwrap();
-    assert!(!driver.session.stickers.masks.open);
+    assert!(!driver.session.stickers.masks.dialog_open());
     let installed = sent_request(&recorder, "getInstalledStickerSets");
     let extra = installed["@extra"].as_str().unwrap().to_string();
     let answer = sets_answer(crate::ids::RequestId(0), &[11, 12, 13, 14, 15, 16])
@@ -112,5 +112,5 @@ fn editor_strip_loads_the_first_mask_sets_once() {
     assert_eq!(count_sent(&recorder, "getStickerSet"), 4);
 
     driver.release_editor_masks();
-    assert!(!driver.session.stickers.masks.strip_wanted);
+    assert!(!driver.session.stickers.masks.strip_wanted());
 }

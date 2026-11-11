@@ -358,6 +358,79 @@ fn driver_toggle_chat_folder_tags() {
 }
 
 #[test]
+fn a_refused_folder_reorder_and_tags_toggle_go_back() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+    let folders = r#"[{"@type":"chatFolderInfo","id":1,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"A","entities":[]}},"icon":null,"color_id":-1,"is_shareable":false},{"@type":"chatFolderInfo","id":2,"name":{"@type":"chatFolderName","text":{"@type":"formattedText","text":"B","entities":[]}},"icon":null,"color_id":-1,"is_shareable":false}]"#;
+    driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"updateChatFolders","chat_folders":{folders},"main_chat_list_position":0,"are_tags_enabled":false}}"#
+                ),
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let before = driver.session.chat_list.folder_order();
+    let reorder = driver
+        .reorder_chat_folders(&FolderOrder {
+            folder_ids: vec![2, 1],
+            main_position: 0,
+        })
+        .expect("reorder");
+    let tags = driver.toggle_chat_folder_tags(true).expect("toggle");
+    assert!(driver.session.chat_list.are_folder_tags_enabled);
+    for extra in [reorder, tags] {
+        driver
+            .ingest(
+                copy_and_parse(
+                    &format!(
+                        r#"{{"@type":"error","@extra":"{}","code":400,"message":"FILTER_NOT_SUPPORTED"}}"#,
+                        extra.0
+                    ),
+                    &seq,
+                    &dyn_sink,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+    }
+    assert_eq!(driver.session.chat_list.folder_order(), before);
+    assert!(!driver.session.chat_list.are_folder_tags_enabled);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_failed_leave_delete_keeps_the_rest_of_the_queue() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    // Not ready yet: the chats path is inactive and every send is refused.
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    driver.session.chat_list.delete_after_leave = vec![ChatId(1), ChatId(2), ChatId(3)];
+    assert!(driver.maybe_finish_leave_deletes().is_err());
+    assert_eq!(
+        driver.session.chat_list.delete_after_leave,
+        vec![ChatId(1), ChatId(2), ChatId(3)],
+        "none of them is dropped"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn driver_get_chat_lists_to_add_chat_caches() {
     let store = MemorySecretStore::new();
     let (dir, prepared) = prepared_tmp(&store);
@@ -401,6 +474,7 @@ fn driver_get_chat_lists_to_add_chat_caches() {
         .chat_list
         .chat_lists_for_add
         .get(&7)
+        .and_then(|lists| lists.data())
         .expect("cached lists");
     assert!(cached.contains(&crate::telegram::envelope::ChatList::Main));
     assert!(cached.contains(&crate::telegram::envelope::ChatList::Folder(5)));

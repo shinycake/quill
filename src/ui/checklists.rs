@@ -50,7 +50,7 @@ impl QuillApp {
             return false;
         };
         session
-            .open_chat
+            .open_chat_id()
             .and_then(|id| session.chats.get(&id.0))
             .is_some_and(|chat| {
                 chat.can_post() && can_create_checklist(chat, session.my_is_premium())
@@ -148,7 +148,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|s| s.open_chat_id()) else {
             self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_SELECT_A_CHAT_TO_SEND)));
             cx.notify();
             return;
@@ -237,13 +237,14 @@ impl QuillApp {
             return;
         }
         if let Some(task) = content.list.tasks.iter_mut().find(|t| t.id == task_id) {
-            if task.is_done() {
-                task.completion_date = 0;
-                task.completed_by = None;
+            task.completion = if task.is_done() {
+                None
             } else {
-                task.completion_date = quill::local_time::now_unix() as i32;
-                task.completed_by = me.map(|user_id| MessageSender::User { user_id });
-            }
+                Some(quill::telegram::envelope::TaskCompletion {
+                    by: me.map(|user_id| MessageSender::User { user_id }),
+                    date: quill::local_time::now_unix() as i32,
+                })
+            };
         }
     }
 
@@ -277,8 +278,7 @@ impl QuillApp {
                 .push(quill::telegram::envelope::ChecklistTask {
                     id,
                     text,
-                    completed_by: None,
-                    completion_date: 0,
+                    completion: None,
                 });
         }
     }

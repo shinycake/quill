@@ -5,9 +5,11 @@
 //! called from a button that names the price or the gifts.
 use super::*;
 use crate::gift_market::{
-    CraftGift, CraftSession, GiftMarketPurpose, ResaleBuy, ResaleFilter, ResaleSearch,
+    AuctionFetch, AuctionFollow, CraftGift, CraftRun, CraftSession, GiftMarketPurpose, PageLoad,
+    ResaleBuy, ResaleFilter, ResaleSearch,
 };
 use crate::ids::RequestId;
+use crate::lang::{keys, tr};
 use crate::local_time::now_unix;
 use crate::marketplace::GiftPrice;
 use crate::state::{PaymentsPurpose, RequestPurpose};
@@ -50,9 +52,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let market = &mut self.session.payments.gift_market;
+        // A purchase that has gone out keeps its box until it answers.
+        if market.buy.as_ref().is_some_and(|buy| buy.sending()) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         market.remember_title(gift_id, title);
         market.resale = Some(ResaleSearch::new(gift_id, ResaleFilter::default(), false));
-        market.buy = None;
+        // A `sendResoldGift` that is out keeps its buy: its answer
+        // belongs to it, and the new list does not change what it paid.
+        if !market.buy.as_ref().is_some_and(|buy| buy.sending()) {
+            market.buy = None;
+        }
         self.search_resale_page(false, false)
     }
 
@@ -102,17 +112,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         .ok_or(ConnectSendError::InvalidRequest)?;
         if !more {
-            search.page = 0;
             search.next_offset.clear();
-            search.loaded = false;
         }
-        search.loading = true;
-        search.error = None;
-        let (gift_id, page) = (search.gift_id, search.page);
+        // A next page extends a list that has an answer; a first page
+        // starts it over.
+        let extends = more && search.load.answered();
+        let gift_id = search.gift_id;
         let filter = search.filter.clone();
         let offset = search.next_offset.clone();
         let for_crafting = search.for_crafting;
-        let result = self.send_market(GiftMarketPurpose::SearchResale { gift_id, page }, |extra| {
+        let result = self.send_market(GiftMarketPurpose::SearchResale { gift_id }, |extra| {
             rq::search_gifts_for_resale(extra, gift_id, &filter, for_crafting, &offset)
         });
         let market = &mut self.session.payments.gift_market;
@@ -124,10 +133,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(search) = search {
             match &result {
                 Ok(extra) => {
-                    search.request_id = extra.0;
-                    search.page = page.saturating_add(1);
+                    search.load.begin(extra.0, extends);
                 }
-                Err(_) => search.loading = false,
+                Err(_) => search
+                    .load
+                    .send_failed(tr(keys::Q_MISC_COULDNT_REACH_TELEGRAM_TRY_AGAIN).to_string()),
             }
         }
         result
@@ -142,6 +152,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         for_craft: bool,
     ) -> Result<(), ConnectSendError> {
         let market = &self.session.payments.gift_market;
+        // A purchase that has gone out keeps its box until it answers: a
+        // second one would not be marked sending and could be paid twice.
+        if market.buy.as_ref().is_some_and(|buy| buy.sending()) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let listing = market
             .resale
             .iter()
@@ -185,8 +200,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .ok_or(ConnectSendError::InvalidRequest)?;
         let limit = self.session.payments.gift_text_length_max;
         let text = text.trim();
-        if buy.sending
-            || buy.done.is_some()
+        if buy.sending()
             || buy.price() != Some(price)
             || !price.valid()
             || (!text.is_empty() && limit.is_some_and(|max| text.chars().count() > max))
@@ -201,12 +215,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 extra, &name, owner, price, text, hide_name,
             )
         });
-        if let Some(buy) = self.session.payments.gift_market.buy.as_mut() {
-            buy.sending = result.is_ok();
-            if let Ok(extra) = &result {
-                buy.price_changed = None;
-                buy.request = extra.0;
-            }
+        if let Ok(extra) = &result
+            && let Some(buy) = self.session.payments.gift_market.buy.as_mut()
+        {
+            buy.begin_send(extra.0);
         }
         result
     }
@@ -231,9 +243,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         });
         let market = &mut self.session.payments.gift_market;
         if let Ok(extra) = &result {
-            market.auction_request = extra.0;
-            market.auction_ready = None;
-            market.auction_loading = true;
+            market.auction = AuctionFetch::Loading { request: extra.0 };
         }
         result
     }
@@ -241,31 +251,46 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Follows one auction's updates while its box shows (`openGiftAuction`)
     /// and stops following the previous one.
     pub fn follow_gift_auction(&mut self, gift_id: Option<i64>) -> Result<(), ConnectSendError> {
-        let was = self.session.payments.gift_market.followed;
-        if was == gift_id {
+        let was = self.session.payments.gift_market.follow;
+        if was.gift_id() == gift_id {
             return Ok(());
         }
-        if let Some(old) = was {
-            let _ = self.send_market(GiftMarketPurpose::CloseAuction, |extra| {
+        // A follow that never opened has nothing to close. A close that did
+        // not go out leaves the follow as it was (the server still sends
+        // that auction's updates), and the next call closes it again: the
+        // send is refused locally until the connection is ready, so nothing
+        // goes out meanwhile.
+        if let AuctionFollow::Following { gift_id: old, .. } = was {
+            self.send_market(GiftMarketPurpose::CloseAuction, |extra| {
                 rq::follow_gift_auction(extra, old, false)
-            });
-        }
-        self.session.payments.gift_market.followed = gift_id;
-        if let Some(new) = gift_id {
-            self.send_market(GiftMarketPurpose::OpenAuction, |extra| {
-                rq::follow_gift_auction(extra, new, true)
             })?;
         }
-        Ok(())
+        self.session.payments.gift_market.follow = AuctionFollow::None;
+        let Some(new) = gift_id else {
+            return Ok(());
+        };
+        let result = self.send_market(GiftMarketPurpose::OpenAuction, |extra| {
+            rq::follow_gift_auction(extra, new, true)
+        });
+        self.session.payments.gift_market.follow = match &result {
+            Ok(extra) => AuctionFollow::Following {
+                gift_id: new,
+                request: extra.0,
+            },
+            Err(_) => AuctionFollow::Failed(new),
+        };
+        result.map(|_| ())
     }
 
-    /// Places a first bid or raises one to `stars` in total. `user_id` is
-    /// who gets the gift.
+    /// Places a first bid or raises one to `stars` in total. `recipient` is
+    /// who gets the gift. A raise (`increaseGiftAuctionBid`) keeps the
+    /// bid's own owner and needs none, so a bid owned by a channel can be
+    /// raised; a new bid goes to a user only.
     pub fn bid_gift_auction(
         &mut self,
         gift_id: i64,
         stars: i64,
-        user_id: i64,
+        recipient: MessageSender,
         text: &str,
         hide_name: bool,
     ) -> Result<RequestId, ConnectSendError> {
@@ -278,7 +303,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         let add = stars.saturating_sub(mine);
         if market.bidding.is_some()
             || state.finished(now_unix())
-            || user_id <= 0
             || stars < state.min_bid_for_me()
             || stars > crate::gift_market::MAX_CUSTOM_BID
             || add <= 0
@@ -292,18 +316,24 @@ impl<S: JsonSender> ConnectDriver<S> {
         let same_owner = state
             .my()
             .and_then(|my| my.owner.as_ref())
-            .is_none_or(|owner| *owner == MessageSender::User { user_id });
+            .is_none_or(|owner| *owner == recipient);
         let result = if mine > 0 && same_owner {
             self.send_market(GiftMarketPurpose::IncreaseBid { gift_id }, |extra| {
                 rq::increase_gift_auction_bid(extra, gift_id, stars)
             })
         } else {
+            let MessageSender::User { user_id } = recipient else {
+                return Err(ConnectSendError::InvalidRequest);
+            };
+            if user_id <= 0 {
+                return Err(ConnectSendError::InvalidRequest);
+            }
             self.send_market(GiftMarketPurpose::PlaceBid { gift_id }, |extra| {
                 rq::place_gift_auction_bid(extra, gift_id, stars, user_id, &text, hide_name)
             })
         };
-        if result.is_ok() {
-            self.session.payments.gift_market.bidding = Some(gift_id);
+        if let Ok(request) = result {
+            self.session.payments.gift_market.bidding = Some((gift_id, request));
         }
         result
     }
@@ -313,33 +343,45 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         gift_id: i64,
     ) -> Result<RequestId, ConnectSendError> {
-        self.send_market(GiftMarketPurpose::AcquiredGifts { gift_id }, |extra| {
+        let acquired = &mut self.session.payments.gift_market.acquired;
+        if acquired.get(&gift_id).is_some_and(|list| list.is_loading()) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        acquired.entry(gift_id).or_default().begin();
+        let sent = self.send_market(GiftMarketPurpose::AcquiredGifts { gift_id }, |extra| {
             rq::get_gift_auction_acquired_gifts(extra, gift_id)
-        })
+        });
+        if let Some(list) = self.session.payments.gift_market.acquired.get_mut(&gift_id) {
+            match &sent {
+                Ok(request) => list.sent(*request),
+                Err(_) => list.fail("not sent"),
+            }
+        }
+        sent
     }
 
-    /// `getGiftUpgradePreview`, once per gift.
+    /// `getGiftUpgradePreview`: once per gift, and again after a failure.
+    /// Called when a box opens, never from a render.
     pub fn fetch_gift_upgrade_preview(
         &mut self,
         gift_id: i64,
     ) -> Result<RequestId, ConnectSendError> {
         let purpose = GiftMarketPurpose::UpgradePreview { gift_id };
-        if gift_id == 0
-            || self
-                .session
-                .payments
-                .gift_market
-                .previews
-                .contains_key(&gift_id)
-            || self.session.requests.has_purpose(RequestPurpose::Payments(
-                PaymentsPurpose::GiftMarket(purpose),
-            ))
-        {
+        let previews = &mut self.session.payments.gift_market.previews;
+        if gift_id == 0 || previews.get(&gift_id).is_some_and(|p| !p.can_ask()) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.send_market(purpose, |extra| {
+        previews.entry(gift_id).or_default().begin();
+        let sent = self.send_market(purpose, |extra| {
             rq::get_gift_upgrade_preview(extra, gift_id)
-        })
+        });
+        if let Some(preview) = self.session.payments.gift_market.previews.get_mut(&gift_id) {
+            match &sent {
+                Ok(request) => preview.sent(*request),
+                Err(_) => preview.fail("not sent"),
+            }
+        }
+        sent
     }
 
     // ---- Crafting -----------------------------------------------------
@@ -353,6 +395,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         let gift_id = primary.gift.regular_gift_id;
         let title = primary.gift.title.clone();
         let market = &mut self.session.payments.gift_market;
+        // A purchase in flight keeps its box until it answers. A craft's
+        // answer belongs to the box that sent it (`craft_request`), so a new
+        // craft box does not take it.
+        if market.buy.as_ref().is_some_and(|buy| buy.sending()) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        // A craft in flight is not orphaned by a new session: its outcome
+        // opens the result box of the session that sent it (`craft_request`).
+        if market.craft.as_ref().is_some_and(|craft| craft.crafting()) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         market.remember_title(gift_id, &title);
         market.craft = Some(CraftSession::new(primary));
         let _ = self.preload_craft_lists();
@@ -369,16 +422,54 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .ok_or(ConnectSendError::InvalidRequest)?;
         let (own, market) = (
-            !craft.candidates_loaded && !craft.candidates_loading,
-            !craft.market.loaded && !craft.market.loading,
+            craft.candidates_load == PageLoad::Idle,
+            craft.market.load == PageLoad::Idle,
         );
-        if own {
-            self.craft_candidates_page(false)?;
+        // The two lists are independent: a refused first send fails its own
+        // list (its error and Retry show) and the other is still asked.
+        let own = if own {
+            self.craft_candidates_page(false).map(|_| ())
+        } else {
+            Ok(())
+        };
+        let market = if market {
+            self.search_resale_page(true, false).map(|_| ())
+        } else {
+            Ok(())
+        };
+        own.and(market)
+    }
+
+    /// "Retry" of a failed "on sale" list in Select Gifts: the first page
+    /// again.
+    pub fn retry_craft_listings(&mut self) -> Result<RequestId, ConnectSendError> {
+        let failed = self
+            .session
+            .payments
+            .gift_market
+            .craft
+            .as_ref()
+            .is_some_and(|craft| craft.market.load.error().is_some());
+        if !failed {
+            return Err(ConnectSendError::InvalidRequest);
         }
-        if market {
-            self.search_resale_page(true, false)?;
+        self.search_resale_page(true, false)
+    }
+
+    /// "Retry" of a failed "your gifts" list in Select Gifts: the first page
+    /// again.
+    pub fn retry_craft_candidates(&mut self) -> Result<RequestId, ConnectSendError> {
+        let failed = self
+            .session
+            .payments
+            .gift_market
+            .craft
+            .as_ref()
+            .is_some_and(|craft| craft.candidates_load.error().is_some());
+        if !failed {
+            return Err(ConnectSendError::InvalidRequest);
         }
-        Ok(())
+        self.craft_candidates_page(false)
     }
 
     /// The next page of the user's own gifts for crafting.
@@ -390,7 +481,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .craft
             .as_ref()
             .ok_or(ConnectSendError::InvalidRequest)?;
-        if craft.candidates_loading || craft.candidates_offset.is_empty() {
+        if craft.candidates_load.is_loading() || craft.candidates_offset.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.craft_candidates_page(true)
@@ -405,23 +496,22 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_mut()
             .ok_or(ConnectSendError::InvalidRequest)?;
         if !more {
-            craft.candidates_page = 0;
             craft.candidates_offset.clear();
         }
-        craft.candidates_loading = true;
-        let (gift_id, page) = (craft.regular_gift_id, craft.candidates_page);
+        let extends = more && craft.candidates_load.answered();
+        let gift_id = craft.regular_gift_id;
         let offset = craft.candidates_offset.clone();
-        let result = self.send_market(
-            GiftMarketPurpose::GiftsForCrafting { gift_id, page },
-            |extra| rq::get_gifts_for_crafting(extra, gift_id, &offset),
-        );
+        let result = self.send_market(GiftMarketPurpose::GiftsForCrafting { gift_id }, |extra| {
+            rq::get_gifts_for_crafting(extra, gift_id, &offset)
+        });
         if let Some(craft) = self.session.payments.gift_market.craft.as_mut() {
             match &result {
                 Ok(extra) => {
-                    craft.candidates_request = extra.0;
-                    craft.candidates_page = page.saturating_add(1);
+                    craft.candidates_load.begin(extra.0, extends);
                 }
-                Err(_) => craft.candidates_loading = false,
+                Err(_) => craft
+                    .candidates_load
+                    .send_failed(tr(keys::Q_MISC_COULDNT_REACH_TELEGRAM_TRY_AGAIN).to_string()),
             }
         }
         result
@@ -437,8 +527,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .ok_or(ConnectSendError::InvalidRequest)?;
         let now = now_unix();
-        if craft.crafting
-            || craft.result.is_some()
+        if craft.run != CraftRun::Idle
             || craft.slots.is_empty()
             || craft.slots.iter().enumerate().any(|(index, slot)| {
                 slot.gate(index == 0, now) != crate::gift_market::CraftGate::Ready
@@ -457,8 +546,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Ok(extra) = &result
             && let Some(craft) = self.session.payments.gift_market.craft.as_mut()
         {
-            craft.crafting = true;
-            craft.craft_request = extra.0;
+            craft.run = CraftRun::Crafting { request: extra.0 };
         }
         result
     }

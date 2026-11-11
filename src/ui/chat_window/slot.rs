@@ -94,6 +94,9 @@ super::super::on_screen::on_screen_fields! {
     pub(super) active: bool,
     /// Where the window stood then (`cover`).
     pub(super) place: Option<super::cover::WindowPlace>,
+    /// The window's geometry at its last render or move, so the places
+    /// can be saved while the window itself is leased (`saved`).
+    pub(super) bounds: Option<Bounds<Pixels>>,
     ;
     history: HistoryUi,
     composer: Entity<TextareaState>,
@@ -156,6 +159,41 @@ impl super::ChatWindows {
             waits
                 .then(|| slot.composer_ui.inline_return.take())
                 .flatten()
+        })
+    }
+
+    /// Ends the round trips of the chat windows not in place that are still
+    /// opening the bot's chat and that `ends` selects: a link that overtook
+    /// the lookup, or its failure, must not leave the start to be sent
+    /// into a chat opened later.
+    pub(in crate::ui) fn cancel_slot_inline_openings(
+        &self,
+        ends: impl Fn(&super::super::inline_return::InlineReturn) -> bool,
+    ) {
+        for slot in self.slots() {
+            let Ok(mut slot) = slot.try_borrow_mut() else {
+                continue;
+            };
+            let end = slot
+                .composer_ui
+                .inline_return
+                .as_ref()
+                .is_some_and(|ret| ret.is_opening() && ends(ret));
+            if end {
+                slot.composer_ui.inline_return = None;
+            }
+        }
+    }
+
+    /// Whether the photo editor of a chat window whose state is not in
+    /// place is in Stickers mode (`QuillApp::sync_editor_masks`).
+    pub(in crate::ui) fn slot_edits_stickers(&self) -> bool {
+        self.slots().any(|slot| {
+            slot.try_borrow().is_ok_and(|slot| {
+                slot.viewer.photo_editor.as_ref().is_some_and(|editor| {
+                    editor.mode == crate::ui::photo_editor::EditorMode::Stickers
+                })
+            })
         })
     }
 
@@ -224,6 +262,7 @@ impl WindowSlot {
             frame_started: Cell::new(0),
             active: false,
             place: None,
+            bounds: None,
         }
     }
 }
@@ -405,6 +444,9 @@ impl QuillApp {
         let display = window.display(cx).map(|display| u64::from(display.id()));
         sticker_player::note_display(Some(chat), display, window, cx);
         self.sticker_frame_starts(cx);
+        self.widgets
+            .scales
+            .insert(Some(chat), window.scale_factor());
         self.widgets_frame_start(Some(chat), cx);
         images.update(cx, |images, cx| {
             images.begin_window_frame(draw, window, cx);
@@ -419,7 +461,7 @@ impl QuillApp {
         if let Some(slot) = self.windows.slot_for(chat_id)
             && let Ok(slot) = slot.try_borrow()
         {
-            slot.history.chrome_notify_pending.set(false);
+            slot.history.chrome_notify_done();
         }
     }
 

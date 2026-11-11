@@ -22,9 +22,10 @@ use quill::telegram::envelope::{
 pub(super) fn inline_keyboard(
     message: &HistoryMessage,
     fast_buttons: bool,
+    session: Option<&quill::state::Session>,
     cx: &mut Context<QuillApp>,
 ) -> Option<AnyElement> {
-    let markup = markup_keyboard(message, fast_buttons, cx);
+    let markup = markup_keyboard(message, fast_buttons, session, cx);
     // A suggested post's Decline / Accept / Suggest Changes rows come after
     // the message's own rows (tdesktop `HistoryMessageReplyMarkup`
     // appends them).
@@ -51,6 +52,7 @@ pub(super) fn inline_keyboard(
 fn markup_keyboard(
     message: &HistoryMessage,
     fast_buttons: bool,
+    session: Option<&quill::state::Session>,
     cx: &mut Context<QuillApp>,
 ) -> Option<AnyElement> {
     // M2: an ephemeral payload carries its own `reply_markup`, shown
@@ -75,6 +77,8 @@ fn markup_keyboard(
     let message_id = message.id.0 as u64;
     let mut grid = div()
         .id(("inline-keyboard", message_id))
+        .w_full()
+        .min_w_0()
         .flex()
         .flex_col()
         .gap_1()
@@ -86,11 +90,20 @@ fn markup_keyboard(
             continue;
         }
         any = true;
+        // Buttons share the row and never widen it: a long label ends in
+        // "…" (tdesktop `ReplyKeyboard` elides each button's text).
         let mut line = div()
             .id(format!("inline-keyboard-row-{message_id}-{row_index}"))
+            .w_full()
+            .min_w_0()
             .flex()
             .gap_1();
         for (button_index, button) in row.iter().enumerate() {
+            let waiting = callback_key(&button.kind).is_some_and(|key| {
+                session.is_some_and(|session| {
+                    session.callback_button_waiting(message.chat_id, message.id, &key)
+                })
+            });
             let element = inline_keyboard_button(
                 message.chat_id,
                 message.id,
@@ -98,14 +111,22 @@ fn markup_keyboard(
                 button_index,
                 button,
                 game_short_name,
+                waiting,
                 cx,
             );
             let number = fast_buttons
                 .then(|| quill::fast_buttons::badge_number(&row_lens, row_index, button_index))
                 .flatten();
-            line = line.child(match number {
-                Some(number) => fast_button_cell(message.id.0 as u64, number, element, cx),
-                None => element.flex_1().into_any_element(),
+            let corner = corner_icon(&button.kind);
+            line = line.child(match (number, corner) {
+                (None, None) => element.flex_auto().min_w_0().into_any_element(),
+                _ => button_cell(
+                    (message_id, row_index, button_index),
+                    element,
+                    number,
+                    corner.map(|icon| (icon, corner_icon_color(button.style, cx))),
+                    cx,
+                ),
             });
         }
         grid = grid.child(line);
@@ -113,31 +134,78 @@ fn markup_keyboard(
     any.then(|| grid.into_any_element())
 }
 
-/// A button with its fast-button digit in the top-left corner, like
-/// tdesktop's numbered reply keyboard.
-fn fast_button_cell(
-    message_id: u64,
-    number: u8,
+/// The type icon a button draws in its top-right corner (tdesktop
+/// `HistoryMessageMarkupButton::IconOfType`): links and logins, switch
+/// to inline mode, buy, web app and copy.
+fn corner_icon(kind: &InlineKeyboardButtonType) -> Option<gpui_kit::assets::IconName> {
+    use gpui_kit::assets::IconName;
+    match kind {
+        InlineKeyboardButtonType::Url { .. } | InlineKeyboardButtonType::LoginUrl { .. } => {
+            Some(IconName::ArrowUpRight)
+        }
+        InlineKeyboardButtonType::SwitchInline { .. } => Some(IconName::Forward),
+        InlineKeyboardButtonType::Buy => Some(IconName::CreditCard),
+        InlineKeyboardButtonType::WebApp { .. } => Some(IconName::AppWindow),
+        InlineKeyboardButtonType::CopyText { .. } => Some(IconName::Copy),
+        _ => None,
+    }
+}
+
+/// The corner icon's color: the label's own, a step back on the plain
+/// button (tdesktop `msgBotKbIconFg`).
+fn corner_icon_color(style: InlineKeyboardButtonStyle, cx: &App) -> Hsla {
+    let theme = cx.theme();
+    match style {
+        InlineKeyboardButtonStyle::Default | InlineKeyboardButtonStyle::Link => {
+            theme.muted_foreground
+        }
+        InlineKeyboardButtonStyle::Primary => theme.primary_foreground,
+        InlineKeyboardButtonStyle::Danger => theme.danger_foreground,
+        InlineKeyboardButtonStyle::Success => theme.success_foreground,
+    }
+}
+
+/// A button with its corner marks: the fast-button digit top-left, like
+/// tdesktop's numbered reply keyboard, and the type icon top-right. The
+/// marks draw over the button and never take its clicks.
+fn button_cell(
+    (message_id, row, column): (u64, usize, usize),
     button: Button,
-    cx: &mut Context<QuillApp>,
+    number: Option<u8>,
+    corner: Option<(gpui_kit::assets::IconName, Hsla)>,
+    cx: &App,
 ) -> AnyElement {
+    let has_corner = corner.is_some();
     div()
-        .id(("fast-button-cell", message_id * 10 + u64::from(number)))
+        .id(format!("inline-button-cell-{message_id}-{row}-{column}"))
         .relative()
-        .flex_1()
+        .flex_auto()
+        .min_w_0()
         .flex()
-        .child(button.w_full())
-        .child(
+        // The label keeps clear of the corner icon when it is cut short.
+        .child(button.flex_auto().min_w_0().when(has_corner, |b| b.px_5()))
+        .children(number.map(|number| {
             div()
                 .absolute()
                 .top_0()
                 .left_2()
                 .text_xs()
                 .text_color(cx.theme().muted_foreground)
-                .child(number.to_string()),
-        )
+                .child(number.to_string())
+        }))
+        .children(corner.map(|(icon, color)| {
+            div()
+                .absolute()
+                .top(px(CORNER_ICON_PADDING))
+                .right(px(CORNER_ICON_PADDING))
+                .child(Icon::new(icon).size(px(CORNER_ICON_SIZE)).text_color(color))
+        }))
         .into_any_element()
 }
+
+/// tdesktop `msgBotKbIconPadding` and the 10px `inline_button_*` icons.
+const CORNER_ICON_PADDING: f32 = 4.;
+const CORNER_ICON_SIZE: f32 = 10.;
 
 /// Phase 3.2 (extended in B1): one inline keyboard button. `Url` opens in
 /// the OS browser (same gate as URLs in message text); `LoginUrl` resolves
@@ -150,7 +218,10 @@ fn fast_button_cell(
 /// short name (schema:7743); `User` opens the private chat with the user;
 /// `SwitchInline` inserts the query into the current chat's composer;
 /// `CopyText` copies to the clipboard. `Buy` stays disabled — payments are
-/// a later slice; unknown types never crash.
+/// a later slice; unknown types never crash. `waiting`: a callback press
+/// of this button waits for the bot, so it spins and takes no presses
+/// (tdesktop draws the pressed button loading until the answer).
+#[allow(clippy::too_many_arguments)]
 pub(super) fn inline_keyboard_button(
     chat_id: ChatId,
     message_id: MessageId,
@@ -158,6 +229,7 @@ pub(super) fn inline_keyboard_button(
     button_index: usize,
     button: &InlineKeyboardButton,
     game_short_name: Option<&str>,
+    waiting: bool,
     cx: &mut Context<QuillApp>,
 ) -> Button {
     let label = if button.text.is_empty() {
@@ -174,8 +246,17 @@ pub(super) fn inline_keyboard_button(
         "inline-btn-{}-{row_index}-{button_index}",
         message_id.0
     ))
-    .label(label)
-    .tooltip(button_tooltip(button));
+    .label(label.clone())
+    // A label cut short by the row width reads in full on hover.
+    .tooltip(match button_tooltip(button) {
+        "" => label,
+        hint => hint.to_string(),
+    })
+    // The spinner takes the icon slot; a plain label has none of its own.
+    .when(waiting, |element| {
+        element.icon(gpui_kit::assets::IconName::LoaderCircle)
+    })
+    .loading(waiting);
     let element = inline_keyboard_style(element, button.style);
     if !button_is_pressable(&button.kind) {
         return element.disabled(true);
@@ -194,6 +275,18 @@ pub(super) fn inline_keyboard_button(
     }))
 }
 
+/// The press key of a button whose press asks the bot (`getCallbackQueryAnswer`).
+fn callback_key(kind: &InlineKeyboardButtonType) -> Option<quill::state::CallbackButtonKey> {
+    match kind {
+        InlineKeyboardButtonType::Callback { data }
+        | InlineKeyboardButtonType::CallbackWithPassword { data } => {
+            Some(quill::state::CallbackButtonKey::Data(data.clone()))
+        }
+        InlineKeyboardButtonType::CallbackGame => Some(quill::state::CallbackButtonKey::Game),
+        _ => None,
+    }
+}
+
 /// The look of an inline keyboard button for its `style`; also used by
 /// the rows Quill adds itself (a suggested post's decisions).
 pub(super) fn inline_keyboard_style(element: Button, style: InlineKeyboardButtonStyle) -> Button {
@@ -202,7 +295,7 @@ pub(super) fn inline_keyboard_style(element: Button, style: InlineKeyboardButton
         InlineKeyboardButtonStyle::Danger => element.danger(),
         InlineKeyboardButtonStyle::Success => element.success(),
         InlineKeyboardButtonStyle::Link => element.link(),
-        InlineKeyboardButtonStyle::Default => element.ghost(),
+        InlineKeyboardButtonStyle::Default => element,
     }
 }
 

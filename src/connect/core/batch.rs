@@ -5,25 +5,87 @@ use crate::telegram::envelope::{
     ChatListPayload, ChatsPayload, EnvelopePayload, MediaPayload, UsersPayload,
 };
 
+/// The passes a batch postponed.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PassSet {
+    /// An envelope was applied since the open chat's custom emoji were
+    /// last looked at.
+    emoji: bool,
+    /// The shown chats' messages changed: mark them viewed and fetch the
+    /// messages they reply to.
+    views: bool,
+    /// The shown chats' media, or a file they wait on, changed: download
+    /// their thumbnails and auto-download media.
+    media: bool,
+}
+
+/// Where the poll batch stands.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Batch {
+    /// No batch is open. `owed` are passes that a failed `end_batch` or an
+    /// offscreen batch left for the next one.
+    Closed { owed: PassSet },
+    /// Between `begin_batch` and `end_batch`; `dirty` are the passes
+    /// waiting for the end.
+    Open { dirty: PassSet },
+}
+
+impl Default for Batch {
+    fn default() -> Self {
+        Self::Closed {
+            owed: PassSet::default(),
+        }
+    }
+}
+
+impl Batch {
+    fn open(&mut self) {
+        if let Self::Closed { owed } = *self {
+            *self = Self::Open { dirty: owed };
+        }
+    }
+
+    /// The batch ends: the passes it holds, now owed by nobody.
+    fn close(&mut self) -> PassSet {
+        let held = match *self {
+            Self::Open { dirty } => dirty,
+            Self::Closed { owed } => owed,
+        };
+        *self = Self::default();
+        held
+    }
+
+    /// Passes that did not run stay for the next batch.
+    fn owe(&mut self, owed: PassSet) {
+        if let Self::Closed { owed: held } = self {
+            held.emoji |= owed.emoji;
+            held.views |= owed.views;
+            held.media |= owed.media;
+        }
+    }
+
+    /// A pass is wanted: held for the end of an open batch. `false` when no
+    /// batch is open and the pass runs now.
+    fn hold(&mut self, mark: impl FnOnce(&mut PassSet)) -> bool {
+        match self {
+            Self::Open { dirty } => {
+                mark(dirty);
+                true
+            }
+            Self::Closed { .. } => false,
+        }
+    }
+}
+
 /// What a poll batch postponed.
 #[derive(Debug, Default)]
 pub(crate) struct BatchState {
-    /// Between `begin_batch` and `end_batch`.
-    open: bool,
-    /// An envelope was applied since the open chat's custom emoji were
-    /// last looked at.
-    emoji_dirty: bool,
+    stage: Batch,
     /// Display files of the open chat's custom emoji that the last emoji
     /// pass left undownloaded. One that stops without completing (a
     /// refused resume ends, a cancel settles, our request fails) needs the
     /// pass again, or nothing asks for it until an unrelated update.
     emoji_waiting_files: std::collections::HashSet<crate::ids::FileId>,
-    /// The shown chats' messages changed: mark them viewed and fetch the
-    /// messages they reply to.
-    views_dirty: bool,
-    /// The shown chats' media, or a file they wait on, changed: download
-    /// their thumbnails and auto-download media.
-    media_dirty: bool,
     /// How often the shown chats' media pass ran.
     #[cfg(test)]
     pub(crate) media_passes: usize,
@@ -47,7 +109,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// work that `end_batch` does once (chat-list sorting, resolving the
     /// open chat's custom emoji).
     pub fn begin_batch(&mut self) {
-        self.batch.open = true;
+        self.batch.stage.open();
         self.session.begin_update_batch();
     }
 
@@ -70,16 +132,30 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Finish the batch started by `begin_batch`.
     pub fn end_batch(&mut self) -> Result<(), ConnectSendError> {
-        self.batch.open = false;
+        let mut owed = self.batch.stage.close();
         self.session.end_update_batch();
-        if std::mem::take(&mut self.batch.views_dirty) {
-            self.run_shown_views()?;
+        // A pass leaves the set only once it ran: one that failed (and the
+        // ones after it) stays owed to the next batch.
+        if owed.views {
+            if let Err(err) = self.run_shown_views() {
+                self.batch.stage.owe(owed);
+                return Err(err);
+            }
+            owed.views = false;
         }
-        if std::mem::take(&mut self.batch.media_dirty) {
-            self.run_shown_media()?;
+        if owed.media {
+            if let Err(err) = self.run_shown_media() {
+                self.batch.stage.owe(owed);
+                return Err(err);
+            }
+            owed.media = false;
         }
-        if std::mem::take(&mut self.batch.emoji_dirty) {
-            return self.resolve_open_chat_custom_emoji();
+        if owed.emoji {
+            let result = self.resolve_open_chat_custom_emoji();
+            if result.is_err() {
+                self.batch.stage.owe(owed);
+            }
+            return result;
         }
         Ok(())
     }
@@ -87,15 +163,15 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `end_batch` for an account not on screen: nothing shows its chats,
     /// so the passes for them wait for the first batch once it is shown.
     pub fn end_offscreen_batch(&mut self) {
-        self.batch.open = false;
+        let held = self.batch.stage.close();
+        self.batch.stage.owe(held);
         self.session.end_update_batch();
     }
 
     /// After an envelope that may show a new custom emoji: resolve and download the open chat's custom
     /// emoji now, or once at the end of the batch.
     pub(super) fn sync_open_chat_custom_emoji(&mut self) -> Result<(), ConnectSendError> {
-        if self.batch.open {
-            self.batch.emoji_dirty = true;
+        if self.batch.stage.hold(|set| set.emoji = true) {
             return Ok(());
         }
         self.resolve_open_chat_custom_emoji()
@@ -104,8 +180,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// After an envelope that changed the shown chats' messages: view them
     /// and fetch their reply targets now, or once at the end of the batch.
     pub(super) fn sync_shown_views(&mut self) -> Result<(), ConnectSendError> {
-        if self.batch.open {
-            self.batch.views_dirty = true;
+        if self.batch.stage.hold(|set| set.views = true) {
             return Ok(());
         }
         self.run_shown_views()
@@ -114,8 +189,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// After an envelope that may change what the shown chats need
     /// downloaded: ask for it now, or once at the end of the batch.
     pub(super) fn sync_shown_media(&mut self) -> Result<(), ConnectSendError> {
-        if self.batch.open {
-            self.batch.media_dirty = true;
+        if self.batch.stage.hold(|set| set.media = true) {
             return Ok(());
         }
         self.run_shown_media()
@@ -189,4 +263,42 @@ pub(super) fn adds_no_custom_emoji(payload: &EnvelopePayload) -> bool {
                     | ChatListPayload::UpdateUnreadChatCount { .. }
             )
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_pass_is_held_only_while_a_batch_is_open() {
+        let mut batch = Batch::default();
+        assert!(!batch.hold(|set| set.views = true), "runs at once");
+        batch.open();
+        assert!(batch.hold(|set| set.media = true));
+        let held = batch.close();
+        assert!(held.media && !held.views);
+        assert_eq!(batch, Batch::default());
+    }
+
+    #[test]
+    fn a_pass_that_did_not_run_is_owed_to_the_next_batch() {
+        let mut batch = Batch::default();
+        batch.open();
+        batch.hold(|set| set.emoji = true);
+        let held = batch.close();
+        // The pass failed at the end: it stays owed.
+        batch.owe(held);
+        batch.open();
+        assert_eq!(
+            batch,
+            Batch::Open {
+                dirty: PassSet {
+                    emoji: true,
+                    ..PassSet::default()
+                }
+            }
+        );
+        assert!(batch.close().emoji);
+        assert_eq!(batch.close(), PassSet::default(), "and then nothing is");
+    }
 }

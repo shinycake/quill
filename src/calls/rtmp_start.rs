@@ -21,65 +21,155 @@ pub struct RtmpInfo {
     pub key: String,
 }
 
+/// What happened to the process's last revoke request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Revoke {
+    Idle,
+    /// The `revoke` request waits for its answer.
+    Asking(RequestId),
+    /// It failed: the UI shows the server error once ([`RtmpStart::failure`]).
+    Failed,
+}
+
+/// Where a "Stream with..." process stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RtmpStage {
+    /// The first URL request waits for its answer; no box yet.
+    Fetching { request: RequestId },
+    /// It failed: the UI shows the server error once and drops the process.
+    FetchFailed,
+    /// The box is on screen (tdesktop creates it on the first answer).
+    Ready { info: RtmpInfo, revoke: Revoke },
+}
+
+/// Which request of the process failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RtmpFailure {
+    /// The first URL: no box was ever shown.
+    Fetch,
+    /// A revoke: the box keeps its old rows.
+    Revoke,
+}
+
 /// One "Stream with..." process (tdesktop's `RtmpRequest`): the chat it is
-/// for, the requests it sent and what the server answered so far.
+/// for and what the server answered so far. Only the answers to the
+/// requests it sent count: a late one from an earlier process for the same
+/// chat does not.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RtmpStart {
     pub chat_id: ChatId,
-    /// `None` until the first answer; the box shows from then on.
-    pub info: Option<RtmpInfo>,
-    /// A request failed: the UI shows the server error once and clears it.
-    pub failed: bool,
-    /// The URL requests this process sent and still waits for. Only their
-    /// answers and failures count: a late one from an earlier process for
-    /// the same chat does not.
-    requests: Vec<RequestId>,
+    pub stage: RtmpStage,
 }
 
 impl RtmpStart {
-    pub fn new(chat_id: ChatId) -> Self {
+    /// The process sent `request` for the chat's URL.
+    pub fn new(chat_id: ChatId, request: RequestId) -> Self {
         Self {
             chat_id,
-            info: None,
-            failed: false,
-            requests: Vec::new(),
+            stage: RtmpStage::Fetching { request },
         }
     }
 
-    /// The process sent `request` (the URL, or the URL with `revoke`).
-    pub fn sent(&mut self, request: RequestId) {
-        self.requests.push(request);
+    /// The URL and key the box shows, once the server answered.
+    pub fn info(&self) -> Option<&RtmpInfo> {
+        match &self.stage {
+            RtmpStage::Ready { info, .. } => Some(info),
+            _ => None,
+        }
     }
 
-    /// Whether `request` is one this process waits for.
-    pub fn waits_for(&self, request: Option<RequestId>) -> bool {
-        request.is_some_and(|request| self.requests.contains(&request))
+    /// A revoke request is out and not answered.
+    pub fn revoke_in_flight(&self) -> bool {
+        matches!(
+            &self.stage,
+            RtmpStage::Ready {
+                revoke: Revoke::Asking(_),
+                ..
+            }
+        )
+    }
+
+    /// The box is open with no revoke in flight: a new one may be sent.
+    pub fn can_revoke(&self) -> bool {
+        matches!(
+            &self.stage,
+            RtmpStage::Ready {
+                revoke: Revoke::Idle | Revoke::Failed,
+                ..
+            }
+        )
+    }
+
+    /// The process sent `request` for a new key (the URL with `revoke`).
+    /// `false` when it is not recorded (no box, or another revoke is out):
+    /// the caller checks [`Self::can_revoke`] before sending.
+    pub fn revoking(&mut self, request: RequestId) -> bool {
+        if !self.can_revoke() {
+            return false;
+        }
+        if let RtmpStage::Ready { revoke, .. } = &mut self.stage {
+            *revoke = Revoke::Asking(request);
+        }
+        true
     }
 
     /// The answer to `request`: the box has data to show.
-    pub fn accept(&mut self, request: Option<RequestId>, info: RtmpInfo) -> bool {
-        if !self.waits_for(request) {
+    pub fn accept(&mut self, request: Option<RequestId>, answer: RtmpInfo) -> bool {
+        let Some(request) = request else {
             return false;
+        };
+        match &mut self.stage {
+            RtmpStage::Fetching { request: asked } if *asked == request => {
+                self.stage = RtmpStage::Ready {
+                    info: answer,
+                    revoke: Revoke::Idle,
+                };
+                true
+            }
+            RtmpStage::Ready { info, revoke } if *revoke == Revoke::Asking(request) => {
+                *info = answer;
+                *revoke = Revoke::Idle;
+                true
+            }
+            _ => false,
         }
-        self.requests.retain(|sent| Some(*sent) != request);
-        self.info = Some(info);
-        self.failed = false;
-        true
     }
 
     /// `request` failed.
     pub fn fail(&mut self, request: Option<RequestId>) -> bool {
-        if !self.waits_for(request) {
+        let Some(request) = request else {
             return false;
+        };
+        match &mut self.stage {
+            RtmpStage::Fetching { request: asked } if *asked == request => {
+                self.stage = RtmpStage::FetchFailed;
+                true
+            }
+            RtmpStage::Ready { revoke, .. } if *revoke == Revoke::Asking(request) => {
+                *revoke = Revoke::Failed;
+                true
+            }
+            _ => false,
         }
-        self.requests.retain(|sent| Some(*sent) != request);
-        self.failed = true;
-        true
+    }
+
+    /// The failure to show: a failed revoke is taken once (the box keeps
+    /// its rows), a failed first request stays until the UI drops the
+    /// process.
+    pub fn failure(&mut self) -> Option<RtmpFailure> {
+        match &mut self.stage {
+            RtmpStage::FetchFailed => Some(RtmpFailure::Fetch),
+            RtmpStage::Ready { revoke, .. } if *revoke == Revoke::Failed => {
+                *revoke = Revoke::Idle;
+                Some(RtmpFailure::Revoke)
+            }
+            _ => None,
+        }
     }
 
     /// The box is on screen (tdesktop creates it on the first answer).
     pub fn box_open(&self) -> bool {
-        self.info.is_some()
+        self.info().is_some()
     }
 }
 
@@ -187,23 +277,63 @@ mod tests {
 
     #[test]
     fn only_this_process_answers_count() {
-        let mut start = RtmpStart::new(ChatId(5));
         let info = RtmpInfo {
             url: "rtmps://x".into(),
             key: "k".into(),
         };
+        let mut start = RtmpStart::new(ChatId(5), RequestId(1));
         // An answer to a request this process did not send.
         assert!(!start.accept(Some(RequestId(9)), info.clone()));
         assert!(!start.accept(None, info.clone()));
         assert!(!start.box_open());
-        start.sent(RequestId(1));
-        assert!(start.accept(Some(RequestId(1)), info));
+        assert!(start.accept(Some(RequestId(1)), info.clone()));
         assert!(start.box_open());
         // A late failure of an earlier process's request.
         assert!(!start.fail(Some(RequestId(1))));
-        assert!(!start.failed);
-        start.sent(RequestId(2));
+        assert_eq!(start.failure(), None);
+        assert!(start.revoking(RequestId(2)));
         assert!(start.fail(Some(RequestId(2))));
-        assert!(start.failed);
+        assert_eq!(start.failure(), Some(RtmpFailure::Revoke));
+        assert_eq!(start.failure(), None, "taken once");
+        assert!(start.box_open(), "the box keeps its rows");
+    }
+
+    #[test]
+    fn a_second_revoke_does_not_replace_the_one_in_flight() {
+        let mut start = RtmpStart::new(ChatId(5), RequestId(1));
+        assert!(!start.can_revoke(), "no box yet");
+        assert!(!start.revoking(RequestId(2)), "not recorded without a box");
+        assert!(start.accept(Some(RequestId(1)), RtmpInfo::default()));
+        assert!(start.can_revoke());
+        assert!(start.revoking(RequestId(2)));
+        assert!(start.revoke_in_flight());
+        assert!(!start.can_revoke());
+        assert!(!start.revoking(RequestId(3)), "the first stays");
+        assert!(start.accept(Some(RequestId(2)), RtmpInfo::default()));
+        assert!(!start.revoke_in_flight());
+    }
+
+    #[test]
+    fn a_failed_first_request_leaves_the_fetching_stage() {
+        let mut start = RtmpStart::new(ChatId(5), RequestId(1));
+        assert!(start.fail(Some(RequestId(1))));
+        assert_eq!(start.failure(), Some(RtmpFailure::Fetch));
+        assert!(!start.box_open());
+        assert!(!start.accept(Some(RequestId(1)), RtmpInfo::default()));
+    }
+
+    #[test]
+    fn a_revoke_answer_swaps_the_key_only_for_its_request() {
+        let info = |key: &str| RtmpInfo {
+            url: "u".into(),
+            key: key.into(),
+        };
+        let mut start = RtmpStart::new(ChatId(5), RequestId(1));
+        start.accept(Some(RequestId(1)), info("old"));
+        start.revoking(RequestId(2));
+        assert!(!start.accept(Some(RequestId(3)), info("other")));
+        assert!(start.accept(Some(RequestId(2)), info("new")));
+        assert_eq!(start.info().map(|i| i.key.as_str()), Some("new"));
+        assert!(!start.accept(Some(RequestId(2)), info("again")), "answered");
     }
 }

@@ -74,13 +74,10 @@ fn a_typed_search_also_asks_the_server_for_chats() {
 fn archived_and_older_filters_reach_search_messages() {
     let mut fx = Fixture::new();
     commit_typed_search(&mut fx.driver, "dune");
-    fx.driver
-        .set_search_filters(GlobalSearchFilters {
-            archived: true,
-            date: SearchDateRange::Older,
-            ..GlobalSearchFilters::default()
-        })
-        .unwrap();
+    let mut filters = GlobalSearchFilters::default();
+    filters.archived = true;
+    filters.date = SearchDateRange::Older;
+    fx.driver.set_search_filters(filters).unwrap();
     let search = fx.requests("searchMessages").pop().unwrap();
     assert_eq!(search["chat_list"]["@type"], "chatListArchive");
     assert_eq!(search["min_date"], 0);
@@ -101,10 +98,7 @@ fn public_posts_scope_sends_only_the_posts_request() {
         .unwrap();
     let before = fx.recorder.snapshot().len();
     fx.driver
-        .set_search_filters(GlobalSearchFilters {
-            scope: SearchScope::PublicPosts,
-            ..GlobalSearchFilters::default()
-        })
+        .set_search_filters(GlobalSearchFilters::default().in_scope(SearchScope::PublicPosts))
         .unwrap();
     let sent = fx.recorder.snapshot();
     // The quota check is free and rides along; the search itself is one
@@ -133,7 +127,7 @@ fn a_hashtag_click_searches_the_tag_in_the_chosen_scope() {
     assert_eq!(tag.len(), 1);
     assert_eq!(tag[0]["tag"], "#dune");
     assert!(fx.requests("searchPublicPosts").is_empty());
-    assert!(fx.driver.session.search.search.open);
+    assert!(fx.driver.session.search.search.is_open());
 
     let flight = fx
         .driver
@@ -199,8 +193,7 @@ fn removing_a_frequent_contact_is_optimistic() {
 #[test]
 fn removing_one_recent_search_sends_remove_recently_found_chat() {
     let mut fx = Fixture::new();
-    fx.driver.session.search.search.open = true;
-    fx.driver.session.search.search.recents = true;
+    fx.driver.session.search.search.surface = crate::state::SearchSurface::Recents;
     fx.driver.session.search.search.chat_ids = vec![ChatId(7), ChatId(8)];
     fx.driver.remove_recent_search(ChatId(7)).unwrap();
     assert_eq!(fx.driver.session.search.search.chat_ids, vec![ChatId(8)]);
@@ -208,4 +201,50 @@ fn removing_one_recent_search_sends_remove_recently_found_chat() {
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0]["chat_id"], 7);
     assert_eq!(fx.driver.remove_recent_search(ChatId(7)).unwrap(), None);
+}
+
+fn error_for(fx: &mut Fixture, type_name: &str) {
+    let sent = fx.requests(type_name);
+    let extra = sent.last().expect("sent")["@extra"]
+        .as_str()
+        .expect("extra")
+        .to_string();
+    fx.feed(&format!(
+        r#"{{"@type":"error","@extra":"{extra}","code":500,"message":"FLOOD"}}"#
+    ));
+}
+
+#[test]
+fn a_refused_removal_of_a_recent_or_frequent_chat_puts_it_back() {
+    let mut fx = Fixture::new();
+    fx.driver.session.search.search.surface = crate::state::SearchSurface::Recents;
+    fx.driver.session.search.search.chat_ids = vec![ChatId(7), ChatId(8)];
+    fx.driver.session.search.search.top_chats = vec![ChatId(11), ChatId(12)];
+    fx.driver.remove_recent_search(ChatId(7)).unwrap();
+    fx.driver.remove_top_chat(ChatId(11)).unwrap();
+    error_for(&mut fx, "removeRecentlyFoundChat");
+    error_for(&mut fx, "removeTopChat");
+    assert_eq!(
+        fx.driver.session.search.search.chat_ids,
+        vec![ChatId(7), ChatId(8)]
+    );
+    assert_eq!(
+        fx.driver.session.search.search.top_chats,
+        vec![ChatId(11), ChatId(12)]
+    );
+}
+
+#[test]
+fn a_refused_frequent_contacts_switch_goes_back_with_its_strip() {
+    let mut fx = Fixture::new();
+    fx.driver.session.search.search.top_chats = vec![ChatId(11), ChatId(12)];
+    fx.driver.set_top_chats_disabled(true).unwrap();
+    assert!(fx.driver.session.search.search.top_chats_disabled);
+    assert!(fx.driver.session.search.search.top_chats.is_empty());
+    error_for(&mut fx, "setOption");
+    assert!(!fx.driver.session.search.search.top_chats_disabled);
+    assert_eq!(
+        fx.driver.session.search.search.top_chats,
+        vec![ChatId(11), ChatId(12)]
+    );
 }

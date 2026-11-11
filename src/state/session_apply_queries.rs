@@ -18,25 +18,34 @@ impl Session {
             return;
         }
         if let Some(RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
-            chat_id,
-            bot_user_id,
-            first_page,
+            first_page, ..
         })) = pending.map(|p| p.purpose)
         {
-            let slot_ok = match (first_page, self.bots.inline_query.as_ref()) {
-                (true, Some(slot)) => {
-                    slot.chat_id == chat_id
-                        && slot.bot_user_id == bot_user_id
-                        && matches!(slot.fetch, InlineQueryFetch::Loading)
-                }
-                (false, Some(slot)) => {
-                    slot.chat_id == chat_id
-                        && slot.bot_user_id == bot_user_id
-                        && matches!(slot.fetch, InlineQueryFetch::Loaded { .. })
-                }
+            // Only the request the slot waits for settles it: the first page
+            // under `Loading`, a next page under `Loaded.more`.
+            let asked = pending.map(|p| p.id);
+            let waits = match (first_page, self.bots.inline_query.as_ref()) {
+                (
+                    true,
+                    Some(InlineQuerySlot {
+                        fetch: InlineQueryFetch::Loading { request },
+                        ..
+                    }),
+                ) => Some(*request) == asked,
+                (
+                    false,
+                    Some(InlineQuerySlot {
+                        fetch:
+                            InlineQueryFetch::Loaded {
+                                more: InlineMore::Asking { request },
+                                ..
+                            },
+                        ..
+                    }),
+                ) => Some(*request) == asked,
                 _ => false,
             };
-            if slot_ok {
+            if waits {
                 // The grid shows these images; the download pass finds
                 // them through the stored results.
                 self.remember_files(&page.files);
@@ -69,6 +78,7 @@ impl Session {
                             button: page.button.or_else(|| old_button.clone()),
                             results,
                             next_offset,
+                            more: InlineMore::Idle,
                         }
                     }
                     _ => InlineQueryFetch::Loaded {
@@ -80,6 +90,7 @@ impl Session {
                             page.next_offset
                         },
                         results: page.results,
+                        more: InlineMore::Idle,
                     },
                 };
                 if let Some(slot) = self.bots.inline_query.as_mut() {
@@ -97,7 +108,12 @@ impl Session {
             // replaces; later pages append (deduped); `next_offset`
             // pages the bot's result list.
             self.remember_files(&page.files);
-            self.accept_gif_search_results(page.animations, page.next_offset, first_page);
+            self.accept_gif_search_results(
+                pending.map(|p| p.id),
+                page.animations,
+                page.next_offset,
+                first_page,
+            );
         }
     }
     #[allow(clippy::too_many_arguments)]
@@ -163,8 +179,17 @@ impl Session {
     ) {
         if let Some(pending) = pending
             && let RequestPurpose::Calls(CallsPurpose::CreateCall { is_video }) = pending.purpose
+            && self.calls.active_call.is_some()
+        {
+            // Another call (an incoming one that arrived meanwhile) took the
+            // slot: the created call has no owner here, so it is discarded.
+            self.calls.created_call_discards.push((id, is_video));
+            // Its updates are no one's either: the end of the call the user
+            // placed must not show as a missed call.
+            self.remember_busy_declined(id);
+        } else if let Some(pending) = pending
+            && let RequestPurpose::Calls(CallsPurpose::CreateCall { is_video }) = pending.purpose
             && let Some(user_id) = pending.user_id
-            && self.calls.active_call.is_none()
         {
             self.calls.active_call = Some(ActiveCall {
                 id,
@@ -176,19 +201,22 @@ impl Session {
                 // stashed in the request purpose.
                 is_video,
                 muted: false,
-                camera_on: is_video,
-                screen_sharing: false,
+                video: if is_video {
+                    crate::state::LocalVideo::Camera
+                } else {
+                    crate::state::LocalVideo::Off
+                },
                 remote_video: RemoteVideoState::Inactive,
                 remote_screen: RemoteVideoState::Inactive,
                 remote_audio_muted: false,
                 remote_battery_low: false,
                 signal_bars: None,
+                media_note: None,
                 state: CallState::Pending {
                     is_created: true,
                     is_received: false,
                 },
                 started_at: Instant::now(),
-                ready_at: None,
                 ready: None,
                 transport: CallTransport::default(),
                 signaling_queue: Vec::new(),

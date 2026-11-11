@@ -54,11 +54,25 @@ impl QuillApp {
             self.set_note(StatusNote::info(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A)));
             return;
         };
-        if let Err(err) = live.driver.send_sharing_request() {
-            self.set_note(StatusNote::error(user_error_for(
-                keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
-                &err,
-            )));
+        match live.driver.send_sharing_request() {
+            Ok(Some(_)) => {}
+            // Refused or failed: the box stays open to try again, and the
+            // chat is not opened as if the request had gone.
+            Ok(None) => {
+                self.set_note(StatusNote::error(tr(
+                    keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
+                )));
+                cx.notify();
+                return;
+            }
+            Err(err) => {
+                self.set_note(StatusNote::error(user_error_for(
+                    keys::Q_PEOPLE_COULDNT_REACH_TELEGRAM_TRY_AGAIN,
+                    &err,
+                )));
+                cx.notify();
+                return;
+            }
         }
         self.dismiss_profile_modal();
         self.select_listed_chat(chat_id, window, cx);

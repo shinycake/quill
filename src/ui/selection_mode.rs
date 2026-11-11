@@ -6,6 +6,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::chat_ui_state::A11yFocus;
 use super::motion;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::*;
@@ -80,13 +81,14 @@ impl QuillApp {
         }
         let now = std::time::Instant::now();
         let checked = self.frame.motion.selection.borrow_mut().check(
+            chat_id.0,
             message_id.0,
             selected,
             self.frame.window_active.get(),
             now,
         );
         let interactive = self.selecting_in(chat_id);
-        let focused = interactive && self.chat_ui.selection_focus == Some(message_id);
+        let focused = interactive && self.chat_ui.focus.row() == Some(message_id);
         let ring_color = cx.theme().ring;
         let forward = self.selection_forward_drag(chat_id, message_id);
         let overlay = (mode > 0.).then(|| {
@@ -249,7 +251,7 @@ impl QuillApp {
         );
         self.add_to_selection(chat_id, span);
         self.chat_ui.selection_anchor = Some(message_id);
-        self.chat_ui.selection_focus = Some(message_id);
+        self.chat_ui.focus = A11yFocus::Row(message_id);
         cx.notify();
     }
 
@@ -484,7 +486,7 @@ impl QuillApp {
         };
         let mut ids = draft.message_ids.clone();
         ids.sort_by_key(|id| id.0);
-        self.clear_forward(window, cx);
+        self.end_selection(window, cx);
         self.open_message_report(draft.from_chat_id, ids, cx);
     }
 
@@ -545,12 +547,17 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return;
         };
+        // Every message must be yours and still open to "delete for
+        // everyone" (TDLib refuses the whole batch otherwise).
         let all_outgoing = session.histories.get(&chat_id.0).is_some_and(|history| {
             ids.iter().all(|id| {
-                history
-                    .messages
-                    .get(&id.0)
-                    .is_some_and(|message| message.is_outgoing)
+                history.messages.get(&id.0).is_some_and(|message| {
+                    message.is_outgoing
+                        && session
+                            .messages
+                            .menu_actions
+                            .allows_revoke(chat_id, *id, true)
+                })
             })
         });
         let offer_revoke = all_outgoing && !session.is_saved_messages(chat_id);
@@ -570,6 +577,7 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return;
         };
+        let account = session.account.clone();
         // A secret chat always deletes for both, so there is nothing to choose.
         let revoke_label =
             (offer_revoke && !session.is_secret_chat(chat_id)).then(|| {
@@ -595,6 +603,7 @@ impl QuillApp {
         let app = cx.entity().downgrade();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let (app, ids, revoke) = (app.clone(), ids.clone(), revoke.clone());
+            let account = account.clone();
             let checkbox_state = revoke.clone();
             let label = revoke_label.clone();
             alert
@@ -620,7 +629,11 @@ impl QuillApp {
                     let revoke = revoke.get();
                     let ids = ids.clone();
                     let _ = app.update(cx, |this, cx| {
-                        this.delete_selection(chat_id, &ids, revoke, cx);
+                        // The box was opened for one account: after a
+                        // switch it must not delete in the new one.
+                        if this.session().is_some_and(|s| s.account == account) {
+                            this.delete_selection(chat_id, &ids, revoke, cx);
+                        }
                     });
                     true
                 })
@@ -634,6 +647,21 @@ impl QuillApp {
         revoke: bool,
         cx: &mut Context<Self>,
     ) {
+        self.delete_messages(chat_id, ids, revoke);
+        self.share.forward = super::forward_stage::ForwardStage::None;
+        cx.notify();
+    }
+
+    /// Delete `ids` of `chat_id` and nothing else: the selection and the
+    /// forward draft stay as they are. `true` when the request went out (or
+    /// the demo applied it), or when every message was gone already; `false`
+    /// when the send was refused, with the note saying so.
+    pub(super) fn delete_messages(
+        &mut self,
+        chat_id: ChatId,
+        ids: &[MessageId],
+        revoke: bool,
+    ) -> bool {
         // The box may have sat open while some of them went away.
         let ids: Vec<MessageId> = ids
             .iter()
@@ -644,22 +672,25 @@ impl QuillApp {
             })
             .collect();
         let ids = ids.as_slice();
+        let mut went_out = true;
         if !ids.is_empty() {
-            self.begin_vanish(chat_id, ids);
             if let Some(live) = self.live.as_mut() {
                 if live.driver.delete_selected(chat_id, ids, revoke).is_err() {
+                    went_out = false;
                     self.set_note(StatusNote::error(tr(
                         keys::Q_CHAT_COULD_NOT_DELETE_MESSAGES,
                     )));
+                } else {
+                    self.begin_vanish(chat_id, ids);
                 }
             } else if self.demo_session.is_some() {
+                self.begin_vanish(chat_id, ids);
                 for id in ids {
                     self.apply_demo_delete(chat_id, *id);
                 }
             }
         }
-        self.share.forward = super::forward_stage::ForwardStage::None;
-        cx.notify();
+        went_out
     }
 
     /// Telegram Desktop's delete box for one message: "Do you want to delete
@@ -689,6 +720,7 @@ impl QuillApp {
         let secret = self
             .session()
             .is_some_and(|s| s.is_secret_chat(confirm.chat_id));
+        let account = self.session().map(|s| s.account.clone());
         let label = (confirm.can_revoke && !secret).then(|| {
             let session = self.session();
             match session
@@ -722,6 +754,7 @@ impl QuillApp {
         let app = cx.entity().downgrade();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let (app, revoke, confirm) = (app.clone(), revoke.clone(), confirm.clone());
+            let account = account.clone();
             let checkbox_state = revoke.clone();
             let (moderation_state, moderation_offer) = (choice.clone(), moderation.clone());
             let on_ok_choice = choice.clone();
@@ -874,7 +907,36 @@ impl QuillApp {
                     let community = community_ban
                         .filter(|_| on_ok_community.get())
                         .zip(offer.clone());
+                    let mut refused = false;
                     let _ = app.update(cx, |this, cx| {
+                        // Opened for one account: a switch since cancels it.
+                        if this.session().map(|s| &s.account) != account.as_ref() {
+                            return;
+                        }
+                        // Reports and "delete all" name the user's
+                        // messages, so they go out before the delete. A
+                        // send that fails keeps the box open and deletes
+                        // nothing: the admin retries (every step is
+                        // idempotent on the server).
+                        if let (true, Some(offer), Some(live)) =
+                            (picked.any(), offer.clone(), this.live.as_mut())
+                            && live
+                                .driver
+                                .moderate_message(
+                                    offer.chat_id,
+                                    &[confirm.message_id],
+                                    offer.user_id,
+                                    picked,
+                                )
+                                .is_err()
+                        {
+                            refused = true;
+                            this.set_note(StatusNote::error(tr(
+                                keys::Q_CHAT_COULD_NOT_DELETE_MESSAGES,
+                            )));
+                            cx.notify();
+                            return;
+                        }
                         if let Some(((community_id, _), offer)) = community {
                             this.start_community_ban(
                                 community_id,
@@ -883,22 +945,9 @@ impl QuillApp {
                                 cx,
                             );
                         }
-                        // Reports and "delete all" name the user's
-                        // messages, so they go out before the delete.
-                        if let (true, Some(offer), Some(live)) =
-                            (picked.any(), offer, this.live.as_mut())
-                        {
-                            let _ = live.driver.moderate_message(
-                                offer.chat_id,
-                                &[confirm.message_id],
-                                offer.user_id,
-                                picked,
-                            );
-                        }
-                        this.chat_ui.pending_delete = Some(confirm);
-                        this.confirm_delete(cx);
+                        this.confirm_delete(confirm, cx);
                     });
-                    true
+                    !refused
                 })
         });
     }

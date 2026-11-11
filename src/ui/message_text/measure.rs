@@ -18,7 +18,7 @@ pub(in crate::ui) struct RichTextSource<'a> {
     pub(in crate::ui) entities: &'a [TextEntity],
     pub(in crate::ui) msg_key: (i64, u64),
     pub(in crate::ui) is_caption: bool,
-    pub(in crate::ui) revealed: &'a std::collections::HashSet<(i64, u64, u64, bool)>,
+    pub(in crate::ui) revealed: &'a crate::ui::message_text::revealed::Revealed,
     pub(in crate::ui) emoji_paths: &'a HashMap<i64, ImageSource>,
 }
 
@@ -69,11 +69,11 @@ pub(in crate::ui) fn measure_rich_text(
             let key = (
                 source.msg_key.0,
                 source.msg_key.1,
-                (start as u64) | (1 << 63),
+                start as u64,
                 source.is_caption,
             );
             let collapsible = quote_collapses(&quote_text);
-            let shown = if collapsible && !source.revealed.contains(&key) {
+            let shown = if collapsible && !source.revealed.quote_expanded(&key) {
                 truncate_runs(group, collapsed_quote_len(&quote_text))
             } else {
                 group.to_vec()

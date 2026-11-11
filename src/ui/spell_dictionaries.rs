@@ -24,11 +24,12 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
 use quill::spell_catalog::{
-    ManagerRow, RowInputs, RowState, Transfer, build_rows, installed_codes, managed_dir,
-    next_chosen, percent, remove,
+    ManagerRow, RowDownload, RowInputs, RowState, Transfer, build_rows, installed_codes,
+    managed_dir, next_chosen, percent, remove,
 };
 use quill::spell_dict::EngineKind;
-use quill::spell_download::{Progress, download_dictionary};
+use quill::spell_download::{DownloadError, Progress, download_dictionary, run_guarded};
+use std::collections::BTreeSet;
 
 /// The one download in flight (tdesktop also loads a single dictionary at
 /// a time).
@@ -39,14 +40,30 @@ pub(super) struct ActiveDownload {
     percent: u8,
 }
 
+/// The one download: none, running (with the task that follows it, so
+/// dropping it ends the loop), or the last one's failure.
+#[derive(Default)]
+enum DictDownload {
+    #[default]
+    Idle,
+    Running {
+        download: ActiveDownload,
+        /// Dropped with the stage: dropping it ends the progress loop.
+        _task: Task<()>,
+    },
+    /// The last download of `code` failed with `message`; starting another
+    /// (or any download) clears it.
+    Failed { code: String, message: String },
+}
+
 /// Manager state on the app.
 #[derive(Default)]
 pub(super) struct DictManager {
     pub open: bool,
-    download: Option<ActiveDownload>,
-    task: Option<Task<()>>,
-    /// `(code, message)` of the last failed download.
-    failed: Option<(String, String)>,
+    download: DictDownload,
+    /// The codes of the dictionaries on disk, read when the list opens and
+    /// after a download or a removal, not on every frame.
+    installed: BTreeSet<String>,
     /// Screenshot fixture: rows to show instead of the real ones.
     pub demo_rows: Option<Vec<ManagerRow>>,
 }
@@ -62,6 +79,13 @@ impl QuillApp {
         self.spell.dict_manager.demo_rows.is_some() || self.spell.info.kind != EngineKind::System
     }
 
+    /// Reads the dictionary folder into [`DictManager::installed`].
+    fn refresh_installed_dictionaries(&mut self) {
+        self.spell.dict_manager.installed = Self::dictionaries_dir()
+            .map(|dir| installed_codes(&dir))
+            .unwrap_or_default();
+    }
+
     fn dictionary_rows(&self, query: &str) -> Vec<ManagerRow> {
         if let Some(rows) = &self.spell.dict_manager.demo_rows {
             return rows
@@ -70,25 +94,21 @@ impl QuillApp {
                 .cloned()
                 .collect();
         }
-        let managed = Self::dictionaries_dir()
-            .map(|dir| installed_codes(&dir))
-            .unwrap_or_default();
-        let transfer = self.spell.dict_manager.download.as_ref().map(|d| Transfer {
-            code: &d.code,
-            percent: d.percent,
-        });
+        let managed = &self.spell.dict_manager.installed;
+        let download = match &self.spell.dict_manager.download {
+            DictDownload::Idle => RowDownload::None,
+            DictDownload::Running { download, .. } => RowDownload::Running(Transfer {
+                code: &download.code,
+                percent: download.percent,
+            }),
+            DictDownload::Failed { code, .. } => RowDownload::Failed(code),
+        };
         build_rows(
             &RowInputs {
-                managed: &managed,
+                managed,
                 available: &self.spell.info.available,
                 active: &self.spell.info.active,
-                transfer,
-                failed: self
-                    .spell
-                    .dict_manager
-                    .failed
-                    .as_ref()
-                    .map(|(c, _)| c.as_str()),
+                download,
             },
             query,
         )
@@ -99,15 +119,13 @@ impl QuillApp {
         if self.spell.dict_manager.demo_rows.is_some() {
             return;
         }
-        let downloading = self
-            .spell
-            .dict_manager
-            .download
-            .as_ref()
-            .is_some_and(|d| d.code == code);
+        let downloading = matches!(
+            &self.spell.dict_manager.download,
+            DictDownload::Running { download, .. } if download.code == code
+        );
         if downloading {
-            if !enable && let Some(d) = &self.spell.dict_manager.download {
-                d.progress.cancel();
+            if !enable {
+                self.cancel_dictionary_download(cx);
             }
             return;
         }
@@ -126,8 +144,30 @@ impl QuillApp {
         self.set_spell_languages(next, cx);
     }
 
+    /// Switching a downloading dictionary off ends it at once, as
+    /// tdesktop's destroyed loader does: the row is a plain off switch
+    /// again and the progress loop and the worker's answer are dropped. The
+    /// blocking read the worker may be stuck in cannot be interrupted; the
+    /// flag ends it at the next chunk and nothing it produces is used, so a
+    /// stalled server holds nothing but its own thread.
+    fn cancel_dictionary_download(&mut self, cx: &mut Context<Self>) {
+        if let DictDownload::Running { download, .. } =
+            std::mem::take(&mut self.spell.dict_manager.download)
+        {
+            download.progress.cancel();
+        }
+        cx.notify();
+    }
+
     fn start_dictionary_download(&mut self, code: &str, cx: &mut Context<Self>) {
-        if self.spell.dict_manager.download.is_some() {
+        if matches!(
+            self.spell.dict_manager.download,
+            DictDownload::Running { .. }
+        ) {
+            // One download at a time: the switch snaps back, so say why.
+            self.set_note(StatusNote::info(tr(
+                keys::Q_MISC_WAIT_FOR_THE_DICTIONARY_DOWNLOAD,
+            )));
             return;
         }
         let (Some(dir), Some(entry)) =
@@ -136,39 +176,43 @@ impl QuillApp {
             return;
         };
         let progress = Arc::new(Progress::default());
-        self.spell.dict_manager.failed = None;
-        self.spell.dict_manager.download = Some(ActiveDownload {
+        let download = ActiveDownload {
             code: code.to_string(),
             progress: progress.clone(),
             total: entry.bytes,
             percent: 0,
-        });
+        };
         let code = code.to_string();
         let worker_progress = progress.clone();
         let worker_code = code.clone();
         let worker = cx.background_spawn(async move {
-            let result = download_dictionary(&dir, &worker_code, &worker_progress);
-            worker_progress.finish();
-            result
+            run_guarded(&worker_progress, || {
+                download_dictionary(&dir, &worker_code, &worker_progress)
+            })
         });
         // screen-scope: the spell checker and its dictionaries belong to the
         // app, not to an account; the download finishes on whichever screen
-        self.spell.dict_manager.task = Some(Self::spawn_app(cx, async move |this, cx| {
+        let task = Self::spawn_app(cx, async move |this, cx| {
             while !progress.is_finished() {
                 cx.background_executor()
                     .timer(Duration::from_millis(120))
                     .await;
                 let received = progress.received();
                 let _ = this.update(cx, |this, cx| {
-                    if let Some(d) = this.spell.dict_manager.download.as_mut() {
-                        d.percent = percent(received, d.total);
+                    if let DictDownload::Running { download, .. } =
+                        &mut this.spell.dict_manager.download
+                    {
+                        download.percent = percent(received, download.total);
                     }
                     cx.notify();
                 });
             }
             let result = worker.await;
             let _ = this.update(cx, |this, cx| {
-                this.spell.dict_manager.download = None;
+                // This task is the running stage's: it is let go of after
+                // the answer is applied, not under it.
+                let _finished = std::mem::take(&mut this.spell.dict_manager.download);
+                this.refresh_installed_dictionaries();
                 match result {
                     Ok(()) => {
                         let next = next_chosen(
@@ -179,12 +223,21 @@ impl QuillApp {
                         );
                         this.set_spell_languages(next, cx);
                     }
-                    Err(message) if message == "Cancelled." => {}
-                    Err(message) => this.spell.dict_manager.failed = Some((code.clone(), message)),
+                    Err(DownloadError::Cancelled) => {}
+                    Err(DownloadError::Message(message)) => {
+                        this.spell.dict_manager.download = DictDownload::Failed {
+                            code: code.clone(),
+                            message,
+                        };
+                    }
                 }
                 cx.notify();
             });
-        }));
+        });
+        self.spell.dict_manager.download = DictDownload::Running {
+            download,
+            _task: task,
+        };
         cx.notify();
     }
 
@@ -193,11 +246,15 @@ impl QuillApp {
         let Some(dir) = Self::dictionaries_dir() else {
             return;
         };
-        if let Err(err) = remove(&dir, code) {
+        let removed = remove(&dir, code);
+        // A half-removed dictionary still counts as it is on disk.
+        self.refresh_installed_dictionaries();
+        if let Err(err) = removed {
             self.set_note(StatusNote::error(tr_with(
                 keys::Q_MISC_COULDNT_REMOVE_THE_DICTIONARY,
                 &[("err", &err.to_string())],
             )));
+            return;
         }
         let chosen: Vec<String> = self
             .spell
@@ -279,6 +336,9 @@ impl QuillApp {
                 .small()
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.spell.dict_manager.open = !this.spell.dict_manager.open;
+                    if this.spell.dict_manager.open {
+                        this.refresh_installed_dictionaries();
+                    }
                     cx.notify();
                 })),
         );
@@ -304,7 +364,7 @@ impl QuillApp {
             for row in &rows {
                 list = list.child(self.dictionary_row(row, cx));
             }
-            if let Some((_, message)) = &self.spell.dict_manager.failed {
+            if let DictDownload::Failed { message, .. } = &self.spell.dict_manager.download {
                 list = list.child(
                     div()
                         .text_xs()

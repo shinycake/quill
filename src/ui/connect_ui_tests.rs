@@ -1,5 +1,5 @@
 use crate::ui::app::{PaneMode, QuillApp};
-use crate::ui::connect_ui::ConnectUiStatus;
+use crate::ui::connect_ui::ConnectStage;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
@@ -70,8 +70,7 @@ fn each_blocker_shows_its_reason_and_retry_and_never_the_phone_form(cx: &mut Tes
         (ConnectBlocker::ReceiveThread, StartupFailure::NoThread),
     ] {
         app.update(&mut vcx, |app, cx| {
-            app.connection.status = ConnectUiStatus::Live;
-            app.auth_demo.demo_state = AuthorizationState::WaitTdlibParameters;
+            app.auth_demo.stage = ConnectStage::Connecting;
             app.open_client(Err(blocker), cx);
         });
         assert!(reads(&mut vcx, failure.reason()), "{failure:?}");
@@ -89,8 +88,7 @@ fn a_database_tdlib_refused_shows_its_reason_and_retry(cx: &mut TestAppContext) 
         StartupFailure::DataFolder { detail: None },
     ] {
         app.update(&mut vcx, |app, cx| {
-            app.connection.status = ConnectUiStatus::Live;
-            app.auth_demo.demo_state = AuthorizationState::StartupFailed(failure.clone());
+            app.auth_demo.stage = ConnectStage::Blocked(failure.clone());
             cx.notify();
         });
         assert!(reads(&mut vcx, failure.reason()), "{failure:?}");

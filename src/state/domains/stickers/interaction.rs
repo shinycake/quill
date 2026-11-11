@@ -66,8 +66,7 @@ impl Session {
         stickers: &[StickerItem],
         emojis: &[Vec<String>],
     ) {
-        self.stickers.animations.apply_set(stickers, emojis);
-        for waiting in self.stickers.animations.take_waiting() {
+        for waiting in self.stickers.animations.apply_set(stickers, emojis) {
             if !self.chat_is_shown(waiting.chat_id) {
                 continue;
             }

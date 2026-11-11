@@ -34,12 +34,7 @@ impl QuillApp {
             input.set_value("", window, cx);
             input.focus(window, cx);
         });
-        self.set_media_panel_mode(PanelMode::Status(StatusTarget { position }));
-        let panel = &mut self.pickers.media_panel;
-        panel.key = None;
-        panel.active_section = 0;
-        panel.category = None;
-        panel.tab = PanelTab::Emoji;
+        self.enter_selector_mode(PanelMode::Status(StatusTarget { position }));
         if let Some(live) = self.live.as_mut() {
             // The installed emoji packs, and the statuses to list.
             let _ = live.driver.open_media_panel();

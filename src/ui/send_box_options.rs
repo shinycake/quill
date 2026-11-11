@@ -9,6 +9,8 @@
 
 use super::app::QuillApp;
 use super::composer_sends::{SendSlot, TrayItem};
+use super::send_box_state::PhotoSize;
+use super::send_box_thumbnails::GIVE_UP_AFTER;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
@@ -24,25 +26,50 @@ use quill::composer::{
     session_allows_paid_media,
 };
 use quill::lang::{keys, tr, tr_with};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::path::Path;
 use std::rc::Rc;
 
 /// The "Paid Content" box (tdesktop `EditPriceBox`).
 pub(super) struct PriceDialog {
     pub(super) input: Entity<InputState>,
-    /// The typed price is over the limit (`field->showError()`).
-    pub(super) too_high: bool,
+    /// What the last Save found (`field->showError()`).
+    pub(super) verdict: PriceVerdict,
     /// The chat the price is for: the one open when the box opened.
     pub(super) slot: SendSlot,
 }
 
+/// The verdict on the typed price. A refusal is about the text that was
+/// refused: it shows only while the field still holds that text, so editing
+/// the price clears it without anything resetting it by hand.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) enum PriceVerdict {
+    #[default]
+    Typing,
+    TooHigh {
+        text: String,
+    },
+}
+
 impl QuillApp {
+    /// The Paid Content box shows "up to N Stars": the last Save refused the
+    /// text the field holds now.
+    pub(super) fn price_too_high(&self, cx: &App) -> bool {
+        self.composer_ui
+            .send_box
+            .price
+            .as_ref()
+            .is_some_and(|dialog| {
+                matches!(&dialog.verdict, PriceVerdict::TooHigh { text }
+                if text.as_str() == dialog.input.read(cx).value().as_ref())
+            })
+    }
+
     /// The chat the tray sends to is a channel that takes paid media.
     fn open_chat_takes_paid_media(&self) -> bool {
         self.session().is_some_and(|session| {
             session
-                .open_chat
+                .open_chat_id()
                 .is_some_and(|chat| session_allows_paid_media(session, chat))
         })
     }
@@ -76,25 +103,90 @@ impl QuillApp {
 
     /// Send-box choices for the snapshot of the next send.
     pub(super) fn composer_media_options(&self) -> MediaSendOptions {
-        let as_files = self
-            .pending_attachments()
-            .iter()
-            .all(|attachment| attachment.kind == AttachmentKind::Document);
+        let as_files = ComposerAttachment::sends_as_files(self.pending_attachments());
         MediaSendOptions {
             hd_photos: self.pending_send().hd_photos && !as_files,
             paid_stars: self.paid_stars_in_effect(),
         }
     }
 
-    /// Size from the file header, read once per photo.
-    fn tray_photo_size(&self, path: &Path) -> Option<(u32, u32)> {
-        *self
-            .composer_ui
-            .send_box
+    /// The size of the picture the photo goes out as (its JPEG when one was
+    /// made), read from the header off the UI thread; unknown until that
+    /// read lands for that very file.
+    fn tray_photo_size(&self, attachment: &ComposerAttachment) -> Option<(u32, u32)> {
+        self.composer_sends
+            .reads
             .photo_sizes
-            .borrow_mut()
-            .entry(path.to_path_buf())
-            .or_insert_with(|| image::image_dimensions(path).ok())
+            .done(&attachment.path)
+            .filter(|read| read.file == attachment.photo_file())
+            .and_then(|read| read.size)
+    }
+
+    /// Read the header of every tray photo's picture that has not been read
+    /// (or was read as another file, before its JPEG was made), in the
+    /// background. A header that cannot be read, or a read that never
+    /// answers, ends as "unknown": the offer stays hidden, nothing waits.
+    pub(super) fn check_tray_photo_sizes(&mut self, cx: &mut Context<Self>) {
+        let wanted: Vec<(std::path::PathBuf, std::path::PathBuf)> = self
+            .composer_sends
+            .attachments()
+            .filter(|attachment| attachment.kind == AttachmentKind::Photo)
+            .map(|attachment| {
+                (
+                    attachment.path.clone(),
+                    attachment.photo_file().to_path_buf(),
+                )
+            })
+            .filter(|(path, file)| {
+                let reads = &self.composer_sends.reads.photo_sizes;
+                !reads.is_reading(path) && reads.done(path).is_none_or(|read| read.file != *file)
+            })
+            .collect();
+        for (path, file) in wanted {
+            let reads = &mut self.composer_sends.reads;
+            reads.photo_size_jobs = reads.photo_size_jobs.wrapping_add(1);
+            let job = reads.photo_size_jobs;
+            let path_key = path.clone();
+            let read_file = file.clone();
+            let worker =
+                cx.background_spawn(async move { image::image_dimensions(&read_file).ok() });
+            let timer = cx.background_executor().timer(GIVE_UP_AFTER);
+            let (waited, waited_file) = (path.clone(), file.clone());
+            let give_up = Self::spawn_app(cx, async move |this, cx| {
+                timer.await;
+                let _ = this.update(cx, |this, cx| {
+                    let unknown = PhotoSize {
+                        file: waited_file,
+                        size: None,
+                    };
+                    if this
+                        .composer_sends
+                        .reads
+                        .photo_sizes
+                        .finish(&waited, job, unknown)
+                    {
+                        cx.notify();
+                    }
+                });
+            });
+            let answer = Self::spawn_app(cx, async move |this, cx| {
+                let size = worker.await;
+                let _ = this.update(cx, |this, cx| {
+                    if this.composer_sends.reads.photo_sizes.finish(
+                        &path,
+                        job,
+                        PhotoSize { file, size },
+                    ) {
+                        cx.notify();
+                    }
+                });
+            });
+            // The stage owns both tasks: leaving it cancels the other.
+            self.composer_sends
+                .reads
+                .photo_sizes
+                .start(path_key, job, vec![give_up, answer]);
+        }
     }
 
     /// tdesktop `hasSendLargePhotosOption`: a compressed photo over 1280 px.
@@ -102,7 +194,7 @@ impl QuillApp {
         self.pending_attachments()
             .iter()
             .filter(|attachment| attachment.kind == AttachmentKind::Photo)
-            .filter_map(|attachment| self.tray_photo_size(attachment.photo_file()))
+            .filter_map(|attachment| self.tray_photo_size(attachment))
             .any(|(width, height)| can_use_high_quality(width, height))
     }
 
@@ -119,54 +211,71 @@ impl QuillApp {
             .filter(|attachment| attachment.needs_sound_check())
             .map(|attachment| attachment.path.clone())
             .filter(|path| {
-                let send_box = &self.composer_ui.send_box;
-                !send_box.sound_checking.contains_key(path)
-                    && !send_box.sound_checked.contains(path)
+                let send_box = &self.composer_sends.reads;
+                send_box.sound.is_unread(path)
             })
             .collect();
         for path in paths {
-            let send_box = &mut self.composer_ui.send_box;
+            let send_box = &mut self.composer_sends.reads;
             send_box.sound_jobs = send_box.sound_jobs.wrapping_add(1);
             let job = send_box.sound_jobs;
-            send_box.sound_checking.insert(path.clone(), job);
             let probed = path.clone();
             let worker =
                 cx.background_spawn(async move { quill::composer::without_sound_track(&probed) });
-            self.spawn_scoped(cx, async move |this, cx| {
+            // The reads belong to the app, not to the window or account that
+            // started them: a closed window or a switched account must not
+            // drop the answer and leave the read running for good.
+            let timer = cx.background_executor().timer(GIVE_UP_AFTER);
+            let waited = path.clone();
+            let give_up = Self::spawn_app(cx, async move |this, cx| {
+                timer.await;
+                let _ = this.update(cx, |this, cx| {
+                    // A probe that never answers must not hold Send: the
+                    // video goes as it is, with its sound.
+                    if this.composer_sends.reads.sound.finish(&waited, job, ()) {
+                        cx.notify();
+                    }
+                });
+            });
+            let sound_key = path.clone();
+            let answer = Self::spawn_app(cx, async move |this, cx| {
                 let silent = worker.await;
                 let _ = this.update(cx, |this, cx| {
-                    let send_box = &mut this.composer_ui.send_box;
-                    // The batch may have been sent or cleared meanwhile.
-                    if send_box.sound_checking.get(&path) != Some(&job) {
+                    let send_box = &mut this.composer_sends.reads;
+                    // The batch may have been sent or cleared, or the read
+                    // given up on, meanwhile.
+                    if !send_box.sound.finish(&path, job, ()) {
                         return;
                     }
-                    send_box.sound_checking.remove(&path);
-                    send_box.sound_checked.insert(path.clone());
                     if silent {
                         for attachment in this
                             .composer_sends
                             .attachments_at_mut(&path)
                             .filter(|attachment| attachment.needs_sound_check())
                         {
-                            attachment.extras.gif = true;
+                            attachment.extras.set_gif(true);
                         }
                     }
                     cx.notify();
                 });
-            })
-            .detach();
+            });
+            self.composer_sends
+                .reads
+                .sound
+                .start(sound_key, job, vec![give_up, answer]);
         }
         self.prepare_tray_file_thumbnails(cx);
+        self.check_tray_photo_sizes(cx);
         self.check_tray_media(cx);
     }
 
     /// Videos in the open slot's tray are still being read (a probe for
     /// another chat's tray does not count).
     pub(super) fn tray_videos_checking(&self) -> bool {
-        let checking = &self.composer_ui.send_box.sound_checking;
+        let checking = &self.composer_sends.reads.sound;
         self.pending_attachments()
             .iter()
-            .any(|attachment| checking.contains_key(&attachment.path))
+            .any(|attachment| checking.is_reading(&attachment.path))
     }
 
     /// The options row of the tray: High quality and the price.
@@ -268,7 +377,7 @@ impl QuillApp {
         let cover_ok = !animation
             && self.session().is_some_and(|session| {
                 session
-                    .open_chat
+                    .open_chat_id()
                     .is_some_and(|chat| session_allows_cover(session, chat))
             });
         if cover_ok {
@@ -393,7 +502,7 @@ impl QuillApp {
         }
         self.composer_ui.send_box.price = Some(PriceDialog {
             input,
-            too_high: false,
+            verdict: PriceVerdict::Typing,
             slot,
         });
         cx.notify();
@@ -417,7 +526,7 @@ impl QuillApp {
         };
         match parse_paid_price(&text, max) {
             PriceInput::TooHigh => {
-                dialog.too_high = true;
+                dialog.verdict = PriceVerdict::TooHigh { text };
                 cx.notify();
                 false
             }
@@ -471,7 +580,7 @@ impl QuillApp {
                         .child(tr(keys::Q_OPS_ENTER_UNLOCK_COST)),
                 )
                 .child(Input::new(&state.input).aria_label(tr(keys::Q_OPS_STARS_TO_UNLOCK_2)))
-                .when(state.too_high, |body| {
+                .when(this.price_too_high(cx), |body| {
                     body.child(div().text_sm().text_color(danger).child(tr_with(
                         keys::Q_LEFTOVERS_PRICE_UP_TO_STARS,
                         &[("count", &(this.paid_media_star_max()).to_string())],
@@ -517,16 +626,13 @@ impl QuillApp {
                         ),
                 )
                 .into_any_element();
-            let body = Rc::new(RefCell::new(Some(body)));
+            let body = Rc::new(Cell::new(Some(body)));
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(keys::Q_OPS_PAID_CONTENT)))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))

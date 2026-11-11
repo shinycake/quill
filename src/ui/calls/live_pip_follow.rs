@@ -30,7 +30,7 @@ impl QuillApp {
                 self.stream_sink(chat_id)
             }
             LivePipSource::Story { chat_id, story_id } => {
-                if self.stories.live.watching != Some((chat_id, story_id)) {
+                if self.stories.live.watching() != Some((chat_id, story_id)) {
                     return None;
                 }
                 self.live_story_sink()
@@ -50,7 +50,7 @@ impl QuillApp {
             return;
         };
         // Not made yet: it opens on the slot's player.
-        let Some(window) = link.window.clone() else {
+        let Some(window) = link.window.window().cloned() else {
             return;
         };
         let source = link.source;

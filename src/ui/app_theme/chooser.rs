@@ -203,6 +203,7 @@ impl QuillApp {
         let system = self
             .preferences
             .system_accent
+            .color()
             .filter(|_| self.appearance.system_accent);
         let mut choices = vec![theme.accent()];
         choices.extend_from_slice(theme.accent_choices());
@@ -253,7 +254,7 @@ impl QuillApp {
                 .w(px(150.)),
         );
         let mut body = div().flex().flex_col().gap_2().child(row);
-        if self.preferences.system_accent.is_some() {
+        if self.preferences.system_accent.color().is_some() {
             body = body.child(
                 self.setting_spot(
                     &["appearance.system_accent"],
@@ -291,7 +292,7 @@ impl QuillApp {
         );
         let section = self.setting_spot(&["appearance.accent_color"], section, cx);
         self.setting_stand_in(
-            self.preferences.system_accent.is_none(),
+            self.preferences.system_accent.color().is_none(),
             &["appearance.system_accent"],
             section,
             cx,
@@ -452,7 +453,11 @@ impl QuillApp {
     /// the built-in default.
     fn delete_custom_theme(&mut self, name: &str, cx: &mut Context<Self>) {
         if let Err(err) = store::delete(&Self::themes_dir(), name) {
+            // The file is still there: the theme stays applied.
             self.set_note(StatusNote::error(err.note()));
+            self.refresh_custom_themes();
+            cx.notify();
+            return;
         }
         self.refresh_custom_themes();
         let gone = ThemeId::Custom(name.to_string());

@@ -96,7 +96,18 @@ fn another_page_starts_at_the_top_and_the_same_page_keeps_its_place(cx: &mut Tes
     assert!(offset(&app, vcx).is_some_and(|y| y < px(0.)), "kept");
     // The same chat's list with other items (its newest deleted, a new one
     // in) is the same list: it keeps its place.
-    show_photos(&app, vcx, 1001, 399);
+    app.update_in(vcx, |app, _, cx| {
+        if let Some(session) = app.demo_session.as_mut()
+            && let Some(chat) = session.media.shared_media.chat_id
+        {
+            session
+                .media
+                .shared_media
+                .remove_messages(chat, &[quill::ids::MessageId(1400)]);
+        }
+        cx.notify();
+    });
+    vcx.run_until_parked();
     assert!(offset(&app, vcx).is_some_and(|y| y < px(0.)), "same list");
     // Another chat's first page starts at the top.
     show_photos(&app, vcx, 5000, 400);

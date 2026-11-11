@@ -32,24 +32,22 @@ impl QuillApp {
             .session()
             .and_then(|s| s.settings.account_export.as_ref())
         else {
-            self.dialogs.account_export_seen = None;
+            self.dialogs.account_export.forget_seen();
             return RedrawNeed::Nothing;
         };
         let progress = export.progress();
-        let hidden = self.dialogs.account_export_progress_hidden;
+        let hidden = export.view == quill::export::ExportView::Hidden;
         if progress.is_settled() && hidden {
             if let Some(session) = self.session_mut() {
                 session.settings.account_export = None;
             }
-            self.dialogs.account_export_seen = None;
-            self.dialogs.account_export_progress_hidden = false;
+            self.dialogs.account_export.forget_seen();
             self.set_note(StatusNote::info(ended_note(&progress)));
             return RedrawNeed::Now;
         }
-        let changed = self.dialogs.account_export_seen.as_ref() != Some(&progress);
-        let need = super::export_progress::progress_redraw(changed, progress.is_settled(), hidden);
-        self.dialogs.account_export_seen = Some(progress);
-        need
+        let settled = progress.is_settled();
+        let changed = self.dialogs.account_export.note_seen(progress);
+        super::export_progress::progress_redraw(changed, settled, hidden)
     }
 
     /// Body and footer of the dialog while an export exists.
@@ -104,6 +102,12 @@ impl QuillApp {
                     &[("failed_chats", &summary.failed_chats.to_string())],
                 ));
             }
+            if summary.partial_chats > 0 {
+                notes.push(tr_with(
+                    keys::Q_OPS_CHATS_STOPPED_EARLY,
+                    &[("partial_chats", &summary.partial_chats.to_string())],
+                ));
+            }
             if summary.contacts_partial {
                 notes.push(tr(keys::Q_OPS_SAVED_PHONE_CONTACTS_WERENT_AVAILABLE).into());
             }
@@ -138,7 +142,7 @@ impl QuillApp {
                         if let Some(live) = this.live.as_mut() {
                             live.driver.session.settings.account_export = None;
                         }
-                        this.dialogs.account_export_seen = None;
+                        this.dialogs.account_export.forget_seen();
                         cx.notify();
                         this.close_kit_dialog_if_done(DialogKind::AccountExport, window, cx);
                     })),
@@ -150,7 +154,7 @@ impl QuillApp {
                         .label(tr(keys::Q_OPS_HIDE))
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
-                            this.dialogs.account_export_progress_hidden = true;
+                            this.set_account_export_view(quill::export::ExportView::Hidden);
                             cx.notify();
                             this.close_kit_dialog_if_done(DialogKind::AccountExport, window, cx);
                         })),

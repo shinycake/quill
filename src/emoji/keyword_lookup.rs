@@ -48,6 +48,14 @@ impl KeywordLookups {
             && !self.in_flight.values().any(|q| q == query)
     }
 
+    /// `query` has no answer and will get none: every attempt failed and
+    /// nothing is in flight for it.
+    pub fn gave_up(&self, query: &str) -> bool {
+        !self.answers.contains_key(query)
+            && self.failures.get(query).copied().unwrap_or(0) >= ATTEMPTS
+            && !self.in_flight.values().any(|q| q == query)
+    }
+
     pub fn sent(&mut self, id: RequestId, query: String) {
         self.in_flight.insert(id, query);
     }
@@ -78,9 +86,19 @@ impl KeywordLookups {
     }
 
     /// Forget requests that will never answer (swept, or the account
-    /// went away), so they do not hold a flight slot.
+    /// went away), so they do not hold a flight slot. Each counts as a
+    /// failed attempt, so a query that is never answered is given up on
+    /// after [`ATTEMPTS`] instead of being asked after every sweep.
     pub fn retain_in_flight(&mut self, live: impl Fn(RequestId) -> bool) {
-        self.in_flight.retain(|id, _| live(*id));
+        let gone: Vec<RequestId> = self
+            .in_flight
+            .keys()
+            .copied()
+            .filter(|id| !live(*id))
+            .collect();
+        for id in gone {
+            self.failed(id);
+        }
     }
 }
 
@@ -248,6 +266,18 @@ mod tests {
     }
 
     #[test]
+    fn a_swept_request_counts_as_a_failed_attempt() {
+        let mut lookups = KeywordLookups::default();
+        lookups.sent(RequestId(1), "fire".into());
+        lookups.retain_in_flight(|_| false);
+        assert!(lookups.wants("fire"), "one attempt left");
+        lookups.sent(RequestId(2), "fire".into());
+        lookups.retain_in_flight(|_| false);
+        assert!(lookups.gave_up("fire"));
+        assert!(!lookups.wants("fire"));
+    }
+
+    #[test]
     fn old_answers_are_forgotten_past_the_cap() {
         let mut lookups = KeywordLookups::default();
         for n in 0..=ANSWER_CAP as u64 {
@@ -257,5 +287,22 @@ mod tests {
         assert!(lookups.answer("q0").is_none());
         assert!(lookups.answer(&format!("q{ANSWER_CAP}")).is_some());
         assert!(lookups.answers.len() <= ANSWER_CAP / 2 + 2);
+    }
+
+    #[test]
+    fn a_query_gives_up_after_its_attempts_fail() {
+        let mut lookups = KeywordLookups::default();
+        lookups.sent(RequestId(1), "zz".into());
+        assert!(!lookups.gave_up("zz"), "still in flight");
+        lookups.failed(RequestId(1));
+        assert!(!lookups.gave_up("zz"), "one attempt left");
+        lookups.sent(RequestId(2), "zz".into());
+        assert!(!lookups.gave_up("zz"), "in flight again");
+        lookups.failed(RequestId(2));
+        assert!(lookups.gave_up("zz"));
+        assert!(!lookups.wants("zz"));
+        lookups.sent(RequestId(3), "ok".into());
+        lookups.answered(RequestId(3), Vec::new());
+        assert!(!lookups.gave_up("ok"), "an answered query did not fail");
     }
 }

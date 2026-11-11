@@ -44,6 +44,7 @@ fn message(chat: i64) -> OsNotification {
     OsNotification {
         chat_id: ChatId(chat),
         message_id: None,
+        topic_id: None,
         title: format!("Chat {chat}"),
         body: "Hello".into(),
     }
@@ -85,7 +86,7 @@ fn the_count_limits_the_stack_and_the_rest_wait(cx: &mut TestAppContext) {
             windows
                 .shown
                 .iter()
-                .any(|s| s.key == (me.clone(), ChatId(4)) && !s.unlinked)
+                .any(|s| s.key == (me.clone(), ChatId(4)) && !s.unlinked())
         );
     });
 
@@ -99,7 +100,7 @@ fn the_count_limits_the_stack_and_the_rest_wait(cx: &mut TestAppContext) {
             .windows
             .shown
             .iter()
-            .filter(|s| !s.unlinked && s.key == (me.clone(), ChatId(2)))
+            .filter(|s| !s.unlinked() && s.key == (me.clone(), ChatId(2)))
             .collect();
         assert_eq!(live.len(), 1);
     });
@@ -155,7 +156,7 @@ fn shown_id(app: &QuillApp, chat: i64) -> u64 {
         .windows
         .shown
         .iter()
-        .find(|s| s.key.1 == ChatId(chat) && !s.unlinked)
+        .find(|s| s.key.1 == ChatId(chat) && !s.unlinked())
         .map(|s| s.id)
         .unwrap_or(0)
 }
@@ -165,7 +166,7 @@ fn fading(app: &QuillApp, id: u64) -> bool {
         .windows
         .shown
         .iter()
-        .any(|s| s.id == id && s.popup.hiding)
+        .any(|s| s.id == id && s.popup.hiding())
 }
 
 /// A new message of the chat whose window has a reply being typed does
@@ -183,7 +184,7 @@ fn a_new_message_keeps_the_window_being_replied_in(cx: &mut TestAppContext) {
         app.show_custom_notification(&me, message(7), None, None, false, true, cx);
         let replying = app.delivery.windows.shown.iter().find(|s| s.id == id);
         assert!(
-            replying.is_some_and(|s| s.replying && !s.unlinked && !s.popup.hiding),
+            replying.is_some_and(|s| s.replying() && !s.unlinked() && !s.popup.hiding()),
             "the window being replied in stays up"
         );
         let live = app
@@ -191,7 +192,7 @@ fn a_new_message_keeps_the_window_being_replied_in(cx: &mut TestAppContext) {
             .windows
             .shown
             .iter()
-            .filter(|s| s.key.1 == ChatId(7) && !s.unlinked)
+            .filter(|s| s.key.1 == ChatId(7) && !s.unlinked())
             .count();
         assert_eq!(live, 2, "the new message shows beside it");
     });
@@ -214,8 +215,7 @@ fn a_window_clicked_under_the_pointer_lets_the_others_fade(cx: &mut TestAppConte
         let later = now + std::time::Duration::from_secs(600);
         // The user was back at the computer: both are due later.
         for shown in app.delivery.windows.shown.iter_mut() {
-            shown.waiting_for_input = false;
-            shown.hide_at = Some(later);
+            shown.hold = super::hold::Hold::Lingering { hide_at: later };
         }
         let (x, y) = (shown_id(app, 7), shown_id(app, 8));
         app.notify_window_event(x, ViewEvent::Hover(true), cx);
@@ -246,6 +246,7 @@ fn a_queued_notification_shows_before_any_window_draws(cx: &mut TestAppContext) 
             notifications: vec![quill::notify::QueuedNotification {
                 chat_id: ChatId(5),
                 message_id: None,
+                topic_id: None,
                 title: "Chat 5".into(),
                 body: "Hello".into(),
                 count: 1,
@@ -309,4 +310,55 @@ fn clicking_a_notification_window_opens_the_chat(cx: &mut TestAppContext) {
     popup.simulate_modifiers_change(gpui_kit::Modifiers::none());
     popup.simulate_keystrokes("a escape up");
     popup.run_until_parked();
+}
+
+#[gpui_kit::test]
+fn the_corner_preview_ends_with_the_page_that_showed_it(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.notify_corner_preview(Some(quill::notify::custom::ScreenCorner::TopLeft), cx);
+    });
+    app.read_with(vcx, |app, _| {
+        assert!(
+            app.delivery.windows.demo.to.abs() < f32::EPSILON,
+            "the real notifications dim while a corner is previewed"
+        );
+    });
+    // Leaving the Notifications page ends it; no hover-out is needed.
+    app.update(vcx, |app, _| app.leave_notification_settings());
+    app.read_with(vcx, |app, _| {
+        assert!((app.delivery.windows.demo.to - 1.0).abs() < f32::EPSILON);
+        assert!(
+            app.delivery
+                .windows
+                .samples
+                .iter()
+                .all(|(_, popup)| popup.hiding()),
+            "the sample windows are going"
+        );
+    });
+}
+
+/// A window that was read or closed while a reply was being typed in it is
+/// fading out: it no longer holds the others' fade.
+#[gpui_kit::test]
+fn a_cleared_window_does_not_count_as_replying(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let me = app.read_with(vcx, |app, _| app.notification_account(None));
+    app.update(vcx, |app, cx| {
+        app.delivery.windows.platform = NotifyPlatform::Windows;
+        app.show_custom_notification(&me, message(7), None, None, false, true, cx);
+        let id = shown_id(app, 7);
+        app.notify_window_event(id, ViewEvent::ReplyOpened, cx);
+        assert!(app.delivery.windows.any_replying());
+        // The chat is read elsewhere.
+        app.clear_custom_notifications(&me, ChatId(7), cx);
+        assert!(!app.delivery.windows.any_replying());
+        assert!(!app.delivery.windows.held());
+        // Replying again in a window that is leaving does not hold either.
+        app.notify_window_event(id, ViewEvent::ReplyOpened, cx);
+        assert!(!app.delivery.windows.any_replying());
+    });
 }

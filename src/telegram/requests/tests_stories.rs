@@ -52,6 +52,9 @@ fn story_request_shapes_match_1_8_67() {
     assert_eq!(v["reply_to"]["story_poster_chat_id"], 11);
     assert_eq!(v["reply_to"]["story_id"], 7);
     assert_eq!(v["input_message_content"]["text"]["text"], "Nice!");
+    // The reply is not the chat's draft: the draft the person is typing in
+    // the chat stays (sweep 07-005).
+    assert_eq!(v["input_message_content"]["clear_draft"], false);
 }
 
 #[test]

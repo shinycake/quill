@@ -126,7 +126,10 @@ impl QuillApp {
                 )
             });
         match session.and_then(|s| s.groups.chat_statistics.get(&chat_id).cloned()) {
-            None | Some(ChatStatisticsFetch::Loading) => div()
+            None
+            | Some(
+                ChatStatisticsFetch::Loading { .. } | ChatStatisticsFetch::WaitingForInfo { .. },
+            ) => div()
                 .flex()
                 .flex_col()
                 .items_center()
@@ -160,7 +163,9 @@ impl QuillApp {
                         })),
                 )
                 .into_any_element(),
-            Some(ChatStatisticsFetch::Loaded(statistics)) => self
+            Some(ChatStatisticsFetch::Loaded {
+                stats: statistics, ..
+            }) => self
                 .statistics_body(chat_id, &statistics, is_channel, cx)
                 .into_any_element(),
         }
@@ -342,6 +347,28 @@ impl QuillApp {
             );
         }
         list.into_any_element()
+    }
+
+    /// Poll drain: statistics fetched for the other theme are asked for
+    /// again in this one (the graphs' colors come with the request). Only a
+    /// `Loaded` result in the other theme asks, and the answer is in this
+    /// one, so it cannot repeat.
+    pub(in crate::ui) fn drain_statistics_theme(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(InfoPanelTarget::Statistics(chat_id)) = self.shown_info_target() else {
+            return false;
+        };
+        let is_dark = super::chat_theme::is_dark_palette();
+        let other_theme = self
+            .session()
+            .and_then(|session| session.groups.chat_statistics.get(&chat_id))
+            .is_some_and(|fetch| {
+                matches!(fetch, ChatStatisticsFetch::Loaded { is_dark: held, .. } if *held != is_dark)
+            });
+        if !other_theme || self.live.is_none() {
+            return false;
+        }
+        self.refresh_statistics(chat_id, cx);
+        true
     }
 
     /// Phase D2: explicit statistics refresh — clears the cached result

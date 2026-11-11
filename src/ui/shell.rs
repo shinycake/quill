@@ -440,12 +440,16 @@ impl QuillShell {
         if host.is_none() {
             Self::close_left_dialogs(&app, window, cx);
         }
-        // An account switch already closed the kit dialog this shell showed.
-        if host.is_none()
-            && app.update(cx, |app, _| {
-                std::mem::take(&mut app.main_window.dialogs_closed)
-            })
-        {
+        // The kit dialog this shell showed was already closed (an account
+        // switch, or the action that finished it): closing again would
+        // take whichever dialog is on top now.
+        let window_id = window.window_handle().window_id();
+        if app.update(cx, |app, _| {
+            app.main_window
+                .dialogs_closed
+                .borrow_mut()
+                .remove(&window_id)
+        }) {
             self.open_dialog = None;
         }
         // A session-wide box this window showed whose flag is clear (its own
@@ -455,6 +459,29 @@ impl QuillShell {
             for kind in app.windows.dialogs_shown_by(host) {
                 if Some(kind) != shown && !Self::flag_open(app, kind) {
                     app.windows.dialog_closed_in(kind, host);
+                }
+            }
+        });
+        // An ask is waiting for the answer that sets its flag. Once the
+        // requests it was made with have settled and the flag is still
+        // clear, that answer is not coming (it failed, was cancelled, or
+        // opened nothing): the ask ends here, so a later open of the kind
+        // is not pinned to it. A demo stages its answers by hand.
+        app.update(cx, |app, _| {
+            // An ask made since the last sync reads its requests now: the
+            // code that asked has run, so its own request is out.
+            if app.windows.has_unread_asks()
+                && let Some(live) = app.live.as_ref()
+            {
+                let pending = live.driver.session.requests.pending_ids();
+                app.windows.read_ask_waits(&pending);
+            }
+            for (kind, waits) in app.windows.asked_dialogs() {
+                let settled = app.live.as_ref().is_some_and(|live| {
+                    waits.settled(|id| live.driver.session.requests.get(id).is_some())
+                });
+                if settled && !Self::flag_open(app, kind) {
+                    app.windows.dialog_ask_expired(kind);
                 }
             }
         });
@@ -591,6 +618,10 @@ impl QuillApp {
         }
         if !QuillShell::dialog_is_open(self, kind) {
             window.close_dialog(cx);
+            self.main_window
+                .dialogs_closed
+                .borrow_mut()
+                .insert(window.window_handle().window_id());
         }
     }
 
@@ -638,6 +669,19 @@ where
     F: Fn(DialogContent, &mut Window, &mut App) -> DialogContent + 'static,
 {
     scrollable_dialog_content_tracked(None, build)
+}
+
+/// `scrollable_dialog_content` for a body built once per dialog render: the
+/// kit's `content` takes an `Fn`, so the element goes in through a `Cell`
+/// (no borrow that could panic). A call after the first draws nothing, as
+/// the builder runs again with the next render.
+pub(crate) fn one_shot_dialog_content(
+    body: AnyElement,
+) -> impl Fn(DialogContent, &mut Window, &mut App) -> DialogContent {
+    let slot = std::rc::Rc::new(std::cell::Cell::new(Some(body)));
+    scrollable_dialog_content(move |content, _, _| {
+        content.child(slot.take().unwrap_or_else(|| div().into_any_element()))
+    })
 }
 
 /// `scrollable_dialog_content` whose scroll region is tracked by `scroll`, so

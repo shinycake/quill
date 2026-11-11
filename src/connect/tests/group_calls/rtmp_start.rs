@@ -4,7 +4,7 @@
 //! the failure path, and who may manage video chats (`canManageGroupCall`)
 //! as `updateSupergroup` reports it.
 use super::*;
-use crate::calls::rtmp_start::RtmpInfo;
+use crate::calls::rtmp_start::{RtmpInfo, RtmpStage};
 use crate::ids::ChatId;
 use std::sync::atomic::AtomicU64;
 
@@ -92,8 +92,8 @@ fn stream_with_asks_for_the_url_and_the_answer_opens_the_box() {
     reply(&mut driver, url_answer(&request, "rtmps://s/", "key-1"));
     let start = driver.session.calls.rtmp_start.as_ref().expect("process");
     assert_eq!(
-        start.info,
-        Some(RtmpInfo {
+        start.info(),
+        Some(&RtmpInfo {
             url: "rtmps://s/".into(),
             key: "key-1".into()
         })
@@ -122,7 +122,7 @@ fn revoke_sends_replace_and_swaps_the_key() {
         .calls
         .rtmp_start
         .as_ref()
-        .and_then(|start| start.info.as_ref())
+        .and_then(|start| start.info())
         .map(|info| info.key.clone());
     assert_eq!(key.as_deref(), Some("new"));
 }
@@ -178,7 +178,7 @@ fn a_failed_request_marks_the_process_and_leaves_the_call_error_alone() {
     let request = last(&recorder);
     reply(&mut driver, error_answer(&request));
     let start = driver.session.calls.rtmp_start.as_ref().expect("process");
-    assert!(start.failed && !start.box_open());
+    assert!(matches!(start.stage, RtmpStage::FetchFailed) && !start.box_open());
     assert!(driver.session.calls.group_call_error.is_none());
 }
 
@@ -191,7 +191,10 @@ fn a_late_failure_of_an_earlier_process_is_ignored() {
     driver.begin_rtmp_start(ChatId(CHAT)).expect("sends again");
     reply(&mut driver, error_answer(&first));
     let start = driver.session.calls.rtmp_start.as_ref().expect("process");
-    assert!(!start.failed, "the new process did not fail");
+    assert!(
+        matches!(start.stage, RtmpStage::Fetching { .. }),
+        "the new process did not fail"
+    );
 }
 
 #[test]
@@ -256,19 +259,18 @@ fn creating_while_a_one_to_one_call_hangs_up_is_allowed() {
         is_video: false,
         state: CallState::Ready,
         started_at: std::time::Instant::now(),
-        ready_at: None,
         ready: None,
         transport: Default::default(),
         signaling_queue: Vec::new(),
         signaling_dropped: 0,
         muted: false,
-        camera_on: false,
-        screen_sharing: false,
+        video: crate::state::LocalVideo::Off,
         remote_video: RemoteVideoState::Inactive,
         remote_screen: RemoteVideoState::Inactive,
         remote_audio_muted: false,
         remote_battery_low: false,
         signal_bars: None,
+        media_note: None,
     });
     assert!(
         driver.start_video_chat(CHAT, String::new(), 0).is_err(),
@@ -351,9 +353,9 @@ fn the_join_as_list_is_asked_for_before_creating() {
         }),
     );
     let join_as = driver.session.calls.create_join_as.as_ref().expect("kept");
-    assert_eq!(join_as.request, sent);
+    assert_eq!(join_as.request(), sent);
     assert_eq!(
-        join_as.answer,
+        join_as.answer(),
         Some(Ok(vec![
             MessageSender::User { user_id: 1 },
             MessageSender::Chat { chat_id: CHAT },
@@ -364,5 +366,5 @@ fn the_join_as_list_is_asked_for_before_creating() {
     let request = last(&recorder);
     reply(&mut driver, error_answer(&request));
     let join_as = driver.session.calls.create_join_as.as_ref().expect("kept");
-    assert_eq!(join_as.answer, Some(Err(())));
+    assert_eq!(join_as.answer(), Some(Err(())));
 }

@@ -104,6 +104,63 @@ impl CloseFriendsEdit {
     }
 }
 
+/// Where the close-friends editor is. It opens on the loaded list only:
+/// `Loading` shows no checkboxes and no Save, so a save can never send a
+/// list built on an empty base. Every stage can be left (Cancel, the viewer
+/// closing); `Saving` ends on the confirmed list or a failure.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum CloseFriendsStage {
+    #[default]
+    Closed,
+    Loading,
+    /// `getCloseFriends` failed: the panel says so and offers a retry.
+    Failed,
+    Editing(CloseFriendsEdit),
+    /// `setCloseFriends` `request` is out: the stage leaves with its answer.
+    Saving {
+        edit: CloseFriendsEdit,
+        request: crate::ids::RequestId,
+    },
+}
+
+impl CloseFriendsStage {
+    pub fn is_open(&self) -> bool {
+        !matches!(self, Self::Closed)
+    }
+
+    pub fn is_saving(&self) -> bool {
+        matches!(self, Self::Saving { .. })
+    }
+
+    pub fn edit(&self) -> Option<&CloseFriendsEdit> {
+        match self {
+            Self::Editing(edit) | Self::Saving { edit, .. } => Some(edit),
+            Self::Closed | Self::Loading | Self::Failed => None,
+        }
+    }
+
+    pub fn edit_mut(&mut self) -> Option<&mut CloseFriendsEdit> {
+        match self {
+            Self::Editing(edit) => Some(edit),
+            Self::Closed | Self::Loading | Self::Failed | Self::Saving { .. } => None,
+        }
+    }
+
+    /// The list arrived: a loading editor starts from it.
+    /// The list's request failed: only a stage still waiting for it ends.
+    pub fn load_failed(&mut self) {
+        if matches!(self, Self::Loading) {
+            *self = Self::Failed;
+        }
+    }
+
+    pub fn loaded(&mut self, list: &[i64]) {
+        if matches!(self, Self::Loading) {
+            *self = Self::Editing(CloseFriendsEdit::new(list));
+        }
+    }
+}
+
 /// Public link of a story: `https://t.me/<username>/s/<id>`
 /// (tdesktop `Data::Story::url`). `None` without a public username.
 pub fn story_link(username: &str, story_id: i32) -> Option<String> {
@@ -202,6 +259,35 @@ mod tests {
         edit.toggle(1);
         assert!(!edit.changed());
         assert_eq!(edit.count(), 2);
+    }
+
+    #[test]
+    fn close_friends_stage_waits_for_the_list() {
+        let mut stage = CloseFriendsStage::Loading;
+        assert!(stage.edit().is_none() && stage.edit_mut().is_none());
+        stage.loaded(&[4, 9]);
+        let edit = stage.edit_mut();
+        assert!(edit.is_some());
+        if let Some(edit) = edit {
+            edit.toggle(1);
+        }
+        assert_eq!(stage.edit().map(CloseFriendsEdit::ids), Some(vec![1, 4, 9]));
+        // A later answer never rebases an edit in progress.
+        stage.loaded(&[]);
+        assert_eq!(stage.edit().map(CloseFriendsEdit::count), Some(3));
+    }
+
+    #[test]
+    fn a_failed_list_request_ends_the_wait_and_only_the_wait() {
+        let mut stage = CloseFriendsStage::Loading;
+        stage.load_failed();
+        assert_eq!(stage, CloseFriendsStage::Failed);
+        assert!(stage.is_open(), "the panel stays to offer a retry");
+        assert!(stage.edit().is_none() && stage.edit_mut().is_none());
+        // An edit in progress is not thrown away by a late failure.
+        let mut editing = CloseFriendsStage::Editing(CloseFriendsEdit::new(&[1]));
+        editing.load_failed();
+        assert!(matches!(editing, CloseFriendsStage::Editing(_)));
     }
 
     #[test]

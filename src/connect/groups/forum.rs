@@ -43,6 +43,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::GetSupergroup, Some(chat_id));
         if let Err(err) = self.sender.send_json(&get_supergroup(extra, supergroup_id)) {
             self.session.requests.take(extra);
+            // A send that never left fails the load like an error answer:
+            // the same set the topic views read.
+            self.session
+                .threads
+                .forum_topics
+                .fail(chat_id.0, "could not send the request");
             return Err(err);
         }
         Ok(())
@@ -59,7 +65,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.threads.forum_topics.remove(&chat_id.0);
+        self.session.threads.forum_topics.outdate(chat_id.0);
         self.maybe_fetch_forum_topics(chat_id)
     }
 
@@ -81,14 +87,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.chat_has_topics(chat_id) {
             return Ok(());
         }
-        if self.session.threads.forum_topics.contains_key(&chat_id.0) {
-            return Ok(());
-        }
-        if self
-            .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::GetForumTopics, chat_id)
-        {
+        if !self.session.threads.forum_topics.wants_fetch(chat_id.0) {
             return Ok(());
         }
         let extra = self
@@ -104,8 +103,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             FORUM_TOPICS_LIMIT,
         )) {
             self.session.requests.take(extra);
+            // A send that never left fails the load like an error answer:
+            // the same set the topic views read.
+            self.session
+                .threads
+                .forum_topics
+                .fail(chat_id.0, "could not send the request");
             return Err(err);
         }
+        self.session.threads.forum_topics.begin(chat_id.0);
+        self.session.threads.forum_topics.sent(chat_id.0, extra);
         Ok(())
     }
 
@@ -119,7 +126,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         // A topic already in the loaded list is selectable whatever the
@@ -149,10 +156,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        let Some(forum_topic_id) = self.session.open_topic else {
+        let Some(forum_topic_id) = self.session.open_forum_topic() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         let key = (chat_id.0, forum_topic_id);
@@ -161,7 +168,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .threads
             .topic_histories
             .get(&key)
-            .is_some_and(|h| h.loaded_complete)
+            .is_some_and(|h| h.loaded_complete())
         {
             return Ok(None);
         }
@@ -169,7 +176,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         // (`retry_topic_history`) instead of re-sending on every render.
         if self
             .session
-            .topic_history_load_failed(chat_id, forum_topic_id)
+            .threads
+            .topic_histories
+            .get(&key)
+            .is_some_and(|h| h.older == crate::state::OlderEnd::Failed)
         {
             return Ok(None);
         }
@@ -216,12 +226,33 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// and request the first page again.
     pub fn retry_topic_history(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         if let (Some(chat_id), Some(forum_topic_id)) =
-            (self.session.open_chat, self.session.open_topic)
+            (self.session.open_chat_id(), self.session.open_forum_topic())
         {
             self.session
                 .clear_topic_load_failed(chat_id, forum_topic_id);
         }
         self.fetch_topic_history()
+    }
+
+    /// The Retry strip at an open topic's newer end.
+    pub fn retry_topic_newer(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        if let (Some(chat_id), Some(topic)) =
+            (self.session.open_chat_id(), self.session.open_forum_topic())
+            && let Some(history) = self
+                .session
+                .threads
+                .topic_histories
+                .get_mut(&(chat_id.0, topic))
+        {
+            history.retry_newer();
+        }
+        self.fetch_topic_history_newer()
+    }
+
+    /// The same Retry for a topic that has rows: its failed older page is
+    /// asked for again.
+    pub fn retry_topic_older(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        self.retry_topic_history()
     }
 
     /// Slice G2: supergroup id for a non-channel supergroup chat —

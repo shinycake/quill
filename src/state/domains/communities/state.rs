@@ -108,6 +108,10 @@ pub struct CommunitiesState {
     pub new_community_photo: Option<(RequestId, String)>,
     /// `getCommunityAddChatRequests`, by community id.
     pub add_chat_requests: HashMap<i64, Fetch<AddChatRequestList>>,
+    /// Add-chat requests approved or declined, by community, since the last
+    /// first page was asked: a page that was in flight meanwhile may still
+    /// list them, and must not bring them back.
+    pub handled_add_requests: HashMap<i64, HashSet<i64>>,
     /// `getCommunityMemberChats`, by community and member.
     pub member_chats: HashMap<(i64, CommunityMember), Fetch<CommunityMemberChats>>,
     /// The settings each in-flight `setCommunityNotificationSettings`
@@ -115,11 +119,6 @@ pub struct CommunitiesState {
     pub notification_sends: HashMap<RequestId, (i64, ChatNotificationSettings)>,
     /// Finished requests the UI has not told about yet.
     pub outcomes: VecDeque<CommunityOutcome>,
-    /// Communities whose `getCommunityFullInfo` failed. The background
-    /// asks (collapsed rows, the moderation ban) wait until TDLib sends
-    /// something new about the community (`updateCommunity`, a full info),
-    /// so a failure is not asked again on every poll.
-    pub full_info_failed: HashSet<i64>,
     /// TDLib options `community_chat_count_max` and
     /// `community_bot_count_max`, for the limit toast.
     pub chat_count_max: i64,
@@ -137,10 +136,10 @@ impl CommunitiesState {
             owned_bots: Fetch::Idle,
             new_community_photo: None,
             add_chat_requests: HashMap::new(),
+            handled_add_requests: HashMap::new(),
             member_chats: HashMap::new(),
             notification_sends: HashMap::new(),
             outcomes: VecDeque::new(),
-            full_info_failed: HashSet::new(),
             chat_count_max: DEFAULT_COMMUNITY_PEERS_MAX,
             bot_count_max: DEFAULT_COMMUNITY_PEERS_MAX,
         }

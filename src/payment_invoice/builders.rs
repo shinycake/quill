@@ -25,12 +25,13 @@ pub const STARS_CURRENCY: &str = "XTR";
 
 /// A Premium gift option in the send-gift dialog. Only a user who is not
 /// the account itself can get Premium; `text` is cut to `text_limit`
-/// characters (`gift_text_length_max`, 0 when unknown).
+/// characters (`gift_text_length_max`); when the limit is not known yet the
+/// text is kept whole, and TDLib refuses a text that is too long.
 pub fn premium_gift_invoice(
     option: &PremiumGiftOption,
     recipient: &GiftRecipient,
     text: &str,
-    text_limit: usize,
+    text_limit: Option<usize>,
 ) -> Option<InputInvoice> {
     premium_gift(option, recipient, text, text_limit, false)
 }
@@ -43,7 +44,7 @@ pub fn premium_gift_stars_invoice(
     option: &PremiumGiftOption,
     recipient: &GiftRecipient,
     text: &str,
-    text_limit: usize,
+    text_limit: Option<usize>,
 ) -> Option<InputInvoice> {
     premium_gift(option, recipient, text, text_limit, true)
 }
@@ -52,7 +53,7 @@ fn premium_gift(
     option: &PremiumGiftOption,
     recipient: &GiftRecipient,
     text: &str,
-    text_limit: usize,
+    text_limit: Option<usize>,
     by_stars: bool,
 ) -> Option<InputInvoice> {
     let MessageSender::User { user_id } = recipient.sender else {
@@ -66,7 +67,11 @@ fn premium_gift(
     if recipient.is_self || option.month_count <= 0 || amount <= 0 {
         return None;
     }
-    let text: String = text.trim().chars().take(text_limit).collect();
+    let text: String = text
+        .trim()
+        .chars()
+        .take(text_limit.unwrap_or(usize::MAX))
+        .collect();
     Some(InputInvoice::Telegram(
         TelegramPaymentPurpose::PremiumGift {
             currency,
@@ -104,7 +109,7 @@ pub fn giveaway_invoice(draft: &GiveawayDraft, options: &GiveawayOptions) -> Opt
     let parameters = draft.parameters_json();
     let purpose = match draft.kind {
         GiveawayKind::Premium => {
-            let option = options.premium.iter().find(|o| {
+            let option = options.premium_options().iter().find(|o| {
                 o.winner_count == draft.premium_winners && o.month_count == draft.premium_months
             })?;
             TelegramPaymentPurpose::PremiumGiveaway {
@@ -116,7 +121,7 @@ pub fn giveaway_invoice(draft: &GiveawayDraft, options: &GiveawayOptions) -> Opt
             }
         }
         GiveawayKind::Stars => {
-            let option = options.stars.get(draft.star_option)?;
+            let option = options.stars_options().get(draft.star_option)?;
             if !option.winner_counts.contains(&draft.star_winners) {
                 return None;
             }
@@ -143,7 +148,7 @@ pub fn invoice_link_invoice(name: &str) -> Option<InputInvoice> {
 /// one code per member, boosting the giveaway's chat.
 fn gift_codes_invoice(draft: &GiveawayDraft, options: &GiveawayOptions) -> Option<InputInvoice> {
     let (currency, amount) = gift_code_price(
-        &options.premium,
+        options.premium_options(),
         draft.premium_months,
         draft.award_user_ids.len(),
     )?;

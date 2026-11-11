@@ -293,12 +293,12 @@ pub(super) fn apply_ready_search_in_chat(
 impl QuillApp {
     pub(super) fn search_is_open(&self) -> bool {
         self.session()
-            .is_some_and(|session| session.search.search.open)
+            .is_some_and(|session| session.search.search.is_open())
     }
 
     pub(super) fn chat_search_is_open(&self) -> bool {
         self.session()
-            .is_some_and(|session| session.search.chat_search.open)
+            .is_some_and(|session| session.search.chat_search.is_open())
     }
 
     /// Open the global search. It lives in the main window's sidebar
@@ -360,7 +360,7 @@ impl QuillApp {
         if self.dismiss_topmost_layer(window, cx) {
             return;
         }
-        if self.settings.open && self.preferences.keybinding_capture.is_none() {
+        if self.settings.open && self.preferences.keybinding.capture.waiting().is_none() {
             self.settings_escape(window, cx);
         } else {
             self.escape_to_chat_list(window, cx);
@@ -452,18 +452,18 @@ impl QuillApp {
 
     /// The user accepted the pending confirmation.
     pub(super) fn accept_search_confirm(&mut self, cx: &mut Context<Self>) {
-        let confirm = self.session().and_then(|s| s.search.search.confirm);
+        let confirm = self.session().and_then(|s| s.search.search.confirm.clone());
         self.set_search_prompt(None, cx);
         match confirm {
             Some(SearchConfirm::ClearRecents) => self.clear_search_recents(cx),
             Some(SearchConfirm::DisableTopChats) => self.set_top_chats_disabled(true, cx),
-            Some(SearchConfirm::PaidPostSearch) => {
+            Some(SearchConfirm::PaidPostSearch { query, price }) => {
                 if quill::agent::ui_driver::guard::refuse_if_injecting(
                     "pay for a public post search",
                 ) {
                     return;
                 }
-                self.search_public_posts_paid_ui(cx);
+                self.search_public_posts_paid_ui(&query, price, cx);
             }
             None => {}
         }
@@ -510,7 +510,8 @@ impl QuillApp {
                 Err(_) => self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEARCH))),
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.search.search.filters.scope = scope;
+            let filters = session.search.search.filters;
+            session.search.search.filters = filters.in_scope(scope);
             session.apply_local_search_filter(tag);
         }
         cx.notify();
@@ -559,7 +560,7 @@ impl QuillApp {
             return;
         }
         let fresh = !self.session().is_some_and(|s| {
-            s.search.chat_search.open && s.search.chat_search.chat_id == s.open_chat
+            s.search.chat_search.is_open() && s.search.chat_search.chat_id == s.open_chat_id()
         });
         let opened = if let Some(live) = self.live.as_mut() {
             match live.driver.open_chat_search() {
@@ -648,7 +649,7 @@ impl QuillApp {
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             let trimmed = query.trim();
-            if session.search.chat_search.open
+            if session.search.chat_search.is_open()
                 && session.search.chat_search.query == trimmed
                 && !matches!(session.search.chat_search.status, SearchStatus::Closed)
             {
@@ -744,6 +745,16 @@ impl QuillApp {
             self.screen
                 .connection
                 .set_note_for(&self.screen.windows, chat_search_jump_note(session));
+        }
+        cx.notify();
+    }
+
+    /// The Retry strip under a failed older page of results.
+    pub(super) fn chat_search_retry_more(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && live.driver.load_more_chat_search().is_err()
+        {
+            self.set_note(StatusNote::error(tr(keys::Q_CHAT_SEARCH_IN_CHAT_FAILED)));
         }
         cx.notify();
     }
@@ -853,7 +864,7 @@ impl QuillApp {
                     StatusNote::error(user_error_for(keys::Q_NOTES_FAILED_SEARCH_FILTERS, &err)),
                 );
             }
-            if filters.scope == SearchScope::Apps {
+            if filters.scope() == SearchScope::Apps {
                 let _ = live.driver.fetch_grossing_web_app_bots();
             }
         } else if let Some(session) = self.demo_session.as_mut() {

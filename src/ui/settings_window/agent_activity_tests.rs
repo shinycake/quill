@@ -263,3 +263,39 @@ fn undo_never_offers_someone_elses_message(cx: &mut TestAppContext) {
     });
     activity::clear();
 }
+
+/// The filter names one account's agents and chats: picking another
+/// account starts the list unfiltered.
+#[test]
+fn picking_another_account_resets_the_activity_filter() {
+    let mut ui = crate::ui::agent_state::AgentUi::new();
+    ui.page.filter.chat = Some(7);
+    ui.page.filter.agent = Some("agent".into());
+    ui.pick_account(None);
+    assert_eq!(ui.page.filter.chat, Some(7), "same account keeps it");
+    ui.pick_account(Some(AccountKey::primary()));
+    assert_eq!(ui.page.filter, Default::default());
+    ui.page.filter.tool = Some("write".into());
+    ui.pick_account(Some(AccountKey::primary()));
+    assert!(
+        ui.page.filter.tool.is_some(),
+        "the same pick changes nothing"
+    );
+}
+
+/// Show more grows the rows; a new filter, another account or leaving the
+/// page starts over at the first page.
+#[test]
+fn the_activity_page_size_starts_over_with_the_filter_account_and_visit() {
+    use crate::ui::agent_state::ACTIVITY_PAGE;
+    let mut ui = crate::ui::agent_state::AgentUi::new();
+    ui.page.activity_shown += ACTIVITY_PAGE * 3;
+    ui.page.set_filter(|f| f.chat = Some(7));
+    assert_eq!(ui.page.activity_shown, ACTIVITY_PAGE);
+    ui.page.activity_shown += ACTIVITY_PAGE;
+    ui.pick_account(Some(AccountKey::primary()));
+    assert_eq!(ui.page.activity_shown, ACTIVITY_PAGE);
+    ui.page.activity_shown += ACTIVITY_PAGE;
+    ui.page.reset_activity();
+    assert_eq!(ui.page.activity_shown, ACTIVITY_PAGE);
+}

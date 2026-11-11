@@ -28,6 +28,60 @@ pub(crate) const PINNED_LEFT_SKIP: f64 = PINNED_SPACE / 2.;
 /// tdesktop `kMaxStickerSets`: the installed sets the sticker scrubber lists.
 pub(crate) const MAX_STICKER_SETS: usize = 5;
 
+/// Qt's start drag distance: a touch that moves less than this (pt) is a
+/// tap; further, it drags a pinned chat.
+pub(crate) const DRAG_START: f64 = 10.;
+
+/// A touch on a pinned chat: pressed, or moved far enough to drag it. No
+/// touch at all is `None` in the holder. Only an Ended touch in `Dragging`
+/// saves the order; a cancelled or failed one moves the pictures back.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum PinTouch {
+    Pressed { index: usize, start_x: f64 },
+    Dragging { index: usize, start_x: f64 },
+}
+
+/// What a touch that ended asks for.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum TouchEnd {
+    /// A tap on the chat at `index`.
+    Open(usize),
+    /// A drag let go at the end x: drop into its slot and save.
+    Drop {
+        index: usize,
+        start_x: f64,
+    },
+    /// A drag the system took away: back to the old slots, nothing saved.
+    SnapBack,
+    Nothing,
+}
+
+impl PinTouch {
+    /// The touch moved to `x`. `movable`: the chat may be dragged (a pinned
+    /// one, with another to swap with).
+    pub(crate) fn moved(self, x: f64, movable: bool) -> Self {
+        match self {
+            Self::Pressed { index, start_x } if movable && (x - start_x).abs() >= DRAG_START => {
+                Self::Dragging { index, start_x }
+            }
+            other => other,
+        }
+    }
+
+    /// The touch ended at `x`; `ended` is false when the system cancelled
+    /// it or the recognizer failed.
+    pub(crate) fn end(self, x: f64, ended: bool) -> TouchEnd {
+        match self {
+            Self::Dragging { index, start_x } if ended => TouchEnd::Drop { index, start_x },
+            Self::Dragging { .. } => TouchEnd::SnapBack,
+            Self::Pressed { index, start_x } if ended && (x - start_x).abs() < DRAG_START => {
+                TouchEnd::Open(index)
+            }
+            Self::Pressed { .. } => TouchEnd::Nothing,
+        }
+    }
+}
+
 /// What a picture in the pinned chats panel stands for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PinKind {
@@ -71,6 +125,35 @@ impl Pin {
     pub(crate) fn reorderable(&self) -> bool {
         self.chat_id.is_some() && self.pinned
     }
+}
+
+/// What a pin stands for, to tell one from another across a change of order.
+pub(crate) type PinKey = (PinKind, Option<ChatId>);
+
+impl Pin {
+    pub(crate) fn key(&self) -> PinKey {
+        (self.kind.clone(), self.chat_id)
+    }
+}
+
+/// How the model's pinned order stands against the order a drop put on
+/// screen (`pinned::Order::Reordering`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Echo {
+    /// The model shows the dropped order: the server answered.
+    Caught,
+    /// The same pins in the old order: the request is still out.
+    Waiting,
+    /// Other pins: the list changed, the dropped order means nothing.
+    Gone,
+}
+
+pub(crate) fn reorder_echo(dropped: &[PinKey], shown: &[PinKey]) -> Echo {
+    if dropped == shown {
+        return Echo::Caught;
+    }
+    let same_pins = dropped.len() == shown.len() && dropped.iter().all(|key| shown.contains(key));
+    if same_pins { Echo::Waiting } else { Echo::Gone }
 }
 
 /// The pinned chats panel, left to right.
@@ -277,7 +360,7 @@ impl PickerSticker {
                 .filter(|id| id.0 != 0)
                 .map(|id| (id, item.thumb_width, item.thumb_height)),
             display: item.display_file_id(),
-            premium: item.requires_premium,
+            premium: item.requires_premium(),
         }
     }
 }
@@ -306,7 +389,7 @@ pub(crate) fn sticker_items(
     sets: &[StickerSection<'_>],
     show_premium: bool,
 ) -> Vec<PickerItem> {
-    let listed = |item: &&StickerItem| show_premium || !item.requires_premium;
+    let listed = |item: &&StickerItem| show_premium || !item.requires_premium();
     let mut items = Vec::new();
     let favorites: Vec<&StickerItem> = favorites.iter().filter(listed).collect();
     if !favorites.is_empty() {

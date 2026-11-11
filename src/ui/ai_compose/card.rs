@@ -22,7 +22,7 @@ use quill::ai_compose::{
 use quill::lang::{keys, tr, tr_with};
 use quill::telegram::envelope::MessageSender;
 use quill::translate::language_name;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ops::Range;
 
 const MODES: [AiComposeMode; 3] = [
@@ -291,7 +291,7 @@ impl QuillApp {
                 .child(Skeleton::new().h(px(12.)).w(relative(0.6)).bg(line))
                 .into_any_element(),
             CardState::Ready(result) => self.ai_compose_result(ai.mode(), result, font, cx),
-            CardState::Waiting | CardState::Failed => {
+            CardState::Waiting | CardState::Failed(_) => {
                 div().text_size(font).child(original).into_any_element()
             }
         };
@@ -380,7 +380,7 @@ impl QuillApp {
                 .child(StyledText::new(text).with_highlights(runs))
                 .into_any_element();
         }
-        let seen: HashSet<(i64, u64, u64, bool)> = HashSet::new();
+        let seen = crate::ui::message_text::revealed::Revealed::default();
         div()
             .id("ai-compose-result")
             .w_full()

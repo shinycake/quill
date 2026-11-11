@@ -66,16 +66,14 @@ impl QuillApp {
 
     pub(super) fn set_buy_step(&mut self, step: BuyStep, cx: &mut Context<Self>) {
         if let Some(buy) = self.resale_buy_mut() {
-            buy.step = step;
+            buy.go(step);
         }
         cx.notify();
     }
 
     fn set_buy_grams(&mut self, grams: bool, cx: &mut Context<Self>) {
         if let Some(buy) = self.resale_buy_mut() {
-            let gram_only = buy.listing.gift.resale.is_some_and(|r| r.gram_only);
-            buy.pay_in_grams = grams || gram_only;
-            buy.price_changed = None;
+            buy.choose_grams(grams);
         }
         cx.notify();
     }
@@ -88,7 +86,7 @@ impl QuillApp {
             .read(cx)
             .value()
             .to_string();
-        let hide = self.payments.gift_hide_name;
+        let hide = self.payments.gift_inputs.hide_name;
         match self.live.as_mut() {
             Some(live) => {
                 if live.driver.buy_gift_resale(price, &text, hide).is_err() {
@@ -117,7 +115,7 @@ impl QuillApp {
         let price = buy.price();
         let muted = cx.theme().muted_foreground;
         let mut body = div().flex().flex_col().gap_3();
-        match buy.step {
+        match buy.step() {
             BuyStep::View => {
                 body = body
                     .child(div().flex().justify_center().child(collectible_tile(
@@ -172,9 +170,9 @@ impl QuillApp {
                     .child(
                         Checkbox::new("resale-buy-hide-name")
                             .label(tr(keys::GIFT_SEND_ANONYMOUS))
-                            .checked(self.payments.gift_hide_name)
+                            .checked(self.payments.gift_inputs.hide_name)
                             .on_click(cx.listener(|this, &on, _, cx| {
-                                this.payments.gift_hide_name = on;
+                                this.payments.gift_inputs.hide_name = on;
                                 cx.notify();
                             })),
                     )
@@ -198,7 +196,7 @@ impl QuillApp {
                     );
                 }
                 let shown = price.map(price_text).unwrap_or_default();
-                if let Some(changed) = buy.price_changed {
+                if let Some(changed) = buy.price_changed() {
                     body = body
                         .child(
                             div()
@@ -247,9 +245,9 @@ impl QuillApp {
                 }
             }
         }
-        let step = buy.step;
+        let step = buy.step();
         let is_self = buy.recipient.is_self;
-        let sending = buy.sending;
+        let sending = buy.sending();
         let action = match (step, price) {
             (_, None) => Button::new("resale-buy-next")
                 .label(tr(keys::Q_MONEY_NOT_FOR_SALE))

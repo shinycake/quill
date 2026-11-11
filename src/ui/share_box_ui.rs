@@ -9,6 +9,7 @@
 
 use super::app::QuillApp;
 use super::*;
+use crate::ui::composer_sends::SendOnce;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -17,7 +18,7 @@ use gpui_kit::*;
 use quill::composer::ComposerSnapshot;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use quill::share_box::{ShareSend, forward_bar_lines, share_done_label};
+use quill::share_box::{ChatSend, ShareSend, forward_bar_lines, share_done_label};
 use quill::telegram::envelope::ChatKind;
 
 use super::forward_stage::ForwardStage;
@@ -29,7 +30,7 @@ impl QuillApp {
 
     /// The typed query changed: ask the server too (`searchChatsOnServer`).
     pub(super) fn sync_share_search(&mut self, text: &str, cx: &mut Context<Self>) {
-        if !self.share.forward.picker_open() && !self.share.reply_elsewhere_open {
+        if !self.share.forward.picker_open() && !self.share.forward.reply_chooser_open() {
             return;
         }
         if let Some(live) = self.live.as_mut() {
@@ -54,9 +55,9 @@ impl QuillApp {
     }
 
     /// Ctrl/Cmd+Enter in the share box search: send to the ticked chats.
-    pub(super) fn submit_share_from_search(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn submit_share_from_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.share.selection.is_empty() {
-            self.submit_share(ShareSend::Normal, cx);
+            self.submit_share(ShareSend::Normal, window, cx);
         }
     }
 
@@ -85,11 +86,17 @@ impl QuillApp {
 
     /// Send the draft to every ticked chat: the comment first (a plain
     /// message), then the forwards with the chosen sound / schedule.
-    pub(super) fn submit_share(&mut self, mode: ShareSend, cx: &mut Context<Self>) {
+    pub(super) fn submit_share(
+        &mut self,
+        mode: ShareSend,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(draft) = self.forward_draft() else {
             return;
         };
-        let dests: Vec<ChatId> = self.share.selection.chats().to_vec();
+        let entries: Vec<(ChatId, ChatSend)> = self.share.selection.entries().to_vec();
+        let dests: Vec<ChatId> = self.share.selection.chats();
         if dests.is_empty() {
             self.set_note(StatusNote::silent(tr(keys::Q_OPS_CHOOSE_A_CHAT_TO_FORWARD)));
             cx.notify();
@@ -112,26 +119,31 @@ impl QuillApp {
                     .unwrap_or_else(|| format!("chat {}", dest.0))
             })
             .collect();
-        let mut failed = 0;
+        // The destinations the send did not finish, each at the stage it
+        // reached: a retry from the box owes only what is missing.
+        let mut unfinished: Vec<(ChatId, ChatSend)> = Vec::new();
         if let Some(live) = self.live.as_mut() {
             let view_generation = live.driver.session.view_generation;
-            for dest in &dests {
-                if !comment.is_empty() {
+            for (dest, stage) in &entries {
+                let mut reached = *stage;
+                if !comment.is_empty() && reached == ChatSend::Due {
                     let snap = ComposerSnapshot::capture(*dest, view_generation, comment.clone())
                         .with_send_options(options);
                     if live.driver.send_snapshot(&snap).is_err() {
-                        failed += 1;
+                        unfinished.push((*dest, reached));
                         continue;
                     }
+                    reached = ChatSend::CommentSent;
                 }
                 if live
                     .driver
                     .forward_messages_with_options(*dest, &draft, &options)
                     .is_err()
                 {
-                    failed += 1;
+                    unfinished.push((*dest, reached));
                 }
             }
+            let failed = unfinished.len();
             self.set_note(if failed == 0 {
                 StatusNote::info(share_done_label(draft.count(), &titles))
             } else {
@@ -140,21 +152,42 @@ impl QuillApp {
                     &[("failed", &failed.to_string())],
                 ))
             });
-        } else if self.demo_session.is_some() {
+        } else if self.demo_session.is_none() {
+            // No client to send through (the connection closed, a remote
+            // log-out, between accounts): nothing was queued, so the box and
+            // the ticked chats stay for a retry.
+            unfinished = entries.clone();
+            self.set_note(StatusNote::error(tr_with(
+                keys::Q_OPS_COULD_NOT_FORWARD_TO_CHAT,
+                &[("failed", &dests.len().to_string())],
+            )));
+        } else {
             for dest in &dests {
                 self.apply_demo_forward(*dest, &draft);
             }
             if let Some(result) = self
                 .demo_session
                 .as_mut()
-                .and_then(|session| session.messages.last_forward.take())
+                .and_then(|session| session.messages.forwards.take_result())
             {
                 self.present_forward_result(result, cx);
             }
         }
-        if failed < dests.len() {
+        if unfinished.is_empty() {
             self.share.forward = ForwardStage::None;
             self.share.selection.clear();
+        } else {
+            // Only the unfinished chats stay ticked. A chat whose comment
+            // went out is marked, so the retry sends it only the forward.
+            self.share.selection.keep_unfinished(&unfinished);
+            if unfinished
+                .iter()
+                .all(|(_, stage)| *stage == ChatSend::CommentSent)
+            {
+                self.share
+                    .comment_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+            }
         }
         cx.notify();
     }
@@ -211,7 +244,7 @@ impl QuillApp {
         };
         !self.chat_ui.is_editing()
             && self.forward_draft().is_some()
-            && self.session().and_then(|s| s.open_chat) == Some(dest)
+            && self.session().and_then(|s| s.open_chat_id()) == Some(dest)
     }
 
     /// Composer Send with the forward bar up: the typed text goes first as a
@@ -220,6 +253,7 @@ impl QuillApp {
     pub(super) fn submit_forward_bar(
         &mut self,
         text: String,
+        once: SendOnce,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -232,13 +266,13 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        let options = self.composer_send_options();
+        let options = self.composer_send_options(once);
         if !text.trim().is_empty() || !self.pending_attachments().is_empty() {
             // The comment goes as a plain message: the bar is lowered to
             // the selection while it does, so the composer does not route
             // it back here.
             self.share.forward.drop_bar();
-            self.submit_composer(text, window, cx);
+            self.submit_composer(text, once, window, cx);
             self.share.forward = match self.share.forward.take_draft() {
                 Some(draft) => ForwardStage::Bar { draft, dest },
                 None => ForwardStage::None,
@@ -268,10 +302,11 @@ impl QuillApp {
             }
         } else if self.demo_session.is_some() {
             self.apply_demo_forward(dest, &draft);
+            self.share.forward = ForwardStage::None;
             if let Some(result) = self
                 .demo_session
                 .as_mut()
-                .and_then(|session| session.messages.last_forward.take())
+                .and_then(|session| session.messages.forwards.take_result())
             {
                 self.present_forward_result(result, cx);
             }

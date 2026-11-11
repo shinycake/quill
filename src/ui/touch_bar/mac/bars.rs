@@ -284,9 +284,17 @@ struct State {
     /// The latest picker lists, shown when a segment is next tapped, as
     /// tdesktop's `_waitingForUpdate` does, so nothing moves under a
     /// finger.
-    pending: Option<PickerContents>,
-    /// Whether the scrubbers were ever filled.
-    filled: bool,
+    fill: PickerFill,
+}
+
+/// How far the picker's scrubbers are filled.
+enum PickerFill {
+    /// Never filled: the first lists fill them at once.
+    Unfilled,
+    /// Filled; no newer lists wait.
+    Shown,
+    /// Newer lists wait for the next tap.
+    Waiting(PickerContents),
 }
 
 /// Everything built once per window. Cloning shares the same objects.
@@ -493,8 +501,7 @@ impl Host {
                 main_items: Vec::new(),
                 viewer_items: Vec::new(),
                 emoji: None,
-                pending: None,
-                filled: false,
+                fill: PickerFill::Unfilled,
             })),
         }
     }
@@ -565,6 +572,11 @@ impl Host {
         ));
         self.apply(bar, picker, palette);
         rows
+    }
+
+    /// A pinned-chat reorder the app dropped: draw the model's order again.
+    pub(super) fn reorder_refused(&self) {
+        self.pinned.reorder_refused();
     }
 
     /// Take the bar off the window.
@@ -646,10 +658,11 @@ impl Host {
             self.stickers_scrubber.reloadData();
         }
         let first = self.state.try_borrow_mut().is_ok_and(|mut state| {
-            if state.pending.as_ref() != Some(picker) {
-                state.pending = Some(picker.clone());
+            let first = matches!(state.fill, PickerFill::Unfilled);
+            if !matches!(&state.fill, PickerFill::Waiting(waiting) if waiting == picker) {
+                state.fill = PickerFill::Waiting(picker.clone());
             }
-            !state.filled
+            first
         });
         if first {
             self.fill_pending_picker();
@@ -658,10 +671,13 @@ impl Host {
 
     /// Show the kept picker lists.
     fn fill_pending_picker(&self) {
-        let pending = self.state.try_borrow_mut().ok().and_then(|mut state| {
-            state.filled = true;
-            state.pending.take()
-        });
+        let pending =
+            self.state.try_borrow_mut().ok().and_then(|mut state| {
+                match std::mem::replace(&mut state.fill, PickerFill::Shown) {
+                    PickerFill::Waiting(picker) => Some(picker),
+                    PickerFill::Unfilled | PickerFill::Shown => None,
+                }
+            });
         if let Some(picker) = pending {
             self.fill_picker(&picker);
         }

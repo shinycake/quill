@@ -153,7 +153,7 @@ impl QuillApp {
     ) -> AnyElement {
         let live = session.stories.live.as_ref();
         let top: Vec<MessageSender> = live
-            .and_then(|live| live.donors.as_ref())
+            .and_then(|live| live.donors.data())
             .map(|donors| {
                 donors
                     .top_donors
@@ -195,7 +195,7 @@ impl QuillApp {
                         &entities,
                         (call_id, message.message_id as u64),
                         false,
-                        &self.message_ui.spoiler_revealed,
+                        &self.message_ui.revealed,
                         px(TEXT_SIZE),
                         &emoji,
                         cx,
@@ -260,7 +260,7 @@ impl QuillApp {
                 .filter(|file_id| {
                     file_id.0 != 0
                         && !session.media.files.get(&file_id.0).is_some_and(|file| {
-                            file.usable_path().is_some() || file.local.is_downloading_active
+                            file.usable_path().is_some() || file.local.is_downloading_active()
                         })
                 })
                 .collect();

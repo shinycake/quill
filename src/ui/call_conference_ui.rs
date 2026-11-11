@@ -120,6 +120,7 @@ impl QuillApp {
             remote_muted: false,
             remote_battery_low: false,
             signal_bars: None,
+            media_note: None,
             video: false,
             preview: false,
             can_add_people: false,
@@ -247,7 +248,7 @@ impl QuillApp {
             .and_then(|live| live.driver.session.calls.active_group_call.as_mut())
             .and_then(|call| call.conference.as_mut())
         {
-            conference.link_open = false;
+            conference.close_link();
         }
     }
 }

@@ -74,7 +74,7 @@ fn translate_message_sends_the_request_and_keeps_the_entities() {
         h.driver
             .session
             .message_translation(ChatId(7), MessageId(42), "en"),
-        Some(&Translation::Pending)
+        Some(&Translation::Pending { job: 1 })
     );
 
     // Asking again while it is pending sends nothing new.
@@ -110,7 +110,7 @@ fn translate_message_sends_the_request_and_keeps_the_entities() {
         h.driver
             .session
             .message_translation(ChatId(7), MessageId(42), "de"),
-        Some(&Translation::Pending)
+        Some(&Translation::Pending { job: 2 })
     );
 }
 
@@ -151,7 +151,7 @@ fn translate_selection_round_trips_a_text_job() {
     assert_eq!(v["to_language_code"], "en");
     assert_eq!(
         h.driver.session.text_translation(job),
-        Some(&Translation::Pending)
+        Some(&Translation::Pending { job: 1 })
     );
     let json = format!(
         r#"{{"@type":"formattedText","text":"Hello, world","entities":[],"@extra":"{id}"}}"#,
@@ -249,6 +249,16 @@ fn channel_auto_translate_is_parsed_gated_and_toggled() {
     );
     h.ingest(&json);
     assert!(h.driver.session.chat_auto_translate(ChatId(13)));
+    // The Edit box that asked for it keeps its Settings error, so it does
+    // not close as saved.
+    let error = h
+        .driver
+        .session
+        .groups
+        .info_edit_errors
+        .get(&13)
+        .expect("the refusal is recorded for the Edit box");
+    assert_eq!(error.field, crate::state::GroupInfoField::Settings);
 }
 
 /// `updateMessageContent` of message 42 with `text`.

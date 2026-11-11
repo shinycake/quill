@@ -15,8 +15,13 @@ impl Session {
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::PreloadHistory
         {
-            if let Some(chat_id) = pending.chat_id {
-                self.chat_list.preloaded_histories.insert(chat_id.0);
+            if let Some(chat_id) = pending.chat_id
+                && self.chat_list.history_preloads.get(&chat_id.0)
+                    == Some(&HistoryPreload::Loading(pending.id))
+            {
+                self.chat_list
+                    .history_preloads
+                    .insert(chat_id.0, HistoryPreload::Ready);
             }
             return;
         }
@@ -76,11 +81,13 @@ impl Session {
             && pending.purpose == RequestPurpose::GetChatPreview
             && let Some(chat_id) = pending.chat_id
         {
-            self.chat_list.chat_preview_fetch = Some(PreviewHistoryFetch {
-                chat_id,
-                messages: messages.to_vec(),
-                failed: None,
-            });
+            // By chat: a late answer for another chat's peek never
+            // replaces the one on screen.
+            self.chat_list
+                .chat_preview_fetch
+                .entry(chat_id)
+                .or_default()
+                .succeed(messages.to_vec());
             return;
         }
         if let Some(pending) = pending
@@ -120,7 +127,7 @@ impl Session {
                     }
                 }
                 if reached_start {
-                    self.history_entry(chat_id).loaded_complete = true;
+                    self.history_entry(chat_id).set_loaded_complete(true);
                 }
                 // R6: scrolling far back — drop the newest end of the
                 // window instead of growing it without bound.
@@ -189,6 +196,19 @@ impl Session {
             }
             Some(RequestPurpose::GetChatPostedToChatPageStories) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    // A page the gallery asked for before it was closed and
+                    // reopened is dropped whole, so it neither shows alone
+                    // nor lands ahead of the new first page.
+                    let generation = pending.and_then(|p| p.search_generation);
+                    if !self.media.shared_media.accepts_profile(
+                        chat_id,
+                        SharedMediaTab::Stories,
+                        generation,
+                    ) && generation.is_some()
+                    {
+                        self.clear_story_page_op(pending);
+                        return;
+                    }
                     let entry = self.stories.chat_page_stories.entry(chat_id.0).or_default();
                     // Phase 9.7: preserve server order (newest
                     // first) across pages — append new ids, dedupe.
@@ -204,7 +224,7 @@ impl Session {
                     self.clear_story_page_op(pending);
                     // The shared-media gallery's Stories tab lists the same
                     // chat-page stories.
-                    self.apply_profile_stories(chat_id, total_count);
+                    self.apply_profile_stories(chat_id, generation, total_count);
                 }
             }
             _ => {}
@@ -261,7 +281,11 @@ impl Session {
                     .map(|message| history_message(message, false))
                     .collect();
                 rows.sort_by_key(|row| std::cmp::Reverse(row.id.0));
-                self.messages.pinned_messages.insert(chat_id.0, rows);
+                self.messages
+                    .pinned_messages
+                    .entry(chat_id.0)
+                    .or_default()
+                    .succeed(rows);
             }
             return;
         }
@@ -445,7 +469,7 @@ impl Session {
         if !message.is_outgoing {
             self.messages
                 .pending_bot_messages
-                .remove(&(message.chat_id.0, message.topic_id.unwrap_or(0)));
+                .remove(&(message.chat_id.0, message.topic_id().unwrap_or(0)));
         }
         // Phase 8.1: decide before upserting; the queue is drained by
         // the UI for OS dispatch. The sound decision is made at the
@@ -484,7 +508,16 @@ impl Session {
                 session.thread_upsert(history_message(message.clone(), false));
             }
         });
-        let (chat_id, topic_id) = (message.chat_id, message.topic_id);
+        let (chat_id, topic_id) = (message.chat_id, message.topic_id());
+        // Inline buttons ride the message and leave the chat's keyboard alone
+        // (tdesktop `definesReplyKeyboard()` is false for them).
+        let has_markup = message.reply_markup.as_ref().is_some_and(|markup| {
+            !matches!(
+                markup,
+                crate::telegram::envelope::ReplyMarkup::InlineKeyboard(_)
+            )
+        });
+        let is_outgoing_msg = message.is_outgoing;
         if self.route_new_message_into_window(&message) {
             self.upsert_message(message, false);
         } else {
@@ -504,8 +537,16 @@ impl Session {
             }
         }
         self.trim_live_windows(chat_id, topic_id);
+        // A later bot message carrying keyboard markup replaces the chat's
+        // keyboard, so a force reply still waiting for its chat is gone
+        // (tdesktop takes it from the chat's current keyboard on open).
+        if !is_outgoing_msg && has_markup {
+            self.bots.pending_force_replies.remove(&chat_id);
+        }
         if let Some(target) = force_reply {
-            self.bots.pending_force_reply = Some(target);
+            self.bots
+                .pending_force_replies
+                .insert(target.chat_id, target);
         }
         if let Some(notification) = notification {
             self.queue_notification_with_sound(notification, sound, photo);
@@ -543,8 +584,7 @@ impl Session {
         {
             if pending.keep_on_stop {
                 pending.can_stop = false;
-                pending.stopped = true;
-                pending.stop_failed = false;
+                pending.stop = BotStopStage::Stopped;
             } else {
                 self.messages.pending_bot_messages.remove(&key);
             }

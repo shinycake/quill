@@ -36,7 +36,7 @@ impl QuillApp {
     /// chats" / "No chats" in All, the person and "N messages" in a chat.
     pub(super) fn direct_admin_header(&self) -> Option<AdminHeader> {
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         if !session.is_direct_messages_admin(chat_id) {
             return None;
         }
@@ -72,7 +72,7 @@ impl QuillApp {
     /// `Section::SavedSublist`); everywhere else the chat menu.
     pub(super) fn header_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let open = self.session().and_then(|s| {
-            let chat_id = s.open_chat?;
+            let chat_id = s.open_chat_id()?;
             Some((chat_id, s.open_direct_topic(chat_id)?))
         });
         match open {
@@ -97,9 +97,11 @@ impl QuillApp {
         let free = topic.can_send_unpaid_messages;
         let short = session.direct_topic_short_name(topic);
         let ban = direct_ban_target(session, chat_id, topic);
-        let banned = ban
-            .and_then(|(channel, user)| session.direct_member_banned(channel, user))
-            .unwrap_or(false);
+        // `None` until the member's status has answered: the item says it
+        // is checking instead of offering Ban for someone already banned.
+        let ban_status =
+            ban.and_then(|(channel, user)| session.direct_member_banned(channel, user));
+        let banned = ban_status.unwrap_or(false);
         let info = if free {
             tr_with(keys::CONTEXT_FEE_FREE, &[("name", &short)])
         } else {
@@ -126,11 +128,12 @@ impl QuillApp {
                     if let Some((channel, user)) = ban {
                         let owner = owner.clone();
                         menu = menu.item(
-                            PopupMenuItem::new(if banned {
-                                tr(keys::CONTEXT_MONOFORUM_UNBAN)
-                            } else {
-                                tr(keys::CONTEXT_MONOFORUM_BAN)
+                            PopupMenuItem::new(match ban_status {
+                                None => tr(keys::Q_OPS_CHECKING),
+                                Some(true) => tr(keys::CONTEXT_MONOFORUM_UNBAN),
+                                Some(false) => tr(keys::CONTEXT_MONOFORUM_BAN),
                             })
+                            .disabled(ban_status.is_none())
                             .icon(if banned {
                                 IconName::UserCheck
                             } else {

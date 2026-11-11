@@ -89,3 +89,26 @@ fn a_ready_file_imports_and_closes_the_box(cx: &mut TestAppContext) {
     });
     shell.read_with(vcx, |shell, _| assert_eq!(shell.open_dialog, None));
 }
+
+/// Sweep 09-001: a read started in a closed box can never be taken for the
+/// next box's, which would show the wrong file as ready.
+#[gpui_kit::test]
+fn a_new_box_never_shares_a_read_token_with_a_closed_one(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let file = quill::scratch::process_dir("quill-contacts-import").join("people.vcf");
+    let _ = std::fs::create_dir_all(file.parent().expect("has a parent"));
+    std::fs::write(&file, "BEGIN:VCARD\nFN:Ada\nTEL:+15550100\nEND:VCARD\n").expect("writes");
+    let mut picks = Vec::new();
+    for _ in 0..2 {
+        app.update_in(vcx, |app, window, cx| {
+            app.close_import_contacts_dialog(cx);
+            app.open_import_contacts_dialog(window, cx);
+            app.read_vcard(file.clone(), cx);
+            picks.extend(app.dialogs.import_contacts_dialog.as_ref().map(|d| d.pick));
+        });
+    }
+    vcx.run_until_parked();
+    assert_eq!(picks.len(), 2);
+    assert_ne!(picks.first(), picks.get(1));
+}

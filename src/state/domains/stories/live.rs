@@ -3,6 +3,7 @@
 //! toggle. The call itself is the story stream (`calls.story_stream`);
 //! its comments are that call's messages.
 use crate::live_story::{CommentsTracker, PendingLiveReaction, normalize_levels, retain_comments};
+use crate::state::fetch::Fetch;
 use crate::state::*;
 use crate::telegram::envelope::{
     AvailableMessageSender, GroupCallMessageLevel, LiveStoryDonors, LiveStoryPayload,
@@ -43,17 +44,42 @@ pub enum LiveStoryPurpose {
 pub enum LiveBursts {
     #[default]
     Unasked,
-    Requested,
+    /// Asked under this request; only its answer or error leaves.
+    Requested(RequestId),
     Loaded(Vec<StickerItem>),
+    /// The ask failed (a refused send or an error answer): not asked again
+    /// until the next Join.
+    Failed,
 }
 
 impl LiveBursts {
     pub fn stickers(&self) -> &[StickerItem] {
         match self {
             Self::Loaded(stickers) => stickers,
-            Self::Unasked | Self::Requested => &[],
+            Self::Unasked | Self::Requested(_) | Self::Failed => &[],
         }
     }
+
+    /// A new Join: a failed ask may go out again.
+    pub fn retry_failed(&mut self) {
+        if *self == Self::Failed {
+            *self = Self::Unasked;
+        }
+    }
+}
+
+/// Stars committed in one `commitPendingLiveStoryReactions` and not yet in
+/// a donors snapshot: the total on the Stars button keeps them until
+/// TDLib counts them. The batch owns the adds sent after the previous
+/// commit and before its own (request ids only grow), so an add's error
+/// finds the batch that holds its Stars.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommittedStars {
+    pub stars: i64,
+    commit: RequestId,
+    /// The previous commit's request id (0 for the first): the adds of
+    /// this batch were sent after it.
+    after: u64,
 }
 
 /// Stars someone just added: the viewer flies a badge up from the Stars
@@ -70,18 +96,17 @@ pub struct LiveStoryState {
     pub chat_id: i64,
     pub story_id: i32,
     pub group_call_id: i32,
-    /// The streamer, top donors and comment senders were asked for.
-    pub extras_requested: bool,
     /// `getLiveStoryStreamer` (not for RTMP streams): whose video to play.
-    pub streamer: Option<ParsedGroupCallParticipant>,
-    pub donors: Option<LiveStoryDonors>,
-    /// Who comments may be sent as; `None` until loaded.
-    pub message_senders: Option<Vec<AvailableMessageSender>>,
+    pub streamer: Fetch<ParsedGroupCallParticipant>,
+    pub donors: Fetch<LiveStoryDonors>,
+    /// Who comments may be sent as.
+    pub message_senders: Fetch<Vec<AvailableMessageSender>>,
     /// Stars tapped and not committed yet.
     pub pending_reaction: Option<PendingLiveReaction>,
-    /// Stars committed and not yet in a donors update: the total on the
-    /// Stars button keeps them until TDLib counts them.
-    pub committed_stars: i64,
+    /// Stars committed and not yet in a donors snapshot.
+    pub committed: Vec<CommittedStars>,
+    /// The latest commit sent: adds sent after it are in `pending_reaction`.
+    last_commit: u64,
     /// New Stars to show as effects, taken by the viewer.
     pub effects: Vec<LiveStarEffect>,
     /// Your comments TDLib could not send.
@@ -97,12 +122,12 @@ impl LiveStoryState {
             chat_id,
             story_id,
             group_call_id,
-            extras_requested: false,
-            streamer: None,
-            donors: None,
-            message_senders: None,
+            streamer: Fetch::Idle,
+            donors: Fetch::Idle,
+            message_senders: Fetch::Idle,
             pending_reaction: None,
-            committed_stars: 0,
+            committed: Vec::new(),
+            last_commit: 0,
             effects: Vec::new(),
             failed: HashSet::new(),
             comments: CommentsTracker::default(),
@@ -110,33 +135,101 @@ impl LiveStoryState {
         }
     }
 
+    /// A Join pressed again: what failed to load is asked for once more.
+    pub(crate) fn retry_extras(&mut self) {
+        if matches!(self.streamer, Fetch::Failed { .. }) {
+            self.streamer = Fetch::Idle;
+        }
+        if matches!(self.donors, Fetch::Failed { .. }) {
+            self.donors = Fetch::Idle;
+        }
+        if matches!(self.message_senders, Fetch::Failed { .. }) {
+            self.message_senders = Fetch::Idle;
+        }
+    }
+
     /// Stars on the Stars button: everyone's total plus your pending and
     /// just committed ones (tdesktop `starsLocalState().total`).
     pub fn stars_total(&self) -> i64 {
         self.donors
-            .as_ref()
+            .data()
             .map_or(0, |donors| donors.total_star_count)
             .saturating_add(self.unconfirmed_stars())
     }
 
     /// Your Stars the donors list does not count yet.
     fn unconfirmed_stars(&self) -> i64 {
-        self.pending_reaction
-            .map_or(0, |p| p.stars)
-            .saturating_add(self.committed_stars)
+        self.committed.iter().fold(
+            self.pending_reaction.map_or(0, |p| p.stars),
+            |sum, batch| sum.saturating_add(batch.stars),
+        )
     }
 
-    /// The pending Stars went out.
-    pub(crate) fn commit_reaction(&mut self) -> Option<PendingLiveReaction> {
+    /// The pending Stars go out with the commit request `commit`.
+    pub(crate) fn commit_reaction(&mut self, commit: RequestId) -> Option<PendingLiveReaction> {
         let pending = self.pending_reaction.take()?;
-        self.committed_stars = self.committed_stars.saturating_add(pending.stars);
+        self.committed.push(CommittedStars {
+            stars: pending.stars,
+            commit,
+            after: self.last_commit,
+        });
+        self.last_commit = commit.0;
         Some(pending)
     }
 
-    /// New donors from TDLib: they count everything committed so far.
-    pub(crate) fn set_donors(&mut self, donors: LiveStoryDonors) {
-        self.donors = Some(donors);
-        self.committed_stars = 0;
+    /// The commit request `commit` did not go out, or failed: its Stars
+    /// were never added.
+    pub(crate) fn commit_failed(&mut self, commit: RequestId) {
+        self.committed.retain(|batch| batch.commit != commit);
+    }
+
+    /// The commit request `commit` never left (a refused send): TDLib still
+    /// holds its Stars as pending, so they go back to the pending slot with
+    /// a new Undo window, for the next commit (never a retry on every poll).
+    pub(crate) fn commit_unsent(
+        &mut self,
+        commit: RequestId,
+        pending: PendingLiveReaction,
+        now_ms: u64,
+    ) {
+        self.commit_failed(commit);
+        self.last_commit = self.committed.last().map_or(0, |batch| batch.commit.0);
+        self.pending_reaction = Some(PendingLiveReaction::add(None, pending.stars, now_ms));
+    }
+
+    /// New donors from TDLib. A pushed update counts every batch committed
+    /// so far (TDLib sends it because of them). The answer to our own
+    /// `getLiveStoryTopDonors` `asked` counts only the batches committed
+    /// before it was asked: an older snapshot leaves a newer batch in the
+    /// total.
+    pub(crate) fn set_donors(&mut self, donors: LiveStoryDonors, asked: Option<RequestId>) {
+        self.donors.succeed(donors);
+        match asked {
+            None => self.committed.clear(),
+            Some(asked) => self.committed.retain(|batch| batch.commit.0 > asked.0),
+        }
+    }
+
+    /// The add request `add` of `stars` failed: those Stars leave whichever
+    /// batch holds them, the pending one or a committed one.
+    pub(crate) fn add_failed(&mut self, add: RequestId, stars: i64) {
+        if add.0 > self.last_commit {
+            if let Some(pending) = self.pending_reaction.as_mut() {
+                pending.stars = pending.stars.saturating_sub(stars);
+                if pending.stars <= 0 {
+                    self.pending_reaction = None;
+                }
+            }
+            return;
+        }
+        if let Some(batch) = self
+            .committed
+            .iter_mut()
+            .find(|b| b.after < add.0 && add.0 < b.commit.0)
+        {
+            batch.stars = batch.stars.saturating_sub(stars);
+        }
+        self.committed.retain(|batch| batch.stars > 0);
     }
 
     /// Queues a Stars effect, keeping the newest four.
@@ -152,7 +245,7 @@ impl LiveStoryState {
     /// Your Stars: committed plus pending.
     pub fn my_stars(&self) -> i64 {
         self.donors
-            .as_ref()
+            .data()
             .and_then(|donors| donors.top_donors.iter().find(|d| d.is_me))
             .map_or(0, |mine| mine.star_count)
             .saturating_add(self.unconfirmed_stars())
@@ -188,6 +281,18 @@ impl Session {
             .live
             .as_mut()
             .filter(|live| live.group_call_id == group_call_id)
+    }
+
+    /// The call of the live story watched: the story stream, only when it
+    /// is that story's call (it can hold another for a moment when the
+    /// viewer switches stories). Every read of the call for the watched
+    /// story goes through here.
+    pub fn live_call(&self) -> Option<&ActiveGroupCall> {
+        let live = self.stories.live.as_ref()?;
+        self.calls
+            .story_stream
+            .as_ref()
+            .filter(|call| call.id == live.group_call_id)
     }
 
     /// The paid comment levels, lowest first.
@@ -232,9 +337,7 @@ impl Session {
     /// Who your live story comments are sent as: the call's choice, else
     /// yourself.
     pub fn live_story_sender(&self) -> Option<MessageSender> {
-        self.calls
-            .story_stream
-            .as_ref()
+        self.live_call()
             .and_then(|call| call.message_sender_id)
             .or_else(|| {
                 self.my_user_id
@@ -257,14 +360,14 @@ impl Session {
                 donors,
             } => {
                 if let Some(live) = self.live_story_mut(group_call_id) {
-                    live.set_donors(donors);
+                    live.set_donors(donors, None);
                 }
             }
             LiveStoryPayload::Donors(donors) => {
                 if let Some(LiveStoryPurpose::GetTopDonors { group_call_id }) = asked
                     && let Some(live) = self.live_story_mut(group_call_id)
                 {
-                    live.set_donors(donors);
+                    live.set_donors(donors, pending.map(|p| p.id));
                 }
             }
             LiveStoryPayload::UpdateMessageLevels(levels) => {
@@ -289,7 +392,7 @@ impl Session {
                 if let Some(LiveStoryPurpose::GetStreamer { group_call_id }) = asked
                     && let Some(live) = self.live_story_mut(group_call_id)
                 {
-                    live.streamer = Some(participant);
+                    live.streamer.succeed(participant);
                 }
             }
         }
@@ -302,7 +405,7 @@ impl Session {
         senders: Vec<AvailableMessageSender>,
     ) {
         if let Some(live) = self.live_story_mut(group_call_id) {
-            live.message_senders = Some(senders);
+            live.message_senders.succeed(senders);
         }
     }
 
@@ -372,15 +475,29 @@ impl Session {
         }
     }
 
-    pub(crate) fn set_live_bursts(&mut self, stickers: Vec<StickerItem>) {
-        self.stories.live_bursts = LiveBursts::Loaded(stickers);
+    /// The bursts' answer; only the request that asked for them counts.
+    pub(crate) fn set_live_bursts(
+        &mut self,
+        stickers: Vec<StickerItem>,
+        answered: Option<RequestId>,
+    ) {
+        if answered.is_some_and(|id| self.stories.live_bursts == LiveBursts::Requested(id)) {
+            self.stories.live_bursts = LiveBursts::Loaded(stickers);
+        }
     }
 
     /// A live story request failed.
-    pub(crate) fn apply_live_story_error(&mut self, purpose: LiveStoryPurpose, err: &TdError) {
+    pub(crate) fn apply_live_story_error(
+        &mut self,
+        purpose: LiveStoryPurpose,
+        failed: Option<RequestId>,
+        err: &TdError,
+    ) {
         let group_call_id = match purpose {
             LiveStoryPurpose::GetBursts => {
-                self.stories.live_bursts = LiveBursts::Unasked;
+                if failed.is_none_or(|id| self.stories.live_bursts == LiveBursts::Requested(id)) {
+                    self.stories.live_bursts = LiveBursts::Failed;
+                }
                 return;
             }
             LiveStoryPurpose::GetStreamer { group_call_id }
@@ -398,23 +515,38 @@ impl Session {
         };
         let reason = error_reason(err);
         match purpose {
-            // Nothing to show: the viewer keeps its defaults.
-            LiveStoryPurpose::GetBursts
-            | LiveStoryPurpose::GetStreamer { .. }
-            | LiveStoryPurpose::GetTopDonors { .. }
-            | LiveStoryPurpose::GetMessageSenders { .. } => {}
+            // The viewer keeps its defaults; the failure waits for the
+            // next Join (`retry_extras`), and the streamer's, which leaves
+            // no picture, is said.
+            LiveStoryPurpose::GetStreamer { .. } => {
+                live.streamer.fail(reason.to_string());
+                live.note = Some(crate::lang::tr_with(
+                    crate::lang::keys::Q_OPS_COULD_NOT_LOAD_THE_STREAM,
+                    &[("reason", &reason)],
+                ));
+            }
+            LiveStoryPurpose::GetTopDonors { .. } => live.donors.fail(reason.to_string()),
+            LiveStoryPurpose::GetMessageSenders { .. } => {
+                live.message_senders.fail(reason.to_string());
+            }
+            LiveStoryPurpose::GetBursts => {}
             LiveStoryPurpose::AddPendingReaction { stars, .. } => {
-                if let Some(pending) = live.pending_reaction.as_mut() {
-                    pending.stars = pending.stars.saturating_sub(stars);
-                    if pending.stars <= 0 {
-                        live.pending_reaction = None;
-                    }
+                if let Some(add) = failed {
+                    live.add_failed(add, stars);
                 }
-                live.note = Some(format!("Stars were not sent: {reason}"));
+                live.note = Some(crate::lang::tr_with(
+                    crate::lang::keys::Q_MONEY_STARS_NOT_SENT_REASON,
+                    &[("reason", &reason)],
+                ));
             }
             LiveStoryPurpose::CommitPendingReactions { .. } => {
-                live.committed_stars = 0;
-                live.note = Some(format!("Stars were not sent: {reason}"));
+                if let Some(commit) = failed {
+                    live.commit_failed(commit);
+                }
+                live.note = Some(crate::lang::tr_with(
+                    crate::lang::keys::Q_MONEY_STARS_NOT_SENT_REASON,
+                    &[("reason", &reason)],
+                ));
             }
             LiveStoryPurpose::SendComment { .. } => {
                 live.note = Some(format!("Could not send the comment: {reason}"));

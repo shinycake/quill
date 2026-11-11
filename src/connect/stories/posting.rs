@@ -12,29 +12,30 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let extra = self.session.request(purpose, None);
-        self.session
-            .begin_story_page_check(story_page_op_label(purpose), extra);
+        self.session.stories.close_friends.begin_load(extra);
         let json = get_close_friends_request(extra);
-        self.send_story_page(purpose, extra, &json).map(Some)
+        match self.sender.send_json(&json) {
+            Ok(()) => Ok(Some(extra)),
+            Err(err) => {
+                self.session.requests.take(extra);
+                self.session.stories.close_friends.fail_load(extra);
+                Err(err)
+            }
+        }
     }
 
-    /// B14: `setCloseFriends` with the full new list; the ids are staged
-    /// in `Session::close_friends_pending` and applied on `ok`.
+    /// B14: `setCloseFriends` with the full new list; the ids ride on the
+    /// request (`PendingRequest::user_ids`) and are applied on its `ok`.
     pub fn set_close_friends(&mut self, user_ids: &[i64]) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::SetCloseFriends;
-        let extra = self.session.request(purpose, None);
-        self.session.stories.close_friends_pending = Some(user_ids.to_vec());
+        let extra = self.session.request_for_user_ids(purpose, user_ids);
         self.session
             .begin_story_page_op(story_page_op_label(purpose), extra);
         let json = set_close_friends_request(extra, user_ids);
-        let sent = self.send_story_page(purpose, extra, &json);
-        if sent.is_err() {
-            self.session.stories.close_friends_pending = None;
-        }
-        sent
+        self.send_story_page(purpose, extra, &json)
     }
 
     /// B14: `setChatActiveStoriesList` — hide (`archive`) or unhide a
@@ -146,11 +147,25 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !can_get {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.requests.has_purpose_for_story(
-            RequestPurpose::GetStoryInteractions,
-            chat_id,
-            story_id,
-        ) {
+        // This panel's own page in flight holds the next one back; a page
+        // sent for an earlier visit answers into nothing. With no panel
+        // state for the story, any request of it in flight does.
+        let waiting = match self
+            .session
+            .stories
+            .viewers
+            .as_ref()
+            .filter(|state| state.chat_id == chat_id.0 && state.story_id == story_id)
+        {
+            Some(state) => matches!(state.page, crate::state::PageFetch::Loading(Some(id))
+                if self.session.requests.get(id).is_some()),
+            None => self.session.requests.has_purpose_for_story(
+                RequestPurpose::GetStoryInteractions,
+                chat_id,
+                story_id,
+            ),
+        };
+        if waiting {
             return Ok(None);
         }
         let extra =
@@ -159,16 +174,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = get_story_interactions_request(extra, story_id, "", offset, 50);
         match self.sender.send_json(&json) {
             Ok(()) => {
-                if let Some(state) = self.session.stories.viewers.as_mut()
-                    && state.chat_id == chat_id.0
-                    && state.story_id == story_id
-                {
-                    state.loading = true;
-                }
+                self.session.story_viewers_sent(chat_id.0, story_id, extra);
                 Ok(Some(extra))
             }
             Err(err) => {
                 self.session.requests.take(extra);
+                self.session.story_viewers_send_failed(
+                    chat_id.0,
+                    story_id,
+                    "Could not load viewers".to_string(),
+                );
                 Err(err)
             }
         }
@@ -213,17 +228,12 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Phase 9.5: `activateStoryStealthMode` — hides the current user's
     /// story views (Premium only; the server decides). The state arrives
-    /// as `updateStoryStealthMode`. Deduped while in flight.
-    pub fn activate_story_stealth_mode(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+    /// as `updateStoryStealthMode`. Not deduped here: the box holds its
+    /// press while its own request is out (`StealthPress::Wait`), and a box
+    /// opened after a closed one asks for an answer of its own.
+    pub fn activate_story_stealth_mode(&mut self) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
-        }
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::ActivateStoryStealthMode)
-        {
-            return Ok(None);
         }
         let extra = self
             .session
@@ -232,7 +242,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .sender
             .send_json(&activate_story_stealth_mode_request(extra))
         {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)
@@ -244,25 +254,15 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `schema/td_api.tl:13702`) for the given chat — the user's own
     /// story chat or an eligible channel / supergroup from
     /// `getChatsToPostStories`. The composer calls this before every
-    /// post; the answer lands in `Session::story_post.eligibility`.
+    /// post; the answer lands in `Session::story_post.check`.
     /// Deduped per chat while a check is in flight.
-    pub fn check_can_post_story(
-        &mut self,
-        chat_id: ChatId,
-    ) -> Result<Option<RequestId>, ConnectSendError> {
+    pub fn check_can_post_story(&mut self, chat_id: ChatId) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         if self.session.my_user_id.is_none() {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if self
-            .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::CheckCanPostStory, chat_id)
-        {
-            return Ok(None);
-        }
         let extra = self
             .session
             .request(RequestPurpose::CheckCanPostStory, Some(chat_id));
@@ -270,7 +270,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .sender
             .send_json(&can_post_story_request(extra, chat_id))
         {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)
@@ -347,7 +347,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Phase 9.5: `getChatsToPostStories` (TDLib 1.8.67,
     /// `schema/td_api.tl:13698`) — channels/supergroups where the user
-    /// may post stories; stored in `Session::story_post_as_chats`.
+    /// may post stories; stored in `StoriesState::post_as`.
     /// Deduped while a fetch is in flight.
     pub fn get_chats_to_post_stories(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
@@ -367,9 +367,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             .sender
             .send_json(&get_chats_to_post_stories_request(extra))
         {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                self.session.stories.post_as.begin();
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
+                self.session
+                    .stories
+                    .post_as
+                    .fail("Could not load \"Post as\" chats");
                 Err(err)
             }
         }

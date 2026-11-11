@@ -8,7 +8,7 @@
 
 use super::app::QuillApp;
 use super::chat_theme::fill_muted;
-use super::gift_market_state::MarketBox;
+use super::gift_market_state::{AuctionOpen, MarketBox};
 use super::premium_ui::sticker_tile;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
@@ -19,7 +19,7 @@ use gpui_kit::component::notification::Notification;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::gift_market::{AuctionBoxChoice, GiftMarketState, auction_about_shown};
+use quill::gift_market::{AuctionBoxChoice, AuctionFetch, GiftMarketState, auction_about_shown};
 use quill::ids::FileId;
 use quill::lang::{keys, tr};
 use quill::local_time::now_unix;
@@ -27,6 +27,7 @@ use quill::marketplace::GiftPrice;
 use quill::premium_hub::group_digits;
 use quill::premium_hub::upgraded::Collectible;
 use quill::state::Session;
+use quill::state::fetch::Fetch;
 use quill::telegram::envelope::{MessageSender, StickerContent};
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -86,14 +87,27 @@ impl QuillApp {
 
     /// Opens `next` above the current box.
     pub(super) fn market_push(&mut self, next: MarketBox, cx: &mut Context<Self>) {
+        self.ask_info_preview(&next);
         self.gift_market.push(next);
         self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         cx.notify();
     }
 
+    /// The auction info box's cover cycles through the gift's variants:
+    /// asked as the box opens (again after a failure), never from its
+    /// render.
+    fn ask_info_preview(&mut self, next: &MarketBox) {
+        if let MarketBox::AuctionInfo { gift_id } = next
+            && let Some(live) = self.live.as_mut()
+        {
+            let _ = live.driver.fetch_gift_upgrade_preview(*gift_id);
+        }
+    }
+
     /// Replaces the top box with `next`.
     pub(super) fn market_replace(&mut self, next: MarketBox, cx: &mut Context<Self>) {
-        self.gift_market.stack.pop();
+        self.ask_info_preview(&next);
+        self.gift_market.pop();
         self.gift_market.push(next);
         self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         cx.notify();
@@ -101,7 +115,7 @@ impl QuillApp {
 
     /// Closes the top box ("Back", Escape, the close button).
     pub(super) fn market_back(&mut self, cx: &mut Context<Self>) {
-        let popped = self.gift_market.stack.pop();
+        let popped = self.gift_market.pop();
         self.after_market_pop(popped);
         cx.notify();
     }
@@ -132,36 +146,47 @@ impl QuillApp {
         match popped {
             Some(MarketBox::Buy) if !still(&MarketBox::Buy) => {
                 if let Some(market) = self.gift_market_mut() {
-                    market.buy.take_if(|buy| !buy.sending);
+                    market.buy.take_if(|buy| !buy.sending());
                 }
             }
             Some(MarketBox::Resale) if !still(&MarketBox::Resale) => {
                 if let Some(market) = self.gift_market_mut() {
                     market.resale = None;
-                    market.buy.take_if(|buy| !buy.sending);
+                    market.buy.take_if(|buy| !buy.sending());
                 }
-            }
-            Some(MarketBox::AuctionBid { .. }) => {
-                self.gift_market.slider = None;
-                self.gift_market.custom = None;
             }
             _ => {}
         }
         if self.gift_market.stack.is_empty() {
             self.gift_market.recipient = None;
-            self.gift_market.pending_auction = false;
-            // "Hide My Name" is one bid's choice, never the next auction's.
-            self.gift_market.hide_name = false;
+            self.gift_market.auction_open = AuctionOpen::Idle;
         }
         self.after_craft_pop();
     }
 
-    /// Who an auction bid goes to: the chosen recipient, or the user.
-    pub(super) fn auction_recipient(&self) -> Option<MessageSender> {
+    /// Who an auction bid goes to: the chosen recipient; else the owner of
+    /// the bid the user already has on this auction (a raise keeps its
+    /// owner, so opening a channel's bid must not turn it into a new bid
+    /// to oneself); else the user. tdesktop's source was not reachable, so
+    /// this is the smallest safe choice.
+    pub(super) fn auction_recipient(&self, gift_id: i64) -> Option<MessageSender> {
         self.gift_market
             .recipient
             .as_ref()
             .map(|recipient| recipient.sender)
+            .or_else(|| {
+                let state = self
+                    .session()?
+                    .payments
+                    .gift_market
+                    .auctions
+                    .get(&gift_id)?;
+                if state.my_stars() > 0 {
+                    state.my().and_then(|my| my.owner)
+                } else {
+                    None
+                }
+            })
             .or_else(|| {
                 let me = self.session()?.my_user_id?;
                 Some(MessageSender::User { user_id: me })
@@ -181,12 +206,13 @@ impl QuillApp {
             self.gift_market.recipient = self
                 .session()
                 .map(|s| &s.payments.gifts_manage.send)
-                .filter(|send| send.open)
+                .filter(|send| send.is_open())
                 .and_then(|send| send.recipient.clone());
         }
+        let from_send_box = self.gift_market.recipient.is_some();
         match self.live.as_mut() {
             Some(live) => match live.driver.fetch_gift_auction(auction_id) {
-                Ok(_) => self.gift_market.pending_auction = true,
+                Ok(_) => self.gift_market.auction_open = AuctionOpen::Waiting { from_send_box },
                 Err(_) => {
                     self.set_note(StatusNote::error(tr(
                         keys::Q_MONEY_COULDNT_LOAD_THE_AUCTION,
@@ -200,7 +226,7 @@ impl QuillApp {
 
     /// The box an auction opens with (tdesktop `ChooseAndShowAuctionBox`).
     pub(super) fn show_auction_box(&mut self, gift_id: i64, cx: &mut Context<Self>) {
-        let recipient = self.auction_recipient();
+        let recipient = self.auction_recipient(gift_id);
         let Some(state) = self
             .session()
             .and_then(|s| s.payments.gift_market.auctions.get(&gift_id))
@@ -211,14 +237,12 @@ impl QuillApp {
             return;
         };
         let next = match state.choose_box(&recipient, auction_about_shown(), now_unix()) {
-            AuctionBoxChoice::Bid => MarketBox::AuctionBid { gift_id },
+            AuctionBoxChoice::Bid => MarketBox::bid(gift_id),
             AuctionBoxChoice::ChangeRecipient => MarketBox::ChangeRecipient { gift_id },
             AuctionBoxChoice::Info => MarketBox::AuctionInfo { gift_id },
             AuctionBoxChoice::About => MarketBox::AuctionAbout { gift_id },
         };
-        self.gift_market.push(next);
-        self.open_box(crate::ui::shell::DialogKind::GiftMarket);
-        cx.notify();
+        self.market_push(next, cx);
     }
 
     /// Per-frame: open an auction whose state arrived, drop a finished
@@ -228,18 +252,29 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.gift_market.pending_auction {
-            let ready = self
-                .gift_market_mut()
-                .and_then(|market| market.auction_ready.take());
-            let loading = self
+        if let AuctionOpen::Waiting { from_send_box } = self.gift_market.auction_open {
+            let ready = self.gift_market_mut().and_then(|market| {
+                let AuctionFetch::Ready { gift_id } = market.auction else {
+                    return None;
+                };
+                market.auction = AuctionFetch::Idle;
+                Some(gift_id)
+            });
+            let loading = self.session().is_some_and(|s| {
+                matches!(s.payments.gift_market.auction, AuctionFetch::Loading { .. })
+            });
+            let send_box_open = self
                 .session()
-                .is_some_and(|s| s.payments.gift_market.auction_loading);
-            if let Some(gift_id) = ready {
-                self.gift_market.pending_auction = false;
+                .is_some_and(|s| s.payments.gifts_manage.send.is_open());
+            if from_send_box && !send_box_open {
+                // The send box the auction was asked from is closed: the
+                // box does not open over whatever the user does now.
+                self.gift_market.auction_open = AuctionOpen::Idle;
+            } else if let Some(gift_id) = ready {
+                self.gift_market.auction_open = AuctionOpen::Idle;
                 self.show_auction_box(gift_id, cx);
             } else if !loading {
-                self.gift_market.pending_auction = false;
+                self.gift_market.auction_open = AuctionOpen::Idle;
             }
         }
         let bought = self.gift_market.top() == Some(&MarketBox::Buy)
@@ -260,17 +295,29 @@ impl QuillApp {
         let mut files = self.market_sticker_files();
         files.sort_unstable_by_key(|file| file.0);
         files.dedup();
-        let fresh = files != self.gift_market.requested_files;
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.follow_gift_auction(follow);
-            if fresh {
-                for file in &files {
-                    let _ = live.driver.download_file(*file, 8);
+        let asked = self.gift_market.requested_files.clone();
+        match self.live.as_mut() {
+            Some(live) => {
+                let _ = live.driver.follow_gift_auction(follow);
+                // A file counts as requested only once its request went
+                // out (or the file layer had nothing to send); a refused
+                // send is tried again at the next upkeep.
+                let sent: Vec<_> = files
+                    .iter()
+                    .copied()
+                    .filter(|file| {
+                        asked.contains(file) || live.driver.download_file(*file, 8).is_ok()
+                    })
+                    .collect();
+                if sent != asked {
+                    self.gift_market.requested_files = sent;
                 }
             }
-        }
-        if fresh {
-            self.gift_market.requested_files = files;
+            None => {
+                if files != self.gift_market.requested_files {
+                    self.gift_market.requested_files = files;
+                }
+            }
         }
     }
 
@@ -282,7 +329,8 @@ impl QuillApp {
         let notes = std::mem::take(&mut market.notes);
         let toasts = std::mem::take(&mut market.toasts);
         let low = std::mem::take(&mut market.balance_low);
-        if let Some(note) = notes.into_iter().last() {
+        // Every note toasts, one after another through the toast queue.
+        for note in notes {
             self.set_note(StatusNote::info(note));
         }
         if low {
@@ -337,7 +385,7 @@ impl QuillApp {
                 stickers.extend(super::gift_craft_ui::craft_stickers(market));
             }
             Some(MarketBox::Variants { gift_id }) => {
-                if let Some(preview) = market.previews.get(gift_id) {
+                if let Some(preview) = market.previews.get(gift_id).and_then(Fetch::data) {
                     stickers.extend(
                         preview
                             .models
@@ -385,7 +433,7 @@ impl QuillApp {
                 MarketBox::AuctionAbout { gift_id } => this.auction_about_box(gift_id, cx),
                 MarketBox::AuctionInfo { gift_id } => this.auction_info_box(gift_id, cx),
                 MarketBox::AuctionSend { gift_id } => this.auction_send_box(gift_id, cx),
-                MarketBox::AuctionBid { gift_id } => this.auction_bid_box(gift_id, cx),
+                MarketBox::AuctionBid { gift_id, .. } => this.auction_bid_box(gift_id, cx),
                 MarketBox::AuctionBought { gift_id } => this.auction_bought_box(gift_id, cx),
                 MarketBox::ChangeRecipient { gift_id } => this.change_recipient_box(gift_id, cx),
                 MarketBox::ActiveAuctions => this.active_auctions_box(cx),
@@ -564,7 +612,7 @@ crate::ui::shell::register_dialogs! {
         3860,
         |app| {
             !app.gift_market.stack.is_empty()
-                && !app.session().is_some_and(|s| s.payments.hub.premium_open)
+                && !app.session().is_some_and(|s| s.payments.hub.premium_open())
         },
         QuillApp::build_gift_market_dialog,
     )

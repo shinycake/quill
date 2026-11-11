@@ -58,13 +58,43 @@ pub(super) struct CallSounds {
     /// sound needs it).
     output: SharedOutput,
     player: Option<OutputPlayer>,
-    looping: Option<CallSound>,
-    /// Keeps the output open between a loop's sounds.
-    hold: Option<Hold>,
-    /// When the current loop's sound may start again.
-    again_at: Option<Instant>,
+    looping: Loop,
     /// The "Play sounds" preference.
     enabled: bool,
+}
+
+/// The loop to keep going: none, or one sound with its output hold and
+/// where it stands between rings.
+enum Loop {
+    Off,
+    On {
+        sound: CallSound,
+        /// Keeps the output open between a loop's sounds.
+        _hold: Hold,
+        phase: LoopPhase,
+    },
+}
+
+/// Where a loop is in one ring and the gap after it.
+#[derive(Clone, Copy)]
+enum LoopPhase {
+    /// The ring plays (or a cue does); the gap is scheduled once it ends.
+    Playing,
+    /// The ring may start again at this time.
+    Due(Instant),
+}
+
+impl Loop {
+    fn sound(&self) -> Option<CallSound> {
+        match self {
+            Loop::Off => None,
+            Loop::On { sound, .. } => Some(*sound),
+        }
+    }
+
+    fn is_on(&self) -> bool {
+        matches!(self, Loop::On { .. })
+    }
 }
 
 impl CallSounds {
@@ -72,9 +102,7 @@ impl CallSounds {
         Self {
             output,
             player: None,
-            looping: None,
-            hold: None,
-            again_at: None,
+            looping: Loop::Off,
             enabled: true,
         }
     }
@@ -83,7 +111,7 @@ impl CallSounds {
 impl CallSounds {
     /// Follow the "Play sounds" preference; turning it off cuts any sound.
     pub(super) fn set_enabled(&mut self, enabled: bool) {
-        if self.enabled && !enabled && self.looping.is_none() {
+        if self.enabled && !enabled && !self.looping.is_on() {
             self.stop_player();
         }
         self.enabled = enabled;
@@ -124,32 +152,48 @@ impl CallSounds {
 
     /// Play once, cutting whatever plays (and any loop).
     pub(super) fn play(&mut self, sound: CallSound) {
-        self.looping = None;
-        self.hold = None;
-        self.again_at = None;
+        self.looping = Loop::Off;
+        self.spawn(sound);
+    }
+
+    /// Play a cue once. A ring that loops keeps looping: the cue plays on
+    /// its own and the ring comes back after it, not cut by the loop's
+    /// next tick.
+    pub(super) fn play_cue(&mut self, sound: CallSound) {
+        let Loop::On { phase, .. } = &mut self.looping else {
+            self.play(sound);
+            return;
+        };
+        *phase = LoopPhase::Playing;
         self.spawn(sound);
     }
 
     /// The sound kept looping, for tests.
     #[cfg(test)]
     pub(super) fn looping(&self) -> Option<CallSound> {
-        self.looping
+        self.looping.sound()
     }
 
     /// Keep `sound` looping, or stop looping with `None`. Call it often
     /// (every call tick): it restarts the loop after its gap.
     pub(super) fn keep_looping(&mut self, sound: Option<CallSound>) {
-        if self.looping != sound {
-            if self.looping.is_some() || sound.is_some() {
+        if self.looping.sound() != sound {
+            if self.looping.is_on() || sound.is_some() {
                 self.stop_player();
             }
-            self.looping = sound;
-            self.hold = sound.map(|_| self.output.hold());
-            self.again_at = Some(Instant::now());
+            self.looping = match sound {
+                Some(sound) => Loop::On {
+                    sound,
+                    _hold: self.output.hold(),
+                    phase: LoopPhase::Due(Instant::now()),
+                },
+                None => Loop::Off,
+            };
         }
-        let Some(sound) = self.looping else {
+        let Loop::On { sound, phase, .. } = &mut self.looping else {
             return;
         };
+        let sound = *sound;
         // A ring whose device failed to open didn't play: the loop tries
         // again after its gap, as after one that played.
         let finished = self
@@ -159,13 +203,13 @@ impl CallSounds {
         if !finished {
             return;
         }
-        match self.again_at {
-            Some(at) if Instant::now() >= at => {
-                self.again_at = None;
+        match *phase {
+            LoopPhase::Due(at) if Instant::now() >= at => {
+                *phase = LoopPhase::Playing;
                 self.spawn(sound);
             }
-            Some(_) => {}
-            None => self.again_at = Some(Instant::now() + sound.gap()),
+            LoopPhase::Due(_) => {}
+            LoopPhase::Playing => *phase = LoopPhase::Due(Instant::now() + sound.gap()),
         }
     }
 }
@@ -174,9 +218,19 @@ impl CallSounds {
 #[derive(Default)]
 pub(super) struct SoundMarks {
     call_id: Option<i32>,
-    connected: bool,
-    ended: bool,
+    /// How far this call's cues have played.
+    cue: CueStage,
     muted: bool,
+}
+
+/// The call-long cues, in the order a call reaches them: the connect chime
+/// plays once, then the hang-up one.
+#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum CueStage {
+    #[default]
+    Ringing,
+    Connected,
+    Ended,
 }
 
 impl super::app::QuillApp {
@@ -196,6 +250,14 @@ impl super::app::QuillApp {
         let second_rings = session.calls.second_call.prompt().is_some();
         let enabled = session.settings.inapp_sounds_enabled;
         let background_ring = self.background_ring_audible();
+        // A call that came in reached no chat window that pressed Call: its
+        // card is the main window's.
+        if let Some(call) = call.as_ref()
+            && !call.is_outgoing
+            && self.screen.call_screen.sound_marks.call_id != Some(call.id)
+        {
+            self.call_boxes.card_window = None;
+        }
         let marks = &mut self.screen.call_screen.sound_marks;
         let sounds = &mut self.calls.sounds;
         sounds.set_enabled(enabled);
@@ -219,13 +281,13 @@ impl super::app::QuillApp {
                 sounds.keep_looping(ringing);
                 let connected =
                     matches!(call.state, CallState::Ready) && call.transport.is_connected();
-                if connected && !marks.connected {
-                    marks.connected = true;
-                    sounds.play(CallSound::Connect);
+                if connected && marks.cue < CueStage::Connected {
+                    marks.cue = CueStage::Connected;
+                    sounds.play_cue(CallSound::Connect);
                 }
                 if marks.muted != call.muted {
                     marks.muted = call.muted;
-                    sounds.play(if call.muted {
+                    sounds.play_cue(if call.muted {
                         CallSound::Mute
                     } else {
                         CallSound::Unmute
@@ -237,8 +299,8 @@ impl super::app::QuillApp {
             // its own buttons dismiss it, so the ring sounds over it.
             (None, Some(summary)) => {
                 sounds.keep_looping(background_ring.then_some(CallSound::Incoming));
-                if marks.call_id == Some(summary.call_id) && !marks.ended {
-                    marks.ended = true;
+                if marks.call_id == Some(summary.call_id) && marks.cue < CueStage::Ended {
+                    marks.cue = CueStage::Ended;
                     sounds.play(if summary.busy {
                         CallSound::Busy
                     } else {
@@ -254,5 +316,21 @@ impl super::app::QuillApp {
                     .keep_looping((invite_rings || background_ring).then_some(CallSound::Incoming));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cue_over_a_ringing_loop_leaves_the_loop_set() {
+        let mut sounds = CallSounds::new(SharedOutput::for_test(None));
+        sounds.keep_looping(Some(CallSound::Incoming));
+        sounds.play_cue(CallSound::Mute);
+        assert_eq!(sounds.looping(), Some(CallSound::Incoming));
+        // A plain play still cuts the loop.
+        sounds.play(CallSound::End);
+        assert_eq!(sounds.looping(), None);
     }
 }

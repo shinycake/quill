@@ -235,6 +235,33 @@ fn an_effect_that_is_gone_is_not_asked_for_again() {
 }
 
 #[test]
+fn a_rate_limited_effect_is_not_gone_and_a_dropped_ask_is_repeated() {
+    let mut f = Fixture::new();
+    f.driver.load_message_effects([77, 78]).unwrap();
+    let asked = f.sent("getMessageEffect");
+    assert_eq!(asked.len(), 2);
+    f.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":429,"message":"Too Many Requests: retry after 3"}}"#,
+        asked[0]["@extra"].as_str().unwrap()
+    ));
+    assert!(!f.driver.session.stickers.effects.is_gone(77));
+    // 77 waits out its retry clock; 78's request is dropped without an
+    // answer, so it is asked for again at once.
+    drop(
+        f.driver
+            .session
+            .requests
+            .take_purpose(crate::state::RequestPurpose::Stickers(
+                crate::state::StickersPurpose::GetMessageEffect { effect_id: 78 },
+            )),
+    );
+    f.driver.load_message_effects([77, 78]).unwrap();
+    let asked = f.sent("getMessageEffect");
+    assert_eq!(asked.len(), 3);
+    assert_eq!(asked[2]["effect_id"], "78");
+}
+
+#[test]
 fn the_picker_describes_every_offered_effect_then_fetches_their_icons() {
     let mut f = Fixture::new();
     f.ingest(

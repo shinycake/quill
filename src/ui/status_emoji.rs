@@ -31,7 +31,8 @@ pub(super) enum StatusSurface {
     ListRow,
     /// The open chat's header (owner: the chat).
     Header,
-    /// A group message's sender name (owner: the message).
+    /// A group message's sender name (owner: the chat and message,
+    /// `ChatMessage`: ids repeat across chats).
     MessageName,
     /// The profile panel (owner: the peer).
     Profile,
@@ -65,7 +66,7 @@ impl QuillApp {
     pub(super) fn status_glyph(
         &self,
         surface: StatusSurface,
-        owner: i64,
+        owner: impl std::hash::Hash,
         id: i64,
         cx: &mut Context<Self>,
     ) -> Option<StatusGlyph> {
@@ -98,7 +99,7 @@ impl QuillApp {
 }
 
 /// The play head of status `id` for `owner` on `surface`.
-pub(super) fn status_head(surface: StatusSurface, owner: i64, id: i64) -> HeadId {
+pub(super) fn status_head(surface: StatusSurface, owner: impl std::hash::Hash, id: i64) -> HeadId {
     HeadId::of(surface.part(), ("status", surface, owner, id))
 }
 
@@ -110,7 +111,7 @@ impl QuillApp {
     pub(super) fn sender_status_element(
         &self,
         sender: Option<&super::history_row::SenderLabel>,
-        message_id: i64,
+        message: quill::ids::ChatMessage,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let label = sender?;
@@ -121,7 +122,7 @@ impl QuillApp {
             .unwrap_or_else(|| Hsla::from(super::chat_theme::text_bright()))
             .opacity(STAR_ALPHA);
         let glyph = (id != 0)
-            .then(|| self.status_glyph(StatusSurface::MessageName, message_id, id, cx))
+            .then(|| self.status_glyph(StatusSurface::MessageName, message, id, cx))
             .flatten();
         Some(match glyph {
             Some(glyph) => status_element(glyph, STATUS_SIZE),

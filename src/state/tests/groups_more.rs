@@ -1,6 +1,7 @@
 //! State reducer tests: groups (continued from groups.rs).
 use super::common::*;
 use super::*;
+use crate::state::fetch::Fetch;
 
 #[test]
 fn event_log_gate() {
@@ -95,7 +96,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         GroupsPurpose::GetChatEventLog { from_event_id: 0 },
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &[300, 299]));
-    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
     else {
         panic!("expected loaded event log");
     };
@@ -103,7 +104,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         loaded.events.iter().map(|e| e.id).collect::<Vec<_>>(),
         vec![300, 299]
     );
-    assert!(!loaded.has_more);
+    assert!(!loaded.has_more());
 
     // Older page appends; the overlapping id dedupes; a full page
     // (100 events) keeps `has_more`.
@@ -113,7 +114,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         GroupsPurpose::GetChatEventLog { from_event_id: 299 },
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &full));
-    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
     else {
         panic!("expected loaded event log");
     };
@@ -121,7 +122,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
     assert_eq!(ids.len(), 101);
     assert_eq!(ids[0], 300);
     assert_eq!(ids[100], 200);
-    assert!(loaded.has_more);
+    assert!(loaded.has_more());
 
     // A short final page clears `has_more`.
     let extra = event_log_request(
@@ -129,12 +130,12 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         GroupsPurpose::GetChatEventLog { from_event_id: 200 },
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &[199]));
-    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
     else {
         panic!("expected loaded event log");
     };
     assert_eq!(loaded.events.len(), 102);
-    assert!(!loaded.has_more);
+    assert!(!loaded.has_more());
 
     // A first-page refetch replaces everything (refresh semantics).
     let extra = event_log_request(
@@ -142,7 +143,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         GroupsPurpose::GetChatEventLog { from_event_id: 0 },
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &[500]));
-    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
     else {
         panic!("expected loaded event log");
     };
@@ -173,7 +174,7 @@ fn event_log_failure_states() {
         ),
     );
     let ChatEventLogFetch::Failed(message) =
-        session.groups.event_logs.get(&13).expect("log failed")
+        session.groups.event_log_fetch(13).expect("log failed")
     else {
         panic!("expected failed event log");
     };
@@ -206,11 +207,26 @@ fn event_log_failure_states() {
             extra.0
         ),
     );
-    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
     else {
         panic!("expected loaded event log");
     };
     assert_eq!(loaded.events.len(), 1);
+    assert!(
+        matches!(loaded.older, OlderEvents::Failed(_)),
+        "the failed older page draws its Retry"
+    );
+    assert!(loaded.has_more(), "Retry may ask again");
+    session.begin_older_events(13);
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
+    else {
+        panic!("expected loaded event log");
+    };
+    assert_eq!(
+        loaded.older,
+        OlderEvents::Available,
+        "asking clears the line"
+    );
 }
 
 #[test]
@@ -343,7 +359,7 @@ fn adding_members_marks_the_member_list_stale() {
 #[test]
 fn an_ownership_transfer_marks_the_member_list_stale() {
     let (mut session, _sink) = session();
-    session.begin_ownership_transfer(13, 888);
+    session.begin_ownership_transfer(13, 888, false);
     session.finish_ownership_transfer(888, Some(13));
     assert_eq!(session.groups.member_list_stale, vec![13]);
 }
@@ -389,11 +405,49 @@ fn update_chat_member_invalidates_admin_list_and_own_rights() {
     );
     let chat = session.chats.get(&13).unwrap();
     assert_eq!(
-        chat.my_member_status,
+        chat.member_status(),
         Some(ChannelMemberStatus::Administrator)
     );
-    assert_eq!(chat.my_admin_can_promote_members, Some(true));
+    assert!(
+        matches!(chat.my_member, crate::state::OwnMember::Administrator(rights) if rights.promote_members == Some(true))
+    );
     assert!(chat.can_manage_admins());
+}
+
+/// An administrator list asked before a membership change must not put
+/// the old administrators back when it answers (05-079).
+#[test]
+fn an_admin_list_asked_before_a_membership_change_is_dropped() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.my_user_id = Some(777);
+    let mut channel = placeholder_chat(ChatId(13));
+    channel.kind = ChatKind::Supergroup {
+        supergroup_id: 13,
+        is_channel: true,
+    };
+    session.chats.insert(13, channel);
+    let asked = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
+    session
+        .groups
+        .admin_lists
+        .insert(13, AdminListFetch::Loading);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateChatMember","chat_id":13,"actor_user_id":777,"date":1,"invite_link":null,"via_join_request":false,"via_chat_folder_invite_link":false,"old_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":888},"status":{"@type":"chatMemberStatusAdministrator","can_be_edited":true}},"new_chat_member":{"@type":"chatMember","member_id":{"@type":"messageSenderUser","user_id":888},"status":{"@type":"chatMemberStatusMember","member_until_date":0}}}"#,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"chatAdministrators","@extra":"{}","administrators":[{{"@type":"chatAdministrator","user_id":888,"custom_title":"","is_owner":false,"can_be_edited":true}}]}}"#,
+            asked.0
+        ),
+    );
+    assert!(!session.groups.admin_lists.contains_key(&13));
 }
 
 #[test]
@@ -457,8 +511,8 @@ fn supergroup_members_fetch_caches() {
     };
     assert_eq!(*total_count, 2);
     assert_eq!(members.len(), 2);
-    assert_eq!(members[0].status, ChannelMemberStatus::Member);
-    assert_eq!(members[1].status, ChannelMemberStatus::Administrator);
+    assert_eq!(members[0].status(), ChannelMemberStatus::Member);
+    assert_eq!(members[1].status(), ChannelMemberStatus::Administrator);
 }
 
 #[test]
@@ -486,11 +540,11 @@ fn basic_group_full_info_caches_members() {
     };
     assert_eq!(*total_count, 2);
     assert_eq!(members.len(), 2);
-    assert_eq!(members[0].status, ChannelMemberStatus::Creator);
+    assert_eq!(members[0].status(), ChannelMemberStatus::Creator);
     // Slice G1: `chatMember.tag` (schema 1.8.67, line 2526) is the
     // admin custom title.
     assert_eq!(members[0].tag, "boss");
-    assert_eq!(members[1].status, ChannelMemberStatus::Member);
+    assert_eq!(members[1].status(), ChannelMemberStatus::Member);
     assert_eq!(members[1].tag, "");
 }
 
@@ -628,13 +682,14 @@ fn g2_welcome_pack_and_flag_cached() {
         .groups
         .welcome_messages
         .get(&13)
+        .and_then(|pack| pack.data())
         .expect("welcome pack");
     assert_eq!(pack.len(), 1);
     assert_eq!(pack[0].id, 7);
-    assert_eq!(
-        session.groups.welcome_message_fetches.get(&13),
-        Some(&WelcomeMessagesFetch::Loaded)
-    );
+    assert!(matches!(
+        session.groups.welcome_messages.get(&13),
+        Some(Fetch::Ready(_))
+    ));
     apply_json(
         &mut session,
         &seq,
@@ -705,8 +760,10 @@ fn g2_boost_slots_stashed_for_chain() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetBoostSlotsForBoost, Some(ChatId(13)));
-    // Stashed only while a boost waits for the slots.
-    session.groups.boost_intent = Some(13);
+    // Kept only while the box of that chat waits for the slots.
+    let mut open = crate::boost_box::BoostBoxState::new(13, false);
+    open.reading_slots(extra);
+    session.groups.boost_box = Some(open);
     apply_json(
         &mut session,
         &seq,
@@ -716,10 +773,16 @@ fn g2_boost_slots_stashed_for_chain() {
             extra.0
         ),
     );
-    let ids: Vec<i32> = session.groups.boost_slots_by_chat[&13]
-        .iter()
-        .map(|slot| slot.slot_id)
-        .collect();
+    let Some(crate::boost_box::BoostPhase::Working(crate::boost_box::BoostWork::SlotsReady(slots))) =
+        session
+            .groups
+            .boost_box
+            .as_ref()
+            .map(|state| state.phase.clone())
+    else {
+        panic!("the box holds the slots");
+    };
+    let ids: Vec<i32> = slots.iter().map(|slot| slot.slot_id).collect();
     assert_eq!(ids, vec![3, 7]);
 }
 
@@ -746,6 +809,8 @@ fn g2_sign_toggle_error_rolls_back() {
         supergroup_id: 25,
         previous_sign: Some(false),
         previous_show: Some(false),
+        shown_sign: true,
+        shown_show: true,
     });
     session.groups.supergroup_sign_messages.insert(25, true);
     session
@@ -792,6 +857,7 @@ fn g2_anti_spam_toggle_error_rolls_back() {
         .rollback = Some(RequestRollback::AntiSpam {
         supergroup_id: 25,
         previous: Some(false),
+        shown: true,
     });
     session.groups.supergroup_anti_spam_enabled.insert(25, true);
     apply_json(
@@ -826,8 +892,8 @@ fn g2_welcome_fetch_error_marks_failed() {
         ),
     );
     assert!(matches!(
-        session.groups.welcome_message_fetches.get(&13),
-        Some(WelcomeMessagesFetch::Failed(_))
+        session.groups.welcome_messages.get(&13),
+        Some(Fetch::Failed { .. })
     ));
 }
 
@@ -877,11 +943,10 @@ fn g2_welcome_delete_ok_drops_pack() {
     // the cached pack so the dialog refetches it.
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.groups.welcome_messages.insert(13, Vec::new());
     session
         .groups
-        .welcome_message_fetches
-        .insert(13, WelcomeMessagesFetch::Loaded);
+        .welcome_messages
+        .insert(13, Fetch::Ready(Vec::new()));
     let extra = session.request(
         RequestPurpose::Groups(GroupsPurpose::DeleteChatWelcomeMessage {
             welcome_message_id: 7,
@@ -895,7 +960,6 @@ fn g2_welcome_delete_ok_drops_pack() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
     assert!(!session.groups.welcome_messages.contains_key(&13));
-    assert!(!session.groups.welcome_message_fetches.contains_key(&13));
 }
 
 #[test]
@@ -913,7 +977,7 @@ fn event_log_admin_ids_dedupes_and_skips_chat_senders() {
             event(3, MessageSender::User { user_id: 9 }),
             event(4, MessageSender::User { user_id: 7 }),
         ],
-        has_more: false,
+        older: crate::state::OlderEvents::Exhausted,
     };
     assert_eq!(page.admin_user_ids(), vec![7, 9]);
 }
@@ -1018,4 +1082,98 @@ fn chat_action_bar_from_new_chat_and_updates() {
         r#"{"@type":"updateChatActionBar","chat_id":501,"action_bar":null}"#,
     );
     assert!(session.chat_action_bar(ChatId(501)).is_none());
+}
+
+#[test]
+fn a_refusal_the_edit_box_has_no_field_for_still_fails_its_save() {
+    // The registry remembers why each request failed, so the Edit box that
+    // sent it reads the refusal; a protected-content switch and a link
+    // that needs Premium both record a box error as well.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let chat = ChatId(13);
+    let switch = session.request(RequestPurpose::ToggleChatHasProtectedContent, Some(chat));
+    let link = session.request(RequestPurpose::SetSupergroupUsername, Some(chat));
+    for id in [switch, link] {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"USERNAMES_ACTIVE_TOO_MUCH"}}"#,
+                id.0
+            ),
+        );
+    }
+    assert!(session.requests.failure(switch).is_some());
+    assert!(session.requests.failure(link).is_some());
+    let error = session.groups.info_edit_errors.get(&13).expect("an error");
+    assert_eq!(error.field, GroupInfoField::Username);
+}
+
+#[test]
+fn a_refused_toggle_keeps_a_value_an_update_changed_meanwhile() {
+    // Sweep 05-201: the rollback restores only while the flags still show
+    // what the request showed; a newer update is the truth.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request(
+        RequestPurpose::ToggleSupergroupAggressiveAntiSpam,
+        Some(ChatId(13)),
+    );
+    session
+        .requests
+        .pending_mut(extra)
+        .expect("pending")
+        .rollback = Some(RequestRollback::AntiSpam {
+        supergroup_id: 25,
+        previous: Some(false),
+        shown: true,
+    });
+    // Another admin's change arrived: the flag is no longer what we showed.
+    session.groups.supergroup_anti_spam_enabled.remove(&25);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_ADMIN_REQUIRED"}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(session.groups.supergroup_anti_spam_enabled.get(&25), None);
+}
+
+#[test]
+fn a_new_status_drops_the_rights_of_the_old_one() {
+    let mut chat = placeholder_chat(ChatId(31));
+    chat.set_member_status(ChannelMemberStatus::Administrator, Some(true));
+    chat.set_admin_can_invite_users(Some(true));
+    assert!(chat.can_invite_users());
+    // Demoted: no administrator right is left to read.
+    chat.set_member_status(ChannelMemberStatus::Member, None);
+    assert!(!chat.can_invite_users());
+    assert_eq!(chat.member_status(), Some(ChannelMemberStatus::Member));
+    // Promoted again without a rights block: the old rights do not return.
+    chat.set_member_status(ChannelMemberStatus::Administrator, None);
+    assert!(!chat.can_invite_users());
+    assert!(chat.channel_admin_can_post(), "a bare administrator posts");
+    // Rights can only be set on an administrator.
+    chat.set_member_status(ChannelMemberStatus::Left, None);
+    chat.set_admin_can_invite_users(Some(true));
+    assert!(!chat.can_invite_users());
+}
+
+#[test]
+fn the_own_restriction_is_unknown_then_one_of_two_answers() {
+    use crate::state::OwnRestriction;
+    let mut chat = placeholder_chat(ChatId(32));
+    assert!(!chat.rights_fetched());
+    assert_eq!(chat.my_restriction, OwnRestriction::Unknown);
+    // The probe found no member record: not restricted, and not asked again.
+    chat.note_no_member_record();
+    assert!(chat.rights_fetched());
+    assert_eq!(chat.restriction(), None);
+    chat.set_my_restriction(None);
+    assert_eq!(chat.my_restriction, OwnRestriction::NotRestricted);
 }

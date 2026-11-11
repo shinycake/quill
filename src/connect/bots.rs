@@ -1,9 +1,10 @@
 //! Connect driver: bots, callback queries, login URLs.
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
-use crate::state::{BotsPurpose, UsersPurpose};
+use crate::state::{BotsPurpose, CallbackButtonKey, CallbackPress, LoginUrlStage, UsersPurpose};
 use crate::state::{
-    InlineBotResolve, InlineQueryFetch, InlineQuerySlot, LoginUrlRequest, RequestPurpose,
+    InlineBotResolve, InlineMore, InlineQueryFetch, InlineQuerySlot, LoginUrlRequest,
+    RequestPurpose,
 };
 use crate::telegram::envelope::ChatKind;
 use crate::telegram::requests::{
@@ -26,7 +27,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(());
         }
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Ok(());
         };
         let Some(user_id) = self.session.bot_user_id_for_chat(chat_id) else {
@@ -65,7 +66,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(());
         }
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Ok(());
         };
         let Some(user_id) = self.session.bot_user_id_for_chat(chat_id) else {
@@ -115,6 +116,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .is_err()
             {
                 self.session.requests.take(extra);
+                self.session.bots.asked_bot_users.remove(&user_id);
                 continue;
             }
             sent = true;
@@ -129,7 +131,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(());
         }
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Ok(());
         };
         if !matches!(
@@ -201,13 +203,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let purpose = RequestPurpose::GetBotSimilarBots;
-        if self
-            .session
-            .requests
-            .has_purpose_for_user(purpose, bot_user_id)
-        {
-            return Ok(None);
-        }
         let extra = self.session.request_for_user(purpose, bot_user_id);
         if let Err(err) = self
             .sender
@@ -216,6 +211,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        // The section is loading from the moment the request is out; its
+        // answer or its refusal ends the stage.
+        self.session
+            .bots
+            .similar_bots
+            .insert(bot_user_id, crate::state::SimilarBotsFetch::Loading);
         Ok(Some(extra))
     }
 
@@ -285,7 +286,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra =
             self.callback_query_extra(chat_id, message_id, RequestPurpose::GetCallbackQueryAnswer)?;
         let json = get_callback_query_answer(extra, chat_id, message_id, data);
-        self.send_json_request(extra, &json)
+        self.send_callback_press(
+            extra,
+            &json,
+            chat_id,
+            message_id,
+            CallbackButtonKey::Data(data.to_vec()),
+        )
     }
 
     /// B1: password-protected callback button —
@@ -305,7 +312,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         )?;
         let json =
             get_callback_query_answer_with_password(extra, chat_id, message_id, password, data);
-        self.send_json_request(extra, &json)
+        self.send_callback_press(
+            extra,
+            &json,
+            chat_id,
+            message_id,
+            CallbackButtonKey::Data(data.to_vec()),
+        )
     }
 
     /// B1: game button — `callbackQueryPayloadGame` with the `game.short_name`
@@ -322,7 +335,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::GetCallbackQueryAnswerGame,
         )?;
         let json = get_callback_query_answer_game(extra, chat_id, message_id, game_short_name);
-        self.send_json_request(extra, &json)
+        self.send_callback_press(extra, &json, chat_id, message_id, CallbackButtonKey::Game)
     }
 
     /// Slice bots-games: `getGameHighScores` (TDLib 1.8.67,
@@ -336,6 +349,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         user_id: i64,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
+            self.session
+                .bots
+                .game_scores
+                .entry((chat_id.0, message_id.0))
+                .or_default()
+                .fail(crate::lang::tr(
+                    crate::lang::keys::Q_MISC_COULDNT_LOAD_THE_SCORES,
+                ));
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request_for_message(
@@ -344,7 +365,28 @@ impl<S: JsonSender> ConnectDriver<S> {
             message_id,
         );
         let json = get_game_high_scores(extra, chat_id, message_id, user_id);
-        self.send_json_request(extra, &json)
+        // The panel waits for this request's answer and no other.
+        let scores = self
+            .session
+            .bots
+            .game_scores
+            .entry((chat_id.0, message_id.0))
+            .or_default();
+        scores.begin();
+        scores.sent(extra);
+        let sent = self.send_json_request(extra, &json);
+        if sent.is_err()
+            && let Some(scores) = self
+                .session
+                .bots
+                .game_scores
+                .get_mut(&(chat_id.0, message_id.0))
+        {
+            scores.fail(crate::lang::tr(
+                crate::lang::keys::Q_MISC_COULDNT_LOAD_THE_SCORES,
+            ));
+        }
+        sent
     }
 
     /// Slice bots-games: `sendMessage` + `inputMessageGame` (TDLib 1.8.67,
@@ -378,6 +420,24 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.send_json_request(extra, &json)
     }
 
+    /// The session holds one login-URL press, which the answer reads: a
+    /// second button waits until the first one's answer is taken.
+    fn refuse_login_url_overlap(&self) -> Result<(), ConnectSendError> {
+        match &self.session.bots.login_url {
+            LoginUrlStage::Idle => Ok(()),
+            // A press whose request is gone from the session (lost with a
+            // reconnect) will never be answered: it does not block the next.
+            LoginUrlStage::Asking { request, .. }
+                if !self.session.requests.pending.contains_key(&request.0) =>
+            {
+                Ok(())
+            }
+            LoginUrlStage::Asking { .. } | LoginUrlStage::Answered { .. } => {
+                Err(ConnectSendError::InvalidRequest)
+            }
+        }
+    }
+
     /// B1: resolve a login-URL button (`getLoginUrlInfo`, schema 1.8.67,
     /// line 12985). `fallback_url` is the button's raw URL, kept in the
     /// session so a TDLib error degrades to a plain URL-button press.
@@ -388,17 +448,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         button_id: i64,
         fallback_url: &str,
     ) -> Result<RequestId, ConnectSendError> {
+        self.refuse_login_url_overlap()?;
         let extra =
             self.callback_query_extra(chat_id, message_id, RequestPurpose::GetLoginUrlInfo)?;
-        self.session.bots.login_url_request = Some(LoginUrlRequest {
+        let context = LoginUrlRequest {
             chat_id,
             message_id,
             button_id,
             raw_url: fallback_url.to_string(),
             from_agent: crate::agent::ui_driver::guard::injecting(),
-        });
+        };
         let json = get_login_url_info(extra, chat_id, message_id, button_id);
-        self.send_json_request(extra, &json)
+        // The press is recorded once the request went out.
+        let sent = self.send_json_request(extra, &json)?;
+        self.session.bots.login_url = LoginUrlStage::asking(sent, context);
+        Ok(sent)
     }
 
     /// B1: the authorized URL after the user consented to a
@@ -410,15 +474,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         request: &LoginUrlRequest,
         allow_write_access: bool,
     ) -> Result<RequestId, ConnectSendError> {
+        self.refuse_login_url_overlap()?;
         let extra = self.callback_query_extra(
             request.chat_id,
             request.message_id,
             RequestPurpose::GetLoginUrl,
         )?;
-        self.session.bots.login_url_request = Some(LoginUrlRequest {
+        let context = LoginUrlRequest {
             from_agent: request.from_agent || crate::agent::ui_driver::guard::injecting(),
             ..request.clone()
-        });
+        };
         let json = get_login_url(
             extra,
             request.chat_id,
@@ -426,7 +491,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             request.button_id,
             allow_write_access,
         );
-        self.send_json_request(extra, &json)
+        let sent = self.send_json_request(extra, &json)?;
+        self.session.bots.login_url = LoginUrlStage::asking(sent, context);
+        Ok(sent)
     }
 
     /// B1: `deleteChatReplyMarkup` after a one-time custom keyboard was used
@@ -454,7 +521,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(());
         }
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Ok(());
         };
         let Some(message_id) = self.session.reply_markup_message_to_fetch(chat_id) else {
@@ -465,8 +532,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         let extra = self.session.request(purpose, Some(chat_id));
-        self.send_json_request(extra, &get_message(extra, chat_id, message_id))
-            .map(|_| ())
+        self.session.begin_reply_markup_fetch(chat_id, extra);
+        let sent = self.send_json_request(extra, &get_message(extra, chat_id, message_id));
+        if sent.is_err() {
+            self.session.fail_reply_markup_fetch(chat_id, extra);
+        }
+        sent.map(|_| ())
     }
 
     /// `getRecentInlineBots`, once per session, when the user types "@".
@@ -533,6 +604,26 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Shared gate for callback-query sends: real (non-pending) messages in
     /// a supported chat. Returns the reserved `@extra`.
+    /// Send a callback query and remember the button it came from, so the
+    /// button shows it is waiting until the request ends.
+    fn send_callback_press(
+        &mut self,
+        extra: RequestId,
+        json: &str,
+        chat_id: ChatId,
+        message_id: MessageId,
+        button: CallbackButtonKey,
+    ) -> Result<RequestId, ConnectSendError> {
+        let sent = self.send_json_request(extra, json)?;
+        self.session.note_callback_press(CallbackPress {
+            request: extra,
+            chat_id,
+            message_id,
+            button,
+        });
+        Ok(sent)
+    }
+
     pub(crate) fn callback_query_extra(
         &mut self,
         chat_id: ChatId,
@@ -579,21 +670,36 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self
+        let first_page = offset.is_empty();
+        let slot = self
             .session
-            .requests
-            .has_inline_query_in_flight(chat_id, bot_user_id)
+            .bots
+            .inline_query
+            .as_ref()
+            .filter(|slot| slot.chat_id == chat_id && slot.bot_user_id == bot_user_id);
+        // One request at a time for the (chat, bot) pair, whatever the page;
+        // a next page needs the loaded page it continues, not asked twice
+        // for an offset that failed. The slot waits only while its request
+        // is still out: one that left the registry unanswered is over, and
+        // the next query replaces the slot.
+        if slot
+            .and_then(|slot| slot.fetch.request())
+            .is_some_and(|request| self.session.requests.get(request).is_some())
         {
             return Ok(None);
         }
-        let first_page = offset.is_empty();
-        if first_page {
-            self.session.bots.inline_query = Some(InlineQuerySlot {
-                chat_id,
-                bot_user_id,
-                query: query.to_string(),
-                fetch: InlineQueryFetch::Loading,
+        if !first_page {
+            let continues = slot.is_some_and(|slot| {
+                matches!(
+                    &slot.fetch,
+                    InlineQueryFetch::Loaded { next_offset, more, .. }
+                        if next_offset == offset
+                            && !matches!(more, InlineMore::Failed { offset: failed } if failed == offset)
+                )
             });
+            if !continues {
+                return Ok(None);
+            }
         }
         let extra = self.session.request(
             RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
@@ -604,16 +710,27 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(chat_id),
         );
         let json = get_inline_query_results(extra, bot_user_id, chat_id, query, offset);
-        match self.sender.send_json(&json) {
-            Ok(()) => Ok(Some(extra)),
-            Err(err) => {
-                self.session.requests.take(extra);
-                if first_page {
-                    self.session.bots.inline_query = None;
-                }
-                Err(err)
-            }
+        // The slot changes once the request went out: a refused send leaves
+        // the previous query's results where they were.
+        if let Err(err) = self.sender.send_json(&json) {
+            self.session.requests.take(extra);
+            return Err(err);
         }
+        if first_page {
+            self.session.bots.inline_query = Some(InlineQuerySlot {
+                chat_id,
+                bot_user_id,
+                query: query.to_string(),
+                fetch: InlineQueryFetch::Loading { request: extra },
+            });
+        } else if let Some(InlineQuerySlot {
+            fetch: InlineQueryFetch::Loaded { more, .. },
+            ..
+        }) = self.session.bots.inline_query.as_mut()
+        {
+            *more = InlineMore::Asking { request: extra };
+        }
+        Ok(Some(extra))
     }
 
     /// Bots slice: resolve `@botname` → bot user id via `searchPublicChat`
@@ -723,6 +840,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             self.session.requests.take(extra);
             return Err(err);
+        }
+        // Stopping again: the last refusal no longer stands.
+        if let Some(draft) = self
+            .session
+            .messages
+            .pending_bot_messages
+            .get_mut(&(chat_id.0, topic_id))
+            .filter(|draft| {
+                matches!(
+                    draft.stop,
+                    crate::state::BotStopStage::Running | crate::state::BotStopStage::Failed
+                )
+            })
+        {
+            draft.stop = crate::state::BotStopStage::Stopping(extra);
         }
         Ok(Some(extra))
     }

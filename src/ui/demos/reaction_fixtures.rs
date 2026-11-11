@@ -28,5 +28,6 @@ pub(in crate::ui) fn seed_reaction_options(
             .collect(),
             allow_custom_emoji: false,
             premium_locked: Vec::new(),
+            paid_offered: false,
         });
 }

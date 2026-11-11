@@ -9,7 +9,9 @@
 
 use super::app::QuillApp;
 use super::photo_edit::{CropRect, Orientation, Placed, Stroke, overlay_item, render};
-use super::photo_editor::{EditorPurpose, HANDLE_GRAB, PhotoEditor, preview_of};
+use super::photo_editor::{
+    EditorPurpose, Gesture, HANDLE_GRAB, KeepRatio, PhotoEditor, SetEdit, preview_of,
+};
 use super::photo_editor_items::ItemDrag;
 use gpui_kit::component::button::*;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
@@ -40,13 +42,20 @@ impl PhotoEditor {
             return None;
         }
         let canvas = RgbaImage::new(CANVAS_SIDE, CANVAS_SIDE);
-        let mut editor = Self::on_canvas(EditorPurpose::Set { set_id, kind }, canvas);
-        editor.base_item = true;
         // Emoji keep no ratio (`RunImageEditorAndCreate` zeroes it).
-        editor.original_ratio = match kind {
+        let original = match kind {
             SetKind::Stickers => original_ratio(width, height),
             SetKind::Emoji => 0.0,
         };
+        let edit = SetEdit {
+            corners: Default::default(),
+            ratio: if original > 0.0 {
+                KeepRatio::Off(original)
+            } else {
+                KeepRatio::NotOffered
+            },
+        };
+        let mut editor = Self::on_canvas(EditorPurpose::Set { set_id, kind, edit }, canvas);
         let preview = preview_of(&image);
         editor.placed.push((
             Placed {
@@ -61,42 +70,90 @@ impl PhotoEditor {
 
     /// The crop can't be dragged: it is the canvas, or the kept ratio.
     pub(super) fn fixed_crop(&self) -> bool {
-        self.base_item
+        self.is_set()
+    }
+
+    /// The editor is making an image for a set (Set mode).
+    pub(super) fn is_set(&self) -> bool {
+        matches!(self.purpose, EditorPurpose::Set { .. })
+    }
+
+    fn set_edit_mut(&mut self) -> Option<&mut SetEdit> {
+        match &mut self.purpose {
+            EditorPurpose::Set { edit, .. } => Some(edit),
+            _ => None,
+        }
+    }
+
+    /// How round the sticker's corners come out.
+    pub(super) fn corners(&self) -> Corners {
+        match &self.purpose {
+            EditorPurpose::Set { edit, .. } => edit.corners,
+            _ => Corners::default(),
+        }
+    }
+
+    /// "Keep original aspect ratio" is on.
+    pub(super) fn keeps_ratio(&self) -> bool {
+        matches!(
+            &self.purpose,
+            EditorPurpose::Set {
+                edit: SetEdit {
+                    ratio: KeepRatio::On(_),
+                    ..
+                },
+                ..
+            }
+        )
     }
 
     /// `index` is the picked image of the Set mode.
     pub(super) fn is_base(&self, index: usize) -> bool {
-        self.base_item && index == 0
+        self.is_set() && index == 0
     }
 
     /// The menu offers "Keep original aspect ratio".
     pub(super) fn offers_keep_ratio(&self) -> bool {
-        self.base_item && self.original_ratio > 0.0
+        matches!(
+            &self.purpose,
+            EditorPurpose::Set { edit, .. } if edit.ratio != KeepRatio::NotOffered
+        )
     }
 
     pub(super) fn set_corners(&mut self, corners: Corners) {
-        self.corners = corners;
+        if let Some(edit) = self.set_edit_mut() {
+            edit.corners = corners;
+        }
     }
 
     /// "Keep original aspect ratio": the crop becomes the largest centered
     /// rectangle of the image's ratio, or the whole canvas again.
     pub(super) fn toggle_keep_ratio(&mut self) {
-        if !self.offers_keep_ratio() {
+        let sideways = self.orientation.is_sideways();
+        let Some(edit) = self.set_edit_mut() else {
             return;
-        }
-        self.keep_ratio = !self.keep_ratio;
-        self.crop = if self.keep_ratio {
-            let (x, y, w, h) = keep_ratio_crop(self.original_ratio);
-            CropRect { x, y, w, h }
-        } else {
-            CropRect::FULL
+        };
+        edit.ratio = match edit.ratio {
+            KeepRatio::NotOffered => return,
+            KeepRatio::Off(original) => KeepRatio::On(original),
+            KeepRatio::On(original) => KeepRatio::Off(original),
+        };
+        let ratio = edit.ratio;
+        self.crop = match ratio {
+            KeepRatio::On(original) => {
+                // The picture's ratio as it lies now: Rotate turned it.
+                let ratio = if sideways { 1.0 / original } else { original };
+                let (x, y, w, h) = keep_ratio_crop(ratio);
+                CropRect { x, y, w, h }
+            }
+            KeepRatio::Off(_) | KeepRatio::NotOffered => CropRect::FULL,
         };
     }
 
     /// A wheel turn over the canvas: scale the picked image about its
     /// center (up is bigger).
     pub(super) fn zoom_base(&mut self, delta_px: f32) {
-        if !self.base_item || !delta_px.is_finite() {
+        if !self.is_set() || !delta_px.is_finite() {
             return;
         }
         if let Some((item, _)) = self.placed.first_mut() {
@@ -117,7 +174,7 @@ impl PhotoEditor {
         let on_handle = ((left + w - x) * scale_x).abs() <= HANDLE_GRAB
             && ((top + h - y) * scale_y).abs() <= HANDLE_GRAB;
         let inside = (left..left + w).contains(&x) && (top..top + h).contains(&y);
-        self.item_drag = if on_handle {
+        let drag = if on_handle {
             let distance = ((x - base.center.0) * scale_x).hypot((y - base.center.1) * scale_y);
             Some(ItemDrag::Resize {
                 start_width: base.width,
@@ -131,7 +188,8 @@ impl PhotoEditor {
         } else {
             None
         };
-        self.selected = self.item_drag.is_some().then_some(0);
+        self.selected = drag.is_some().then_some(0);
+        self.gesture = drag.map_or(Gesture::None, Gesture::Item);
     }
 
     /// What "Done" renders, without the editor's UI handles, taken out of
@@ -151,7 +209,7 @@ impl PhotoEditor {
     /// The picked image (when it is still the base) and the other items.
     fn set_items(&self) -> (Option<Placed>, Vec<Placed>) {
         let mut items = self.placed.iter().map(|(item, _)| item.clone());
-        let base = self.base_item.then(|| items.next()).flatten();
+        let base = self.is_set().then(|| items.next()).flatten();
         (base, items.collect())
     }
 
@@ -203,8 +261,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Div {
         let owner = cx.entity().downgrade();
-        let current = editor.corners;
-        let keep_ratio = editor.keep_ratio;
+        let current = editor.corners();
+        let keep_ratio = editor.keeps_ratio();
         let offers_keep_ratio = editor.offers_keep_ratio();
         let corners_button = Button::new("photo-editor-corners")
             .label(tr_with(
@@ -319,7 +377,7 @@ mod tests {
         );
 
         wide.toggle_keep_ratio();
-        assert!(wide.keep_ratio);
+        assert!(wide.keeps_ratio());
         let kept = wide.render_set_image();
         assert_eq!(kept.dimensions(), (512, 256));
         assert_eq!(kept.get_pixel(256, 128)[3], 255);
@@ -329,6 +387,18 @@ mod tests {
         let prepared = quill::sticker_image::prepared_sticker_image(&kept, 512, Corners::Large);
         assert_eq!(prepared.get_pixel(0, 0)[3], 0, "rounded corner");
         assert_eq!(prepared.get_pixel(256, 128)[3], 255);
+    }
+
+    #[test]
+    fn keep_ratio_after_rotate_follows_the_turned_picture() {
+        let mut wide = editor(400, 200, SetKind::Stickers);
+        wide.rotate();
+        wide.toggle_keep_ratio();
+        wide.toggle_keep_ratio();
+        wide.toggle_keep_ratio();
+        assert_eq!(wide.crop.w * 2.0, wide.crop.h, "tall after one turn");
+        wide.rotate();
+        assert_eq!(wide.crop.h * 2.0, wide.crop.w, "wide after two");
     }
 
     /// Done hands the canvas to the worker as it is: the turn waits for
@@ -370,6 +440,6 @@ mod tests {
             Some(super::BASE_MIN_WIDTH)
         );
         square.set_corners(Corners::None);
-        assert_eq!(square.corners, Corners::None);
+        assert_eq!(square.corners(), Corners::None);
     }
 }

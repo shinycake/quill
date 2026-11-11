@@ -107,7 +107,7 @@ pub(super) struct PanelKey {
     session_revision: u64,
     recent_emoji: usize,
     premium: bool,
-    category: Option<usize>,
+    category: Option<quill::telegram::EmojiCategorySource>,
     unicode_only: bool,
 }
 
@@ -122,8 +122,10 @@ pub(super) struct ReactionTarget {
 
 pub(super) struct MediaPanel {
     /// Closed, composing, or a selector; written through
-    /// [`QuillApp::set_media_panel_mode`] only.
-    pub panel_mode: PanelMode,
+    /// [`QuillApp::set_media_panel_mode`] only. Private to `media_panel`, so
+    /// no other module can write it (scripts/single-writers.txt checks the
+    /// module itself).
+    panel_mode: PanelMode,
     /// The "Set Status for..." box, once a status asked for a custom time.
     pub until: Option<status_time_box::StatusUntil>,
     pub tab: PanelTab,
@@ -136,9 +138,10 @@ pub(super) struct MediaPanel {
     pub key: Option<PanelKey>,
     pub active_section: usize,
     pub hovered: Option<FileId>,
-    /// The sticker category chosen in the strip under the search field
-    /// (an index into `Session::stickers.emoji.sticker_categories`).
-    pub category: Option<usize>,
+    /// The sticker category chosen in the strip under the search field,
+    /// by what it searches: a reload of the category list cannot make it
+    /// name another one.
+    pub category: Option<quill::telegram::EmojiCategorySource>,
 }
 
 impl Default for MediaPanel {
@@ -220,7 +223,7 @@ fn push_custom_packs(
         } else {
             set.title.clone().into()
         };
-        let items = session.media.media_library.set_stickers.get(&set.id);
+        let items = session.media.media_library.get(&set.id);
         let cells: Vec<PanelCell> = match (items, matches) {
             (Some(items), matches) => items
                 .iter()
@@ -307,19 +310,18 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.message_ui.menu = None;
+        // Not `close_message_menu`: the selector shows this message's
+        // reaction options, which that would drop.
+        self.message_ui.menu.close();
         self.pickers.reaction_search_input.update(cx, |input, cx| {
             input.set_value("", window, cx);
             input.focus(window, cx);
         });
-        self.set_media_panel_mode(PanelMode::Reaction(ReactionTarget {
+        self.enter_selector_mode(PanelMode::Reaction(ReactionTarget {
             chat_id,
             message_id,
             position,
         }));
-        self.pickers.media_panel.key = None;
-        self.pickers.media_panel.active_section = 0;
-        self.pickers.media_panel.tab = PanelTab::Emoji;
         if let Some(live) = self.live.as_mut() {
             // Loads the installed custom emoji packs.
             let _ = live.driver.open_media_panel();
@@ -371,7 +373,7 @@ impl QuillApp {
     pub(super) fn panel_item(&self, source: StickerSource, ix: usize) -> Option<&StickerItem> {
         let session = self.session()?;
         match source {
-            StickerSource::Set(id) => session.media.media_library.set_stickers.get(&id)?.get(ix),
+            StickerSource::Set(id) => session.media.media_library.get(&id)?.get(ix),
             StickerSource::Recent => session.stickers.stickers.recent.get(ix),
             StickerSource::Favorites => session.stickers.stickers.favorites.get(ix),
             StickerSource::Found => session.stickers.stickers.found_stickers.get(ix),
@@ -432,7 +434,7 @@ impl QuillApp {
                 .session()
                 .map_or(0, |s| s.settings.media_prefs.recent_emoji.len()),
             premium: self.session().is_some_and(|s| s.my_is_premium()),
-            category: self.pickers.media_panel.category,
+            category: self.pickers.media_panel.category.clone(),
             unicode_only: self.group_title_emoji_active(),
         };
         self.sync_media_panel_search(&query);
@@ -480,7 +482,7 @@ impl QuillApp {
         let tab = self.pickers.media_panel.tab;
         // Emoji search adds TDLib's keyword matches (all typed languages).
         let keywords =
-            tab == PanelTab::Emoji && session.stickers.emoji.keyword_emojis.query != query;
+            tab == PanelTab::Emoji && session.stickers.emoji.keyword_emojis.query() != query;
         // Sticker search goes to TDLib (by emoji or keyword, or for a
         // category).
         let stickers = (tab == PanelTab::Stickers)
@@ -687,7 +689,7 @@ impl QuillApp {
                 label: title,
                 set_id: Some(set.id),
             });
-            match session.media.media_library.set_stickers.get(&set.id) {
+            match session.media.media_library.get(&set.id) {
                 Some(items) => push_grid(
                     &mut rows,
                     (0..items.len())

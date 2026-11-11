@@ -6,6 +6,15 @@ use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::ids::ChatId;
 
+/// The recent-actions search box of one page: it shows that chat's stored
+/// query from the moment it is built, and goes with the page.
+pub(crate) struct EventLogSearch {
+    pub(super) input: Entity<TextareaState>,
+    /// Typing in the box searches once it pauses; held so the page's end
+    /// ends the subscription.
+    pub(super) _typed: Subscription,
+}
+
 pub(crate) struct AdminUi {
     /// The New Link / Edit Link box (`invite_link_box/`).
     pub(super) invite_link_box: Option<super::invite_link_box::InviteLinkBox>,
@@ -30,22 +39,14 @@ pub(crate) struct AdminUi {
     pub(super) group_confirm_dialog: Option<GroupConfirmDialog>,
     /// Slice G2: forum-topic management dialog.
     pub(super) forum_manage_dialog: Option<ForumManageDialog>,
-    /// Slice G2: event-log search input for the info panel's
-    /// "Recent actions" section (created lazily when the panel opens).
-    pub(super) event_log_search: Option<Entity<TextareaState>>,
     /// The recent-actions list (oldest event first, newest at the bottom):
     /// earlier events load when it is scrolled to its top.
     pub(super) event_log_list: ListState,
     /// The event ids the list was last built for (`event_log_list::plan_sync`).
-    pub(super) event_log_ids: std::cell::RefCell<Vec<i64>>,
-    /// Counts search edits so only the last one searches.
-    pub(super) event_log_keystroke: u64,
-    /// The list reports its scrolling to the app (set up once).
-    pub(super) event_log_hooked: bool,
-    /// The list length an automatic "load earlier" was last asked for.
-    pub(super) event_log_autoload: std::cell::Cell<usize>,
-    /// The chat whose recent-actions poll is running (one timer task).
-    pub(super) event_log_poll: Option<ChatId>,
+    pub(super) event_log_ids: std::cell::Cell<Vec<i64>>,
+    /// The recent-actions page last opened, with the timers that belong to
+    /// it. Opening it for another chat replaces it, and its timers stop.
+    pub(super) event_log_page: Option<EventLogPage>,
     /// B7: group / channel settings dialog (topics, history, reactions,
     /// discussion group, ...).
     pub(super) group_settings_dialog: Option<GroupSettingsDialog>,
@@ -55,6 +56,36 @@ pub(crate) struct AdminUi {
     pub(super) welcome_dialog: Option<WelcomeDialog>,
     /// The group or channel Edit box (`group_edit_box/`).
     pub(super) group_edit_box: Option<super::group_edit_box::GroupEditBox>,
+}
+
+/// The recent-actions page of one chat and what runs for it. The timer
+/// tasks are owned here: replacing the page or dropping the screen stops
+/// them, and a newer one replaces an older one of its kind.
+pub(super) struct EventLogPage {
+    pub(super) chat: ChatId,
+    /// The page's search box, built once the window it shows in is known.
+    pub(super) search: Option<EventLogSearch>,
+    /// The list length an automatic "load earlier" was last asked for in
+    /// this page (cleared when the list starts over).
+    pub(super) autoload: std::cell::Cell<Option<usize>>,
+    /// The search debounce: each edit replaces it, so only the last one
+    /// searches.
+    pub(super) typed: Option<gpui_kit::Task<()>>,
+    /// The poll timer, which ends by itself when the page closes or the app
+    /// goes inactive (`resume_event_log_poll` starts it again).
+    pub(super) poll: Option<gpui_kit::Task<()>>,
+}
+
+impl EventLogPage {
+    pub(super) fn new(chat: ChatId) -> Self {
+        Self {
+            chat,
+            search: None,
+            autoload: std::cell::Cell::new(None),
+            typed: None,
+            poll: None,
+        }
+    }
 }
 
 /// The boost box keeps its state in the session (`groups.boost_box`),
@@ -97,13 +128,9 @@ impl AdminUi {
             ownership_dialog: None,
             group_confirm_dialog: None,
             forum_manage_dialog: None,
-            event_log_search: None,
             event_log_list: super::event_log::new_event_log_list(),
-            event_log_ids: std::cell::RefCell::new(Vec::new()),
-            event_log_keystroke: 0,
-            event_log_hooked: false,
-            event_log_autoload: std::cell::Cell::new(0),
-            event_log_poll: None,
+            event_log_ids: std::cell::Cell::new(Vec::new()),
+            event_log_page: None,
             group_settings_dialog: None,
             join_requests_dialog: None,
             welcome_dialog: None,

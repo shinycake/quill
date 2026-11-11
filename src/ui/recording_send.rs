@@ -170,11 +170,10 @@ impl QuillApp {
         let Some(target) = self.begin_recording_send(&caption, cx) else {
             return;
         };
-        let play_once = self.recording.once;
-        let Some(capture) = self.recording.take_voice() else {
+        let play_once = self.recording.play_once() && self.once_allowed_in(Some(target.chat_id));
+        let Some(capture) = self.take_voice_capture() else {
             return;
         };
-        self.stop_record_preview();
         self.consume_composer_for_send(&target, true, window, cx);
         let finish = capture.close_microphone();
         self.sync_voice_action();
@@ -252,8 +251,7 @@ impl QuillApp {
             );
             if sent.is_ok() {
                 self.set_note(StatusNote::silent(tr(keys::Q_MISC_SENDING_VOICE_NOTE)));
-                self.composer_ui.clear_draft_on_success =
-                    Some(DraftClear::whole_composer(target.chat_id));
+                self.expect_draft_clear(DraftClear::whole_composer(target.chat_id));
             } else {
                 let _ = std::fs::remove_file(&draft.path);
                 self.restore_composer_after_failed_send(target, window, cx);
@@ -360,8 +358,7 @@ impl QuillApp {
             );
             if sent.is_ok() {
                 self.set_note(StatusNote::silent(tr(keys::Q_MISC_SENDING_VIDEO_NOTE)));
-                self.composer_ui.clear_draft_on_success =
-                    Some(DraftClear::whole_composer(target.chat_id));
+                self.expect_draft_clear(DraftClear::whole_composer(target.chat_id));
             } else {
                 let _ = std::fs::remove_file(&draft.path);
                 self.restore_composer_after_failed_send(target, window, cx);
@@ -447,7 +444,7 @@ impl QuillApp {
                 self.spawn_voice_tick(cx);
                 let note = match purpose {
                     CaptureFor::Message => {
-                        self.recording.locked = lock;
+                        self.recording.set_locked(lock);
                         self.sync_voice_action();
                         keys::Q_MISC_RECORDING_VIDEO_NOTE
                     }

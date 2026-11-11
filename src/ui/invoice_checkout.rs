@@ -31,7 +31,9 @@ impl QuillApp {
     pub(super) fn payment_dialog_visible(&self) -> bool {
         self.payments.dialog.is_some()
             && self.session().is_some_and(|s| {
-                s.payments.form.is_some() || s.payments.form_loading || s.payments.note.is_some()
+                s.payments.checkout.form().is_some()
+                    || s.payments.checkout.is_loading()
+                    || s.payments.checkout.note().is_some()
             })
     }
 
@@ -48,23 +50,19 @@ impl QuillApp {
         ) {
             return;
         }
-        let sent = self.live.as_mut().map(|live| {
-            let payments = &mut live.driver.session.payments;
-            payments.form = None;
-            payments.validated = None;
-            payments.shipping_id = None;
-            payments.form_paid = false;
-            payments.form_loading = true;
-            payments.note = None;
-            live.driver.send_payment_form_request(invoice)
-        });
-        self.open_box(crate::ui::shell::DialogKind::PaymentForm);
+        // The driver replaces the checkout (and its note) only when the
+        // form's request went out: a refused one, such as a new form while
+        // a payment waits on its verification step, leaves the checkout
+        // on screen as it was.
+        let sent = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.send_payment_form_request(invoice));
         match sent {
             Some(Ok(_)) => self.open_payment_dialog(window, cx),
             _ => {
-                if let Some(live) = self.live.as_mut() {
-                    live.driver.session.payments.form_loading = false;
-                }
+                // Nothing was asked: the checkout that was on screen, and
+                // its dialog, stay as they were.
                 self.set_note(StatusNote::error(tr(
                     keys::Q_MONEY_COULD_NOT_LOAD_THE_PAYMENT,
                 )));
@@ -113,7 +111,7 @@ impl QuillApp {
     ) {
         let pack = self
             .session()
-            .and_then(|s| s.payments.star_packs.options.get(index).cloned());
+            .and_then(|s| s.payments.star_packs.options.items().get(index).cloned());
         match pack {
             Some(pack) => self.start_invoice_checkout(stars_pack_invoice(&pack), window, cx),
             None => self.set_status_note(
@@ -135,9 +133,9 @@ impl QuillApp {
         let (recipient, limit) = match self.session() {
             Some(session) => (
                 session.payments.gifts_manage.send.recipient.clone(),
-                session.payments.gift_text_length_max.unwrap_or(0),
+                session.payments.gift_text_length_max,
             ),
-            None => (None, 0),
+            None => (None, None),
         };
         let text = self
             .payments
@@ -168,6 +166,17 @@ impl QuillApp {
         let Some(draft) = self.giveaway_draft_now(cx) else {
             return;
         };
+        // Its payment is out, or done: the giveaway is not bought twice.
+        let settled = self.session().is_some_and(|s| {
+            s.payments.giveaway_paying(draft.boosted_chat_id)
+                || s.payments
+                    .giveaway
+                    .launches
+                    .is_done_for(draft.boosted_chat_id)
+        });
+        if settled {
+            return;
+        }
         let options = self
             .session()
             .map(|s| s.payments.giveaway.options.clone())
@@ -193,9 +202,9 @@ impl QuillApp {
     pub(super) fn submit_stars_payment(&mut self, cx: &mut Context<Self>) {
         let snapshot = self.session().map(|session| {
             (
-                session.payments.form.clone(),
-                session.payments.request.clone(),
-                session.payments.form_paid,
+                session.payments.checkout.form().cloned(),
+                session.payments.checkout.invoice().cloned(),
+                session.payments.checkout.is_paid(),
             )
         });
         let Some((Some(form), Some(request), false)) = snapshot else {
@@ -205,7 +214,7 @@ impl QuillApp {
             return;
         }
         let sent = self.live.as_mut().map(|live| {
-            live.driver.session.payments.note = None;
+            live.driver.session.payments.checkout.set_note(None);
             live.driver.submit_payment_form(
                 &request.invoice,
                 form.id,
@@ -273,7 +282,7 @@ impl QuillApp {
             .primary();
         body.child(if session.payments.checkout_sending() {
             pay.label(tr(keys::Q_MONEY_PROCESSING)).disabled(true)
-        } else if session.payments.form_paid {
+        } else if session.payments.checkout.is_paid() {
             pay.label(tr(keys::SR_MESSAGE_INVOICE_PAID)).disabled(true)
         } else if too_poor {
             pay.disabled(true)

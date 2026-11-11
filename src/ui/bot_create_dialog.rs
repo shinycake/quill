@@ -15,23 +15,14 @@ use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::owned_bots::{self, NAME_MAX, UsernameProblem};
-use quill::state::DeepLinkAction;
+use quill::state::{DeepLinkAction, ManagedBotShare};
 use quill::telegram::envelope::{RequestManagedBotSpec, UsernameCheckResult};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
 /// Wait after the last keystroke before asking the server.
 const CHECK_DELAY: Duration = Duration::from_millis(350);
-
-/// The keyboard button a dialog answers: after `createBot` the new bot is
-/// handed to the requesting bot with `shareUsersWithBot`.
-#[derive(Clone, Copy)]
-pub(in crate::ui) struct ManagedBotShare {
-    chat_id: ChatId,
-    message_id: MessageId,
-    button_id: i32,
-}
 
 pub(super) struct BotCreateDialog {
     manager_id: i64,
@@ -43,8 +34,6 @@ pub(super) struct BotCreateDialog {
     username: Entity<InputState>,
     /// Counts keystrokes, so only the last one starts a check.
     version: u64,
-    /// The person pressed Create and the answer is awaited.
-    submitted: bool,
     _subscription: Subscription,
 }
 
@@ -140,6 +129,20 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // An earlier createBot may still be in flight (its box was closed
+        // while "Creating..."). Resetting would bump the generation and its
+        // answer would no longer match, so it is never reported; a new box
+        // would adopt that submission and its own share would never be
+        // answered. So a second press waits: `drain_bot_create` reports the
+        // first answer, and the press says so.
+        let creating = self
+            .session()
+            .is_some_and(|session| session.bots.owned.create.creating());
+        if creating {
+            self.set_note(StatusNote::info(tr(keys::Q_MEDIA_STILL_CREATING_A_BOT)));
+            cx.notify();
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
             live.driver.reset_create_bot();
         }
@@ -170,7 +173,6 @@ impl QuillApp {
             name,
             username: username.clone(),
             version: 0,
-            submitted: false,
             _subscription: subscription,
         });
         self.open_box(DialogKind::BotCreate);
@@ -224,7 +226,14 @@ impl QuillApp {
     }
 
     fn close_bot_create(&mut self, cx: &mut Context<Self>) {
+        // While "Creating..." the box may close: the bot is created on the
+        // server all the same, and `drain_bot_create` reports the answer
+        // (toast, chat, share) whether or not the box is still there.
+        let creating = self
+            .session()
+            .is_some_and(|session| session.bots.owned.create.creating());
         if self.dialogs.bot_create_dialog.take().is_some()
+            && !creating
             && let Some(live) = self.live.as_mut()
         {
             live.driver.reset_create_bot();
@@ -236,13 +245,11 @@ impl QuillApp {
         let Some(dialog) = self.screen.dialogs.bot_create_dialog.as_mut() else {
             return;
         };
-        if dialog.submitted {
-            return;
-        }
         let name = dialog.name.read(cx).value().trim().to_string();
         let typed = dialog.username.read(cx).value().to_string();
         let manager_id = dialog.manager_id;
         let via_link = dialog.via_link;
+        let share = dialog.share;
         if name.is_empty()
             || name.chars().count() > NAME_MAX
             || owned_bots::username_problem(&typed).is_some()
@@ -257,7 +264,7 @@ impl QuillApp {
         };
         if live
             .driver
-            .create_managed_bot(manager_id, &name, &full, via_link)
+            .create_managed_bot(manager_id, &name, &full, via_link, share)
             .is_err()
         {
             self.set_note(StatusNote::error(tr(
@@ -266,62 +273,29 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        dialog.submitted = true;
-        // Watched until TDLib answers or the box closes: a cap would leave
-        // Create off with nothing in flight, and drop a late success. Not
-        // tied to the window it was pressed in: when that window closes the
-        // box goes on in the main window, and its answer still lands.
-        self.spawn_screen(cx, async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(150))
-                    .await;
-                let Ok(done) = this.update(cx, |this, cx| this.poll_bot_create(&name, &full, cx))
-                else {
-                    break;
-                };
-                if done {
-                    break;
-                }
-            }
-        })
-        .detach();
         cx.notify();
     }
 
-    /// Watch the `createBot` answer; `true` when it is settled.
-    pub(super) fn poll_bot_create(
-        &mut self,
-        name: &str,
-        full: &str,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if self.dialogs.bot_create_dialog.is_none() {
-            return true;
-        }
-        let Some(create) = self.session().map(|s| s.bots.owned.create.clone()) else {
-            return true;
+    /// Report the `createBot` answer the poll loop finds in the session:
+    /// the bot exists, or the create failed with no box left to show why.
+    /// The box may have been closed meanwhile: the answer is reported all
+    /// the same, with the name and manager fixed at the press.
+    pub(super) fn drain_bot_create(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(live) = self.live.as_mut() else {
+            return false;
         };
-        if let Some(new_bot_id) = create.created {
-            let share = self
-                .dialogs
-                .bot_create_dialog
-                .as_ref()
-                .and_then(|d| d.share);
-            let manager_id = self
-                .dialogs
-                .bot_create_dialog
-                .as_ref()
-                .map(|d| d.manager_id);
-            let manager = manager_id
-                .and_then(|id| self.session().and_then(|s| s.user(id)))
+        let created = live.driver.take_created_bot();
+        if let Some((submission, new_bot_id)) = created {
+            let manager = self
+                .session()
+                .and_then(|s| s.user(submission.manager_id))
                 .map(|u| u.first_name.clone())
                 .unwrap_or_default();
             // The shell closes the kit dialog with its flag, in whichever
-            // window hosts it.
+            // window hosts it. The answer is in: the dialog may go.
             self.close_bot_create(cx);
             // tdesktop reports the new bot to the requesting bot.
-            if let (Some(share), Some(live)) = (share, self.live.as_mut()) {
+            if let (Some(share), Some(live)) = (submission.share, self.live.as_mut()) {
                 let _ = live.driver.share_users_with_bot(
                     share.chat_id,
                     share.message_id,
@@ -330,26 +304,34 @@ impl QuillApp {
                 );
             }
             // tdesktop opens the new bot's chat and toasts.
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.resolve_deep_link(DeepLinkAction::OpenUsername {
-                    domain: full.to_string(),
-                    start_param: None,
-                    post: None,
-                    story_id: None,
-                });
-            }
+            let _ = self.resolve_deep_link_here(DeepLinkAction::OpenUsername {
+                domain: submission.username.clone(),
+                start_param: None,
+                post: None,
+                story_id: None,
+            });
             self.set_note(StatusNote::silent(tr_with(
                 keys::Q_MEDIA_CREATED_WILL_MANAGE_THIS_BOT,
-                &[("name", name), ("manager", &manager.to_string())],
+                &[("name", &submission.name), ("manager", &manager)],
             )));
             cx.notify();
             return true;
         }
-        if create.creating.is_none() {
-            // Failed: the dialog shows the reason and takes another try.
-            if let Some(dialog) = self.dialogs.bot_create_dialog.as_mut() {
-                dialog.submitted = false;
-            }
+        // Failed: an open dialog shows the reason and takes another try; a
+        // closed box has nowhere to show it, so it is a toast.
+        if self.dialogs.bot_create_dialog.is_none()
+            && let Some(live) = self.live.as_mut()
+            && let Some(error) = live
+                .driver
+                .session
+                .bots
+                .owned
+                .create
+                .error()
+                .map(str::to_string)
+        {
+            live.driver.reset_create_bot();
+            self.set_note(StatusNote::error(error));
             cx.notify();
             return true;
         }
@@ -372,7 +354,6 @@ impl QuillApp {
             };
             let (manager_id, name, username) =
                 (state.manager_id, state.name.clone(), state.username.clone());
-            let submitted = state.submitted;
             let muted = cx.theme().muted_foreground;
             let danger = cx.theme().danger;
             let success = cx.theme().success;
@@ -389,11 +370,8 @@ impl QuillApp {
             let name_text = name.read(cx).value().trim().to_string();
             let full = owned_bots::full_username(&typed);
             let problem = owned_bots::username_problem(&typed);
-            let verdict = create
-                .check
-                .as_ref()
-                .filter(|(checked, _)| *checked == full)
-                .map(|(_, result)| *result);
+            let verdict = create.verdict(&full);
+            let submitted = create.creating();
             let (line, line_color) = match (problem, verdict) {
                 (Some(UsernameProblem::Empty), _) => (String::new(), muted),
                 (Some(problem), _) => (problem.line().to_string(), danger),
@@ -405,7 +383,7 @@ impl QuillApp {
                     success,
                 ),
                 (None, Some(_)) => (tr(keys::CREATE_BOT_USERNAME_TAKEN).to_string(), danger),
-                (None, None) if create.check_pending.is_some() => {
+                (None, None) if create.checking() => {
                     (tr(keys::Q_MEDIA_CHECKING).to_string(), muted)
                 }
                 (None, None) => (
@@ -476,7 +454,7 @@ impl QuillApp {
                         .text_color(muted)
                         .child(tr(keys::Q_MEDIA_CREATING)),
                 );
-            } else if let Some(error) = create.error.clone() {
+            } else if let Some(error) = create.error().map(str::to_string) {
                 body = body.child(div().text_xs().text_color(danger).child(error));
             }
             let footer = div()
@@ -487,6 +465,7 @@ impl QuillApp {
                     Button::new("bot-create-cancel")
                         .label(tr(keys::CANCEL))
                         .ghost()
+                        .disabled(submitted)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.close_bot_create(cx);
                             this.close_kit_dialog_if_done(DialogKind::BotCreate, window, cx);
@@ -508,16 +487,13 @@ impl QuillApp {
                 .child(body)
                 .child(footer)
                 .into_any_element();
-            let content = Rc::new(RefCell::new(Some(content)));
+            let content = Rc::new(Cell::new(Some(content)));
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(tr(keys::CREATE_BOT_TITLE)))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |slot, _, _| {
-                        let body = content
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = content.take().unwrap_or_else(|| div().into_any_element());
                         slot.child(body)
                     },
                 ))
@@ -534,3 +510,8 @@ crate::ui::shell::register_dialogs! {
     )
     .close(|app, _, cx| app.close_bot_create(cx)),
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "bot_create_tests.rs"]
+mod tests;

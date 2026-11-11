@@ -18,6 +18,13 @@ pub(crate) fn call_request_error_line(err: &TdError, action: &str) -> String {
     }
 }
 
+/// The line of a fetch whose request could not even be sent (the client is
+/// closing or not connected): the same shape as a refusal, so the page draws
+/// it with its Retry instead of a spinner that nothing will end.
+pub(crate) fn send_failed_line(action: &str) -> String {
+    call_request_error_line(&TdError::from_code(LOST_REQUEST_ERROR_CODE), action)
+}
+
 /// Slice A2: honest one-line failure for a 2FA management request. The
 /// classification comes from TDLib's actual numeric error code (400 =
 /// wrong password / invalid input, 429 = flood-wait); the native message

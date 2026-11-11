@@ -141,6 +141,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::ReportChatSponsoredMessage, Some(chat_id));
+        self.session.note_sponsored_report_request(extra);
         match self.sender.send_json(&report_chat_sponsored_message(
             extra, chat_id, message_id, option_id,
         )) {

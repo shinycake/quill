@@ -30,8 +30,6 @@ pub(crate) struct ChatWindowView {
     title_shown: String,
     /// The geometry at the last render; a change is saved for next time.
     bounds_seen: Option<Bounds<Pixels>>,
-    /// The window's bookkeeping ran (the app knows the window is gone).
-    closed: bool,
     /// This window is kept out of screen capture (a secret chat, or its
     /// viewer showing a secret chat's media): each window has its own.
     capture_blocked: bool,
@@ -68,7 +66,6 @@ impl ChatWindowView {
             shell,
             title_shown: String::new(),
             bounds_seen: None,
-            closed: false,
             capture_blocked: false,
             _observe: observe,
             _placed: placed,
@@ -81,8 +78,9 @@ impl ChatWindowView {
     fn placed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (chat_id, active) = (self.chat_id, window.is_window_active());
         let place = WindowPlace::of(window, window.display(cx).map(|display| display.id()));
+        let bounds = window.bounds();
         let _ = self.owner.update(cx, |app, cx| {
-            app.chat_window_placed(chat_id, active, place, cx);
+            app.chat_window_placed(chat_id, active, place, bounds, cx);
         });
     }
 
@@ -96,15 +94,25 @@ impl ChatWindowView {
     /// the app. `window` is this window while it can still run their
     /// closes (`None`: the platform already destroyed it, and its
     /// per-window boxes go with its state).
-    fn closing(&mut self, reopenable: bool, window: Option<&mut Window>, cx: &mut Context<Self>) {
-        if self.closed {
-            return;
-        }
-        self.closed = true;
+    pub(super) fn closing(
+        &mut self,
+        reopenable: bool,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
+        let me = cx.entity_id();
         let chat_id = self.chat_id;
         // Where the window stood, for "Reopen closed window".
         let bounds = self.bounds_seen.filter(|_| reopenable);
         let _ = self.owner.update(cx, |app, cx| {
+            // The app lists the window until its bookkeeping runs (the
+            // bookkeeping unlists it): one that is not listed was closed
+            // already, by this window's earlier close report or by an
+            // account switch that came before the platform's. Running it
+            // again would act on a window of the same chat the app has now.
+            if !app.windows.lists_view(me) {
+                return;
+            }
             // Its boxes close against its own state, before it goes.
             if let Some(window) = window {
                 app.close_window_boxes(chat_id, window, cx);
@@ -112,20 +120,6 @@ impl ChatWindowView {
             app.in_window_scope(Some(chat_id), cx, |app, cx| app.flush_leaving_draft(cx));
             app.chat_window_closed(chat_id, bounds, cx);
         });
-    }
-
-    /// The app already did the window's bookkeeping (an account switch
-    /// closed it): its close runs nothing more. The platform reports the
-    /// close after the switch, when the bookkeeping would run on the new
-    /// account and file its windows as these, now gone.
-    pub(super) fn mark_closed(&mut self) {
-        self.closed = true;
-    }
-
-    /// Whether the window's bookkeeping ran.
-    #[cfg(test)]
-    pub(super) fn is_closed(&self) -> bool {
-        self.closed
     }
 
     /// Whether this window is kept out of screen capture.
@@ -169,6 +163,10 @@ impl Render for ChatWindowView {
             return div().size_full().into_any_element();
         }
         if app.read(cx).account.passcode.is_locked() {
+            // The lock draws no history: this window's widgets go off
+            // screen, so they stop running and polling (round 18 C #8), as
+            // the main window's do.
+            app.update(cx, |app, _| app.widgets_left_window(Some(chat_id)));
             return self.render_locked(&app, window, cx);
         }
         if self.title_shown != title {
@@ -183,7 +181,7 @@ impl Render for ChatWindowView {
         // A window may draw in the middle of another window's input: the
         // scope in place then is restored afterwards.
         let (outer, outer_tick) = app.update(cx, |app, cx| {
-            if app.windows.note_place(chat_id, active, place) {
+            if app.windows.note_place(chat_id, active, place, bounds) {
                 // The gate follows it now, not at the main window's next
                 // render, which a minimized main window never draws.
                 app.follow_windows(cx);
@@ -219,8 +217,11 @@ impl Render for ChatWindowView {
             app.viewer_follow_window_fullscreen(window);
             app.seed_history_width(f32::from(window.viewport_size().width));
             // The window's half of the frame upkeep, with its state in
-            // place (a window whose view is gone runs none of it).
+            // place (a window whose view is gone runs none of it). Its
+            // viewer may draw an HDR frame: this window goes to extended
+            // range for it, as the main window does.
             if app.windows.scope == Some(chat_id) {
+                app.sync_viewer_hdr(window);
                 app.per_window_upkeep(window, cx);
             }
             let body = app.chat_window_body(chat_id, window, cx);
@@ -239,7 +240,7 @@ impl Render for ChatWindowView {
             app.disk_low_banner(cx)
         });
         let view = cx.weak_entity();
-        super::super::window_frame::sync(window, app.read(cx).appearance.native_window_frame);
+        super::super::window_frame::sync(window, cx, app.read(cx).appearance.native_window_frame);
         let title_bar = super::super::window_frame::FrameTitleBar::new()
             .on_close_window({
                 let view = view.clone();

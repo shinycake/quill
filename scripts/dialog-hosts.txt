@@ -16,6 +16,7 @@ AccountExport | answer | the progress box shows the export its own box's Export 
 Giveaway | keys | giveaway.form
 GiftMarket | keys | gift_market.stack gift_market.push()
 LogOut | keys | settings.log_out_confirm
+ProxyList | keys | proxy.list_box
 ArchiveMuteSuggestion | answer | TDLib suggests it with no request; the archive it is about is the main window's chat list
 CallSwap | answer | an incoming call during a call asks with no request; it has no close and must be answered, in the window of the last press
 PremiumLimit | answer | a limit error on any request; it shows in the window of the last press, the one whose action hit the limit

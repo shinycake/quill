@@ -47,7 +47,9 @@ impl QuillApp {
         self.sync_window_userpic_videos(chat_id);
         let effects = self.emoji_effect_overlay(self.effects_window_active(), cx);
         let forum_column = self.forum_column_layout(window);
-        let topic_open = self.session().is_some_and(|s| s.open_topic.is_some());
+        let topic_open = self
+            .session()
+            .is_some_and(|s| s.open_forum_topic().is_some());
         // A narrow forum window shows the topics until one is picked.
         let topics_only = forum_column == ForumColumn::Replacing && !topic_open;
         let column = (forum_column != ForumColumn::Hidden
@@ -127,7 +129,7 @@ impl QuillApp {
             .children(self.custom_emoji_card(cx))
             .children(self.photo_editor_overlay(cx))
             // M1: right-click message context menu.
-            .when_some(self.message_ui.menu, |this, menu| {
+            .when_some(self.message_ui.menu.at(), |this, menu| {
                 this.child(self.message_menu_overlay(menu, cx))
             })
             // The expanded reaction selector, where the menu was.

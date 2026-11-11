@@ -26,7 +26,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::calls::group_call_create::{CreateKind, rtmp_join_as};
 use quill::calls::rtmp_start::{
-    RtmpInfo, RtmpStart, StartEntry, StartFacts, call_button_visible, start_entries,
+    RtmpFailure, RtmpInfo, RtmpStart, StartEntry, StartFacts, call_button_visible, start_entries,
 };
 use quill::ids::{ChatId, RequestId};
 use quill::lang::{keys, tr};
@@ -43,11 +43,54 @@ pub(crate) enum RtmpConfirm {
     KeyWarning,
 }
 
-/// The box's own state: the key was revealed, a confirmation is up.
+/// Whether the Stream Key row shows the key.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum KeyRow {
+    #[default]
+    Hidden,
+    Shown,
+}
+
+/// What the box draws: the rows, or a confirmation in their place (which
+/// gives the rows back as they were when it ends).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RtmpBoxView {
+    Rows(KeyRow),
+    Confirm { which: RtmpConfirm, back: KeyRow },
+}
+
+impl Default for RtmpBoxView {
+    fn default() -> Self {
+        RtmpBoxView::Rows(KeyRow::Hidden)
+    }
+}
+
+impl RtmpBoxView {
+    /// The rows under the view (what a confirmation covers too).
+    fn key_row(self) -> KeyRow {
+        match self {
+            RtmpBoxView::Rows(row) | RtmpBoxView::Confirm { back: row, .. } => row,
+        }
+    }
+
+    /// Ask `which`, keeping the rows to go back to.
+    pub(crate) fn ask(&mut self, which: RtmpConfirm) {
+        *self = RtmpBoxView::Confirm {
+            which,
+            back: self.key_row(),
+        };
+    }
+
+    /// The confirmation was cancelled.
+    fn cancel(&mut self) {
+        *self = RtmpBoxView::Rows(self.key_row());
+    }
+}
+
+/// The box's own state.
 #[derive(Default)]
 pub(crate) struct RtmpStartUi {
-    pub(crate) key_shown: bool,
-    pub(crate) confirm: Option<RtmpConfirm>,
+    pub(crate) view: RtmpBoxView,
 }
 
 /// One pair of Server URL / Stream Key rows (tdesktop `FillRtmpRows`),
@@ -302,7 +345,7 @@ impl QuillApp {
             // and the fixture supplies the answer.
             None => {
                 if let Some(session) = self.demo_session.as_mut() {
-                    session.calls.rtmp_start = Some(RtmpStart::new(chat_id));
+                    session.calls.rtmp_start = Some(RtmpStart::new(chat_id, RequestId(0)));
                 }
             }
         }
@@ -360,6 +403,16 @@ impl QuillApp {
             chat_id.0,
             self.session().is_some_and(|s| s.chat_am_creator(chat_id)),
         );
+        if let Some(live) = self.live.as_ref()
+            && live
+                .driver
+                .check_create_video_chat(chat_id.0, String::new(), 0)
+                .is_err()
+        {
+            self.group_call_boxes.rtmp_start = RtmpStartUi::default();
+            self.created_video_chat(chat_id, None, true, join_as, window, cx);
+            return;
+        }
         self.end_current_call_for_create(cx);
         self.group_call_boxes.rtmp_start = RtmpStartUi::default();
         let sent = match self.live.as_mut() {
@@ -375,8 +428,7 @@ impl QuillApp {
 
     /// The revoke confirmation was accepted: ask for a new URL and key.
     fn revoke_rtmp_start_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.group_call_boxes.rtmp_start.confirm = None;
-        self.group_call_boxes.rtmp_start.key_shown = false;
+        self.group_call_boxes.rtmp_start.view = RtmpBoxView::default();
         if let Some(live) = self.live.as_mut()
             && live.driver.revoke_rtmp_start_key().is_err()
         {
@@ -402,11 +454,10 @@ impl QuillApp {
         let Some(start) = session.calls.rtmp_start.as_mut() else {
             return;
         };
-        if !start.failed {
+        let Some(failure) = start.failure() else {
             return;
-        }
-        start.failed = false;
-        if start.info.is_none() {
+        };
+        if failure == RtmpFailure::Fetch {
             session.calls.rtmp_start = None;
         }
         window.push_notification(
@@ -431,7 +482,7 @@ impl QuillApp {
             let info = this
                 .session()
                 .and_then(|s| s.calls.rtmp_start.as_ref())
-                .and_then(|start| start.info.clone());
+                .and_then(|start| start.info().cloned());
             let Some(RtmpInfo { url, key }) = info else {
                 return dialog
                     .overlay(true)
@@ -440,10 +491,11 @@ impl QuillApp {
                     )))
                     .on_close(on_close.clone());
             };
-            let confirm = this.group_call_boxes.rtmp_start.confirm;
-            let body = match confirm {
-                Some(which) => confirm_view(which, cx),
-                None => div()
+            let view = this.group_call_boxes.rtmp_start.view;
+            let confirm = matches!(view, RtmpBoxView::Confirm { .. });
+            let body = match view {
+                RtmpBoxView::Confirm { which, .. } => confirm_view(which, cx),
+                RtmpBoxView::Rows(row) => div()
                     .flex()
                     .flex_col()
                     .gap_3()
@@ -452,17 +504,22 @@ impl QuillApp {
                             prefix: "rtmp-start",
                             url,
                             key,
-                            key_shown: this.group_call_boxes.rtmp_start.key_shown,
+                            key_shown: row == KeyRow::Shown,
                             revoke_label: tr(keys::GROUP_INVITE_CONTEXT_REVOKE),
                         },
                         cx,
                         |this, cx| {
-                            this.group_call_boxes.rtmp_start.confirm =
-                                Some(RtmpConfirm::KeyWarning);
+                            this.group_call_boxes
+                                .rtmp_start
+                                .view
+                                .ask(RtmpConfirm::KeyWarning);
                             cx.notify();
                         },
                         |this, cx| {
-                            this.group_call_boxes.rtmp_start.confirm = Some(RtmpConfirm::Revoke);
+                            this.group_call_boxes
+                                .rtmp_start
+                                .view
+                                .ask(RtmpConfirm::Revoke);
                             cx.notify();
                         },
                     ))
@@ -476,7 +533,7 @@ impl QuillApp {
                     )
                     .into_any_element(),
             };
-            let footer = (confirm.is_none()).then(|| {
+            let footer = (!confirm).then(|| {
                 div()
                     .flex()
                     .w_full()
@@ -567,7 +624,7 @@ fn confirm_view(which: RtmpConfirm, cx: &mut Context<QuillApp>) -> AnyElement {
                         .label(tr(keys::CANCEL))
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.group_call_boxes.rtmp_start.confirm = None;
+                            this.group_call_boxes.rtmp_start.view.cancel();
                             cx.notify();
                         })),
                 )
@@ -582,8 +639,8 @@ fn confirm_view(which: RtmpConfirm, cx: &mut Context<QuillApp>) -> AnyElement {
                             .on_click(cx.listener(move |this, _, window, cx| match which {
                                 RtmpConfirm::Revoke => this.revoke_rtmp_start_key(window, cx),
                                 RtmpConfirm::KeyWarning => {
-                                    this.group_call_boxes.rtmp_start.confirm = None;
-                                    this.group_call_boxes.rtmp_start.key_shown = true;
+                                    this.group_call_boxes.rtmp_start.view =
+                                        RtmpBoxView::Rows(KeyRow::Shown);
                                     cx.notify();
                                 }
                             })),

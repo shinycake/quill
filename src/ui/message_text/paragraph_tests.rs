@@ -2,7 +2,7 @@
 //! the text it belongs to.
 use super::paragraph_text;
 use quill::text::{LinkTarget, RunStyle, TextRun};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 fn run(text: &str, style: RunStyle, link: Option<LinkTarget>) -> TextRun {
     TextRun {
@@ -38,7 +38,7 @@ fn zalgo_marks_and_stray_tags_go_and_ranges_stay_on_their_text() {
         0,
         (1, 1),
         false,
-        &HashSet::new(),
+        &super::revealed::Revealed::default(),
         &HashMap::new(),
         &HashMap::new(),
     );

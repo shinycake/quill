@@ -51,7 +51,10 @@ pub(super) fn shown_dialog(
 
 pub(super) fn sheet(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<CeremonySheet> {
     app.read_with(vcx, |app, _| {
-        app.privacy.passkeys.ceremony.as_ref().map(|ui| ui.sheet)
+        app.privacy
+            .passkeys
+            .ceremony()
+            .map(super::CeremonyUi::sheet)
     })
 }
 
@@ -241,19 +244,16 @@ fn no_ceremony_ticks_under_the_lock(cx: &mut TestAppContext) {
     assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::PasskeyCeremony));
     app.update_in(vcx, |app, window, cx| {
         app.run_passkey_ticker(window, cx);
-        assert!(app.privacy.passkeys.ticker.is_some(), "unlocked, it ticks");
+        assert!(app.privacy.passkeys.ticking(), "unlocked, it ticks");
         app.account.passcode.enabled = true;
         app.lock_by_passcode(cx);
-        assert!(
-            app.privacy.passkeys.ticker.is_none(),
-            "the lock stops the ticker"
-        );
+        assert!(!app.privacy.passkeys.ticking(), "the lock stops the ticker");
         app.run_passkey_ticker(window, cx);
         assert!(
-            app.privacy.passkeys.ticker.is_none(),
+            !app.privacy.passkeys.ticking(),
             "no ticker starts while locked"
         );
         assert!(!app.tick_passkey_ceremony(window, cx), "a tick refuses");
-        assert!(app.privacy.passkeys.ceremony.is_none());
+        assert!(app.privacy.passkeys.ceremony().is_none());
     });
 }

@@ -268,7 +268,7 @@ impl Render for VideoPip {
             let playing = transport.is_playing();
             let total = transport.total();
             let position = self
-                .seek_preview
+                .seek_preview()
                 .map_or(transport.position, |fraction| fraction * total.max(0.0));
             let play_icon = if playing {
                 IconName::Pause

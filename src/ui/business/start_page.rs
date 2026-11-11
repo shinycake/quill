@@ -116,10 +116,10 @@ impl QuillApp {
             .cloned()
         });
         if let Some(d) = self.business_mut() {
-            if let (Some(sticker), Some(page)) = (found, d.start_page.as_mut()) {
+            if let (Some(sticker), Some(page)) = (found, d.screen.start_page_mut()) {
                 page.sticker = Some(sticker);
             }
-            d.view = View::StartPage;
+            d.screen.go(View::StartPage);
         }
         self.close_start_page_stickers();
         cx.notify();
@@ -174,12 +174,12 @@ impl QuillApp {
     /// The hello sticker a start page without its own sticker shows.
     pub(super) fn business_random_greeting(&mut self, seed: i64) -> Option<StickerItem> {
         let session = self.session()?;
-        if !session.stickers.stickers.greeting_loaded
+        if session.stickers.stickers.greeting.is_idle()
             && let Some(live) = self.live.as_mut()
         {
             let _ = live.driver.fetch_greeting_stickers();
         }
-        let list = &self.session()?.stickers.stickers.greeting;
+        let list = self.session()?.stickers.stickers.greeting.data()?;
         let at = (seed.unsigned_abs() as usize).checked_rem(list.len())?;
         list.get(at).cloned()
     }
@@ -229,7 +229,7 @@ impl QuillApp {
             .dialogs
             .business_dialog
             .as_ref()
-            .and_then(|d| d.start_page.as_ref())
+            .and_then(|d| d.screen.start_page())
             .map(|p| (p.title.clone(), p.message.clone(), p.sticker.clone()))
         else {
             return div();
@@ -298,7 +298,8 @@ impl QuillApp {
                         cx,
                     )
                     .on_click(cx.listener(|this, _, window, cx| {
-                        if let Some(page) = this.business_mut().and_then(|d| d.start_page.as_mut())
+                        if let Some(page) =
+                            this.business_mut().and_then(|d| d.screen.start_page_mut())
                         {
                             page.sticker = None;
                             let (title, message) = (page.title.clone(), page.message.clone());
@@ -326,7 +327,7 @@ impl QuillApp {
             .dialogs
             .business_dialog
             .as_ref()
-            .and_then(|d| d.start_page.as_ref())
+            .and_then(|d| d.screen.start_page())
             .map(|p| {
                 (
                     p.title.read(cx).value().trim().to_string(),

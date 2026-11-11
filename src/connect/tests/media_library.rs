@@ -78,6 +78,18 @@ fn opening_the_panel_requests_both_set_lists_recent_and_favorites_once() {
     );
     assert_eq!(h.sent("getRecentStickers").len(), 1);
     assert_eq!(h.sent("getFavoriteStickers").len(), 1);
+    // One fetch per list tracks the send, so the group sticker box shows
+    // "Loading" and does not ask again.
+    assert!(
+        h.driver
+            .session
+            .stickers
+            .stickers
+            .lists
+            .installed
+            .is_loading()
+    );
+    assert!(h.driver.session.stickers.emoji.lists.installed.is_loading());
 }
 
 #[test]
@@ -97,7 +109,7 @@ fn library_sets_load_lazily_with_a_cap_and_failures_are_not_retried() {
         first.0,
         sticker_json(100, 1, 900)
     ));
-    let loaded = &h.driver.session.media.media_library.set_stickers[&1];
+    let loaded = &h.driver.session.media.media_library.get(&1).unwrap();
     assert_eq!(loaded.len(), 1);
     assert!(h.driver.session.media.files.contains_key(&900));
 
@@ -106,7 +118,7 @@ fn library_sets_load_lazily_with_a_cap_and_failures_are_not_retried() {
         r#"{{"@type":"error","@extra":"{}","code":400,"message":"STICKERSET_INVALID"}}"#,
         second.0
     ));
-    assert!(h.driver.session.media.media_library.failed.contains(&2));
+    assert!(h.driver.session.media.media_library.is_failed(2));
     // Two slots freed: sets 5 and 6 go out; 1 (loaded) and 2 (failed) don't.
     h.driver.ensure_library_sets(&wanted).unwrap();
     let ids: Vec<String> = h
@@ -137,7 +149,7 @@ fn fail_set_one(h: &mut Harness) {
         r#"{{"@type":"error","@extra":"{}","code":420,"message":"FLOOD_WAIT_3"}}"#,
         Harness::extra_of(&request).0
     ));
-    assert!(h.driver.session.media.media_library.failed.contains(&1));
+    assert!(h.driver.session.media.media_library.is_failed(1));
     h.driver.ensure_library_sets(&[1]).unwrap();
 }
 
@@ -385,7 +397,11 @@ fn late_answer_for_an_earlier_message_leaves_the_loading_menu_alone() {
     ));
     let state = &h.driver.session.stickers.message_reaction_options;
     assert!(state.is_loading_for(ChatId(7), MessageId(51)));
-    assert!(!h.driver.session.payments.paid.offered_for(7, 50));
+    assert!(
+        !h.driver
+            .session
+            .paid_reaction_offered(ChatId(7), MessageId(50))
+    );
     h.ingest(&reactions_answer(&second.0.to_string(), THUMB));
     assert!(
         h.driver
@@ -416,7 +432,11 @@ fn late_answers_after_b_answered_keep_bs_strip() {
         let state = &h.driver.session.stickers.message_reaction_options;
         assert!(state.ready_for(ChatId(7), MessageId(51)).is_some());
         assert!(!state.is_unavailable_for(ChatId(7), MessageId(50)));
-        assert!(!h.driver.session.payments.paid.offered_for(7, 50));
+        assert!(
+            !h.driver
+                .session
+                .paid_reaction_offered(ChatId(7), MessageId(50))
+        );
     }
 }
 
@@ -507,7 +527,11 @@ fn an_answer_offering_only_stars_still_shows_the_strip() {
     h.ingest(&reactions_answer(&extra.0.to_string(), STAR));
     let state = &h.driver.session.stickers.message_reaction_options;
     assert!(state.ready_for(ChatId(7), MessageId(50)).is_some());
-    assert!(h.driver.session.payments.paid.offered_for(7, 50));
+    assert!(
+        h.driver
+            .session
+            .paid_reaction_offered(ChatId(7), MessageId(50))
+    );
 }
 
 #[test]

@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
+use crate::ui::chat_list_state::SidebarTab;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::diagnostics::DiagnosticSink;
@@ -28,7 +29,7 @@ impl QuillApp {
         self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
         let extra = session.request(RequestPurpose::SearchCallMessages, None);
         // Recent calls only take the page they wait for.
-        session.calls.recent_calls_request = Some(extra);
+        session.calls.recent_calls_stage = quill::state::RecentCalls::Loading { request: extra };
         let calls: Vec<String> = (0..14i64)
             .map(|n| {
                 let reason = if n % 3 == 1 {
@@ -56,8 +57,7 @@ impl QuillApp {
         if let Some(owned) = copy_and_parse(&json, &self.demo_ui.seq, &sink) {
             session.apply(owned);
         }
-        self.chat_list.contacts_tab_open = false;
-        self.chat_list.calls_tab_open = true;
+        self.chat_list.tab = SidebarTab::Calls;
         cx.notify();
     }
 }

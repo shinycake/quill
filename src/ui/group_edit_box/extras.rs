@@ -15,7 +15,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use quill::state::RequestPurpose;
+use quill::state::{RequestPurpose, Submit, SubmitView};
 use quill::telegram::envelope::ChatKind;
 
 impl QuillApp {
@@ -95,7 +95,11 @@ impl QuillApp {
                 tr(keys::Q_PEOPLE_UPGRADE_TO_SUPERGROUP),
                 false,
                 cx.listener(move |this, _, _, cx| {
-                    this.open_group_settings_view(chat_id, GroupSettingsView::ConfirmUpgrade, cx);
+                    this.open_group_settings_view(
+                        chat_id,
+                        GroupSettingsView::ConfirmUpgrade(Submit::Editing),
+                        cx,
+                    );
                 }),
                 cx,
             ));
@@ -108,7 +112,7 @@ impl QuillApp {
                     tr(keys::RIGHTS_GIGAGROUP_CONVERT),
                     false,
                     cx.listener(move |this, _, _, cx| {
-                        this.open_group_confirm(chat_id, GroupConfirmAction::BroadcastIntro, cx);
+                        this.open_group_confirm(GroupConfirmAction::BroadcastIntro { chat_id }, cx);
                     }),
                     cx,
                 ))
@@ -153,7 +157,7 @@ impl QuillApp {
                 },
                 true,
                 cx.listener(move |this, _, _, cx| {
-                    this.open_group_confirm(chat_id, GroupConfirmAction::DeleteChat, cx);
+                    this.open_group_confirm(GroupConfirmAction::DeleteChat { chat_id }, cx);
                 }),
                 cx,
             ));
@@ -190,12 +194,8 @@ impl QuillApp {
         ]
         .iter()
         .any(|p| session.requests.has_purpose_for_chat(*p, chat_id));
-        let loading = [
-            RequestPurpose::GetInstalledStickerSets,
-            RequestPurpose::GetInstalledEmojiSets,
-        ]
-        .iter()
-        .any(|p| session.requests.has_purpose(*p));
+        let loading = session.stickers.stickers.lists.installed.is_loading()
+            || session.stickers.emoji.lists.installed.is_loading();
         let mut section = div().flex().flex_col().gap_1().child(
             Button::new("group-load-sticker-packs")
                 .label(if loading {
@@ -216,7 +216,9 @@ impl QuillApp {
                     cx.notify();
                 })),
         );
-        if session.stickers.stickers.failed || session.stickers.emoji.failed {
+        if session.stickers.stickers.lists.installed.error().is_some()
+            || session.stickers.emoji.lists.installed.error().is_some()
+        {
             section = section.child(
                 div()
                     .text_sm()
@@ -295,5 +297,75 @@ impl QuillApp {
             section = section.child(choices);
         }
         section.into_any_element()
+    }
+}
+
+impl QuillApp {
+    /// The Upgrade of the confirm page: the request goes out and the page
+    /// waits for its answer (`settle_group_upgrade`), or says why it could
+    /// not go out.
+    pub(in crate::ui) fn submit_group_upgrade(&mut self, cx: &mut Context<Self>) {
+        let requests = self.session().map(|session| &session.requests);
+        let Some(dialog) = self.admin.group_settings_dialog.as_ref() else {
+            return;
+        };
+        let GroupSettingsView::ConfirmUpgrade(submit) = &dialog.view else {
+            return;
+        };
+        if submit.is_sending(requests) {
+            return;
+        }
+        let chat_id = dialog.chat_id;
+        let next = match self.live.as_mut() {
+            Some(live) => match live.driver.upgrade_basic_group(chat_id) {
+                Ok(Some(id)) => Submit::sent(vec![id]),
+                Ok(None) => {
+                    Submit::Failed(tr(keys::Q_PEOPLE_THAT_SETTING_ISNT_AVAILABLE_FOR).to_string())
+                }
+                Err(_) => {
+                    Submit::Failed(tr(keys::Q_PEOPLE_COULDNT_SEND_THE_CHANGE_TRY).to_string())
+                }
+            },
+            None => Submit::Failed(tr(keys::Q_PEOPLE_DEMO_MODE_THIS_NEEDS_A).to_string()),
+        };
+        if let Some(dialog) = self.admin.group_settings_dialog.as_mut() {
+            dialog.view = GroupSettingsView::ConfirmUpgrade(next);
+        }
+        cx.notify();
+    }
+
+    /// The confirm page leaves Sending on the answer: it closes, or stays
+    /// with TDLib's reason.
+    pub(in crate::ui) fn settle_group_upgrade(&mut self, cx: &mut Context<Self>) {
+        let requests = self.session().map(|session| &session.requests);
+        let Some(view) = self
+            .admin
+            .group_settings_dialog
+            .as_ref()
+            .and_then(|dialog| match &dialog.view {
+                GroupSettingsView::ConfirmUpgrade(submit) => Some(submit.view(requests)),
+                _ => None,
+            })
+        else {
+            return;
+        };
+        match view {
+            SubmitView::Done => {
+                self.set_group_settings_dialog(None);
+                cx.notify();
+            }
+            SubmitView::Failed(reason) => {
+                if let Some(GroupSettingsView::ConfirmUpgrade(submit)) = self
+                    .admin
+                    .group_settings_dialog
+                    .as_mut()
+                    .map(|dialog| &mut dialog.view)
+                    && submit.keep_failure(reason)
+                {
+                    cx.notify();
+                }
+            }
+            SubmitView::Editing | SubmitView::Sending => {}
+        }
     }
 }

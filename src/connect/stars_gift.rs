@@ -2,7 +2,7 @@
 //! gift recipient list.
 use super::*;
 use crate::ids::RequestId;
-use crate::stars_gift::{StarsGiftTarget, can_gift_stars};
+use crate::stars_gift::{GiftStage, PackLoad, StarsGiftTarget, can_gift_stars};
 use crate::state::RequestPurpose;
 use crate::telegram::requests::get_star_gift_payment_options;
 
@@ -13,8 +13,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let state = &mut self.session.payments.stars_gift;
-        state.clear_target();
-        state.open = true;
+        state.open();
         self.fetch_contacts()?;
         // The people you write to most are listed first, unless the
         // frequent contacts are switched off.
@@ -33,8 +32,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     pub fn close_stars_gift(&mut self) {
         let state = &mut self.session.payments.stars_gift;
-        state.clear_target();
-        state.open = false;
+        state.close();
     }
 
     /// A contact was picked: ask which packs they can get
@@ -46,7 +44,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<RequestId, ConnectSendError> {
         let is_bot = self.session.is_bot_user(user_id);
         if !self.chats_path_active()
-            || !self.session.payments.stars_gift.open
+            || !self.session.payments.stars_gift.is_open()
             || !can_gift_stars(user_id, self.session.my_user_id, is_bot)
         {
             return Err(ConnectSendError::InvalidRequest);
@@ -54,18 +52,21 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetStarGiftOptions, None);
-        let state = &mut self.session.payments.stars_gift;
-        state.clear_target();
-        state.target = Some(StarsGiftTarget {
+        let target = StarsGiftTarget {
             user_id,
             name: name.to_string(),
-        });
-        state.loading = true;
+        };
         let json = get_star_gift_payment_options(extra, user_id);
-        if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.payments.stars_gift.loading = false;
-            return Err(err);
-        }
-        Ok(extra)
+        let sent = self.send_json_request(extra, &json);
+        // A request that never left shows the contact's error, not an empty
+        // pack list.
+        self.session.payments.stars_gift.stage = GiftStage::Packs {
+            target,
+            load: match &sent {
+                Ok(_) => PackLoad::Loading(extra),
+                Err(_) => PackLoad::Failed("Couldn't load Star packs".into()),
+            },
+        };
+        sent
     }
 }

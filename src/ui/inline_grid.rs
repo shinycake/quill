@@ -21,7 +21,7 @@ use quill::inline_grid::{
 };
 use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
-use quill::state::{DeepLinkAction, InlineBotResolve, InlineQueryFetch};
+use quill::state::{DeepLinkAction, InlineBotResolve, InlineMore, InlineQueryFetch};
 use quill::telegram::envelope::{InlineQueryResultSummary, InlineQueryResultsButton};
 use std::path::PathBuf;
 
@@ -188,7 +188,8 @@ impl QuillApp {
         let selected = order
             .get(
                 self.chat_ui
-                    .inline_results_selected
+                    .inline
+                    .selected()
                     .min(order.len().saturating_sub(1)),
             )
             .copied();
@@ -434,38 +435,35 @@ impl QuillApp {
         let Some(action) = button_action(button) else {
             return;
         };
-        let Some((bot_id, username)) =
-            self.session()
-                .and_then(|session| match session.bots.inline_bot_resolve.as_ref() {
-                    Some(InlineBotResolve::Resolved {
-                        user_id, username, ..
-                    }) => Some((*user_id, username.clone())),
-                    _ => None,
-                })
-        else {
+        let Some((bot_id, username)) = (match self.inline_bot_of_trigger(cx) {
+            Some(InlineBotResolve::Resolved {
+                user_id, username, ..
+            }) => Some((*user_id, username.clone())),
+            _ => None,
+        }) else {
             return;
         };
-        self.chat_ui.inline_results_open = false;
-        self.chat_ui.inline_query_armed = None;
+        self.chat_ui.inline.close();
         match action {
             ButtonAction::StartBot { parameter } => {
                 // tdesktop sends the bot's start with the parameter once
                 // its chat is open and remembers where to come back to
                 // (`inline_return.rs`).
                 self.begin_inline_return(bot_id, &username, &parameter);
-                if let Some(live) = self.live.as_mut() {
-                    let sent = live.driver.resolve_deep_link(DeepLinkAction::OpenUsername {
-                        domain: username,
-                        start_param: None,
-                        post: None,
-                        story_id: None,
-                    });
-                    if sent.is_err() {
-                        self.set_status_note(
-                            StatusNote::error(tr(keys::Q_MEDIA_COULDNT_OPEN_THE_BOTS_CHAT)),
-                            cx,
-                        );
-                    }
+                let sent = self.resolve_deep_link_here(DeepLinkAction::OpenUsername {
+                    domain: username,
+                    start_param: None,
+                    post: None,
+                    story_id: None,
+                });
+                if sent != Some(true) {
+                    self.cancel_inline_opening();
+                }
+                if sent == Some(false) {
+                    self.set_status_note(
+                        StatusNote::error(tr(keys::Q_MEDIA_COULDNT_OPEN_THE_BOTS_CHAT)),
+                        cx,
+                    );
                 }
             }
             ButtonAction::WebApp { url } => self.open_inline_results_web_app(bot_id, &url, cx),
@@ -496,8 +494,7 @@ impl QuillApp {
         if order.is_empty() {
             return;
         }
-        let Some(&target) = order.get(self.chat_ui.inline_results_selected.min(order.len() - 1))
-        else {
+        let Some(&target) = order.get(self.chat_ui.inline.selected().min(order.len() - 1)) else {
             return;
         };
         let Some(row) = mosaic
@@ -523,7 +520,7 @@ impl QuillApp {
     /// one viewport of the end (`Widget::onScroll`), so a short first page
     /// keeps loading until the panel fills.
     pub(super) fn load_more_inline_results_if_needed(&mut self, cx: &mut Context<Self>) {
-        if !self.chat_ui.inline_results_open {
+        if !self.chat_ui.inline.is_open() {
             return;
         }
         let text = self.composer.read(cx).value().to_string();
@@ -548,15 +545,19 @@ impl QuillApp {
             results,
             button,
             next_offset,
+            more,
             ..
         } = &slot.fetch
         else {
             return;
         };
         let (bot_user_id, offset) = (slot.bot_user_id, next_offset.clone());
-        let loading = session
-            .requests
-            .has_inline_query_in_flight(chat_id, bot_user_id);
+        // A failed page waits for the next query instead of being asked again
+        // on every poll batch.
+        if matches!(more, InlineMore::Failed { offset: failed } if *failed == offset) {
+            return;
+        }
+        let loading = slot.fetch.in_flight();
         let mosaic = layout_results(results);
         let has_button = button
             .as_ref()

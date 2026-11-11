@@ -35,6 +35,9 @@ mod apply;
 #[cfg(feature = "demo-capture")]
 mod apply_tests;
 mod demo;
+mod stage;
+
+use stage::{LookSend, LookStage, SendStage};
 
 /// What the dialog is for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,57 +46,39 @@ pub(super) enum LookTarget {
     Chat(i64),
 }
 
+/// The wallpaper choice of the dialog: one value, so picking one drops the
+/// others.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) enum WallpaperChoice {
+    /// Leave the chat's own wallpaper as it is.
+    #[default]
+    Keep,
+    /// An installed background picked for the chat.
+    Installed(i64),
+    /// An image file picked for the chat (tdesktop `uploadForPeer`).
+    File(PathBuf),
+    /// Remove the chat's own wallpaper.
+    Remove,
+}
+
 /// The dialog's pending choices; nothing is sent until Apply.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ChatLookDialog {
     pub target: LookTarget,
     /// The emoji theme that will be applied (`None` = no theme).
     pub theme: Option<String>,
-    /// An installed background picked for the chat.
-    pub background: Option<i64>,
-    /// An image file picked for the chat (tdesktop `uploadForPeer`).
-    pub file: Option<PathBuf>,
+    /// What the chat's own wallpaper becomes on Apply.
+    pub wallpaper: WallpaperChoice,
     /// Dark-mode dimming of a photo wallpaper, 0-100
     /// (`setChatBackground.dark_theme_dimming`).
     pub dimming: i32,
     /// The dimming slider (`None` in tests).
     pub dimming_slider: Option<Entity<SliderState>>,
-    /// Remove the chat's own wallpaper.
-    pub remove_wallpaper: bool,
     /// Also set the wallpaper for the other person (Premium only).
     pub both: bool,
-    /// Requests Apply has sent and is waiting on; the dialog stays open
-    /// until they are acknowledged, and shows the error if one fails.
-    pub awaiting: Option<LookWait>,
-}
-
-/// Apply's in-flight requests: `sent` of them, counted from the session's
-/// acknowledgement counter `base`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct LookWait {
-    pub base: u32,
-    pub sent: u32,
-}
-
-/// Where an Apply stands, from the session's counters.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum LookProgress {
-    Waiting,
-    Done,
-    Failed(String),
-}
-
-/// Whether Apply's requests are acknowledged, still pending or failed. An
-/// error wins over acknowledgements: the dialog stays open to show it.
-pub(super) fn look_progress(wait: LookWait, oks: u32, error: Option<&str>) -> LookProgress {
-    if let Some(error) = error {
-        return LookProgress::Failed(error.to_owned());
-    }
-    if oks.wrapping_sub(wait.base) >= wait.sent {
-        LookProgress::Done
-    } else {
-        LookProgress::Waiting
-    }
+    /// Where Apply stands: the dialog stays open until every change it sent
+    /// is acknowledged, and shows the error of one that failed.
+    pub stage: LookStage,
 }
 
 /// One change `Apply` sends.
@@ -128,19 +113,19 @@ pub(super) fn plan_changes(
         changes.push(LookChange::Theme(pending.theme.clone().unwrap_or_default()));
     }
     let dimming = pending.dimming.clamp(0, 100);
-    if let Some(path) = &pending.file {
-        changes.push(LookChange::WallpaperFile {
+    match (&pending.wallpaper, own) {
+        (WallpaperChoice::File(path), _) => changes.push(LookChange::WallpaperFile {
             path: path.clone(),
             dimming,
-        });
-    } else if let Some(id) = pending.background {
-        changes.push(LookChange::Wallpaper { id, dimming });
-    } else if pending.remove_wallpaper && own.is_some() {
-        changes.push(LookChange::RemoveWallpaper);
-    } else if let Some((id, current)) = own
-        && current != dimming
-    {
-        changes.push(LookChange::Wallpaper { id, dimming });
+        }),
+        (WallpaperChoice::Installed(id), _) => {
+            changes.push(LookChange::Wallpaper { id: *id, dimming });
+        }
+        (WallpaperChoice::Remove, Some(_)) => changes.push(LookChange::RemoveWallpaper),
+        (_, Some((id, current))) if current != dimming => {
+            changes.push(LookChange::Wallpaper { id, dimming });
+        }
+        _ => {}
     }
     changes
 }
@@ -198,15 +183,14 @@ impl QuillApp {
         self.dialogs.chat_look_dialog = Some(ChatLookDialog {
             target: LookTarget::Chat(chat_id),
             theme,
-            background: None,
-            file: None,
+            wallpaper: WallpaperChoice::Keep,
             dimming,
             dimming_slider: Some(slider),
-            remove_wallpaper: false,
             both: false,
-            awaiting: None,
+            stage: LookStage::Editing,
         });
         self.open_box(DialogKind::ChatLook);
+        self.retry_failed_wallpapers();
         self.ensure_wallpapers_loaded(cx);
         let boosted = self.is_boosted_look(chat_id);
         if let Some(live) = self.live.as_mut() {
@@ -221,6 +205,16 @@ impl QuillApp {
     /// "From file…" in the chat colors dialog: the picked image previews
     /// and is uploaded for this chat on Apply.
     fn choose_chat_wallpaper_file(&mut self, cx: &mut Context<Self>) {
+        // The answer belongs to the dialog that asked, not to whichever one
+        // is open when the native picker closes.
+        let Some(asked) = self
+            .dialogs
+            .chat_look_dialog
+            .as_ref()
+            .map(|d| d.target.clone())
+        else {
+            return;
+        };
         let picker = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -234,10 +228,13 @@ impl QuillApp {
                 let _ = this.update(cx, |this, cx| {
                     if !is_wallpaper_image(&path) {
                         this.set_note(StatusNote::silent(tr(keys::Q_MISC_CHOOSE_A_JPEG_PNG_OR)));
-                    } else if let Some(d) = this.dialogs.chat_look_dialog.as_mut() {
-                        d.file = Some(path);
-                        d.background = None;
-                        d.remove_wallpaper = false;
+                    } else if let Some(d) = this
+                        .dialogs
+                        .chat_look_dialog
+                        .as_mut()
+                        .filter(|d| d.target == asked)
+                    {
+                        d.wallpaper = WallpaperChoice::File(path);
                     }
                     cx.notify();
                 });
@@ -247,12 +244,16 @@ impl QuillApp {
     }
 
     pub(super) fn close_chat_look_dialog(&mut self, cx: &mut Context<Self>) {
-        self.dialogs.chat_look_dialog = None;
-        if let Some(session) = match self.live.as_mut() {
-            Some(live) => Some(&mut live.driver.session),
-            None => self.demo_session.as_deref_mut(),
-        } {
-            session.chats_state.background_error = None;
+        let waiting = self
+            .dialogs
+            .chat_look_dialog
+            .take()
+            .map(|d| d.stage.in_flight())
+            .unwrap_or_default();
+        if let Some(live) = self.live.as_mut() {
+            for id in waiting {
+                live.driver.session.acks.forget(id);
+            }
         }
         cx.notify();
     }
@@ -273,7 +274,21 @@ impl QuillApp {
         let premium = self.session().is_some_and(|s| s.my_is_premium());
         // Boosted chats set the wallpaper for everyone, never for self only.
         let only_for_self = !boosted && !(dialog.both && premium);
-        if dialog.awaiting.is_some() || (boosted && self.boosted_look_blocked(chat_id, &changes)) {
+        if dialog.stage.applying() {
+            cx.notify();
+            return;
+        }
+        // What an earlier Apply already got acknowledged is not sent again;
+        // a failed change is planned again like any other.
+        let done = dialog.stage.done();
+        let changes: Vec<LookChange> = changes
+            .into_iter()
+            .filter(|change| !done.iter().any(|send| send.change == *change))
+            .collect();
+        if boosted && let Some(why) = self.boosted_look_blocked(chat_id, &changes) {
+            if let Some(d) = self.screen.dialogs.chat_look_dialog.as_mut() {
+                d.stage = LookStage::Blocked(why);
+            }
             cx.notify();
             return;
         }
@@ -283,24 +298,22 @@ impl QuillApp {
                     self.close_chat_look_dialog(cx);
                     return;
                 }
-                live.driver.session.chats_state.background_error = None;
-                let base = live.driver.session.chats_state.chat_look_oks;
-                let mut sent = 0u32;
+                let mut sends = done;
                 for change in changes {
                     let result =
-                        match change {
+                        match &change {
                             LookChange::Theme(name) => {
-                                live.driver.set_chat_look_theme(ChatId(chat_id), &name)
+                                live.driver.set_chat_look_theme(ChatId(chat_id), name)
                             }
                             LookChange::Wallpaper { id, dimming } => live
                                 .driver
-                                .set_chat_background(ChatId(chat_id), id, dimming, only_for_self),
+                                .set_chat_background(ChatId(chat_id), *id, *dimming, only_for_self),
                             LookChange::WallpaperFile { path, dimming } => {
                                 live.driver.set_chat_background_local(
                                     ChatId(chat_id),
                                     &path.to_string_lossy(),
                                     false,
-                                    dimming,
+                                    *dimming,
                                     only_for_self,
                                 )
                             }
@@ -308,21 +321,17 @@ impl QuillApp {
                                 live.driver.delete_chat_background(ChatId(chat_id), false)
                             }
                         };
-                    match result {
-                        Ok(_) => sent += 1,
-                        Err(err) => {
-                            live.driver.session.chats_state.background_error =
-                                Some(user_error(&err));
+                    let stage = match result {
+                        Ok(id) => {
+                            live.driver.session.acks.expect(id);
+                            SendStage::InFlight(id)
                         }
-                    }
+                        Err(err) => SendStage::Failed(user_error(&err)),
+                    };
+                    sends.push(LookSend { change, stage });
                 }
                 if let Some(d) = self.screen.dialogs.chat_look_dialog.as_mut() {
-                    d.awaiting = (sent > 0).then_some(LookWait { base, sent });
-                }
-                // Nothing in flight and no error: nothing to wait for.
-                if sent == 0 && live.driver.session.chats_state.background_error.is_none() {
-                    self.close_chat_look_dialog(cx);
-                    return;
+                    d.stage = LookStage::Sent(sends);
                 }
                 cx.notify();
                 return;
@@ -336,13 +345,8 @@ impl QuillApp {
                                 .set_chat_theme_name(chat_id, (!name.is_empty()).then_some(name)),
                             LookChange::WallpaperFile { .. } => {}
                             LookChange::Wallpaper { id, dimming } => {
-                                let found = session
-                                    .chats_state
-                                    .installed_backgrounds
-                                    .iter()
-                                    .flatten()
-                                    .find(|b| b.id == id)
-                                    .cloned();
+                                let found =
+                                    session.chats_state.installed_backgrounds.find(id).cloned();
                                 if let Some(background) = found {
                                     session.set_chat_background(
                                         chat_id,
@@ -364,34 +368,23 @@ impl QuillApp {
         self.close_chat_look_dialog(cx);
     }
 
-    /// Poll-loop half of Apply: close the dialog once its requests are
-    /// acknowledged; on a failure keep it open (the error shows inline).
+    /// Poll-loop half of Apply: settle each change on its own answer, close
+    /// the dialog once all are acknowledged; on a failure keep it open (the
+    /// error shows inline, the next Apply sends only what failed).
     pub(super) fn drain_chat_look(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(wait) = self
-            .dialogs
-            .chat_look_dialog
-            .as_ref()
-            .and_then(|d| d.awaiting)
-        else {
+        let Some(live) = self.live.as_mut() else {
             return false;
         };
-        let Some(session) = self.session() else {
+        let Some(dialog) = self.screen.dialogs.chat_look_dialog.as_mut() else {
             return false;
         };
-        match look_progress(
-            wait,
-            session.chats_state.chat_look_oks,
-            session.chats_state.background_error.as_deref(),
-        ) {
-            LookProgress::Waiting => false,
-            LookProgress::Done => {
+        match dialog.stage.settle(&mut live.driver.session.acks) {
+            None => false,
+            Some(true) => {
                 self.close_chat_look_dialog(cx);
                 true
             }
-            LookProgress::Failed(_) => {
-                if let Some(d) = self.dialogs.chat_look_dialog.as_mut() {
-                    d.awaiting = None;
-                }
+            Some(false) => {
                 cx.notify();
                 true
             }
@@ -566,10 +559,32 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let muted = cx.theme().muted_foreground;
-        let Some(list) = self
+        let dark = cx.theme().is_dark();
+        let fetch = self
             .session()
-            .and_then(|s| s.chats_state.installed_backgrounds.clone())
-        else {
+            .map(|s| s.chats_state.installed_backgrounds.theme(dark));
+        let Some(list) = fetch.and_then(|f| f.data().cloned()) else {
+            // A failed list shows its error with a Retry (the Appearance
+            // page's), not a "Loading" nothing will end.
+            if let Some(error) = fetch.and_then(|f| f.error()).map(str::to_owned) {
+                return div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(div().text_xs().text_color(muted).child(error))
+                    .child(
+                        Button::new("chat-look-wallpaper-retry")
+                            .label(tr(keys::Q_MONEY_RETRY))
+                            .small()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if let Some(live) = this.live.as_mut() {
+                                    let _ = live.driver.retry_installed_backgrounds(dark);
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .into_any_element();
+            }
             return div()
                 .text_xs()
                 .text_color(muted)
@@ -590,7 +605,7 @@ impl QuillApp {
                 self.wallpaper_tile(
                     ("chat-look-wallpaper", id as u64),
                     background,
-                    dialog.background == Some(id),
+                    dialog.wallpaper == WallpaperChoice::Installed(id),
                     cx,
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -601,17 +616,13 @@ impl QuillApp {
                             .session
                             .chats_state
                             .installed_backgrounds
-                            .iter()
-                            .flatten()
-                            .find(|b| b.id == id)
+                            .find(id)
                             .cloned()
                     {
                         live.driver.download_background_file(&bg);
                     }
                     if let Some(d) = this.dialogs.chat_look_dialog.as_mut() {
-                        d.background = Some(id);
-                        d.file = None;
-                        d.remove_wallpaper = false;
+                        d.wallpaper = WallpaperChoice::Installed(id);
                     }
                     cx.notify();
                 })),
@@ -657,23 +668,18 @@ impl QuillApp {
                     let outgoing_fill =
                         pending_theme.map(|t| OutgoingFill::from_theme(t.settings(dark), dark));
                     let mut wallpaper = None;
-                    if let Some(path) = &state.file {
+                    if let WallpaperChoice::File(path) = &state.wallpaper {
                         wallpaper = Some(super::wallpaper::Wallpaper::Image {
                             path: path.clone(),
                             blurred: false,
                             tiled: false,
                         });
-                    } else if let Some(id) = state.background {
+                    } else if let WallpaperChoice::Installed(id) = state.wallpaper {
                         wallpaper = session.and_then(|s| {
-                            let bg = s
-                                .chats_state
-                                .installed_backgrounds
-                                .iter()
-                                .flatten()
-                                .find(|b| b.id == id)?;
+                            let bg = s.chats_state.installed_backgrounds.find(id)?;
                             session_wallpaper(s, bg)
                         });
-                    } else if !state.remove_wallpaper
+                    } else if state.wallpaper != WallpaperChoice::Remove
                         && let Some(s) = session
                         && let Some(bg) = s
                             .chats_state
@@ -760,7 +766,7 @@ impl QuillApp {
                             action_row(
                                 "chat-look-remove-wallpaper",
                                 Some(gpui_kit::assets::IconName::Trash),
-                                if state.remove_wallpaper {
+                                if state.wallpaper == WallpaperChoice::Remove {
                                     tr(keys::Q_MISC_WALLPAPER_WILL_BE_REMOVED)
                                 } else {
                                     tr(keys::Q_MISC_REMOVE_THIS_CHATS_WALLPAPER)
@@ -770,17 +776,17 @@ impl QuillApp {
                             )
                             .on_click(cx.listener(|this, _, _, cx| {
                                 if let Some(d) = this.dialogs.chat_look_dialog.as_mut() {
-                                    d.remove_wallpaper = !d.remove_wallpaper;
-                                    d.background = None;
-                                    d.file = None;
+                                    d.wallpaper = if d.wallpaper == WallpaperChoice::Remove {
+                                        WallpaperChoice::Keep
+                                    } else {
+                                        WallpaperChoice::Remove
+                                    };
                                 }
                                 cx.notify();
                             })),
                         );
                     }
-                    if let Some(error) =
-                        session.and_then(|s| s.chats_state.background_error.clone())
-                    {
+                    if let Some(error) = state.stage.error() {
                         wall = wall.child(
                             div()
                                 .id("chat-look-error")
@@ -788,11 +794,11 @@ impl QuillApp {
                                 .text_color(super::danger_dark())
                                 .child(tr_with(
                                     keys::Q_MISC_COULDNT_CHANGE_THE_CHAT_LOOK,
-                                    &[("error", &error.to_string())],
+                                    &[("error", error)],
                                 )),
                         );
                     }
-                    let applying = state.awaiting.is_some();
+                    let applying = state.stage.applying();
                     let changed = {
                         let current_theme = this
                             .session()
@@ -847,8 +853,8 @@ crate::ui::shell::register_dialogs! {
 #[cfg(test)]
 mod tests {
     use super::{
-        ChatLookDialog, LookChange, LookProgress, LookTarget, LookWait, chat_look_allowed,
-        is_wallpaper_image, look_progress, plan_changes,
+        ChatLookDialog, LookChange, LookStage, LookTarget, WallpaperChoice, chat_look_allowed,
+        is_wallpaper_image, plan_changes,
     };
     use std::path::Path;
 
@@ -856,13 +862,11 @@ mod tests {
         ChatLookDialog {
             target: LookTarget::Chat(1),
             theme: None,
-            background: None,
-            file: None,
+            wallpaper: WallpaperChoice::Keep,
             dimming: 0,
             dimming_slider: None,
-            remove_wallpaper: false,
             both: false,
-            awaiting: None,
+            stage: LookStage::Editing,
         }
     }
 
@@ -886,7 +890,7 @@ mod tests {
     fn theme_and_wallpaper_changes_are_planned_separately() {
         let mut pending = dialog();
         pending.theme = Some("🌷".into());
-        pending.background = Some(9);
+        pending.wallpaper = WallpaperChoice::Installed(9);
         assert_eq!(
             plan_changes(None, None, &pending),
             vec![
@@ -896,7 +900,7 @@ mod tests {
         );
         // Dropping the theme sends Telegram's empty name.
         let mut remove = dialog();
-        remove.remove_wallpaper = true;
+        remove.wallpaper = WallpaperChoice::Remove;
         assert_eq!(
             plan_changes(Some("🌷"), Some((5, 0)), &remove),
             vec![
@@ -911,7 +915,7 @@ mod tests {
     #[test]
     fn a_file_or_a_new_dimming_sets_the_chat_wallpaper() {
         let mut file = dialog();
-        file.file = Some("/a/b.jpg".into());
+        file.wallpaper = WallpaperChoice::File("/a/b.jpg".into());
         file.dimming = 140;
         assert_eq!(
             plan_changes(None, Some((5, 0)), &file),
@@ -936,26 +940,5 @@ mod tests {
         assert!(is_wallpaper_image(Path::new("c.webp")));
         assert!(!is_wallpaper_image(Path::new("c.gif")));
         assert!(!is_wallpaper_image(Path::new("noext")));
-    }
-
-    #[test]
-    fn apply_waits_for_every_acknowledgement() {
-        let wait = LookWait { base: 4, sent: 2 };
-        assert_eq!(look_progress(wait, 4, None), LookProgress::Waiting);
-        assert_eq!(look_progress(wait, 5, None), LookProgress::Waiting);
-        assert_eq!(look_progress(wait, 6, None), LookProgress::Done);
-    }
-
-    #[test]
-    fn a_failure_keeps_the_dialog_open_with_the_reason() {
-        let wait = LookWait { base: 0, sent: 1 };
-        assert_eq!(
-            look_progress(wait, 0, Some("BACKGROUND_INVALID")),
-            LookProgress::Failed("BACKGROUND_INVALID".into())
-        );
-        assert_eq!(
-            look_progress(wait, 1, Some("CHAT_NOT_MODIFIED")),
-            LookProgress::Failed("CHAT_NOT_MODIFIED".into())
-        );
     }
 }

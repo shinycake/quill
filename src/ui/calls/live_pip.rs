@@ -43,13 +43,34 @@ pub(crate) enum LivePipSource {
 
 /// An open (or opening) live PiP.
 pub(crate) struct LivePipLink {
-    /// `None` until the window is made (it opens deferred).
-    pub(crate) window: Option<PipWindow>,
+    pub(crate) window: PipWindowStage,
     pub(crate) source: LivePipSource,
     /// The account it was opened in.
     account: Option<AccountKey>,
     /// The window the picture was in, brought to the front on enlarge.
     return_to: Option<AnyWindowHandle>,
+}
+
+/// The PiP's window: it opens deferred, so the link exists first.
+pub(crate) enum PipWindowStage {
+    Opening,
+    Open(PipWindow),
+}
+
+impl PipWindowStage {
+    pub(crate) fn window(&self) -> Option<&PipWindow> {
+        match self {
+            Self::Opening => None,
+            Self::Open(window) => Some(window),
+        }
+    }
+
+    fn into_window(self) -> Option<PipWindow> {
+        match self {
+            Self::Opening => None,
+            Self::Open(window) => Some(window),
+        }
+    }
 }
 
 impl QuillApp {
@@ -92,12 +113,12 @@ impl QuillApp {
         let return_to = Some(window.window_handle());
         self.open_live_pip(player, LivePipSource::Stream { call_id }, return_to, cx);
         self.group_call_screen.window_closed_by_user = Some(call_id);
-        self.group_call_screen.stream_join = None;
+        self.group_call_screen.clear_stream_wish();
         self.group_call.stream.overlay = None;
         // The stream window goes now, out of full screen first, rather
         // than on the main window's next frame.
-        if self.group_call.window == Some(window.window_handle()) {
-            self.group_call.window = None;
+        if self.group_call.window.is(window.window_handle()) {
+            self.group_call.window = crate::ui::group_call_state::CallWindow::Closed;
             crate::ui::group_call_stream_layout::leave_stream_full(window);
             window.remove_window();
         }
@@ -107,7 +128,7 @@ impl QuillApp {
     /// The live story header's PiP button: the story's picture goes into
     /// a floating window and the viewer closes; the story stays joined.
     pub(crate) fn open_story_pip(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((chat_id, story_id)) = self.stories.live.watching else {
+        let Some((chat_id, story_id)) = self.stories.live.watching() else {
             return;
         };
         let Some(player) = self.stories.live.player.clone() else {
@@ -131,7 +152,7 @@ impl QuillApp {
         self.close_live_pip(cx);
         let account = self.session().map(|session| session.account.clone());
         self.group_call.live_pip = Some(LivePipLink {
-            window: None,
+            window: PipWindowStage::Opening,
             source,
             account,
             return_to,
@@ -157,20 +178,28 @@ impl QuillApp {
         cx.defer(move |cx| {
             let opened = open_pip_window(open, cx);
             let _ = weak.update(cx, |app, cx| {
-                let pending = app
-                    .group_call
-                    .live_pip
-                    .as_mut()
-                    .filter(|link| link.source == source && link.window.is_none());
+                let pending = app.group_call.live_pip.as_mut().filter(|link| {
+                    link.source == source && matches!(link.window, PipWindowStage::Opening)
+                });
                 match (pending, opened) {
-                    (Some(link), Some(window)) => link.window = Some(window),
+                    (Some(link), Some(window)) => link.window = PipWindowStage::Open(window),
                     // Closed before it opened: the window goes too.
                     (None, Some(window)) => close_window(window, false, cx),
-                    (_, None) => {
+                    (Some(_), None) => {
                         app.group_call.live_pip = None;
+                        // The stream window went when PiP was pressed: it
+                        // may open again.
+                        if let LivePipSource::Stream { call_id } = source
+                            && app.group_call_screen.window_closed_by_user == Some(call_id)
+                        {
+                            app.group_call_screen.window_closed_by_user = None;
+                        }
                         app.set_note(StatusNote::error(tr(keys::Q_MEDIA_PIP_FAILED)));
                         app.check_live_pip(cx);
                     }
+                    // Another PiP replaced this one before it failed: that
+                    // one's link stays.
+                    (None, None) => {}
                 }
                 cx.notify();
             });
@@ -185,7 +214,7 @@ impl QuillApp {
         let Some(link) = self.group_call.live_pip.take() else {
             return;
         };
-        if let Some(window) = link.window {
+        if let Some(window) = link.window.into_window() {
             close_window(window, false, cx);
         }
         cx.refresh_windows();
@@ -195,7 +224,12 @@ impl QuillApp {
     /// viewer on the story): the PiP lets go of the player, which plays on
     /// there, and closes.
     fn detach_live_pip(&mut self, cx: &mut Context<Self>) {
-        if let Some(window) = self.group_call.live_pip.take().and_then(|link| link.window) {
+        if let Some(window) = self
+            .group_call
+            .live_pip
+            .take()
+            .and_then(|link| link.window.into_window())
+        {
             close_window(window, true, cx);
         }
     }
@@ -252,13 +286,13 @@ impl QuillApp {
         let Some(link) = self.group_call.live_pip.as_ref() else {
             // A live story kept by a PiP that is gone, with no viewer on
             // it: leave it, as closing the viewer would have.
-            if self.stories.live.watching.is_some() && !self.stories.viewer.is_open() {
+            if self.stories.live.watching().is_some() && !self.stories.viewer.is_open() {
                 self.sync_live_story(cx);
             }
             return;
         };
         let source = link.source;
-        if let Some(window) = link.window.as_ref() {
+        if let Some(window) = link.window.window() {
             let closed = window
                 .view
                 .upgrade()
@@ -291,7 +325,7 @@ impl QuillApp {
         };
         let shown_again =
             match source {
-                LivePipSource::Stream { .. } => self.group_call.window.is_some(),
+                LivePipSource::Stream { .. } => self.group_call.window.handle().is_some(),
                 LivePipSource::Story { chat_id, story_id } => {
                     self.stories.viewer.is_open()
                         && self.stories.viewer.current().is_some_and(|item| {
@@ -299,7 +333,7 @@ impl QuillApp {
                         })
                 }
             };
-        if shown_again && link.window.is_some() {
+        if shown_again && link.window.window().is_some() {
             self.detach_live_pip(cx);
         }
     }
@@ -313,20 +347,30 @@ impl QuillApp {
     /// PiP closes, as for a left call; the stream window keeps the
     /// manual Rejoin.
     fn live_pip_source_alive(&self, source: LivePipSource) -> bool {
-        let Some(calls) = self.session().map(|s| &s.calls) else {
+        let Some(session) = self.session() else {
             return false;
         };
+        // The same call id on another account is not this PiP's call.
+        if self
+            .group_call
+            .live_pip
+            .as_ref()
+            .is_some_and(|link| link.account.as_ref() != Some(&session.account))
+        {
+            return false;
+        }
+        let calls = &session.calls;
         match source {
             LivePipSource::Stream { call_id } => {
                 calls.active_group_call.as_ref().is_some_and(|call| {
                     call.id == call_id
                         && (call.is_joined || call.rejoining())
-                        && calls.left_group_call != Some(call_id)
+                        && !call.rejoin.is_left()
                         && call.stream != StreamState::Ended
                 })
             }
             LivePipSource::Story { chat_id, story_id } => {
-                self.stories.live.watching == Some((chat_id, story_id))
+                self.stories.live.watching() == Some((chat_id, story_id))
                     && !calls
                         .story_stream
                         .as_ref()

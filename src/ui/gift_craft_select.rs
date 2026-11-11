@@ -8,6 +8,7 @@ use super::app::QuillApp;
 use super::gift_craft_ui::gate_notice;
 use super::gift_market_state::MarketBox;
 use super::gift_market_ui::{BoxView, collectible_tile, price_line};
+use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -67,7 +68,15 @@ impl QuillApp {
     /// A listing on sale: bought for the user, then it fills a slot.
     fn pick_craft_listing(&mut self, name: String, cx: &mut Context<Self>) {
         let started = match self.live.as_mut() {
-            Some(live) => live.driver.start_gift_resale_buy(&name, None, true).is_ok(),
+            Some(live) => {
+                let started = live.driver.start_gift_resale_buy(&name, None, true).is_ok();
+                if !started {
+                    self.set_note(StatusNote::error(tr(
+                        keys::Q_MONEY_COULDNT_START_THE_PURCHASE,
+                    )));
+                }
+                started
+            }
             None => {
                 let me = self.session().and_then(|s| s.my_user_id).unwrap_or(0);
                 self.gift_market_mut().is_some_and(|market| {
@@ -92,9 +101,9 @@ impl QuillApp {
             }
         };
         if started {
-            self.payments.gift_hide_name = false;
+            self.reset_gift_choices(false);
             // The purchase returns to the craft box, not to this list.
-            self.gift_market.stack.pop();
+            self.gift_market.pop();
             self.gift_market.push(MarketBox::Craft);
             self.gift_market.push(MarketBox::Buy);
             self.open_box(crate::ui::shell::DialogKind::GiftMarket);
@@ -105,6 +114,20 @@ impl QuillApp {
     fn more_craft_candidates(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.load_more_craft_candidates();
+        }
+        cx.notify();
+    }
+
+    fn retry_craft_candidates(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.retry_craft_candidates();
+        }
+        cx.notify();
+    }
+
+    fn retry_craft_listings(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.retry_craft_listings();
         }
         cx.notify();
     }
@@ -161,24 +184,52 @@ impl QuillApp {
                     .child(tile),
             );
         }
-        if craft.candidates_loading && own_count == 0 {
+        if craft.candidates_load.is_loading() && own_count == 0 {
             body = body.child(
                 div()
                     .text_sm()
                     .text_color(muted)
                     .child(tr(keys::Q_MONEY_LOADING)),
             );
-        } else if own_count == 0 {
+        } else if own_count == 0 && craft.candidates_load.error().is_none() {
             body = body.child(
                 div()
                     .text_sm()
                     .text_color(muted)
                     .child(tr(keys::GIFT_CRAFT_SELECT_NONE)),
             );
-        } else {
+        } else if own_count > 0 {
             body = body.child(own);
         }
-        if !craft.candidates_loading && !craft.candidates_offset.is_empty() {
+        if let Some(error) = craft.candidates_load.error() {
+            // A failed list is not "none": say why, and retry.
+            body = body.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().danger)
+                            .child(error.to_string()),
+                    )
+                    .child(
+                        Button::new("craft-own-retry")
+                            .label(tr(keys::Q_CHAT_RETRY))
+                            .ghost()
+                            .small()
+                            .on_click(
+                                cx.listener(|this, _, _, cx| this.retry_craft_candidates(cx)),
+                            ),
+                    ),
+            );
+        }
+        if !craft.candidates_load.is_loading()
+            && craft.candidates_load.error().is_none()
+            && !craft.candidates_offset.is_empty()
+        {
             body = body.child(
                 Button::new("craft-own-more")
                     .label(tr(keys::Q_MONEY_SHOW_MORE))
@@ -222,12 +273,36 @@ impl QuillApp {
                     .child(tile),
             );
         }
-        if market.loading && market.listings.is_empty() {
+        if market.load.is_loading() && market.listings.is_empty() {
             body = body.child(
                 div()
                     .text_sm()
                     .text_color(muted)
                     .child(tr(keys::Q_MONEY_LOADING)),
+            );
+        } else if market.listings.is_empty()
+            && let Some(error) = market.load.error()
+        {
+            // A failed search is not "none on sale": say why, and retry.
+            body = body.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().danger)
+                            .child(error.to_string()),
+                    )
+                    .child(
+                        Button::new("craft-sale-retry")
+                            .label(tr(keys::Q_CHAT_RETRY))
+                            .ghost()
+                            .small()
+                            .on_click(cx.listener(|this, _, _, cx| this.retry_craft_listings(cx))),
+                    ),
             );
         } else if market.listings.is_empty() {
             body = body.child(
@@ -239,7 +314,7 @@ impl QuillApp {
         } else {
             body = body.child(sale);
         }
-        if !market.loading && market.has_more() {
+        if market.has_more() {
             body = body.child(
                 Button::new("craft-sale-more")
                     .label(tr(keys::Q_MONEY_SHOW_MORE))

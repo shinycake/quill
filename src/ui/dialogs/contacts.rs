@@ -11,26 +11,68 @@ pub struct AddContactDialog {
     pub(crate) phone_input: Entity<TextareaState>,
     pub(crate) first_name_input: Entity<TextareaState>,
     pub(crate) last_name_input: Entity<TextareaState>,
-    /// New Contact box (`user_id == 0`): the first name of the import in
-    /// flight or answered.
-    pub(crate) sent_name: Option<String>,
-    /// New Contact box: the import it sent, whose answer it applies.
-    pub(crate) sent_request: Option<quill::ids::RequestId>,
-    /// New Contact box: the phone is not on Telegram (tdesktop's
-    /// `_retrying` state).
-    pub(crate) not_joined: bool,
+    /// New Contact box (`user_id == 0`): where its import stands.
+    pub(crate) stage: NewContactStage,
+    /// Add Contact box (`user_id != 0`): the `addContact` it waits on.
+    pub(crate) save: ContactSave,
+}
+
+/// Where the New Contact box (`user_id == 0`) stands. Every stage has a way
+/// out: the import's answer, "Try another contact", or closing the box.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NewContactStage {
+    /// The form is filled in.
+    Form,
+    /// The import it sent, whose answer it applies, and the first name it
+    /// was sent with.
+    Sending {
+        request: quill::ids::RequestId,
+        name: String,
+    },
+    /// The phone is not on Telegram (tdesktop's `_retrying` state).
+    NotJoined { name: String },
+}
+
+/// Where the Add Contact box's save stands: the box closes on the answer
+/// to its own request, and shows the refusal when there is one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContactSave {
+    Idle,
+    Saving(quill::ids::RequestId),
+    Failed(String),
 }
 
 /// Slice A6: vCard import dialog — the user chooses a `.vcf` file and
 /// `parse_vcard` (telegram::requests) turns it into `ImportedContact`
 /// cards for `importContacts` (schema 1.8.67, line 14517). The box renders
 /// from `state` alone.
-#[derive(Default)]
 pub struct ImportContactsDialog {
     pub(crate) state: quill::vcard_import::VcardImport,
-    /// Which file choice the pending read belongs to; a read that lands
-    /// after another choice (or after closing) is dropped.
+    /// This box, never shared with another one (they count from one
+    /// process-wide counter): the file picker's answer lands only in the
+    /// box that asked.
+    pub(crate) id: u64,
+    /// Which file choice the pending read belongs to, counted with the
+    /// same counter; a read that lands after another choice (in this box
+    /// or the next one) or after closing is dropped.
     pub(crate) pick: u64,
+}
+
+impl ImportContactsDialog {
+    pub(crate) fn new() -> Self {
+        Self {
+            state: quill::vcard_import::VcardImport::default(),
+            id: Self::next_token(),
+            pick: 0,
+        }
+    }
+
+    /// A token no other box or choice of this process has had.
+    pub(crate) fn next_token() -> u64 {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    }
 }
 
 impl AddContactDialog {
@@ -71,9 +113,8 @@ impl AddContactDialog {
             phone_input,
             first_name_input,
             last_name_input,
-            sent_name: None,
-            sent_request: None,
-            not_joined: false,
+            stage: NewContactStage::Form,
+            save: ContactSave::Idle,
         }
     }
 

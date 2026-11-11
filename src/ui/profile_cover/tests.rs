@@ -82,10 +82,7 @@ fn the_rating_pill_opens_the_rating_box(cx: &mut TestAppContext) {
     click(&mut vcx, "profile-rating");
     assert_eq!(dialog(&shell, &mut vcx), Some(DialogKind::StarsRating));
     click(&mut vcx, "rating-box-understood");
-    assert_eq!(
-        app.read_with(&vcx, |app, _| app.profile_cover.rating_box),
-        None
-    );
+    assert!(app.read_with(&vcx, |app, _| app.profile_cover.rating_box.is_none()));
     assert_ne!(dialog(&shell, &mut vcx), Some(DialogKind::StarsRating));
 }
 
@@ -99,6 +96,7 @@ fn hidden_last_seen_offers_to_show_yours(cx: &mut TestAppContext) {
         Some(ShowOrPremiumBox {
             kind: ShowOrPremium::LastSeen,
             user_id: COVER_HIDDEN,
+            stage: crate::ui::profile_cover::ShowStage::Choosing,
         })
     );
     assert_eq!(dialog(&shell, &mut vcx), Some(DialogKind::ShowOrPremium));
@@ -116,8 +114,8 @@ fn hidden_last_seen_subscribes_with_the_lastseen_hidden_ref(cx: &mut TestAppCont
     let premium = app.read_with(&vcx, |app, _| {
         app.session().map(|session| {
             (
-                session.payments.hub.premium_open,
-                session.payments.hub.premium_ref.clone(),
+                session.payments.hub.premium_open(),
+                session.payments.hub.premium_ref().to_string(),
             )
         })
     });
@@ -173,9 +171,12 @@ fn your_rating_box_previews_the_pending_rating(cx: &mut TestAppContext) {
     click(&mut vcx, "profile-rating");
     assert_eq!(dialog(&shell, &mut vcx), Some(DialogKind::StarsRating));
     click(&mut vcx, "rating-box-preview");
-    assert!(app.read_with(&vcx, |app, _| app.profile_cover.rating_preview));
+    let mode = |vcx: &VisualTestContext| {
+        app.read_with(vcx, |app, _| app.profile_cover.rating_box.map(|b| b.mode))
+    };
+    assert_eq!(mode(&vcx), Some(super::RatingMode::Future));
     click(&mut vcx, "rating-box-preview");
-    assert!(!app.read_with(&vcx, |app, _| app.profile_cover.rating_preview));
+    assert_eq!(mode(&vcx), Some(super::RatingMode::Current));
 }
 
 #[gpui_kit::test]
@@ -183,4 +184,31 @@ fn others_have_no_pending_rating(cx: &mut TestAppContext) {
     let (_app, _shell, mut vcx) = new_app(cx, "ready-info-cover-stories");
     click(&mut vcx, "profile-rating");
     assert!(!find(&mut vcx, "rating-box-preview"));
+}
+
+/// The box settles on its own request: another save of the Last seen rule
+/// (a refusal in the key's state) says nothing about it.
+#[gpui_kit::test]
+fn the_show_box_settles_on_its_own_request(cx: &mut TestAppContext) {
+    use crate::ui::profile_cover::ShowStage;
+    use quill::state::RequestPurpose;
+    let (app, _shell, mut vcx) = new_app(cx, "ready-info-cover-last-seen");
+    click(&mut vcx, "profile-cover-when");
+    app.update_in(&mut vcx, |app, _, cx| {
+        let request = app
+            .demo_session
+            .as_mut()
+            .map(|session| session.request(RequestPurpose::SetReadDatePrivacy, None))
+            .expect("the demo session");
+        if let Some(open) = app.profile_cover.show_or_premium.as_mut() {
+            open.stage = ShowStage::Saving(request);
+        }
+        assert!(!app.drain_show_or_premium(cx), "its request is still out");
+        assert!(app.profile_cover.show_or_premium.is_some());
+        if let Some(session) = app.demo_session.as_mut() {
+            session.requests.take(request);
+        }
+        assert!(app.drain_show_or_premium(cx), "answered");
+        assert!(app.profile_cover.show_or_premium.is_none());
+    });
 }

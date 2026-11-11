@@ -17,7 +17,7 @@ impl QuillApp {
         let status = session
             .map(|s| s.search.search.status())
             .unwrap_or(SearchStatus::Closed);
-        let recents = session.is_some_and(|s| s.search.search.recents);
+        let recents = session.is_some_and(|s| s.search.search.is_recents());
         let query = session
             .map(|s| s.search.search.query.clone())
             .unwrap_or_default();
@@ -27,8 +27,9 @@ impl QuillApp {
         let tab = session.map_or(SearchTab::Chats, |s| {
             SearchTab::of(&s.search.search.filters)
         });
-        let public_scope = session
-            .is_some_and(|s| s.search.search.filters.scope == SearchScope::PublicPosts && !recents);
+        let public_scope = session.is_some_and(|s| {
+            s.search.search.filters.scope() == SearchScope::PublicPosts && !recents
+        });
         let apps_scope = tab == SearchTab::Apps;
         // The Channels tab lists its channels until a query is typed; the
         // media tabs list their kind of message from every chat.
@@ -39,7 +40,7 @@ impl QuillApp {
         let show_messages = !matches!(tab, SearchTab::Apps | SearchTab::Downloads)
             && !channels_idle
             && !(tab == SearchTab::Posts && query.trim().is_empty());
-        let limits_exceeded = session.is_some_and(|s| s.search.search.public_limits_exceeded);
+        let limits_exceeded = session.is_some_and(|s| s.search.search.public_limits_exceeded());
         let messages: Vec<(ChatId, MessageId, String, String, i32)> = session
             .map(|s| {
                 s.search
@@ -162,7 +163,7 @@ impl QuillApp {
         } else {
             tr(keys::Q_CHAT_MESSAGES)
         };
-        let confirm = session.and_then(|s| s.search.search.confirm);
+        let confirm = session.and_then(|s| s.search.search.confirm.clone());
         let messages_empty = messages.is_empty();
         // A new query, tab or filter starts the list from its top.
         if let Some(search) = session.map(|s| &s.search.search) {
@@ -175,7 +176,7 @@ impl QuillApp {
             // Infinite scroll: look again once this frame is laid out, so a
             // page that left the list short of the viewport asks for more.
             let tabs = &search.tabs;
-            if tabs.has_more() && !tabs.loading_more && !tabs.more_failed {
+            if tabs.has_more() && !tabs.loading_more() && !tabs.more_failed() {
                 self.defer_screen(cx, move |this, cx| {
                     this.maybe_load_more_search(cx);
                 });

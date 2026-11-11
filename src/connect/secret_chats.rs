@@ -72,7 +72,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let queued: Vec<i32> =
             std::mem::take(&mut self.session.users_state.secret_chat_fetch_queue);
-        for secret_chat_id in queued {
+        let mut queued = queued.into_iter();
+        while let Some(secret_chat_id) = queued.next() {
             if self
                 .session
                 .users_state
@@ -100,10 +101,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .send_json(&get_secret_chat(extra, secret_chat_id))
             {
                 self.session.requests.take(extra);
-                self.session
-                    .users_state
-                    .secret_chat_fetch_queue
-                    .push(secret_chat_id);
+                // This one and everything not tried yet wait for the next
+                // call: their state is still unknown.
+                let queue = &mut self.session.users_state.secret_chat_fetch_queue;
+                queue.push(secret_chat_id);
+                queue.extend(queued);
                 return Err(err);
             }
         }

@@ -159,12 +159,15 @@ impl QuillApp {
     /// with no window comes up in the main window, which comes forward.
     pub(super) fn choose_share_chat(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(text) = self.share.link_text.take() {
-            self.links.pending_deep_link_open = Some(PendingOpen::user(
-                chat_id,
-                DeepLinkAction::ShareDraft { text },
-            ));
             let asker = self.asking_window().flatten();
-            self.hold_resolved_link(asker, cx);
+            self.hold_resolved_link(
+                super::links_state::ResolvedStep::Open(PendingOpen::user(
+                    chat_id,
+                    DeepLinkAction::ShareDraft { text },
+                )),
+                asker,
+                cx,
+            );
         }
         self.qr_share_chosen(chat_id, cx);
         cx.notify();
@@ -202,6 +205,15 @@ impl QuillApp {
         else {
             return;
         };
+        // The reader left the chat before the message loaded: nothing is
+        // played or opened over the chat they moved to.
+        if !self
+            .session()
+            .is_some_and(|session| session.chat_is_shown(chat_id))
+        {
+            self.playback.pending_media_seek = None;
+            return;
+        }
         let loaded = self.session().is_some_and(|session| {
             session
                 .histories

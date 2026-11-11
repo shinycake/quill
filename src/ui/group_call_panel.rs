@@ -352,7 +352,7 @@ impl QuillApp {
                     .on_click(cx.listener(|this, _, _, cx| this.dismiss_group_call_error(cx)))
                     .child(error)
             });
-        let banner = call.reconnecting().then(|| {
+        let banner = call.offers_rejoin().then(|| {
             div()
                 .id("group-call-rejoin")
                 .mx(px(16.))
@@ -371,8 +371,8 @@ impl QuillApp {
         });
 
         // A conference made with "Create Call Link" opens on its link.
-        let link_open = call.conference.as_ref().is_some_and(|c| c.link_open);
-        let invite = ((self.group_call_boxes.invite_open || link_open)
+        let link_open = call.conference.as_ref().is_some_and(|c| c.link_open());
+        let invite = ((self.group_call_boxes.invite_open() || link_open)
             && !self.account.passcode.is_locked())
         .then(|| {
             div()

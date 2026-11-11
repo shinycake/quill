@@ -151,12 +151,20 @@ fn my_notes_and_hidden_author_use_tdesktop_names() {
     assert_eq!(titles, vec!["My Notes", "Author Hidden"]);
 }
 
+/// The open sublist waits for `extra`, as the driver records it on send.
+fn ask_sublist(session: &mut Session, extra: RequestId) {
+    if let Some(view) = session.threads.saved.sublist.as_mut() {
+        view.page = SavedPage::Asking(extra);
+    }
+}
+
 #[test]
 fn sublist_history_pages_and_follows_deletes_and_edits() {
     let (mut session, sink, seq) = saved_session();
     session.open_saved_sublist(77);
     let purpose = RequestPurpose::GetSavedMessagesTopicHistory { topic_id: 77 };
     let extra = session.request(purpose, None);
+    ask_sublist(&mut session, extra);
     apply_json(
         &mut session,
         &seq,
@@ -171,9 +179,10 @@ fn sublist_history_pages_and_follows_deletes_and_edits() {
     let view = session.threads.saved.sublist.as_ref().unwrap();
     assert_eq!(view.history.messages.len(), 2);
     assert_eq!(view.history.next_from_message_id, MessageId(20));
-    assert!(!view.history.loaded_complete);
+    assert!(!view.history.loaded_complete());
     // An empty page ends the history.
     let extra = session.request(purpose, None);
+    ask_sublist(&mut session, extra);
     apply_json(
         &mut session,
         &seq,
@@ -191,11 +200,12 @@ fn sublist_history_pages_and_follows_deletes_and_edits() {
             .as_ref()
             .unwrap()
             .history
-            .loaded_complete
+            .loaded_complete()
     );
     // A page answered for another sublist is dropped.
     session.open_saved_sublist(5);
     let extra = session.request(purpose, None);
+    ask_sublist(&mut session, extra);
     apply_json(
         &mut session,
         &seq,
@@ -223,6 +233,7 @@ fn sublist_history_pages_and_follows_deletes_and_edits() {
         RequestPurpose::GetSavedMessagesTopicHistory { topic_id: 77 },
         None,
     );
+    ask_sublist(&mut session, extra);
     apply_json(
         &mut session,
         &seq,
@@ -274,8 +285,8 @@ fn tag_updates_and_sublist_tag_names() {
         &sink,
         r#"{"@type":"updateSavedMessagesTags","saved_messages_topic_id":"0","tags":{"@type":"savedMessagesTags","tags":[{"tag":{"@type":"reactionTypeEmoji","emoji":"❤"},"label":"Love","count":4},{"tag":{"@type":"reactionTypeEmoji","emoji":"🔥"},"label":"","count":1}]}}"#,
     );
-    assert!(session.threads.saved.tags_loaded);
-    assert_eq!(session.threads.saved.tags[0].label, "Love");
+    assert!(session.threads.saved.tags.data().is_some());
+    assert_eq!(session.threads.saved.tag_list()[0].label, "Love");
     session.open_saved_sublist(77);
     let extra = session.request(RequestPurpose::GetSavedMessagesTags { topic_id: 77 }, None);
     apply_json(
@@ -301,7 +312,7 @@ fn tag_search_pages_land_in_the_filter() {
     session.begin_saved_tag_search(0, tag.clone());
     let extra = session.request(RequestPurpose::SearchSavedMessages { topic_id: 0 }, None);
     if let Some(search) = session.threads.saved.tag_search.as_mut() {
-        search.request = Some(extra);
+        search.page = SavedPage::Asking(extra);
     }
     apply_json(
         &mut session,
@@ -315,10 +326,9 @@ fn tag_search_pages_land_in_the_filter() {
         ),
     );
     let search = session.threads.saved.tag_search.as_ref().unwrap();
-    assert!(search.loaded);
     assert_eq!(search.tag, tag);
     assert_eq!(search.history.messages.len(), 2);
-    assert!(search.history.loaded_complete);
+    assert!(search.history.loaded_complete());
     session.clear_saved_tag_search();
     assert!(session.threads.saved.tag_search.is_none());
 }
@@ -336,8 +346,8 @@ fn load_topics_404_marks_the_list_complete() {
             extra.0
         ),
     );
-    assert!(session.threads.saved.topics_exhausted);
-    assert!(session.chats_state.chat_action_error.is_none());
+    assert!(session.threads.saved.topics_exhausted());
+    assert!(session.chats_state.chat_action_error.is_empty());
 }
 
 /// Round 7, 2d: a failed first page is not "sent" any more, so the pane
@@ -354,13 +364,13 @@ fn a_failed_first_page_is_asked_again_once_back_online() {
             extra.0
         )
     };
-    session.threads.saved.topics_requested = true;
+    session.threads.saved.topics_load = SavedTopicsLoad::Started;
     let page = session.request(RequestPurpose::LoadSavedMessagesTopics, None);
     apply_json(&mut session, &seq, &sink, &error(page));
-    assert!(!session.threads.saved.topics_requested);
-    assert!(session.threads.saved.retry_when_online);
+    assert_eq!(session.threads.saved.topics_load, SavedTopicsLoad::Retry);
+    assert!(session.threads.saved.waiting_to_retry());
     assert!(
-        !session.threads.saved.topics_exhausted,
+        !session.threads.saved.topics_exhausted(),
         "the pane is not 'no chats'"
     );
 
@@ -370,13 +380,20 @@ fn a_failed_first_page_is_asked_again_once_back_online() {
         )
     };
     apply_json(&mut session, &seq, &sink, &state("Connecting"));
-    assert!(session.threads.saved.retry_when_online);
+    assert!(session.threads.saved.waiting_to_retry());
     apply_json(&mut session, &seq, &sink, &state("Ready"));
-    assert!(!session.threads.saved.retry_when_online);
+    assert!(!session.threads.saved.waiting_to_retry());
 
     let tags = session.request(RequestPurpose::GetSavedMessagesTags { topic_id: 0 }, None);
+    session.threads.saved.tags.begin();
+    session.threads.saved.tags.sent(tags);
     apply_json(&mut session, &seq, &sink, &error(tags));
-    assert!(session.threads.saved.retry_when_online);
+    assert!(session.threads.saved.waiting_to_retry());
+    assert!(session.threads.saved.tags.error().is_some());
+    // Back online, the tags are asked again (the pump sees them idle).
+    apply_json(&mut session, &seq, &sink, &state("Connecting"));
+    apply_json(&mut session, &seq, &sink, &state("Ready"));
+    assert!(session.threads.saved.tags.is_idle());
 }
 
 /// Round 8, 2e: a server error arrives while already online, so no
@@ -387,7 +404,7 @@ fn a_failure_while_online_is_asked_again_on_the_next_open() {
     let (mut session, sink, seq) = saved_session();
     session.connection = ConnectionState::Ready;
     session.open_chat(ChatId(ME));
-    session.threads.saved.topics_requested = true;
+    session.threads.saved.topics_load = SavedTopicsLoad::Started;
     let page = session.request(RequestPurpose::LoadSavedMessagesTopics, None);
     apply_json(
         &mut session,
@@ -398,16 +415,17 @@ fn a_failure_while_online_is_asked_again_on_the_next_open() {
             page.0
         ),
     );
-    assert!(session.threads.saved.retry_when_online);
+    assert!(session.threads.saved.waiting_to_retry());
     session.open_chat(ChatId(ME + 1));
-    assert!(session.threads.saved.retry_when_online, "another chat");
+    assert!(session.threads.saved.waiting_to_retry(), "another chat");
     session.open_chat(ChatId(ME));
     assert!(
-        !session.threads.saved.retry_when_online,
+        !session.threads.saved.waiting_to_retry(),
         "Saved Messages again"
     );
-    assert!(
-        !session.threads.saved.topics_requested,
+    assert_eq!(
+        session.threads.saved.topics_load,
+        SavedTopicsLoad::Idle,
         "the pump sends the page"
     );
 }

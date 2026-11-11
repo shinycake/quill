@@ -24,6 +24,7 @@ use quill::paid_messages::{
 };
 use quill::premium_hub::group_digits;
 use quill::privacy::{NewChatPrivacy, NewChatPrivacyState};
+use quill::state::PrivacyControl;
 use quill::telegram::requests_privacy::PrivacySettingKey;
 
 /// A slider over `steps` (see `price_steps`) that reports each pick to
@@ -63,8 +64,8 @@ pub(super) fn price_slider(
 impl QuillApp {
     /// The Messages row of the Privacy screen was pressed.
     pub(crate) fn open_new_chat_editor(&mut self, cx: &mut Context<Self>) {
-        self.privacy.editor = Some(PrivacyEditorTarget::NewChat);
-        self.privacy.exception_picker_open = false;
+        self.privacy.layer.open_editor(PrivacyEditorTarget::NewChat);
+        self.privacy.layer.close_exception_picker();
         self.paid_messages.charge = None;
         if let Some(live) = self.live.as_mut() {
             // The free-messages list behind "Remove fee".
@@ -93,7 +94,12 @@ impl QuillApp {
     pub(super) fn new_chat_editor(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
         let can_restrict = self.can_restrict_new_chats();
-        let error = session.and_then(|s| s.settings.privacy_data.error.clone());
+        let error = session.and_then(|s| {
+            s.settings
+                .privacy_data
+                .error(PrivacyControl::NewChat)
+                .map(str::to_string)
+        });
         let paid_error = session
             .and_then(|s| s.payments.paid_messages.save.user_error())
             .map(str::to_string);
@@ -335,11 +341,10 @@ impl QuillApp {
         let count = self
             .session()
             .and_then(|s| s.settings.privacy.get(&key))
-            .map(|state| match state {
-                quill::privacy::PrivacyKeyState::Ready(detail) => {
-                    detail.always.len() + detail.always_chats.len()
-                }
-                _ => 0,
+            .map(|state| {
+                state
+                    .detail()
+                    .map_or(0, |detail| detail.always.len() + detail.always_chats.len())
             })
             .unwrap_or(0);
         let target = PrivacyEditorTarget::Rule(key);
@@ -376,8 +381,10 @@ impl QuillApp {
                             }),
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.privacy.exceptions = Some((target, PrivacyExceptionKind::Always));
-                        this.privacy.exception_picker_open = false;
+                        this.privacy
+                            .layer
+                            .open_exceptions(target, PrivacyExceptionKind::Always);
+                        this.privacy.layer.close_exception_picker();
                         cx.notify();
                     })),
             )

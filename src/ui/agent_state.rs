@@ -11,6 +11,7 @@ use quill::agent::activity;
 use quill::agent::grants::{self, AccountGrants, ChatGrant, Scope};
 use quill::agent::prompts::{self, Ask, Prompt};
 use quill::ids::AccountKey;
+use quill::lang::{keys, tr_with};
 use std::time::Duration;
 
 /// "All other chats" waiting for the user to say yes.
@@ -42,6 +43,16 @@ pub(crate) struct AgentUi {
 }
 
 impl AgentUi {
+    /// Settings now edits `account` (`None` follows the active one). The
+    /// activity filter names the old account's agents, chats and tools, so
+    /// another account starts unfiltered.
+    pub(super) fn pick_account(&mut self, account: Option<AccountKey>) {
+        if self.picked != account {
+            self.picked = account;
+            self.page.reset_activity();
+        }
+    }
+
     pub(super) fn new() -> Self {
         Self {
             picked: None,
@@ -57,16 +68,39 @@ impl super::on_screen::Farewell for AgentUi {}
 /// Activity rows shown at first, and added by each "Show more".
 pub(super) const ACTIVITY_PAGE: usize = 50;
 
+/// Where the UI driver's input stands. Input commands run one at a time: a
+/// click of one agent landing between the characters another types would
+/// leave both answers wrong, and the app-wide refusal and send slots would
+/// be credited to the wrong command. A command that arrives while one runs
+/// waits here, in order, and starts when the running one answers (or when
+/// its task ends any other way: the next one then re-checks every switch).
+pub(crate) enum Driver {
+    Idle,
+    /// The input command with this request id runs.
+    Running {
+        id: u64,
+        waiting: std::collections::VecDeque<quill::agent::ui_driver::bridge::Pending>,
+    },
+}
+
 /// The app's side of agent access: the task that wakes the UI for agent
-/// state and requests (agents drive whichever account is on screen), how
-/// many activity rows show, and a send handed to the agent path. A
+/// state and requests (agents drive whichever account is on screen), a
+/// send handed to the agent path, and the input commands in line. A
 /// `QuillApp` field (`agent_bridge`).
 pub(crate) struct AgentBridge {
-    /// How many activity rows Settings shows.
-    pub(super) activity_shown: usize,
     /// A send the composer handed to the agent path while the UI driver
     /// injected input (`agent_driver_send`), until the task picks it up.
-    pub(super) ui_send: Option<quill::agent::ui_driver::bridge::UiSend>,
+    /// The send carries the screen it was built on: a command takes it
+    /// only while that screen is still its own (07-026).
+    /// Boxed: `QuillApp` is held by value on the main thread's stack.
+    pub(super) ui_send: Option<
+        Box<(
+            super::on_screen::ScreenEpoch,
+            quill::agent::ui_driver::bridge::UiSend,
+        )>,
+    >,
+    /// The input command that runs, and those waiting behind it.
+    pub(super) driver: Driver,
 }
 
 impl AgentBridge {
@@ -121,8 +155,8 @@ impl AgentBridge {
         })
         .detach();
         Self {
-            activity_shown: ACTIVITY_PAGE,
             ui_send: None,
+            driver: Driver::Idle,
         }
     }
 }
@@ -196,7 +230,6 @@ pub(super) fn apply_ask(grants: &mut AccountGrants, ask: &Ask) {
 }
 
 /// The scope a grant row sets (the page reads it from the access summary).
-#[cfg(test)]
 fn scope_of(grants: &AccountGrants, target: GrantTarget) -> Option<Scope> {
     match target {
         GrantTarget::Saved => grants.saved,
@@ -260,7 +293,9 @@ impl QuillApp {
             });
             self.open_box(crate::ui::shell::DialogKind::AgentConsent);
         } else {
-            grants::update(&account, |g| apply_scope(g, target, scope));
+            let current = scope_of(&grants::for_account(&account), target);
+            let narrows = !widens(current, scope);
+            self.update_grants_as(&account, narrows, |g| apply_scope(g, target, scope));
         }
         cx.notify();
     }
@@ -271,7 +306,7 @@ impl QuillApp {
             return;
         }
         if let Some(consent) = self.agent_ui.consent.take() {
-            grants::update(&consent.account, |g| g.all_chats = Some(consent.scope));
+            self.update_grants(&consent.account, |g| g.all_chats = Some(consent.scope));
         }
         note_prompt_answered();
         cx.notify();
@@ -285,16 +320,52 @@ impl QuillApp {
 
     pub(super) fn set_agent_contacts(&mut self, on: bool, cx: &mut Context<Self>) {
         let account = self.agent_settings_account();
-        grants::update(&account, |g| g.contacts = on);
+        self.update_grants_as(&account, !on, |g| g.contacts = on);
         cx.notify();
     }
 
     pub(super) fn remove_agent_chat(&mut self, chat_id: i64, cx: &mut Context<Self>) {
         let account = self.agent_settings_account();
-        grants::update(&account, |g| {
+        self.update_grants_as(&account, true, |g| {
             g.chats.remove(&chat_id);
         });
         cx.notify();
+    }
+
+    /// Changes `account`'s grants. A grants file that cannot be written
+    /// leaves the grants as they were and says so, so the page never shows
+    /// a change a restart would undo. Whether the change was kept.
+    pub(super) fn update_grants(
+        &mut self,
+        account: &AccountKey,
+        change: impl FnOnce(&mut AccountGrants),
+    ) -> bool {
+        self.update_grants_as(account, false, change)
+    }
+
+    /// [`Self::update_grants`] for a change that `narrows` access: it holds
+    /// in memory even when the save fails (the note still says so).
+    pub(super) fn update_grants_as(
+        &mut self,
+        account: &AccountKey,
+        narrows: bool,
+        change: impl FnOnce(&mut AccountGrants),
+    ) -> bool {
+        let result = if narrows {
+            grants::update_narrowing(account, change)
+        } else {
+            grants::update(account, change)
+        };
+        match result {
+            Ok(()) => true,
+            Err(err) => {
+                self.set_note(super::status_note::StatusNote::error(tr_with(
+                    keys::Q_AGENT_GRANTS_SAVE_FAILED,
+                    &[("err", &err.0)],
+                )));
+                narrows
+            }
+        }
     }
 
     /// Answer the request `prompt`: on Allow the grant is applied first, so
@@ -308,10 +379,9 @@ impl QuillApp {
     ) {
         let waiting =
             prompts::current_for(&prompt.account).is_some_and(|current| current.id == prompt.id);
-        if waiting && allow {
-            grants::update(&prompt.account, |g| apply_ask(g, &prompt.ask));
-        }
-        let decision = if waiting && allow {
+        let saved = !(waiting && allow)
+            || self.update_grants(&prompt.account, |g| apply_ask(g, &prompt.ask));
+        let decision = if waiting && allow && saved {
             prompts::Decision::Allowed
         } else {
             prompts::Decision::Denied
@@ -401,7 +471,7 @@ pub(super) fn reset_for_test(account: &AccountKey) {
     activity::clear();
     quill::agent::access::set_confirm_sends(false);
     quill::agent::access::set_raw_calls(true);
-    grants::update(account, |g| *g = AccountGrants::default());
+    let _ = grants::update(account, |g| *g = AccountGrants::default());
     quill::agent::access::set_enabled(true);
 }
 

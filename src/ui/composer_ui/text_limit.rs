@@ -39,31 +39,58 @@ struct TextLimitKey {
 }
 
 /// The note of the text at the last counted revision, which only ever answers
-/// for that revision of that field.
+/// for that revision of that field. One value: a count in flight keeps the
+/// last answer beside it, and dropping the value cancels the count.
 #[derive(Default)]
-struct TextLimitCount {
-    known: Cell<Option<(TextLimitKey, TextLimitNote)>>,
-    running: Cell<Option<(TextLimitKey, Task<()>)>>,
+enum TextLimitCount {
+    #[default]
+    Idle,
+    Known(TextLimitKey, TextLimitNote),
+    Counting {
+        key: TextLimitKey,
+        _task: Task<()>,
+        last: Option<(TextLimitKey, TextLimitNote)>,
+    },
 }
 
+/// A `Cell`, not a `RefCell`: each method takes the value out, reads it and
+/// puts it back, so no borrow is held while a dropped count's task is freed.
 #[derive(Default)]
-pub(in crate::ui) struct TextLimitMemo(Box<TextLimitCount>);
+pub(in crate::ui) struct TextLimitMemo(Cell<TextLimitCount>);
 
 impl TextLimitMemo {
     fn known(&self) -> Option<(TextLimitKey, TextLimitNote)> {
-        self.0.known.get()
+        let state = self.0.take();
+        let known = match &state {
+            TextLimitCount::Idle => None,
+            TextLimitCount::Known(key, note) => Some((*key, *note)),
+            TextLimitCount::Counting { last, .. } => *last,
+        };
+        self.0.set(state);
+        known
     }
 
+    /// An answer: any count in flight is over.
     fn set(&self, key: TextLimitKey, note: TextLimitNote) {
-        self.0.known.set(Some((key, note)));
-        self.0.running.take();
+        drop(self.0.replace(TextLimitCount::Known(key, note)));
     }
 
     fn is_counting(&self, key: TextLimitKey) -> bool {
-        let running = self.0.running.take();
-        let same = running.as_ref().is_some_and(|(known, _)| *known == key);
-        self.0.running.set(running);
-        same
+        let state = self.0.take();
+        let counting =
+            matches!(&state, TextLimitCount::Counting { key: counting, .. } if *counting == key);
+        self.0.set(state);
+        counting
+    }
+
+    /// A count for `key` runs as `task`; an earlier count is dropped.
+    fn start(&self, key: TextLimitKey, task: Task<()>) {
+        let last = self.known();
+        drop(self.0.replace(TextLimitCount::Counting {
+            key,
+            _task: task,
+            last,
+        }));
     }
 }
 
@@ -106,7 +133,7 @@ impl QuillApp {
                 })
                 .ok();
             });
-            memo.0.running.set(Some((key, task)));
+            memo.start(key, task);
         }
         TextLimitNote::Counting
     }
@@ -117,7 +144,7 @@ impl QuillApp {
     /// several messages), so the label says how many.
     pub(in crate::ui) fn text_limit_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         // The rich editor sends one message, and refuses text over its own limit.
-        if self.chat_ui.rich_editor_open || !self.pending_attachments().is_empty() {
+        if self.chat_ui.rich.editor_open() || !self.pending_attachments().is_empty() {
             return None;
         }
         let editing = self.chat_ui.pending_edit();

@@ -10,7 +10,8 @@ pub enum SyntheticKind {
     Text,
     Rtl,
     Emoji,
-    Image { loaded: bool },
+    ImageLoading,
+    ImageLoaded,
 }
 
 #[derive(Clone)]
@@ -69,7 +70,7 @@ impl SyntheticChat {
                 5,
                 tr(keys::Q_MISC_ADA),
                 tr(keys::Q_MISC_PHOTO_PENDING),
-                SyntheticKind::Image { loaded: false },
+                SyntheticKind::ImageLoading,
                 false,
             ),
         ];
@@ -133,9 +134,9 @@ impl SyntheticChat {
         if let Some(row) = self
             .rows
             .iter_mut()
-            .find(|row| matches!(row.kind, SyntheticKind::Image { loaded: false }))
+            .find(|row| matches!(row.kind, SyntheticKind::ImageLoading))
         {
-            row.kind = SyntheticKind::Image { loaded: true };
+            row.kind = SyntheticKind::ImageLoaded;
             row.body = tr(keys::Q_MISC_PHOTO_LOADED_HEIGHT_CHANGED).into();
         }
         let len = self.rows.len();
@@ -187,7 +188,7 @@ impl BubbleLook {
 
 /// Radius of a corner that joins a neighbouring bubble or carries the
 /// bubble's tail (tdesktop `bubbleRadiusSmall`).
-const JOINED_RADIUS: f32 = 5.0;
+pub(in crate::ui) const JOINED_RADIUS: f32 = 5.0;
 
 impl BubbleLook {
     /// Pre-login synthetic placeholder: today's fixed look.
@@ -327,6 +328,11 @@ pub(crate) struct MessageChrome {
     pub max_width: Option<Pixels>,
 }
 
+/// The time pill's distance from the picture's right and bottom edges.
+const MEDIA_PILL_INSET: f32 = 10.;
+/// The time pill's padding beside the time (`px_1p5`).
+const MEDIA_PILL_PAD_X: f32 = 6.;
+
 /// The time on a picture: a dark pill in the bottom-right corner of the
 /// nearest positioned parent (the bubble, or a bubble-less media block).
 pub(crate) fn media_footer_pill(
@@ -335,13 +341,18 @@ pub(crate) fn media_footer_pill(
 ) -> AnyElement {
     let pill = |footer: AnyElement| {
         div()
-            .px_1p5()
+            .px(px(MEDIA_PILL_PAD_X))
             .rounded_full()
             .bg(gpui_kit::black().opacity(0.45))
             .text_color(gpui_kit::white())
             .child(footer)
     };
-    let pill_at = |footer| pill(footer).absolute().right(px(10.)).bottom(px(10.));
+    let pill_at = |footer| {
+        pill(footer)
+            .absolute()
+            .right(px(MEDIA_PILL_INSET))
+            .bottom(px(MEDIA_PILL_INSET))
+    };
     match rebuild {
         // Over an inline video the history's animation layer draws: it
         // draws the pill again, above the video.
@@ -430,8 +441,8 @@ fn message_bubble_with_quote(
     look: BubbleLook,
 ) -> AnyElement {
     let image_h = match row.kind {
-        SyntheticKind::Image { loaded: false } => px(40.),
-        SyntheticKind::Image { loaded: true } => px(96.),
+        SyntheticKind::ImageLoading => px(40.),
+        SyntheticKind::ImageLoaded => px(96.),
         _ => px(0.),
     };
     let rtl = matches!(row.kind, SyntheticKind::Rtl | SyntheticKind::Emoji);
@@ -556,13 +567,11 @@ fn message_bubble_with_quote(
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(
-                        if matches!(row.kind, SyntheticKind::Image { loaded: true }) {
-                            tr(keys::Q_MISC_IMAGE_4_3)
-                        } else {
-                            tr(keys::Q_MISC_LOADING_IMAGE)
-                        },
-                    ),
+                    .child(if matches!(row.kind, SyntheticKind::ImageLoaded) {
+                        tr(keys::Q_MISC_IMAGE_4_3)
+                    } else {
+                        tr(keys::Q_MISC_LOADING_IMAGE)
+                    }),
             )
         })
         .when_some(extra, |this, el| this.child(el))

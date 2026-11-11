@@ -26,26 +26,28 @@ impl QuillApp {
     fn demo_premium_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(session) = self.demo_session.as_mut() {
             let hub = &mut session.payments.hub;
-            hub.premium = Some(parse_premium_features(&serde_json::json!({
-                "features": [
-                    {"@type": "premiumFeatureIncreasedLimits"},
-                    {"@type": "premiumFeatureVoiceRecognition"},
-                    {"@type": "premiumFeatureDisabledAds"},
-                    {"@type": "premiumFeatureUniqueReactions"},
-                    {"@type": "premiumFeatureEmojiStatus"},
-                    {"@type": "premiumFeatureAccentColor"},
-                ],
-                "limits": [],
-            })));
-            hub.premium_state = Some(parse_premium_state(&serde_json::json!({
-                "state": {"text": "", "entities": []},
-                "payment_options": [
-                    {"payment_option": {"currency": "USD", "amount": 499,
-                        "discount_percentage": 0, "month_count": 1}},
-                    {"payment_option": {"currency": "USD", "amount": 2999,
-                        "discount_percentage": 50, "month_count": 12}},
-                ],
-            })));
+            hub.premium
+                .succeed(parse_premium_features(&serde_json::json!({
+                    "features": [
+                        {"@type": "premiumFeatureIncreasedLimits"},
+                        {"@type": "premiumFeatureVoiceRecognition"},
+                        {"@type": "premiumFeatureDisabledAds"},
+                        {"@type": "premiumFeatureUniqueReactions"},
+                        {"@type": "premiumFeatureEmojiStatus"},
+                        {"@type": "premiumFeatureAccentColor"},
+                    ],
+                    "limits": [],
+                })));
+            hub.premium_state =
+                quill::state::fetch::Fetch::Ready(parse_premium_state(&serde_json::json!({
+                    "state": {"text": "", "entities": []},
+                    "payment_options": [
+                        {"payment_option": {"currency": "USD", "amount": 499,
+                            "discount_percentage": 0, "month_count": 1}},
+                        {"payment_option": {"currency": "USD", "amount": 2999,
+                            "discount_percentage": 50, "month_count": 12}},
+                    ],
+                })));
         }
         match std::env::var("QUILL_DEMO_PREMIUM").as_deref() {
             Ok("to-buy") => self.open_premium_to_buy(BusinessFeature::AccountLinks, cx),

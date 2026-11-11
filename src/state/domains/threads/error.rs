@@ -1,4 +1,5 @@
 //! Failed requests for forum topics, comment threads and Saved Messages.
+use crate::lang::{keys, tr};
 use crate::premium_limits::PremiumLimitKind;
 use crate::state::*;
 
@@ -9,10 +10,17 @@ impl Session {
         &mut self,
         err: &TdError,
         pending: Option<&PendingRequest>,
-        _extra: Option<RequestId>,
+        extra: Option<RequestId>,
         _seq: u64,
     ) {
         match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::StartBotThread) => {
+                if let Some(request) = extra {
+                    let line =
+                        call_request_error_line(err, tr(keys::Q_CHAT_COULDN_T_START_A_NEW_THREAD));
+                    self.bot_thread_answered(request, Err(line));
+                }
+            }
             // tdesktop `SublistsPinsLimitBox`: Saved Messages has its own
             // pin limit.
             Some(RequestPurpose::Threads(ThreadsPurpose::ToggleSavedMessagesTopicPinned {
@@ -29,31 +37,38 @@ impl Session {
             // sublists were loaded; it is not a failure.
             Some(RequestPurpose::LoadSavedMessagesTopics) => {
                 if err.code == 404 {
-                    self.threads.saved.topics_exhausted = true;
+                    self.threads.saved.topics_load = SavedTopicsLoad::Exhausted;
                 } else {
                     // Not sent as far as the pump goes: it asks again when
                     // the connection is back or Saved Messages opens again.
-                    self.threads.saved.topics_requested = false;
-                    self.threads.saved.retry_when_online = true;
-                    self.chats_state.chat_action_error =
-                        Some(call_request_error_line(err, "Could not load saved chats"));
+                    self.threads.saved.topics_load = SavedTopicsLoad::Retry;
+                    self.chats_state
+                        .chat_action_error
+                        .push(call_request_error_line(err, "Could not load saved chats"));
                 }
             }
             Some(RequestPurpose::GetSavedMessagesTags { topic_id: 0 }) => {
-                self.threads.saved.retry_when_online = true;
-                self.chats_state.chat_action_error = Some(call_request_error_line(
-                    err,
-                    "Could not complete that action",
-                ));
+                self.threads.saved.tags.failed(
+                    pending.map(|p| p.id),
+                    format!("error {}", err.code),
+                    false,
+                );
+                self.chats_state
+                    .chat_action_error
+                    .push(call_request_error_line(
+                        err,
+                        "Could not complete that action",
+                    ));
             }
             Some(RequestPurpose::LoadDirectMessagesChatTopics) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                    self.threads.direct.page_failed(chat_id.0, err.code);
                     if err.code == 404 {
-                        self.threads.direct.exhausted.insert(chat_id.0);
                         self.view_generation.bump();
                     } else {
-                        self.chats_state.chat_action_error =
-                            Some(call_request_error_line(err, "Could not load chats"));
+                        self.chats_state
+                            .chat_action_error
+                            .push(call_request_error_line(err, "Could not load chats"));
                     }
                 }
             }
@@ -63,20 +78,27 @@ impl Session {
                 | ThreadsPurpose::ReadDirectMessagesChatTopic { .. }
                 | ThreadsPurpose::ToggleDirectMessagesChatTopicCanSendUnpaidMessages { .. },
             )) => {
-                self.chats_state.chat_action_error = Some(call_request_error_line(
-                    err,
-                    "Could not complete that action",
-                ));
+                self.chats_state
+                    .chat_action_error
+                    .push(call_request_error_line(
+                        err,
+                        "Could not complete that action",
+                    ));
             }
             // The rows show "No chats" and do not ask again.
             Some(RequestPurpose::GetForumTopics) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.threads.forum_topics_failed.insert(chat_id.0);
+                    self.threads.forum_topics.failed_request(
+                        chat_id.0,
+                        pending.map(|p| p.id),
+                        error_reason(err),
+                    );
                 }
             }
             Some(RequestPurpose::GetForumTopicLink) => {
-                self.messages.message_link_error =
-                    Some(call_request_error_line(err, "Could not get the topic link"));
+                self.messages
+                    .message_link_error
+                    .push(call_request_error_line(err, "Could not get the topic link"));
             }
             Some(
                 RequestPurpose::ToggleChatViewAsTopics
@@ -91,10 +113,12 @@ impl Session {
                 | RequestPurpose::GetSavedMessagesTopicHistory { .. }
                 | RequestPurpose::SearchSavedMessages { .. },
             ) => {
-                self.chats_state.chat_action_error = Some(call_request_error_line(
-                    err,
-                    "Could not complete that action",
-                ));
+                self.chats_state
+                    .chat_action_error
+                    .push(call_request_error_line(
+                        err,
+                        "Could not complete that action",
+                    ));
             }
             _ => {}
         }
@@ -103,6 +127,12 @@ impl Session {
             Some(RequestPurpose::SearchSavedMessages { .. })
         ) {
             self.fail_saved_tag_page(pending);
+        }
+        if matches!(
+            pending.map(|p| p.purpose),
+            Some(RequestPurpose::GetSavedMessagesTopicHistory { .. })
+        ) {
+            self.fail_saved_topic_page(pending);
         }
         // A failed thread request marks the open thread view.
         self.fail_thread(

@@ -118,9 +118,9 @@ fn switch_selects_fetches_pack_and_base_then_synchronizes() {
     let pack_extra = f.strings_extra("pt-br");
     let base_extra = f.strings_extra("pt");
     f.feed(strings(&pack_extra, "lng_languages", "Idioma"));
-    assert!(f.driver.session.settings.language.ready.is_none());
+    assert!(f.driver.session.settings.language.take_install().is_none());
     f.feed(strings(&base_extra, "lng_box_ok", "OK"));
-    let ready = f.driver.session.settings.language.ready.take().unwrap();
+    let ready = f.driver.session.settings.language.take_install().unwrap();
     assert_eq!(ready.info.id, "pt-br");
     assert_eq!(
         ready.pack,
@@ -148,7 +148,7 @@ fn a_newer_switch_drops_the_older_answers() {
     de.plural_code = "de".into();
     f.driver.switch_language(de).unwrap();
     f.feed(strings(&old, "lng_languages", "Idioma"));
-    assert!(f.driver.session.settings.language.ready.is_none());
+    assert!(f.driver.session.settings.language.take_install().is_none());
     let new = f.strings_extra("de");
     f.feed(strings(&new, "lng_languages", "Sprache"));
     assert_eq!(
@@ -156,7 +156,7 @@ fn a_newer_switch_drops_the_older_answers() {
             .session
             .settings
             .language
-            .ready
+            .take_install()
             .as_ref()
             .map(|r| r.info.id.as_str()),
         Some("de")
@@ -176,7 +176,7 @@ fn unofficial_packs_are_added_first_and_english_needs_no_strings() {
     let sent = f.sent();
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0]["value"]["value"], "en");
-    let ready = f.driver.session.settings.language.ready.take().unwrap();
+    let ready = f.driver.session.settings.language.take_install().unwrap();
     assert!(ready.pack.is_empty());
     assert!(f.driver.session.settings.language.current.is_none());
 }
@@ -191,30 +191,30 @@ fn string_updates_patch_the_current_pack_or_ask_for_a_reload() {
         json!({"@type":"updateLanguagePackStrings","localization_target":"android",
         "language_pack_id":"pt-br","strings":[]}),
     );
-    assert!(!f.driver.session.settings.language.reload);
+    assert!(!f.driver.session.settings.language.reload_queued());
     f.feed(
         json!({"@type":"updateLanguagePackStrings","localization_target":"tdesktop",
         "language_pack_id":"pt-br","strings":[{"@type":"languagePackString","key":"lng_box_ok",
         "value":{"@type":"languagePackStringValueOrdinary","value":"Certo"}}]}),
     );
     assert_eq!(
-        f.driver.session.settings.language.patch,
+        f.driver.session.settings.language.queued_patch(),
         vec![("lng_box_ok".into(), PackValue::Ordinary("Certo".into()))]
     );
-    assert!(!f.driver.session.settings.language.reload);
+    assert!(!f.driver.session.settings.language.reload_queued());
     // A deleted string falls back to the base pack: fetch again.
     f.feed(
         json!({"@type":"updateLanguagePackStrings","localization_target":"tdesktop",
         "language_pack_id":"pt-br","strings":[{"@type":"languagePackString","key":"lng_box_ok",
         "value":{"@type":"languagePackStringValueDeleted"}}]}),
     );
-    assert!(f.driver.session.settings.language.reload);
-    f.driver.session.settings.language.reload = false;
+    assert!(f.driver.session.settings.language.reload_queued());
+    f.driver.session.settings.language.events.clear();
     f.feed(
         json!({"@type":"updateLanguagePackStrings","localization_target":"tdesktop",
         "language_pack_id":"pt-br","strings":[]}),
     );
-    assert!(f.driver.session.settings.language.reload);
+    assert!(f.driver.session.settings.language.reload_queued());
 }
 
 #[test]
@@ -223,18 +223,51 @@ fn a_finished_switch_drops_changes_queued_for_the_old_pack() {
     f.driver.switch_language(pack("pt-br", "")).unwrap();
     let extra = f.strings_extra("pt-br");
     f.feed(strings(&extra, "lng_languages", "Idioma"));
-    f.driver.session.settings.language.ready = None;
+    f.driver.session.settings.language.events.clear();
     f.driver.switch_language(pack("de", "")).unwrap();
     f.feed(
         json!({"@type":"updateLanguagePackStrings","localization_target":"tdesktop",
         "language_pack_id":"pt-br","strings":[{"@type":"languagePackString","key":"lng_box_ok",
         "value":{"@type":"languagePackStringValueOrdinary","value":"Certo"}}]}),
     );
-    assert_eq!(f.driver.session.settings.language.patch.len(), 1);
+    assert_eq!(f.driver.session.settings.language.queued_patch().len(), 1);
     let extra = f.strings_extra("de");
     f.feed(strings(&extra, "lng_languages", "Sprache"));
     let state = &f.driver.session.settings.language;
-    assert!(state.ready.is_some() && state.patch.is_empty());
+    assert!(state.install_queued() && state.queued_patch().is_empty());
+}
+
+#[test]
+fn a_change_to_the_pack_being_switched_to_is_kept_for_its_arrival() {
+    let mut f = Fixture::new();
+    f.driver.switch_language(pack("pt-br", "")).unwrap();
+    f.feed(
+        json!({"@type":"updateLanguagePackStrings","localization_target":"tdesktop",
+        "language_pack_id":"pt-br","strings":[{"@type":"languagePackString","key":"lng_box_ok",
+        "value":{"@type":"languagePackStringValueOrdinary","value":"Certo"}}]}),
+    );
+    let extra = f.strings_extra("pt-br");
+    f.feed(strings(&extra, "lng_languages", "Idioma"));
+    let state = &f.driver.session.settings.language;
+    assert!(state.install_queued());
+    assert_eq!(
+        state.queued_patch(),
+        vec![("lng_box_ok".into(), PackValue::Ordinary("Certo".into()))]
+    );
+    assert!(!state.reload_queued());
+
+    // A deleted string while switching asks for a fetch once ready.
+    let mut f = Fixture::new();
+    f.driver.switch_language(pack("pt-br", "")).unwrap();
+    f.feed(
+        json!({"@type":"updateLanguagePackStrings","localization_target":"tdesktop",
+        "language_pack_id":"pt-br","strings":[{"@type":"languagePackString","key":"lng_box_ok",
+        "value":{"@type":"languagePackStringValueDeleted"}}]}),
+    );
+    let extra = f.strings_extra("pt-br");
+    f.feed(strings(&extra, "lng_languages", "Idioma"));
+    let state = &f.driver.session.settings.language;
+    assert!(state.install_queued() && state.reload_queued() && state.queued_patch().is_empty());
 }
 
 #[test]
@@ -244,8 +277,8 @@ fn failed_strings_end_the_switch_with_an_error() {
     let extra = f.strings_extra("pt-br");
     f.feed(json!({"@type":"error","@extra":extra,"code":400,"message":"LANG_PACK_INVALID"}));
     let state = &f.driver.session.settings.language;
-    assert!(state.switching.is_none() && state.ready.is_none());
-    assert!(state.error.is_some());
+    assert!(state.switching().is_none() && !state.install_queued());
+    assert!(state.failure().is_some());
     // TDLib goes back to the pack the interface still shows.
     let before = f.sent().len();
     f.driver.restore_language_option().unwrap();
@@ -288,7 +321,7 @@ fn startup_points_tdlib_at_tdesktop_strings_and_restores_the_saved_pack() {
             .session
             .settings
             .language
-            .ready
+            .take_install()
             .as_ref()
             .map(|r| r.info.native_name.as_str()),
         Some("Deutsch")
@@ -299,7 +332,7 @@ fn startup_points_tdlib_at_tdesktop_strings_and_restores_the_saved_pack() {
 fn the_pack_list_comes_from_the_localization_target() {
     let mut f = Fixture::new();
     let extra = f.driver.request_language_packs().unwrap();
-    assert!(f.driver.session.settings.language.packs_loading);
+    assert!(f.driver.session.settings.language.packs.is_loading());
     assert_eq!(f.sent()[0]["@type"], "getLocalizationTargetInfo");
     f.feed(
         json!({"@type":"localizationTargetInfo","@extra":extra.as_extra(),"language_packs":[
@@ -307,8 +340,18 @@ fn the_pack_list_comes_from_the_localization_target() {
          "plural_code":"en","is_official":true}]}),
     );
     let state = &f.driver.session.settings.language;
-    assert!(!state.packs_loading);
-    assert_eq!(state.packs.len(), 1);
+    assert!(!state.packs.is_loading());
+    assert_eq!(state.packs.data().map(Vec::len), Some(1));
+}
+
+#[test]
+fn a_refused_pack_list_stops_loading_and_says_why() {
+    let mut f = Fixture::new();
+    let extra = f.driver.request_language_packs().unwrap();
+    f.feed(json!({"@type":"error","@extra":extra.as_extra(),"code":500,"message":"Timeout"}));
+    let packs = &f.driver.session.settings.language.packs;
+    assert!(!packs.is_loading());
+    assert!(packs.error().is_some());
 }
 
 fn position(chat: i64, source: Value) -> Value {
@@ -372,13 +415,13 @@ fn announcement_labels_are_fetched_once_and_hide_deletes_the_history() {
 
     // A joined channel is not hidden, and a language switch asks again.
     if let Some(chat) = f.driver.session.chats.get_mut(&7) {
-        chat.my_member_status = Some(crate::telegram::envelope::ChannelMemberStatus::Member);
+        chat.assume_member_status(Some(crate::telegram::envelope::ChannelMemberStatus::Member));
     }
     let sent_before = f.sent().len();
     assert!(f.driver.hide_promotion(ChatId(7)).unwrap().is_none());
     assert_eq!(f.sent().len(), sent_before);
     if let Some(chat) = f.driver.session.chats.get_mut(&7) {
-        chat.my_member_status = Some(crate::telegram::envelope::ChannelMemberStatus::Left);
+        chat.assume_member_status(Some(crate::telegram::envelope::ChannelMemberStatus::Left));
     }
     f.driver.switch_language(pack("pt-br", "pt")).unwrap();
     f.driver.pump_psa_labels();
@@ -408,7 +451,7 @@ fn announcement_labels_are_fetched_once_and_hide_deletes_the_history() {
 fn the_about_box_waits_for_the_saved_flags_and_saves_without_overwriting() {
     use crate::psa_about::{load_seen_from, merge_save};
     use std::collections::BTreeSet;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     let dir = std::env::temp_dir().join(format!("quill-psa-driver-{}", std::process::id()));
     let file = dir.join("psa_about_seen.json");
@@ -433,28 +476,20 @@ fn the_about_box_waits_for_the_saved_flags_and_saves_without_overwriting() {
             .session
             .chat_list
             .psa_about
-            .visible(f.driver.session.open_chat, Instant::now())
+            .visible(f.driver.session.open_chat_id(), Instant::now())
             .is_some()
     };
     assert!(!shown(&f), "the saved flags are not in yet");
 
-    let mut tries = 0;
-    while !shown(&f) && tries < 200 {
-        f.driver.sync_psa_about();
-        std::thread::sleep(Duration::from_millis(10));
-        tries += 1;
-    }
+    f.driver.sync_psa_about();
+    f.driver.session.finish_psa_background(Instant::now());
     assert!(
         shown(&f),
         "unseen chat: the box shows once the flags are in"
     );
 
-    let mut tries = 0;
-    while !load_seen_from(&file).contains(&7) && tries < 200 {
-        f.driver.sync_psa_about();
-        std::thread::sleep(Duration::from_millis(10));
-        tries += 1;
-    }
+    f.driver.sync_psa_about();
+    f.driver.session.finish_psa_background(Instant::now());
     assert_eq!(
         load_seen_from(&file),
         BTreeSet::from([7, 9]),
@@ -480,7 +515,7 @@ fn a_client_coming_on_screen_follows_the_choice_saved_now() {
     f.driver.send_language_options().unwrap();
     let extra = f.strings_extra("de");
     f.feed(strings(&extra, "lng_languages", "Sprache"));
-    assert!(f.driver.session.settings.language.ready.is_some());
+    assert!(f.driver.session.settings.language.take_install().is_some());
 
     let french = LanguageChoice {
         pack_id: "fr".into(),
@@ -492,10 +527,33 @@ fn a_client_coming_on_screen_follows_the_choice_saved_now() {
     save_choice(&f.dir, &french).unwrap();
     f.driver.adopt_saved_language().unwrap();
     let language = &f.driver.session.settings.language;
-    assert!(language.ready.is_none(), "the old pack is not installed");
-    assert!(!language.reload);
-    assert_eq!(
-        language.switching.as_ref().map(|s| s.info.id.as_str()),
-        Some("fr")
+    assert!(!language.install_queued(), "the old pack is not installed");
+    assert!(!language.reload_queued());
+    assert_eq!(language.switching().map(|s| s.info.id.as_str()), Some("fr"));
+}
+
+/// Refuses every request, as a closed client does.
+struct RefusingSender;
+
+impl JsonSender for Arc<RefusingSender> {
+    fn send_json(&self, _: &str) -> Result<(), ConnectSendError> {
+        Err(ConnectSendError::Native)
+    }
+}
+
+/// A switch whose request never left does not stay pending (sweep 02-133).
+#[test]
+fn a_switch_that_cannot_be_sent_does_not_stay_pending() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let session = crate::state::Session::new(crate::ids::AccountKey::primary(), sink);
+    let mut driver = ConnectDriver::new(
+        session,
+        Arc::new(RefusingSender),
+        test_credentials(),
+        prepared,
     );
+    assert!(driver.switch_language(pack("pt-br", "pt")).is_err());
+    assert!(driver.session.settings.language.switching().is_none());
+    let _ = std::fs::remove_dir_all(&dir);
 }

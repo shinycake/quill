@@ -8,6 +8,7 @@ use crate::ids::ChatId;
 use crate::marketplace::GiftPrice;
 use crate::platform::MemorySecretStore;
 use crate::telegram::client::copy_and_parse;
+use crate::telegram::envelope::MessageSender;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -78,7 +79,7 @@ impl Drop for Fixture {
     }
 }
 
-fn collectible(number: i32, owner: i64) -> Value {
+pub(super) fn collectible(number: i32, owner: i64) -> Value {
     json!({"@type": "upgradedGift", "id": (9000 + number).to_string(), "regular_gift_id": "500",
         "title": "Plush Pepe", "name": format!("PlushPepe-{number}"), "number": number,
         "model": {"@type": "upgradedGiftModel", "name": "Gold", "rarity": {"@type": "upgradedGiftAttributeRarityRare"}},
@@ -223,7 +224,7 @@ fn resale_buy_sends_the_confirmed_price_and_handles_a_change() {
     );
     let buy = f.driver.session.payments.gift_market.buy.clone().unwrap();
     assert_eq!(buy.price(), Some(GiftPrice::Stars(1700)));
-    assert!(!buy.sending);
+    assert!(!buy.sending());
     f.driver
         .buy_gift_resale(GiftPrice::Stars(1700), "", false)
         .unwrap();
@@ -261,21 +262,42 @@ fn auction_link_follow_and_bids() {
     let mut f = Fixture::new();
     f.driver.fetch_gift_auction("pepe").unwrap();
     assert_eq!(f.last("getGiftAuctionState")["auction_id"], "pepe");
-    assert!(f.driver.session.payments.gift_market.auction_loading);
+    assert!(matches!(
+        f.driver.session.payments.gift_market.auction,
+        crate::gift_market::AuctionFetch::Loading { .. }
+    ));
     f.answer("getGiftAuctionState", auction_state(Value::Null));
     let market = &f.driver.session.payments.gift_market;
-    assert_eq!(market.auction_ready, Some(800));
-    assert!(!market.auction_loading);
+    assert_eq!(
+        market.auction,
+        crate::gift_market::AuctionFetch::Ready { gift_id: 800 }
+    );
     f.driver.follow_gift_auction(Some(800)).unwrap();
     assert_eq!(f.last("openGiftAuction")["gift_id"], "800");
     // Below the minimum bid nothing is sent.
     assert!(
         f.driver
-            .bid_gift_auction(800, 50, FRIEND_CHAT.0, "", false)
+            .bid_gift_auction(
+                800,
+                50,
+                MessageSender::User {
+                    user_id: FRIEND_CHAT.0
+                },
+                "",
+                false
+            )
             .is_err()
     );
     f.driver
-        .bid_gift_auction(800, 600, FRIEND_CHAT.0, "for you", false)
+        .bid_gift_auction(
+            800,
+            600,
+            MessageSender::User {
+                user_id: FRIEND_CHAT.0,
+            },
+            "for you",
+            false,
+        )
         .unwrap();
     let place = f.last("placeGiftAuctionBid");
     assert_eq!(place["gift_id"], "800");
@@ -285,10 +307,32 @@ fn auction_link_follow_and_bids() {
     // One bid at a time.
     assert!(
         f.driver
-            .bid_gift_auction(800, 700, FRIEND_CHAT.0, "", false)
+            .bid_gift_auction(
+                800,
+                700,
+                MessageSender::User {
+                    user_id: FRIEND_CHAT.0
+                },
+                "",
+                false
+            )
             .is_err()
     );
+    // The bid in flight is the request that answers it (09-X067).
+    let asked = f.last("placeGiftAuctionBid")["@extra"]
+        .as_str()
+        .and_then(|extra| extra.parse::<u64>().ok());
+    assert_eq!(
+        f.driver
+            .session
+            .payments
+            .gift_market
+            .bidding
+            .map(|(gift, request)| (gift, Some(request.0))),
+        Some((800, asked))
+    );
     f.answer("placeGiftAuctionBid", json!({"@type": "ok"}));
+    assert!(f.driver.session.payments.gift_market.bidding.is_none());
     assert_eq!(
         f.driver.session.take_gift_market_toasts()[0].0,
         "Your bid has been placed"
@@ -304,7 +348,15 @@ fn auction_link_follow_and_bids() {
         600
     );
     f.driver
-        .bid_gift_auction(800, 900, FRIEND_CHAT.0, "", false)
+        .bid_gift_auction(
+            800,
+            900,
+            MessageSender::User {
+                user_id: FRIEND_CHAT.0,
+            },
+            "",
+            false,
+        )
         .unwrap();
     let raise = f.last("increaseGiftAuctionBid");
     assert_eq!(
@@ -319,7 +371,15 @@ fn auction_link_follow_and_bids() {
     assert!(f.driver.session.payments.gift_market.bidding.is_none());
     // A bid for someone else is a new bid, not a raise of the friend's.
     f.driver
-        .bid_gift_auction(800, 900, FRIEND_CHAT.0 + 1, "", false)
+        .bid_gift_auction(
+            800,
+            900,
+            MessageSender::User {
+                user_id: FRIEND_CHAT.0 + 1,
+            },
+            "",
+            false,
+        )
         .unwrap();
     let other = f.last("placeGiftAuctionBid");
     assert_eq!(other["user_id"], FRIEND_CHAT.0 + 1);
@@ -327,7 +387,10 @@ fn auction_link_follow_and_bids() {
     f.answer("placeGiftAuctionBid", json!({"@type": "ok"}));
     f.driver.follow_gift_auction(None).unwrap();
     assert_eq!(f.last("closeGiftAuction")["gift_id"], "800");
-    assert!(f.driver.session.payments.gift_market.followed.is_none());
+    assert_eq!(
+        f.driver.session.payments.gift_market.follow,
+        crate::gift_market::AuctionFollow::None
+    );
 }
 
 #[test]
@@ -362,13 +425,26 @@ fn acquired_and_preview_requests() {
             "unique_gift_number": 0, "text": {"text": ""}, "is_private": false}]}),
     );
     assert_eq!(
-        f.driver.session.payments.gift_market.acquired[&800].len(),
-        1
+        f.driver.session.payments.gift_market.acquired[&800]
+            .data()
+            .map(Vec::len),
+        Some(1)
     );
     f.driver.fetch_gift_upgrade_preview(800).unwrap();
     assert_eq!(f.last("getGiftUpgradePreview")["regular_gift_id"], "800");
     // Not twice while in flight.
     assert!(f.driver.fetch_gift_upgrade_preview(800).is_err());
+    // A failure is shown, and the next opening of the box asks again.
+    f.answer(
+        "getGiftUpgradePreview",
+        json!({"@type": "error", "code": 500, "message": "TIMEOUT"}),
+    );
+    assert!(
+        f.driver.session.payments.gift_market.previews[&800]
+            .error()
+            .is_some()
+    );
+    f.driver.fetch_gift_upgrade_preview(800).unwrap();
     f.answer(
         "getGiftUpgradePreview",
         json!({"@type": "giftUpgradePreview", "models": [], "symbols": [], "backdrops": [], "prices": [], "next_prices": []}),
@@ -379,11 +455,13 @@ fn acquired_and_preview_requests() {
             .payments
             .gift_market
             .previews
-            .contains_key(&800)
+            .get(&800)
+            .and_then(|preview| preview.data())
+            .is_some()
     );
 }
 
-fn received(number: i32) -> Value {
+pub(super) fn received(number: i32) -> Value {
     json!({"@type": "receivedGift", "received_gift_id": format!("r{number}"),
         "gift": {"@type": "sentGiftUpgraded", "gift": collectible(number, ME)}, "craft_date": 0})
 }
@@ -420,14 +498,52 @@ fn craft_loads_both_lists_and_crafts() {
     assert!(f.driver.craft_gift().is_err());
     f.answer("craftGift", json!({"@type": "craftGiftResultFail"}));
     let craft = f.driver.session.payments.gift_market.craft.clone().unwrap();
-    assert!(!craft.crafting);
-    assert_eq!(craft.result, Some(CraftResult::Fail));
+    assert!(!craft.crafting());
+    assert_eq!(craft.result(), Some(&CraftResult::Fail));
 }
 
-/// A craft box opened after the one that crafted closed shows nothing of
-/// the old craft's answer, and keeps its own guard.
+/// A failed "your gifts" list is an error the box draws, and asking again
+/// (the next open, or Retry) sends the first page once more.
 #[test]
-fn a_craft_answer_belongs_to_the_box_that_sent_it() {
+fn a_failed_craft_candidates_list_is_asked_again() {
+    let mut f = Fixture::new();
+    f.driver
+        .open_gift_craft(CraftGift::parse_received(&received(1)).unwrap())
+        .unwrap();
+    f.answer(
+        "getGiftsForCrafting",
+        json!({"@type": "error", "code": 500, "message": "INTERNAL"}),
+    );
+    let stage = |f: &Fixture| {
+        f.driver
+            .session
+            .payments
+            .gift_market
+            .craft
+            .as_ref()
+            .map(|c| c.candidates_load.clone())
+    };
+    assert!(stage(&f).is_some_and(|s| s.error().is_some()));
+    let before = f.sent("getGiftsForCrafting").len();
+    // Only Retry asks again: the preload of an open does not.
+    f.driver.preload_craft_lists().unwrap();
+    assert_eq!(f.sent("getGiftsForCrafting").len(), before);
+    f.driver.retry_craft_candidates().unwrap();
+    assert_eq!(f.sent("getGiftsForCrafting").len(), before + 1);
+    assert!(stage(&f).is_some_and(|s| s.is_loading()));
+    f.answer(
+        "getGiftsForCrafting",
+        json!({"@type": "giftsForCrafting", "total_count": 1, "gifts": [received(2)],
+            "next_offset": ""}),
+    );
+    assert!(stage(&f).is_some_and(|s| s == crate::gift_market::PageLoad::Ready));
+    assert!(f.driver.retry_craft_candidates().is_err());
+}
+
+/// A craft in flight is not orphaned: a new craft box is refused until its
+/// answer lands, and the answer belongs to the session that sent it.
+#[test]
+fn a_new_craft_session_does_not_orphan_a_craft_in_flight() {
     let mut f = Fixture::new();
     f.driver
         .open_gift_craft(CraftGift::parse_received(&received(1)).unwrap())
@@ -442,16 +558,22 @@ fn a_craft_answer_belongs_to_the_box_that_sent_it() {
         assert!(craft.add(second));
     }
     f.driver.craft_gift().unwrap();
-    let old = f.last("craftGift");
-    f.driver
-        .open_gift_craft(CraftGift::parse_received(&received(3)).unwrap())
-        .unwrap();
-    let mut answer = json!({"@type": "craftGiftResultFail"});
-    answer["@extra"] = old["@extra"].clone();
-    f.ingest(&answer.to_string());
+    assert!(
+        f.driver
+            .open_gift_craft(CraftGift::parse_received(&received(3)).unwrap())
+            .is_err(),
+        "the forge is still out"
+    );
     let craft = f.driver.session.payments.gift_market.craft.clone().unwrap();
-    assert_eq!(craft.result, None, "the old craft's answer");
-    assert_eq!(craft.slots[0].received_gift_id, "r3");
+    assert!(craft.crafting());
+    assert_eq!(craft.slots[0].received_gift_id, "r1");
+    f.answer("craftGift", json!({"@type": "craftGiftResultFail"}));
+    let craft = f.driver.session.payments.gift_market.craft.clone().unwrap();
+    assert_eq!(
+        craft.result(),
+        Some(&CraftResult::Fail),
+        "its outcome landed"
+    );
 }
 
 #[test]
@@ -477,4 +599,125 @@ fn craft_buys_a_listing_into_a_slot() {
     assert_eq!(craft.slots[1].received_gift_id, "bought");
     assert!(craft.market.listings.is_empty());
     assert!(f.driver.session.take_gift_market_toasts().is_empty());
+}
+
+/// A failed "your gifts" list in Select Gifts keeps its error for the box to
+/// draw, and its Retry asks the first page again.
+#[test]
+fn a_failed_craft_candidates_list_retries() {
+    let mut f = Fixture::new();
+    let primary = CraftGift::parse_received(&received(1)).unwrap();
+    f.driver.open_gift_craft(primary).unwrap();
+    assert!(f.driver.retry_craft_candidates().is_err(), "not failed yet");
+    f.answer(
+        "getGiftsForCrafting",
+        json!({"@type": "error", "code": 500, "message": "boom"}),
+    );
+    let craft = f.driver.session.payments.gift_market.craft.clone().unwrap();
+    assert!(craft.candidates_load.error().is_some() && craft.candidates.is_empty());
+    f.driver.retry_craft_candidates().unwrap();
+    assert!(
+        f.driver
+            .session
+            .payments
+            .gift_market
+            .craft
+            .as_ref()
+            .unwrap()
+            .candidates_load
+            .is_loading()
+    );
+    f.answer(
+        "getGiftsForCrafting",
+        json!({"@type": "giftsForCrafting", "total_count": 1, "gifts": [received(2)],
+            "attribute_persistence_probabilities": [], "next_offset": ""}),
+    );
+    let craft = f.driver.session.payments.gift_market.craft.clone().unwrap();
+    assert_eq!(craft.candidates.len(), 1);
+    assert!(craft.candidates_load.error().is_none());
+}
+
+/// A preview in flight is not asked twice; a failed one says so, and is
+/// asked again only by a box opening or its Retry (never from a render).
+#[test]
+fn a_failed_upgrade_preview_waits_for_a_user_action() {
+    let mut f = Fixture::new();
+    f.driver.fetch_gift_upgrade_preview(801).unwrap();
+    assert!(
+        f.driver.fetch_gift_upgrade_preview(801).is_err(),
+        "in flight"
+    );
+    f.answer(
+        "getGiftUpgradePreview",
+        json!({"@type": "error", "code": 500, "message": "boom"}),
+    );
+    assert!(
+        f.driver.session.payments.gift_market.previews[&801]
+            .error()
+            .is_some()
+    );
+    assert!(f.driver.fetch_gift_upgrade_preview(802).is_ok());
+    assert!(f.driver.fetch_gift_upgrade_preview(801).is_ok(), "Retry");
+}
+
+/// Opening a resale list while a buy's `sendResoldGift` is out is refused and
+/// keeps that buy: its answer still lands in it.
+#[test]
+fn opening_the_resale_list_keeps_a_buy_that_is_out() {
+    let mut f = Fixture::new();
+    f.driver.open_gift_resale(500, "Plush Pepe").unwrap();
+    f.answer("searchGiftsForResale", resale_page(&[1, 2]));
+    f.driver
+        .start_gift_resale_buy(
+            "PlushPepe-1",
+            f.driver.session.gift_recipient(FRIEND_CHAT),
+            false,
+        )
+        .unwrap();
+    f.driver
+        .buy_gift_resale(GiftPrice::Stars(1500), "", false)
+        .unwrap();
+    assert!(
+        f.driver.open_gift_resale(500, "Plush Pepe").is_err(),
+        "refused while the buy is out"
+    );
+    let buy = f.driver.session.payments.gift_market.buy.clone();
+    assert!(buy.is_some_and(|buy| buy.sending()), "the buy is still out");
+    f.answer(
+        "sendResoldGift",
+        json!({"@type": "giftResaleResultOk", "received_gift_id": "rx"}),
+    );
+    assert!(f.driver.session.payments.gift_market.buy.is_none());
+    assert_eq!(
+        f.driver.session.take_gift_market_toasts().len(),
+        1,
+        "its answer landed"
+    );
+}
+
+/// A bid owned by a channel can be raised (`increaseGiftAuctionBid` needs
+/// no owner); a new bid still needs a user to receive the gift.
+#[test]
+fn a_channel_owned_bid_can_be_raised_but_a_channel_cannot_get_a_new_one() {
+    let mut f = Fixture::new();
+    let channel = MessageSender::Chat { chat_id: -100_200 };
+    f.driver.fetch_gift_auction("pepe").unwrap();
+    f.answer("getGiftAuctionState", auction_state(Value::Null));
+    assert!(
+        f.driver
+            .bid_gift_auction(800, 600, channel, "", false)
+            .is_err(),
+        "a first bid goes to a user"
+    );
+    assert!(f.sent("placeGiftAuctionBid").is_empty());
+    f.ingest(
+        &json!({"@type": "updateGiftAuctionState", "state": auction_state(json!({
+            "star_count": 600, "bid_date": 2, "next_bid_star_count": 601,
+            "owner_id": {"@type": "messageSenderChat", "chat_id": -100_200}, "was_returned": false}))})
+        .to_string(),
+    );
+    f.driver
+        .bid_gift_auction(800, 900, channel, "", false)
+        .unwrap();
+    assert_eq!(f.last("increaseGiftAuctionBid")["star_count"], 900);
 }

@@ -5,6 +5,7 @@
 //! `boxes/select_future_owner_box.cpp`.
 use super::*;
 use crate::lang::{keys, tr, tr_with, trn};
+use crate::state::fetch::Fetch;
 
 /// Answer of `getChatOwnerAfterLeaving` for one chat.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,6 +22,10 @@ pub enum OwnerLookup {
 pub struct OwnershipTransfer {
     pub chat_id: i64,
     pub user_id: i64,
+    /// The viewer asked to leave once the new owner is appointed. It rides
+    /// with the transfer it was asked for, so the answer never reads
+    /// whatever box is open by then.
+    pub leave_after: bool,
 }
 
 /// The viewer's own standing in a basic group, from `updateBasicGroup`.
@@ -32,19 +37,61 @@ pub struct BasicGroupOwn {
     pub can_manage_tags: bool,
 }
 
+/// Where the viewer's `transferChatOwnership` stands. Each stage leaves
+/// by the answer, the error, or the dialog opening again.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum TransferStage {
+    #[default]
+    Idle,
+    /// Waiting for TDLib.
+    Sending(OwnershipTransfer),
+    /// Why the transfer failed (wrong password, flood wait). Never holds
+    /// the password.
+    Failed(String),
+    /// The transfer succeeded; the UI drains it once.
+    Done(OwnershipTransfer),
+}
+
+impl TransferStage {
+    /// The transfer waiting for TDLib.
+    pub fn sending(&self) -> Option<&OwnershipTransfer> {
+        match self {
+            Self::Sending(transfer) => Some(transfer),
+            _ => None,
+        }
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            Self::Failed(error) => Some(error),
+            _ => None,
+        }
+    }
+
+    /// A finished transfer or its failure is forgotten; one in flight stays.
+    pub fn forget_settled(&mut self) {
+        if !matches!(self, Self::Sending(_)) {
+            *self = Self::Idle;
+        }
+    }
+
+    /// The succeeded transfer, once; any other stage stays as it is.
+    pub fn take_done(&mut self) -> Option<OwnershipTransfer> {
+        match std::mem::take(self) {
+            Self::Done(transfer) => Some(transfer),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OwnershipState {
-    /// Last `canTransferOwnership` answer; `None` until asked.
-    pub can_transfer: Option<CanTransferOwnershipResult>,
-    pub check_in_flight: bool,
-    pub check_error: Option<String>,
-    /// A `transferChatOwnership` is waiting for TDLib.
-    pub transfer_in_flight: Option<OwnershipTransfer>,
-    /// Why the last transfer failed (wrong password, flood wait). Never
-    /// holds the password.
-    pub transfer_error: Option<String>,
-    /// One-shot: the transfer that just succeeded; the UI drains it.
-    pub transferred: Option<OwnershipTransfer>,
+    /// The `canTransferOwnership` gate: asked, answered, or failed.
+    pub check: Fetch<CanTransferOwnershipResult>,
+    pub transfer: TransferStage,
     pub owner_after_leaving: HashMap<i64, OwnerLookup>,
 }
 
@@ -82,31 +129,40 @@ fn wait_text(secs: i32) -> String {
 impl Session {
     /// A `canTransferOwnership` request went out.
     pub fn begin_ownership_check(&mut self) {
-        self.groups.ownership.can_transfer = None;
-        self.groups.ownership.check_in_flight = true;
-        self.groups.ownership.check_error = None;
+        self.groups.ownership.check = Fetch::Loading {
+            stale: None,
+            request: None,
+        };
     }
 
     pub(crate) fn accept_can_transfer_ownership(&mut self, result: CanTransferOwnershipResult) {
-        self.groups.ownership.can_transfer = Some(result);
-        self.groups.ownership.check_in_flight = false;
-        self.groups.ownership.check_error = None;
+        self.groups.ownership.check = Fetch::Ready(result);
     }
 
     /// The transfer left for TDLib; clears any earlier failure.
-    pub fn begin_ownership_transfer(&mut self, chat_id: i64, user_id: i64) {
-        self.groups.ownership.transfer_in_flight = Some(OwnershipTransfer { chat_id, user_id });
-        self.groups.ownership.transfer_error = None;
+    pub fn begin_ownership_transfer(&mut self, chat_id: i64, user_id: i64, leave_after: bool) {
+        self.groups.ownership.transfer = TransferStage::Sending(OwnershipTransfer {
+            chat_id,
+            user_id,
+            leave_after,
+        });
     }
 
     pub(crate) fn finish_ownership_transfer(&mut self, user_id: i64, chat_id: Option<i64>) {
-        let done = self
-            .groups
-            .ownership
-            .transfer_in_flight
-            .take()
-            .or_else(|| chat_id.map(|chat_id| OwnershipTransfer { chat_id, user_id }));
-        self.groups.ownership.transferred = done;
+        let sending = match std::mem::take(&mut self.groups.ownership.transfer) {
+            TransferStage::Sending(transfer) => Some(transfer),
+            _ => None,
+        };
+        let done = sending.or_else(|| {
+            chat_id.map(|chat_id| OwnershipTransfer {
+                chat_id,
+                user_id,
+                leave_after: false,
+            })
+        });
+        if let Some(done) = done {
+            self.groups.ownership.transfer = TransferStage::Done(done);
+        }
         // The viewer is now a plain admin; TDLib confirms with
         // `updateChatMember`, but the cached admin list is stale already.
         if let Some(done) = done {
@@ -122,8 +178,7 @@ impl Session {
     }
 
     pub(crate) fn fail_ownership_transfer(&mut self, err: &TdError) {
-        self.groups.ownership.transfer_in_flight = None;
-        self.groups.ownership.transfer_error = Some(ownership_error_line(err));
+        self.groups.ownership.transfer = TransferStage::Failed(ownership_error_line(err));
     }
 
     /// The admin's `deleteMessageReactionsFromSender` was confirmed: the

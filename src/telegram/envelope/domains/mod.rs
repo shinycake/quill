@@ -25,7 +25,7 @@ mod users;
 pub use auth::AuthPayload;
 pub use bots::BotsPayload;
 pub use calls::CallsPayload;
-pub use chat_list::ChatListPayload;
+pub use chat_list::{ChatListPayload, LastMessageUpdate};
 pub use chats::ChatsPayload;
 pub use common::CommonPayload;
 pub use communities::CommunitiesPayload;

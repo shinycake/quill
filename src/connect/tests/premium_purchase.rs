@@ -83,7 +83,7 @@ fn without_a_bot_the_invoice_link_asks_for_the_payment_form() {
 
 #[test]
 fn a_collectible_lookup_sends_the_item_type_and_keeps_the_answer_or_the_failure() {
-    use crate::collectible_info::CollectibleLookup;
+    use crate::collectible_info::LookupSpec;
     let store = MemorySecretStore::new();
     let (_dir, prepared) = prepared_tmp(&store);
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
@@ -92,7 +92,7 @@ fn a_collectible_lookup_sends_the_item_type_and_keeps_the_answer_or_the_failure(
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
 
     driver
-        .request_collectible_info(CollectibleLookup::new(
+        .request_collectible_info(LookupSpec::new(
             "durov",
             "Pavel",
             Some(ChatId(5)),
@@ -115,15 +115,15 @@ fn a_collectible_lookup_sends_the_item_type_and_keeps_the_answer_or_the_failure(
         .ingest(copy_and_parse(&answer, &seq, &sink).unwrap())
         .unwrap();
     let lookup = driver.session.payments.hub.collectible.clone().unwrap();
-    assert!(!lookup.loading);
+    assert!(!lookup.is_loading());
     assert_eq!(
-        lookup.info.unwrap().url,
+        lookup.info().unwrap().url,
         "https://fragment.com/username/durov"
     );
 
     // A lookup TDLib refuses keeps the reason for the UI.
     driver
-        .request_collectible_info(CollectibleLookup::new("someone", "S", None, String::new()))
+        .request_collectible_info(LookupSpec::new("someone", "S", None, String::new()))
         .unwrap();
     let request = sent_request(&recorder, "getCollectibleItemInfo");
     let error = json!({
@@ -135,7 +135,7 @@ fn a_collectible_lookup_sends_the_item_type_and_keeps_the_answer_or_the_failure(
         .ingest(copy_and_parse(&error, &seq, &sink).unwrap())
         .unwrap();
     let lookup = driver.session.payments.hub.collectible.clone().unwrap();
-    assert_eq!(lookup.failed.as_deref(), Some("COLLECTIBLE_NOT_FOUND"));
+    assert_eq!(lookup.failure(), Some("COLLECTIBLE_NOT_FOUND"));
 }
 
 /// A failed fetch of the sticker preview's examples is asked again next
@@ -159,6 +159,66 @@ fn failed_premium_sticker_examples_are_asked_again() {
     driver
         .ingest(copy_and_parse(&error, &seq, &sink).unwrap())
         .unwrap();
-    assert!(!driver.session.payments.hub.premium_stickers_loading);
+    assert!(!driver.session.payments.hub.premium_stickers.is_loading());
     assert!(driver.maybe_fetch_premium_stickers().unwrap().is_some());
+}
+
+#[test]
+fn a_collectible_answer_of_a_replaced_lookup_is_not_taken_by_the_new_one() {
+    use crate::collectible_info::LookupSpec;
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+
+    driver
+        .request_collectible_info(LookupSpec::new("first", "A", None, String::new()))
+        .unwrap();
+    let first = sent_request(&recorder, "getCollectibleItemInfo");
+    driver
+        .request_collectible_info(LookupSpec::new("second", "B", None, String::new()))
+        .unwrap();
+
+    let late = json!({
+        "@type": "collectibleItemInfo", "@extra": first["@extra"],
+        "purchase_date": 1, "currency": "USD", "amount": 1,
+        "cryptocurrency": "TON", "cryptocurrency_amount": 1,
+        "url": "https://fragment.com/username/first",
+    })
+    .to_string();
+    driver
+        .ingest(copy_and_parse(&late, &seq, &sink).unwrap())
+        .unwrap();
+    let lookup = driver.session.payments.hub.collectible.clone().unwrap();
+    assert_eq!(lookup.entity, "second");
+    assert!(lookup.is_loading(), "the first answer is not the second's");
+
+    let refused = json!({
+        "@type": "error", "@extra": first["@extra"],
+        "code": 400, "message": "COLLECTIBLE_NOT_FOUND",
+    })
+    .to_string();
+    driver
+        .ingest(copy_and_parse(&refused, &seq, &sink).unwrap())
+        .unwrap();
+    let lookup = driver.session.payments.hub.collectible.clone().unwrap();
+    assert!(lookup.is_loading(), "the first error is not the second's");
+}
+
+/// A lookup the sender refuses (the chats path is not active) is an error
+/// the UI turns into a note, and no lookup is left behind to open a box.
+#[test]
+fn a_refused_collectible_lookup_is_an_error_and_stores_nothing() {
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
+    let lookup = crate::collectible_info::LookupSpec::new("durov", "P", None, String::new());
+    assert!(driver.request_collectible_info(lookup).is_err());
+    assert!(driver.session.payments.hub.collectible.is_none());
 }

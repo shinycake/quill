@@ -110,7 +110,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         changed |= self.pump_call_media(now);
         // Group calls: your own level and speaking state, and the
         // connected transports' camera and mute.
-        changed |= self.pump_call_audio(now).unwrap_or(true);
+        changed |= self.pump_call_audio(now).unwrap_or(false);
         self.pump_connected_group_calls();
         // Group calls: the "You are on mute" hint.
         changed |= self.tick_muted_speech_hint(now);
@@ -141,6 +141,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.custom_emoji_hold = None;
             changed = true;
         }
+        // A ringing conference invitation whose settling update never came.
+        if self
+            .session
+            .expire_conference_invite(crate::local_time::now_unix())
+        {
+            self.send_conference_declines();
+            changed = true;
+        }
         let sweep_due = self
             .last_request_sweep
             .is_none_or(|last| now.saturating_duration_since(last) >= SWEEP_EVERY);
@@ -150,8 +158,25 @@ impl<S: JsonSender> ConnectDriver<S> {
             changed |= self
                 .session
                 .sweep_stale_requests(now, PENDING_REQUEST_TTL, |id| waiting.contains(&id));
+            self.forget_flood_attempts_of_gone_requests();
         }
         changed
+    }
+
+    /// A re-sent read that was swept or taken without any answer leaves its
+    /// attempt count and retained JSON behind: drop those of requests the
+    /// registry no longer holds.
+    fn forget_flood_attempts_of_gone_requests(&mut self) {
+        let gone: Vec<u64> = self
+            .flood_attempts
+            .keys()
+            .copied()
+            .filter(|id| self.session.requests.get(RequestId(*id)).is_none())
+            .collect();
+        for id in gone {
+            self.flood_attempts.remove(&id);
+            self.sender.forget_retained(RequestId(id));
+        }
     }
 
     /// How long until the earliest time-driven work here and in the session
@@ -178,6 +203,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Your own level's next read while the tap is open.
         let level = self.call_audio_deadline(now);
         let microphone = self.call_capture.until_reopen(now);
+        let screen_wait = self.call_screen.wait_deadline(now);
         let paid = self
             .session
             .payments
@@ -192,8 +218,24 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .and_then(|live| live.pending_reaction.as_ref())
             .map(|pending| Duration::from_millis(pending.commit_at_ms.saturating_sub(now_ms)));
+        // A ringing conference invitation's last second.
+        let ring = self
+            .session
+            .conference_invite_rings_for(crate::local_time::now_unix())
+            .and_then(|secs| u64::try_from(secs).ok())
+            .map(Duration::from_secs);
         [
-            retry, emoji_hold, bot, levels, hint, level, microphone, paid, live_stars,
+            retry,
+            emoji_hold,
+            bot,
+            levels,
+            hint,
+            level,
+            microphone,
+            screen_wait,
+            paid,
+            live_stars,
+            ring,
         ]
         .into_iter()
         .flatten()
@@ -203,7 +245,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// The "Couldn't load messages · Retry" action: clear the failure and
     /// request the first page again.
     pub fn retry_history(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         self.retry_history_for(chat_id)
@@ -216,7 +258,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if let Some(history) = self.session.histories.get_mut(&chat_id.0) {
-            history.load_failed = false;
+            history.clear_load_failed();
         }
         self.fetch_history_for(chat_id)
     }

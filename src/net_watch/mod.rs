@@ -23,6 +23,7 @@ use crate::locks::lock_or_recover;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, UdpSocket};
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 const TELEGRAM_V4: SocketAddr =
     SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(149, 154, 167, 51), 443));
@@ -53,23 +54,34 @@ struct Hop {
     link: link::Link,
 }
 
+impl Hop {
+    /// Whether this hop is `then` with the gateway's hardware address not
+    /// resolved yet, so `then`'s address stands for it.
+    fn carries(self, then: Self) -> bool {
+        match (self.link.gateway, then.link.gateway) {
+            (link::Gateway::Unresolved(ip), link::Gateway::Resolved(then_ip, _)) => {
+                ip == then_ip
+                    && Hop {
+                        link: link::Link {
+                            gateway: self.link.gateway,
+                            ..then.link
+                        },
+                        ..then
+                    } == self
+            }
+            _ => false,
+        }
+    }
+}
+
 impl Path {
     /// `self`, keeping the gateway's link-layer address from `before` when
     /// the system has not resolved it yet: an entry the cache dropped, or
     /// one not learned yet, is no new network. A different address is.
     fn settled(self, before: Self) -> Self {
         match (self, before) {
-            (Self::Via(mut now), Self::Via(then))
-                if now.link.gateway_hardware.is_none()
-                    && Hop {
-                        link: link::Link {
-                            gateway_hardware: None,
-                            ..then.link
-                        },
-                        ..then
-                    } == now =>
-            {
-                now.link.gateway_hardware = then.link.gateway_hardware;
+            (Self::Via(mut now), Self::Via(then)) if now.carries(then) => {
+                now.link.gateway = then.link.gateway;
                 Self::Via(now)
             }
             _ => self,
@@ -81,11 +93,7 @@ impl Path {
     /// same address is not seen.
     fn carried(self, before: Self) -> Option<IpAddr> {
         match (self, before) {
-            (Self::Via(now), Self::Via(then))
-                if now.link.gateway_hardware.is_none() && then.link.gateway_hardware.is_some() =>
-            {
-                now.link.gateway.filter(|_| self.settled(before) != self)
-            }
+            (Self::Via(now), Self::Via(then)) if now.carries(then) => now.link.gateway.ip(),
             _ => None,
         }
     }
@@ -132,7 +140,9 @@ impl Route {
         [self.v4, self.v6]
             .into_iter()
             .find_map(|path| match path {
-                Path::Via(hop) if hop.link.gateway == Some(gateway) => Some(hop.link.interface),
+                Path::Via(hop) if hop.link.gateway.ip() == Some(gateway) => {
+                    Some(hop.link.interface)
+                }
                 _ => None,
             })
             .unwrap_or(0)
@@ -143,7 +153,7 @@ impl Route {
         [self.v4, self.v6]
             .into_iter()
             .filter_map(|path| match path {
-                Path::Via(hop) => hop.link.gateway,
+                Path::Via(hop) => hop.link.gateway.ip(),
                 _ => None,
             })
     }
@@ -179,22 +189,43 @@ pub struct NetworkState {
     pub available: bool,
 }
 
+/// Where one IP version's gateway stands in having its link-layer address
+/// resolved. It leaves `Asking` when the route no longer carries the old
+/// address over (the system resolved it, or the gateway changed).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Neighbour {
+    /// Nothing is awaited.
+    Unasked,
+    /// This gateway was asked for; not asked again until it changes.
+    Asking(IpAddr),
+}
+
 #[derive(Debug)]
 struct Tracker {
     route: Route,
     epoch: u64,
-    /// The gateways [`Self::gateways_to_resolve`] last named, so each is asked once
-    /// until it resolves: a router that never answers would otherwise turn
-    /// every failed lookup's event into another lookup.
-    resolving: [Option<IpAddr>; 2],
+    /// Per IP version (v4, v6): the gateway [`Self::gateways_to_resolve`]
+    /// last named, so each is asked once until it resolves: a router that
+    /// never answers would otherwise turn every failed lookup's event into
+    /// another lookup.
+    neighbours: [Neighbour; 2],
+    /// When a read last looked at the routing table because the route read
+    /// offline.
+    looked_at: Option<Instant>,
 }
+
+/// While offline a read looks again, but at most this often: each look is
+/// socket calls (and a netlink or configd round trip), and every account's
+/// poll reads the state.
+const OFFLINE_LOOK_EVERY: Duration = Duration::from_secs(1);
 
 impl Tracker {
     fn new(route: Route) -> Self {
         Self {
             route,
             epoch: 0,
-            resolving: [None; 2],
+            neighbours: [Neighbour::Unasked; 2],
+            looked_at: None,
         }
     }
 
@@ -207,10 +238,11 @@ impl Tracker {
         ];
         let fresh = carried
             .iter()
-            .zip(self.resolving)
-            .filter_map(|(now, asked)| now.filter(|gateway| asked != Some(*gateway)))
+            .zip(self.neighbours)
+            .filter_map(|(now, asked)| now.filter(|gateway| asked != Neighbour::Asking(*gateway)))
             .collect();
-        self.resolving = carried;
+        self.neighbours =
+            carried.map(|gateway| gateway.map_or(Neighbour::Unasked, Neighbour::Asking));
         fresh
     }
 
@@ -229,10 +261,27 @@ impl Tracker {
     }
 
     /// `networkTypeNone` stops TDLib, so leaving that state must not hang on
-    /// one event arriving: while offline every read looks again.
-    fn state(&mut self, look: impl FnOnce() -> Route) -> NetworkState {
-        if !self.route.available() {
-            self.observe(look());
+    /// one event arriving: while offline a read looks again, once per
+    /// [`OFFLINE_LOOK_EVERY`]. Whether this read should, marking it so.
+    fn look_due(&mut self, now: Instant) -> bool {
+        if self.route.available() {
+            return false;
+        }
+        let due = self
+            .looked_at
+            .is_none_or(|at| now.saturating_duration_since(at) >= OFFLINE_LOOK_EVERY);
+        if due {
+            self.looked_at = Some(now);
+        }
+        due
+    }
+
+    /// The state, after the look [`Self::look_due`] asked for (`probed`).
+    fn state(&mut self, probed: Option<Route>) -> NetworkState {
+        if let Some(route) = probed
+            && !self.route.available()
+        {
+            self.observe(route);
         }
         NetworkState {
             epoch: self.epoch,
@@ -253,7 +302,10 @@ fn tracker() -> &'static Mutex<Tracker> {
 
 /// The network as last seen. The first call starts the watcher.
 pub fn latest() -> NetworkState {
-    lock_or_recover(tracker()).state(route_now)
+    let due = lock_or_recover(tracker()).look_due(Instant::now());
+    // The look is socket calls: never under the mutex the watcher needs.
+    let probed = due.then(route_now);
+    lock_or_recover(tracker()).state(probed)
 }
 
 pub fn system_woke() {
@@ -276,8 +328,8 @@ fn is_gateway(ip: IpAddr) -> bool {
 #[cfg(target_os = "macos")]
 fn still_resolving(gateway: IpAddr) -> bool {
     lock_or_recover(tracker())
-        .resolving
-        .contains(&Some(gateway))
+        .neighbours
+        .contains(&Neighbour::Asking(gateway))
 }
 
 fn network_changed() {

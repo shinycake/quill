@@ -58,6 +58,25 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// A confirmed link offered its call once the old one ended: what the
+    /// link's own press does, a stream opening in its window and the note.
+    pub(super) fn take_offered_call_link(&mut self, cx: &mut Context<Self>) {
+        let Some(offered) = self
+            .live
+            .as_mut()
+            .and_then(|live| live.driver.session.calls.call_link_stage.take_offered())
+        else {
+            return;
+        };
+        self.note_stream_join_intent(StreamJoinIntent::Call(offered.group_call_id));
+        self.set_note(StatusNote::silent(tr(if offered.live_stream {
+            keys::Q_OPS_OPENING_THE_LIVE_STREAM
+        } else {
+            keys::Q_OPS_OPENING_THE_VOICE_CHAT
+        })));
+        cx.notify();
+    }
+
     pub(super) fn cancel_call_link_leave(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.driver.cancel_call_link_leave();
@@ -71,6 +90,7 @@ impl QuillApp {
         {
             self.set_note(StatusNote::error(tr(keys::Q_OPS_COULDNT_LEAVE_THE_CALL)));
         }
+        self.take_offered_call_link(cx);
         cx.notify();
     }
 
@@ -89,7 +109,7 @@ impl QuillApp {
         app.update(cx, |this, cx| {
             let Some(ask) = this
                 .session()
-                .and_then(|session| session.calls.call_link_confirm.clone())
+                .and_then(|session| session.calls.call_link_stage.confirm().cloned())
             else {
                 return dialog.overlay(true).on_close(on_close.clone());
             };
@@ -130,7 +150,7 @@ crate::ui::shell::register_dialogs! {
     /// A call link while another call is on: leave it and join?
     CallLinkLeave => DialogSpec::new(
         2960,
-        |app| app.session().is_some_and(|s| s.calls.call_link_confirm.is_some()),
+        |app| app.session().is_some_and(|s| s.calls.call_link_stage.confirm().is_some()),
         QuillApp::build_call_link_leave_dialog,
     )
     .close(|app, _, cx| app.cancel_call_link_leave(cx)),

@@ -62,9 +62,20 @@ impl QuillApp {
         }
     }
 
+    /// A message passed every refusal and is on its way: sending returns
+    /// the reader to the latest messages (the position left behind is not
+    /// where the chat reopens) and its hashtags join the recent ones. A
+    /// send that was refused (slow mode, rights, size, the paid box) did
+    /// neither.
+    fn note_message_leaving(&mut self, text: &str) {
+        self.forget_scroll_on_return_to_latest();
+        self.remember_sent_hashtags(text);
+    }
+
     pub(super) fn submit_composer(
         &mut self,
         text: String,
+        once: crate::ui::composer_sends::SendOnce,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -102,19 +113,18 @@ impl QuillApp {
                 }
                 // The tray goes, now or once its renders land: an editor
                 // asked for mid-render no longer opens.
-                self.viewer.photo_editor_after = None;
+                self.viewer.photo_editor.clear_deferred();
                 // A photo's edit is still rendering: the Send waits for it,
                 // so the unedited file never goes out.
                 if self.tray_renders_an_edit() {
-                    let once = self.send_once();
-                    self.update_pending_send(|send| send.held_send = Some((text, once)));
+                    self.update_pending_send(|send| send.hold_send(text, once));
                     self.set_note(StatusNote::silent(tr(keys::Q_OPS_PREPARING_THE_FILES)));
                     cx.notify();
                     return;
                 }
                 // B4: the forward bar sends the comment, then the forward.
                 if self.forward_bar_here() {
-                    self.submit_forward_bar(text, window, cx);
+                    self.submit_forward_bar(text, once, window, cx);
                     return;
                 }
                 // A picture still being read, or getting its thumbnail,
@@ -127,23 +137,26 @@ impl QuillApp {
                     cx.notify();
                     return;
                 }
-                // Sending returns the reader to the latest messages: the
-                // position left behind is not where the chat reopens.
-                self.forget_scroll_on_return_to_latest();
-                self.remember_sent_hashtags(&text);
                 // M2: the rich editor sends blocks, not text.
-                if self.chat_ui.rich_editor_open {
+                if self.chat_ui.rich.editor_open() {
                     let blocks = quill::rich::markup_to_blocks(&text);
-                    self.submit_rich_composer(blocks, window, cx);
+                    self.submit_rich_composer(blocks, once, window, cx);
+                    return;
+                }
+                // In a bot's "All" view the message starts a thread of its
+                // own and goes there.
+                if let Some(chat_id) = self.open_chat_id()
+                    && self.send_waits_for_bot_thread(chat_id, &text, once, cx)
+                {
                     return;
                 }
                 let plan = self.live.as_ref().map(|live| {
                     let session = &live.driver.session;
                     (
-                        session.open_chat,
+                        session.open_chat_id(),
                         session.view_generation,
                         session
-                            .open_chat
+                            .open_chat_id()
                             .and_then(|id| session.chats.get(&id.0).map(|chat| chat.supported())),
                     )
                 });
@@ -158,7 +171,7 @@ impl QuillApp {
                         cx.notify();
                         return;
                     }
-                    if self.paid_send_waits(chat_id, &text, cx) {
+                    if self.paid_send_waits(chat_id, &text, once, cx) {
                         return;
                     }
                     // A video's sound track is still being read: wait, so a
@@ -178,6 +191,7 @@ impl QuillApp {
                         cx.notify();
                         return;
                     }
+                    let text_for_memory = text.clone();
                     let attachments = self.pending_attachments().to_vec();
                     // The viewer's own rights in a group: text needs the
                     // basic right, each attachment its media right.
@@ -209,10 +223,7 @@ impl QuillApp {
                     let mut snaps = Vec::new();
                     // A repeating message is sent alone (tdesktop limits the
                     // batch to one item with a repeat period).
-                    let repeating = matches!(
-                        self.pending_send().scheduling,
-                        ComposerScheduling::SendAtDate(_)
-                    ) && self.pending_send().schedule_repeat != 0;
+                    let repeating = self.pending_send().scheduling.repeat_period() != 0;
                     if attachments.len() >= 2 && grouped && !repeating {
                         // One message per run of one album type, in tray
                         // order (tdesktop `GroupRanges`); paid media is one
@@ -245,7 +256,7 @@ impl QuillApp {
                                     // M1: silent / scheduled / when-online /
                                     // link-preview options ride the snapshot to
                                     // `sendMessage.options`.
-                                    .with_send_options(self.composer_post_options())
+                                    .with_send_options(self.composer_post_options(once))
                                     // MED4: caption-above-media toggle.
                                     .with_caption_above_media(
                                         self.pending_send().caption_above
@@ -266,7 +277,7 @@ impl QuillApp {
                                 )
                                 .with_reply(if i == 0 { reply.clone() } else { None })
                                 .with_self_destruct(self_destruct)
-                                .with_send_options(self.composer_post_options())
+                                .with_send_options(self.composer_post_options(once))
                                 // MED4: caption-above-media toggle.
                                 .with_caption_above_media(
                                     self.pending_send().caption_above
@@ -287,7 +298,7 @@ impl QuillApp {
                             // M1: silent / scheduled / when-online /
                             // link-preview options ride the snapshot to
                             // `sendMessage.options`.
-                            .with_send_options(self.composer_post_options())
+                            .with_send_options(self.composer_post_options(once))
                             // MED4: caption-above-media toggle.
                             .with_caption_above_media(
                                 self.pending_send().caption_above && !self.open_chat_is_secret(),
@@ -311,8 +322,7 @@ impl QuillApp {
                     // the reply rides the first part only.
                     let mut split = None;
                     if let [only] = snaps.as_slice()
-                        && only.attachment.is_none()
-                        && only.album.is_empty()
+                        && only.content == quill::composer::SendContent::Text
                     {
                         let limit = self.text_length_limit();
                         if quill::text_split::units_over_limit(&only.text, limit) > 0 {
@@ -363,6 +373,7 @@ impl QuillApp {
                         &snaps,
                     );
                     origin.split = split;
+                    self.note_message_leaving(&text_for_memory);
                     if snaps.iter().any(ComposerSnapshot::needs_media_prep) {
                         self.begin_media_prep(origin, snaps, window, cx);
                     } else {
@@ -374,11 +385,12 @@ impl QuillApp {
                     // Phase A1: the slow-mode gate applies to the demo
                     // session too (fixture-driven countdown, no live
                     // Telegram).
-                    let demo_chat = self.demo_session.as_ref().and_then(|s| s.open_chat);
+                    let demo_chat = self.demo_session.as_ref().and_then(|s| s.open_chat_id());
                     if demo_chat.is_some_and(|chat_id| self.slow_mode_blocked(chat_id, cx)) {
                         return;
                     }
                     let attachments = self.pending_attachments().to_vec();
+                    self.note_message_leaving(&text);
                     if attachments.iter().any(|att| {
                         att.kind == AttachmentKind::VideoNote
                             && quill::video::probe_local_video_note(&att.path).is_err()
@@ -425,7 +437,8 @@ impl QuillApp {
                     }
                     self.finish_pending_send();
                     self.chat_ui.set_reply(None);
-                    if let Some(chat_id) = self.demo_session.as_ref().and_then(|s| s.open_chat) {
+                    if let Some(chat_id) = self.demo_session.as_ref().and_then(|s| s.open_chat_id())
+                    {
                         self.forget_local_draft(chat_id);
                     }
                     self.composer
@@ -452,6 +465,7 @@ impl QuillApp {
     pub(super) fn submit_rich_composer(
         &mut self,
         mut blocks: Vec<quill::rich::RichBlock>,
+        once: crate::ui::composer_sends::SendOnce,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -464,9 +478,9 @@ impl QuillApp {
         };
         let session = &live.driver.session;
         let (open_chat, supported) = (
-            session.open_chat,
+            session.open_chat_id(),
             session
-                .open_chat
+                .open_chat_id()
                 .and_then(|id| session.chats.get(&id.0).map(|chat| chat.supported())),
         );
         // Premium gate (`premiumFeatureRichMessages`): the editor can only
@@ -554,7 +568,8 @@ impl QuillApp {
         let reply_to = self
             .reply_for_send(cx)
             .and_then(|reply| reply.send_reply(chat_id));
-        let options = self.composer_post_options();
+        let options = self.composer_post_options(once);
+        let typed = self.composer_markup(cx);
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -562,13 +577,17 @@ impl QuillApp {
             .driver
             .send_rich_snapshot(chat_id, &blocks, reply_to, &options)
         {
-            Ok(_) => {
+            Ok(request) => {
+                // The field is cleared as the send starts; a refusal gives
+                // the text back (`settle_sent_text`).
+                self.note_message_leaving(&typed);
+                self.remember_sent_text(request, typed);
                 self.finish_pending_send();
-                self.chat_ui.schedule_popup_open = false;
+                self.chat_ui.hide_schedule_popup();
                 self.chat_ui.set_reply(None);
-                self.chat_ui.rich_editor_open = false;
+                self.chat_ui.rich.set_editor(false);
                 self.clear_suggest_bar_after_send(chat_id);
-                self.composer_ui.clear_draft_on_success = Some(DraftClear::whole_composer(chat_id));
+                self.expect_draft_clear(DraftClear::whole_composer(chat_id));
                 self.composer
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 self.forget_local_draft(chat_id);
@@ -773,7 +792,7 @@ impl QuillApp {
             Some(session) => session,
             None => return false,
         };
-        let Some(open) = session.open_chat else {
+        let Some(open) = session.open_chat_id() else {
             return false;
         };
         let is_private = session
@@ -838,7 +857,7 @@ impl QuillApp {
             .messages
             .mention_search
             .as_ref()
-            .filter(|search| Some(search.chat_id) == session.open_chat)
+            .filter(|search| Some(search.chat_id) == session.open_chat_id())
         {
             for user in search.user_ids.iter().filter_map(|id| session.user(*id)) {
                 if !items.iter().any(|(id, _, _)| *id == user.id) {
@@ -963,11 +982,17 @@ impl QuillApp {
 
 mod attach_picker;
 mod bar_clicks;
+pub(in crate::ui) mod bot_thread;
 mod cancel_edit_confirm;
 mod command_menu;
+pub(super) use command_menu::CommandMenu;
 mod copy_inline_text;
 mod field_placeholder;
+mod scheduled_load;
 mod send_bot_command;
+mod sent_text;
+pub(in crate::ui) use scheduled_load::ScheduledDialog;
+pub(in crate::ui) use sent_text::{AiAsk, LeftSend, SentText};
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod send_options_to_tests;

@@ -34,7 +34,7 @@ impl QuillApp {
             .extra
             .rename_input
             .update(cx, |input, cx| input.set_value(current, window, cx));
-        self.privacy.extra.renaming_device = true;
+        self.privacy.devices.start_rename();
         let input = self.privacy.extra.rename_input.clone();
         window.defer(cx, move |window, cx| {
             input.update(cx, |input, cx| input.focus(window, cx));
@@ -81,7 +81,7 @@ impl QuillApp {
                 keys::Q_PREFS_DEMO_DEVICE_NAME_IS_NOT,
             )));
         }
-        self.privacy.extra.renaming_device = false;
+        self.privacy.devices.stop_rename();
         cx.notify();
     }
 }

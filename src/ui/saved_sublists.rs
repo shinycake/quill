@@ -120,7 +120,7 @@ impl QuillApp {
     /// history.
     pub(super) fn saved_mode(&self) -> Option<SavedMode> {
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         if !session.is_saved_messages(chat_id) {
             return None;
         }
@@ -157,7 +157,7 @@ impl QuillApp {
                 let search = session.threads.saved.tag_search.as_ref()?;
                 let label = tag_name(
                     &session.saved_tag_choices(),
-                    &session.threads.saved.tags,
+                    session.threads.saved.tag_list(),
                     &search.tag,
                 );
                 Some((
@@ -356,7 +356,7 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        let Some(chat_id) = live.driver.session.open_chat else {
+        let Some(chat_id) = live.driver.session.open_chat_id() else {
             return;
         };
         if !live.driver.session.is_saved_messages(chat_id) {
@@ -364,10 +364,10 @@ impl QuillApp {
         }
         let session = &live.driver.session;
         // A failed first page or tags request waits for the connection.
-        if session.threads.saved.retry_when_online {
+        if session.threads.saved.waiting_to_retry() {
             return;
         }
-        if !session.threads.saved.tags_loaded
+        if session.threads.saved.tags.is_idle()
             && !session
                 .requests
                 .has_purpose(quill::state::RequestPurpose::GetSavedMessagesTags { topic_id: 0 })
@@ -376,8 +376,7 @@ impl QuillApp {
         }
         let session = &live.driver.session;
         if session.chat_views_as_topics(chat_id)
-            && !session.threads.saved.topics_requested
-            && !session.threads.saved.topics_exhausted
+            && session.threads.saved.topics_load == quill::state::SavedTopicsLoad::Idle
         {
             let _ = live.driver.load_saved_topics();
         }
@@ -392,7 +391,7 @@ impl QuillApp {
         };
         let topics = session.threads.saved.ordered_topics();
         if topics.is_empty() {
-            let loading = !session.threads.saved.topics_exhausted;
+            let loading = !session.threads.saved.topics_exhausted();
             return pane_placeholder(
                 if loading {
                     tr(keys::Q_PEOPLE_LOADING_SAVED_CHATS)
@@ -457,7 +456,7 @@ impl QuillApp {
         };
         let saved = &session.threads.saved;
         let loaded = saved.topics.len();
-        let has_more = !saved.topics_exhausted
+        let has_more = !saved.topics_exhausted()
             && (saved.topic_count == 0 || loaded < saved.topic_count as usize);
         if !load_due(
             scrolled_near_end(&self.dialogs.saved_scroll),
@@ -590,11 +589,10 @@ impl QuillApp {
     }
 
     fn confirm_delete_saved_sublist(&mut self, topic_id: i64, cx: &mut Context<Self>) {
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+        if self.session().and_then(|s| s.open_chat_id()).is_none() {
             return;
-        };
+        }
         self.open_group_confirm(
-            chat_id,
             super::GroupConfirmAction::DeleteSavedSublist { topic_id },
             cx,
         );
@@ -605,7 +603,7 @@ impl QuillApp {
     /// The tags bar above the messages: "All" plus one chip per tag.
     pub(super) fn saved_tags_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        if !session.is_saved_messages(session.open_chat?) {
+        if !session.is_saved_messages(session.open_chat_id()?) {
             return None;
         }
         self.saved_tags_bar_body(cx)
@@ -618,7 +616,7 @@ impl QuillApp {
     #[inline(never)]
     fn saved_tags_bar_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         if !session.is_saved_messages(chat_id) || self.saved_mode() == Some(SavedMode::Sublists) {
             return None;
         }
@@ -772,7 +770,7 @@ impl QuillApp {
             .and_then(|s| {
                 s.threads
                     .saved
-                    .tags
+                    .tag_list()
                     .iter()
                     .find(|entry| entry.tag == tag)
                     .map(|entry| entry.label.clone())
@@ -785,18 +783,17 @@ impl QuillApp {
                 .submit_on_enter(false)
         });
         input.update(cx, |input, cx| input.set_value(current, window, cx));
-        self.dialogs.saved_tag_dialog = Some(SavedTagDialog { tag, input });
-        self.open_box(DialogKind::SavedTagName);
+        self.message_ui.saved_tag_dialog = Some(SavedTagDialog { tag, input });
         cx.notify();
     }
 
     fn close_saved_tag_dialog(&mut self, cx: &mut Context<Self>) {
-        self.dialogs.saved_tag_dialog = None;
+        self.message_ui.saved_tag_dialog = None;
         cx.notify();
     }
 
     fn submit_saved_tag_name(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.dialogs.saved_tag_dialog.as_ref() else {
+        let Some(dialog) = self.message_ui.saved_tag_dialog.as_ref() else {
             return;
         };
         let tag = dialog.tag.clone();
@@ -815,7 +812,7 @@ impl QuillApp {
                 keys::Q_PEOPLE_NAMING_TAGS_NEEDS_A_LIVE,
             ))),
         }
-        self.dialogs.saved_tag_dialog = None;
+        self.message_ui.saved_tag_dialog = None;
         cx.notify();
     }
 
@@ -830,7 +827,7 @@ impl QuillApp {
                 this.close_saved_tag_dialog(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(state) = this.dialogs.saved_tag_dialog.as_ref() else {
+            let Some(state) = this.message_ui.saved_tag_dialog.as_ref() else {
                 return dialog.on_close(on_close);
             };
             let premium = this
@@ -840,7 +837,7 @@ impl QuillApp {
             let named = this.session().is_some_and(|s| {
                 s.threads
                     .saved
-                    .tags
+                    .tag_list()
                     .iter()
                     .any(|entry| entry.tag == state.tag && !entry.label.is_empty())
             });
@@ -953,15 +950,17 @@ fn tag_name(choices: &[SavedMessagesTag], all: &[SavedMessagesTag], tag: &Reacti
 crate::ui::shell::register_dialogs! {
     SavedTagName => DialogSpec::new(
         5300,
-        |app| app.dialogs.saved_tag_dialog.is_some(),
+        |app| app.message_ui.saved_tag_dialog.is_some(),
         QuillApp::build_saved_tag_dialog,
     )
+    .per_window()
     .close(|app, _, cx| app.close_saved_tag_dialog(cx)),
 }
 
 #[cfg(test)]
 mod tests {
     use super::{count_line, tag_name};
+    use crate::ui::shell::{DialogKind, QuillShell};
     use quill::telegram::envelope::{ReactionType, SavedMessagesTag};
 
     #[test]
@@ -988,5 +987,10 @@ mod tests {
             tag_name(&[], &[], &ReactionType::CustomEmoji { custom_emoji_id: 5 }),
             "tag"
         );
+    }
+
+    #[test]
+    fn the_tag_name_box_opens_in_the_window_that_asked() {
+        assert!(QuillShell::is_per_window(DialogKind::SavedTagName));
     }
 }

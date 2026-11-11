@@ -14,6 +14,7 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::input::Input;
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::gift_recipients::{Heading, People, RowStatus, Section, sections};
@@ -45,6 +46,17 @@ impl QuillApp {
         }
         self.payments.gift_recipients_open = true;
         self.open_box(DialogKind::GiftRecipients);
+        cx.notify();
+    }
+
+    /// Retry on the failed contacts line: asks again, and says so when the
+    /// request cannot even be sent.
+    fn retry_gift_recipients(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && live.driver.load_gift_recipients().is_err()
+        {
+            self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_OPEN_THE_GIFTS)));
+        }
         cx.notify();
     }
 
@@ -83,6 +95,40 @@ impl QuillApp {
                 ),
             );
             if let Some(session) = this.session() {
+                let contacts = &session.users_state.contacts;
+                if contacts.error().is_some() {
+                    body = body.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .px_2()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(tr(keys::Q_PEOPLE_COULDN_T_LOAD_CONTACTS))
+                            .child(
+                                Button::new("gift-recipients-retry")
+                                    .label(tr(keys::Q_PEOPLE_RETRY))
+                                    .ghost()
+                                    .small()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.retry_gift_recipients(cx);
+                                    })),
+                            ),
+                    );
+                } else if contacts.data().is_none() && this.live.is_some() {
+                    body = body.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .px_2()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(Spinner::new().small())
+                            .child(tr(keys::Q_PEOPLE_LOADING_CONTACTS)),
+                    );
+                }
                 let mut shown = 0;
                 for section in recipient_sections(session, &query) {
                     if let Some(heading) = section.heading {
@@ -134,7 +180,12 @@ fn recipient_sections(session: &Session, query: &str) -> Vec<Section> {
             })
             .collect()
     };
-    let contacts = session.users_state.contacts.as_deref().unwrap_or_default();
+    let contacts = session
+        .users_state
+        .contacts
+        .data()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
     let people = People {
         me: session.my_user_id,
         birthdays: &session.chat_list.suggestions.close_birthdays,

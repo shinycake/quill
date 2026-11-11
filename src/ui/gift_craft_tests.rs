@@ -119,6 +119,25 @@ fn the_info_box_starts_a_craft(cx: &mut TestAppContext) {
     });
 }
 
+/// Opening the craft info for another gift while the forge runs leaves
+/// the forge as it is, so its answer still ends it.
+#[gpui_kit::test]
+fn the_craft_info_does_not_replace_a_running_forge(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, cx| {
+        let other = app
+            .craft_session()
+            .and_then(|craft| craft.slots.get(1).cloned())
+            .expect("a second gift");
+        app.gift_market.craft.start_forge(Instant::now());
+        app.open_craft_info(other, cx);
+        assert!(app.gift_market.craft.forge_since().is_some());
+        assert_ne!(app.gift_market.top(), Some(&MarketBox::CraftInfo));
+    });
+}
+
 #[gpui_kit::test]
 fn the_forge_ends_in_the_result(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
@@ -126,18 +145,21 @@ fn the_forge_ends_in_the_result(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     app.update_in(vcx, |app, _, cx| {
         app.craft_now(cx);
-        assert!(app.gift_market.forge_started.is_some());
+        assert!(app.gift_market.craft.forge_since().is_some());
         assert_eq!(app.craft_box(cx).title.as_ref(), "Crafting");
         // Not before the forge ran its time.
         app.craft_frame_upkeep(cx);
         assert_eq!(app.gift_market.top(), Some(&MarketBox::Craft));
-        app.gift_market.forge_started =
-            Instant::now().checked_sub(Duration::from_secs_f32(FORGE_SECONDS + 0.1));
+        if let Some(since) =
+            Instant::now().checked_sub(Duration::from_secs_f32(FORGE_SECONDS + 0.1))
+        {
+            app.gift_market.craft.start_forge(since);
+        }
         app.craft_frame_upkeep(cx);
-        assert!(app.gift_market.forge_started.is_none());
+        assert!(app.gift_market.craft.forge_since().is_none());
         assert_eq!(app.gift_market.top(), Some(&MarketBox::CraftResult));
         assert_eq!(
-            app.craft_session().and_then(|c| c.result.clone()),
+            app.craft_session().and_then(|c| c.result().cloned()),
             Some(CraftResult::Fail)
         );
         assert_eq!(app.craft_result_box(cx).title.as_ref(), "Crafting Failed");
@@ -161,11 +183,11 @@ fn the_forge_ends_in_the_result(cx: &mut TestAppContext) {
 /// Ends the running forge with `result` as if `craftGift` had answered.
 fn answer_forge(app: &mut QuillApp, result: CraftResult) {
     if let Some(craft) = app.craft_mut() {
-        craft.crafting = false;
-        craft.result = Some(result);
+        craft.run = quill::gift_market::CraftRun::Done(result);
     }
-    app.gift_market.forge_started =
-        Instant::now().checked_sub(Duration::from_secs_f32(FORGE_SECONDS + 0.1));
+    if let Some(since) = Instant::now().checked_sub(Duration::from_secs_f32(FORGE_SECONDS + 0.1)) {
+        app.gift_market.craft.start_forge(since);
+    }
 }
 
 #[gpui_kit::test]
@@ -179,7 +201,7 @@ fn a_refused_craft_keeps_the_craft_box(cx: &mut TestAppContext) {
         app.craft_now(cx);
         answer_forge(app, CraftResult::TooEarly(3_600));
         app.craft_frame_upkeep(cx);
-        assert!(app.gift_market.forge_started.is_none());
+        assert!(app.gift_market.craft.forge_since().is_none());
         match app.gift_market.top() {
             Some(MarketBox::Notice { title, text }) => {
                 assert_eq!(title, "Crafting unavailable");
@@ -190,7 +212,7 @@ fn a_refused_craft_keeps_the_craft_box(cx: &mut TestAppContext) {
             }
             other => panic!("expected the notice, got {other:?}"),
         }
-        assert_eq!(app.craft_session().and_then(|c| c.result.clone()), None);
+        assert_eq!(app.craft_session().and_then(|c| c.result().cloned()), None);
         assert_eq!(slot_ids(app), ["own-1204", "own-77", "own-19"]);
         app.market_back(cx);
         assert_eq!(app.gift_market.top(), Some(&MarketBox::Craft));
@@ -199,13 +221,29 @@ fn a_refused_craft_keeps_the_craft_box(cx: &mut TestAppContext) {
         app.craft_now(cx);
         answer_forge(app, CraftResult::InvalidGift);
         app.craft_frame_upkeep(cx);
-        assert!(app.gift_market.forge_started.is_none());
+        assert!(app.gift_market.craft.forge_since().is_none());
         assert_eq!(app.gift_market.top(), Some(&MarketBox::Craft));
         assert_eq!(
             app.connection.status_note(),
             "This gift can't be used for crafting."
         );
-        assert_eq!(app.craft_session().and_then(|c| c.result.clone()), None);
+        assert_eq!(app.craft_session().and_then(|c| c.result().cloned()), None);
         assert_eq!(slot_ids(app), ["own-1204", "own-77", "own-19"]);
+    });
+}
+
+#[gpui_kit::test]
+fn closing_the_boxes_during_the_forge_keeps_the_outcome(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, cx| {
+        app.craft_now(cx);
+        app.gift_market.stack.clear();
+        app.after_craft_pop();
+        assert!(app.craft_session().is_some(), "the craft is still out");
+        answer_forge(app, CraftResult::Fail);
+        app.craft_frame_upkeep(cx);
+        assert_eq!(app.gift_market.top(), Some(&MarketBox::CraftResult));
     });
 }

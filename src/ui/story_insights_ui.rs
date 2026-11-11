@@ -13,6 +13,7 @@ use super::scroll_load::{load_due, loading_row, scrolled_near_end, watch_scroll}
 use super::statistics::format_stat_count;
 use super::statistics_graph::stat_graph_block;
 use crate::ui::status_note::StatusNote;
+use crate::ui::stories_state::{PanelKind, ViewerPanel};
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
@@ -20,7 +21,7 @@ use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::stat_chart::ChartKind;
 use quill::state::{
-    StorySearchQuery, StoryStatsFetch, event_log_relative_time, private_share_count,
+    PageFetch, StorySearchQuery, StoryStatsFetch, event_log_relative_time, private_share_count,
     story_search_tag,
 };
 use quill::story_viewer::collect_found_story_items;
@@ -34,21 +35,19 @@ impl QuillApp {
             return;
         };
         if let Some(open) = self.stories.viewer_ui_mut() {
-            open.stats_open = !open.stats_open;
+            open.toggle(PanelKind::Stats, ViewerPanel::Stats);
         }
-        if self.stories.viewer_ui().stats_open {
-            if let Some(open) = self.stories.viewer_ui_mut() {
-                open.viewers_open = false;
-            }
-            if let Some(open) = self.stories.viewer_ui_mut() {
-                open.report_open = false;
-            }
+        if self.stories.viewer_ui().is_open(PanelKind::Stats) {
             self.fetch_story_stats(&item.chat_id, item.story_id, cx);
         }
         cx.notify();
     }
 
     fn fetch_story_stats(&mut self, chat_id: &ChatId, story_id: i32, cx: &mut Context<Self>) {
+        // Another story's panel (or a retry): its first page is looked for
+        // afresh, from the top.
+        self.stories.stats_asked.reset();
+        self.stories.stats_scroll = ScrollHandle::new();
         let is_dark = super::chat_theme::is_dark_palette();
         if let Some(live) = self.live.as_mut() {
             if live
@@ -56,9 +55,11 @@ impl QuillApp {
                 .retry_story_statistics(*chat_id, story_id, is_dark)
                 .is_err()
             {
-                self.set_note(StatusNote::error(tr(
-                    keys::Q_MEDIA_COULD_NOT_LOAD_STORY_STATISTICS,
-                )));
+                live.driver.session.story_statistics_not_sent(
+                    chat_id.0,
+                    story_id,
+                    tr(keys::Q_MEDIA_COULD_NOT_LOAD_STORY_STATISTICS).to_string(),
+                );
             }
         } else if self.demo_session.is_some() {
             self.set_note(StatusNote::silent(tr(
@@ -86,12 +87,12 @@ impl QuillApp {
         else {
             return;
         };
-        if !self.stories.viewer_ui().stats_open
-            || (state.forwards_error.is_some() && !scrolled)
+        if !self.stories.viewer_ui().is_open(PanelKind::Stats)
+            || (state.forwards_error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.stories.stats_scroll),
                 !state.forwards_next_offset.is_empty(),
-                state.forwards_loading,
+                state.forwards_loading(),
             )
             || !self
                 .stories
@@ -112,11 +113,11 @@ impl QuillApp {
         let Some(search) = self.session().and_then(|s| s.stories.search.as_ref()) else {
             return;
         };
-        if (search.error.is_some() && !scrolled)
+        if (search.page.error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.stories.found_scroll),
                 !search.next_offset.is_empty(),
-                search.loading,
+                search.page.is_loading(),
             )
             || !self
                 .stories
@@ -364,10 +365,10 @@ impl QuillApp {
                 PublicForwardKind::Story { .. } => row.into_any_element(),
             });
         }
-        if let Some(error) = state.forwards_error.clone() {
+        if let Some(error) = state.forwards_error().map(str::to_string) {
             panel = panel.child(div().text_sm().text_color(danger()).child(error));
         }
-        if state.forwards_loading {
+        if state.forwards_loading() {
             panel = panel.child(loading_row("story-forwards-loading", cx));
         } else if state.forwards.is_empty()
             && state.forwards_next_offset.is_empty()
@@ -415,6 +416,9 @@ impl QuillApp {
         query: StorySearchQuery,
         cx: &mut Context<Self>,
     ) {
+        // A new search starts its list over.
+        self.stories.found_asked.reset();
+        self.stories.found_scroll = ScrollHandle::new();
         if let Some(live) = self.live.as_mut() {
             if live.driver.search_public_stories(query).is_err() {
                 self.set_note(StatusNote::error(tr(
@@ -568,21 +572,26 @@ impl QuillApp {
                     ),
             );
         }
-        if search.loading && !search.stories.is_empty() {
+        if search.page.is_loading() && !search.stories.is_empty() {
             rows = rows.child(loading_row("found-stories-loading", cx));
         }
         block = block.child(rows);
-        if let Some(error) = search.error.clone() {
-            block = block.child(div().text_sm().text_color(danger()).child(error));
+        if let Some(error) = search.page.error() {
+            block = block.child(
+                div()
+                    .text_sm()
+                    .text_color(danger())
+                    .child(error.to_string()),
+            );
         }
-        if search.loading && search.stories.is_empty() {
+        if search.page.is_loading() && search.stories.is_empty() {
             block = block.child(
                 div()
                     .text_sm()
                     .text_color(text_muted())
                     .child(tr(keys::Q_MEDIA_SEARCHING_STORIES)),
             );
-        } else if search.stories.is_empty() && !search.loading && search.error.is_none() {
+        } else if search.stories.is_empty() && search.page == PageFetch::Idle {
             block = block.child(
                 div()
                     .text_sm()
@@ -665,7 +674,7 @@ impl QuillApp {
     /// Rows of the open reply thread's info card.
     pub(super) fn thread_info_card(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let thread = session.thread_for_chat(session.open_chat?)?;
+        let thread = session.thread_for_chat(session.open_chat_id()?)?;
         let root = thread.root_message();
         let started_by = root
             .and_then(|m| m.sender.as_ref())

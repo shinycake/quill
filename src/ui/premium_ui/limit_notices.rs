@@ -180,7 +180,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(kind) = self.hub_mut().and_then(|hub| hub.limit_toast.take()) else {
+        let Some(kind) = self.hub_mut().and_then(|hub| hub.take_limit_toast()) else {
             return;
         };
         let Some(toast) = self.session().and_then(|s| limit_toast_text(s, kind)) else {
@@ -200,14 +200,12 @@ impl QuillApp {
         match link {
             LimitLink::Premium(kind) => self.open_premium_from(&kind.premium_ref(), cx),
             LimitLink::BotFather => {
-                if let Some(live) = self.live.as_mut() {
-                    let _ = live.driver.resolve_deep_link(DeepLinkAction::OpenUsername {
-                        domain: BOT_MANAGER_USERNAME.to_string(),
-                        start_param: Some(DELETE_BOT_START.to_string()),
-                        post: None,
-                        story_id: None,
-                    });
-                }
+                let _ = self.resolve_deep_link_here(DeepLinkAction::OpenUsername {
+                    domain: BOT_MANAGER_USERNAME.to_string(),
+                    start_param: Some(DELETE_BOT_START.to_string()),
+                    post: None,
+                    story_id: None,
+                });
                 cx.notify();
             }
         }
@@ -218,7 +216,7 @@ impl QuillApp {
     pub(in crate::ui) fn note_gif_replaced(&mut self, cx: &mut Context<Self>) {
         let full = self.session().is_some_and(|s| {
             !s.my_is_premium()
-                && s.stickers.gifs.loaded
+                && s.stickers.gifs.loaded()
                 && saved_list_full(
                     s.stickers.gifs.animations.len(),
                     s.premium_limit_in_force(PremiumLimitKind::SavedGifs),
@@ -255,7 +253,7 @@ impl QuillApp {
         if session.my_is_premium() || !session.premium_possible() {
             return None;
         }
-        let ProfileChatsFetch::Loaded(list) = session
+        let ProfileChatsFetch::Loaded { ids: list, .. } = session
             .users_state
             .profile_chat_lists
             .get(&(ProfileChatsKind::SimilarChats, chat_id.0))?

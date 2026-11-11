@@ -39,7 +39,7 @@ impl Rig {
                 .ingest(copy_and_parse(json, &seq, &sink).unwrap())
                 .unwrap();
         }
-        driver.session.open_chat = Some(ChatId(8));
+        driver.session.open = crate::state::OpenView::of(Some(ChatId(8)));
         Self {
             driver,
             recorder,
@@ -102,7 +102,7 @@ fn a_prepared_video_is_sent_to_its_chat_while_another_is_open() {
     rig.driver.send_snapshot(&snap).unwrap();
     let request = rig.last();
     assert_eq!(request["chat_id"], 7, "the chat Send was tapped in");
-    assert_eq!(rig.driver.session.open_chat, Some(ChatId(8)));
+    assert_eq!(rig.driver.session.open_chat_id(), Some(ChatId(8)));
     let content = &request["input_message_content"];
     assert_eq!(content["@type"], "inputMessageVideo");
     assert_eq!(content["video"]["duration"], 42);
@@ -135,7 +135,7 @@ fn prepared_round_videos_and_gifs_are_sent_without_probing() {
     assert_eq!(content["video_note"]["length"], 280);
 
     let mut gif = rig.junk("fun.mp4", AttachmentKind::Video);
-    gif.extras.gif = true;
+    gif.extras.set_gif(true);
     let prepared = PreparedMedia::default().with_file(
         gif.path.clone(),
         PreparedFile {

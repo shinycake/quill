@@ -107,7 +107,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|session| session.groups.boost_box.as_mut())
         {
-            state.phase = BoostPhase::Main;
+            state.phase = BoostPhase::main();
         }
         cx.notify();
     }
@@ -316,7 +316,7 @@ impl QuillApp {
                 );
             }
         }
-        if let Some(note) = state.note.clone() {
+        if let Some(note) = state.note().map(str::to_string) {
             body = body.child(div().id("boost-box-note").text_sm().child(note));
         }
         body.into_any_element()
@@ -377,7 +377,7 @@ impl QuillApp {
                     ),
             );
         }
-        if let Some(note) = state.note.clone() {
+        if let Some(note) = state.note().map(str::to_string) {
             list = list.child(div().id("boost-box-note").text_sm().child(note));
         }
         list.into_any_element()
@@ -415,13 +415,13 @@ impl QuillApp {
             };
             let mut footer = div().flex().justify_end().gap_2();
             let (title, body) = match &state.phase {
-                BoostPhase::Main | BoostPhase::Working => {
+                BoostPhase::Main { .. } | BoostPhase::Working(_) => {
                     let counters = session
                         .groups
                         .chat_boost_details
                         .get(&state.chat_id)
                         .map(BoostCounters::from);
-                    let working = matches!(state.phase, BoostPhase::Working);
+                    let working = matches!(state.phase, BoostPhase::Working(_));
                     footer = footer.child(close_button(tr(keys::CLOSE)));
                     if let Some(counters) = counters {
                         let allow_multi = session.groups.boosts_per_gift.unwrap_or(0) > 0;
@@ -453,7 +453,9 @@ impl QuillApp {
                     };
                     (title, this.boost_main_body(session, &state, cx))
                 }
-                BoostPhase::Reassign { slots, selected } => {
+                BoostPhase::Reassign {
+                    slots, selected, ..
+                } => {
                     let now = quill::local_time::now_unix();
                     let single = matches!(slots.as_slice(), [only] if !quill::boost_box::is_waiting(only, now));
                     let can_move = !state.reassign_selection(now).is_empty();

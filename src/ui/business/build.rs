@@ -139,7 +139,7 @@ impl QuillApp {
         // The server's order (`getBusinessFeatures`), else tdesktop's.
         let features = self
             .session()
-            .and_then(|s| s.payments.hub.business_features.clone())
+            .and_then(|s| s.payments.hub.business_features.data().cloned())
             .unwrap_or_else(|| BusinessFeature::FALLBACK_ORDER.to_vec());
         for feature in features {
             let (title, about) = feature.text_keys();
@@ -235,11 +235,14 @@ impl QuillApp {
                     cx.listener(move |this, _, window, cx| this.save_business_day(day, window, cx)),
                 ),
             ),
-            View::LinkEdit => footer.child(back(tr(keys::CANCEL))).child(
-                primary("business-link-save", tr(keys::SETTINGS_SAVE)).on_click(
-                    cx.listener(|this, _, window, cx| this.save_business_link(window, cx)),
-                ),
-            ),
+            View::LinkEdit => {
+                let saving = self.business_link_saving();
+                footer.child(back(tr(keys::CANCEL))).child(
+                    primary("business-link-save", tr(keys::SETTINGS_SAVE))
+                        .loading(saving)
+                        .on_click(cx.listener(|this, _, _, cx| this.save_business_link(cx))),
+                )
+            }
             // The screens save when they are left; the time zone list,
             // sticker panel, links and QR code have nothing to save.
             _ => footer.child(back(tr(keys::Q_OPS_BACK))),
@@ -263,11 +266,11 @@ impl QuillApp {
             let Some((view, include, new_link, local_error, note)) =
                 this.dialogs.business_dialog.as_ref().map(|d| {
                     (
-                        d.view,
-                        d.picker.as_ref().is_some_and(|p| p.include),
-                        d.link_edit.as_ref().is_none_or(|e| e.link.is_none()),
-                        d.local_error.clone(),
-                        d.note.clone(),
+                        d.view(),
+                        d.screen.picker().is_some_and(|p| p.include),
+                        d.screen.link_edit().is_none_or(|e| e.link.is_none()),
+                        d.local_error().map(str::to_string),
+                        d.note().map(str::to_string),
                     )
                 })
             else {
@@ -328,7 +331,7 @@ impl QuillApp {
             }
             let server_error = this
                 .session()
-                .and_then(|s| s.settings.business.error.clone());
+                .and_then(|s| s.settings.business.refusal().map(str::to_string));
             // The screen's own line and TDLib's refusal both show: a local
             // "still loading" must not hide why the load failed.
             let server_error = server_error.filter(|line| local_error.as_ref() != Some(line));

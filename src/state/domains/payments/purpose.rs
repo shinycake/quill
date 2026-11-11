@@ -1,5 +1,6 @@
 //! Request purposes for payments, Premium, Stars and gifts.
 use crate::state::request_purpose::flat_purposes;
+use crate::telegram::envelope::MessageSender;
 
 /// In-flight requests for payments, Premium, Stars and gifts; wrapped as
 /// [`RequestPurpose::Payments`].
@@ -46,7 +47,7 @@ pub enum PaymentsPurpose {
     /// `getReceivedGifts` filtered to gifts with wearable colors, for the
     /// color editor's collectible row.
     GetWearableGifts,
-    /// `toggleGiftIsSaved` for the gift in `PremiumHub::gift_selected`.
+    /// `toggleGiftIsSaved` for the gift in `PremiumHub::gift_view`.
     ToggleGiftSaved {
         saved: bool,
     },
@@ -147,8 +148,11 @@ pub enum PaymentsPurpose {
     GiftExportProbe,
     /// `setGiftResalePrice`. Response is `ok`.
     SetGiftResalePrice,
-    /// `getGiftCollections`. Response is `giftCollections`.
-    GetGiftCollections,
+    /// `getGiftCollections` of `owner`. Response is `giftCollections`; an
+    /// answer for another owner than the open list is dropped.
+    GetGiftCollections {
+        owner: MessageSender,
+    },
     /// `createGiftCollection`, `setGiftCollectionName`,
     /// `addGiftCollectionGifts` and `removeGiftCollectionGifts` answer with
     /// `giftCollection`; `deleteGiftCollection` with `ok`.
@@ -162,11 +166,9 @@ pub enum PaymentsPurpose {
     GetPremiumGiftOptions,
     /// `sendGift`: spends Stars, sent only on the send button.
     SendStarGift,
-    /// `getSupergroupMembers` for a page of the "Choose members" list;
-    /// `generation` tells an older search from the current one.
-    GetAwardMembers {
-        generation: u64,
-    },
+    /// `getSupergroupMembers` for a page of the "Choose members" list; the
+    /// list's stage holds the request that is current.
+    GetAwardMembers,
     /// Revenue screens and affiliate programs (`crate::earn`).
     Earn(crate::earn::EarnPurpose),
     /// Suggested posts in channel direct messages
@@ -190,7 +192,7 @@ impl PaymentsPurpose {
                 | Self::GiftExportUrl
                 | Self::GiftExportProbe
                 | Self::SetGiftResalePrice
-                | Self::GetGiftCollections
+                | Self::GetGiftCollections { .. }
                 | Self::ChangeGiftCollection
                 | Self::DeleteGiftCollection
                 | Self::DeleteGift
@@ -238,7 +240,6 @@ flat_purposes!(Payments(PaymentsPurpose) {
     GiftExportUrl,
     GiftExportProbe,
     SetGiftResalePrice,
-    GetGiftCollections,
     ChangeGiftCollection,
     DeleteGiftCollection,
     DeleteGift,

@@ -168,11 +168,57 @@ pub(super) struct MarkdownRevert {
     pub restore: Option<(Range<usize>, String)>,
 }
 
+/// The composer text the last Change event saw, and the markdown or emoji
+/// replacement Backspace can still take back. The replacement is for exactly
+/// that text, so setting the text drops a replacement made for other text:
+/// the two cannot drift apart.
+#[derive(Default)]
+pub(super) struct FieldEcho {
+    prev: gpui_kit::SharedString,
+    revert: Option<MarkdownRevert>,
+}
+
+impl FieldEcho {
+    /// The text the last event (or the code that set the field) left.
+    #[cfg(test)]
+    pub(super) fn prev(&self) -> &gpui_kit::SharedString {
+        &self.prev
+    }
+
+    /// The field now holds `text`; `prev` is what it held before. A
+    /// replacement made for other text is dropped.
+    pub(super) fn set(&mut self, text: gpui_kit::SharedString) -> gpui_kit::SharedString {
+        if self
+            .revert
+            .as_ref()
+            .is_some_and(|revert| revert.text != text.as_ref())
+        {
+            self.revert = None;
+        }
+        std::mem::replace(&mut self.prev, text)
+    }
+
+    /// A replacement was just made: Backspace takes it back while the text
+    /// stays `revert.text`.
+    pub(super) fn arm(&mut self, revert: MarkdownRevert) {
+        self.revert = Some(revert);
+    }
+
+    /// The field was rewritten by code: nothing to take back.
+    pub(super) fn drop_revert(&mut self) {
+        self.revert = None;
+    }
+
+    pub(super) fn take_revert(&mut self) -> Option<MarkdownRevert> {
+        self.revert.take()
+    }
+}
+
 impl QuillApp {
     /// The composer's content as markup, for sending, drafts and edits.
     pub(super) fn composer_markup(&self, cx: &App) -> String {
         let state = self.composer.read(cx);
-        if self.chat_ui.rich_editor_open {
+        if self.chat_ui.rich.editor_open() {
             return state.value().to_string();
         }
         field_doc(state).to_markup()
@@ -185,12 +231,12 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let content = if self.chat_ui.rich_editor_open {
+        let content = if self.chat_ui.rich.editor_open() {
             InputContent::new(quill::composer::strip_barrier(markup))
         } else {
             doc_content(&ComposerDoc::from_markup(markup))
         };
-        self.composer_ui.markdown_revert = None;
+        self.composer_ui.echo.drop_revert();
         self.composer
             .update(cx, |input, cx| input.set_value(content, window, cx));
     }
@@ -249,7 +295,7 @@ impl QuillApp {
         custom_emoji_id: i64,
     ) -> InputContent {
         let fallback = if fallback.is_empty() { "⭐" } else { fallback };
-        if self.chat_ui.rich_editor_open {
+        if self.chat_ui.rich.editor_open() {
             InputContent::new(quill::composer::custom_emoji_markup(
                 fallback,
                 custom_emoji_id,
@@ -279,7 +325,7 @@ impl QuillApp {
         };
         let content = if !username.is_empty() {
             InputContent::new(format!("@{username} "))
-        } else if self.chat_ui.rich_editor_open {
+        } else if self.chat_ui.rich.editor_open() {
             InputContent::new(quill::moderation::mention_text(user_id, "", name))
         } else {
             mention_content(user_id, name)
@@ -296,7 +342,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.composer_ui.markdown_revert = None;
+        self.composer_ui.echo.drop_revert();
         self.composer.update(cx, |input, cx| {
             let doc = field_doc(input);
             let range = input.selected_range();
@@ -328,7 +374,7 @@ impl QuillApp {
     /// "Clear formatting": the selection loses every format; with nothing
     /// selected, the next typed text is plain.
     pub(super) fn clear_composer_tags(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.composer_ui.markdown_revert = None;
+        self.composer_ui.echo.drop_revert();
         self.composer.update(cx, |input, cx| {
             let range = input.selected_range();
             if range.is_empty() {
@@ -388,15 +434,15 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.chat_ui.rich_editor_open {
+        if self.chat_ui.rich.editor_open() {
             return false;
         }
         let revert = self
             .composer
             .update(cx, |input, cx| apply_markdown(input, prev, window, cx));
         let replaced = revert.is_some();
-        if replaced {
-            self.composer_ui.markdown_revert = revert;
+        if let Some(revert) = revert {
+            self.composer_ui.echo.arm(revert);
         }
         replaced
     }
@@ -408,7 +454,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(revert) = self.composer_ui.markdown_revert.take() else {
+        let Some(revert) = self.composer_ui.echo.take_revert() else {
             return false;
         };
         let state = self.composer.read(cx);
@@ -423,7 +469,8 @@ impl QuillApp {
                 // Telegram Desktop `revertFormatReplace`: the typed text
                 // comes back over the replacement.
                 self.replace_composer_text(range, &original, window, cx);
-                self.composer_ui.prev_text = self.composer.read(cx).value();
+                let value = self.composer.read(cx).value();
+                self.composer_ui.echo.set(value);
             }
             None => window.dispatch_action(Box::new(gpui_kit::component::input::Undo), cx),
         }
@@ -584,3 +631,37 @@ pub(super) fn mention_name(first_name: &str, display_name: &str) -> String {
 #[cfg(feature = "demo-capture")]
 #[path = "composer_long_line_tests.rs"]
 mod long_line_tests;
+
+#[cfg(test)]
+mod echo_tests {
+    use super::{FieldEcho, MarkdownRevert};
+    use gpui_kit::SharedString;
+
+    fn revert(text: &str) -> MarkdownRevert {
+        MarkdownRevert {
+            text: text.to_string(),
+            caret: text.len(),
+            restore: None,
+        }
+    }
+
+    #[test]
+    fn a_replacement_is_taken_back_only_for_the_text_it_was_made_for() {
+        let mut echo = FieldEcho::default();
+        echo.set(SharedString::from("*a*"));
+        echo.arm(revert("a"));
+        // The field now holds other text: the replacement is gone.
+        let before = echo.set(SharedString::from("ab"));
+        assert_eq!(before.as_ref(), "*a*");
+        assert!(echo.take_revert().is_none());
+    }
+
+    #[test]
+    fn a_replacement_survives_the_event_for_its_own_text() {
+        let mut echo = FieldEcho::default();
+        echo.arm(revert("a"));
+        echo.set(SharedString::from("a"));
+        assert!(echo.take_revert().is_some());
+        assert!(echo.take_revert().is_none(), "taken once");
+    }
+}

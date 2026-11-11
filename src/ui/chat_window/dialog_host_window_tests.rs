@@ -81,7 +81,7 @@ fn mute_asked_again_from_a_chat_window_moves_there(cx: &mut TestAppContext) {
     );
     h.app.read_with(cx, |app, _| {
         assert_eq!(
-            app.notify.mute_chat,
+            app.notify.mute_chat(),
             Some(OTHER),
             "for the asking window's chat"
         );
@@ -121,7 +121,7 @@ fn each_window_shows_its_own_per_window_box(cx: &mut TestAppContext) {
     let chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, _| {
         app.set_window_scope(None);
-        app.chat_ui.scheduled_dialog_open = true;
+        app.chat_ui.scheduled_dialog = crate::ui::composer::ScheduledDialog::Ready;
     });
     draw_both(&h, chat_window, cx);
     assert_eq!(shown(&h.shell, cx), Some(DialogKind::Scheduled));
@@ -129,7 +129,7 @@ fn each_window_shows_its_own_per_window_box(cx: &mut TestAppContext) {
     assert_eq!(shown(&in_chat_window, cx), None, "its own flag is clear");
     h.app.update(cx, |app, cx| {
         app.in_window_scope(Some(OTHER), cx, |app, _| {
-            app.chat_ui.scheduled_dialog_open = true;
+            app.chat_ui.scheduled_dialog = crate::ui::composer::ScheduledDialog::Ready;
         });
     });
     draw_both(&h, chat_window, cx);
@@ -150,9 +150,9 @@ fn a_closing_window_closes_only_its_own_boxes(cx: &mut TestAppContext) {
     let chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, cx| {
         app.set_window_scope(None);
-        app.chat_ui.scheduled_dialog_open = true;
+        app.chat_ui.scheduled_dialog = crate::ui::composer::ScheduledDialog::Ready;
         app.in_window_scope(Some(OTHER), cx, |app, _| {
-            app.chat_ui.scheduled_dialog_open = true;
+            app.chat_ui.scheduled_dialog = crate::ui::composer::ScheduledDialog::Ready;
         });
     });
     draw_both(&h, chat_window, cx);
@@ -163,7 +163,7 @@ fn a_closing_window_closes_only_its_own_boxes(cx: &mut TestAppContext) {
     h.app.update(cx, |app, _| {
         app.set_window_scope(None);
         assert!(
-            app.chat_ui.scheduled_dialog_open,
+            app.chat_ui.scheduled_dialog.is_open(),
             "the main window's own box was not closed"
         );
     });
@@ -182,7 +182,7 @@ fn a_session_box_closes_with_the_window_that_shows_it(cx: &mut TestAppContext) {
     draw_both(&h, chat_window, cx);
     close_from_inside(&h, chat_window, cx);
     h.app.read_with(cx, |app, _| {
-        assert!(!app.notify.mute_menu_open, "its own close ran at once");
+        assert!(app.notify.mute_box.is_none(), "its own close ran at once");
     });
     draw(h.main, cx);
     assert_eq!(shown(&h.shell, cx), None);
@@ -244,10 +244,12 @@ fn a_typed_link_opens_its_box_in_the_window_it_was_clicked_in(cx: &mut TestAppCo
     h.app.update(cx, |app, _| {
         app.note_window_pointer(None);
         app.set_window_scope(None);
-        app.links.pending_deep_link_ui = Some(quill::deep_link_types::DeepLinkUi::ConferenceCall {
-            link: "https://t.me/call/abc".into(),
-        });
-        app.links.pending_flow_window = Some(OTHER);
+        app.links.resolved = Some(crate::ui::links_state::ResolvedLink::ui(
+            quill::deep_link_types::DeepLinkUi::ConferenceCall {
+                link: "https://t.me/call/abc".into(),
+            },
+            Some(OTHER),
+        ));
     });
     let app = h.app.clone();
     cx.update_window(h.main, |_, window, cx| {

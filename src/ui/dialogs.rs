@@ -30,11 +30,12 @@ pub(crate) mod profile_panels;
 pub(crate) mod restrict;
 pub(crate) mod rtmp_stream;
 pub(crate) mod share_content;
+pub(crate) mod storage_editor;
 pub(crate) mod username;
 pub(crate) mod welcome;
 
 pub(crate) use super::security_recovery::TwofaConfirm;
-pub(crate) use account_notices::TermsStep;
+pub(crate) use account_notices::TermsPrompt;
 pub(crate) use add_special::*;
 pub(crate) use admin::*;
 pub(crate) use call_rating::*;

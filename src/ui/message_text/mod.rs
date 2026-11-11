@@ -550,7 +550,7 @@ fn paint_text_run(
     index: usize,
     msg_key: (i64, u64),
     is_caption: bool,
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &revealed::Revealed,
     emoji_paths: &HashMap<i64, ImageSource>,
     // Decoded animated custom emoji, drawn by the conversation's
     // animation layer (`anim_layer`); they take precedence over stills.
@@ -565,7 +565,7 @@ fn paint_text_run(
     );
     let style = &run.style;
     let revealed =
-        !style.spoiler || revealed.contains(&(msg_key.0, msg_key.1, index as u64, is_caption));
+        !style.spoiler || revealed.spoiler_shown(&(msg_key.0, msg_key.1, index as u64, is_caption));
     if !revealed {
         let key = (msg_key.0, msg_key.1, index as u64, is_caption);
         // The text keeps its room but is invisible; specks in the text's
@@ -594,7 +594,7 @@ fn paint_text_run(
             .aria_label(tr(keys::Q_MISC_REVEAL_SPOILER))
             .cursor_pointer()
             .on_click(cx.listener(move |this, _, _, cx| {
-                this.message_ui.spoiler_revealed.insert(key);
+                this.message_ui.revealed.reveal_spoiler(key);
                 super::spoiler_fx::mark_revealed(key);
                 cx.notify();
             }))
@@ -779,14 +779,13 @@ fn pre_block(run: &TextRun, id: &str, font: Pixels, cx: &mut Context<QuillApp>) 
 /// One blockquote block: quote styling (accent bar, like `reply_quote_strip`)
 /// with long quotes collapsed to `QUOTE_COLLAPSE_LINES` lines and a kit
 /// "Show more"/"Show less" affordance. `start` is the group's first run
-/// index; expansion state shares the spoiler `revealed` set and its key
-/// scheme instead of threading a second set through every history call site.
+/// index; expansion state is the quotes half of `Revealed`.
 fn quote_block(
     group: &[TextRun],
     start: usize,
     msg_key: (i64, u64),
     is_caption: bool,
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &revealed::Revealed,
     emoji_paths: &HashMap<i64, ImageSource>,
     layered: &HashMap<i64, StickerView>,
     // Settings → Appearance: message font size.
@@ -794,9 +793,8 @@ fn quote_block(
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let quote_text: String = group.iter().map(|run| run.text.as_str()).collect();
-    // Keep quote expansion separate from spoiler visibility at the same run.
-    let key = (msg_key.0, msg_key.1, (start as u64) | (1 << 63), is_caption);
-    let expanded = revealed.contains(&key);
+    let key = (msg_key.0, msg_key.1, start as u64, is_caption);
+    let expanded = revealed.quote_expanded(&key);
     let collapsible = quote_collapses(&quote_text);
     let shown: Vec<TextRun> = if collapsible && !expanded {
         // Truncate to the first QUOTE_COLLAPSE_LINES lines, keeping each
@@ -852,11 +850,7 @@ fn quote_block(
                 .label(label)
                 .ghost()
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    if this.message_ui.spoiler_revealed.contains(&key) {
-                        this.message_ui.spoiler_revealed.remove(&key);
-                    } else {
-                        this.message_ui.spoiler_revealed.insert(key);
-                    }
+                    this.message_ui.revealed.toggle_quote(key);
                     cx.notify();
                 })),
         );
@@ -878,7 +872,7 @@ pub(in crate::ui) fn rich_text_line(
     entities: &[TextEntity],
     msg_key: (i64, u64),
     is_caption: bool,
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &revealed::Revealed,
     // Settings → Appearance: message font size (was hardcoded text_sm).
     font: Pixels,
     // Resolved custom emoji sticker images (id → path); empty when none.
@@ -910,6 +904,7 @@ enum InlineAction {
 
 mod link_preview_tile;
 mod measure;
+pub(in crate::ui) mod revealed;
 pub(in crate::ui) use measure::{RichTextSource, measure_rich_text};
 mod of;
 mod paragraph;

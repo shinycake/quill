@@ -62,9 +62,10 @@ impl QuillApp {
     }
 
     fn submit_fact_check(&mut self, cx: &mut Context<Self>) {
-        let Some(dialog) = self.message_ui.fact_check_dialog.take() else {
+        let Some(dialog) = self.message_ui.fact_check_dialog.as_ref() else {
             return;
         };
+        let (chat_id, message_id) = (dialog.chat_id, dialog.message_id);
         let text: String = dialog
             .input
             .read(cx)
@@ -74,22 +75,27 @@ impl QuillApp {
             .take(FACT_CHECK_LENGTH_MAX)
             .collect();
         if text == dialog.existing.trim() {
+            self.message_ui.fact_check_dialog = None;
             cx.notify();
             return;
         }
+        // The box closes once the request is on its way; one the driver
+        // refuses stays open with the typed text, so Save can be pressed
+        // again.
+        let mut sent = true;
         match self.live.as_mut() {
             Some(live) => {
                 self.screen.connection.set_note_for(
                     &self.screen.windows,
-                    match live
-                        .driver
-                        .set_fact_check(dialog.chat_id, dialog.message_id, &text)
-                    {
+                    match live.driver.set_fact_check(chat_id, message_id, &text) {
                         Ok(_) if text.is_empty() => {
                             StatusNote::silent(tr(keys::Q_MISC_REMOVING_THE_FACT_CHECK))
                         }
                         Ok(_) => StatusNote::silent(tr(keys::Q_MISC_SAVING_THE_FACT_CHECK)),
-                        Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_SAVE_THE_FACT)),
+                        Err(_) => {
+                            sent = false;
+                            StatusNote::error(tr(keys::Q_MISC_COULD_NOT_SAVE_THE_FACT))
+                        }
                     },
                 );
             }
@@ -97,8 +103,8 @@ impl QuillApp {
                 if let Some(message) = self
                     .demo_session
                     .as_mut()
-                    .and_then(|session| session.histories.get_mut(&dialog.chat_id.0))
-                    .and_then(|history| history.messages.get_mut(&dialog.message_id.0))
+                    .and_then(|session| session.histories.get_mut(&chat_id.0))
+                    .and_then(|history| history.messages.get_mut(&message_id.0))
                 {
                     let country = message
                         .extras
@@ -112,6 +118,9 @@ impl QuillApp {
                 }
                 self.set_note(StatusNote::silent(tr(keys::Q_MISC_FACT_CHECK_SAVED_DEMO)));
             }
+        }
+        if sent {
+            self.message_ui.fact_check_dialog = None;
         }
         cx.notify();
     }

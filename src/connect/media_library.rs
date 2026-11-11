@@ -3,7 +3,7 @@
 use super::*;
 use crate::ids::{ChatId, FileId, MessageId, RequestId};
 use crate::state::{MessagesPurpose, StickersPurpose};
-use crate::state::{ReactionChoice, RequestPurpose};
+use crate::state::{ReactionChoice, RequestPurpose, RequestRollback};
 use crate::telegram::requests::{
     get_installed_sticker_sets, get_message_available_reactions, get_recent_stickers,
     get_sticker_set, reaction_type_custom_emoji, reaction_type_emoji, set_message_reaction,
@@ -26,20 +26,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A set whose load failed (a FLOOD_WAIT while scrolling fast) is
         // asked for again when the panel opens next, not left blank until
         // restart.
-        self.session.media.media_library.failed.clear();
-        if !self.session.stickers.stickers.installed_loaded
+        self.session.media.media_library.forget_failures();
+        if !self.session.stickers.stickers.installed_loaded()
             && !self
                 .session
                 .requests
                 .has_purpose(RequestPurpose::GetInstalledStickerSets)
         {
-            let extra = self
-                .session
-                .request(RequestPurpose::GetInstalledStickerSets, None);
-            if let Err(err) = self.sender.send_json(&get_installed_sticker_sets(extra)) {
-                self.session.requests.take(extra);
-                return Err(err);
-            }
+            self.sticker_request(
+                RequestPurpose::GetInstalledStickerSets,
+                get_installed_sticker_sets,
+            )?;
         }
         if self.session.stickers.emoji.installed_sets.is_empty()
             && !self
@@ -47,18 +44,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .requests
                 .has_purpose(RequestPurpose::GetInstalledEmojiSets)
         {
-            let extra = self
-                .session
-                .request(RequestPurpose::GetInstalledEmojiSets, None);
-            if let Err(err) =
-                self.sender
-                    .send_json(&crate::telegram::requests_emoji::get_installed_emoji_sets(
-                        extra,
-                    ))
-            {
-                self.session.requests.take(extra);
-                return Err(err);
-            }
+            self.emoji_set_request(
+                RequestPurpose::GetInstalledEmojiSets,
+                crate::telegram::requests_emoji::get_installed_emoji_sets,
+            )?;
         }
         if self.session.stickers.stickers.recent.is_empty()
             && !self
@@ -95,7 +84,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 return Err(err);
             }
-            self.session.media.media_library.loading.insert(set_id);
+            self.session.media.media_library.begin_load(set_id, extra);
         }
         Ok(())
     }
@@ -173,13 +162,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.messages.message_menu_actions = None;
+        self.session
+            .messages
+            .menu_actions
+            .forget(chat_id, message_id);
         self.ask_message_menu_actions(chat_id, message_id)
     }
 
-    /// Like [`Self::fetch_message_menu_actions`] but leaves the shared answer
-    /// slot as it is, so an open message menu keeps what it knows while a
-    /// gallery row asks about its own message.
+    /// Like [`Self::fetch_message_menu_actions`] but keeps the answer
+    /// already held for the message while asking again (a gallery row).
     pub fn refresh_message_menu_actions(
         &mut self,
         chat_id: ChatId,
@@ -239,7 +230,17 @@ impl<S: JsonSender> ConnectDriver<S> {
                 extra, value,
             )) {
             Ok(()) => {
-                self.session.stickers.default_reaction = Some(choice.clone());
+                let previous = self
+                    .session
+                    .stickers
+                    .default_reaction
+                    .replace(choice.clone());
+                if let Some(pending) = self.session.requests.pending_mut(extra) {
+                    pending.rollback = Some(RequestRollback::DefaultReaction {
+                        previous,
+                        shown: choice.clone(),
+                    });
+                }
                 Ok(extra)
             }
             Err(err) => {

@@ -38,12 +38,17 @@ impl Session {
                 append,
             }) => {
                 self.payments.earn.star_balances.insert(peer, page.balance);
-                if let Some(open) = self.earn_page_mut(peer) {
+                let id = pending.map(|p| p.id);
+                if let Some(open) = self.earn_page_mut(peer)
+                    && open.history_mut(filter).load.waits_for(id)
+                {
                     open.history_mut(filter).apply(page, append);
                 }
             }
             Some(EarnPurpose::StarBalance { peer }) => {
                 self.payments.earn.star_balances.insert(peer, page.balance);
+                let id = pending.map(|p| p.id);
+                self.payments.earn.settle_balance(peer, id);
             }
             _ => {}
         }
@@ -79,18 +84,23 @@ impl Session {
             }
             (EarnPayload::TonStats(stats), Some(EarnPurpose::TonStats { peer })) => {
                 earn.ton_balances.insert(peer, stats.amounts);
-                if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
+                if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer)
+                    && page.ton.waits_for(pending.map(|p| p.id))
+                {
                     page.ton = Load::Ready(stats);
                 }
             }
             (EarnPayload::TonStats(stats), Some(EarnPurpose::TonBalance { peer })) => {
                 earn.ton_balances.insert(peer, stats.amounts);
+                earn.settle_balance(peer, pending.map(|p| p.id));
             }
             (
                 EarnPayload::TonTransactions(page_data),
                 Some(EarnPurpose::TonTransactions { peer, append }),
             ) => {
-                if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
+                if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer)
+                    && page.ton_history.load.waits_for(pending.map(|p| p.id))
+                {
                     let history = &mut page.ton_history;
                     if !append {
                         history.rows.clear();
@@ -104,9 +114,11 @@ impl Session {
                 stats.status = stats.status.stamped(crate::local_time::now_unix());
                 earn.star_balances.insert(peer, stats.status.current);
                 if me.is_some_and(|me| peer == EarnPeer::User(me)) {
-                    earn.self_stats = Some(true);
+                    earn.self_stats.succeed(());
                 }
-                if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
+                if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer)
+                    && page.stars.waits_for(pending.map(|p| p.id))
+                {
                     page.stars = Load::Ready(stats);
                 }
             }
@@ -119,7 +131,7 @@ impl Session {
                 } else {
                     earn.join.as_mut().map(|join| &mut join.found)
                 };
-                if let Some(list) = list {
+                if let Some(list) = list.filter(|l| l.load.waits_for(pending.map(|p| p.id))) {
                     if !append {
                         list.programs.clear();
                     }
@@ -141,7 +153,12 @@ impl Session {
                 EarnPayload::ConnectedList(found),
                 Some(EarnPurpose::ConnectedPrograms { append }),
             ) => {
-                if let Some(list) = earn.join.as_mut().map(|join| &mut join.mine) {
+                if let Some(list) = earn
+                    .join
+                    .as_mut()
+                    .map(|join| &mut join.mine)
+                    .filter(|l| l.load.waits_for(pending.map(|p| p.id)))
+                {
                     if !append {
                         list.programs.clear();
                     }
@@ -163,22 +180,35 @@ impl Session {
                     choose_recipient,
                 }),
             ) => {
+                // Only the click being resolved opens a box: the answer of
+                // a program the user left (or tapped past) opens nothing.
+                if !earn.resolve.waits_for(pending.map(|p| p.id)) {
+                    return;
+                }
+                earn.resolve = Resolve::Idle;
                 // tdesktop `ListController::open`: a live link opens the
                 // link box, anything else the join box.
                 if program.bot_user_id == bot_user_id
                     && !program.url.is_empty()
                     && !program.is_disconnected
                 {
-                    earn.link_box = Some(LinkBox { program, recipient });
-                    earn.pending_join = None;
+                    earn.link_box = Some(LinkBox::new(program, recipient));
+                    earn.recipients.drop_parked();
                 } else {
                     self.open_join_box_after_resolve(bot_user_id, recipient, choose_recipient);
                 }
             }
             (EarnPayload::Connected(program), Some(EarnPurpose::Connect { recipient })) => {
-                // Joined: the link box replaces the join box and the
-                // program moves to "My Programs" when it was for this page.
-                earn.join_box = None;
+                // Joined: the link box replaces the join box that asked and
+                // the program moves to "My Programs" when it was for this
+                // page. A box the user opened since is left as it is.
+                let asked = earn
+                    .join_box
+                    .as_ref()
+                    .is_some_and(|b| b.stage.waits_for(pending.map(|p| p.id)));
+                if asked {
+                    earn.join_box = None;
+                }
                 if let Some(join) = earn.join.as_mut().filter(|j| j.peer == recipient) {
                     join.found
                         .programs
@@ -187,10 +217,16 @@ impl Session {
                         join.mine.programs.insert(0, program.clone());
                     }
                 }
-                earn.link_box = Some(LinkBox { program, recipient });
+                if asked || earn.join_box.is_none() {
+                    earn.link_box = Some(LinkBox::new(program, recipient));
+                }
             }
             (EarnPayload::Connected(program), Some(EarnPurpose::Disconnect)) => {
-                let revoked = earn.revoke.take();
+                let ours = earn
+                    .revoke
+                    .as_ref()
+                    .is_some_and(|r| r.send.waits_for(pending.map(|p| p.id)));
+                let revoked = if ours { earn.revoke.take() } else { None };
                 if let Some(join) = earn.join.as_mut() {
                     join.mine
                         .programs
@@ -252,12 +288,12 @@ impl Session {
             info,
             recipient,
             choose_recipient,
-            joining: false,
+            stage: JoinStage::Open,
         };
-        if choose_recipient && earn.recipients_loading > 0 {
-            earn.pending_join = Some(join);
-        } else {
+        if !choose_recipient {
             earn.join_box = Some(join);
+        } else if let Some(open) = earn.recipients.park(join) {
+            earn.join_box = Some(open);
         }
     }
 
@@ -269,7 +305,7 @@ impl Session {
                 // An answer to an attempt the user cancelled (or one
                 // before this attempt) opens nothing.
                 let id = pending.map(|p| p.id);
-                if earn.withdraw.as_ref().is_some_and(|w| w.waits_for(id)) {
+                if earn.withdraw.as_ref().is_some_and(|w| w.takes_answer(id)) {
                     earn.withdraw = None;
                     if !url.is_empty() {
                         earn.open_url = Some(url);
@@ -306,7 +342,7 @@ impl Session {
         // either way.
         if ours {
             earn.setup = None;
-            earn.setup_closed = true;
+            earn.effects.push(EarnEffect::SetupDone);
         }
         earn.note(if end {
             "Affiliate program ended. Participating affiliates have been notified. All referral links will be disabled in 24 hours."
@@ -332,7 +368,7 @@ impl Session {
             .filter(|id| self.earn_can_post_in_channel(id.0))
             .map(|id| EarnPeer::Chat(id.0))
             .collect();
-        self.add_earn_recipients(channels);
+        self.add_earn_recipients(channels, pending.map(|p| p.id));
         true
     }
 
@@ -345,7 +381,10 @@ impl Session {
         if earn_purpose(pending) != Some(EarnPurpose::RecipientBots) {
             return false;
         }
-        self.add_earn_recipients(user_ids.iter().map(|id| EarnPeer::User(*id)).collect());
+        self.add_earn_recipients(
+            user_ids.iter().map(|id| EarnPeer::User(*id)).collect(),
+            pending.map(|p| p.id),
+        );
         true
     }
 
@@ -372,7 +411,7 @@ impl Session {
     /// The signed-in user created the channel (tdesktop `amCreator`).
     pub fn earn_is_channel_creator(&self, chat_id: i64) -> bool {
         self.chats.get(&chat_id).is_some_and(|chat| {
-            chat.my_member_status == Some(crate::telegram::envelope::ChannelMemberStatus::Creator)
+            chat.member_status() == Some(crate::telegram::envelope::ChannelMemberStatus::Creator)
         })
     }
 
@@ -390,24 +429,40 @@ impl Session {
         })
     }
 
-    fn add_earn_recipients(&mut self, more: Vec<EarnPeer>) {
+    /// One of the two recipient lists answered (or failed, which counts as
+    /// empty). Only the attempt's own requests count: after a failed send
+    /// the stage is `Failed` and a late answer changes nothing.
+    fn add_earn_recipients(&mut self, more: Vec<EarnPeer>, request: Option<RequestId>) {
         let me = self.my_user_id;
         let earn = &mut self.payments.earn;
-        let list = earn.recipients.get_or_insert_with(Vec::new);
-        if let Some(me) = me
-            && !list.contains(&EarnPeer::User(me))
-        {
-            list.insert(0, EarnPeer::User(me));
+        let Recipients::Loading {
+            waiting,
+            found,
+            join,
+        } = &mut earn.recipients
+        else {
+            return;
+        };
+        let Some(at) = request.and_then(|id| waiting.iter().position(|w| *w == id)) else {
+            return;
+        };
+        waiting.remove(at);
+        found.extend(more);
+        if !waiting.is_empty() {
+            return;
         }
-        for peer in more {
+        let mut list = Vec::new();
+        if let Some(me) = me {
+            list.push(EarnPeer::User(me));
+        }
+        for peer in std::mem::take(found) {
             if !list.contains(&peer) {
                 list.push(peer);
             }
         }
-        earn.recipients_loading = earn.recipients_loading.saturating_sub(1);
-        if earn.recipients_loading == 0
-            && let Some(join) = earn.pending_join.take()
-        {
+        let parked = join.take();
+        earn.recipients = Recipients::Ready(list);
+        if let Some(join) = parked {
             earn.join_box = Some(join);
         }
     }
@@ -433,16 +488,22 @@ impl Session {
         let earn = &mut self.payments.earn;
         match purpose {
             EarnPurpose::TonStats { peer } => {
-                if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
+                if let Some(page) = earn
+                    .page
+                    .as_mut()
+                    .filter(|p| p.peer == peer && p.ton.waits_for(request))
+                {
                     // tdesktop: a group without TON ads just leaves the
                     // TON part out; anything else is shown.
                     if matches!(peer, EarnPeer::Chat(_))
                         && err.earn_hint == Some(EarnErrorHint::BroadcastRequired)
                     {
-                        page.ton_unavailable = true;
-                        page.ton = Load::Idle;
+                        page.ton = Load::Unavailable;
                     } else {
-                        page.ton = Load::Failed(format!("Couldn't load the revenue: {reason}"));
+                        page.ton = Load::Failed(crate::lang::tr_with(
+                            crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_REVENUE_REASON,
+                            &[("reason", &reason)],
+                        ));
                         // tdesktop toasts the error too.
                         earn.notes.push(reason.clone());
                     }
@@ -450,39 +511,49 @@ impl Session {
             }
             EarnPurpose::StarStats { peer } => {
                 if self.my_user_id.is_some_and(|me| peer == EarnPeer::User(me)) {
-                    earn.self_stats = Some(false);
+                    earn.self_stats.fail(reason.clone());
                 }
-                if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
-                    page.stars = Load::Failed(format!("Couldn't load the revenue: {reason}"));
+                if let Some(page) = earn
+                    .page
+                    .as_mut()
+                    .filter(|p| p.peer == peer && p.stars.waits_for(request))
+                {
+                    page.stars = Load::Failed(crate::lang::tr_with(
+                        crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_REVENUE_REASON,
+                        &[("reason", &reason)],
+                    ));
                     // tdesktop toasts the error too.
                     earn.notes.push(reason.clone());
                 }
             }
             EarnPurpose::TonTransactions { peer, .. } => {
                 if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
-                    page.ton_history.load.fail();
+                    page.ton_history.load.fail_request(request);
                 }
             }
             EarnPurpose::StarTransactions { peer, filter, .. } => {
                 if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
-                    page.history_mut(filter).load.fail();
+                    page.history_mut(filter).load.fail_request(request);
                 }
             }
-            // Settled either way, so the gates do not ask again each frame.
-            EarnPurpose::AppConfig => earn.limits.app_config_loaded = true,
-            EarnPurpose::TonBalance { .. }
-            | EarnPurpose::StarBalance { .. }
-            | EarnPurpose::AdAccountUrl { .. } => {}
+            // Failed: the next info panel to open asks again.
+            EarnPurpose::AppConfig => earn.limits.app_config.fail(reason.clone()),
+            EarnPurpose::TonBalance { peer } | EarnPurpose::StarBalance { peer } => {
+                earn.fail_balance(peer, request);
+            }
+            EarnPurpose::AdAccountUrl { .. } => {}
             EarnPurpose::WithdrawalUrl { with_password } => {
-                if earn.withdraw.as_ref().is_some_and(|w| w.waits_for(request)) {
+                if earn
+                    .withdraw
+                    .as_ref()
+                    .is_some_and(|w| w.takes_answer(request))
+                {
                     Self::apply_withdrawal_error(earn, err, with_password, &reason);
                 }
             }
             EarnPurpose::SetProgram { .. } => {
-                if let Some(setup) = earn.setup.as_mut()
-                    && setup.waits_for(request)
-                {
-                    setup.saving = None;
+                if let Some(setup) = earn.setup.as_mut() {
+                    setup.save_refused(request);
                 }
                 // tdesktop `UpdateProgram`: "Failed: " and the error.
                 earn.note(format!("Failed: {reason}"));
@@ -494,12 +565,12 @@ impl Session {
                     earn.join.as_mut().map(|j| &mut j.found)
                 };
                 if let Some(list) = list {
-                    list.load.fail();
+                    list.load.fail_request(request);
                 }
             }
             EarnPurpose::ConnectedPrograms { .. } => {
                 if let Some(join) = earn.join.as_mut() {
-                    join.mine.load.fail();
+                    join.mine.load.fail_request(request);
                 }
             }
             EarnPurpose::ConnectedProgram {
@@ -508,24 +579,30 @@ impl Session {
                 choose_recipient,
             } => {
                 // tdesktop `Resolve` treats a failure as "not joined".
-                self.open_join_box_after_resolve(bot_user_id, recipient, choose_recipient);
+                if earn.resolve.waits_for(request) {
+                    earn.resolve = Resolve::Idle;
+                    self.open_join_box_after_resolve(bot_user_id, recipient, choose_recipient);
+                }
             }
             EarnPurpose::Connect { .. } => {
-                if let Some(join) = earn.join_box.as_mut() {
-                    join.joining = false;
+                // A closed box's failure toasts over nothing.
+                if let Some(join) = earn.join_box.as_mut()
+                    && join.stage.waits_for(request)
+                {
+                    join.stage = JoinStage::Open;
+                    earn.note(format!("Failed: {reason}"));
                 }
-                earn.note(format!("Failed: {reason}"));
             }
             EarnPurpose::Disconnect => {
-                if let Some(revoke) = earn.revoke.as_mut() {
-                    revoke.sending = false;
+                if let Some(revoke) = earn.revoke.as_mut().filter(|r| r.send.waits_for(request)) {
+                    revoke.send = BoxSend::Idle;
+                    // tdesktop `Revoke`: "Failed: " and the error.
+                    earn.note(format!("Failed: {reason}"));
                 }
-                // tdesktop `Revoke`: "Failed: " and the error.
-                earn.note(format!("Failed: {reason}"));
             }
             EarnPurpose::RecipientChats | EarnPurpose::RecipientBots => {
                 // tdesktop treats a failed list as empty.
-                self.add_earn_recipients(Vec::new());
+                self.add_earn_recipients(Vec::new(), request);
             }
         }
     }
@@ -553,23 +630,16 @@ impl Session {
             }
             Some(EarnErrorHint::PasswordInvalid) if with_password => {
                 withdraw.step = WithdrawStep::Password {
-                    sending: false,
                     error: Some("Wrong cloud password".into()),
                 };
             }
             _ if !with_password => {
                 // Any other answer to the password-less try opens the
                 // password box (tdesktop `processOut`).
-                withdraw.step = WithdrawStep::Password {
-                    sending: false,
-                    error: None,
-                };
+                withdraw.step = WithdrawStep::Password { error: None };
             }
             _ => {
-                withdraw.step = WithdrawStep::Password {
-                    sending: false,
-                    error: None,
-                };
+                withdraw.step = WithdrawStep::Password { error: None };
                 // tdesktop toasts the error as it is.
                 earn.note(reason);
             }

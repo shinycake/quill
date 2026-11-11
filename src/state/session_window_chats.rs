@@ -50,7 +50,6 @@ impl Session {
             return false;
         }
         self.window_chats
-            .views
             .insert(chat_id, SessionView::of_chat(chat_id));
         self.prepare_history_view(chat_id);
         self.prepare_history_window(chat_id);
@@ -63,7 +62,10 @@ impl Session {
         if self.view_in_place() == Some(chat_id) {
             self.enter_view(None);
         }
-        let was_window = self.window_chats.views.remove(&chat_id).is_some();
+        self.messages
+            .instant_view_fallbacks
+            .retain(|fallback| fallback.window != Some(chat_id));
+        let was_window = self.window_chats.remove(&chat_id);
         if was_window {
             self.release_chat_history(chat_id);
         }
@@ -73,7 +75,7 @@ impl Session {
     /// The chat window whose view is in the session's place (`None`: the
     /// main window's).
     pub fn view_in_place(&self) -> Option<ChatId> {
-        self.requests.window
+        self.requests.view.chat()
     }
 
     /// Put `target`'s view in the session's place (`None`: the main
@@ -82,16 +84,20 @@ impl Session {
     /// records a diagnostic (the UI asks only for windows it has, so a
     /// miss means the two disagree).
     pub fn enter_view(&mut self, target: Option<ChatId>) -> bool {
-        if self.requests.window == target {
+        if self.requests.view.chat() == target {
             return true;
         }
-        if let Some(current) = self.requests.window.take() {
+        if let Some(current) = self.requests.view.chat() {
             self.swap_stored_view(current);
         }
+        self.requests.view = AskingView::Main;
         match target {
             Some(chat_id) if self.window_chats.contains(&chat_id) => {
                 self.swap_stored_view(chat_id);
-                self.requests.window = Some(chat_id);
+                self.requests.view = AskingView::Window {
+                    chat: chat_id,
+                    opening: self.window_chats.opening_of(chat_id),
+                };
                 true
             }
             Some(chat_id) => {
@@ -142,21 +148,26 @@ impl Session {
     ) {
         let Some(asked_in) = pending
             .filter(|pending| lands_in_view(pending.purpose))
-            .map(|pending| pending.window)
+            .map(|pending| pending.asked_in)
         else {
             return self.apply_payload(payload, pending, extra, seq);
         };
         let outer = self.view_in_place();
-        if asked_in.is_none_or(|chat_id| self.window_chats.contains(&chat_id)) {
-            self.enter_view(asked_in);
+        // The same chat in a new window is not the window that asked.
+        let current = match asked_in {
+            AskingView::Main => true,
+            AskingView::Window { chat, opening } => self.window_chats.opening_of(chat) == opening,
+        };
+        if current {
+            self.enter_view(asked_in.chat());
             self.apply_payload(payload, pending, extra, seq);
         } else {
             self.enter_view(None);
             let mut detached = SessionView::default();
             self.swap_view(&mut detached);
-            self.requests.window = asked_in;
+            self.requests.view = asked_in;
             self.apply_payload(payload, pending, extra, seq);
-            self.requests.window = None;
+            self.requests.view = AskingView::Main;
             self.swap_view(&mut detached);
         }
         self.enter_view(outer);
@@ -176,11 +187,12 @@ impl Session {
     /// its topic, thread, Saved Messages views, search and gallery close
     /// with it; the history itself stays loaded.
     pub fn leave_open_chat(&mut self) -> Option<ChatId> {
-        let prev = self.open_chat.take()?;
+        let prev = std::mem::take(&mut self.open).chat()?;
+        self.clear_sponsored_placements(prev);
         self.chat_list.psa_about.hide();
         self.search.chat_search.close();
         self.media.shared_media.close();
-        self.open_topic = None;
+        self.clear_date_jump_ui(Some(prev));
         self.threads.saved.close_views();
         if self
             .threads
@@ -229,9 +241,30 @@ fn lands_in_view(purpose: RequestPurpose) -> bool {
 #[derive(Debug, Default)]
 pub struct WindowViews {
     views: BTreeMap<ChatId, SessionView>,
+    /// Which opening each window is (never 0, never repeated): requests
+    /// carry it, so a window closed and opened again for the same chat
+    /// does not take the old window's answers.
+    openings: BTreeMap<ChatId, u64>,
+    opened: u64,
 }
 
 impl WindowViews {
+    fn insert(&mut self, chat_id: ChatId, view: SessionView) {
+        self.opened = self.opened.saturating_add(1);
+        self.openings.insert(chat_id, self.opened);
+        self.views.insert(chat_id, view);
+    }
+
+    fn remove(&mut self, chat_id: &ChatId) -> bool {
+        self.openings.remove(chat_id);
+        self.views.remove(chat_id).is_some()
+    }
+
+    /// Which opening `chat_id`'s window is; 0 for no window.
+    pub(crate) fn opening_of(&self, chat_id: ChatId) -> u64 {
+        self.openings.get(&chat_id).copied().unwrap_or(0)
+    }
+
     /// Whether `chat_id` is shown in a window of its own.
     pub fn contains(&self, chat_id: &ChatId) -> bool {
         self.views.contains_key(chat_id)
@@ -265,8 +298,8 @@ impl WindowViews {
 /// exchanged into place by [`Session::enter_view`].
 #[derive(Debug, Default)]
 pub struct SessionView {
-    pub open_chat: Option<ChatId>,
-    pub open_topic: Option<i32>,
+    /// The chat (and forum topic) this window shows.
+    pub open: OpenView,
     pub thread: Option<ThreadView>,
     pub saved_sublist: Option<SavedSublistView>,
     pub saved_tag_search: Option<SavedTagSearch>,
@@ -284,7 +317,7 @@ impl SessionView {
     /// A fresh view of `chat_id`: its plain history, nothing layered.
     pub fn of_chat(chat_id: ChatId) -> Self {
         Self {
-            open_chat: Some(chat_id),
+            open: OpenView::Chat { chat: chat_id },
             ..Self::default()
         }
     }
@@ -294,8 +327,7 @@ impl Session {
     /// Exchange the session's view with `view` (symmetric: calling it
     /// twice restores the original).
     pub(crate) fn swap_view(&mut self, view: &mut SessionView) {
-        std::mem::swap(&mut self.open_chat, &mut view.open_chat);
-        std::mem::swap(&mut self.open_topic, &mut view.open_topic);
+        std::mem::swap(&mut self.open, &mut view.open);
         std::mem::swap(&mut self.threads.thread, &mut view.thread);
         std::mem::swap(&mut self.threads.saved.sublist, &mut view.saved_sublist);
         std::mem::swap(

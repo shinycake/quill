@@ -34,7 +34,7 @@ pub(super) fn gift_owner_actions(
 ) -> AnyElement {
     let hub = &session.payments.hub;
     let manage = &session.payments.gifts_manage;
-    let busy = hub.gift_mutating;
+    let busy = hub.received.op.is_mutating();
     let now = now_unix();
     let balance = hub.balance;
     let poor = |cost: i64| balance.is_some_and(|b| b.stars < cost);
@@ -48,7 +48,7 @@ pub(super) fn gift_owner_actions(
         )
     };
     let mut col = div().flex().flex_col().gap_2();
-    col = pin_section(col, gift, mine, manage, hub.gifts.as_slice(), busy, cx);
+    col = pin_section(col, gift, mine, manage, &hub.received.rows, busy, cx);
     if let Some(cost) = gift.upgrade_cost(mine) {
         col = upgrade_section(
             col,
@@ -217,6 +217,7 @@ fn upgrade_section(
     let Some(GiftFlow::Upgrade {
         id: open,
         keep_details,
+        ..
     }) = &manage.flow
     else {
         return col.child(
@@ -232,14 +233,7 @@ fn upgrade_section(
                 .ghost()
                 .disabled(busy)
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    this.set_gift_flow(
-                        Some(GiftFlow::Upgrade {
-                            id: id.clone(),
-                            keep_details: false,
-                        }),
-                        window,
-                        cx,
-                    )
+                    this.set_gift_flow(Some(GiftFlow::upgrade(id.clone(), false)), window, cx)
                 })),
         );
     };
@@ -317,7 +311,7 @@ fn resale_section(
 ) -> Div {
     let id = gift.id.clone();
     let listed = gift.manage.listed;
-    let open = matches!(&manage.flow, Some(GiftFlow::Resale { id: open }) if *open == gift.id);
+    let open = matches!(&manage.flow, Some(GiftFlow::Resale { id: open, .. }) if *open == gift.id);
     if !open {
         let open_id = id.clone();
         let edit = Button::new("gift-resale")
@@ -329,13 +323,7 @@ fn resale_section(
             .ghost()
             .disabled(busy)
             .on_click(cx.listener(move |this, _, window, cx| {
-                this.set_gift_flow(
-                    Some(GiftFlow::Resale {
-                        id: open_id.clone(),
-                    }),
-                    window,
-                    cx,
-                )
+                this.set_gift_flow(Some(GiftFlow::resale(open_id.clone())), window, cx)
             }));
         if !listed {
             return col.child(edit);

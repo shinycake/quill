@@ -109,10 +109,10 @@ impl QuillApp {
     pub(super) fn animated_emoji_suggestion(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         let emoji = &session.stickers.emoji;
-        if !self.composer_suggests(emoji.animated_emoji_for.as_deref(), cx) {
+        if !self.composer_suggests(emoji.animated.emoji_for(), cx) {
             return None;
         }
-        let sticker = emoji.animated_emoji.as_ref()?;
+        let sticker = emoji.animated.sticker()?;
         let row = div()
             .id("animated-emoji-suggestion")
             .flex()
@@ -152,8 +152,8 @@ impl QuillApp {
         self.sticker_suggestions_shown(cx)
             || self.session().is_some_and(|session| {
                 let emoji = &session.stickers.emoji;
-                emoji.animated_emoji.is_some()
-                    && self.composer_suggests(emoji.animated_emoji_for.as_deref(), cx)
+                emoji.animated.sticker().is_some()
+                    && self.composer_suggests(emoji.animated.emoji_for(), cx)
             })
     }
 
@@ -162,7 +162,7 @@ impl QuillApp {
         self.session().is_some_and(|session| {
             let stickers = &session.stickers.stickers;
             !stickers.suggestions.is_empty()
-                && self.composer_suggests(stickers.suggest_for.as_deref(), cx)
+                && self.composer_suggests(stickers.suggest_for.emoji(), cx)
         })
     }
 
@@ -285,7 +285,7 @@ impl QuillApp {
         };
         let premium_mark = self
             .session()
-            .filter(|s| sticker.requires_premium && s.premium_badges_shown())
+            .filter(|s| sticker.requires_premium() && s.premium_badges_shown())
             .map(|s| crate::ui::premium_mark::premium_mark(s.my_is_premium()));
         let cell = div()
             .id(SharedString::from(format!(
@@ -366,7 +366,7 @@ impl QuillApp {
             return Some(intro);
         }
         let session = self.session()?;
-        if !session.stickers.stickers.greeting_loaded {
+        if session.stickers.stickers.greeting.is_idle() {
             self.defer_screen(cx, move |this, cx| {
                 if let Some(live) = this.live.as_mut() {
                     let _ = live.driver.fetch_greeting_stickers();
@@ -374,7 +374,7 @@ impl QuillApp {
                 }
             });
         }
-        let sticker = greeting_pick(&session.stickers.stickers.greeting, chat.id.0)?.clone();
+        let sticker = greeting_pick(session.stickers.stickers.greeting.data()?, chat.id.0)?.clone();
         if let Some(file) = sticker.display_file_id()
             && let Some(live) = self.live.as_mut()
         {
@@ -712,23 +712,11 @@ impl QuillApp {
                 );
             }
         }
-        let loading_tab = self.session().is_some_and(|session| {
-            let purpose = match panel.tab {
-                StickerTab::Installed => RequestPurpose::GetInstalledStickerSets,
-                StickerTab::Recent => RequestPurpose::GetRecentStickers,
-                StickerTab::Favorites => RequestPurpose::GetFavoriteStickers,
-                StickerTab::Trending => RequestPurpose::GetTrendingStickerSets,
-                StickerTab::Archived => RequestPurpose::GetArchivedStickerSets,
-                StickerTab::Search => RequestPurpose::SearchStickerSets,
-            };
-            session.requests.has_purpose(purpose)
-                || panel.tab == StickerTab::Search
-                    && session.requests.has_purpose(RequestPurpose::SearchStickers)
-        });
+        let loading_tab = panel.lists.tab_loading(panel.tab);
         // Only states worth reading: loading, failure, and empty views.
-        let status: Option<String> = if loading_tab || panel.loading_set {
+        let status: Option<String> = if loading_tab || panel.set.is_loading() {
             Some(tr(keys::Q_MEDIA_LOADING_STICKERS).into())
-        } else if panel.failed {
+        } else if panel.lists.tab_error(panel.tab).is_some() || panel.set.is_failed() {
             Some(tr(keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN).into())
         } else {
             match panel.tab {

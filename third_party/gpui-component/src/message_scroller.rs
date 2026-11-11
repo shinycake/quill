@@ -81,6 +81,12 @@ impl MessageScrollerState {
         self.list_state.estimated_distance_to_edges()
     }
 
+    /// QUILL: the height of each row in `range`, rows not measured yet at
+    /// the mean height of the measured ones. `None` until a row is laid out.
+    pub fn estimated_row_heights(&self, range: Range<usize>) -> Option<Vec<Pixels>> {
+        self.list_state.estimated_item_heights(range)
+    }
+
     /// Reset the list to `item_count` rows.
     pub fn reset(&mut self, item_count: usize, cx: &mut Context<Self>) {
         self.list_state.reset(item_count);

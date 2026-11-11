@@ -9,7 +9,7 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
-use quill::calls::share_links::{InviteRowAction, VideoChatShareLinks};
+use quill::calls::share_links::{InviteRowAction, ShareLink, VideoChatShareLinks};
 use quill::ids::ChatId;
 use quill::state::{ActiveGroupCall, DeepLinkAction, VideoChatInfo};
 use quill::telegram::envelope::ChatKind;
@@ -61,9 +61,8 @@ fn video_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, speaker: &str
             is_video_chat: true,
             can_be_managed: true,
             share_links: VideoChatShareLinks {
-                listener: Some(LISTENER.into()),
-                speaker: Some(speaker.into()),
-                generating: false,
+                listener: ShareLink::Got(LISTENER.into()),
+                speaker: ShareLink::Got(speaker.into()),
             },
             ..ActiveGroupCall::fresh(77)
         });
@@ -108,11 +107,11 @@ fn the_box_copies_the_speaker_or_listener_link(cx: &mut TestAppContext) {
         vcx.read_from_clipboard().and_then(|item| item.text()),
         Some(SPEAKER.to_string())
     );
-    app.read_with(vcx, |app, _| assert!(app.group_call_boxes.share_copied));
+    app.read_with(vcx, |app, _| assert!(app.group_call_boxes.share_copied()));
 
     // Unticked: the listener link; the box stays open.
     app.update_in(vcx, |app, _, cx| {
-        app.group_call_boxes.share_speaker = false;
+        app.group_call_boxes.set_share_speaker(false);
         app.copy_group_call_share_link(cx);
     });
     assert_eq!(
@@ -153,7 +152,8 @@ fn a_chat_gets_the_link_in_its_message_box(cx: &mut TestAppContext) {
         app.open_group_call_share_links(cx);
         app.share_group_call_link_to(chat, cx);
         // Taken before the next frame opens the chat.
-        let pending = app.links.pending_deep_link_open.take();
+        let pending = app.links.waiting_open().cloned();
+        app.links.resolved = None;
         assert_eq!(
             pending,
             Some(crate::ui::links_state::PendingOpen::user(
@@ -163,7 +163,7 @@ fn a_chat_gets_the_link_in_its_message_box(cx: &mut TestAppContext) {
                 }
             ))
         );
-        assert!(!app.group_call_boxes.share_open);
+        assert!(!app.group_call_boxes.share_open());
     });
 }
 
@@ -184,8 +184,8 @@ fn the_invite_row_shares_the_link_in_a_public_channel(cx: &mut TestAppContext) {
             Some(InviteRowAction::ShareLink)
         );
         app.group_call_invite_row_clicked(cx);
-        assert!(app.group_call_boxes.share_open);
-        assert!(!app.group_call_boxes.invite_open);
+        assert!(app.group_call_boxes.share_open());
+        assert!(!app.group_call_boxes.invite_open());
     });
 }
 
@@ -198,8 +198,11 @@ fn the_box_waits_for_the_passcode_unlock(cx: &mut TestAppContext) {
         app.account.passcode.force_locked(true);
         app.open_group_call_share_links(cx);
     });
+    // Nothing is asked for and no box opens behind the lock.
     assert!(!overlay_shown(&app, vcx));
     app.update_in(vcx, |app, _, _| app.account.passcode.force_locked(false));
+    assert!(!overlay_shown(&app, vcx));
+    app.update_in(vcx, |app, _, cx| app.open_group_call_share_links(cx));
     assert!(overlay_shown(&app, vcx));
 }
 
@@ -218,7 +221,7 @@ fn the_call_boxes_close_with_their_call(cx: &mut TestAppContext) {
         app.sync_group_call_boxes();
     });
     let open = app.read_with(vcx, |app, _| {
-        app.group_call_boxes.share_open && app.group_call_screen.settings_open
+        app.group_call_boxes.share_open() && app.group_call_screen.settings_open
     });
     assert!(open, "the same call keeps them");
 
@@ -229,14 +232,22 @@ fn the_call_boxes_close_with_their_call(cx: &mut TestAppContext) {
         app.sync_group_call_boxes();
     });
     app.read_with(vcx, |app, _| {
-        assert!(!app.group_call_boxes.share_open);
+        assert!(!app.group_call_boxes.share_open());
         assert!(!app.group_call_screen.settings_open);
     });
 
     app.update_in(vcx, |app, _, _| {
-        app.group_call_boxes.share_open = true;
+        let call = app
+            .session()
+            .and_then(|s| s.calls.active_group_call.as_ref())
+            .map(|call| call.id);
+        app.group_call_boxes.call_box = crate::ui::group_call_state::CallBox::Share {
+            call,
+            speaker: true,
+            copied: false,
+        };
         app.sync_group_call_boxes();
     });
-    let open = app.read_with(vcx, |app, _| app.group_call_boxes.share_open);
+    let open = app.read_with(vcx, |app, _| app.group_call_boxes.share_open());
     assert!(!open, "no links and none on the way: the box closes");
 }

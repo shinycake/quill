@@ -100,7 +100,7 @@ fn wait_for(mut done: impl FnMut() -> bool) {
 fn joined_group_call(muted: bool) -> ActiveGroupCall {
     let mut call = tracked_group_call(false, false, false);
     call.is_muted_self = muted;
-    call.transport_ready = true;
+    call.transport.connected();
     let json: Value =
         serde_json::from_str(&group_participant_json(777, true, "null", "null")).unwrap();
     let mut me = parse_group_call_participant(json.get("participant")).unwrap();
@@ -139,7 +139,7 @@ fn group_call_microphone_feeds_the_engine_and_follows_mute() {
 
     // Joined but the transport is not up yet: still nothing.
     let mut call = joined_group_call(false);
-    call.transport_ready = false;
+    call.transport.reset();
     driver.session.calls.active_group_call = Some(call);
     pump_until_mic_answers(&mut driver);
     assert!(mics.opened.lock().unwrap().is_empty());
@@ -240,6 +240,68 @@ fn a_refused_microphone_shows_the_error_and_the_call_goes_on() {
     driver.session.calls.active_group_call = None;
     pump_until_mic_answers(&mut driver);
     assert_eq!(driver.group_call_level_error(), None);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn a_refused_microphone_is_put_on_the_call_for_its_window() {
+    let (dir, mut driver, _engine, mics) = group_driver();
+    mics.fail.store(true, Ordering::SeqCst);
+    driver.session.calls.active_group_call = Some(joined_group_call(false));
+    driver.pump_call_media(Instant::now());
+    while driver.call_capture().opening() {
+        std::thread::yield_now();
+        driver.pump_call_media(Instant::now());
+    }
+    assert_eq!(
+        driver.session.calls.group_call_error.as_deref(),
+        Some("Quill can't use the microphone.")
+    );
+    // Dismissed, it stays gone until the failure changes.
+    driver.session.calls.group_call_error = None;
+    driver.pump_call_media(Instant::now());
+    assert_eq!(driver.session.calls.group_call_error, None);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+/// A 1:1 call's note follows the devices: a new failure shows even while an
+/// older one stands, and the note goes once the devices work again.
+#[test]
+fn a_private_calls_media_note_follows_the_devices() {
+    let (dir, mut driver, _engine, _mics) = group_driver();
+    driver.session.calls.active_group_call = None;
+    driver.session.calls.active_call = Some(crate::state::ActiveCall::fresh(
+        5,
+        11,
+        true,
+        false,
+        crate::telegram::envelope::CallState::Ready,
+        None,
+    ));
+    let note = |driver: &ConnectDriver<Arc<RecordingSender>>| {
+        driver
+            .session
+            .calls
+            .active_call
+            .as_ref()
+            .and_then(|call| call.media_note.clone())
+    };
+    let (mic, screen) = (Some("mic".to_string()), Some("screen".to_string()));
+    let none = [None, None, None];
+    let mic_only = [mic.clone(), None, None];
+    let both = [mic.clone(), None, screen.clone()];
+    assert!(driver.note_call_media_errors(&none, &mic_only));
+    assert_eq!(note(&driver), mic);
+    assert!(
+        !driver.note_call_media_errors(&mic_only, &mic_only),
+        "nothing changed: no redraw"
+    );
+    assert!(driver.note_call_media_errors(&mic_only, &both));
+    assert_eq!(note(&driver), screen, "the microphone's does not hide it");
+    assert!(driver.note_call_media_errors(&both, &mic_only));
+    assert_eq!(note(&driver), mic, "what still stands shows again");
+    assert!(driver.note_call_media_errors(&mic_only, &none));
+    assert_eq!(note(&driver), None, "the devices work again");
     std::fs::remove_dir_all(dir).ok();
 }
 
@@ -386,7 +448,7 @@ fn a_lost_microphone_needs_no_telegram_update() {
     assert!(driver.request_tick(t0), "the call window shows the note");
     assert_eq!(driver.call_capture().target(), None);
     assert_eq!(
-        driver.call_capture().error.as_deref(),
+        driver.call_capture().error(),
         Some("The microphone was disconnected.")
     );
     let t1 = t0 + Duration::from_secs(1);
@@ -406,7 +468,7 @@ fn a_lost_microphone_needs_no_telegram_update() {
     }
     assert_eq!(mics.opened.lock().unwrap().len(), 2);
     assert!(driver.call_capture().target().is_some());
-    assert_eq!(driver.call_capture().error, None);
+    assert_eq!(driver.call_capture().error(), None);
     assert_eq!(
         driver.next_deadline(t2, 0),
         Some(Duration::from_millis(92)),
@@ -518,5 +580,37 @@ fn a_camera_wanted_before_the_first_list_lands_is_not_refused() {
     engine.set_devices(a_camera());
     engine.hold_device_lists();
     assert_eq!(driver.camera_to_turn_on(), Ok("cam".to_string()));
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn a_call_that_refuses_the_frames_is_not_reopened_until_the_user_acts() {
+    let (dir, mut driver, _engine, mics) = group_driver();
+    driver.session.calls.active_group_call = Some(joined_group_call(false));
+    pump_until_mic_answers(&mut driver);
+    assert_eq!(mics.opened.lock().unwrap().len(), 1);
+    // The engine refused a long run of frames: the capture ends.
+    let sink = mics.sink.lock().unwrap().clone().expect("open");
+    sink.push_event(CaptureEvent::Failed(CaptureError::Refused(
+        "The call refused the captured frames.".into(),
+    )));
+    let start = Instant::now();
+    driver.pump_call_capture(start);
+    assert_eq!(driver.call_capture().target(), None);
+    assert!(driver.group_call_level_error().is_some());
+    // Long after the retry delay, nothing reopens the microphone.
+    for minutes in 1..4 {
+        driver.pump_call_capture(start + Duration::from_secs(60 * minutes));
+    }
+    assert!(!driver.call_capture().opening());
+    assert_eq!(mics.opened.lock().unwrap().len(), 1);
+    assert!(driver.group_call_level_error().is_some());
+    // Muting is the user acting: the microphone opens again.
+    if let Some(call) = driver.session.calls.active_group_call.as_mut() {
+        call.is_muted_self = true;
+    }
+    pump_until_mic_answers(&mut driver);
+    assert_eq!(mics.opened.lock().unwrap().len(), 2);
+    assert_eq!(driver.group_call_level_error(), None);
     std::fs::remove_dir_all(dir).ok();
 }

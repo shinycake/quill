@@ -86,11 +86,14 @@ impl QuillApp {
     fn confirm_delete_admin_revoked(
         &mut self,
         chat_id: ChatId,
+        admin: i64,
         name: String,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let app = cx.entity().downgrade();
+        // The alert acts for the account and the admin it was opened for:
+        // after a switch (the screen is gone) pressing Delete does nothing.
+        let app = self.screen_app(cx);
         window.open_alert_dialog(cx, move |alert, _, _| {
             let app = app.clone();
             alert
@@ -108,7 +111,8 @@ impl QuillApp {
                             &this.screen.windows,
                             match this.live.as_mut() {
                                 Some(live) => {
-                                    match live.driver.delete_all_revoked_admin_links(chat_id) {
+                                    match live.driver.delete_all_revoked_admin_links(chat_id, admin)
+                                    {
                                         Ok(_) => {
                                             StatusNote::info(tr(keys::Q_OPS_DELETING_REVOKED_LINKS))
                                         }
@@ -229,7 +233,7 @@ impl QuillApp {
                 ),
         );
         block = match &state.active {
-            InviteLinkFetch::Loading => block.child(super::invite_admin_ui::loading_row(muted)),
+            InviteLinkFetch::Loading(_) => block.child(super::invite_admin_ui::loading_row(muted)),
             InviteLinkFetch::Failed(message) => {
                 block.child(div().text_xs().text_color(muted).child(message.clone()))
             }
@@ -266,7 +270,9 @@ impl QuillApp {
                                 .small()
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     let name = this.contact_display_name(admin);
-                                    this.confirm_delete_admin_revoked(chat_id, name, window, cx);
+                                    this.confirm_delete_admin_revoked(
+                                        chat_id, admin, name, window, cx,
+                                    );
                                 })),
                         ),
                 )
@@ -289,8 +295,14 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             if open {
                 live.driver.close_link_join_requests(chat_id);
-            } else {
-                let _ = live.driver.open_link_join_requests(chat_id, invite_link);
+            } else if !live
+                .driver
+                .open_link_join_requests(chat_id, invite_link)
+                .is_ok_and(|sent| sent.is_some())
+            {
+                self.set_note(StatusNote::error(tr(
+                    keys::Q_CHAT_COULD_NOT_LOAD_JOIN_REQUESTS,
+                )));
             }
         } else if open && let Some(session) = self.demo_session.as_mut() {
             session.groups.invite_pages.close_join_requests(chat_id.0);
@@ -359,8 +371,8 @@ impl QuillApp {
                     .child(
                         div().text_xs().text_color(muted).child(
                             state
-                                .error
-                                .clone()
+                                .error()
+                                .map(str::to_string)
                                 .unwrap_or_else(|| tr(keys::Q_OPS_NO_PENDING_REQUESTS).into()),
                         ),
                     )
@@ -448,7 +460,7 @@ impl QuillApp {
                     ),
             );
         }
-        if let Some(error) = state.error.clone() {
+        if let Some(error) = state.error().map(str::to_string) {
             block = block.child(div().text_xs().text_color(muted).child(error));
         }
         if state.loading() {

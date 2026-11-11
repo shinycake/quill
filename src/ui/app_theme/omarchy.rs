@@ -33,23 +33,66 @@ impl OmarchyState {
     }
 }
 
+/// Following Omarchy, by stage: not looked for, looked for and absent, or
+/// found (and, once the watcher runs, watched).
+#[derive(Default)]
+pub(crate) enum Omarchy {
+    #[default]
+    Unprobed,
+    Absent,
+    Found(OmarchyState),
+    /// Found, and the watcher re-reads it when the generation changes. The
+    /// watcher's task is owned here: leaving this stage stops it.
+    Watching {
+        state: OmarchyState,
+        _task: Task<()>,
+    },
+}
+
+impl Omarchy {
+    fn probe(dir: Option<PathBuf>) -> Self {
+        dir.and_then(OmarchyState::read)
+            .map_or(Self::Absent, Self::Found)
+    }
+
+    fn state(&self) -> Option<&OmarchyState> {
+        match self {
+            Self::Unprobed | Self::Absent => None,
+            Self::Found(state) | Self::Watching { state, .. } => Some(state),
+        }
+    }
+
+    /// The watcher started: `Found` becomes `Watching`. Any other stage has
+    /// no theme to watch, and the task is dropped (stopped).
+    fn watch(&mut self, task: Task<()>) {
+        if let Self::Found(_) = self
+            && let Self::Found(state) = std::mem::take(self)
+        {
+            *self = Self::Watching { state, _task: task };
+        }
+    }
+
+    /// A re-read theme replaces the state, keeping the watcher's stage.
+    fn replace(&mut self, new: OmarchyState) {
+        match self {
+            Self::Watching { state, .. } | Self::Found(state) => *state = new,
+            Self::Unprobed | Self::Absent => *self = Self::Found(new),
+        }
+    }
+}
+
 impl QuillApp {
     /// Omarchy's palette, looked for on first use.
     pub(super) fn omarchy_palette(&mut self) -> Option<Palette> {
-        if !self.preferences.app_theme.omarchy_probed {
-            self.preferences.app_theme.omarchy_probed = true;
-            self.preferences.app_theme.omarchy = current_dir().and_then(OmarchyState::read);
+        if matches!(self.preferences.app_theme.omarchy, Omarchy::Unprobed) {
+            self.preferences.app_theme.omarchy = Omarchy::probe(current_dir());
         }
-        self.preferences
-            .app_theme
-            .omarchy
-            .as_ref()
-            .map(|state| state.palette.clone())
+        self.omarchy_theme().map(|state| state.palette.clone())
     }
 
     /// The theme Omarchy shows, when Quill runs on Omarchy.
     pub(crate) fn omarchy_theme(&self) -> Option<&OmarchyState> {
-        self.preferences.app_theme.omarchy.as_ref()
+        self.preferences.app_theme.omarchy.state()
     }
 
     /// The tile's "follow Omarchy" choice.
@@ -62,15 +105,15 @@ impl QuillApp {
     /// Re-read the theme whenever Omarchy's generation stamp changes;
     /// started once, when a theme was found (not in screenshot demos).
     pub(crate) fn start_omarchy_watch(&mut self, cx: &mut Context<Self>) {
-        if self.demo_session.is_some() || self.preferences.app_theme.omarchy_watched {
+        if self.demo_session.is_some() {
             return;
         }
-        let Some(dir) = self.omarchy_theme().map(|s| s.dir.clone()) else {
+        let Omarchy::Found(state) = &self.preferences.app_theme.omarchy else {
             return;
         };
-        self.preferences.app_theme.omarchy_watched = true;
+        let dir = state.dir.clone();
         // screen-scope: the Omarchy watcher re-applies the app's appearance for whichever account is on screen.
-        cx.spawn(async move |this, cx| {
+        let task = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(POLL).await;
                 let probe = dir.clone();
@@ -83,13 +126,13 @@ impl QuillApp {
                         .preferences
                         .app_theme
                         .omarchy
-                        .as_ref()
+                        .state()
                         .and_then(|s| s.stamp.clone());
                     if seen == current {
                         return;
                     }
                     if let Some(state) = OmarchyState::read(dir.clone()) {
-                        app.preferences.app_theme.omarchy = Some(state);
+                        app.preferences.app_theme.omarchy.replace(state);
                         app.apply_appearance(cx);
                         cx.notify();
                     }
@@ -97,8 +140,8 @@ impl QuillApp {
                     return;
                 };
             }
-        })
-        .detach();
+        });
+        self.preferences.app_theme.omarchy.watch(task);
     }
 }
 
@@ -106,7 +149,6 @@ impl QuillApp {
 impl QuillApp {
     /// Screenshot demos and tests: Omarchy found at `dir`, no watcher.
     pub(crate) fn use_omarchy_dir(&mut self, dir: PathBuf) {
-        self.preferences.app_theme.omarchy_probed = true;
-        self.preferences.app_theme.omarchy = OmarchyState::read(dir);
+        self.preferences.app_theme.omarchy = Omarchy::probe(Some(dir));
     }
 }

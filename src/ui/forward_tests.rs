@@ -63,7 +63,7 @@ fn enter_toggles_the_first_match_and_does_not_send(cx: &mut TestAppContext) {
         assert!(app.share.selection.is_empty());
         assert!(app.share.forward.picker_open());
         // Ctrl+Enter with nothing ticked does nothing.
-        app.submit_share_from_search(cx);
+        app.submit_share_from_search(window, cx);
         assert!(app.share.forward.picker_open());
     });
 }

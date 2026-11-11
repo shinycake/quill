@@ -9,7 +9,7 @@ use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::gift_manage::ExportError;
 use quill::premium_hub::TxFilter;
-use quill::premium_hub::ton::GramWithdraw;
+use quill::premium_hub::ton::{GramWithdraw, WithdrawOutcome};
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     let (app, _shell, vcx) = new_app_with_shell(cx);
@@ -242,7 +242,7 @@ fn the_withdrawal_url_opens_only_through_the_link_policy(cx: &mut TestAppContext
         let url = url.to_string();
         app.update_in(vcx, |app, _, cx| {
             if let Some(grams) = app.demo_session.as_mut().map(|s| &mut s.payments.hub.grams) {
-                grams.withdraw_url = Some(url);
+                grams.withdraw_outcome = Some(WithdrawOutcome::Url(url));
             }
             cx.notify();
         });
@@ -275,7 +275,7 @@ fn the_withdrawal_url_opens_only_through_the_link_policy(cx: &mut TestAppContext
     );
     let left = app.read_with(vcx, |app, _| {
         app.session()
-            .and_then(|s| s.payments.hub.grams.withdraw_url.clone())
+            .and_then(|s| s.payments.hub.grams.withdraw_outcome.clone())
     });
     assert_eq!(left, None);
 }

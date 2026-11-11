@@ -49,7 +49,7 @@ fn passkey_ids(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Vec<Strin
             .map(|s| {
                 s.settings
                     .passkeys
-                    .list
+                    .passkeys()
                     .iter()
                     .map(|p| p.id.clone())
                     .collect()
@@ -91,7 +91,7 @@ fn deleting_a_passkey_asks_then_returns_to_the_shorter_list(cx: &mut TestAppCont
         vec!["demo-passkey-icloud".to_string()]
     );
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.privacy.passkeys.confirm, None);
+        assert_eq!(app.privacy.passkeys.confirm(), None);
         let label = app
             .session()
             .map(|s| s.settings.passkeys.row_label().text());
@@ -118,7 +118,9 @@ fn cancel_keeps_the_passkey(cx: &mut TestAppContext) {
     vcx.update(|window, cx| window.click("passkey-delete-cancel", cx));
     assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::Passkeys));
     assert_eq!(passkey_ids(&app, vcx).len(), 2);
-    app.read_with(vcx, |app, _| assert_eq!(app.privacy.passkeys.confirm, None));
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.privacy.passkeys.confirm(), None)
+    });
 }
 
 #[gpui_kit::test]
@@ -142,7 +144,7 @@ fn learn_more_shows_the_box(cx: &mut TestAppContext) {
     assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::PasskeysAbout));
     // Closing the box shows the list again.
     app.update_in(vcx, |app, window, cx| {
-        app.privacy.passkeys.about_open = false;
+        app.privacy.passkeys.close_about();
         cx.notify();
         app.close_kit_dialog_if_done(DialogKind::PasskeysAbout, window, cx);
     });
@@ -177,7 +179,10 @@ fn the_privacy_row_without_passkeys_follows_webauthn(cx: &mut TestAppContext) {
     assert_eq!(shown_dialog(&shell, vcx), Some(DialogKind::Passkeys));
     app.update_in(vcx, |app, window, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.settings.passkeys.accept_list(Vec::new());
+            let passkeys = &mut session.settings.passkeys;
+            let ask = quill::ids::RequestId(0);
+            passkeys.list_asked(ask, std::time::Instant::now());
+            passkeys.accept_list(ask, Vec::new());
         }
         app.close_passkeys(cx);
         app.close_kit_dialog_if_done(DialogKind::Passkeys, window, cx);

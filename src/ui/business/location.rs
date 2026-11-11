@@ -46,7 +46,7 @@ impl QuillApp {
             .dialogs
             .business_dialog
             .as_ref()
-            .and_then(|d| d.location.as_ref())
+            .and_then(|d| d.screen.location())
             .map(|l| (l.address.clone(), l.point_e6))
         else {
             return div();
@@ -106,7 +106,7 @@ impl QuillApp {
                             .on_click(cx.listener(|this, &on: &bool, _, cx| {
                                 if !on
                                     && let Some(l) =
-                                        this.business_mut().and_then(|d| d.location.as_mut())
+                                        this.business_mut().and_then(|d| d.screen.location_mut())
                                 {
                                     l.point_e6 = None;
                                 }
@@ -126,7 +126,7 @@ impl QuillApp {
             .dialogs
             .business_dialog
             .as_ref()
-            .and_then(|d| d.location.as_ref())
+            .and_then(|d| d.screen.location())
             .map(|l| {
                 (
                     l.address.read(cx).value().to_string(),

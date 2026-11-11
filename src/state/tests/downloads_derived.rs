@@ -44,14 +44,7 @@ fn a_stale_request_never_shows_over_a_finished_file() {
         id: FileId(61),
         size: 100,
         expected_size: 100,
-        uploading: false,
-        local: LocalFileState {
-            path: "/tmp/derived.bin".into(),
-            can_be_downloaded: true,
-            is_downloading_active: false,
-            is_downloading_completed: true,
-            downloaded_size: 100,
-        },
+        local: LocalFileState::from_parts("/tmp/derived.bin", true, false, true, 100),
     });
     assert_eq!(status(&session, 61), DownloadStatus::Done);
 }
@@ -280,4 +273,82 @@ fn counts_follow_every_mutation() {
     d.clear();
     assert_eq!(counts(&d), (0, 0, 0));
     assert_eq!(d.user_ids().count(), 0);
+}
+
+#[test]
+fn an_ended_automatic_download_reads_as_ended_without_a_file() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let ended = |s: &Session, id| s.media.downloads.ended_without_file(id, &s.media.files);
+    assert!(!ended(&session, 70));
+    session.begin_download(FileId(70));
+    assert!(!ended(&session, 70));
+    session.media.downloads.end(70);
+    // `status` only fails user downloads; the wait on an automatic one
+    // needs this to leave.
+    assert_eq!(status(&session, 70), DownloadStatus::Idle);
+    assert!(ended(&session, 70));
+    // A retry clears the end; a finished file is not an end.
+    session.begin_download(FileId(70));
+    assert!(!ended(&session, 70));
+    session.media.downloads.end(70);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &update_file(70, false, true, 100),
+    );
+    assert!(!ended(&session, 70));
+}
+
+#[test]
+fn a_profile_box_saves_on_the_answer_not_on_the_request_leaving_flight() {
+    use crate::state::SaveOutcome;
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let saves = |s: &mut Session, id| s.users_state.saves.take_outcome(id, false);
+    let answered = session.request(RequestPurpose::Other, None);
+    session.users_state.saves.watch(answered);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, answered.0),
+    );
+    assert_eq!(saves(&mut session, answered), SaveOutcome::Saved);
+    // Dropped without an answer (the connection restarted): no success.
+    let dropped = session.request(RequestPurpose::Other, None);
+    session.users_state.saves.watch(dropped);
+    session.requests.take(dropped);
+    assert_eq!(saves(&mut session, dropped), SaveOutcome::Unknown);
+}
+
+#[test]
+fn a_pause_is_a_stage_of_the_request_and_the_chat_that_asked_is_its_origin() {
+    use crate::ids::ChatId;
+    let mut d = DownloadIntents::default();
+    d.begin(1, DownloadOrigin::User);
+    d.set_paused(1, true);
+    assert!(d.is_paused(1) && d.is_requested(1) && d.is_user(1));
+    assert_eq!(d.requested_count(), 1);
+    // Asking again keeps the pause of the same origin; a cancel ends it.
+    d.begin(1, DownloadOrigin::User);
+    assert!(d.is_paused(1));
+    d.set_paused(1, false);
+    assert!(!d.is_paused(1) && d.is_requested(1));
+    d.set_paused(1, true);
+    d.cancel(1);
+    assert!(!d.is_requested(1) && !d.is_paused(1));
+    assert_eq!(d.requested_count(), 0);
+
+    // An automatic download takes the chat that asked; another origin keeps
+    // its own, and the chat goes with the request.
+    d.begin(2, DownloadOrigin::Auto);
+    d.note_open_chat(2, ChatId(7));
+    assert_eq!(d.asked_by_chat(2), Some(ChatId(7)));
+    d.begin(3, DownloadOrigin::User);
+    d.note_open_chat(3, ChatId(7));
+    assert_eq!(d.asked_by_chat(3), None);
+    d.settle(2);
+    assert_eq!(d.asked_by_chat(2), None);
 }

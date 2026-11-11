@@ -95,14 +95,56 @@ pub const CONFERENCE_FOLLOW_FAILED: &str = "Failed to connect";
 pub struct ConferenceCall {
     /// How it was reached, for a rejoin before its link is known.
     pub input: Option<ConferenceInput>,
+    pub stage: ConferenceStage,
+}
+
+/// Where a conference call is in taking over a 1:1 call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConferenceStage {
+    /// Joined or created without a 1:1 call to take over.
+    Running,
+    /// Created from a 1:1 call: it ends and the people are invited once
+    /// the conference has its link.
+    Upgrading(ConferenceUpgrade),
+    /// Took over the 1:1 call `from`: its end shows no end screen
+    /// (tdesktop moves the call panel into the conference).
+    Upgraded { from: i32 },
+    /// As `Upgraded`, with the call's link on screen to share ("Share
+    /// link" in the invite box, tdesktop `migrationShowShareLink`) until
+    /// the panel closes.
+    SharingLink { from: i32 },
+}
+
+impl ConferenceCall {
     /// The 1:1 call still to end and the people still to invite.
-    pub upgrade: Option<ConferenceUpgrade>,
-    /// The 1:1 call this conference took over: its end shows no end
-    /// screen (tdesktop moves the call panel into the conference).
-    pub migrated_from: Option<i32>,
-    /// The call's link is on screen to share ("Share link" in the invite
-    /// box, tdesktop `migrationShowShareLink`).
-    pub link_open: bool,
+    pub fn upgrade(&self) -> Option<&ConferenceUpgrade> {
+        match &self.stage {
+            ConferenceStage::Upgrading(upgrade) => Some(upgrade),
+            _ => None,
+        }
+    }
+
+    /// The 1:1 call this conference took over.
+    pub fn migrated_from(&self) -> Option<i32> {
+        match self.stage {
+            ConferenceStage::Upgraded { from } | ConferenceStage::SharingLink { from } => {
+                Some(from)
+            }
+            _ => None,
+        }
+    }
+
+    /// The call's link is on screen to share.
+    pub fn link_open(&self) -> bool {
+        matches!(self.stage, ConferenceStage::SharingLink { .. })
+    }
+
+    /// The share-link panel is done.
+    pub fn close_link(&mut self) {
+        if let ConferenceStage::SharingLink { from } = self.stage {
+            self.stage = ConferenceStage::Upgraded { from };
+        }
+    }
 }
 
 impl ActiveGroupCall {
@@ -158,16 +200,13 @@ impl Session {
             tracked.is_muted_self = pending.muted;
             tracked.conference = Some(ConferenceCall {
                 input: pending.origin.input(),
-                upgrade: match pending.origin {
-                    ConferenceOrigin::Create { upgrade } => upgrade,
-                    _ => None,
+                stage: match pending.origin {
+                    ConferenceOrigin::Create {
+                        upgrade: Some(upgrade),
+                    } => ConferenceStage::Upgrading(upgrade),
+                    _ => ConferenceStage::Running,
                 },
-                migrated_from: None,
-                link_open: false,
             });
-            if self.calls.left_group_call == Some(group_call_id) {
-                self.calls.left_group_call = None;
-            }
         }
         if !self.calls.group_call_fetch_queue.contains(&group_call_id) {
             self.calls.group_call_fetch_queue.push(group_call_id);
@@ -187,7 +226,7 @@ impl Session {
             .active_group_call
             .as_ref()
             .and_then(|tracked| tracked.conference.as_ref())
-            .is_some_and(|conference| conference.migrated_from == Some(call.id));
+            .is_some_and(|conference| conference.migrated_from() == Some(call.id));
         if migrated_here {
             return true;
         }

@@ -338,6 +338,8 @@ fn read_zip(zip: &[u8]) -> Option<Vec<(String, Vec<u8>)>> {
     let count = u16_at(zip, eocd + 10)?;
     let mut at = u32_at(zip, eocd + 16)?;
     let mut out = Vec::new();
+    let mut seen_offsets = std::collections::HashSet::new();
+    let mut inflated_total = 0usize;
     for _ in 0..count {
         if u32_at(zip, at)? != 0x0201_4b50 {
             return None;
@@ -357,12 +359,24 @@ fn read_zip(zip: &[u8]) -> Option<Vec<(String, Vec<u8>)>> {
         if u32_at(zip, offset)? != 0x0403_4b50 {
             return None;
         }
+        // Two entries on one local header is how a small zip inflates the
+        // same stream many times over.
+        if !seen_offsets.insert(offset) {
+            return None;
+        }
+        inflated_total = inflated_total.checked_add(size)?;
+        if inflated_total > SCHEME_LIMIT + BACKGROUND_LIMIT {
+            return None;
+        }
         let local_name = u16_at(zip, offset + 26)?;
         let local_extra = u16_at(zip, offset + 28)?;
         let start = offset + 30 + local_name + local_extra;
         let raw = zip.get(start..start.checked_add(compressed)?)?;
         let data = match method {
-            0 => raw.to_vec(),
+            // A stored entry holds exactly its declared size, the number the
+            // running total counts; any other length is a forged header.
+            0 if compressed == size => raw.to_vec(),
+            0 => return None,
             8 => {
                 let mut inflated = Vec::with_capacity(size);
                 flate2::read::DeflateDecoder::new(raw)

@@ -119,14 +119,7 @@ impl Drop for Fixture {
 }
 
 fn text_draft(text: &str) -> ChatDraft {
-    ChatDraft {
-        text: text.into(),
-        rich: None,
-        item: Default::default(),
-        reply_to_message_id: None,
-        quote: None,
-        suggested_post: None,
-    }
+    ChatDraft::text_only(text)
 }
 
 #[test]
@@ -358,6 +351,31 @@ fn a_debounced_topic_draft_keeps_its_slot_across_a_topic_switch() {
     );
 }
 
+/// A save that fails and is dropped because the composer left (the chat
+/// was deselected) does not leave its slot unsaved for good: a draft
+/// written on another device shows there again.
+#[test]
+fn a_failed_save_left_behind_does_not_block_remote_drafts_for_good() {
+    let mut f = Fixture::new();
+    f.open_forum();
+    f.driver.select_topic(4).unwrap();
+    f.driver
+        .note_composer_draft(ChatId(16), "typing in four", None, 1_000, true)
+        .unwrap();
+    assert!(
+        f.driver
+            .session
+            .draft_is_dirty(ChatId(16), DraftTopic::Forum(4))
+    );
+    f.recorder.refuse(Some("setChatDraftMessage"));
+    let _ = f.driver.deselect_chat();
+    assert!(
+        !f.driver
+            .session
+            .draft_is_dirty(ChatId(16), DraftTopic::Forum(4))
+    );
+}
+
 fn thread_message(id: i64, chat: i64, thread: i64, text: &str) -> String {
     format!(
         r#"{{"@type":"message","id":{id},"chat_id":{chat},"is_outgoing":false,"date":1700000000,"topic_id":{{"@type":"messageTopicThread","message_thread_id":{thread}}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"{text}","entities":[]}}}}}}"#
@@ -386,7 +404,7 @@ fn a_comments_thread_drafts_with_message_topic_thread() {
         ),
     );
     f.driver.switch_to_thread_chat().unwrap();
-    assert_eq!(f.driver.session.open_chat, Some(ChatId(14)));
+    assert_eq!(f.driver.session.open_chat_id(), Some(ChatId(14)));
     assert_eq!(
         f.driver.session.open_draft_topic(ChatId(14)),
         DraftTopic::Thread(501)

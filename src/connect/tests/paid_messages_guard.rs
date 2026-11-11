@@ -108,7 +108,7 @@ fn a_remembered_price_is_stored_and_lets_sends_through() {
     f.1.session
         .payments
         .paid_messages
-        .record_answer(600, CanSend::Ok, 1);
+        .record_answer(600, CanSend::Ok, 1, false);
     f.1.sync_paid_guard();
     assert!(read().entries().is_empty());
     cleanup(f);

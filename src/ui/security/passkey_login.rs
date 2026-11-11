@@ -41,8 +41,7 @@ impl QuillApp {
     pub(in crate::ui) fn passkey_login_busy(&self) -> bool {
         self.privacy
             .passkeys
-            .ceremony
-            .as_ref()
+            .ceremony()
             .is_some_and(|ui| ui.mode == CeremonyMode::Login)
             || self
                 .live
@@ -57,14 +56,13 @@ impl QuillApp {
         let login_open = self
             .privacy
             .passkeys
-            .ceremony
-            .as_ref()
+            .ceremony()
             .is_some_and(|ui| ui.mode == CeremonyMode::Login);
         if !login_open || self.live.is_none() || signing_in(&self.current_auth()) {
             return false;
         }
         // Dropping the ceremony cancels it.
-        self.privacy.passkeys.ceremony = None;
+        self.privacy.passkeys.take_ceremony();
         true
     }
 
@@ -96,7 +94,7 @@ impl QuillApp {
         let busy = self.passkey_login_busy();
         let error = self
             .session()
-            .and_then(|s| s.settings.passkeys.login.error.clone())
+            .and_then(|s| s.settings.passkeys.login.error().map(str::to_string))
             .or_else(|| self.privacy.passkeys.demo_login_error.clone());
         let mut column = div().flex().flex_col().items_center().gap_1().child(
             Button::new("passkey-login")
@@ -126,11 +124,12 @@ impl QuillApp {
 crate::ui::screenshot_demo::register_demos![
     crate::ui::screenshot_demo::DemoSpec::signed_out("wait-qr-passkey", || {
         (
-            crate::ui::connect_ui::ConnectUiStatus::DemoWaitPhone,
+            crate::ui::connect_ui::ConnectStage::Shown(
+                AuthorizationState::WaitOtherDeviceConfirmation {
+                    link: "tg://login?token=AQID".into(),
+                },
+            ),
             tr(keys::Q_PREFS_SCREENSHOT_DEMO_QR_SIGN_IN).into(),
-            AuthorizationState::WaitOtherDeviceConfirmation {
-                link: "tg://login?token=AQID".into(),
-            },
         )
     })
     .setup(QuillApp::demo_passkey_login),
@@ -161,8 +160,9 @@ impl QuillApp {
         };
         if let Some(sheet) = sheet {
             // box-host: demo
-            self.privacy.passkeys.ceremony =
-                Some(CeremonyUi::new(CeremonyMode::Login, sheet, None));
+            self.privacy
+                .passkeys
+                .show_ceremony(CeremonyUi::new(CeremonyMode::Login, sheet, None));
         }
         cx.notify();
     }
@@ -178,7 +178,9 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         // box-host: a step of the open ceremony; it stays where it shows
-        self.privacy.passkeys.ceremony = Some(CeremonyUi::new(CeremonyMode::Login, sheet, None));
+        self.privacy
+            .passkeys
+            .show_ceremony(CeremonyUi::new(CeremonyMode::Login, sheet, None));
         cx.notify();
     }
 }

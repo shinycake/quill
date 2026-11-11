@@ -23,6 +23,82 @@ fn tab(session: &Session, tab: SharedMediaTab) -> &SharedMediaTabState {
     &session.media.shared_media.tabs[tab.index()]
 }
 
+fn gifts_stamp(session: &Session) -> u64 {
+    tab(session, SharedMediaTab::Gifts).generation
+}
+
+#[test]
+fn a_gifts_page_asked_before_the_gallery_reopened_is_dropped() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    open_user_gallery(&mut session, &seq, &sink);
+    let first = session
+        .media
+        .shared_media
+        .begin_profile_fetch(SharedMediaTab::Gifts);
+    let late = session.request(
+        RequestPurpose::Media(MediaPurpose::GetProfileGifts {
+            append: true,
+            generation: first,
+        }),
+        Some(ChatId(6)),
+    );
+    session.media.shared_media.close();
+    session.media.shared_media.open_for(ChatId(6));
+    session
+        .media
+        .shared_media
+        .begin_profile_fetch(SharedMediaTab::Gifts);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"receivedGifts","@extra":"{}","total_count":9,"next_offset":"stale","gifts":[{{"received_gift_id":"g9","date":1,"gift":{{"@type":"sentGiftUpgraded","gift":{{"@type":"upgradedGift","title":"Old","number":1}}}}}}]}}"#,
+            late.0
+        ),
+    );
+    let gifts = tab(&session, SharedMediaTab::Gifts);
+    assert!(gifts.items.is_empty());
+    assert!(gifts.status.is_loading());
+    assert_eq!(gifts.next_offset, "");
+}
+
+#[test]
+fn a_stories_page_asked_before_the_gallery_reopened_is_dropped() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    open_user_gallery(&mut session, &seq, &sink);
+    let first = session
+        .media
+        .shared_media
+        .begin_profile_fetch(SharedMediaTab::Stories);
+    let late = session.request_chat_search(
+        RequestPurpose::GetChatPostedToChatPageStories,
+        ChatId(6),
+        first,
+    );
+    session.media.shared_media.close();
+    session.media.shared_media.open_for(ChatId(6));
+    session
+        .media
+        .shared_media
+        .begin_profile_fetch(SharedMediaTab::Stories);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"stories","@extra":"{}","total_count":3,"stories":[{{"@type":"story","id":4,"poster_chat_id":6,"date":1690000000,"content":{{"@type":"storyContentUnsupported"}}}}]}}"#,
+            late.0
+        ),
+    );
+    let stories = tab(&session, SharedMediaTab::Stories);
+    assert!(stories.items.is_empty());
+    assert!(stories.status.is_loading());
+    assert!(!session.stories.chat_page_stories.contains_key(&6));
+}
+
 #[test]
 fn saved_tracks_fill_the_users_playlist_and_page() {
     let (mut session, sink) = session();
@@ -32,6 +108,13 @@ fn saved_tracks_fill_the_users_playlist_and_page() {
         RequestPurpose::Media(MediaPurpose::GetProfileAudios { append: false }),
         78,
     );
+    session
+        .media
+        .playlists
+        .entry(78)
+        .or_default()
+        .list
+        .begin(extra, false);
     apply_json(
         &mut session,
         &seq,
@@ -42,10 +125,10 @@ fn saved_tracks_fill_the_users_playlist_and_page() {
         ),
     );
     let playlist = &session.media.playlists[&78];
-    assert!(playlist.loaded);
-    assert_eq!(playlist.tracks.len(), 2);
-    assert_eq!(track_name(&playlist.tracks[0]), "Ada — Night Drive");
-    assert_eq!(track_name(&playlist.tracks[1]), "b.ogg");
+    assert!(playlist.loaded());
+    assert_eq!(playlist.tracks().len(), 2);
+    assert_eq!(track_name(&playlist.tracks()[0]), "Ada — Night Drive");
+    assert_eq!(track_name(&playlist.tracks()[1]), "b.ogg");
     assert!(playlist.has_more());
     // The gallery tabs are not touched: the playlist is not a tab.
     assert!(
@@ -60,6 +143,13 @@ fn saved_tracks_fill_the_users_playlist_and_page() {
         RequestPurpose::Media(MediaPurpose::GetProfileAudios { append: true }),
         78,
     );
+    session
+        .media
+        .playlists
+        .entry(78)
+        .or_default()
+        .list
+        .begin(extra, true);
     apply_json(
         &mut session,
         &seq,
@@ -70,7 +160,7 @@ fn saved_tracks_fill_the_users_playlist_and_page() {
         ),
     );
     let playlist = &session.media.playlists[&78];
-    assert_eq!(playlist.tracks.len(), 3);
+    assert_eq!(playlist.tracks().len(), 3);
     assert!(!playlist.has_more());
 }
 
@@ -83,6 +173,13 @@ fn a_failed_playlist_request_is_loaded_and_empty() {
         RequestPurpose::Media(MediaPurpose::GetProfileAudios { append: false }),
         78,
     );
+    session
+        .media
+        .playlists
+        .entry(78)
+        .or_default()
+        .list
+        .begin(extra, false);
     apply_json(
         &mut session,
         &seq,
@@ -93,7 +190,7 @@ fn a_failed_playlist_request_is_loaded_and_empty() {
         ),
     );
     let playlist = &session.media.playlists[&78];
-    assert!(playlist.loaded && playlist.tracks.is_empty() && playlist.error.is_some());
+    assert!(playlist.loaded() && playlist.tracks().is_empty() && playlist.error().is_some());
 }
 
 #[test]
@@ -106,7 +203,10 @@ fn received_gifts_fill_the_gifts_tab_without_touching_the_gifts_dialog() {
         .shared_media
         .begin_profile_fetch(SharedMediaTab::Gifts);
     let extra = session.request(
-        RequestPurpose::Media(MediaPurpose::GetProfileGifts { append: false }),
+        RequestPurpose::Media(MediaPurpose::GetProfileGifts {
+            append: false,
+            generation: gifts_stamp(&session),
+        }),
         Some(ChatId(6)),
     );
     apply_json(
@@ -119,7 +219,7 @@ fn received_gifts_fill_the_gifts_tab_without_touching_the_gifts_dialog() {
         ),
     );
     let gifts = tab(&session, SharedMediaTab::Gifts);
-    assert_eq!(gifts.status, SharedMediaTabStatus::Ready);
+    assert!(gifts.status.is_ready());
     assert_eq!(gifts.items[0].label, "100 Stars — Happy birthday!");
     assert_eq!(gifts.items[1].label, "Plush Pepe #123");
     assert_eq!(gifts.items[0].action, SharedMediaAction::Gift);
@@ -128,7 +228,52 @@ fn received_gifts_fill_the_gifts_tab_without_touching_the_gifts_dialog() {
     assert!(!gifts.can_load_more());
     assert_eq!(session.media.chat_media_counts[&6][&COUNT_KEY_GIFTS], 2);
     // The Gifts dialog's own list is untouched.
-    assert!(session.payments.hub.gifts.is_empty());
+    assert!(session.payments.hub.received.rows.is_empty());
+}
+
+#[test]
+fn a_late_gifts_page_for_another_chat_leaves_the_open_gallerys_offset() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    open_user_gallery(&mut session, &seq, &sink);
+    session
+        .media
+        .shared_media
+        .begin_profile_fetch(SharedMediaTab::Gifts);
+    let extra = session.request(
+        RequestPurpose::Media(MediaPurpose::GetProfileGifts {
+            append: false,
+            generation: gifts_stamp(&session),
+        }),
+        Some(ChatId(6)),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"receivedGifts","@extra":"{}","total_count":9,"next_offset":"mine","gifts":[]}}"#,
+            extra.0
+        ),
+    );
+    assert_eq!(tab(&session, SharedMediaTab::Gifts).next_offset, "mine");
+    let other = session.request(
+        RequestPurpose::Media(MediaPurpose::GetProfileGifts {
+            append: true,
+            generation: gifts_stamp(&session),
+        }),
+        Some(ChatId(7)),
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"receivedGifts","@extra":"{}","total_count":9,"next_offset":"theirs","gifts":[]}}"#,
+            other.0
+        ),
+    );
+    assert_eq!(tab(&session, SharedMediaTab::Gifts).next_offset, "mine");
 }
 
 #[test]
@@ -154,7 +299,7 @@ fn chat_page_stories_fill_the_stories_tab_and_failures_hide_it() {
         ),
     );
     let stories = tab(&session, SharedMediaTab::Stories);
-    assert_eq!(stories.status, SharedMediaTabStatus::Ready);
+    assert!(stories.status.is_ready());
     assert_eq!(stories.items.len(), 2);
     assert_eq!(stories.items[0].action, SharedMediaAction::Story(5));
     assert_eq!(stories.total_count, 3);
@@ -173,7 +318,10 @@ fn chat_page_stories_fill_the_stories_tab_and_failures_hide_it() {
         .shared_media
         .begin_profile_fetch(SharedMediaTab::Gifts);
     let extra = session.request(
-        RequestPurpose::Media(MediaPurpose::GetProfileGifts { append: false }),
+        RequestPurpose::Media(MediaPurpose::GetProfileGifts {
+            append: false,
+            generation: gifts_stamp(&session),
+        }),
         Some(ChatId(6)),
     );
     apply_json(
@@ -186,8 +334,8 @@ fn chat_page_stories_fill_the_stories_tab_and_failures_hide_it() {
         ),
     );
     let gifts = tab(&session, SharedMediaTab::Gifts);
-    assert_eq!(gifts.status, SharedMediaTabStatus::Failed);
-    assert!(!gifts.error.is_empty());
+    assert!(gifts.status.is_failed());
+    assert!(!gifts.error().is_empty());
     assert_eq!(session.media.chat_media_counts[&6][&COUNT_KEY_GIFTS], 0);
     assert!(
         !session

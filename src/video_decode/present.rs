@@ -6,7 +6,7 @@
 //! "starved" (buffering) state live here too.
 #![deny(clippy::indexing_slicing)]
 
-use super::{DUE_SLACK, Pixels, Player, VideoFrame, lock, synced_position, take_due};
+use super::{DUE_SLACK, Pixels, Player, Presenting, VideoFrame, lock, synced_position, take_due};
 use std::time::{Duration, Instant};
 
 /// The longest the UI is told to sleep before the next picture, so a wrong
@@ -30,7 +30,7 @@ impl Player {
         // With sound, pull the wall clock back to it when they drifted
         // apart (the sound is the master; the wall clock only smooths it).
         let clock = self.clock();
-        if !clock.held && clock.is_playing() {
+        if !clock.is_held() && clock.is_playing() {
             let wall = clock.position(now);
             let synced = synced_position(wall, self.heard());
             if synced != wall {
@@ -40,16 +40,15 @@ impl Player {
         let position = self.position_at(present.max(now));
         let picked = {
             let mut state = lock(&self.shared.state);
-            take_due(&mut state.video, position, self.first)
+            take_due(&mut state.video, position, self.presenting.awaiting_first())
         };
         if let Some(frame) = &picked {
             self.note_handed_out(frame);
             self.shared.wake.notify_all();
-            if self.first {
-                self.first = false;
+            if !self.presenting.is_showing() {
                 self.with_clock(|clock| clock.release(now));
             }
-            self.last_pts = Some(frame.pts);
+            self.presenting.shown(frame.pts);
         }
         picked
     }
@@ -65,7 +64,7 @@ impl Player {
     /// or nothing is queued yet (the caller then asks every frame).
     pub fn next_due(&self, now: Instant) -> Option<Instant> {
         let clock = self.clock();
-        if clock.held || !clock.is_playing() || self.ended {
+        if clock.is_held() || !clock.is_playing() || self.presenting.is_ended() {
             return None;
         }
         let front = lock(&self.shared.state)
@@ -86,12 +85,12 @@ impl Player {
     /// of the file: the picture is stalled (shown as buffering).
     pub fn starved(&self) -> bool {
         let clock = self.clock();
-        if clock.held || !clock.is_playing() || self.ended {
+        if clock.is_held() || !clock.is_playing() || self.presenting.is_ended() {
             return false;
         }
         let state = lock(&self.shared.state);
         let has_video = state.info.as_ref().is_some_and(|info| info.has_video);
-        has_video && state.video.is_empty() && !state.eof
+        has_video && state.video.is_empty() && !state.decoding.at_end()
     }
 
     /// Paused: show the next queued picture and move the clock to it.
@@ -107,9 +106,9 @@ impl Player {
             clock.follow(frame.pts, now);
             clock.pause(now);
         });
-        self.first = false;
-        self.ended = false;
-        self.last_pts = Some(frame.pts);
+        self.presenting = Presenting::Showing {
+            last_pts: frame.pts,
+        };
         Some(frame)
     }
 
@@ -124,7 +123,10 @@ impl Player {
             .map(|info| info.frame_rate)
             .filter(|fps| fps.is_finite() && *fps > 0.0)
             .unwrap_or(30.0);
-        let shown = self.last_pts.unwrap_or_else(|| self.position());
+        let shown = self
+            .presenting
+            .last_pts()
+            .unwrap_or_else(|| self.position());
         self.seek((shown - 1.5 / fps).max(0.0));
     }
 }

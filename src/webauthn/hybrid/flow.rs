@@ -129,9 +129,16 @@ pub(super) fn run(kind: Kind<'_>, env: &mut Environment, link: &Link) -> End {
     }
 }
 
+/// `span` after `from`; one too long to add to the clock reads as a year.
+fn after(from: Instant, span: Duration) -> Instant {
+    from.checked_add(span)
+        .or_else(|| from.checked_add(Duration::from_secs(86_400 * 365)))
+        .unwrap_or(from)
+}
+
 fn run_phone(kind: Kind<'_>, env: &mut Environment, link: &Link) -> Result<End, CeremonyError> {
     let started_at = (env.now)();
-    let deadline = started_at.checked_add(kind.timeout()).unwrap_or(started_at);
+    let deadline = after(started_at, kind.timeout());
     let qr = QrKey::generate(env.rng.as_mut()).ok_or(CeremonyError::Phone)?;
     let eid_key = qr::derive::<EID_KEY_LEN>(qr.secret(), &[], Derived::EidKey);
 
@@ -254,7 +261,7 @@ fn probe(
     link: &Link,
     early: &mut Vec<Vec<u8>>,
 ) -> Result<bool, CeremonyError> {
-    let until = now().checked_add(limit).unwrap_or_else(now);
+    let until = after(now(), limit);
     loop {
         if link.cancelled() {
             return Err(CeremonyError::Cancelled);

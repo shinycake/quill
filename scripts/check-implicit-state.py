@@ -11,13 +11,18 @@ continuation is dropped; a `loading` bool next to an `error` field that
 can both be set; flags that are reset by hand in some places and not
 others.
 
-This check finds the two shapes a field list shows:
+This check finds the shapes a field list shows:
 
 - a `bool` field whose name says it is a stage of something
   (`pending`, `loading`, `busy`, `in_flight`, `requested`, `sending`,
   `failed`, `done`, ...);
 - a struct that holds such a flag and an `error` field beside it (that
-  pair is `Fetch<T>`, src/state/fetch.rs).
+  pair is `Fetch<T>`, src/state/fetch.rs);
+- an integer field that counts acknowledgements (`*_oks`, `*_acks`,
+  `*_acked`): a counter is not matched to what asked, so another request's
+  answer (or a dialog closed and reopened) is counted for this one. Register
+  the request with `Session::acks` (`RequestAcks`, src/state/acks.rs) and
+  settle each on its own answer.
 
 Every hit in the tree when the check was added is in
 scripts/implicit-state-baseline.txt. Those are debt: the list may only
@@ -57,6 +62,8 @@ STAGE_WORDS = (
     "in_progress|ongoing|working|asked|answered"
 )
 STAGE_BOOL = re.compile(rf"(?:^|_)(?:{STAGE_WORDS})(?:$|_)")
+COUNTER_TYPES = ("u8", "u16", "u32", "u64", "usize", "i32", "i64", "isize")
+ACK_COUNTER = re.compile(r"(?:^|_)(?:oks|acks|acked|ack_count)(?:$|_)")
 ERROR_FIELD = re.compile(r"(?:^|_)(?:error|err|failure)(?:$|_)")
 STRUCT = re.compile(r"\bstruct\s+([A-Z][A-Za-z0-9_]*)\s*(?:<[^{;]*>)?\s*(?:where[^{;]*)?\{")
 
@@ -124,6 +131,9 @@ def hits(root):
                     ]
                     for flag in flags:
                         found.add(f"{struct}::{flag}")
+                    for f, t in fields:
+                        if t in COUNTER_TYPES and ACK_COUNTER.search(f):
+                            found.add(f"{struct}::{f}")
                     errors = [f for f, t in fields if ERROR_FIELD.search(f) and t != "bool"]
                     if flags and errors:
                         found.add(f"{struct}::{flags[0]}+{errors[0]}")
@@ -172,7 +182,12 @@ def main():
     for key in found:
         if key in baseline or key in allow:
             continue
-        if "+" in key:
+        if ACK_COUNTER.search(key.rsplit("::", 1)[-1]):
+            problems.append(
+                f"{key}: an acknowledgement counter is not matched to what asked; register "
+                "the request with Session::acks (RequestAcks) and settle it on its own answer"
+            )
+        elif "+" in key:
             problems.append(
                 f"{key}: a stage flag beside an error field is a hand-rolled Fetch<T> "
                 "(src/state/fetch.rs); use it, or an enum"

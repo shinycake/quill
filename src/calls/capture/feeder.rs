@@ -5,14 +5,14 @@
 //! timestamps mapped to Unix milliseconds.
 #![deny(clippy::indexing_slicing)]
 
-use super::{AudioFrame, CaptureEvent, VideoFrame};
+use super::{AudioFrame, CaptureError, CaptureEvent, VideoFrame};
 use crate::calls::engine::{
     ExternalDevice, ExternalFrameMeta, ExternalFrameSender, external_frame_valid,
 };
 use crate::locks::LockExt;
 use crate::wake::Signal;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -252,14 +252,67 @@ impl FeederStats {
     }
 }
 
+/// This many frames in a row refused by the engine end the capture with a
+/// `Failed` event (half a second of microphone, a few seconds of screen):
+/// the source must not look live while nothing reaches the call.
+const FAILED_RUN: u32 = 50;
+
 /// Engine errors are logged at most this often.
 const ERROR_LOG_EVERY: Duration = Duration::from_secs(1);
+
+/// What a feeder thread does with the frames it takes. One value, so a
+/// stopped feeder is never also forwarding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeederMode {
+    /// Frames go to the call.
+    Forwarding,
+    /// Frames are dropped (the share is hidden or paused).
+    Paused,
+    /// The thread ends; it never leaves this mode.
+    Stopped,
+}
+
+/// A [`FeederMode`] shared with the feeder thread.
+struct SharedMode(AtomicU8);
+
+impl SharedMode {
+    const FORWARDING: u8 = 0;
+    const PAUSED: u8 = 1;
+    const STOPPED: u8 = 2;
+
+    fn new() -> Self {
+        Self(AtomicU8::new(Self::FORWARDING))
+    }
+
+    fn get(&self) -> FeederMode {
+        match self.0.load(Ordering::Acquire) {
+            Self::FORWARDING => FeederMode::Forwarding,
+            Self::PAUSED => FeederMode::Paused,
+            _ => FeederMode::Stopped,
+        }
+    }
+
+    /// Pause or resume forwarding; a stopped feeder stays stopped.
+    fn forward(&self, on: bool) {
+        let (from, to) = if on {
+            (Self::PAUSED, Self::FORWARDING)
+        } else {
+            (Self::FORWARDING, Self::PAUSED)
+        };
+        let _ = self
+            .0
+            .compare_exchange(from, to, Ordering::AcqRel, Ordering::Acquire);
+    }
+
+    fn stop(&self) {
+        self.0.store(Self::STOPPED, Ordering::Release);
+    }
+}
 
 /// The thread that drains one sink into one call. Dropping it stops the
 /// thread (within one wait) and closes the sink.
 pub struct CaptureFeeder {
-    stop: Arc<AtomicBool>,
-    forwarding: Arc<AtomicBool>,
+    mode: Arc<SharedMode>,
     stats: Arc<FeederStats>,
     close_sink: Box<dyn Fn() + Send>,
     worker: Option<JoinHandle<Option<()>>>,
@@ -270,23 +323,16 @@ impl CaptureFeeder {
         sink: FrameSink<T>,
         sender: Arc<dyn ExternalFrameSender>,
     ) -> std::io::Result<Self> {
-        let stop = Arc::new(AtomicBool::new(false));
-        let forwarding = Arc::new(AtomicBool::new(true));
+        let mode = Arc::new(SharedMode::new());
         let stats = Arc::new(FeederStats::default());
         let worker = {
-            let (stop, forwarding, stats, sink) = (
-                stop.clone(),
-                forwarding.clone(),
-                stats.clone(),
-                sink.clone(),
-            );
+            let (mode, stats, sink) = (mode.clone(), stats.clone(), sink.clone());
             crate::thread_guard::spawn_guarded("quill-call-feeder", move || {
-                run(&sink, sender.as_ref(), &stop, &forwarding, &stats);
+                run(&sink, sender.as_ref(), &mode, &stats);
             })?
         };
         Ok(Self {
-            stop,
-            forwarding,
+            mode,
             stats,
             close_sink: Box::new(move || sink.close()),
             worker: Some(worker),
@@ -295,11 +341,11 @@ impl CaptureFeeder {
 
     /// Pause (`false`) or resume forwarding; paused frames are dropped.
     pub fn set_forwarding(&self, on: bool) {
-        self.forwarding.store(on, Ordering::Release);
+        self.mode.forward(on);
     }
 
     pub fn forwarding(&self) -> bool {
-        self.forwarding.load(Ordering::Acquire)
+        self.mode.get() == FeederMode::Forwarding
     }
 
     pub fn stats(&self) -> &FeederStats {
@@ -309,7 +355,7 @@ impl CaptureFeeder {
 
 impl Drop for CaptureFeeder {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Release);
+        self.mode.stop();
         (self.close_sink)();
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
@@ -320,21 +366,21 @@ impl Drop for CaptureFeeder {
 fn run<T: FeedFrame>(
     sink: &FrameSink<T>,
     sender: &dyn ExternalFrameSender,
-    stop: &AtomicBool,
-    forwarding: &AtomicBool,
+    mode: &SharedMode,
     stats: &FeederStats,
 ) {
     let mut clock = CaptureClock::new();
     let mut bytes = Vec::new();
     let mut last_log: Option<Instant> = None;
-    while !stop.load(Ordering::Acquire) {
+    let mut failed_run = 0u32;
+    while mode.get() != FeederMode::Stopped {
         let Some(frame) = sink.pop_timeout(Duration::from_millis(100)) else {
             if sink.is_closed() {
                 break;
             }
             continue;
         };
-        if !forwarding.load(Ordering::Acquire) {
+        if mode.get() != FeederMode::Forwarding {
             continue;
         }
         let (width, height) = frame.size();
@@ -351,10 +397,19 @@ fn run<T: FeedFrame>(
         match sender.send(T::DEVICE, &bytes, meta) {
             Ok(()) => {
                 stats.sent.fetch_add(1, Ordering::Relaxed);
+                // Recovered: the old error is not the current one.
+                failed_run = 0;
+                *stats.last_error.lock_or_recover() = None;
             }
             Err(err) => {
                 stats.failed.fetch_add(1, Ordering::Relaxed);
                 let text = err.to_string();
+                failed_run = failed_run.saturating_add(1);
+                if failed_run == FAILED_RUN {
+                    sink.push_event(CaptureEvent::Failed(CaptureError::Refused(format!(
+                        "The call refused the captured frames ({text})."
+                    ))));
+                }
                 if last_log.is_none_or(|at| at.elapsed() >= ERROR_LOG_EVERY) {
                     last_log = Some(Instant::now());
                     eprintln!("quill: call capture: {text}");
@@ -410,6 +465,82 @@ mod tests {
             assert!(start.elapsed() < Duration::from_secs(5), "timed out");
             std::thread::sleep(Duration::from_millis(2));
         }
+    }
+
+    /// Refuses every frame and stops the feeder after `limit` of them.
+    struct Refusing {
+        seen: AtomicU64,
+        limit: u64,
+        mode: Arc<SharedMode>,
+    }
+
+    impl ExternalFrameSender for Refusing {
+        fn send(
+            &self,
+            _: ExternalDevice,
+            _: &[u8],
+            _: ExternalFrameMeta,
+        ) -> Result<(), EngineError> {
+            if self.seen.fetch_add(1, Ordering::Relaxed) + 1 >= self.limit {
+                self.mode.stop();
+            }
+            Err(EngineError::Engine {
+                op: "qc_external_frame",
+                code: -1,
+            })
+        }
+    }
+
+    #[test]
+    fn a_run_of_refused_frames_is_reported_once_as_a_failure() {
+        let sink = FrameSink::new(200);
+        for value in 0..120 {
+            sink.push(audio(value));
+        }
+        let mode = Arc::new(SharedMode::new());
+        let sender = Refusing {
+            seen: AtomicU64::new(0),
+            limit: 120,
+            mode: mode.clone(),
+        };
+        let stats = FeederStats::default();
+        run(&sink, &sender, &mode, &stats);
+        let events = sink.take_events();
+        assert_eq!(events.len(), 1, "one event for the whole run");
+        assert!(matches!(
+            &events[0],
+            CaptureEvent::Failed(CaptureError::Refused(_))
+        ));
+        assert_eq!(stats.failed(), 120);
+    }
+
+    #[test]
+    fn a_stopped_feeder_never_forwards_again() {
+        let mode = SharedMode::new();
+        assert_eq!(mode.get(), FeederMode::Forwarding);
+        mode.forward(false);
+        assert_eq!(mode.get(), FeederMode::Paused);
+        mode.forward(true);
+        assert_eq!(mode.get(), FeederMode::Forwarding);
+        mode.stop();
+        mode.forward(true);
+        assert_eq!(mode.get(), FeederMode::Stopped);
+    }
+
+    #[test]
+    fn a_few_refused_frames_are_not_a_failure() {
+        let sink = FrameSink::new(200);
+        for value in 0..10 {
+            sink.push(audio(value));
+        }
+        let mode = Arc::new(SharedMode::new());
+        let sender = Refusing {
+            seen: AtomicU64::new(0),
+            limit: 10,
+            mode: mode.clone(),
+        };
+        run(&sink, &sender, &mode, &FeederStats::default());
+        assert!(sink.take_events().is_empty());
     }
 
     #[test]

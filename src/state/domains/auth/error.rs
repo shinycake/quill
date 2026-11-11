@@ -35,8 +35,16 @@ impl Session {
             // error line on the overlay — never a fake success,
             // never an optimistic state change.
             Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp { op })) => {
-                self.auth_state.password_state_loading = false;
-                self.auth_state.password_op_error = Some(password_op_error_line(op, err));
+                // A late error of an older request leaves the one in flight
+                // (and its line) alone.
+                self.auth_state
+                    .fail_password_op(pending.map(|p| p.id), password_op_error_line(op, err));
+            }
+            // The country list failed: the boxes say so and offer Retry (a
+            // user action, never a frame), instead of "Loading countries"
+            // for good.
+            Some(RequestPurpose::GetCountries) => {
+                self.auth_state.countries.fail(error_reason(err));
             }
             // Slice A8: a refused change-number op (code send /
             // resend, code check) clears the in-flight flags and
@@ -48,14 +56,20 @@ impl Session {
             // code is still valid — the user can retry or resend.
             // A failed check likewise keeps the pending number.
             Some(RequestPurpose::SendPhoneNumberCode | RequestPurpose::ResendPhoneNumberCode) => {
-                self.auth_state.change_number_loading = false;
-                self.auth_state.change_number_error =
-                    Some(sessions_error_line("send the verification code", err));
+                if let Some(request) = extra {
+                    self.auth_state.change_number.fail(
+                        request,
+                        sessions_error_line("send the verification code", err),
+                    );
+                }
             }
             Some(RequestPurpose::CheckPhoneNumberCode) => {
-                self.auth_state.change_number_checking = false;
-                self.auth_state.change_number_error =
-                    Some(sessions_error_line("check the verification code", err));
+                if let Some(request) = extra {
+                    self.auth_state.change_number.fail(
+                        request,
+                        sessions_error_line("check the verification code", err),
+                    );
+                }
             }
             // TDLib answers and stays in WaitTdlibParameters, which sends no
             // update: without this the card says "Connecting" forever.

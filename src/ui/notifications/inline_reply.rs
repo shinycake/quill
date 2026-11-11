@@ -113,9 +113,13 @@ impl QuillApp {
             return;
         }
         let mut open = Vec::new();
+        // "Mark as read" sends read receipts: under the lock it waits,
+        // queued, for the unlock (the next poll runs it).
+        let mut held = Vec::new();
         for click in clicks {
             let chat_id = click.chat_id;
             match click.action {
+                NotificationAction::MarkRead if self.refused_while_locked() => held.push(click),
                 NotificationAction::MarkRead => self.mark_read_from_notification(chat_id, cx),
                 NotificationAction::Reply => {
                     if !self.send_typed_notification_reply(&click.account, chat_id, cx) {
@@ -124,6 +128,9 @@ impl QuillApp {
                 }
                 NotificationAction::Open => open.push(click),
             }
+        }
+        if !held.is_empty() {
+            self.delivery.notify_clicks.lock_or_recover().extend(held);
         }
         if open.is_empty() {
             return;
@@ -158,7 +165,60 @@ impl QuillApp {
             "inline reply typed into a notification: {} chars",
             text.chars().count()
         );
-        self.send_inline_reply(account, chat_id, &text, cx)
+        let outcome = self.send_inline_reply(account, chat_id, &text, cx);
+        self.keep_unsent_reply(account, chat_id, text, outcome);
+        outcome == InlineReplyOutcome::Sent
+    }
+
+    /// Typed text that did not go out (`outcome` is not `Sent`) must not be
+    /// lost with the send, whichever path took it (the platform's reply
+    /// field or Quill's own toast): the chat that opens instead gets it in
+    /// its composer.
+    pub(in crate::ui) fn keep_unsent_reply(
+        &mut self,
+        account: &AccountKey,
+        chat_id: ChatId,
+        text: String,
+        outcome: InlineReplyOutcome,
+    ) {
+        if outcome != InlineReplyOutcome::Sent && !text.trim().is_empty() {
+            self.delivery
+                .unsent_replies
+                .insert((account.clone(), chat_id), text);
+        }
+    }
+
+    /// The reply typed into `account`'s notification for the chat that
+    /// could not be sent goes into the composer of the chat the click
+    /// opened, once that chat shows in the window in place. Without a
+    /// `window` (the chat's own window, whose frame is not at hand) the
+    /// text waits in that window's state for its next frame.
+    pub(in crate::ui) fn compose_unsent_reply(
+        &mut self,
+        account: &AccountKey,
+        chat_id: ChatId,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.open_chat_id() != Some(chat_id) {
+            return;
+        }
+        let Some(text) = self
+            .delivery
+            .unsent_replies
+            .remove(&(account.clone(), chat_id))
+        else {
+            return;
+        };
+        self.apply_open_carry(
+            chat_id,
+            crate::ui::chat_window::ChatOpenCarry {
+                compose: Some(text),
+                ..Default::default()
+            },
+            window,
+            cx,
+        );
     }
 
     /// "Mark as read" from the notification: `viewMessages` through the
@@ -188,10 +248,10 @@ impl QuillApp {
         chat_id: ChatId,
         text: &str,
         cx: &mut Context<Self>,
-    ) -> bool {
+    ) -> InlineReplyOutcome {
         let locked = self.account.passcode.is_locked();
         let Some(session) = self.session().filter(|s| &s.account == account) else {
-            return false;
+            return InlineReplyOutcome::NotHere;
         };
         let private_chat = session.chats.get(&chat_id.0).is_none_or(|chat| {
             matches!(
@@ -206,7 +266,7 @@ impl QuillApp {
             .copied();
         let Some(plan) = quill::notify::plan_inline_reply(text, locked, private_chat, message_id)
         else {
-            return false;
+            return InlineReplyOutcome::NotHere;
         };
         let snapshot = ComposerSnapshot::capture(chat_id, session.view_generation, plan.text)
             .with_reply(
@@ -214,13 +274,13 @@ impl QuillApp {
                     .map(|message_id| ComposerReplyTo::new(chat_id, message_id)),
             );
         let Some(live) = self.live.as_mut() else {
-            return false;
+            return InlineReplyOutcome::NotHere;
         };
         match live.driver.send_text_snapshot(&snapshot) {
             Ok(_) => {
                 let _ = live.driver.mark_chat_as_read(chat_id);
                 self.dismiss_os_notification(chat_id, cx);
-                true
+                InlineReplyOutcome::Sent
             }
             Err(_) => {
                 // Not sendable here (no rights, a closed topic, a channel):
@@ -228,8 +288,34 @@ impl QuillApp {
                 self.set_note(StatusNote::silent(tr(
                     keys::Q_PREFS_REPLY_FROM_THE_NOTIFICATION_WAS,
                 )));
-                false
+                InlineReplyOutcome::Refused
             }
+        }
+    }
+}
+
+/// How sending the text typed into a notification ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::ui) enum InlineReplyOutcome {
+    /// A message went out.
+    Sent,
+    /// Nothing to send here: another account is on screen, the app is
+    /// locked, the text is blank or there is no client.
+    NotHere,
+    /// The chat refused it (no rights, a closed topic, a channel): the typed
+    /// text must not vanish, so the caller opens the chat to show why.
+    Refused,
+}
+
+impl InlineReplyOutcome {
+    /// Whether the notification's Reply click should open the chat: another
+    /// account's toast switches to it, and a refused reply shows why in the
+    /// chat instead of vanishing with its text.
+    pub(in crate::ui) fn opens_chat(self, account_on_screen: bool) -> bool {
+        match self {
+            Self::Sent => false,
+            Self::Refused => true,
+            Self::NotHere => !account_on_screen,
         }
     }
 }

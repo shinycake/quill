@@ -4,7 +4,7 @@
 //! hotkey and Add Style, or Remove / Delete Style once it is saved.
 
 use super::card::section_title;
-use super::style_menu::{ai_apply_shortcut_text, bound_to, set_bound_style};
+use super::style_menu::ai_apply_shortcut_text;
 use super::style_notices::text_toast;
 use super::{attention_button, pill_radius, session_mut};
 use crate::ui::ai_compose_state::{AiStylePreview, PreviewStage};
@@ -25,7 +25,7 @@ use quill::state::StyleError;
 use quill::telegram::envelope::MessageSender;
 use quill::text::TextEntity;
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -72,10 +72,44 @@ impl QuillApp {
             stage: PreviewStage::LookingUp { token },
             examples: StyleExamples::new(false),
             example: None,
-            example_token: 0,
-            example_asked_at: None,
         });
         self.open_box(DialogKind::AiStylePreview);
+        cx.notify();
+    }
+
+    /// Add Style: sent once, the button waits for that request's answer.
+    fn add_ai_style_from_preview(
+        &mut self,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .ai_compose
+            .preview
+            .as_ref()
+            .is_none_or(AiStylePreview::adding)
+        {
+            return;
+        }
+        let sent = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.add_text_composition_style(name));
+        match sent {
+            Some(Ok(request)) => {
+                if let Some(preview) = self.ai_compose.preview.as_mut() {
+                    let stage =
+                        std::mem::replace(&mut preview.stage, PreviewStage::LookingUp { token: 0 });
+                    preview.stage = match stage {
+                        PreviewStage::Shown(style) => PreviewStage::Adding { style, request },
+                        other => other,
+                    };
+                }
+            }
+            Some(Err(_)) => self.push_ai_toast(text_toast(""), window, cx),
+            None => {}
+        }
         cx.notify();
     }
 
@@ -105,8 +139,12 @@ impl QuillApp {
             let slot = &mut s.messages.ai_compose.style_lookup;
             let answered = slot
                 .as_ref()
-                .is_some_and(|lookup| lookup.token == token && lookup.outcome.is_some());
-            if answered { slot.take()?.outcome } else { None }
+                .is_some_and(|lookup| lookup.token == token && lookup.outcome.is_done());
+            if answered {
+                slot.take()?.outcome.done()
+            } else {
+                None
+            }
         });
         let Some(outcome) = outcome else {
             return;
@@ -146,8 +184,7 @@ impl QuillApp {
             .ai_compose
             .preview
             .as_ref()
-            .filter(|preview| preview.examples.loading())
-            .map(|preview| preview.example_token)
+            .and_then(|preview| preview.examples.token())
         else {
             return;
         };
@@ -155,8 +192,12 @@ impl QuillApp {
             let slot = &mut s.messages.ai_compose.example;
             let answered = slot
                 .as_ref()
-                .is_some_and(|answer| answer.token == token && answer.outcome.is_some());
-            if answered { slot.take()?.outcome } else { None }
+                .is_some_and(|answer| answer.token == token && answer.outcome.is_done());
+            if answered {
+                slot.take()?.outcome.done()
+            } else {
+                None
+            }
         });
         let Some(outcome) = outcome else {
             return;
@@ -164,14 +205,16 @@ impl QuillApp {
         let Some(preview) = self.ai_compose.preview.as_mut() else {
             return;
         };
-        preview.example_asked_at = None;
         match outcome {
             Ok(example) => {
-                preview.examples.loaded();
-                preview.example = Some(example);
+                if preview.examples.loaded(token) {
+                    preview.example = Some(example);
+                }
             }
             Err(error) => {
-                preview.examples.failed();
+                if !preview.examples.failed(token) {
+                    return;
+                }
                 let kind = match error {
                     StyleError::Other(kind) => kind,
                     StyleError::Invalid | StyleError::SavedTooMany => String::new(),
@@ -186,26 +229,23 @@ impl QuillApp {
         let Some(preview) = self.ai_compose.preview.as_mut() else {
             return;
         };
-        let Some(number) = preview.examples.start_next() else {
+        if preview.examples.loading() {
+            return;
+        }
+        let token = fresh_token();
+        let Some(number) = preview.examples.start_next(token, Instant::now()) else {
             return;
         };
-        let token = fresh_token();
-        preview.example_token = token;
-        preview.example_asked_at = Some(Instant::now());
         let name = preview.name.clone();
         cx.notify();
-        let Some(live) = self.live.as_mut() else {
-            return;
-        };
         let number = i32::try_from(number).unwrap_or(i32::MAX);
-        if live
-            .driver
-            .get_text_composition_style_example(&name, number, token)
-            .is_err()
-            && let Some(preview) = self.ai_compose.preview.as_mut()
-        {
-            preview.examples.failed();
-            preview.example_asked_at = None;
+        let sent = self.live.as_mut().is_some_and(|live| {
+            live.driver
+                .get_text_composition_style_example(&name, number, token)
+                .is_ok()
+        });
+        if !sent && let Some(preview) = self.ai_compose.preview.as_mut() {
+            preview.examples.failed(token);
             self.push_ai_toast(text_toast(""), window, cx);
         }
     }
@@ -313,12 +353,12 @@ impl QuillApp {
                                 keys::AI_COMPOSE_BIND_USE_HOTKEY,
                                 &[("keys", &shortcut)],
                             ))
-                            .checked(bound_to(&name))
-                            .on_click(cx.listener(move |_, checked: &bool, _, cx| {
+                            .checked(self.ai_style_bound(&name))
+                            .on_click(cx.listener(move |this, checked: &bool, _, cx| {
                                 if *checked {
-                                    set_bound_style(Some(&name));
-                                } else if bound_to(&name) {
-                                    set_bound_style(None);
+                                    this.bind_ai_style(Some(&name));
+                                } else if this.ai_style_bound(&name) {
+                                    this.bind_ai_style(None);
                                 }
                                 cx.notify();
                             })),
@@ -345,7 +385,8 @@ impl QuillApp {
             .and_then(|s| s.messages.ai_compose.limits.example_count);
         let another = preview.style().is_some() && preview.examples.can_show_another(max);
         let angle = preview
-            .example_asked_at
+            .examples
+            .asked_at()
             .map_or(0., |at| spin_angle(at.elapsed()));
         let font = self.msg_font();
         let body = |text: &str, entities: &[TextEntity], key: u64, cx: &mut Context<Self>| {
@@ -357,7 +398,7 @@ impl QuillApp {
                     .child(Skeleton::new().w(relative(0.6)).h(px(12.)))
                     .into_any_element();
             }
-            let seen: HashSet<(i64, u64, u64, bool)> = HashSet::new();
+            let seen = crate::ui::message_text::revealed::Revealed::default();
             rich_text_line(
                 text,
                 entities,
@@ -499,6 +540,11 @@ impl QuillApp {
         else {
             return div().into_any_element();
         };
+        let adding = self
+            .ai_compose
+            .preview
+            .as_ref()
+            .is_some_and(AiStylePreview::adding);
         let installed = self
             .session()
             .and_then(|s| s.messages.ai_compose.styles.find(&style.name))
@@ -522,11 +568,9 @@ impl QuillApp {
             None => Button::new("ai-style-preview-add")
                 .primary()
                 .label(tr(keys::AI_COMPOSE_TONE_PREVIEW_ADD))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if let Some(live) = this.live.as_mut() {
-                        let _ = live.driver.add_text_composition_style(&name);
-                    }
-                    cx.notify();
+                .disabled(adding)
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.add_ai_style_from_preview(&name, window, cx);
                 })),
         };
         div()

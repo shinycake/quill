@@ -41,21 +41,13 @@ impl QuillApp {
             let state = session
                 .as_ref()
                 .and_then(|s| s.auth_state.password_state.clone());
-            let loading = session.is_some_and(|s| s.auth_state.password_state_loading);
+            let loading = session.is_some_and(|s| s.auth_state.password_state_loading());
             let error = session
                 .as_ref()
-                .and_then(|s| s.auth_state.password_op_error.clone());
-            // A finished recovery / reset / login-email step reports on the
-            // status screen.
-            if this.twofa_step_finished()
-                && matches!(this.twofa.view, TwofaView::Recover | TwofaView::LoginEmail)
-            {
-                this.twofa.view = TwofaView::Status;
-                this.twofa.confirm = None;
-            }
+                .and_then(|s| s.auth_state.password_op_error().map(str::to_string));
             let notice = this.twofa_notice_line();
             let mut body = div().flex().flex_col().gap_2();
-            if let Some(line) = notice.filter(|_| this.twofa.view == TwofaView::Status) {
+            if let Some(line) = notice.filter(|_| this.twofa.view() == TwofaView::Status) {
                 body = body.child(
                     div()
                         .id("twofa-notice")
@@ -73,7 +65,7 @@ impl QuillApp {
                         .child(tr_with(keys::Q_PREFS_ERROR, &[("line", &line.to_string())])),
                 );
             }
-            body = match (this.twofa.view, state) {
+            body = match (this.twofa.view(), state) {
                 (TwofaView::Status, None) => body.child(
                     div()
                         .text_xs()
@@ -137,8 +129,8 @@ impl QuillApp {
                 .and_then(|s| s.settings.sessions.data().cloned())
                 .unwrap_or_default();
             let loading = session.is_some_and(|s| s.settings.sessions.is_loading());
-            let mutating = session.is_some_and(|s| s.settings.sessions_mutating);
-            let stale = session.is_some_and(|s| s.settings.sessions_stale);
+            let mutating = session.is_some_and(|s| s.settings.sessions_op.is_mutating());
+            let stale = session.is_some_and(|s| s.settings.sessions_op.is_stale());
             let error = session
                 .as_ref()
                 .and_then(|s| s.settings.sessions.error().map(str::to_string));
@@ -155,7 +147,7 @@ impl QuillApp {
             others.sort_by_key(|a| std::cmp::Reverse(a.last_active_date));
 
             let mut body = div().flex().flex_col().gap_4();
-            if let Some(notice) = this.privacy.device_link_notice {
+            if let Some(notice) = this.privacy.device_link.notice() {
                 body = body.child(
                     div()
                         .id("device-link-notice")
@@ -165,7 +157,7 @@ impl QuillApp {
                         .child(notice),
                 );
             }
-            if this.privacy.device_login_qr.is_some() {
+            if this.privacy.device_link.is_confirming() {
                 body = body.child(
                     this.setting_spot(
                         &["devices.link_device"],
@@ -205,7 +197,7 @@ impl QuillApp {
                         cx,
                     ),
                 );
-            } else if this.privacy.device_qr_scanner.is_some() {
+            } else if this.privacy.device_link.is_scanning() {
                 body = body.child(
                     this.setting_spot(
                         &["devices.link_device"],
@@ -219,7 +211,7 @@ impl QuillApp {
                         cx,
                     ),
                 );
-            } else {
+            } else if !this.privacy.device_link.is_busy() {
                 // Cross-platform: paste the `tg://login?token=...` link that
                 // a QR reader shows for the other device's code.
                 let mut row = div().flex().flex_wrap().gap_2();
@@ -489,13 +481,12 @@ impl QuillApp {
 
     /// Phase S2: refetch the storage stats. Live: drop the cache so the
     /// guarded fetch fires again. Demo: re-inject the fixture stats.
-    pub(super) fn refresh_storage_usage(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn refresh_storage_usage(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.driver.refresh_storage_statistics();
             let _ = live.driver.maybe_fetch_storage_statistics();
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.settings.storage_stats = Some(demo_storage_stats());
-            session.settings.storage_stats_loading = false;
+            session.settings.storage_stats.succeed(demo_storage_stats());
         }
         cx.notify();
     }
@@ -509,16 +500,16 @@ impl QuillApp {
         ) {
             return;
         }
-        self.twofa.open = true;
         self.open_box(DialogKind::TwoFa);
+        self.twofa.open_at(TwofaView::Status);
         self.goto_twofa_view(TwofaView::Status);
         // The last change's error belongs to the box it was shown in; a
         // cached state skips the fetch that would clear it. One still in
         // flight keeps its answer's line.
         if let Some(auth) = self.session_mut().map(|session| &mut session.auth_state)
-            && !auth.password_state_loading
+            && !auth.password_state_loading()
         {
-            auth.password_op_error = None;
+            auth.clear_password_error();
         }
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_password_state();
@@ -542,9 +533,7 @@ impl QuillApp {
 
     /// Entering the Devices page: a clean list and a guarded fetch.
     pub(crate) fn fetch_sessions(&mut self) {
-        self.privacy.sessions_confirm = None;
-        self.privacy.extra.session_details = None;
-        self.privacy.extra.renaming_device = false;
+        self.privacy.devices.close_all();
         // An earlier visit's failure line goes: with a list held, the
         // guarded fetch below sends nothing that would replace it.
         if let Some(session) = self.session_mut() {
@@ -563,7 +552,7 @@ impl QuillApp {
     /// Slice A2: close the overlay and clear every 2FA input — passwords
     /// must not linger in the form after the dialog is gone.
     pub(super) fn close_twofa(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.twofa.open = false;
+        self.twofa.close();
         self.goto_twofa_view(TwofaView::Status);
         self.twofa
             .current_password
@@ -588,23 +577,21 @@ impl QuillApp {
     /// Leaving the Devices page stops a camera scan and drops a pending
     /// terminate confirmation.
     pub(crate) fn leave_devices(&mut self) {
-        self.clear_device_qr();
-        self.privacy.sessions_confirm = None;
-        self.privacy.extra.session_details = None;
-        self.privacy.extra.renaming_device = false;
+        self.leave_device_link();
+        self.privacy.devices.close_all();
     }
 
     /// Something over the Devices list that Esc peels first.
+    /// The details box counts only while its session is in the list: one
+    /// terminated from another device closes the box, and Esc must not
+    /// spend itself on the invisible layer.
     pub(crate) fn sessions_layer_open(&self) -> bool {
-        self.privacy.sessions_confirm.is_some() || self.privacy.extra.session_details.is_some()
+        self.privacy.devices.confirm().is_some() || self.details_session().is_some()
     }
 
     /// Esc on the Devices page: the confirmation first, then the details.
     pub(crate) fn close_sessions_top(&mut self, cx: &mut Context<Self>) {
-        if self.privacy.sessions_confirm.take().is_none() {
-            self.privacy.extra.session_details = None;
-            self.privacy.extra.renaming_device = false;
-        }
+        self.privacy.devices.close_top();
         cx.notify();
     }
 
@@ -613,7 +600,7 @@ impl QuillApp {
     pub(super) fn refresh_sessions(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.sessions = Fetch::Idle;
-            live.driver.session.settings.sessions_stale = false;
+            live.driver.session.settings.sessions_op.refetched();
             let _ = live.driver.maybe_fetch_active_sessions();
         } else if let Some(session) = self.demo_session.as_mut() {
             session.settings.sessions = Fetch::Ready(demo_sessions());
@@ -624,9 +611,7 @@ impl QuillApp {
     /// Slice A2: switch the 2FA view; a fresh form starts with no local
     /// notice line.
     pub(super) fn goto_twofa_view(&mut self, view: TwofaView) {
-        self.twofa.view = view;
-        self.twofa.notice = None;
-        self.twofa.confirm = None;
+        self.twofa.goto(view);
         if view == TwofaView::Status {
             self.clear_twofa_flow();
         } else if let Some(session) = self.live.as_mut().map(|l| &mut l.driver.session) {
@@ -642,7 +627,7 @@ impl QuillApp {
     /// change/disable a leftover email would put the request into
     /// pending-confirmation and silently not apply (schema 1.8.67, line
     /// 11434). The fields are cleared and the password strings zeroized
-    /// immediately after the send; the status view shows TDLib's
+    /// after the driver took the request; the status view shows TDLib's
     /// authoritative answer when it arrives.
     pub(super) fn submit_twofa_password(
         &mut self,
@@ -665,13 +650,43 @@ impl QuillApp {
             None
         };
         if let Some(note) = missing {
-            self.twofa.notice = Some(note.to_string());
+            self.twofa.set_notice(Some(note.to_string()));
             current.zeroize();
             new.zeroize();
             cx.notify();
             return;
         }
-        self.twofa.notice = None;
+        // The form stays until the driver took the request: one it refused
+        // (not connected, shutting down) keeps what was typed and says so.
+        let sent = match self.live.as_mut() {
+            Some(live) => {
+                let email_opt = if include_email && !email.is_empty() {
+                    Some(email.as_str())
+                } else {
+                    None
+                };
+                live.driver
+                    .set_two_step_password(&current, &new, &hint, email_opt)
+                    .is_ok()
+            }
+            None => true,
+        };
+        current.zeroize();
+        new.zeroize();
+        if !sent {
+            self.twofa
+                .set_notice(Some(tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string()));
+            cx.notify();
+            return;
+        }
+        self.twofa.set_notice(None);
+        self.clear_twofa_inputs(window, cx);
+        self.goto_twofa_view(TwofaView::Status);
+        cx.notify();
+    }
+
+    /// Empty every field of the two-step forms.
+    fn clear_twofa_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.twofa
             .current_password
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -684,20 +699,6 @@ impl QuillApp {
         self.twofa
             .email
             .update(cx, |input, cx| input.set_value("", window, cx));
-        if let Some(live) = self.live.as_mut() {
-            let email_opt = if include_email && !email.is_empty() {
-                Some(email.as_str())
-            } else {
-                None
-            };
-            let _ = live
-                .driver
-                .set_two_step_password(&current, &new, &hint, email_opt);
-        }
-        current.zeroize();
-        new.zeroize();
-        self.goto_twofa_view(TwofaView::Status);
-        cx.notify();
     }
 
     /// Slice A2: one `setRecoveryEmailAddress` round-trip. Requires the
@@ -716,22 +717,24 @@ impl QuillApp {
             None
         };
         if let Some(note) = missing {
-            self.twofa.notice = Some(note.to_string());
+            self.twofa.set_notice(Some(note.to_string()));
             current.zeroize();
             cx.notify();
             return;
         }
-        self.twofa.notice = None;
-        self.twofa
-            .current_password
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.twofa
-            .email
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.set_recovery_email(&current, &email);
-        }
+        let sent = match self.live.as_mut() {
+            Some(live) => live.driver.set_recovery_email(&current, &email).is_ok(),
+            None => true,
+        };
         current.zeroize();
+        if !sent {
+            self.twofa
+                .set_notice(Some(tr(keys::Q_OPS_REQUEST_NOT_SENT).to_string()));
+            cx.notify();
+            return;
+        }
+        self.twofa.set_notice(None);
+        self.clear_twofa_inputs(window, cx);
         self.goto_twofa_view(TwofaView::Status);
         cx.notify();
     }
@@ -755,7 +758,7 @@ impl QuillApp {
         incomplete: bool,
         cx: &mut Context<Self>,
     ) {
-        self.privacy.sessions_confirm = Some(SessionsConfirm::TerminateOne {
+        self.privacy.devices.ask(SessionsConfirm::TerminateOne {
             session_id,
             incomplete,
         });
@@ -766,14 +769,14 @@ impl QuillApp {
     /// Slice A3: arm the "terminate all other sessions" confirmation
     /// (TGX `AreYouSureSessions`).
     pub(super) fn begin_terminate_all_sessions(&mut self, cx: &mut Context<Self>) {
-        self.privacy.sessions_confirm = Some(SessionsConfirm::TerminateAll);
+        self.privacy.devices.ask(SessionsConfirm::TerminateAll);
         self.open_box(DialogKind::SessionsConfirm);
         cx.notify();
     }
 
     /// Slice A3: drop the pending terminate confirmation.
     pub(super) fn cancel_sessions_confirm(&mut self, cx: &mut Context<Self>) {
-        self.privacy.sessions_confirm = None;
+        self.privacy.devices.take_confirm();
         cx.notify();
     }
 
@@ -781,7 +784,7 @@ impl QuillApp {
     /// no TDLib; the list refreshes from the authoritative `ok` answer,
     /// never optimistically.
     pub(super) fn confirm_sessions_terminate(&mut self, cx: &mut Context<Self>) {
-        let confirm = self.privacy.sessions_confirm.take();
+        let confirm = self.privacy.devices.take_confirm();
         if let (Some(live), Some(confirm)) = (self.live.as_mut(), confirm) {
             let result = match confirm {
                 SessionsConfirm::TerminateOne { session_id, .. } => {
@@ -813,14 +816,14 @@ pub(super) fn quiet_danger(cx: &App) -> ButtonCustomVariant {
 crate::ui::shell::register_dialogs! {
     Websites => DialogSpec::new(
         600,
-        |app| app.privacy.websites_open,
+        |app| app.privacy.websites.is_open(),
         QuillApp::build_websites_dialog,
     )
     .close(|app, _, cx| app.close_websites(cx)),
 
     TwoFa => DialogSpec::new(
         800,
-        |app| app.twofa.open,
+        |app| app.twofa.is_open(),
         QuillApp::build_twofa_dialog,
     )
 

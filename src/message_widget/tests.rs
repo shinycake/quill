@@ -87,20 +87,54 @@ fn a_card_takes_the_bots_width_within_the_bubble() {
 #[test]
 fn stopped_and_failed_both_show_the_stopped_label() {
     assert!(
-        Lifecycle::Stopped {
-            reason: "cpu".into()
+        Lifecycle::<()>::Stopped {
+            reason: "cpu".into(),
+            streak: 1
         }
         .is_stopped()
     );
     assert!(
-        Lifecycle::Failed {
+        Lifecycle::<()>::Failed {
             reason: "bundle".into()
         }
         .is_stopped()
     );
-    assert!(!Lifecycle::Released.is_stopped());
-    assert!(Lifecycle::Loading.is_live() && Lifecycle::Running.is_live());
-    assert!(!Lifecycle::Waiting.is_live());
+    assert!(!Lifecycle::<()>::Released.is_stopped());
+    let loading = |runtime: u8| Lifecycle::Loading { runtime, streak: 1 };
+    assert!(loading(0).is_live() && Lifecycle::Running(0).is_live());
+    assert!(!Lifecycle::<u8>::Waiting { streak: 0 }.is_live());
+    assert_eq!(loading(7).started(), Lifecycle::Running(7));
+    assert_eq!(Lifecycle::<u8>::Released.started(), Lifecycle::Released);
+}
+
+/// Stops in a row travel with the restart and are gone once it runs: two
+/// stops in a row end the restarts, a run in between starts the count over.
+#[test]
+fn the_stop_streak_lives_in_the_stage_and_resets_when_it_runs() {
+    let running: Lifecycle<u8> = Lifecycle::Running(1);
+    let first = running.stopped("cpu".into(), true);
+    assert_eq!(first.streak(), 1);
+    assert_eq!(first.restarts_on_return(), Some(1));
+    // Restarted: the streak rides through Waiting and Loading.
+    let waiting = Lifecycle::<u8>::Waiting { streak: 1 };
+    let loading = Lifecycle::Loading {
+        runtime: 2,
+        streak: waiting.streak(),
+    };
+    let second = loading.stopped("cpu".into(), true);
+    assert_eq!(second.streak(), MAX_CRASHES);
+    assert_eq!(second.restarts_on_return(), None, "gave up");
+    // A run that gets its first frame starts over.
+    let ran = loading.started();
+    assert_eq!(ran.stopped("cpu".into(), true).streak(), 1);
+    // Never on screen, or released: starts at once.
+    assert_eq!(Lifecycle::<u8>::Idle.restarts_on_return(), Some(0));
+    assert_eq!(Lifecycle::<u8>::Released.restarts_on_return(), Some(0));
+    // No frame to keep: it could not start.
+    assert!(matches!(
+        running.stopped("bundle".into(), false),
+        Lifecycle::Failed { .. }
+    ));
 }
 
 fn temp_dir(name: &str) -> std::path::PathBuf {

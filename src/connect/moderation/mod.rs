@@ -2,6 +2,8 @@
 use super::*;
 use crate::ids::{ChatId, RequestId};
 use crate::state::GroupsPurpose;
+use crate::state::TransferStage;
+use crate::state::fetch::Fetch;
 use crate::state::{
     AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch, InviteLinkFetch,
     JoinRequestFetch, MemberListFilter, MemberStatusChange, OwnerLookup, RequestPurpose,
@@ -29,6 +31,7 @@ mod admins;
 mod invites;
 mod members;
 mod members_more;
+mod ownership_open;
 mod permissions;
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -36,9 +39,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// gate. Sent when the transfer dialog opens, never on a timer.
     pub fn check_can_transfer_ownership(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            self.fail_ownership_check_send();
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.groups.ownership.check_in_flight {
+        if self.session.groups.ownership.check.is_loading() {
             return Ok(None);
         }
         self.session.begin_ownership_check();
@@ -47,7 +51,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request(RequestPurpose::CanTransferOwnership, None);
         if let Err(err) = self.sender.send_json(&can_transfer_ownership(extra)) {
             self.session.requests.take(extra);
-            self.session.groups.ownership.check_in_flight = false;
+            self.fail_ownership_check_send();
             return Err(err);
         }
         Ok(Some(extra))
@@ -62,6 +66,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         user_id: i64,
         password: &str,
+        leave_after: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -70,15 +75,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.chats.get(&chat_id.0).map(|c| &c.kind),
             Some(ChatKind::BasicGroup { .. } | ChatKind::Supergroup { .. })
         ) && self.session.chat_is_owner(chat_id)
-            && self.session.groups.ownership.can_transfer == Some(CanTransferOwnershipResult::Ok)
-            && self.session.groups.ownership.transfer_in_flight.is_none()
+            && self.session.groups.ownership.check == Fetch::Ready(CanTransferOwnershipResult::Ok)
+            && self.session.groups.ownership.transfer.sending().is_none()
             && !password.is_empty()
             && self.session.my_user_id != Some(user_id)
             && !self.session.is_bot_user(user_id);
         if !allowed {
             return Ok(None);
         }
-        self.session.begin_ownership_transfer(chat_id.0, user_id);
+        self.session
+            .begin_ownership_transfer(chat_id.0, user_id, leave_after);
         let extra = self.session.request(
             RequestPurpose::Groups(GroupsPurpose::TransferChatOwnership { user_id }),
             Some(chat_id),
@@ -87,7 +93,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             extra, chat_id.0, user_id, password,
         )) {
             self.session.requests.take(extra);
-            self.session.groups.ownership.transfer_in_flight = None;
+            self.session.groups.ownership.transfer = TransferStage::Idle;
             return Err(err);
         }
         Ok(Some(extra))
@@ -100,6 +106,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            self.fail_owner_lookup_send(chat_id);
             return Err(ConnectSendError::InvalidRequest);
         }
         let supported = matches!(
@@ -128,11 +135,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&get_chat_owner_after_leaving(extra, chat_id.0))
         {
             self.session.requests.take(extra);
-            self.session
-                .groups
-                .ownership
-                .owner_after_leaving
-                .remove(&chat_id.0);
+            self.fail_owner_lookup_send(chat_id);
             return Err(err);
         }
         Ok(Some(extra))
@@ -166,9 +169,24 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let purpose = RequestPurpose::SetChatPermissions;
-        if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
-            return Ok(None);
-        }
+        // A save while an earlier one is out sends too (TDLib applies them
+        // in order, the later one wins); its rollback restores the values
+        // from before the first, not the ones the first showed. When the
+        // first succeeds, the later rollbacks take its values
+        // (`Session::settle_permissions_save`).
+        let original = self
+            .session
+            .requests
+            .pending_extra_for(purpose, Some(chat_id))
+            .and_then(|id| self.session.requests.pending_mut(id))
+            .and_then(|pending| match &pending.rollback {
+                Some(RequestRollback::ChatPermissions {
+                    previous,
+                    previous_can_send,
+                    ..
+                }) => Some((*previous, *previous_can_send)),
+                _ => None,
+            });
         let extra = self.session.request(purpose, Some(chat_id));
         if let Err(err) = self.sender.send_json(&set_chat_permissions(
             extra,
@@ -182,9 +200,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         // The pre-request values ride on the pending entry so the error
         // arm can roll back.
         if let Some(chat) = self.session.chats.get_mut(&chat_id.0) {
+            let (previous, previous_can_send) =
+                original.unwrap_or((chat.permissions, chat.can_send_basic_messages));
             let rollback = RequestRollback::ChatPermissions {
-                previous: chat.permissions,
-                previous_can_send: chat.can_send_basic_messages,
+                previous,
+                previous_can_send,
+                sent: *permissions,
             };
             chat.permissions = Some(*permissions);
             chat.can_send_basic_messages = permissions.can_send_basic_messages;
@@ -289,6 +310,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             pending.rollback = Some(RequestRollback::JoinByRequest {
                 supergroup_id,
                 previous,
+                shown: join_by_request,
             });
         }
         Ok(Some(extra))
@@ -342,6 +364,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             pending.rollback = Some(RequestRollback::SupergroupUsername {
                 supergroup_id,
                 previous,
+                shown: username.to_string(),
             });
         }
         Ok(Some(extra))

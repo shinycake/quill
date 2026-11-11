@@ -12,6 +12,7 @@ use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
 use gpui_kit::*;
 use quill::lang::{keys, tr};
+use quill::state::{Submit, SubmitView};
 
 /// TDLib's compiled default for `bio_length_max` (Premium raises it).
 pub(crate) const DEFAULT_BIO_LENGTH_MAX: usize = 70;
@@ -88,14 +89,20 @@ impl QuillApp {
             && now.bio_remaining(self.profile_bio_limit()) >= 0
     }
 
-    /// The Save button: send only the changed fields, then close.
+    /// The Save button: send only the changed fields. The box stays,
+    /// saving, until TDLib answers; a refused name or bio shows in it
+    /// (`settle_edit_profile_save`).
     pub(super) fn save_profile_form(&mut self, cx: &mut Context<Self>) {
         if !self.profile_form_can_save(cx) {
             return;
         }
+        let requests = self.session().map(|session| &session.requests);
         let Some(dialog) = &self.dialogs.edit_profile_dialog else {
             return;
         };
+        if dialog.save.is_sending(requests) {
+            return;
+        }
         let edits = dialog.initial.edits_to(&dialog.current_fields(cx));
         let Some(live) = self.live.as_mut() else {
             self.set_note(StatusNote::info(tr(
@@ -105,22 +112,55 @@ impl QuillApp {
             return;
         };
         live.driver.session.users_state.profile_edit_error = None;
+        let mut sent = Vec::new();
         for edit in edits {
-            let sent = match &edit {
+            let result = match &edit {
                 ProfileEdit::Name { first, last } => live.driver.set_name(first, last),
                 ProfileEdit::SetBio(bio) => live.driver.set_bio(bio),
             };
-            if let Err(err) = sent {
-                self.set_note(StatusNote::error(user_error_for(
-                    keys::Q_NOTES_FAILED_SAVE_PROFILE,
-                    &err,
-                )));
-                cx.notify();
-                return;
+            match result {
+                Ok(id) => sent.push(id),
+                Err(err) => {
+                    // What went out before stays out; the box stays too.
+                    let line = user_error_for(keys::Q_NOTES_FAILED_SAVE_PROFILE, &err);
+                    if let Some(dialog) = self.dialogs.edit_profile_dialog.as_mut() {
+                        dialog.save = Submit::Failed(line.clone());
+                    }
+                    self.set_note(StatusNote::error(line));
+                    cx.notify();
+                    return;
+                }
             }
         }
+        if let Some(dialog) = self.dialogs.edit_profile_dialog.as_mut() {
+            dialog.save = Submit::sent(sent);
+        }
         self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_NAME_UPDATE_REQUESTED)));
-        self.close_edit_profile_dialog(cx);
+        cx.notify();
+    }
+
+    /// The edit profile box leaves its Sending stage on TDLib's answer.
+    pub(in crate::ui) fn settle_edit_profile_save(&mut self, cx: &mut Context<Self>) {
+        let requests = self.session().map(|session| &session.requests);
+        let Some(view) = self
+            .dialogs
+            .edit_profile_dialog
+            .as_ref()
+            .map(|dialog| dialog.save.view(requests))
+        else {
+            return;
+        };
+        match view {
+            SubmitView::Done => self.close_edit_profile_dialog(cx),
+            SubmitView::Failed(reason) => {
+                if let Some(dialog) = self.dialogs.edit_profile_dialog.as_mut()
+                    && dialog.save.keep_failure(reason)
+                {
+                    cx.notify();
+                }
+            }
+            SubmitView::Editing | SubmitView::Sending => {}
+        }
     }
 }
 

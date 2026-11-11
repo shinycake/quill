@@ -5,7 +5,9 @@
 use super::super::*;
 use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
-use crate::gift_manage::{ExportError, GiftFlow, GiftTransferred, TransferPicker, TransferStage};
+use crate::gift_manage::{
+    ExportError, ExportSend, GiftFlow, GiftTransferred, TransferPicker, TransferStage,
+};
 use crate::platform::MemorySecretStore;
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::MessageSender;
@@ -93,7 +95,7 @@ fn set_stage(p: &mut Parts, id: &str, stage: TransferStage) {
 
 fn password_stage() -> TransferStage {
     TransferStage::Password {
-        sending: false,
+        send: ExportSend::Idle,
         error: None,
     }
 }
@@ -121,6 +123,7 @@ fn a_transfer_goes_only_to_the_contact_the_confirmation_names() {
             TransferStage::ConfirmPeer {
                 user_id,
                 name: name.into(),
+                error: None,
             },
         );
         assert!(p.0.transfer_picked_gift().is_err());
@@ -132,9 +135,24 @@ fn a_transfer_goes_only_to_the_contact_the_confirmation_names() {
         TransferStage::ConfirmPeer {
             user_id: 21,
             name: "Maya".into(),
+            error: None,
         },
     );
     let extra = p.0.transfer_picked_gift().unwrap();
+    // The confirmation waits on this request: only its answer reports
+    // the transfer.
+    assert_eq!(
+        p.0.session
+            .payments
+            .gifts_manage
+            .transfer()
+            .map(|picker| picker.stage.clone()),
+        Some(TransferStage::Transferring {
+            user_id: 21,
+            name: "Maya".into(),
+            request: extra,
+        })
+    );
     let sent = sent_request(&p.1, "transferGift");
     assert_eq!(sent["received_gift_id"], "open");
     assert_eq!(sent["new_owner_id"]["@type"], "messageSenderUser");
@@ -144,7 +162,7 @@ fn a_transfer_goes_only_to_the_contact_the_confirmation_names() {
     let manage = &p.0.session.payments.gifts_manage;
     assert!(manage.flow.is_none());
     assert_eq!(
-        manage.transferred,
+        manage.transferred().cloned(),
         Some(GiftTransferred {
             gift_name: "Plush Pepe #4".into(),
             recipient: "Maya".into(),
@@ -179,11 +197,13 @@ fn the_export_url_is_asked_only_from_the_password_box() {
     assert_eq!(sent["password"], PASSWORD);
     assert_eq!(sent["valid_for"], 60);
     assert_eq!(count(&p.1, "getUpgradedGiftWithdrawalUrl"), 0);
-    let sending = Some(TransferStage::Password {
-        sending: true,
-        error: None,
-    });
-    assert_eq!(stage(&p), sending);
+    let sending = |request| {
+        Some(TransferStage::Password {
+            send: ExportSend::Out(request),
+            error: None,
+        })
+    };
+    assert_eq!(stage(&p), sending(unlock));
     // A second Submit while the first is out sends nothing.
     assert!(p.0.export_picked_gift(PASSWORD).is_err());
     assert_eq!(count(&p.1, "createTemporaryPassword"), 1);
@@ -195,7 +215,11 @@ fn the_export_url_is_asked_only_from_the_password_box() {
     assert_eq!(sent["received_gift_id"], "open");
     assert!(sent.get("password").is_none());
     assert_eq!(count(&p.1, "getUpgradedGiftWithdrawalUrl"), 1);
-    assert_eq!(stage(&p), sending);
+    // The box now waits for the URL request, not the unlock.
+    assert!(matches!(
+        stage(&p),
+        Some(TransferStage::Password { send: ExportSend::Out(url), .. }) if url != unlock
+    ));
     feed(
         &mut p,
         json!({"@type": "httpUrl", "@extra": extra,
@@ -204,7 +228,7 @@ fn the_export_url_is_asked_only_from_the_password_box() {
     let manage = &p.0.session.payments.gifts_manage;
     assert!(manage.flow.is_none());
     assert_eq!(
-        manage.export_url.as_deref(),
+        manage.export_url(),
         Some("https://fragment.com/gift/PlushPepe-4?export=1")
     );
 }
@@ -244,7 +268,7 @@ fn fail_export_at(step: Step, message: &str, code: i32) -> Option<TransferStage>
         &mut p,
         json!({"@type": "error", "@extra": extra, "code": code, "message": message}),
     );
-    assert!(p.0.session.payments.gifts_manage.export_url.is_none());
+    assert!(p.0.session.payments.gifts_manage.export_url().is_none());
     let state = format!("{:?}", p.0.session.payments.gifts_manage);
     assert!(!state.contains(PASSWORD));
     stage(&p)
@@ -255,7 +279,7 @@ fn password_errors_land_in_the_password_box() {
     assert_eq!(
         fail_export("PASSWORD_HASH_INVALID", 400),
         Some(TransferStage::Password {
-            sending: false,
+            send: ExportSend::Idle,
             error: Some(ExportError::WrongPassword)
         })
     );
@@ -274,7 +298,7 @@ fn password_errors_land_in_the_password_box() {
     assert_eq!(
         fail_export("Too Many Requests: retry after 30", 429),
         Some(TransferStage::Password {
-            sending: false,
+            send: ExportSend::Idle,
             error: Some(ExportError::Flood)
         })
     );
@@ -283,14 +307,14 @@ fn password_errors_land_in_the_password_box() {
     assert_eq!(
         fail_export("SRP_PASSWORD_CHANGED", 400),
         Some(TransferStage::Password {
-            sending: false,
+            send: ExportSend::Idle,
             error: Some(ExportError::WrongPassword)
         })
     );
     assert_eq!(
         fail_export("SRP_ID_INVALID", 400),
         Some(TransferStage::Password {
-            sending: false,
+            send: ExportSend::Idle,
             error: Some(ExportError::ServerError)
         })
     );
@@ -307,7 +331,7 @@ fn password_errors_land_in_the_password_box() {
         matches!(
             &other,
             Some(TransferStage::Password {
-                sending: false,
+                send: ExportSend::Idle,
                 error: Some(ExportError::Other(reason)),
             }) if !reason.is_empty()
         ),
@@ -352,7 +376,7 @@ fn open_fragment_sends_the_password_less_probe_only_from_its_confirmation() {
     assert!(sent.get("password").is_none());
     assert_eq!(count(&p.1, "createTemporaryPassword"), 0);
     assert_eq!(count(&p.1, "getPasswordState"), 1);
-    assert_eq!(stage(&p), Some(TransferStage::Probing));
+    assert!(matches!(stage(&p), Some(TransferStage::Probing(_))));
     // A second click while it is out sends nothing.
     assert!(p.0.probe_gift_export().is_err());
     assert_eq!(count(&p.1, "getUpgradedGiftWithdrawalUrl"), 1);
@@ -369,7 +393,7 @@ fn a_url_answer_to_the_probe_is_never_opened() {
             "url": "https://fragment.com/gift/PlushPepe-4?export=1"}),
     );
     let manage = &p.0.session.payments.gifts_manage;
-    assert!(manage.export_url.is_none());
+    assert!(manage.export_url().is_none());
     assert_eq!(stage(&p), Some(password_stage()));
 }
 
@@ -384,7 +408,7 @@ fn fail_probe(message: &str, has_password: Option<bool>) -> Option<TransferStage
     if let Some(has_password) = has_password {
         password_state(&mut p, has_password);
     }
-    assert!(p.0.session.payments.gifts_manage.export_url.is_none());
+    assert!(p.0.session.payments.gifts_manage.export_url().is_none());
     stage(&p)
 }
 
@@ -420,6 +444,7 @@ fn a_second_transfer_click_sends_nothing() {
         TransferStage::ConfirmPeer {
             user_id: 21,
             name: "Maya".into(),
+            error: None,
         },
     );
     p.0.transfer_picked_gift().unwrap();
@@ -429,4 +454,130 @@ fn a_second_transfer_click_sends_nothing() {
     set_stage(&mut p, "open", TransferStage::ConfirmExport);
     assert!(p.0.probe_gift_export().is_err());
     assert_eq!(count(&p.1, "getUpgradedGiftWithdrawalUrl"), 0);
+}
+
+#[test]
+fn cancel_waits_for_the_transfer_and_the_answer_still_opens_the_chat() {
+    let mut p = parts();
+    open_my_gifts(&mut p);
+    set_stage(
+        &mut p,
+        "open",
+        TransferStage::ConfirmPeer {
+            user_id: 21,
+            name: "Maya".into(),
+            error: None,
+        },
+    );
+    let extra = p.0.transfer_picked_gift().unwrap();
+    assert!(matches!(
+        stage(&p),
+        Some(TransferStage::Transferring { user_id: 21, .. })
+    ));
+    // Cancel or Esc while the transfer is out does nothing.
+    if let Some(picker) = p.0.session.payments.gifts_manage.transfer_mut() {
+        picker.back();
+    }
+    assert!(matches!(
+        stage(&p),
+        Some(TransferStage::Transferring { .. })
+    ));
+    feed(&mut p, json!({"@type": "ok", "@extra": extra.as_extra()}));
+    let manage = &p.0.session.payments.gifts_manage;
+    assert!(manage.flow.is_none());
+    let moved = manage.transferred().expect("the toast and chat");
+    assert_eq!((moved.user_id, moved.recipient.as_str()), (21, "Maya"));
+}
+
+#[test]
+fn a_failed_transfer_returns_to_the_confirmation() {
+    let mut p = parts();
+    open_my_gifts(&mut p);
+    set_stage(
+        &mut p,
+        "open",
+        TransferStage::ConfirmPeer {
+            user_id: 21,
+            name: "Maya".into(),
+            error: None,
+        },
+    );
+    let extra = p.0.transfer_picked_gift().unwrap();
+    feed(
+        &mut p,
+        json!({"@type": "error", "@extra": extra.as_extra(), "code": 400, "message": "BAD"}),
+    );
+    // The reason is in the confirmation, not under the dialog.
+    assert!(matches!(
+        stage(&p),
+        Some(TransferStage::ConfirmPeer { user_id: 21, error: Some(ref reason), .. })
+            if reason.starts_with("Couldn't transfer the gift")
+    ));
+    assert!(p.0.session.payments.hub.received.notice.is_none());
+    assert!(!p.0.session.payments.hub.received.op.is_mutating());
+}
+
+/// 05-119: the answer of an export the user left (its picker closed, then
+/// another opened and submitted) unlocks and opens nothing in the new one.
+#[test]
+fn a_late_export_answer_acts_on_nothing_the_new_box_did_not_ask() {
+    let mut p = parts();
+    open_my_gifts(&mut p);
+    set_stage(&mut p, "open", password_stage());
+    let first = p.0.export_picked_gift(PASSWORD).unwrap();
+    // The picker goes (a switch back, a reopened list) and a new one asks.
+    p.0.session.payments.gifts_manage.flow = None;
+    set_stage(&mut p, "open", password_stage());
+    let second = p.0.export_picked_gift(PASSWORD).unwrap();
+    assert_ne!(first, second);
+    feed(
+        &mut p,
+        json!({"@type": "temporaryPasswordState", "@extra": first.as_extra(),
+            "has_password": true, "valid_for": 60}),
+    );
+    assert_eq!(count(&p.1, "getUpgradedGiftWithdrawalUrl"), 0);
+    // The first one failing leaves the second one waiting.
+    feed(
+        &mut p,
+        json!({"@type": "error", "@extra": first.as_extra(), "code": 400,
+            "message": "PASSWORD_HASH_INVALID"}),
+    );
+    assert_eq!(
+        stage(&p),
+        Some(TransferStage::Password {
+            send: ExportSend::Out(second),
+            error: None
+        })
+    );
+    // The second one's own answer goes on.
+    feed(
+        &mut p,
+        json!({"@type": "temporaryPasswordState", "@extra": second.as_extra(),
+            "has_password": true, "valid_for": 60}),
+    );
+    assert_eq!(count(&p.1, "getUpgradedGiftWithdrawalUrl"), 1);
+}
+
+/// 05-118: a transfer's ok closes the picker that sent it, not a flow
+/// opened since.
+#[test]
+fn a_transfer_ok_leaves_a_different_open_flow_alone() {
+    let mut p = parts();
+    open_my_gifts(&mut p);
+    set_stage(
+        &mut p,
+        "open",
+        TransferStage::ConfirmPeer {
+            user_id: 21,
+            name: "Maya".into(),
+            error: None,
+        },
+    );
+    let extra = p.0.transfer_picked_gift().unwrap();
+    // The picker is replaced by a resale form before the ok lands.
+    p.0.session.payments.gifts_manage.flow = Some(GiftFlow::resale("open".into()));
+    feed(&mut p, json!({"@type": "ok", "@extra": extra.as_extra()}));
+    let manage = &p.0.session.payments.gifts_manage;
+    assert!(matches!(manage.flow, Some(GiftFlow::Resale { .. })));
+    assert_eq!(manage.transferred(), None);
 }

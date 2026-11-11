@@ -22,6 +22,9 @@
 mod bgra;
 mod clock;
 mod decode_loop;
+mod decoding;
+mod presenting;
+use presenting::Presenting;
 mod ffi;
 mod nv12;
 mod present;
@@ -348,6 +351,9 @@ struct AudioShared {
     /// generation it belongs to, in one word so that neither is read
     /// without the other ([`PlayedMark`]).
     played: AtomicU64,
+    /// The output's state, the one value the decode thread and the tap
+    /// share: true until the last sample pulled was decoded sound (not
+    /// underrun silence).
     starved: AtomicBool,
 }
 
@@ -471,8 +477,6 @@ pub struct AudioTap {
     gap: usize,
     gap_at: usize,
     generation: u64,
-    /// Whether the last sample was real sound (not underrun silence).
-    sounding: bool,
 }
 
 impl AudioTap {
@@ -486,7 +490,7 @@ impl AudioTap {
 
     /// Whether the last sample pulled was decoded sound.
     pub fn sounding(&self) -> bool {
-        self.sounding
+        !self.shared.starved.load(Ordering::Acquire)
     }
 
     /// The next interleaved sample (silence while starved).
@@ -599,11 +603,8 @@ impl AudioTap {
         );
     }
 
-    fn set_sounding(&mut self, sounding: bool) {
-        if self.sounding != sounding {
-            self.sounding = sounding;
-            self.shared.starved.store(!sounding, Ordering::Release);
-        }
+    fn set_sounding(&self, sounding: bool) {
+        self.shared.starved.store(!sounding, Ordering::Release);
     }
 }
 
@@ -634,25 +635,19 @@ struct State {
     video_cap: usize,
     /// The picture layout asked for; the decode thread passes it on.
     output: PixelOutput,
-    seek: Option<f64>,
+    /// What the decode thread is doing, or why it is not.
+    decoding: decoding::Decoding,
     /// The player's clock. It lives here so the decode thread can pace
     /// pictures nobody paints on it.
     clock: Clock,
     /// Bumped by every seek: items decoded for an older one are dropped.
     epoch: u64,
-    eof: bool,
-    error: Option<String>,
-    stop: bool,
 }
 
 /// One clip: a decode thread plus the clock and the picture queue.
 pub struct Player {
     shared: Arc<Shared>,
-    /// No picture shown since the last seek (or open).
-    first: bool,
-    /// The newest picture handed out, for the end position.
-    last_pts: Option<f64>,
-    ended: bool,
+    presenting: Presenting,
     bgra: BgraPool,
     /// The decode thread. Dropping the player detaches it (it exits within
     /// one decode step); tests join it.
@@ -669,13 +664,10 @@ impl Drop for ExitReport {
     fn drop(&mut self) {
         let (tap, audio) = {
             let mut state = lock(&self.0.state);
-            if state.stop {
+            if state.decoding.is_stopped() {
                 return;
             }
-            if state.error.is_none() {
-                state.error = Some("Video playback stopped unexpectedly".to_string());
-            }
-            state.eof = true;
+            state.decoding.thread_died();
             state.video.clear();
             (state.tap.take(), state.audio.take())
         };
@@ -741,17 +733,14 @@ impl Player {
                 Ok(demuxer) => decode_loop::run(demuxer, thread_shared, want_audio),
                 Err(err) => {
                     let mut state = lock(&thread_shared.state);
-                    state.error = Some(err);
-                    state.eof = true;
+                    state.decoding.fail(err);
                 }
             }
         })
         .map_err(|err| err.to_string())?;
         Ok(Self {
             shared,
-            first: true,
-            last_pts: None,
-            ended: false,
+            presenting: Presenting::AwaitingFirst,
             bgra,
             #[cfg(test)]
             thread: Some(thread),
@@ -793,7 +782,7 @@ impl Player {
 
     /// Why the clip can't play (open or decode failure).
     pub fn error(&self) -> Option<String> {
-        lock(&self.shared.state).error.clone()
+        lock(&self.shared.state).decoding.error().cloned()
     }
 
     /// The clip's sound for an audio output, once (when it was asked for
@@ -833,7 +822,7 @@ impl Player {
     }
 
     pub fn play(&mut self) {
-        if self.ended {
+        if self.presenting.is_ended() {
             self.seek(0.0);
         }
         self.with_clock(|clock| clock.play(Instant::now()));
@@ -841,7 +830,7 @@ impl Player {
 
     pub fn pause(&mut self) {
         let now = Instant::now();
-        if !self.clock().held {
+        if !self.clock().is_held() {
             let position = self.position_at(now);
             self.with_clock(|clock| clock.follow(position, now));
         }
@@ -851,13 +840,13 @@ impl Player {
     /// Playing, and not run out.
     pub fn is_playing(&mut self) -> bool {
         self.update_ended(Instant::now());
-        self.clock().is_playing() && !self.ended
+        self.clock().is_playing() && !self.presenting.is_ended()
     }
 
     /// Ran out at the end (until the next seek).
     pub fn ended(&mut self) -> bool {
         self.update_ended(Instant::now());
-        self.ended
+        self.presenting.is_ended()
     }
 
     pub fn set_rate(&mut self, rate: f64) {
@@ -872,10 +861,9 @@ impl Player {
         };
         {
             let mut state = lock(&self.shared.state);
-            state.seek = Some(secs);
+            state.decoding.seek(secs);
             state.epoch += 1;
             state.video.clear();
-            state.eof = false;
             // Under the lock: the decode thread must not judge pictures of
             // the new position against where the sound was before the seek.
             if let Some(audio) = &state.audio {
@@ -884,9 +872,7 @@ impl Player {
         }
         self.shared.wake.notify_all();
         self.with_clock(|clock| clock.seek(secs, Instant::now()));
-        self.first = true;
-        self.ended = false;
-        self.last_pts = None;
+        self.presenting = Presenting::AwaitingFirst;
     }
 
     fn heard(&self) -> Option<f64> {
@@ -900,7 +886,7 @@ impl Player {
     fn position_at(&self, now: Instant) -> f64 {
         let clock = self.clock();
         let wall = clock.position(now);
-        let position = if clock.held || !clock.is_playing() {
+        let position = if clock.is_held() || !clock.is_playing() {
             wall
         } else {
             synced_position(wall, self.heard())
@@ -917,7 +903,7 @@ impl Player {
     }
 
     fn update_ended(&mut self, now: Instant) {
-        if self.ended {
+        if self.presenting.is_ended() {
             return;
         }
         // A clip nobody paints keeps its last picture queued; once the
@@ -927,7 +913,7 @@ impl Player {
         // pictures on the sound (`paint_floor`), so the clock follows it.
         // With no sound to follow, time starts once the picture is ready.
         let clock = self.clock();
-        if clock.held && clock.is_playing() {
+        if clock.is_held() && clock.is_playing() {
             if let Some(heard) = self.heard().filter(|&heard| heard > clock.position(now)) {
                 self.with_clock(|clock| clock.follow(heard, now));
             } else if !self.has_sound() && !lock(&self.shared.state).video.is_empty() {
@@ -936,21 +922,21 @@ impl Player {
         }
         let position = self.position_at(now);
         // Running without a picture shown since the seek: released above.
-        let running = !self.first || !self.clock().held;
+        let running = !self.presenting.awaiting_first() || !self.clock().is_held();
         let drained = {
             let state = lock(&self.shared.state);
             let passed = |last: &VideoFrame| running && last.pts <= position + DUE_SLACK;
-            state.eof && state.video.back().is_none_or(passed)
+            state.decoding.at_end() && state.video.back().is_none_or(passed)
         };
         if !drained {
             return;
         }
-        let no_picture_coming = self.first;
+        let no_picture_coming = self.presenting.awaiting_first();
         if no_picture_coming {
             self.with_clock(|clock| clock.release(now));
         }
         let sound_done = self.audio().is_none_or(|audio| audio.drained());
-        let end = self.duration().or(self.last_pts);
+        let end = self.duration().or(self.presenting.last_pts());
         let reached =
             no_picture_coming || end.is_none_or(|end| self.position_at(now) + DUE_SLACK >= end);
         if sound_done && reached {
@@ -960,7 +946,7 @@ impl Player {
                 clock.follow(end, now);
                 clock.pause(now);
             });
-            self.ended = true;
+            self.presenting.end();
         }
     }
 }
@@ -969,7 +955,7 @@ impl Drop for Player {
     fn drop(&mut self) {
         let tap = {
             let mut state = lock(&self.shared.state);
-            state.stop = true;
+            state.decoding.stop();
             state.tap.take()
         };
         // An untaken sound end goes too (its drop wakes the thread).

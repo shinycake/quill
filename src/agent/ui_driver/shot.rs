@@ -130,6 +130,32 @@ impl Limiter {
         self.taken.push_back(now_ms);
         Ok(())
     }
+
+    /// Give back the slot reserved at `at_ms`: the screenshot was never
+    /// taken, so it must not count against the limits.
+    pub fn release(&mut self, at_ms: u64) {
+        if let Some(index) = self.taken.iter().rposition(|at| *at == at_ms) {
+            self.taken.remove(index);
+        }
+    }
+}
+
+/// A reserved screenshot. Dropping it gives the slot back to the limiter;
+/// [`Slot::keep`] is for the picture that was taken.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Slot(u64);
+
+impl Slot {
+    /// The picture was taken: the slot stays counted.
+    pub fn keep(self) {
+        std::mem::forget(self);
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        crate::locks::lock_or_recover(&LIMITER).release(self.0);
+    }
 }
 
 static LIMITER: Mutex<Limiter> = Mutex::new(Limiter {
@@ -145,9 +171,12 @@ fn now_ms() -> u64 {
 }
 
 /// Count a screenshot against the limits, or say when the next is allowed.
-pub fn reserve() -> Result<(), String> {
+/// The slot goes back when the returned [`Slot`] is dropped without `keep`.
+pub fn reserve() -> Result<Slot, String> {
+    let at = now_ms();
     crate::locks::lock_or_recover(&LIMITER)
-        .reserve(now_ms())
+        .reserve(at)
+        .map(|()| Slot(at))
         .map_err(rate_limited)
 }
 
@@ -192,6 +221,21 @@ mod tests {
         assert_eq!(limiter.reserve(10_000), Ok(()));
         assert_eq!(limiter.reserve(10_400), Err(600));
         assert_eq!(limiter.reserve(11_000), Ok(()));
+    }
+
+    #[test]
+    fn a_released_slot_does_not_count() {
+        let mut limiter = Limiter::default();
+        assert_eq!(limiter.reserve(10_000), Ok(()));
+        assert_eq!(limiter.reserve(10_100), Err(900));
+        limiter.release(10_000);
+        assert_eq!(limiter.reserve(10_100), Ok(()));
+        limiter.release(5);
+        assert_eq!(
+            limiter.reserve(10_200),
+            Err(900),
+            "an unknown slot changes nothing"
+        );
     }
 
     #[test]

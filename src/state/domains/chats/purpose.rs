@@ -44,32 +44,36 @@ pub enum ChatsPurpose {
     /// and Report work on the first tap. The chat joins the session but is
     /// not opened.
     EnsurePrivateChat,
-    /// `getInstalledBackgrounds`. Response is `backgrounds`
-    /// (`Session::installed_backgrounds`).
-    GetInstalledBackgrounds,
+    /// `getInstalledBackgrounds` for a theme. Response is `backgrounds`
+    /// (`ChatsState::installed_backgrounds`, under `for_dark_theme`).
+    GetInstalledBackgrounds { for_dark_theme: bool },
     /// `setDefaultBackground`. Response is `background`
-    /// (`Session::default_backgrounds`).
-    SetDefaultBackground,
-    /// `deleteDefaultBackground`. Response is `ok`.
-    DeleteDefaultBackground,
+    /// (`Session::default_backgrounds`) under `for_dark_theme`, the theme this
+    /// request was sent for.
+    SetDefaultBackground { for_dark_theme: bool },
+    /// `deleteDefaultBackground`. Response is `ok`; the wallpaper leaves
+    /// `default_backgrounds` when it arrives.
+    DeleteDefaultBackground { for_dark_theme: bool },
     /// `removeInstalledBackground`. Response is `ok`; the entry leaves the
-    /// list optimistically at send time.
-    RemoveInstalledBackground,
+    /// list when it arrives.
+    RemoveInstalledBackground { background_id: i64 },
     /// `setDefaultBackground` with a local image (`inputBackgroundLocal`).
     /// Response is `background`, stored like `SetDefaultBackground`.
-    SetDefaultBackgroundLocal,
+    SetDefaultBackgroundLocal { for_dark_theme: bool },
     /// `searchBackground` for a `bg/` link. Response is `background`
     /// (`ChatsState::background_search`).
     SearchBackground,
     /// `setChatBackground`. Response is `ok`; `updateChatBackground`
     /// carries the new wallpaper.
     SetChatBackground,
-    /// `deleteChatBackground`. Response is `ok`.
+    /// `deleteChatBackground`. Response is `ok`; the wallpaper leaves the
+    /// chat when it arrives.
     DeleteChatBackground,
     /// `setChatTheme`. Response is `ok`; `updateChatTheme` carries it.
     SetChatTheme,
     /// `getBackgroundUrl` for the wallpaper preview's Share. Response is
-    /// `httpUrl` (`Session::chats_state.background_url`).
+    /// `httpUrl`, taken by the preview that asked
+    /// (`Session::chats_state.background_answers`, keyed by request).
     GetBackgroundUrl,
     /// `setChatAccentColor`: a channel's name color and reply icon.
     /// Response is `ok`; `updateChatAccentColors` carries the result.
@@ -89,11 +93,6 @@ flat_purposes!(Chats(ChatsPurpose) {
     RemoveBusinessBotFromChat,
     CreatePrivateChat,
     EnsurePrivateChat,
-    GetInstalledBackgrounds,
-    SetDefaultBackground,
-    DeleteDefaultBackground,
-    RemoveInstalledBackground,
-    SetDefaultBackgroundLocal,
     SearchBackground,
     SetChatBackground,
     DeleteChatBackground,

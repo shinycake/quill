@@ -23,7 +23,7 @@ pub(super) fn paragraph_text(
     first_index: usize,
     msg_key: (i64, u64),
     is_caption: bool,
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &super::revealed::Revealed,
     emoji_paths: &HashMap<i64, ImageSource>,
     layered: &HashMap<i64, StickerView>,
 ) -> ParagraphText {
@@ -49,7 +49,7 @@ pub(super) fn paragraph_text(
             (first_index + offset) as u64,
             is_caption,
         );
-        let hidden = style.spoiler && !revealed.contains(&key);
+        let hidden = style.spoiler && !revealed.spoiler_shown(&key);
         // A resolved custom emoji (animated first) becomes a placeholder
         // glyph; unresolved ones and hidden spoilers keep their text.
         let visual = run.custom_emoji_id.filter(|_| !hidden).and_then(|id| {

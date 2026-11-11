@@ -32,6 +32,14 @@ impl QuillApp {
         self.account.passcode.is_locked()
     }
 
+    /// The one rule for `session.app_active` (docs/decisions/
+    /// lock-is-a-render-state.md section 4): a locked Quill is not looked
+    /// at, whichever window has the focus. The on-screen account and the
+    /// background accounts both take it from here.
+    pub(in crate::ui) fn looked_at(&self, window_focused: bool) -> bool {
+        window_focused && !self.refused_while_locked()
+    }
+
     /// Locked: the pumps that turn a stored request or answer into
     /// something shown or started do not run, and what they would drain
     /// stays where it is for the first pass after the unlock. The main
@@ -46,10 +54,19 @@ impl QuillApp {
     /// held for the unlock are taken again.
     pub(in crate::ui) fn set_locked(&mut self, locked: bool, cx: &mut Context<Self>) {
         self.account.passcode.set_lock_flag(locked);
+        // The GIF gate follows what is drawn: shut under the lock, open
+        // again for a panel left on its GIFs tab.
+        self.sync_gif_downloads();
         quill::wake::PASSCODE.poke();
         quill::wake::CHROME.poke();
         if !locked {
             quill::wake::LINKS.poke();
+        }
+        if locked {
+            // The lock layer draws no toast, so none can report its hover end.
+            self.connection
+                .toasts
+                .pointer_gone(std::time::Instant::now());
         }
         super::lock_layer::publish(locked, cx);
         // The demo apps share the process with the tests: only a real
@@ -100,6 +117,8 @@ impl QuillApp {
     /// Close or stop what the lock screen does not cover or must not keep
     /// running. Every surface the lock reaches is called from here.
     pub(super) fn close_for_lock(&mut self, cx: &mut Context<Self>) {
+        // A swipe the finger left or released does not run behind the lock.
+        self.chat_list.swipe.drop_gestures();
         // The microphone or camera stops, and nothing is sent: a round
         // video reaching its time limit would go out by itself.
         if self.recording_busy() {
@@ -113,9 +132,16 @@ impl QuillApp {
             }
             // Every window's context menus go too.
             app.dismiss_context_menus(cx);
+            // A held press on a history row never sees its release behind
+            // the lock screen: its drag ends here, and its poll loop with it.
+            app.message_ui.selection_drag.clear();
             // And its inline clips: a locked chat window runs no frame
             // upkeep, so a round video playing there kept its sound.
             app.players.inline_videos.leave_window(app.windows.scope);
+            // Its message widgets too: a locked window draws no history
+            // pass to say they left, so their runtimes would keep running
+            // and their public data being polled behind the lock screen.
+            app.widgets_left_window(app.windows.scope);
         });
         // A clip parked to play goes with the clips; a voice note or song
         // parked for its download plays on, as tdesktop's player does.
@@ -132,8 +158,17 @@ impl QuillApp {
         // in `switchToPip`); this runs with the main window minimized or
         // hidden too. A chat window's viewer keeps its own link.
         self.close_every_video_pip(cx);
-        // The device-linking scanner is a helper window with the camera on.
-        self.clear_device_qr();
+        // A replayed intro clip is drawn only by the unlocked window: its
+        // curtain, volume fade and pause stop running under the lock, so
+        // the clip would play its sound on behind it. It ends here.
+        if self.first_run.intro_player().is_some() || self.first_run.awaits_intro() {
+            self.first_run.finish();
+        }
+        // The device-linking scanner is a helper window with the camera on,
+        // and a scanned link waiting for consent is not kept under the lock.
+        // A link already sent stays (it holds only its request), so its
+        // answer still reaches the user and no second link is sent beside it.
+        self.leave_device_link();
         // A passkey ceremony box closes and its key is told to stop; its
         // PIN sheet would take focus from the passcode field.
         self.close_passkey_ceremony_for_lock();
@@ -142,7 +177,7 @@ impl QuillApp {
         self.close_cameras_for_lock(cx);
         // A key capture would take the first key of the passcode as a
         // binding: Settings > Shortcuts and the push-to-talk key.
-        self.preferences.keybinding_capture = None;
+        self.preferences.keybinding.end();
         self.group_call.ptt_capture = false;
         // Now Playing names the sender or the song: the OS controls go off.
         self.publish_now_playing();

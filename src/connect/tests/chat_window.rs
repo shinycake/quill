@@ -104,7 +104,7 @@ fn an_account_going_to_the_background_trims_the_chat_it_showed() {
     assert_eq!(h.history(ALICE).messages.len(), 80);
 
     h.driver.leave_for_background().unwrap();
-    assert_eq!(h.driver.session.open_chat, None);
+    assert_eq!(h.driver.session.open_chat_id(), None);
     assert_eq!(h.sent("closeChat", ALICE).len(), 1);
     assert_eq!(
         h.history(ALICE).messages.len(),
@@ -122,7 +122,7 @@ fn a_window_chat_opens_and_pages_beside_the_main_chat() {
 
     let window_page = h.driver.open_chat_window(BOB).unwrap().expect("first page");
     assert_eq!(
-        h.driver.session.open_chat,
+        h.driver.session.open_chat_id(),
         Some(ALICE),
         "the main window keeps its chat"
     );
@@ -213,7 +213,7 @@ fn moving_the_active_chat_to_a_window_leaves_the_main_window_empty() {
     h.driver.select_chat(BOB).unwrap();
     h.driver.open_chat_window(BOB).unwrap();
     h.driver.deselect_chat().unwrap();
-    assert_eq!(h.driver.session.open_chat, None);
+    assert_eq!(h.driver.session.open_chat_id(), None);
     assert!(
         h.sent("closeChat", BOB).is_empty(),
         "the window still shows it"
@@ -221,7 +221,7 @@ fn moving_the_active_chat_to_a_window_leaves_the_main_window_empty() {
     assert!(h.driver.session.chat_is_shown(BOB));
     // Nothing to deselect twice.
     h.driver.deselect_chat().unwrap();
-    assert_eq!(h.driver.session.open_chat, None);
+    assert_eq!(h.driver.session.open_chat_id(), None);
 }
 
 #[test]
@@ -271,7 +271,7 @@ fn a_chat_that_is_not_shown_cannot_page() {
 fn a_window_chat_runs_the_open_chat_follow_ups_without_moving_the_main_view() {
     let mut h = Harness::two_chats();
     h.driver.select_chat(ALICE).unwrap();
-    h.driver.session.open_topic = Some(5);
+    h.driver.session.open = h.driver.session.open.with_topic(5);
     h.driver.open_chat_window(BOB).unwrap();
     // The follow-ups ran for Bob (its pinned message was asked for) with
     // the main window's view untouched.
@@ -280,16 +280,65 @@ fn a_window_chat_runs_the_open_chat_follow_ups_without_moving_the_main_view() {
         1,
         "pinned messages asked for"
     );
-    assert_eq!(h.driver.session.open_chat, Some(ALICE));
-    assert_eq!(h.driver.session.open_topic, Some(5));
+    assert_eq!(h.driver.session.open_chat_id(), Some(ALICE));
+    assert_eq!(h.driver.session.open_forum_topic(), Some(5));
     // Inside `with_window_chat` the window's chat is the open one, with a
     // plain view (no topic); outside, the main window's view is back.
     let seen = h.driver.with_window_chat(BOB, |driver| {
-        (driver.session.open_chat, driver.session.open_topic)
+        (
+            driver.session.open_chat_id(),
+            driver.session.open_forum_topic(),
+        )
     });
     assert_eq!(seen, (Some(BOB), None));
-    assert_eq!(h.driver.session.open_chat, Some(ALICE));
-    assert_eq!(h.driver.session.open_topic, Some(5));
+    assert_eq!(h.driver.session.open_chat_id(), Some(ALICE));
+    assert_eq!(h.driver.session.open_forum_topic(), Some(5));
+}
+
+/// A channel in a chat window waits for `getMe` to learn its own
+/// membership; the answer continues the probe for that window's chat, not
+/// only the main window's.
+#[test]
+fn a_chat_windows_membership_probe_continues_when_getme_answers() {
+    let mut h = Harness::two_chats();
+    h.ingest(
+        r#"{"@type":"updateNewChat","chat":{"id":-1001,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":1,"is_channel":true},"unread_count":0}}"#,
+    );
+    h.driver.select_chat(ALICE).unwrap();
+    h.driver.open_chat_window(ChatId(-1001)).unwrap();
+    assert!(h.sent("getChatMember", ChatId(-1001)).is_empty());
+    let extra = h
+        .recorder
+        .snapshot()
+        .iter()
+        .filter_map(|j| serde_json::from_str::<Value>(j).ok())
+        .find(|v| v["@type"] == "getMe")
+        .and_then(|v| v["@extra"].as_str().map(str::to_string))
+        .expect("getMe asked");
+    h.ingest(&format!(
+        r#"{{"@type":"user","@extra":"{extra}","id":99,"first_name":"Me","type":{{"@type":"userTypeRegular"}}}}"#
+    ));
+    assert_eq!(h.sent("getChatMember", ChatId(-1001)).len(), 1);
+}
+
+/// The shared-media gallery is part of a window's view: one opened in a
+/// chat window is that chat's, and the main window's stays closed.
+#[test]
+fn a_gallery_opened_in_a_chat_window_belongs_to_that_window() {
+    let mut h = Harness::two_chats();
+    h.driver.select_chat(ALICE).unwrap();
+    h.driver.open_chat_window(BOB).unwrap();
+    let opened = h
+        .driver
+        .with_window_chat(BOB, |driver| driver.open_shared_media());
+    assert!(matches!(opened, Ok(true)));
+    let seen = h.driver.with_window_chat(BOB, |driver| {
+        let gallery = &driver.session.media.shared_media;
+        (gallery.open(), gallery.chat_id)
+    });
+    assert_eq!(seen, (true, Some(BOB)));
+    let main = &h.driver.session.media.shared_media;
+    assert!(!main.open() && main.chat_id.is_none());
 }
 
 #[test]
@@ -319,7 +368,7 @@ fn a_search_typed_in_a_chat_window_searches_its_chat_and_answers_there() {
         r#"{{"@type":"foundChatMessages","@extra":"{extra}","total_count":1,"next_from_message_id":0,"messages":[{}]}}"#,
         message_json(BOB.0, 60, false)
     ));
-    assert!(!h.driver.session.search.chat_search.open);
+    assert!(!h.driver.session.search.chat_search.is_open());
     let hits = h.driver.with_window_chat(BOB, |driver| {
         let state = &driver.session.search.chat_search;
         (state.chat_id, state.hits.len())
@@ -467,4 +516,41 @@ fn a_chat_windows_waiting_draft_survives_typing_and_sends_elsewhere() {
     h.driver.cancel_pending_draft_of(ALICE);
     assert!(h.driver.flush_pending_draft().unwrap().is_some());
     assert_eq!(h.sent("setChatDraftMessage", BOB).len(), 2);
+}
+
+#[test]
+fn a_failed_close_still_leaves_the_chat_the_main_window_cleared() {
+    let mut h = Harness::two_chats();
+    h.driver.select_chat(BOB).unwrap();
+    // The close cannot be sent, but the main window has cleared its chat:
+    // the session must not keep treating it as shown.
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let session = std::mem::replace(
+        &mut h.driver.session,
+        Session::new(AccountKey::primary(), sink),
+    );
+    let (_dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let mut broken = ConnectDriver::new(
+        session,
+        Arc::new(RefusesClose),
+        test_credentials(),
+        prepared,
+    );
+    let closed = broken.deselect_chat();
+    assert!(closed.is_err(), "the failure is still reported");
+    assert_eq!(broken.session.open_chat_id(), None);
+    assert!(!broken.session.chat_is_shown(BOB));
+}
+
+/// Refuses `closeChat`, as a client closing mid-switch does.
+struct RefusesClose;
+
+impl JsonSender for Arc<RefusesClose> {
+    fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
+        if request.contains("\"closeChat\"") {
+            Err(ConnectSendError::Native)
+        } else {
+            Ok(())
+        }
+    }
 }

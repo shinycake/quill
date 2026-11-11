@@ -22,23 +22,60 @@ use quill::folder_archive::{ARCHIVE_SIZE_LIMIT, ArchiveError, build_archive};
 use quill::lang::{keys, tr, trn};
 use std::path::PathBuf;
 
+/// The folder zip behind "Send as archive": at most one per composer, for
+/// the chat it was dropped in. It ends with the answer (landed or dropped)
+/// or with the screen, whose task and composer go together.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) enum ArchiveJob {
+    #[default]
+    Idle,
+    Building(SendSlot),
+}
+
+/// A file drag over the conversation. The paths are looked at off the UI
+/// thread, and an answer applies only while the drag still holds the paths
+/// it was asked for. A drag leaves to `Idle` when it ends (no active drag at
+/// the next draw) or its files are dropped.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) enum FileDrag {
+    #[default]
+    Idle,
+    /// Asked: what the paths hold is being probed.
+    Probing(Vec<PathBuf>),
+    /// Answered: the zones to offer (`None` when nothing is offered).
+    Probed {
+        paths: Vec<PathBuf>,
+        state: Option<DragState>,
+    },
+    /// A demo's fixed drop-zone state (no real drag in a screenshot).
+    Preview(DragState),
+}
+
+impl FileDrag {
+    fn paths(&self) -> &[PathBuf] {
+        match self {
+            FileDrag::Probing(paths) | FileDrag::Probed { paths, .. } => paths,
+            FileDrag::Idle | FileDrag::Preview(_) => &[],
+        }
+    }
+}
+
 impl QuillApp {
     /// Whether the open chat takes dropped files into its composer.
     pub(super) fn file_drop_enabled(&self) -> bool {
         matches!(self.pane_mode(), PaneMode::Ready)
             && self.composer_available(PaneMode::Ready)
             && !self.chat_ui.is_editing()
-            && !self.chat_ui.rich_editor_open
+            && !self.chat_ui.rich.editor_open()
             && !self.recording_active()
     }
 
     /// A file drag moved over the conversation: remember what it holds.
     pub(super) fn note_file_drag(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
-        if !self.file_drop_enabled() || self.composer_ui.drop_paths == paths {
+        if !self.file_drop_enabled() || self.composer_ui.file_drag.paths() == paths {
             return;
         }
-        self.composer_ui.drop_paths = paths.to_vec();
-        self.composer_ui.drop_state = None;
+        self.composer_ui.file_drag = FileDrag::Probing(paths.to_vec());
         // Each path is looked at on disk, which can stall on a network drive.
         let probed = paths.to_vec();
         self.run_off_ui_scoped_then(
@@ -47,8 +84,11 @@ impl QuillApp {
                 (probed, classify(&entries))
             },
             |this, (probed, state), cx| {
-                if this.composer_ui.drop_paths == probed {
-                    this.composer_ui.drop_state = state;
+                if this.composer_ui.file_drag.paths() == probed {
+                    this.composer_ui.file_drag = FileDrag::Probed {
+                        paths: probed,
+                        state,
+                    };
                     cx.notify();
                 }
             },
@@ -58,24 +98,23 @@ impl QuillApp {
 
     /// The zones to draw now: a live file drag, or a demo's fixed state.
     pub(super) fn visible_drop_state(&mut self, cx: &App) -> Option<DragState> {
-        if self.composer_ui.drop_preview.is_some() {
-            return self.composer_ui.drop_preview;
+        if let FileDrag::Preview(state) = self.composer_ui.file_drag {
+            return Some(state);
         }
         if !cx.has_active_drag() {
-            self.composer_ui.drop_state = None;
-            self.composer_ui.drop_paths.clear();
+            self.composer_ui.file_drag = FileDrag::Idle;
         }
-        self.composer_ui
-            .drop_state
-            .filter(|_| self.file_drop_enabled())
+        match self.composer_ui.file_drag {
+            FileDrag::Probed { state, .. } => state.filter(|_| self.file_drop_enabled()),
+            FileDrag::Idle | FileDrag::Probing(_) | FileDrag::Preview(_) => None,
+        }
     }
 
     /// Files dropped on the conversation outside any zone, or while the
     /// zones are off (editing): the usual attach, which picks media or
     /// documents by what was dropped.
     pub(super) fn drop_files_plain(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
-        self.composer_ui.drop_state = None;
-        self.composer_ui.drop_paths.clear();
+        self.composer_ui.file_drag = FileDrag::Idle;
         if self.file_drop_enabled() || self.chat_ui.is_editing() {
             self.attach_dropped_files(paths, cx);
         }
@@ -88,16 +127,40 @@ impl QuillApp {
         paths: &[PathBuf],
         cx: &mut Context<Self>,
     ) {
-        self.composer_ui.drop_state = None;
-        self.composer_ui.drop_paths.clear();
+        self.composer_ui.file_drag = FileDrag::Idle;
         if !self.file_drop_enabled() {
             return;
         }
-        let folder_files = match (action, paths) {
-            (DropAction::FolderFiles, [folder]) => folder_files_for_sending(folder),
-            _ => Vec::new(),
-        };
-        match plan_drop(action, paths, &folder_files) {
+        // A folder on a slow share is walked off the UI thread; its plan
+        // applies where it was dropped, if the person is still there.
+        if let (DropAction::FolderFiles, [folder]) = (action, paths) {
+            let Some(slot) = self.send_slot() else {
+                return;
+            };
+            let folder = folder.clone();
+            let kept = paths.to_vec();
+            self.run_off_ui_scoped_then(
+                move || folder_files_for_sending(&folder),
+                move |this, folder_files, cx| {
+                    if this.send_slot().as_ref() == Some(&slot) && this.file_drop_enabled() {
+                        this.apply_zone_drop(action, &kept, &folder_files, cx);
+                    }
+                },
+                cx,
+            );
+            return;
+        }
+        self.apply_zone_drop(action, paths, &[], cx);
+    }
+
+    fn apply_zone_drop(
+        &mut self,
+        action: DropAction,
+        paths: &[PathBuf],
+        folder_files: &[PathBuf],
+        cx: &mut Context<Self>,
+    ) {
+        match plan_drop(action, paths, folder_files) {
             // The usual attach makes a lone GIF a GIF.
             DropPlan::Attach(_) if matches!(paths, [only] if is_gif_path(only)) => {
                 self.attach_dropped_files(paths, cx);
@@ -125,6 +188,11 @@ impl QuillApp {
                 let Some(slot) = self.send_slot() else {
                     return;
                 };
+                // One zip at a time; its note is still showing.
+                if self.composer_ui.archive != ArchiveJob::Idle {
+                    return;
+                }
+                self.composer_ui.archive = ArchiveJob::Building(slot.clone());
                 self.set_note(StatusNote::silent(tr(keys::Q_MISC_PREPARING_THE_ARCHIVE)));
                 cx.notify();
                 let dir = quill::local_path::media_cache_base().join("archives");
@@ -150,13 +218,19 @@ impl QuillApp {
         built: Result<quill::scratch::OwnedFile, ArchiveError>,
         cx: &mut Context<Self>,
     ) {
+        self.composer_ui.archive = ArchiveJob::Idle;
+        // The person moved on to another chat (or account) while it was
+        // zipped: the result is dropped (an archive removes itself), and
+        // so is the note that said it was being prepared.
+        if self.send_slot().as_ref() != Some(&slot) {
+            if self.connection.note().text() == tr(keys::Q_MISC_PREPARING_THE_ARCHIVE) {
+                self.set_note(StatusNote::default());
+            }
+            cx.notify();
+            return;
+        }
         match built {
             Ok(archive) => {
-                // The person moved on to another chat (or account) while
-                // it was zipped: dropping it removes it.
-                if self.send_slot().as_ref() != Some(&slot) {
-                    return;
-                }
                 let path = archive.path().to_path_buf();
                 let Some(appended) = self.update_pending_attachments(|tray| {
                     ComposerAttachment::append_planned(tray, &[(path, AttachmentKind::Document)])
@@ -230,3 +304,8 @@ impl QuillApp {
             .into_any_element()
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "drop_zones_tests.rs"]
+mod tests;

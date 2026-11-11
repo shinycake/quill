@@ -16,13 +16,14 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             let chat = if channel { 13 } else { 11 };
             if channel && let Some(chat) = session.chats.get_mut(&13) {
-                chat.my_member_status =
-                    Some(quill::telegram::envelope::ChannelMemberStatus::Creator);
+                chat.assume_member_status(Some(
+                    quill::telegram::envelope::ChannelMemberStatus::Creator,
+                ));
             }
             session.open_chat(quill::ids::ChatId(chat));
         }
         // The box is the chat's (`ChatUi`): the view takes the chat first.
-        self.sync_chat_ui();
+        self.sync_chat_ui(cx);
         self.open_poll_dialog(window, cx);
         let Some(dialog) = self.chat_ui.poll_dialog.as_mut() else {
             return;

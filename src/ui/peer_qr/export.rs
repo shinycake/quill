@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::super::app::QuillApp;
+use super::Export;
 use super::qr_path::{QrGrid, qr_body};
 use base64::Engine as _;
 use gpui_kit::*;
@@ -322,7 +323,7 @@ impl QuillApp {
     ) -> Option<(ShownLink, Picture)> {
         let view = self.qr_view()?;
         let open = self.peer_qr.open.as_ref()?;
-        if open.exporting {
+        if open.export.is_rendering() {
             return None;
         }
         let shown = match open.state.check_share(view.shown.clone(), now_unix()) {
@@ -335,14 +336,14 @@ impl QuillApp {
             }
         };
         let card = card_layout(CARD_WIDTH, view.peer_box());
-        let (stills, tiles) = match &open.state.gift {
+        let (stills, tiles) = match open.state.gift() {
             Some(gift) => gift_picture(
                 self.qr_gift_model(gift).map(|(image, _)| image),
                 self.qr_gift_symbol(gift).map(|(image, _)| image),
                 &card,
             ),
             None => {
-                let stills = super::plain_picks(&open.state.emoji)
+                let stills = super::plain_picks(open.state.emoji())
                     .iter()
                     .filter_map(|emoji| self.qr_emoji_still(emoji))
                     .collect::<Vec<_>>();
@@ -387,7 +388,15 @@ impl QuillApp {
             return false;
         };
         match open.state.check_share(view.shown, now_unix()) {
-            Ok(shown) => shown.link == link && view.appearance == *appearance,
+            Ok(shown) => {
+                let same = shown.link == link && view.appearance == *appearance;
+                if !same {
+                    // The box changed while the picture was made: say so
+                    // rather than let the press go nowhere.
+                    self.show_qr_toast(QrToast::Changed, cx);
+                }
+                same
+            }
             Err(toast) => {
                 if let Some(toast) = toast {
                     self.show_qr_toast(toast, cx);
@@ -424,12 +433,11 @@ impl QuillApp {
         let Some(open) = self.peer_qr.open.as_mut() else {
             return;
         };
-        open.exporting = true;
         let box_id = open.state.id;
         let renderer = cx.svg_renderer();
         let link = picture.link.clone();
         let appearance = picture.appearance.clone();
-        self.run_off_ui_then(
+        let rendering = self.run_off_ui_held(
             move || render_png(&renderer, &picture).and_then(finish),
             move |this, result, cx| {
                 // A box opened since then, even for the same link, is not
@@ -441,7 +449,7 @@ impl QuillApp {
                     .filter(|open| open.state.id == box_id);
                 let same_box = open.is_some();
                 if let Some(open) = open {
-                    open.exporting = false;
+                    open.export = Export::Idle;
                 }
                 let current = same_box && this.qr_image_current(&link, &appearance, cx);
                 done(this, result, current, cx);
@@ -449,6 +457,9 @@ impl QuillApp {
             },
             cx,
         );
+        if let Some(open) = self.peer_qr.open.as_mut() {
+            open.export = Export::Rendering(rendering);
+        }
         cx.notify();
     }
 
@@ -501,7 +512,10 @@ impl QuillApp {
                     }
                     return;
                 };
-                open.share_image = image;
+                open.share = super::QrShare::Chooser {
+                    window: from,
+                    image,
+                };
                 this.as_asked_by(from, |this| {
                     this.in_asking_window(cx, |this, _| this.share.link_text = Some(shown.link));
                 });

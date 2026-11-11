@@ -57,12 +57,20 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// monoforum it lists).
     pub(crate) fn maybe_preload_direct_topics(&mut self, chat_id: ChatId) {
         if !self.session.is_direct_messages_admin(chat_id)
-            || self.session.threads.direct.requested.contains(&chat_id.0)
+            || !self.session.threads.direct.never_asked(chat_id.0)
         {
             return;
         }
-        if matches!(self.load_more_direct_topics(chat_id), Ok(Some(_))) {
-            self.session.threads.direct.requested.insert(chat_id.0);
+        let _ = self.load_more_direct_topics(chat_id);
+    }
+
+    /// Opening an administered direct messages chat whose first page failed
+    /// asks for it again.
+    pub(crate) fn retry_direct_topics_on_open(&mut self, chat_id: ChatId) {
+        if self.session.is_direct_messages_admin(chat_id)
+            && !self.session.threads.direct.preloaded(chat_id.0)
+        {
+            let _ = self.load_more_direct_topics(chat_id);
         }
     }
 
@@ -75,14 +83,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::LoadDirectMessagesChatTopics;
-        if self.session.threads.direct.exhausted.contains(&chat_id.0)
+        if self.session.threads.direct.exhausted(chat_id.0)
             || self.session.requests.has_purpose_for_chat(purpose, chat_id)
         {
             return Ok(None);
         }
         let extra = self.session.request(purpose, Some(chat_id));
         let json = load_direct_messages_chat_topics(extra, chat_id, DIRECT_TOPICS_PAGE);
-        self.send_json_request(extra, &json).map(Some)
+        let sent = self.send_json_request(extra, &json).map(Some);
+        if sent.is_ok() {
+            self.session.threads.direct.page_asked(chat_id.0);
+        }
+        sent
     }
 
     /// Show one conversation (or All) and load its first page.
@@ -123,7 +135,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             topic.unread_count > 0,
             topic.last_message_id,
         );
+        // The two halves are independent: a refused one does not stop the
+        // other. The call fails only when nothing went out, so a half that
+        // landed is not reported as a failure (the other half stays visible
+        // and can be asked again).
         let mut sent = None;
+        let mut refused = None;
         if marked == read {
             let purpose =
                 RequestPurpose::Threads(ThreadsPurpose::SetDirectMessagesChatTopicMarkedAsUnread {
@@ -132,7 +149,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             let extra = self.session.request(purpose, Some(chat_id));
             let json =
                 set_direct_messages_chat_topic_is_marked_as_unread(extra, chat_id, topic_id, !read);
-            sent = Some(self.send_json_request(extra, &json)?);
+            match self.send_json_request(extra, &json) {
+                Ok(id) => sent = Some(id),
+                Err(err) => refused = Some(err),
+            }
         }
         if read && unread && last != 0 {
             let purpose =
@@ -145,9 +165,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                 "messageSourceDirectMessagesChatTopicHistory",
                 true,
             );
-            sent = Some(self.send_json_request(extra, &json)?);
+            match self.send_json_request(extra, &json) {
+                Ok(id) => sent = Some(id),
+                Err(err) => refused = Some(err),
+            }
         }
-        Ok(sent)
+        match (sent, refused) {
+            (None, Some(err)) => Err(err),
+            (sent, _) => Ok(sent),
+        }
     }
 
     /// "Delete chat": every message of the conversation

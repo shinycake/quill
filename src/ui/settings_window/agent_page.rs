@@ -72,6 +72,15 @@ impl SearchableListItem for ChatChoice {
 
 pub(in crate::ui) type ChatPicker = Entity<SelectState<SearchableVec<ChatChoice>>>;
 
+/// The "Add a chat" picker with the chats it was built from (the account,
+/// a fingerprint of the ids and titles it lists, and the ids it leaves
+/// out), so it is rebuilt only when they change: a renamed chat or one
+/// swapped for another counts, not only a different number of chats.
+pub(in crate::ui) struct BuiltPicker {
+    pub(in crate::ui) select: ChatPicker,
+    key: (AccountKey, u64, Vec<i64>),
+}
+
 /// What the activity list shows.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(in crate::ui) struct ActivityFilter {
@@ -90,10 +99,10 @@ pub(in crate::ui) struct AgentPageUi {
     pub(in crate::ui) scroll_to: Option<Spot>,
     pub(in crate::ui) focus_chat: Option<i64>,
     pub(in crate::ui) filter: ActivityFilter,
-    pub(in crate::ui) picker: Option<ChatPicker>,
-    /// The chats the picker was built from (the account, their count and
-    /// the ids it leaves out), so it is rebuilt only when they change.
-    picker_key: Option<(AccountKey, usize, Vec<i64>)>,
+    /// How many activity rows show: it grows with Show more and starts
+    /// over with the filter, the account and each visit.
+    pub(in crate::ui) activity_shown: usize,
+    pub(in crate::ui) picker: Option<BuiltPicker>,
     /// The "Reset the agent token?" dialog is open.
     pub(in crate::ui) reset_confirm: bool,
 }
@@ -113,10 +122,22 @@ impl AgentPageUi {
             scroll_to: None,
             focus_chat: None,
             filter: ActivityFilter::default(),
+            activity_shown: super::super::agent_state::ACTIVITY_PAGE,
             picker: None,
-            picker_key: None,
             reset_confirm: false,
         }
+    }
+
+    /// Unfiltered, with the first page of rows.
+    pub(in crate::ui) fn reset_activity(&mut self) {
+        self.filter = ActivityFilter::default();
+        self.activity_shown = super::super::agent_state::ACTIVITY_PAGE;
+    }
+
+    /// Change the filter; the rows start from the first page again.
+    pub(in crate::ui) fn set_filter(&mut self, change: impl FnOnce(&mut ActivityFilter)) {
+        change(&mut self.filter);
+        self.activity_shown = super::super::agent_state::ACTIVITY_PAGE;
     }
 
     pub(in crate::ui) fn anchor(&self, spot: Spot) -> Option<ScrollAnchor> {
@@ -391,7 +412,6 @@ impl QuillApp {
     fn ensure_agent_chat_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.agent_settings_on_open_account() {
             self.agent_ui.page.picker = None;
-            self.agent_ui.page.picker_key = None;
             return;
         }
         let account = self.agent_settings_account();
@@ -400,10 +420,16 @@ impl QuillApp {
             .keys()
             .copied()
             .collect();
-        let count = self.session().map_or(0, |s| s.chats.len());
-        let key = (account, count, added.clone());
-        if self.agent_ui.page.picker_key.as_ref() == Some(&key)
-            && self.agent_ui.page.picker.is_some()
+        let listed = self
+            .session()
+            .map_or(0, |s| listed_chats_fingerprint(s.chats.values(), &added));
+        let key = (account, listed, added.clone());
+        if self
+            .agent_ui
+            .page
+            .picker
+            .as_ref()
+            .is_some_and(|built| built.key == key)
         {
             return;
         }
@@ -422,9 +448,9 @@ impl QuillApp {
             })
             .unwrap_or_default();
         choices.sort_by_cached_key(|choice| (choice.title.to_lowercase(), choice.id));
-        self.agent_ui.page.picker_key = Some(key);
-        if let Some(picker) = self.agent_ui.page.picker.clone() {
-            picker.update(cx, |picker, cx| {
+        if let Some(built) = self.agent_ui.page.picker.as_mut() {
+            built.key = key;
+            built.select.update(cx, |picker, cx| {
                 picker.set_items(SearchableVec::new(choices), window, cx);
             });
             return;
@@ -444,7 +470,10 @@ impl QuillApp {
             },
         )
         .detach();
-        self.agent_ui.page.picker = Some(picker);
+        self.agent_ui.page.picker = Some(BuiltPicker {
+            select: picker,
+            key,
+        });
     }
 
     /// Leaving the page: forget the chat it was opened for and the picker.
@@ -452,7 +481,7 @@ impl QuillApp {
         self.agent_ui.page.focus_chat = None;
         self.agent_ui.page.scroll_to = None;
         self.agent_ui.page.picker = None;
-        self.agent_ui.page.picker_key = None;
+        self.agent_ui.page.activity_shown = super::super::agent_state::ACTIVITY_PAGE;
     }
 
     /// The chat menus' "Agent access": the page, scrolled to `chat_id`'s
@@ -474,7 +503,7 @@ impl QuillApp {
         }) {
             return;
         }
-        self.agent_ui.picked = None;
+        self.agent_ui.pick_account(None);
         self.open_settings(Some(Page::AgentAccess), cx);
         self.agent_ui.page.focus_chat = Some(chat_id);
         self.agent_ui.page.scroll_to = Some(Spot::FocusChat);
@@ -568,6 +597,23 @@ crate::ui::screenshot_demo::register_demos![
         }
     ),
 ];
+
+/// An order-free fingerprint of the chats the "Add a chat" picker lists
+/// (not yet granted, with a title): it changes when one is renamed, joins or
+/// leaves, even when their number stays the same.
+fn listed_chats_fingerprint<'a>(
+    chats: impl Iterator<Item = &'a quill::state::ChatSummary>,
+    granted: &[i64],
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    chats
+        .filter(|chat| !granted.contains(&chat.id.0) && !chat.title.trim().is_empty())
+        .fold(0u64, |sum, chat| {
+            let mut hasher = std::hash::DefaultHasher::new();
+            (chat.id.0, &chat.title).hash(&mut hasher);
+            sum.wrapping_add(hasher.finish())
+        })
+}
 
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]

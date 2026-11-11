@@ -1,6 +1,6 @@
 //! Connect driver: privacy, notifications, sessions, storage, account.
 use super::*;
-use crate::data_settings::{AutoDownloadNetSettings, NetworkKind, save_data_storage_prefs};
+use crate::data_settings::{AutoDownloadNetSettings, NetworkKind, Seed, save_data_storage_prefs};
 use crate::ids::{ChatId, RequestId};
 use crate::notify::NotificationSoundKind;
 use crate::privacy::{PrivacyKeyState, PrivacyRuleDetail};
@@ -44,23 +44,31 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session
+        let busy = self
+            .session
             .settings
             .privacy
-            .insert(key, PrivacyKeyState::Loading);
+            .get(&key)
+            .is_some_and(|state| {
+                matches!(
+                    state,
+                    PrivacyKeyState::Loading { .. } | PrivacyKeyState::Saving { .. }
+                )
+            });
+        if busy {
+            return Ok(());
+        }
         let extra = self.session.request(
             RequestPurpose::Settings(SettingsPurpose::GetPrivacyRules { key }),
             None,
         );
+        self.session.settings.begin_privacy_load(key, extra);
         if let Err(err) = self
             .sender
             .send_json(&get_privacy_rules(extra, key.td_type()))
         {
             self.session.requests.take(extra);
-            self.session
-                .settings
-                .privacy
-                .insert(key, PrivacyKeyState::Failed);
+            self.session.settings.fail_privacy_load(key, Some(extra));
             return Err(err);
         }
         Ok(())
@@ -87,17 +95,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&set_privacy_rules(extra, key.td_type(), rules))
         {
             self.session.requests.take(extra);
-            self.session
-                .settings
-                .privacy
-                .insert(key, PrivacyKeyState::Failed);
             return Err(err);
         }
         self.session.mirror_call_privacy(key, &detail);
-        self.session
-            .settings
-            .privacy
-            .insert(key, PrivacyKeyState::Ready(detail));
+        self.session.settings.begin_privacy_save(key, detail, extra);
         Ok(extra)
     }
 
@@ -107,8 +108,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.read_date_loading = true;
-        self.session.settings.read_date_error = false;
+        // A set in flight already holds the value the server will have;
+        // a get answered after it would undo the user's change.
+        if self.session.settings.read_date.setting() {
+            return Ok(());
+        }
         let extra = self
             .session
             .request(RequestPurpose::GetReadDatePrivacy, None);
@@ -117,10 +121,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&get_read_date_privacy_settings(extra))
         {
             self.session.requests.take(extra);
-            self.session.settings.read_date_loading = false;
-            self.session.settings.read_date_error = true;
+            self.session.settings.read_date.send_refused();
             return Err(err);
         }
+        self.session.settings.read_date.start_get(extra);
         Ok(())
     }
 
@@ -139,12 +143,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&set_read_date_privacy_settings(extra, show))
         {
             self.session.requests.take(extra);
-            self.session.settings.read_date_loading = false;
-            self.session.settings.read_date_error = true;
+            self.session.settings.read_date.send_refused();
             return Err(err);
         }
-        self.session.settings.read_date_show = Some(show);
-        self.session.settings.read_date_loading = true;
+        // A get still in flight is superseded: its answer no longer lands.
+        self.session.settings.read_date.start_set(extra, show);
         Ok(extra)
     }
 
@@ -155,6 +158,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        // One page at a time: the answer of the one out decides the next.
+        if self.session.settings.blocked_senders.is_loading() {
+            return Ok(());
+        }
         let offset = self
             .session
             .settings
@@ -162,10 +169,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .data()
             .map(|list| list.len())
             .unwrap_or(0);
+        if offset == 0 {
+            self.session.settings.restart_blocked_list();
+        }
         self.session.settings.blocked_senders.begin();
         let extra = self.session.request(
             RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
                 offset: offset as i32,
+                generation: self.session.settings.blocked_generation,
             }),
             None,
         );
@@ -270,6 +281,14 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// (`badge_prefs.json`) next to the account.
     pub fn save_badge_prefs(&mut self) -> std::io::Result<()> {
         save_badge_prefs(&self.paths, &self.session.settings.badge_prefs)
+    }
+
+    /// Save `prefs` and, once they are on disk, apply them to the session:
+    /// a failed save leaves the value the switch shows as it was.
+    pub fn set_badge_prefs(&mut self, prefs: crate::settings::BadgePrefs) -> std::io::Result<()> {
+        save_badge_prefs(&self.paths, &prefs)?;
+        self.session.settings.badge_prefs = prefs;
+        Ok(())
     }
 
     /// Parity slice: persist the in-app notification sounds toggle

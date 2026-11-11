@@ -63,8 +63,8 @@ impl Session {
         let in_place_window = self.view_in_place();
         let in_place = ShownView {
             window: in_place_window,
-            open_chat: self.open_chat,
-            open_topic: self.open_topic,
+            open_chat: self.open_chat_id(),
+            open_topic: self.open_forum_topic(),
             thread: self.threads.thread.as_ref(),
             saved_sublist: self.threads.saved.sublist.as_ref(),
             saved_tag_search: self.threads.saved.tag_search.as_ref(),
@@ -76,8 +76,8 @@ impl Session {
             .stored()
             .map(move |(key, view)| ShownView {
                 window: (Some(*key) != in_place_window).then_some(*key),
-                open_chat: view.open_chat,
-                open_topic: view.open_topic,
+                open_chat: view.open.chat(),
+                open_topic: view.open.topic(),
                 thread: view.thread.as_ref(),
                 saved_sublist: view.saved_sublist.as_ref(),
                 saved_tag_search: view.saved_tag_search.as_ref(),
@@ -178,10 +178,16 @@ impl Session {
         }
     }
 
-    /// Messages deleted for good: an in-chat search jump of the in-place
-    /// view that waits for one of them finds it missing. Run it through
+    /// Messages of `chat_id` deleted for good: an in-chat search jump of
+    /// the in-place view over that chat that waits for one of them finds
+    /// it missing. Run it through
     /// [`Self::in_every_view`].
-    pub(crate) fn miss_search_jump(&mut self, deleted: &[MessageId]) {
+    pub(crate) fn miss_search_jump(&mut self, chat_id: ChatId, deleted: &[MessageId]) {
+        // Server message ids repeat across channels: only a deletion in the
+        // chat the search is over can take its jump's message away.
+        if self.search.chat_search.chat_id != Some(chat_id) {
+            return;
+        }
         let jump = &mut self.search.chat_search.jump;
         if let ChatSearchJump::Ready { message_id } | ChatSearchJump::Loading { message_id } = *jump
             && deleted.contains(&message_id)

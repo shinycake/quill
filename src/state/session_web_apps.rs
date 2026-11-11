@@ -73,9 +73,11 @@ impl Session {
             BotsPayload::CustomRequestResult { result } => {
                 if let Some(p) = pending
                     && p.purpose == RequestPurpose::SendWebAppCustomRequest
-                    && let Some(req_id) = self.bots.web_apps.custom_requests.remove(&p.id.0)
+                    && let Some((launch_id, req_id)) =
+                        self.bots.web_apps.custom_requests.remove(&p.id.0)
                 {
                     self.bots.web_apps.custom_replies.push(CustomRequestReply {
+                        launch_id,
                         req_id,
                         result: Ok(result),
                     });
@@ -104,20 +106,22 @@ impl Session {
             }
             return;
         };
-        self.bots.web_apps.open_result = Some(if url.is_empty() {
-            WebAppOpenResult::Failed {
-                bot_user_id,
-                message: "The bot returned no app address.".into(),
-            }
-        } else {
-            WebAppOpenResult::Opened {
-                bot_user_id,
-                chat_id,
-                source,
-                launch_id,
-                url,
-            }
-        });
+        self.bots
+            .web_apps
+            .replace_open_result(Some(if url.is_empty() {
+                WebAppOpenResult::Failed {
+                    bot_user_id,
+                    message: crate::lang::tr(crate::lang::keys::Q_WEB_APP_NO_ADDRESS).to_string(),
+                }
+            } else {
+                WebAppOpenResult::Opened {
+                    bot_user_id,
+                    chat_id,
+                    source,
+                    launch_id,
+                    url,
+                }
+            }));
     }
 
     /// The context of the open call that `request` answers.
@@ -136,8 +140,11 @@ impl Session {
         pending: Option<&PendingRequest>,
     ) -> bool {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetGrossingWebAppBots) {
-            self.bots.web_apps.grossing_bots = Some(user_ids.to_vec());
-            self.bots.web_apps.grossing_loading = false;
+            // Only the request the list waits for fills it.
+            self.bots
+                .web_apps
+                .grossing
+                .answered(pending.map(|p| p.id), user_ids.to_vec());
             return true;
         }
         false
@@ -146,10 +153,12 @@ impl Session {
     pub(crate) fn apply_web_app_ok(&mut self, pending: Option<&PendingRequest>) {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::Bots(BotsPurpose::CanBotSendMessages { bot_user_id })) => {
-                self.bots.web_apps.write_access = Some((bot_user_id, WriteAccessResult::Allowed));
+                self.bots.web_apps.write_access = pending
+                    .map(|p| WriteAnswer::new(p.id, bot_user_id, WriteAccessResult::Allowed));
             }
             Some(RequestPurpose::Bots(BotsPurpose::AllowBotToSendMessages { bot_user_id })) => {
-                self.bots.web_apps.write_access = Some((bot_user_id, WriteAccessResult::Granted));
+                self.bots.web_apps.write_access = pending
+                    .map(|p| WriteAnswer::new(p.id, bot_user_id, WriteAccessResult::Granted));
             }
             Some(RequestPurpose::Bots(BotsPurpose::ToggleBotEmojiStatusAccess {
                 bot_user_id,
@@ -161,7 +170,13 @@ impl Session {
                 bot_user_id,
                 added,
             })) => {
-                self.bots.web_apps.attachment_menu_toggled = Some(Ok((bot_user_id, added)));
+                self.bots
+                    .web_apps
+                    .attachment_menu_toggled
+                    .push(AttachmentToggle {
+                        bot_user_id,
+                        result: Ok(added),
+                    });
             }
             Some(RequestPurpose::SendWebAppData) => {
                 self.bots.web_apps.data_sent = Some(Ok(()));
@@ -179,10 +194,12 @@ impl Session {
             | RequestPurpose::Bots(BotsPurpose::GetWebAppLinkUrl { bot_user_id }) => {
                 // A dropped launch's failure is nobody's to report.
                 if self.take_web_app_pending(pending).is_some() {
-                    self.bots.web_apps.open_result = Some(WebAppOpenResult::Failed {
-                        bot_user_id,
-                        message: web_app_error_text(err),
-                    });
+                    self.bots
+                        .web_apps
+                        .replace_open_result(Some(WebAppOpenResult::Failed {
+                            bot_user_id,
+                            message: web_app_error_text(err),
+                        }));
                 }
             }
             RequestPurpose::Bots(BotsPurpose::SearchWebApp { bot_user_id }) => {
@@ -194,7 +211,8 @@ impl Session {
                 self.bots.web_apps.found = Some((bot_user_id, Err(message)));
             }
             RequestPurpose::Bots(BotsPurpose::CanBotSendMessages { bot_user_id }) => {
-                self.bots.web_apps.write_access = Some((
+                self.bots.web_apps.write_access = Some(WriteAnswer::new(
+                    p.id,
                     bot_user_id,
                     if err.code == 404 {
                         WriteAccessResult::NeedsConsent
@@ -204,10 +222,14 @@ impl Session {
                 ));
             }
             RequestPurpose::Bots(BotsPurpose::AllowBotToSendMessages { bot_user_id }) => {
-                self.bots.web_apps.write_access = Some((bot_user_id, WriteAccessResult::Denied));
+                self.bots.web_apps.write_access = Some(WriteAnswer::new(
+                    p.id,
+                    bot_user_id,
+                    WriteAccessResult::Denied,
+                ));
             }
-            RequestPurpose::Bots(BotsPurpose::SharePhoneWithMiniApp { bot_user_id }) => {
-                self.bots.web_apps.phone_share = Some((bot_user_id, false));
+            RequestPurpose::Bots(BotsPurpose::SharePhoneWithMiniApp { .. }) => {
+                self.bots.web_apps.phone_share = Some(PhoneShare::Refused(p.id));
             }
             RequestPurpose::Bots(BotsPurpose::ToggleBotEmojiStatusAccess {
                 bot_user_id,
@@ -223,19 +245,30 @@ impl Session {
                 self.bots.web_apps.attachment_menu_bot =
                     Some((bot_user_id, Err(web_app_error_text(err))));
             }
-            RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu { .. }) => {
-                self.bots.web_apps.attachment_menu_toggled = Some(Err(web_app_error_text(err)));
-            }
-            RequestPurpose::GetGrossingWebAppBots => {
-                self.bots.web_apps.grossing_loading = false;
+            RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu {
+                bot_user_id, ..
+            }) => {
                 self.bots
                     .web_apps
-                    .grossing_bots
-                    .get_or_insert_with(Vec::new);
+                    .attachment_menu_toggled
+                    .push(AttachmentToggle {
+                        bot_user_id,
+                        result: Err(web_app_error_text(err)),
+                    });
+            }
+            RequestPurpose::GetGrossingWebAppBots => {
+                self.bots.web_apps.grossing.failed(
+                    Some(p.id),
+                    crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_LOAD_APPS),
+                    false,
+                );
             }
             RequestPurpose::SendWebAppCustomRequest => {
-                if let Some(req_id) = self.bots.web_apps.custom_requests.remove(&p.id.0) {
+                if let Some((launch_id, req_id)) =
+                    self.bots.web_apps.custom_requests.remove(&p.id.0)
+                {
                     self.bots.web_apps.custom_replies.push(CustomRequestReply {
+                        launch_id,
                         req_id,
                         result: Err(if err.code == 400 {
                             "BAD_REQUEST".into()

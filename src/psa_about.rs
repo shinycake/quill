@@ -17,12 +17,14 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ids::ChatId;
+use crate::locks::LockExt;
 use crate::promotion::top_promotion;
 use crate::state::Session;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 const FILE_NAME: &str = "psa_about_seen.json";
@@ -39,35 +41,93 @@ pub struct AboutToast {
     pub expires_at: Instant,
 }
 
-/// Where the background read leaves the saved flags.
-#[derive(Debug, Clone, Default)]
-struct LoadSlot(Arc<Mutex<Option<BTreeSet<i64>>>>);
+/// A worker thread's result, polled without blocking. A panic in the worker
+/// is caught by `spawn_guarded` and shows up as `Some(None)`, so a stage
+/// that waits on a job always gets out.
+#[derive(Debug, Clone)]
+struct Job<T>(Arc<Mutex<Option<JoinHandle<Option<T>>>>>);
 
-impl PartialEq for LoadSlot {
+impl<T> PartialEq for Job<T> {
     fn eq(&self, _: &Self) -> bool {
         true
     }
 }
-impl Eq for LoadSlot {}
+impl<T> Eq for Job<T> {}
 
+impl<T: Send + 'static> Job<T> {
+    /// Run `work` on a worker thread; `None` when no thread could start.
+    fn spawn(name: &str, work: impl FnOnce() -> T + Send + 'static) -> Option<Self> {
+        let handle = crate::thread_guard::spawn_guarded(name, work).ok()?;
+        Some(Self(Arc::new(Mutex::new(Some(handle)))))
+    }
+
+    /// `None` while the worker runs; `Some(None)` when it panicked.
+    fn poll(&self) -> Option<Option<T>> {
+        let mut slot = self.0.lock_or_recover();
+        if !slot.as_ref().is_some_and(JoinHandle::is_finished) {
+            return None;
+        }
+        let handle = slot.take()?;
+        Some(handle.join().ok().flatten())
+    }
+
+    /// Block until the worker ends (tests: a join, not a clock).
+    #[cfg(test)]
+    fn wait(&self) -> Option<T> {
+        let handle = self.0.lock_or_recover().take()?;
+        handle.join().ok().flatten()
+    }
+}
+
+/// The saved flags' file, from the first read to what a save stands at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Stage {
+    /// The read has not started. `waiting` is the chat opened meanwhile: it
+    /// gets its box once the flags are in (if it is still the open one).
+    Unread { waiting: Option<ChatId> },
+    /// The read is out. `waiting` is the chat that opened meanwhile.
+    Reading {
+        job: Job<BTreeSet<i64>>,
+        waiting: Option<ChatId>,
+    },
+    /// The flags are in.
+    Ready {
+        save: Save,
+        toast: Option<AboutToast>,
+    },
+}
+
+impl Default for Stage {
+    fn default() -> Self {
+        Self::Unread { waiting: None }
+    }
+}
+
+/// Whether `seen` differs from the file.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-enum Load {
+enum Save {
     #[default]
-    Idle,
-    Reading(LoadSlot),
-    Done,
+    InSync,
+    /// A flag was added that no save has carried yet.
+    Unsaved,
+    /// The write of `written` is out; it ends `InSync` when it succeeded
+    /// and carried everything, `Unsaved` when a flag came in meanwhile, and
+    /// `Failed` when it did not succeed.
+    Writing {
+        job: Job<bool>,
+        written: BTreeSet<i64>,
+    },
+    /// The last write failed. Nothing writes again on its own (a folder
+    /// that cannot be written would start a worker on every sync); the
+    /// next new flag saves them all.
+    Failed,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PsaAbout {
     seen: BTreeSet<i64>,
-    load: Load,
-    /// `seen` changed since it was last saved.
-    dirty: bool,
-    toast: Option<AboutToast>,
+    stage: Stage,
     serial: u32,
-    /// A chat opened before the saved flags were in.
-    waiting: Option<ChatId>,
     /// Overrides the app data folder (tests).
     file: Option<PathBuf>,
 }
@@ -83,26 +143,50 @@ impl PsaAbout {
     }
 
     pub fn is_loaded(&self) -> bool {
-        self.load == Load::Done
+        matches!(self.stage, Stage::Ready { .. })
     }
 
     /// The box to draw: its chat is the open one and its time is not up.
     pub fn visible(&self, open_chat: Option<ChatId>, now: Instant) -> Option<&AboutToast> {
-        self.toast
-            .as_ref()
-            .filter(|toast| open_chat == Some(toast.chat_id) && now < toast.expires_at)
+        match &self.stage {
+            Stage::Ready {
+                toast: Some(toast), ..
+            } if open_chat == Some(toast.chat_id) && now < toast.expires_at => Some(toast),
+            _ => None,
+        }
     }
 
     /// Drop the box and anything waiting for the saved flags.
     pub fn hide(&mut self) {
-        self.toast = None;
-        self.waiting = None;
+        match &mut self.stage {
+            Stage::Unread { waiting } | Stage::Reading { waiting, .. } => *waiting = None,
+            Stage::Ready { toast, .. } => *toast = None,
+        }
     }
 
-    /// Without a driver (demos, tests) there is nothing to read.
-    pub fn restore(&mut self, saved: BTreeSet<i64>) {
+    /// A chat opened before the saved flags were in: it waits for them.
+    fn wait_for_load(&mut self, chat_id: ChatId) {
+        if let Stage::Unread { waiting } | Stage::Reading { waiting, .. } = &mut self.stage {
+            *waiting = Some(chat_id);
+        }
+    }
+
+    /// The flags are in (`saved` merged into `seen`): the stage is ready.
+    /// Returns the chat that waited for them.
+    fn ready(&mut self, saved: BTreeSet<i64>) -> Option<ChatId> {
         self.seen.extend(saved);
-        self.load = Load::Done;
+        let (waiting, stage) = match std::mem::take(&mut self.stage) {
+            Stage::Unread { waiting } | Stage::Reading { waiting, .. } => (
+                waiting,
+                Stage::Ready {
+                    save: Save::InSync,
+                    toast: None,
+                },
+            ),
+            ready @ Stage::Ready { .. } => (None, ready),
+        };
+        self.stage = stage;
+        waiting
     }
 
     /// Point the file at a folder other than the app data folder.
@@ -116,58 +200,116 @@ impl PsaAbout {
             .or_else(|| crate::settings::safe_app_root().map(|root| root.join(FILE_NAME)))
     }
 
-    /// Start reading the saved flags on a background thread, once.
-    pub fn start_load(&mut self) {
-        if self.load != Load::Idle {
-            return;
-        }
+    /// Start reading the saved flags on a worker thread, once. Without a
+    /// file or a thread there is nothing to read: the flags are empty and
+    /// the stage is ready now (the chat that waited is returned).
+    fn start_load(&mut self) -> Option<Option<ChatId>> {
+        let Stage::Unread { waiting } = self.stage else {
+            return None;
+        };
         let Some(path) = self.file_path() else {
-            self.load = Load::Done;
+            return Some(self.ready(BTreeSet::new()));
+        };
+        let Some(job) = Job::spawn("quill-psa-about-read", move || load_seen_from(&path)) else {
+            return Some(self.ready(BTreeSet::new()));
+        };
+        self.stage = Stage::Reading { job, waiting };
+        None
+    }
+
+    /// The flags the worker finished with: `Some(waiting chat)` when they
+    /// came in just now. A worker that died leaves no flags: the box then
+    /// may show once more, and nothing waits for ever.
+    fn poll_load(&mut self) -> Option<Option<ChatId>> {
+        let Stage::Reading { job, .. } = &self.stage else {
+            return None;
+        };
+        let read = job.poll()?;
+        Some(self.ready(read.unwrap_or_default()))
+    }
+
+    /// Without a driver (demos, tests) there is nothing to read; a chat
+    /// that waited is returned.
+    fn restore(&mut self, saved: BTreeSet<i64>) -> Option<ChatId> {
+        self.ready(saved)
+    }
+
+    /// Settle the write that ended, then start one for flags no save has
+    /// carried: on a worker thread, merged with the file. A write that
+    /// failed is not started again by a sync (`Save::Failed`).
+    pub fn sync_save(&mut self) {
+        let ended = match &self.stage {
+            Stage::Ready {
+                save: Save::Writing { job, .. },
+                ..
+            } => match job.poll() {
+                Some(result) => Some(result),
+                None => return,
+            },
+            _ => None,
+        };
+        if let Some(result) = ended {
+            self.settle_save(result);
+        }
+        let Stage::Ready { save, .. } = &mut self.stage else {
             return;
         };
-        let slot = LoadSlot::default();
-        let out = slot.0.clone();
-        self.load = Load::Reading(slot);
-        std::thread::spawn(move || {
-            let seen = load_seen_from(&path);
-            if let Ok(mut guard) = out.lock() {
-                *guard = Some(seen);
+        if *save != Save::Unsaved {
+            return;
+        }
+        // Without a file there is nothing to save to: the flags stay
+        // unsaved rather than counted as written.
+        let Some(path) = self
+            .file
+            .clone()
+            .or_else(|| crate::settings::safe_app_root().map(|root| root.join(FILE_NAME)))
+        else {
+            return;
+        };
+        let written = self.seen.clone();
+        let flags = written.clone();
+        // No thread: the flags stay unsaved and the next sync asks again.
+        if let Some(job) = Job::spawn("quill-psa-about-save", move || merge_save(&path, &flags)) {
+            *save = Save::Writing { job, written };
+        }
+    }
+
+    /// The write ended with `result` (`None`: the worker died).
+    fn settle_save(&mut self, result: Option<bool>) {
+        let Stage::Ready { save, .. } = &mut self.stage else {
+            return;
+        };
+        if let Save::Writing { written, .. } = save {
+            *save = match result {
+                Some(true) if *written == self.seen => Save::InSync,
+                Some(true) => Save::Unsaved,
+                Some(false) | None => Save::Failed,
+            };
+        }
+    }
+
+    /// Whether a write is out (tests: that one was, or was not, started).
+    #[cfg(test)]
+    fn is_writing(&self) -> bool {
+        matches!(
+            self.stage,
+            Stage::Ready {
+                save: Save::Writing { .. },
+                ..
             }
-        });
-    }
-
-    /// Take the flags the background read finished with. `true` when they
-    /// came in just now.
-    pub fn poll_load(&mut self) -> bool {
-        let Load::Reading(slot) = &self.load else {
-            return false;
-        };
-        let read = slot.0.lock().ok().and_then(|mut guard| guard.take());
-        let Some(read) = read else {
-            return false;
-        };
-        self.restore(read);
-        true
-    }
-
-    /// Save the flags that changed, merged with the file, on a background
-    /// thread.
-    pub fn save_unsaved(&mut self) {
-        if !std::mem::take(&mut self.dirty) {
-            return;
-        }
-        let Some(path) = self.file_path() else {
-            return;
-        };
-        let seen = self.seen.clone();
-        std::thread::spawn(move || merge_save(&path, &seen));
+        )
     }
 
     fn show(&mut self, chat_id: ChatId, now: Instant, lifetime: Duration) {
+        let Stage::Ready { save, toast } = &mut self.stage else {
+            return;
+        };
         self.seen.insert(chat_id.0);
-        self.dirty = true;
+        if !matches!(save, Save::Writing { .. }) {
+            *save = Save::Unsaved;
+        }
         self.serial = self.serial.wrapping_add(1);
-        self.toast = Some(AboutToast {
+        *toast = Some(AboutToast {
             chat_id,
             serial: self.serial,
             expires_at: now + lifetime,
@@ -182,19 +324,52 @@ impl Session {
     pub(crate) fn show_promotion_about(&mut self, chat_id: ChatId, now: Instant) {
         self.chat_list.psa_about.hide();
         if !self.chat_list.psa_about.is_loaded() {
-            self.chat_list.psa_about.waiting = Some(chat_id);
+            self.chat_list.psa_about.wait_for_load(chat_id);
             return;
         }
         self.show_about_if_due(chat_id, now);
     }
 
-    /// The saved flags arrived: a chat opened meanwhile gets its box now.
+    /// Start the read of the saved flags (once) and take them in when the
+    /// worker is done: a chat opened meanwhile gets its box now.
     pub fn poll_psa_about(&mut self, now: Instant) {
-        if !self.chat_list.psa_about.poll_load() {
-            return;
+        let psa = &mut self.chat_list.psa_about;
+        let arrived = psa.start_load().or_else(|| psa.poll_load());
+        self.show_waiting_about(arrived, now);
+    }
+
+    /// Tests: wait for the read or write that is out (a join, not a clock)
+    /// and take its result in.
+    #[cfg(test)]
+    pub(crate) fn finish_psa_background(&mut self, now: Instant) {
+        let psa = &mut self.chat_list.psa_about;
+        let read = match &psa.stage {
+            Stage::Reading { job, .. } => Some(job.wait()),
+            _ => None,
+        };
+        let arrived = read.map(|read| psa.ready(read.unwrap_or_default()));
+        let write = match &psa.stage {
+            Stage::Ready {
+                save: Save::Writing { job, .. },
+                ..
+            } => Some(job.wait()),
+            _ => None,
+        };
+        if let Some(result) = write {
+            psa.settle_save(result);
         }
-        if let Some(chat_id) = self.chat_list.psa_about.waiting.take()
-            && self.open_chat == Some(chat_id)
+        self.show_waiting_about(arrived, now);
+    }
+
+    /// Without a driver (demos, tests): the flags are `saved`.
+    pub fn restore_psa_about(&mut self, saved: BTreeSet<i64>, now: Instant) {
+        let arrived = Some(self.chat_list.psa_about.restore(saved));
+        self.show_waiting_about(arrived, now);
+    }
+
+    fn show_waiting_about(&mut self, arrived: Option<Option<ChatId>>, now: Instant) {
+        if let Some(Some(chat_id)) = arrived
+            && self.open_chat_id() == Some(chat_id)
         {
             self.show_about_if_due(chat_id, now);
         }
@@ -245,7 +420,7 @@ pub fn plain_text(text: &str) -> String {
 }
 
 pub fn load_seen_from(path: &Path) -> BTreeSet<i64> {
-    let _guard = FILE_LOCK.lock();
+    let _guard = FILE_LOCK.lock_or_recover();
     read_file(path)
 }
 
@@ -260,11 +435,11 @@ fn read_file(path: &Path) -> BTreeSet<i64> {
 /// Write `seen` united with what the file holds now, so a session that
 /// knows fewer flags cannot take away the ones another one saved. A failed
 /// save only means the box shows once more next run.
-pub fn merge_save(path: &Path, seen: &BTreeSet<i64>) {
-    let _guard = FILE_LOCK.lock();
+pub fn merge_save(path: &Path, seen: &BTreeSet<i64>) -> bool {
+    let _guard = FILE_LOCK.lock_or_recover();
     let mut merged = read_file(path);
     merged.extend(seen.iter().copied());
-    let _ = crate::settings::write_json_atomic(path, &Saved { seen: merged });
+    crate::settings::write_json_atomic(path, &Saved { seen: merged }).is_ok()
 }
 
 #[cfg(test)]
@@ -282,7 +457,7 @@ mod tests {
             supergroup_id: id,
             is_channel: true,
         };
-        chat.my_member_status = Some(ChannelMemberStatus::Left);
+        chat.assume_member_status(Some(ChannelMemberStatus::Left));
         s.chats.insert(id, chat);
         s.chat_list.promoted_chats.insert(
             id,
@@ -291,14 +466,14 @@ mod tests {
                 text: String::new(),
             },
         );
-        s.chat_list.psa_about.restore(BTreeSet::new());
+        s.restore_psa_about(BTreeSet::new(), Instant::now());
         s
     }
 
     fn visible(s: &Session) -> bool {
         s.chat_list
             .psa_about
-            .visible(s.open_chat, Instant::now())
+            .visible(s.open_chat_id(), Instant::now())
             .is_some()
     }
 
@@ -306,16 +481,6 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("quill-psa-{tag}-{}", std::process::id()));
         let file = dir.join(FILE_NAME);
         (dir, file)
-    }
-
-    fn wait_for(mut done: impl FnMut() -> bool) -> bool {
-        for _ in 0..200 {
-            if done() {
-                return true;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        false
     }
 
     #[test]
@@ -334,7 +499,7 @@ mod tests {
         s.open_chat(ChatId(9));
         assert!(!visible(&s));
         if let Some(chat) = s.chats.get_mut(&5) {
-            chat.my_member_status = Some(ChannelMemberStatus::Member);
+            chat.assume_member_status(Some(ChannelMemberStatus::Member));
         }
         s.open_chat(ChatId(5));
         assert!(!visible(&s), "useTopPromotion");
@@ -376,7 +541,7 @@ mod tests {
         let mut s = session_with_promoted(5);
         s.open_chat(ChatId(5));
         let about = &s.chat_list.psa_about;
-        let open = s.open_chat;
+        let open = s.open_chat_id();
         assert!(about.visible(open, Instant::now()).is_some());
         let later = Instant::now() + Duration::from_secs(9);
         assert!(about.visible(open, later).is_none());
@@ -391,22 +556,18 @@ mod tests {
         s.chat_list.psa_about.use_file(file.clone());
         s.open_chat(ChatId(5));
         assert!(!visible(&s), "not before the flags are known");
-        s.chat_list.psa_about.start_load();
-        assert!(wait_for(|| {
-            s.poll_psa_about(Instant::now());
-            s.chat_list.psa_about.is_loaded()
-        }));
+        s.poll_psa_about(Instant::now());
+        assert!(!s.chat_list.psa_about.is_loaded(), "the read is out");
+        s.finish_psa_background(Instant::now());
+        assert!(s.chat_list.psa_about.is_loaded());
         assert!(!visible(&s), "the saved flag says it was shown");
 
         let mut fresh = session_with_promoted(6);
         fresh.chat_list.psa_about = PsaAbout::default();
         fresh.chat_list.psa_about.use_file(dir.join("none.json"));
         fresh.open_chat(ChatId(6));
-        fresh.chat_list.psa_about.start_load();
-        assert!(wait_for(|| {
-            fresh.poll_psa_about(Instant::now());
-            fresh.chat_list.psa_about.is_loaded()
-        }));
+        fresh.poll_psa_about(Instant::now());
+        fresh.finish_psa_background(Instant::now());
         assert!(visible(&fresh), "unseen: the box shows once they are in");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -417,17 +578,15 @@ mod tests {
         let mut s = session_with_promoted(5);
         s.chat_list.psa_about.use_file(file.clone());
         s.open_chat(ChatId(5));
-        s.chat_list.psa_about.save_unsaved();
-        assert!(wait_for(|| load_seen_from(&file).contains(&5)));
+        s.chat_list.psa_about.sync_save();
+        s.finish_psa_background(Instant::now());
+        assert!(load_seen_from(&file).contains(&5));
 
         let mut restarted = session_with_promoted(5);
         restarted.chat_list.psa_about = PsaAbout::default();
         restarted.chat_list.psa_about.use_file(file.clone());
-        restarted.chat_list.psa_about.start_load();
-        assert!(wait_for(|| {
-            restarted.poll_psa_about(Instant::now());
-            restarted.chat_list.psa_about.is_loaded()
-        }));
+        restarted.poll_psa_about(Instant::now());
+        restarted.finish_psa_background(Instant::now());
         restarted.open_chat(ChatId(5));
         assert!(!visible(&restarted));
 
@@ -446,10 +605,12 @@ mod tests {
         b.chat_list.psa_about.use_file(file.clone());
         a.open_chat(ChatId(1));
         b.open_chat(ChatId(2));
-        a.chat_list.psa_about.save_unsaved();
-        assert!(wait_for(|| load_seen_from(&file).contains(&1)));
-        b.chat_list.psa_about.save_unsaved();
-        assert!(wait_for(|| load_seen_from(&file).contains(&2)));
+        a.chat_list.psa_about.sync_save();
+        a.finish_psa_background(Instant::now());
+        assert!(load_seen_from(&file).contains(&1));
+        b.chat_list.psa_about.sync_save();
+        b.finish_psa_background(Instant::now());
+        assert!(load_seen_from(&file).contains(&2));
         assert_eq!(load_seen_from(&file), BTreeSet::from([1, 2]));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -459,17 +620,65 @@ mod tests {
         let (dir, file) = temp_file("once");
         let mut s = session_with_promoted(5);
         s.chat_list.psa_about.use_file(file.clone());
-        s.chat_list.psa_about.save_unsaved();
-        std::thread::sleep(Duration::from_millis(50));
-        assert!(!file.exists(), "nothing changed, nothing written");
+        s.chat_list.psa_about.sync_save();
+        assert!(!s.chat_list.psa_about.is_writing(), "nothing changed");
         s.open_chat(ChatId(5));
-        s.chat_list.psa_about.save_unsaved();
-        assert!(wait_for(|| file.exists()));
-        let _ = std::fs::remove_file(&file);
-        s.chat_list.psa_about.save_unsaved();
-        std::thread::sleep(Duration::from_millis(50));
-        assert!(!file.exists(), "not saved again");
+        s.chat_list.psa_about.sync_save();
+        assert!(s.chat_list.psa_about.is_writing());
+        s.finish_psa_background(Instant::now());
+        assert!(file.exists());
+        s.chat_list.psa_about.sync_save();
+        assert!(!s.chat_list.psa_about.is_writing(), "not saved again");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A write that fails is not counted as written, and no sync starts it
+    /// again on its own: the next new flag saves them all.
+    #[test]
+    fn a_failed_write_waits_for_the_next_flag() {
+        let (dir, file) = temp_file("retry");
+        std::fs::create_dir_all(&dir).ok();
+        // A regular file where the folder should be: every write fails.
+        let blocker = dir.join("blocker");
+        std::fs::write(&blocker, b"x").ok();
+        let mut s = session_with_promoted(5);
+        s.chat_list.psa_about.use_file(blocker.join(FILE_NAME));
+        s.open_chat(ChatId(5));
+        s.chat_list.psa_about.sync_save();
+        s.finish_psa_background(Instant::now());
+        for _ in 0..3 {
+            s.chat_list.psa_about.sync_save();
+            assert!(
+                !s.chat_list.psa_about.is_writing(),
+                "a failed write is not started again by a sync"
+            );
+        }
+        // The folder works again and another box is shown: one write
+        // carries both flags.
+        s.chat_list.psa_about.use_file(file.clone());
+        s.chat_list
+            .psa_about
+            .show(ChatId(6), Instant::now(), Duration::from_secs(5));
+        s.chat_list.psa_about.sync_save();
+        assert!(s.chat_list.psa_about.is_writing());
+        s.finish_psa_background(Instant::now());
+        assert_eq!(load_seen_from(&file), BTreeSet::from([5, 6]));
+        s.chat_list.psa_about.sync_save();
+        assert!(!s.chat_list.psa_about.is_writing(), "now in sync");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `restore` (a demo, a test) resolves the chat that waited: nothing is
+    /// left waiting with no one to resolve it.
+    #[test]
+    fn restoring_the_flags_shows_the_box_of_the_chat_that_waited() {
+        let mut s = session_with_promoted(5);
+        s.chat_list.psa_about = PsaAbout::default();
+        s.chat_list.psa_about.use_file(temp_file("restore").1);
+        s.open_chat(ChatId(5));
+        assert!(!visible(&s));
+        s.restore_psa_about(BTreeSet::new(), Instant::now());
+        assert!(visible(&s));
     }
 
     #[test]

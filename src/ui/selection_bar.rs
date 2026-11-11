@@ -136,7 +136,13 @@ fn selection_unpin_button(cx: &mut Context<QuillApp>) -> AnyElement {
         .tooltip(tr(keys::Q_CHAT_UNPIN_SELECTED))
         .on_click(cx.listener(move |this, _, window, cx| {
             if let Some(draft) = this.forward_draft() {
-                this.confirm_unpin(draft.from_chat_id, draft.message_ids, window, cx);
+                this.confirm_unpin(
+                    draft.from_chat_id,
+                    draft.message_ids,
+                    crate::ui::pin_box::UnpinOrigin::Selection,
+                    window,
+                    cx,
+                );
             }
         }))
         .into_any_element()
@@ -162,7 +168,7 @@ fn selection_cancel_button(cx: &mut Context<QuillApp>) -> AnyElement {
         .label(tr(keys::CANCEL))
         .ghost()
         .on_click(cx.listener(|this, _, window, cx| {
-            this.clear_forward(window, cx);
+            this.end_selection(window, cx);
         }))
         .into_any_element()
 }

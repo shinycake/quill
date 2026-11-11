@@ -69,8 +69,7 @@ pub(crate) fn parse_threads_payload(
             }))
         }
         // Slice G2: `forumTopicInfo` — the `createForumTopic` answer
-        // (schema 1.8.67, line 12665). Only the chat id is kept; the
-        // topic list is refetched on success.
+        // (schema 1.8.67, line 12665).
         // Subsection tabs: live topic changes (schema 1.8.67, lines
         // 10652 / 10665) — new topics, renames, pins, reads, mutes.
         "updateForumTopicInfo" => value
@@ -100,6 +99,7 @@ pub(crate) fn parse_threads_payload(
             .ok_or(ParseError::MissingField),
         "forumTopicInfo" => Ok(EnvelopePayload::Threads(ThreadsPayload::ForumTopic {
             chat_id: value.get("chat_id").and_then(Value::as_i64).unwrap_or(0),
+            info: parse_forum_topic_info(value).map(Box::new),
         })),
         _ => return Ok(None),
     };

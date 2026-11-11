@@ -22,6 +22,7 @@ mod intro_view;
 mod location;
 mod messages;
 mod recipients;
+mod screen;
 mod start_page;
 mod state;
 #[cfg(test)]
@@ -29,8 +30,9 @@ mod state;
 mod tests;
 
 pub(crate) use state::{
-    AwayDraft, BusinessDialog, ChatbotDraft, DayRow, GreetingDraft, HoursDraft, LinkEditDraft,
-    LocationDraft, MessageKind, PickerDraft, Recipients, ScheduleChoice, StartPageDraft, View,
+    AwayDraft, BotLink, BotNotice, BusinessDialog, ChatbotDraft, DayRow, GreetingDraft, HoursDraft,
+    LinkEditDraft, LocationDraft, MessageKind, PickerDraft, Recipients, ScheduleChoice,
+    StartPageDraft, View,
 };
 
 use super::app::QuillApp;
@@ -100,22 +102,12 @@ impl QuillApp {
     pub(super) fn open_business(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let zone_search = live_input(window, cx, tr(keys::Q_OPS_SEARCH));
         self.dialogs.business_dialog = Some(BusinessDialog {
-            view: View::Hub,
-            greeting: None,
-            away: None,
-            hours: None,
-            day_rows: Vec::new(),
-            location: None,
-            picker: None,
-            start_page: None,
-            link_edit: None,
-            confirm_delete: None,
-            chatbot: None,
+            screen: screen::Screen::Hub,
             zone_search,
-            local_error: None,
-            note: None,
+            line: state::Line::None,
         });
         self.open_box(crate::ui::shell::DialogKind::Business);
+        self.reset_link_save();
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.business.error = None;
             let _ = live.driver.ensure_quick_reply_shortcuts();
@@ -130,7 +122,7 @@ impl QuillApp {
 
     pub(super) fn close_business(&mut self, cx: &mut Context<Self>) {
         if let Some(closed) = self.dialogs.business_dialog.take() {
-            if closed.view == View::StickerPick {
+            if closed.view() == View::StickerPick {
                 self.close_start_page_stickers();
             }
             cx.notify();
@@ -146,19 +138,48 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(view) = self.dialogs.business_dialog.as_ref().map(|d| d.view) else {
+        let Some((view, parent)) = self
+            .dialogs
+            .business_dialog
+            .as_ref()
+            .map(|d| (d.view(), d.screen.parent()))
+        else {
             return true;
         };
-        if let Leave::Stay = self.business_leave(view, window, cx) {
-            if can_stay {
-                return false;
+        // A sub-screen (a day, the picker, the sticker panel) hangs from
+        // the screen that holds the draft: closing saves that screen.
+        let saving = if view.saves_on_leave() { view } else { parent };
+        match self.business_leave(saving, window, cx) {
+            Leave::Stay => {
+                if can_stay {
+                    return false;
+                }
+                if let Some(line) = self.business_mut().and_then(|d| d.take_error()) {
+                    self.set_note(StatusNote::error(line));
+                }
             }
-            if let Some(line) = self.business_mut().and_then(|d| d.local_error.take()) {
-                self.set_note(StatusNote::error(line));
-            }
+            // The box is going, so the line a leave would show on the next
+            // screen (a refused send, "stays off") goes to the status line.
+            Leave::Go(Some(line)) => self.set_note(StatusNote::error(line)),
+            Leave::Go(None) => {}
         }
         self.close_business(cx);
         true
+    }
+
+    /// A save TDLib refused after the box was closed: its line goes to the
+    /// status line instead of waiting, unseen, for the next open.
+    pub(in crate::ui) fn business_closed_error_upkeep(&mut self) {
+        if self.dialogs.business_dialog.is_some() {
+            return;
+        }
+        let Some(line) = self
+            .session_mut()
+            .and_then(|session| session.settings.business.error.take())
+        else {
+            return;
+        };
+        self.set_note(StatusNote::error(line));
     }
 
     pub(super) fn business_mut(&mut self) -> Option<&mut BusinessDialog> {
@@ -166,7 +187,7 @@ impl QuillApp {
     }
 
     pub(super) fn business_view(&self) -> Option<View> {
-        self.dialogs.business_dialog.as_ref().map(|d| d.view)
+        self.dialogs.business_dialog.as_ref().map(|d| d.view())
     }
 
     /// The own account's saved business info, or `None` while its full
@@ -192,6 +213,11 @@ impl QuillApp {
     pub(super) fn business_go(&mut self, view: View, window: &mut Window, cx: &mut Context<Self>) {
         if self.business_view() == Some(View::StickerPick) && view != View::StickerPick {
             self.close_start_page_stickers();
+        }
+        // The screen changes first: a section keeps its draft when it is
+        // the one open, and a new one waits for it (`missing`).
+        if let Some(d) = self.business_mut() {
+            d.screen.go(view);
         }
         let missing = self.business_draft_missing(view);
         match view {
@@ -224,30 +250,14 @@ impl QuillApp {
             View::Chatbots if missing => {
                 let draft = self.new_chatbot_draft(window, cx);
                 if let Some(d) = self.business_mut() {
-                    d.chatbot = Some(draft);
+                    d.screen.put_chatbot(draft);
                 }
                 self.business_bot_watch(window, cx);
             }
             _ => {}
         }
         if let Some(d) = self.business_mut() {
-            // Back on the hub, every draft is gone.
-            if view == View::Hub {
-                d.greeting = None;
-                d.away = None;
-                d.hours = None;
-                d.location = None;
-                d.picker = None;
-                d.start_page = None;
-                d.chatbot = None;
-            }
-            if !matches!(view, View::LinkEdit) {
-                d.link_edit = None;
-            }
-            d.confirm_delete = None;
-            d.view = view;
-            d.local_error = None;
-            d.note = None;
+            d.line = state::Line::None;
         }
         cx.notify();
     }
@@ -272,12 +282,23 @@ impl QuillApp {
         let Some(d) = self.business_mut() else {
             return true;
         };
-        match view {
-            View::Greeting => d.greeting = Some(Self::new_greeting_draft(&saved)),
-            View::Away => d.away = away,
-            View::Hours => d.hours = Some(Self::new_hours_draft(&saved)),
-            View::Location => d.location = location,
-            View::StartPage => d.start_page = start_page,
+        use screen::{Draft, Screen};
+        match (&mut d.screen, view) {
+            (Screen::Greeting { draft, .. }, View::Greeting) => {
+                *draft = Draft::Ready(Self::new_greeting_draft(&saved));
+            }
+            (Screen::Away { draft, .. }, View::Away) => {
+                *draft = away.map_or(Draft::Waiting, Draft::Ready);
+            }
+            (Screen::Hours { draft, .. }, View::Hours) => {
+                *draft = Draft::Ready(Self::new_hours_draft(&saved));
+            }
+            (Screen::Location(draft), View::Location) => {
+                *draft = location.map_or(Draft::Waiting, Draft::Ready);
+            }
+            (Screen::StartPage { draft, .. }, View::StartPage) => {
+                *draft = start_page.map_or(Draft::Waiting, Draft::Ready);
+            }
             _ => {}
         }
         true
@@ -297,6 +318,7 @@ impl QuillApp {
         if self.business_waits_for_info(view) && self.business_fill_draft(view, window, cx) {
             cx.notify();
         }
+        self.business_link_save_upkeep(window, cx);
     }
 
     /// Why the own full info a waiting screen needs did not come, when
@@ -326,15 +348,7 @@ impl QuillApp {
         let Some(d) = self.dialogs.business_dialog.as_ref() else {
             return false;
         };
-        match view {
-            View::Greeting => d.greeting.is_none(),
-            View::Away => d.away.is_none(),
-            View::Hours => d.hours.is_none(),
-            View::Location => d.location.is_none(),
-            View::StartPage => d.start_page.is_none(),
-            View::Chatbots => d.chatbot.is_none(),
-            _ => false,
-        }
+        d.view() == view && d.screen.draft_missing()
     }
 
     /// Save the screen being left.
@@ -359,8 +373,8 @@ impl QuillApp {
         let Some(d) = self.dialogs.business_dialog.as_ref() else {
             return;
         };
-        let view = d.view;
-        let parent = view.parent(d.picker.as_ref().map(|p| p.target));
+        let view = d.view();
+        let parent = d.screen.parent();
         let note = if view.saves_on_leave() {
             match self.business_leave(view, window, cx) {
                 Leave::Stay => return,
@@ -372,26 +386,26 @@ impl QuillApp {
         if view == View::Picker
             && let Some(d) = self.business_mut()
         {
-            d.picker = None;
+            d.screen.take_picker();
         }
         self.business_go(parent, window, cx);
-        if note.is_some()
+        if let Some(note) = note
             && let Some(d) = self.business_mut()
         {
-            d.note = note;
+            d.line = state::Line::Note(note);
         }
     }
 
     pub(super) fn business_error(&mut self, line: impl Into<String>, cx: &mut Context<Self>) {
         if let Some(d) = self.business_mut() {
-            d.local_error = Some(line.into());
+            d.line = state::Line::Error(line.into());
         }
         cx.notify();
     }
 
     pub(super) fn business_note(&mut self, line: impl Into<String>, cx: &mut Context<Self>) {
         if let Some(d) = self.business_mut() {
-            d.note = Some(line.into());
+            d.line = state::Line::Note(line.into());
         }
         cx.notify();
     }

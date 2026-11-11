@@ -35,16 +35,21 @@ impl Session {
             if call.state.is_terminal() {
                 self.end_active_call(call);
             } else {
-                if matches!(call.state, CallState::Ready) && active.ready_at.is_none() {
-                    active.ready_at = Some(Instant::now());
-                }
                 if matches!(call.state, CallState::Ready) {
-                    active.ready = call.ready.clone();
+                    match active.ready.as_mut() {
+                        Some(ready) => ready.params = call.ready.clone(),
+                        None => {
+                            active.ready = Some(CallReady {
+                                params: call.ready.clone(),
+                                since: Instant::now(),
+                            })
+                        }
+                    }
                 }
                 active.is_video = call.is_video;
                 // A hang-up in flight keeps showing: the update is where
                 // the call goes back to if the discardCall fails.
-                match self.calls.hang_up.as_mut() {
+                match self.calls.progress.hang_up_mut() {
                     Some(hang_up) if hang_up.call_id == call.id => {
                         hang_up.resume = call.state.clone();
                     }
@@ -87,7 +92,16 @@ impl Session {
             return;
         }
         if call.state.is_terminal() {
-            self.calls.summary = Some(CallSummary::from_terminal(call, 0, false));
+            // Another call's card still waiting for its rating stays: a
+            // call that ended untracked (a missed one) does not replace it.
+            let holds_rating = self
+                .calls
+                .summary
+                .as_ref()
+                .is_some_and(|summary| summary.call_id != call.id && summary.rating.is_open());
+            if !holds_rating {
+                self.calls.summary = Some(CallSummary::from_terminal(call, 0, false));
+            }
             return;
         }
         if self.decline_call_while_invite_rings(call) {
@@ -108,17 +122,26 @@ impl Session {
     /// Queue an incoming call for the driver to decline as busy, and
     /// remember it so its later updates are dropped (`accept_call_update`).
     pub(crate) fn queue_busy_decline(&mut self, call: &ParsedCall) {
-        const BUSY_DECLINED_CALLS_MAX: usize = 16;
         if self.calls.busy_declined_calls.contains(&call.id) {
             return;
         }
         self.calls
             .busy_decline_queue
             .push((call.id, call.user_id, call.is_video));
+        self.remember_busy_declined(call.id);
+    }
+
+    /// Mark a call id as no one's, so its updates (and a missed-call
+    /// summary for its end) never reach the call window.
+    pub(crate) fn remember_busy_declined(&mut self, id: i32) {
+        const BUSY_DECLINED_CALLS_MAX: usize = 16;
+        if self.calls.busy_declined_calls.contains(&id) {
+            return;
+        }
         if self.calls.busy_declined_calls.len() >= BUSY_DECLINED_CALLS_MAX {
             self.calls.busy_declined_calls.pop_front();
         }
-        self.calls.busy_declined_calls.push_back(call.id);
+        self.calls.busy_declined_calls.push_back(id);
     }
 
     /// Phase C2b: `updateNewCallSignalingData`. The driver also feeds these
@@ -155,10 +178,7 @@ impl Session {
         };
         // "Add People" closes with its call: its search goes too.
         self.calls.add_people_search = ShareSearch::default();
-        let duration_secs = active
-            .ready_at
-            .map(|t| t.elapsed().as_secs() as i64)
-            .unwrap_or(0);
+        let duration_secs = active.connected_secs();
         let mut summary =
             CallSummary::from_terminal(call, duration_secs, active.transport.is_connected());
         summary.final_transport = active.transport.state();
@@ -169,17 +189,7 @@ impl Session {
         if !self.note_call_migration(call, &summary) {
             self.calls.summary = Some(summary);
         }
-        if self
-            .calls
-            .hang_up
-            .as_ref()
-            .is_some_and(|hang_up| hang_up.call_id == call.id)
-        {
-            self.calls.hang_up = None;
-        }
-        if self.calls.answered_call == Some(call.id) {
-            self.calls.answered_call = None;
-        }
+        self.calls.progress.call_ended(call.id);
         self.calls
             .busy_decline_queue
             .retain(|(id, _, _)| *id != call.id);
@@ -224,8 +234,10 @@ impl Session {
     /// (`story_stream`); any other live story is not tracked.
     pub(crate) fn accept_group_call_update(&mut self, group_call: &ParsedGroupCall) {
         // TDLib confirms the leave: later joined updates are real again.
-        if !group_call.is_joined && self.calls.left_group_call == Some(group_call.id) {
-            self.calls.left_group_call = None;
+        if !group_call.is_joined
+            && let Some(call) = self.calls.group_call_mut(group_call.id)
+        {
+            call.rejoin.leave_over();
         }
         let watched = self.stories.live.as_ref().map(|live| live.group_call_id);
         if watched == Some(group_call.id) {
@@ -326,8 +338,13 @@ impl Session {
         // disagrees is older than the change (a stale speaking or volume
         // update) and must not undo it, or the microphone would reopen for
         // a round trip. Once the request completed the next update settles.
+        // Only a toggle of this participant counts: muting someone else
+        // says nothing about your own row.
         let toggle_in_flight = self.requests.has_purpose(RequestPurpose::Calls(
-            CallsPurpose::ToggleGroupCallParticipantMute { group_call_id },
+            CallsPurpose::ToggleGroupCallParticipantMute {
+                group_call_id,
+                participant: participant.participant_id,
+            },
         ));
         let Some(tracked) = self.calls.group_call_mut(group_call_id) else {
             return;
@@ -474,7 +491,17 @@ impl Session {
             && tracked.id == group_call_id
         {
             tracked.join_as = pick_join_as(&senders, tracked.join_as, default);
-            tracked.join_as_options = senders;
+            tracked.join_as_options.succeed(senders);
+        }
+    }
+
+    /// `getVideoChatAvailableParticipants` failed: the picker is optional,
+    /// so the call keeps no list and the join goes ahead as yourself.
+    pub(crate) fn fail_group_call_join_as_options(&mut self, group_call_id: i32, error: &str) {
+        if let Some(tracked) = self.calls.active_group_call.as_mut()
+            && tracked.id == group_call_id
+        {
+            tracked.join_as_options.fail(error);
         }
     }
 
@@ -493,7 +520,7 @@ impl Session {
     /// tracked either.
     fn group_call_update_may_take_slot(&self, group_call: &ParsedGroupCall) -> bool {
         if group_call.is_joined {
-            return self.calls.left_group_call != Some(group_call.id);
+            return !self.calls.group_call_left(group_call.id);
         }
         match self.calls.active_group_call.as_ref() {
             Some(tracked) => tracked.id == group_call.id || !tracked.is_joined,
@@ -540,7 +567,7 @@ impl Session {
             if let Some(request) = request {
                 tracked.rejoin.attempt_joined(request);
             }
-            tracked.join_payload = payload;
+            tracked.transport.store_answer(payload);
         }
     }
 
@@ -551,17 +578,22 @@ impl Session {
         if let Some(tracked) = self.calls.active_group_call.as_mut()
             && tracked.id == group_call_id
         {
-            tracked.screen_share_answer = payload;
+            tracked.screen_share.store_answer(payload);
         }
     }
 
-    /// Store a `getVideoChatInviteLink` `HttpUrl` answer on the tracked
-    /// call: the speaker link when the request had `can_self_unmute`.
-    pub fn set_group_call_invite_link(&mut self, group_call_id: i32, speaker: bool, link: String) {
+    /// Store the `HttpUrl` answer of the `getVideoChatInviteLink` request
+    /// `request` on the tracked call, in the slot that waits for it.
+    pub fn set_group_call_invite_link(
+        &mut self,
+        group_call_id: i32,
+        request: RequestId,
+        link: String,
+    ) {
         if let Some(tracked) = self.calls.active_group_call.as_mut()
             && tracked.id == group_call_id
         {
-            tracked.share_links.answered(speaker, link);
+            tracked.share_links.answered(request, link);
         }
     }
 }
@@ -576,7 +608,6 @@ fn apply_group_call_fields(tracked: &mut ActiveGroupCall, group_call: &ParsedGro
     tracked.scheduled_start_date = 0;
     let was_joined = tracked.is_joined;
     tracked.is_joined = group_call.is_joined;
-    tracked.need_rejoin = group_call.need_rejoin;
     tracked.can_be_managed = group_call.can_be_managed;
     tracked.is_owned = group_call.is_owned;
     tracked.participant_count = group_call.participant_count;

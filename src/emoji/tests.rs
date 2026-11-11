@@ -21,8 +21,7 @@ fn pack_order_preserves_usage_when_emoji_resolve_out_of_order() {
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,
-        requires_premium: false,
-        premium_animation: None,
+        premium: None,
     };
     let pack = |id| StickerSetInfo {
         id,
@@ -100,7 +99,7 @@ fn message_custom_emoji_ids_to_resolve_scans_open_chat() {
     apply_json(&mut session, &seq, &sink, json);
     // Chat 4 isn't open: nothing to resolve.
     assert!(session.message_custom_emoji_ids_to_resolve().is_empty());
-    session.open_chat = Some(ChatId(4));
+    session.open = crate::state::OpenView::of(Some(ChatId(4)));
     // Deduped even though the entity repeats.
     assert_eq!(session.message_custom_emoji_ids_to_resolve(), vec![12345]);
     // Attempted ids are excluded.
@@ -180,7 +179,7 @@ fn open_chat_custom_emoji_files_cover_text_and_reactions() {
         &sink,
         r#"{"@type":"updateMessageInteractionInfo","chat_id":4,"message_id":9,"interaction_info":{"@type":"messageInteractionInfo","view_count":0,"forward_count":0,"reply_info":null,"reactions":{"@type":"messageReactions","reactions":[{"@type":"messageReaction","type":{"@type":"reactionTypeCustomEmoji","custom_emoji_id":"777"},"total_count":2,"is_chosen":true,"used_sender_id":null,"recent_sender_ids":[]}],"are_tags":false,"paid_reactors":[],"can_get_added_reactions":false}}}"#,
     );
-    session.open_chat = Some(ChatId(4));
+    session.open = crate::state::OpenView::of(Some(ChatId(4)));
     assert_eq!(session.open_chat_custom_emoji_ids(), vec![777, 12345]);
     let message = &session.histories[&4].messages[&9];
     assert_eq!(message.reaction_chips().len(), 1);
@@ -202,8 +201,7 @@ fn open_chat_custom_emoji_files_cover_text_and_reactions() {
             thumb_file_id: None,
             thumb_width: 0,
             thumb_height: 0,
-            requires_premium: false,
-            premium_animation: None,
+            premium: None,
         });
     assert_eq!(
         session.open_chat_custom_emoji_files(),
@@ -280,6 +278,10 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
 
     // getAnimatedEmoji's animatedEmoji lands under GetAnimatedEmoji.
     let extra = with_purpose.request(RequestPurpose::GetAnimatedEmoji, None);
+    with_purpose.stickers.emoji.animated = crate::emoji::AnimatedSuggestion::Asking {
+        emoji: "🔥".into(),
+        request: extra,
+    };
     apply_json(
         &mut with_purpose,
         &seq,
@@ -293,8 +295,8 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
         with_purpose
             .stickers
             .emoji
-            .animated_emoji
-            .as_ref()
+            .animated
+            .sticker()
             .expect("animated")
             .emoji,
         "🔥"
@@ -418,6 +420,8 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
     assert_eq!(with_purpose.stickers.emoji.archived_sets.len(), 2);
 
     let extra = with_purpose.request(RequestPurpose::GetTrendingEmojiSets, None);
+    with_purpose.stickers.emoji.lists.trending.begin(0);
+    with_purpose.stickers.emoji.lists.trending.sent(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -428,8 +432,8 @@ fn s10_emoji_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.emoji.trending_sets.len(), 1);
-    assert!(with_purpose.stickers.emoji.trending_is_premium);
+    assert_eq!(with_purpose.stickers.emoji.lists.trending.sets().len(), 1);
+    assert!(with_purpose.stickers.emoji.lists.trending.is_premium());
     assert!(with_purpose.stickers.stickers.trending.is_empty());
 
     // A clearRecentEmojiStatuses `ok` drops the recent statuses.
@@ -503,11 +507,11 @@ fn a_chat_windows_custom_emoji_count_as_shown() {
 #[test]
 fn an_empty_installed_list_is_loaded_only_after_its_answer() {
     let (mut session, _) = session();
-    assert!(!session.stickers.emoji.installed_loaded);
+    assert!(session.stickers.emoji.lists.installed.can_ask());
     session.accept_installed_emoji_sets(Vec::new());
-    assert!(session.stickers.emoji.installed_loaded);
+    assert!(!session.stickers.emoji.lists.installed.can_ask());
     session.invalidate_installed_emoji_sets();
-    assert!(!session.stickers.emoji.installed_loaded);
+    assert!(session.stickers.emoji.lists.installed.can_ask());
 }
 
 /// A failed custom emoji lookup (message text, a live story's comments,
@@ -534,5 +538,25 @@ fn a_failed_custom_emoji_lookup_asks_again() {
     );
     assert!(session.custom_emoji_needs_resolving(41));
     assert!(session.custom_emoji_needs_resolving(42));
-    assert!(session.stickers.emoji.status_note.is_none());
+}
+
+#[test]
+fn a_set_change_is_settled_only_by_its_own_request() {
+    use crate::emoji::SetMutation;
+    use crate::ids::RequestId;
+    let mut mutation = SetMutation::Running {
+        request: RequestId(3),
+        set_id: 9,
+        installed: true,
+    };
+    assert_eq!(mutation.running(), Some((9, true)));
+    assert!(mutation.waits_for(Some(RequestId(3))));
+    assert!(!mutation.waits_for(Some(RequestId(4))), "another request");
+    assert!(!mutation.waits_for(None));
+    // A running change keeps its stage when an old failure is forgotten.
+    mutation.forget_failure();
+    assert!(mutation.is_running());
+    mutation = SetMutation::Failed;
+    mutation.forget_failure();
+    assert_eq!(mutation, SetMutation::Idle);
 }

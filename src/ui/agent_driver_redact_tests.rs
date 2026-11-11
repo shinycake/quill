@@ -78,11 +78,11 @@ fn show_search_tab(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, tab: Sea
         } else {
             "demo".to_string()
         };
-        search.open = true;
-        search.recents = false;
+        search.surface = quill::state::SearchSurface::Query;
         search.filters = tab.apply(GlobalSearchFilters::default());
         search.messages = vec![hit(12, 1, "top secret post"), hit(11, 2, "granted hit")];
-        search.public_limits_exceeded = true;
+        search.accept_messages(search.messages.clone(), false);
+        search.note_public_limits(true);
         search.tabs.limits = Some(PublicPostLimits {
             daily_free: 3,
             remaining_free: 0,
@@ -114,7 +114,7 @@ fn list_parts_hide_rows_of_ungranted_chats_and_untagged_rows(cx: &mut TestAppCon
     app.update_in(vcx, |app, _, cx| {
         app.chat_ui
             .set_reply(Some(ComposerReplyTo::new(ChatId(11), MessageId(101))));
-        app.share.reply_elsewhere_open = true;
+        app.share.forward.open_reply_chooser();
         cx.notify();
     });
     settle(vcx);
@@ -179,7 +179,7 @@ fn list_parts_hide_rows_of_ungranted_chats_and_untagged_rows(cx: &mut TestAppCon
     }
 
     // All chats on: the same screen shows the rows the grants cut.
-    grants::update(&AccountKey::primary(), |g| g.all_chats = Some(Scope::Read));
+    let _ = grants::update(&AccountKey::primary(), |g| g.all_chats = Some(Scope::Read));
     settle(vcx);
     let tree = read_tree(&app, vcx);
     let text = text_of(&tree);
@@ -191,5 +191,5 @@ fn list_parts_hide_rows_of_ungranted_chats_and_untagged_rows(cx: &mut TestAppCon
     show_search_tab(&app, vcx, SearchTab::Channels);
     let text = text_of(&read_tree(&app, vcx));
     assert!(text.contains(UNGRANTED_CHANNEL), "{text}");
-    grants::update(&AccountKey::primary(), |g| g.all_chats = None);
+    let _ = grants::update(&AccountKey::primary(), |g| g.all_chats = None);
 }

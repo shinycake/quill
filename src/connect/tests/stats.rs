@@ -6,8 +6,8 @@ use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::{AccountKey, ChatId, MessageId, RequestId};
 use crate::platform::MemorySecretStore;
 use crate::state::{
-    GraphFetch, InfoPanelTarget, MessageStatsFetch, RECENT_POSTS_FIRST, RequestPurpose, Session,
-    StatsPage,
+    ChatStatisticsFetch, GraphFetch, InfoPanelTarget, MessageStatsFetch, RECENT_POSTS_FIRST,
+    RequestPurpose, Session, StatsPage,
 };
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::StatisticalGraph;
@@ -182,7 +182,7 @@ fn message_statistics_open_the_page_and_page_through_forwards() {
     assert_eq!(stats.page(-100), StatsPage::Message(42 << 20));
     let state = stats.message_for(-100, 42 << 20).expect("tracked");
     assert_eq!(state.statistics, MessageStatsFetch::Loading);
-    assert!(state.forwards.loading);
+    assert!(state.forwards.loading());
 
     rig.answer(
         stats_extra,
@@ -200,10 +200,10 @@ fn message_statistics_open_the_page_and_page_through_forwards() {
         .message_for(-100, 42 << 20)
         .unwrap();
     assert!(matches!(state.statistics, MessageStatsFetch::Loaded(_)));
-    assert_eq!(state.forwards.forwards.len(), 2);
-    assert_eq!(state.forwards.forwards[0].view_count, 40);
-    assert_eq!(state.forwards.total, 3);
-    assert!(!state.forwards.loading);
+    assert_eq!(state.forwards.items().len(), 2);
+    assert_eq!(state.forwards.items()[0].view_count, 40);
+    assert_eq!(state.forwards.total(), 3);
+    assert!(!state.forwards.loading());
 
     let more = rig
         .driver
@@ -214,7 +214,7 @@ fn message_statistics_open_the_page_and_page_through_forwards() {
     assert!(rig.driver.load_more_message_forwards().unwrap().is_none());
     rig.answer(more, &forwards_page("", &[3]));
     let state = rig.driver.session.groups.stats.message.as_ref().unwrap();
-    assert_eq!(state.forwards.forwards.len(), 3);
+    assert_eq!(state.forwards.items().len(), 3);
     assert!(rig.driver.load_more_message_forwards().unwrap().is_none());
 
     // Opening the panel again starts on the overview.
@@ -355,6 +355,41 @@ fn poll_votes_are_asked_once_for_a_poll_post() {
     ));
 }
 
+/// A poll votes request that did not go out is a failed chart the page
+/// draws with Retry, not an empty slot the next render asks for again
+/// (13-030).
+#[test]
+fn a_refused_poll_votes_request_fails_and_retries() {
+    let mut rig = Rig::new();
+    rig.recorder.refuse(Some("getPollVoteStatistics"));
+    let key = (-100, 3 << 20);
+    assert!(
+        rig.driver
+            .fetch_stats_poll_votes(ChatId(-100), MessageId(3 << 20), false)
+            .is_err()
+    );
+    assert!(matches!(
+        rig.driver.session.messages.poll_stats.get(&key),
+        Some(crate::state::PollStatsFetch::Failed(_))
+    ));
+    // The render's own ask finds the slot taken.
+    assert!(
+        rig.driver
+            .fetch_stats_poll_votes(ChatId(-100), MessageId(3 << 20), false)
+            .unwrap()
+            .is_none()
+    );
+    rig.recorder.refuse(None);
+    rig.driver
+        .retry_stats_poll_votes(ChatId(-100), MessageId(3 << 20), false)
+        .unwrap()
+        .expect("sent again");
+    assert!(matches!(
+        rig.driver.session.messages.poll_stats.get(&key),
+        Some(crate::state::PollStatsFetch::Loading)
+    ));
+}
+
 #[test]
 fn the_open_panel_downloads_recent_post_thumbnails() {
     use crate::ids::FileId;
@@ -407,7 +442,10 @@ fn the_open_panel_downloads_recent_post_thumbnails() {
     };
     session.groups.chat_statistics.insert(
         -100,
-        ChatStatisticsFetch::Loaded(Box::new(ChatStatistics::Channel(Box::new(stats)))),
+        ChatStatisticsFetch::Loaded {
+            stats: std::sync::Arc::new(ChatStatistics::Channel(Box::new(stats))),
+            is_dark: false,
+        },
     );
     session.groups.stats.posts.insert(
         (-100, 9 << 20),
@@ -426,6 +464,55 @@ fn the_open_panel_downloads_recent_post_thumbnails() {
     // The post's own page asks for every candidate.
     session.open_message_stats_page(-100, 9 << 20);
     assert_eq!(session.stats_thumb_file_ids(), vec![FileId(55), FileId(56)]);
+}
+
+/// Sweep 06-008: a page of forwards asked before another post was shown
+/// is dropped when it lands in the reopened post's fresh list.
+#[test]
+fn a_stale_forwards_page_does_not_join_a_reopened_posts_list() {
+    let mut rig = Rig::new();
+    let (a, b) = (MessageId(42 << 20), MessageId(43 << 20));
+    rig.driver
+        .fetch_message_statistics(ChatId(-100), a, true)
+        .unwrap()
+        .unwrap();
+    let first = rig.extra_of("getMessagePublicForwards");
+    rig.answer(first, &forwards_page("p2", &[1, 2]));
+    rig.driver.load_more_message_forwards().unwrap().unwrap();
+    let stale = rig.extra_of("getMessagePublicForwards");
+    rig.driver
+        .fetch_message_statistics(ChatId(-100), b, true)
+        .unwrap();
+    rig.driver
+        .fetch_message_statistics(ChatId(-100), a, true)
+        .unwrap();
+    let again = rig.extra_of("getMessagePublicForwards");
+    assert_ne!(
+        again, stale,
+        "the reopened post asks for its own first page"
+    );
+
+    rig.answer(stale, &forwards_page("", &[3, 4]));
+    let state = rig
+        .driver
+        .session
+        .groups
+        .stats
+        .message_for(-100, a.0)
+        .unwrap();
+    assert!(state.forwards.items().is_empty());
+    assert!(state.forwards.loading());
+
+    rig.answer(again, &forwards_page("p2", &[1, 2]));
+    let state = rig
+        .driver
+        .session
+        .groups
+        .stats
+        .message_for(-100, a.0)
+        .unwrap();
+    assert_eq!(state.forwards.items().len(), 2);
+    assert_eq!(state.forwards.next_offset(), "p2");
 }
 
 #[test]
@@ -463,7 +550,7 @@ fn reopening_a_post_whose_statistics_are_out_asks_for_its_forwards_again() {
         .stats
         .message_for(-100, a.0)
         .unwrap();
-    assert!(state.forwards.loading);
+    assert!(state.forwards.loading());
     let forwards = rig.extra_of("getMessagePublicForwards");
     rig.answer(forwards, &forwards_page("", &[1, 2]));
     let state = rig
@@ -473,5 +560,182 @@ fn reopening_a_post_whose_statistics_are_out_asks_for_its_forwards_again() {
         .stats
         .message_for(-100, a.0)
         .unwrap();
-    assert_eq!(state.forwards.forwards.len(), 2);
+    assert_eq!(state.forwards.items().len(), 2);
+}
+
+/// A chat whose statistics TDLib will not give ends in an error the panel
+/// draws, never a spinner nothing will end (sweep 13-021, 13-022).
+#[test]
+fn unavailable_chat_statistics_end_in_an_error() {
+    let mut rig = Rig::new();
+    for json in [
+        r#"{"@type":"updateNewChat","chat":{"id":-100,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":100,"is_channel":true},"unread_count":0}}"#,
+        r#"{"@type":"updateSupergroupFullInfo","supergroup_id":100,"supergroup_full_info":{"description":"","member_count":3,"can_get_statistics":false}}"#,
+    ] {
+        rig.driver
+            .ingest(copy_and_parse(json, &rig.seq, &rig.sink).unwrap())
+            .unwrap();
+    }
+    let asked = rig.sent().len();
+    assert_eq!(
+        rig.driver.fetch_chat_statistics(ChatId(-100), false),
+        Ok(None)
+    );
+    assert!(matches!(
+        rig.driver.session.groups.chat_statistics.get(&-100),
+        Some(ChatStatisticsFetch::Failed(_))
+    ));
+    assert_eq!(rig.sent().len(), asked, "nothing was sent");
+    // A refresh from the error panel is not blocked by the held error.
+    assert_eq!(
+        rig.driver.refresh_chat_statistics(ChatId(-100), false),
+        Ok(None)
+    );
+}
+
+/// Statistics asked before the chat's full info is known wait for it, ask
+/// for it, and go out (or fail) when it lands (sweep 13-022).
+#[test]
+fn statistics_asked_before_the_full_info_wait_and_go_out_when_it_lands() {
+    let mut rig = Rig::new();
+    rig.driver
+        .ingest(copy_and_parse(
+            r#"{"@type":"updateNewChat","chat":{"id":-100,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":100,"is_channel":true},"unread_count":0}}"#,
+            &rig.seq,
+            &rig.sink,
+        ).unwrap())
+        .unwrap();
+    assert_eq!(
+        rig.driver.fetch_chat_statistics(ChatId(-100), true),
+        Ok(None)
+    );
+    assert_eq!(
+        rig.driver.session.groups.chat_statistics.get(&-100),
+        Some(&ChatStatisticsFetch::WaitingForInfo { is_dark: true })
+    );
+    assert_eq!(rig.last("getSupergroupFullInfo")["supergroup_id"], 100);
+    assert!(!rig.sent().iter().any(|v| v["@type"] == "getChatStatistics"));
+    rig.driver
+        .ingest(copy_and_parse(
+            r#"{"@type":"updateSupergroupFullInfo","supergroup_id":100,"supergroup_full_info":{"description":"","member_count":3,"can_get_statistics":true}}"#,
+            &rig.seq,
+            &rig.sink,
+        ).unwrap())
+        .unwrap();
+    assert_eq!(
+        rig.driver.session.groups.chat_statistics.get(&-100),
+        Some(&ChatStatisticsFetch::Loading { is_dark: true })
+    );
+    let request = rig.last("getChatStatistics");
+    assert_eq!(request["chat_id"], -100);
+    assert_eq!(request["is_dark"], true);
+}
+
+#[test]
+fn statistics_waiting_for_a_full_info_that_fails_end_in_an_error() {
+    let mut rig = Rig::new();
+    rig.driver
+        .ingest(copy_and_parse(
+            r#"{"@type":"updateNewChat","chat":{"id":-100,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":100,"is_channel":true},"unread_count":0}}"#,
+            &rig.seq,
+            &rig.sink,
+        ).unwrap())
+        .unwrap();
+    assert_eq!(
+        rig.driver.fetch_chat_statistics(ChatId(-100), false),
+        Ok(None)
+    );
+    let extra = rig.last("getSupergroupFullInfo")["@extra"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    rig.driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"error","@extra":"{extra}","code":500,"message":"Timeout"}}"#
+                ),
+                &rig.seq,
+                &rig.sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(matches!(
+        rig.driver.session.groups.chat_statistics.get(&-100),
+        Some(ChatStatisticsFetch::Failed(_))
+    ));
+}
+
+/// Refuses every `getSupergroupFullInfo` send, records the rest.
+struct RefuseFullInfoSender(Arc<RecordingSender>);
+
+impl JsonSender for RefuseFullInfoSender {
+    fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
+        if request.contains("getSupergroupFullInfo") {
+            return Err(ConnectSendError::Native);
+        }
+        self.0.send_json(request)
+    }
+}
+
+/// The full-info request that statistics wait on cannot be sent: the panel
+/// ends in an error instead of waiting for an answer that never comes
+/// (sweep 13-022).
+#[test]
+fn statistics_whose_full_info_send_fails_end_in_an_error() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let session = Session::new(AccountKey::primary(), sink.clone());
+    let mut driver = ConnectDriver::new(
+        session,
+        RefuseFullInfoSender(Arc::new(RecordingSender::new())),
+        test_credentials(),
+        prepared,
+    );
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &sink);
+    driver
+        .ingest(copy_and_parse(
+            r#"{"@type":"updateNewChat","chat":{"id":-100,"title":"News","type":{"@type":"chatTypeSupergroup","supergroup_id":100,"is_channel":true},"unread_count":0}}"#,
+            &seq,
+            &sink,
+        ).unwrap())
+        .unwrap();
+    assert!(driver.fetch_chat_statistics(ChatId(-100), false).is_err());
+    assert!(matches!(
+        driver.session.groups.chat_statistics.get(&-100),
+        Some(ChatStatisticsFetch::Failed(_))
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Sweep 02-217: a send that fails leaves the page on Failed (with its
+/// Retry), not Loading for good.
+#[test]
+fn a_message_statistics_send_that_fails_shows_failed_not_loading() {
+    let mut rig = Rig::new();
+    rig.recorder.refuse_sends(true);
+    assert!(
+        rig.driver
+            .fetch_message_statistics(ChatId(-100), MessageId(7), false)
+            .is_err()
+    );
+    let state = rig.driver.session.groups.stats.message.as_ref().unwrap();
+    assert!(matches!(state.statistics, MessageStatsFetch::Failed(_)));
+    rig.recorder.refuse_sends(false);
+    rig.driver
+        .retry_message_statistics(ChatId(-100), MessageId(7), false)
+        .unwrap()
+        .expect("Retry sends again");
+}
+
+/// Sweep 02-219: a refused load records no zoom.
+#[test]
+fn a_zoom_whose_load_is_refused_is_not_recorded() {
+    let mut rig = Rig::new();
+    rig.recorder.refuse_sends(true);
+    assert!(rig.driver.zoom_stat_graph(ChatId(-100), "zoom", 5).is_err());
+    assert!(rig.driver.session.groups.stats.zoomed.is_empty());
 }

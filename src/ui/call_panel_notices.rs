@@ -212,7 +212,6 @@ mod tests {
             is_video: false,
             state,
             started_at: std::time::Instant::now(),
-            ready_at: None,
             ready: None,
             transport: transport.map_or_else(Default::default, |state| {
                 CallTransport::reported(state, Default::default()).unwrap_or(
@@ -225,13 +224,13 @@ mod tests {
             signaling_queue: Vec::new(),
             signaling_dropped: 0,
             muted: false,
-            camera_on: false,
-            screen_sharing: false,
+            video: quill::state::LocalVideo::Off,
             remote_video: RemoteVideoState::Inactive,
             remote_screen: RemoteVideoState::Inactive,
             remote_audio_muted: false,
             remote_battery_low: false,
             signal_bars: bars,
+            media_note: None,
         }
     }
 

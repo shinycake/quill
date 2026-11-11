@@ -51,7 +51,7 @@ impl QuillApp {
             .map(|c| c.title.clone())
             .unwrap_or_else(|| tr(keys::Q_MONEY_THIS_CHAT).into());
         let now = now_unix() as i32;
-        let boosts = draft.boost_count(&options.stars);
+        let boosts = draft.boost_count(options.stars_options());
 
         // Channels.
         body = body
@@ -269,7 +269,7 @@ impl QuillApp {
     ) -> Div {
         if draft.prepaid.is_some()
             || draft.kind != GiveawayKind::Premium
-            || options.premium.is_empty()
+            || options.premium_options().is_empty()
         {
             return body;
         }
@@ -324,8 +324,8 @@ impl QuillApp {
     ) -> Div {
         let users = draft.award_user_ids.len();
         let mut months = div().flex().flex_col().gap_1();
-        for month_count in gift_code_months(&options.premium) {
-            let price = gift_code_price(&options.premium, month_count, users)
+        for month_count in gift_code_months(options.premium_options()) {
+            let price = gift_code_price(options.premium_options(), month_count, users)
                 .map(|(currency, amount)| format_payment_price(&currency, amount))
                 .unwrap_or_default();
             months = months.child(
@@ -355,7 +355,8 @@ impl QuillApp {
         options: &GiveawayOptions,
     ) -> Option<String> {
         let users = draft.award_user_ids.len();
-        let (currency, amount) = gift_code_price(&options.premium, draft.premium_months, users)?;
+        let (currency, amount) =
+            gift_code_price(options.premium_options(), draft.premium_months, users)?;
         Some(format!(
             "{} for {users} Premium {}",
             format_payment_price(&currency, amount),
@@ -384,9 +385,9 @@ impl QuillApp {
                     let _ = live.driver.search_award_members(ChatId(chat), "");
                 }
                 GiveawayPage::Countries => {
-                    let _ = live.driver.fetch_countries();
+                    let _ = live.driver.retry_countries();
                 }
-                GiveawayPage::Form => {}
+                GiveawayPage::Form | GiveawayPage::Confirming => {}
             }
         }
         if let Some(form) = self.giveaway.form.as_mut() {
@@ -427,16 +428,12 @@ impl QuillApp {
             return;
         };
         if !on_users
-            || (list.error.is_some() && !scrolled)
+            || (list.error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.payments.pick_scroll),
                 list.can_load_more(),
-                list.loading,
+                list.is_loading(),
             )
-            || !self
-                .payments
-                .giveaway_asked
-                .allow(list.user_ids.len(), scrolled)
         {
             return;
         }
@@ -539,9 +536,9 @@ impl QuillApp {
                             })),
                     );
                 }
-                if let Some(error) = list.error.as_ref() {
-                    body = body.child(div().text_sm().child(error.clone()));
-                } else if list.loading {
+                if let Some(error) = list.error() {
+                    body = body.child(div().text_sm().child(error.to_string()));
+                } else if list.is_loading() {
                     body = body.child(
                         div()
                             .text_sm()
@@ -556,7 +553,7 @@ impl QuillApp {
                             .child(tr(keys::Q_MONEY_NO_MEMBERS_FOUND)),
                     );
                 }
-                if list.loading && shown > 0 {
+                if list.is_loading() && shown > 0 {
                     body = body.child(loading_row("giveaway-award-loading", cx));
                 }
             }
@@ -568,7 +565,7 @@ impl QuillApp {
                         ("len", &(draft.country_codes.len()).to_string()),
                     ],
                 )));
-                match session.auth_state.countries.as_ref() {
+                match session.auth_state.countries.data() {
                     Some(countries) => {
                         let mut list: Vec<&quill::phone::Country> = countries
                             .iter()
@@ -597,6 +594,9 @@ impl QuillApp {
                                 );
                         }
                     }
+                    None if session.auth_state.countries.error().is_some() => {
+                        body = body.child(self.countries_failed_row("giveaway", cx));
+                    }
                     None => {
                         body = body.child(
                             div()
@@ -607,7 +607,7 @@ impl QuillApp {
                     }
                 }
             }
-            GiveawayPage::Form => {}
+            GiveawayPage::Form | GiveawayPage::Confirming => {}
         }
         if let Some(note) = form.note.as_ref() {
             body = body.child(
@@ -636,7 +636,7 @@ fn country_name(session: &Session, code: &str) -> String {
     session
         .auth_state
         .countries
-        .as_ref()
+        .data()
         .and_then(|list| list.iter().find(|c| c.iso == code))
         .map(|c| c.name.clone())
         .unwrap_or_else(|| code.to_string())

@@ -10,6 +10,7 @@ use std::ops::Range;
 
 use super::actions::{EmojiWordBlock, EmojiWordSuggest, EmojiWordsOff};
 use super::app::QuillApp;
+use super::emoji_words_ui::{OpenBar, WordBar};
 use super::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -102,32 +103,53 @@ impl QuillApp {
             return;
         }
         let normalized = normalize_query(&action.word);
-        if let Some(live) = self.live.as_mut() {
-            let _ = live
+        let sent = match self.live.as_mut() {
+            Some(live) => live
                 .driver
-                .lookup_emoji_keywords(std::iter::once(normalized.as_str()));
+                .lookup_emoji_keywords(std::iter::once(normalized.as_str()))
+                .is_ok(),
+            None => true,
+        };
+        if !sent {
+            // Not signed in, or the request could not go: say so now.
+            self.set_note(StatusNote::info(tr(keys::Q_CHAT_EMOJI_WORD_LOOKUP_FAILED)));
+            cx.notify();
+            return;
         }
-        self.composer_ui.emoji_words.asked = Some((action.start..action.end, normalized));
+        let ui = &mut self.screen.composer_ui.emoji_words;
+        ui.unhover(&mut self.screen.composer_ui.suggest);
+        ui.bar = WordBar::Asking {
+            range: action.start..action.end,
+            word: normalized,
+        };
         self.answer_asked_word(cx);
     }
 
     /// Open the bar for the word "Suggest Emoji" asked about once its
     /// keyword answer is in; a note when it has no emoji.
     pub(super) fn answer_asked_word(&mut self, cx: &mut Context<Self>) {
-        let Some((range, normalized)) = self.composer_ui.emoji_words.asked.clone() else {
+        let WordBar::Asking {
+            range,
+            word: normalized,
+        } = &self.composer_ui.emoji_words.bar
+        else {
             return;
         };
-        let answered = self.session().is_none_or(|s| {
-            s.stickers
-                .emoji
-                .keyword_lookups
-                .answer(&normalized)
-                .is_some()
-        });
+        let (range, normalized) = (range.clone(), normalized.clone());
+        let lookups = self.session().map(|s| &s.stickers.emoji.keyword_lookups);
+        let answered = lookups.is_none_or(|l| l.answer(&normalized).is_some());
         if !answered {
+            // Out of attempts: it will not answer, so stop waiting and say so
+            // instead of opening the bar unprompted if a later lookup of the
+            // word lands.
+            if lookups.is_some_and(|l| l.gave_up(&normalized)) {
+                self.composer_ui.emoji_words.bar = WordBar::Closed;
+                self.set_note(StatusNote::info(tr(keys::Q_CHAT_EMOJI_WORD_LOOKUP_FAILED)));
+                cx.notify();
+            }
             return;
         }
-        self.composer_ui.emoji_words.asked = None;
+        self.composer_ui.emoji_words.bar = WordBar::Closed;
         let word = Highlight {
             range,
             normalized,
@@ -137,10 +159,9 @@ impl QuillApp {
         if items.is_empty() {
             self.set_note(StatusNote::info(tr(keys::Q_CHAT_EMOJI_WORD_NONE)));
         } else {
-            let ui = &mut self.composer_ui.emoji_words;
-            ui.unhover();
-            ui.hovered = Some((word, items));
-            ui.pinned = true;
+            let ui = &mut self.screen.composer_ui.emoji_words;
+            ui.unhover(&mut self.screen.composer_ui.suggest);
+            ui.bar = WordBar::Pinned(OpenBar::new((word, items)));
         }
         cx.notify();
     }
@@ -151,13 +172,12 @@ impl QuillApp {
         if !self.chat_prefs.emoji_word_blocklist.contains(&word) {
             self.set_chat_prefs(cx, |c| c.emoji_word_blocklist.push(word));
         }
-        let ui = &mut self.composer_ui.emoji_words;
+        let ui = &mut self.screen.composer_ui.emoji_words;
         if ui
-            .hovered
-            .as_ref()
+            .hovered()
             .is_some_and(|(h, _)| h.normalized == action.word)
         {
-            ui.unhover();
+            ui.unhover(&mut self.screen.composer_ui.suggest);
         }
         self.sync_emoji_words(cx);
         cx.notify();
@@ -173,7 +193,10 @@ impl QuillApp {
     /// After the highlights were turned off from the menu (the tests call
     /// it straight, so the shared test prefs file keeps them on).
     pub(super) fn emoji_words_turned_off(&mut self, cx: &mut Context<Self>) {
-        self.composer_ui.emoji_words.unhover();
+        self.screen
+            .composer_ui
+            .emoji_words
+            .unhover(&mut self.screen.composer_ui.suggest);
         self.sync_emoji_words(cx);
         self.set_note(StatusNote::info(tr(keys::Q_CHAT_EMOJI_WORDS_OFF_NOTE)));
         cx.notify();

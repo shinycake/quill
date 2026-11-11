@@ -18,7 +18,7 @@ impl QuillApp {
     /// `SecretChatFeatureUnsupported` gate (round videos need layer ≥ 66).
     pub(super) fn open_secret_chat_peer_layer(&self) -> Option<(String, i32)> {
         let session = self.session()?;
-        let open = session.open_chat?;
+        let open = self.viewed_chat()?;
         let chat = session.chats.get(&open.0)?;
         let secret_chat_id = chat.secret_chat_id()?;
         let record = session
@@ -36,7 +36,7 @@ impl QuillApp {
         let session = self.session();
         session
             .as_ref()
-            .and_then(|s| s.open_chat)
+            .and_then(|s| s.open_chat_id())
             .and_then(|id| session.as_ref()?.chats.get(&id.0))
             .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }))
     }
@@ -108,18 +108,23 @@ impl QuillApp {
 
     /// Phase B3: keep the self-destruct countdown badges re-rendering
     /// while the open chat has a live `self_destruct_in` timer. At most
-    /// one task per open chat (guarded by `self_destruct_tick_chat`,
+    /// one task per open chat (held in `self_destruct_tick`,
     /// mirroring the Phase A1 slow-mode tick); it exits when no timer is
     /// live or the open chat changes. Called from `render`, which has the
     /// `&mut self` the tick needs.
     pub(super) fn ensure_self_destruct_tick(&mut self, cx: &mut Context<Self>) {
         let now_ms = unix_ms_now();
-        let Some(chat_id) = self.session().and_then(|session| session.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|session| session.open_chat_id()) else {
             return;
         };
         // A running tick keeps itself alive: no need to scan the history
         // again every frame.
-        if self.history.self_destruct_tick_chat == Some(chat_id) {
+        if self
+            .chat_ui
+            .self_destruct_tick
+            .as_ref()
+            .is_some_and(|(chat, _)| *chat == chat_id)
+        {
             return;
         }
         if !self
@@ -128,14 +133,14 @@ impl QuillApp {
         {
             return;
         }
-        self.history.self_destruct_tick_chat = Some(chat_id);
-        self.spawn_scoped(cx, async move |this, cx| {
+        let task = self.spawn_scoped(cx, async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
                 let cont = this
                     .update(cx, |this, cx| {
                         let now_ms = unix_ms_now();
-                        let still_open = this.session().and_then(|s| s.open_chat) == Some(chat_id);
+                        let still_open =
+                            this.session().and_then(|s| s.open_chat_id()) == Some(chat_id);
                         let still_live = this.session().is_some_and(|session| {
                             session.open_chat_has_live_self_destruct(now_ms)
                         });
@@ -144,8 +149,16 @@ impl QuillApp {
                             this.notify_conversations(cx);
                             true
                         } else {
-                            if this.history.self_destruct_tick_chat == Some(chat_id) {
-                                this.history.self_destruct_tick_chat = None;
+                            // This task ends: let go of it without
+                            // cancelling the update it is inside.
+                            if this
+                                .chat_ui
+                                .self_destruct_tick
+                                .as_ref()
+                                .is_some_and(|(chat, _)| *chat == chat_id)
+                                && let Some((_, task)) = this.chat_ui.self_destruct_tick.take()
+                            {
+                                task.detach();
                             }
                             false
                         }
@@ -155,8 +168,8 @@ impl QuillApp {
                     break;
                 }
             }
-        })
-        .detach();
+        });
+        self.chat_ui.self_destruct_tick = Some((chat_id, task));
     }
 
     /// Phase B4: apply a chat TTL choice (`setChatMessageAutoDeleteTime`,
@@ -198,7 +211,7 @@ impl QuillApp {
     /// the open chat is a secret chat with a known peer.
     pub(super) fn secret_notif_label(session: Option<&Session>) -> Option<String> {
         let session = session?;
-        let open = session.open_chat?;
+        let open = session.open_chat_id()?;
         let chat = session.chats.get(&open.0)?;
         let ChatKind::Secret { user_id, .. } = &chat.kind else {
             return None;
@@ -303,7 +316,7 @@ impl QuillApp {
     /// shows then).
     pub(super) fn secret_composer_note(&self) -> Option<String> {
         let session = self.session()?;
-        let open = session.open_chat?;
+        let open = session.open_chat_id()?;
         let chat = session.chats.get(&open.0)?;
         let ChatKind::Secret { user_id, .. } = &chat.kind else {
             return None;

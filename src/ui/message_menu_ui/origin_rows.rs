@@ -78,7 +78,7 @@ impl QuillApp {
             &self.frame.menu.items,
             cx,
             move |this, window, cx| {
-                this.message_ui.menu = None;
+                this.close_message_menu();
                 this.open_send_gift_for(chat_id, window, cx);
             },
         ))
@@ -128,7 +128,7 @@ impl QuillApp {
             &self.frame.menu.items,
             cx,
             move |this, _, cx| {
-                this.message_ui.menu = None;
+                this.close_message_menu();
                 if let Some(session) = this.origin_session_mut() {
                     session.users_state.replies_block = Some(block.clone());
                     this.open_box(DialogKind::BlockFromReplies);
@@ -159,26 +159,50 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// Live, the box stays (`Submitting`) until the server answers: the
+    /// "blocked" note comes from the answer (`drain_replies_blocked`), an
+    /// error gives the box its choices back.
     fn submit_replies_block(&mut self, cx: &mut Context<Self>) {
         let name = self
             .session()
             .and_then(|s| s.users_state.replies_block.as_ref())
             .map(|block| block.name.clone());
-        let sent = match self.live.as_mut() {
-            Some(live) => live.driver.submit_replies_block().is_ok(),
+        match self.live.as_mut() {
+            Some(live) => {
+                if live.driver.submit_replies_block().is_err() {
+                    self.set_note(StatusNote::error(tr(
+                        keys::Q_CHAT_COULDNT_BLOCK_THE_SENDER_TRY_AGAIN,
+                    )));
+                }
+            }
             None => {
                 self.close_replies_block(cx);
-                true
+                if let Some(name) = name {
+                    self.set_note(StatusNote::silent(tr_with(
+                        keys::NEW_CONTACT_BLOCK_DONE,
+                        &[("user", &name)],
+                    )));
+                }
             }
-        };
-        if let Some(name) = name {
-            self.set_note(if sent {
-                StatusNote::silent(tr_with(keys::NEW_CONTACT_BLOCK_DONE, &[("user", &name)]))
-            } else {
-                StatusNote::error(tr(keys::Q_CHAT_COULDNT_BLOCK_THE_SENDER_TRY_AGAIN))
-            });
         }
         cx.notify();
+    }
+
+    /// The server blocked a Replies sender: say so.
+    pub(in crate::ui) fn drain_replies_blocked(&mut self) -> bool {
+        let names = self
+            .live
+            .as_mut()
+            .map(|live| std::mem::take(&mut live.driver.session.users_state.replies_blocked))
+            .unwrap_or_default();
+        let any = !names.is_empty();
+        for name in names {
+            self.set_note(StatusNote::silent(tr_with(
+                keys::NEW_CONTACT_BLOCK_DONE,
+                &[("user", &name)],
+            )));
+        }
+        any
     }
 
     pub(in crate::ui) fn build_replies_block_dialog(
@@ -260,6 +284,9 @@ impl QuillApp {
                     Button::new("replies-block-submit")
                         .label(tr(keys::BLOCKED_LIST_CONFIRM_OK))
                         .danger()
+                        .disabled(
+                            block.stage != quill::message_menu_origin::RepliesBlockStage::Editing,
+                        )
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.submit_replies_block(cx);
                             this.close_kit_dialog_if_done(DialogKind::BlockFromReplies, window, cx);

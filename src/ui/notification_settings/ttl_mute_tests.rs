@@ -52,7 +52,7 @@ fn shown(vcx: &mut VisualTestContext, selector: &'static str) -> bool {
 
 fn open_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> ChatId {
     app.read_with(vcx, |app, _| {
-        let Some(chat_id) = app.session().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = app.session().and_then(|s| s.open_chat_id()) else {
             panic!("demo has no open chat");
         };
         chat_id
@@ -70,12 +70,7 @@ fn ttl_of(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, chat_id: ChatId) 
 
 fn move_ttl_slider(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, index: usize) {
     app.update_in(vcx, |app, window, cx| {
-        let Some(slider) = app
-            .preferences
-            .index_sliders
-            .get(StepSlider::AutoDelete)
-            .cloned()
-        else {
+        let Some(slider) = app.index_sliders.get(StepSlider::AutoDelete).cloned() else {
             panic!("auto-delete slider missing");
         };
         slider.update(cx, |state, cx| {
@@ -100,9 +95,7 @@ fn auto_delete_slider_saves_the_period_it_is_on(cx: &mut TestAppContext) {
     assert!(!shown(vcx, "ttl-disable"), "Off is a slider step");
     // No timer yet: the slider starts on Off.
     let start = app.read_with(vcx, |app, cx| {
-        app.preferences
-            .index_sliders
-            .index(StepSlider::AutoDelete, cx)
+        app.index_sliders.index(StepSlider::AutoDelete, cx)
     });
     assert_eq!(start, Some(0));
 
@@ -118,9 +111,7 @@ fn auto_delete_slider_saves_the_period_it_is_on(cx: &mut TestAppContext) {
     app.update(vcx, |app, cx| app.open_ttl_picker(chat_id, cx));
     frames(vcx);
     let start = app.read_with(vcx, |app, cx| {
-        app.preferences
-            .index_sliders
-            .index(StepSlider::AutoDelete, cx)
+        app.index_sliders.index(StepSlider::AutoDelete, cx)
     });
     assert_eq!(start, Some(3));
     move_ttl_slider(&app, vcx, 0);
@@ -188,6 +179,46 @@ fn custom_mute_is_three_fields_that_start_at_eight_hours(cx: &mut TestAppContext
 }
 
 #[gpui_kit::test]
+fn reopening_custom_mute_starts_at_eight_hours_again(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    let chat_id = open_chat(&app, vcx);
+    app.update(vcx, |app, cx| app.open_mute_menu_for(chat_id, true, cx));
+    frames(vcx);
+    app.update_in(vcx, |app, window, cx| {
+        let Some(inputs) = app.notify.mute_time.as_ref() else {
+            panic!("fields missing");
+        };
+        inputs.set_for_test("3", "0", "0", window, cx);
+    });
+    frames(vcx);
+    app.update(vcx, |app, cx| app.close_mute_menu(cx));
+    app.update(vcx, |app, cx| app.open_mute_menu_for(chat_id, true, cx));
+    frames(vcx);
+    let value = app.read_with(vcx, |app, cx| app.mute_time_value(cx));
+    assert_eq!(value.map(|v| v.mute_for()), Some(8 * 3600));
+}
+
+#[gpui_kit::test]
+fn the_mute_panel_reopens_collapsed_after_a_story_sound_picker(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    app.update(vcx, |app, cx| {
+        app.open_mute_menu(cx);
+        app.notify
+            .set_mute_section(crate::ui::notify_state::MuteSection::StorySoundPicker);
+        app.close_mute_menu(cx);
+        app.open_mute_menu(cx);
+        assert_eq!(
+            app.notify.mute_section(),
+            crate::ui::notify_state::MuteSection::Collapsed
+        );
+    });
+}
+
+#[gpui_kit::test]
 fn custom_mute_applies_the_total_and_closes_the_panel(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
@@ -198,7 +229,7 @@ fn custom_mute_applies_the_total_and_closes_the_panel(cx: &mut TestAppContext) {
     vcx.update(|window, cx| window.click("mute-custom-apply", cx));
     frames(vcx);
     app.read_with(vcx, |app, _| {
-        assert!(!app.notify.mute_menu_open);
+        assert!(app.notify.mute_box.is_none());
         let Some(chat) = app.session().and_then(|s| s.chats.get(&chat_id.0)) else {
             panic!("chat missing");
         };
@@ -227,8 +258,8 @@ fn the_mute_box_keeps_the_chat_it_was_opened_for(cx: &mut TestAppContext) {
     });
     frames(&mut vcx);
     app.read_with(&vcx, |app, _| {
-        assert_eq!(app.session().and_then(|s| s.open_chat), Some(other));
-        assert_eq!(app.notify.mute_chat, Some(first), "the box's own chat");
+        assert_eq!(app.session().and_then(|s| s.open_chat_id()), Some(other));
+        assert_eq!(app.notify.mute_chat(), Some(first), "the box's own chat");
     });
 }
 

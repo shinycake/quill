@@ -1,5 +1,6 @@
 //! Service text: the wording for every `ServiceAction`, including giveaway results and gifts.
 use super::*;
+use crate::telegram::envelope::GiftOfferState;
 
 #[allow(clippy::too_many_lines)]
 pub fn render_action(action: &ServiceAction, ctx: &ServiceCtx<'_>) -> ServiceText {
@@ -99,6 +100,7 @@ pub fn render_action(action: &ServiceAction, ctx: &ServiceCtx<'_>) -> ServiceTex
         A::JoinByLink => from().t(" joined the group via invite link").done(),
         // tdesktop `lng_action_you_joined`.
         A::YouJoinedChannel => text("You joined this channel"),
+        A::NewBotThread => text(crate::lang::tr(crate::lang::keys::BOT_NEW_THREAD_ABOUT)),
         // tdesktop `lng_replies_discussion_started` / `lng_replies_no_comments`.
         A::ThreadDivider { with_comments } => text(if *with_comments {
             "Discussion started"
@@ -407,9 +409,9 @@ pub fn render_action(action: &ServiceAction, ctx: &ServiceCtx<'_>) -> ServiceTex
             "This gift was downgraded because a request to refund the payment related to this gift was made, and the money was returned.",
         ),
         A::GiftOffer { name, price, state } => match state {
-            1 => text("This offer was accepted."),
-            2 => text("This offer was rejected."),
-            _ => {
+            GiftOfferState::Accepted => text("This offer was accepted."),
+            GiftOfferState::Rejected => text("This offer was rejected."),
+            GiftOfferState::Pending | GiftOfferState::Unknown => {
                 if ctx.actor_is_me() {
                     text(&format!("You offered {} for {name}.", cost(price)))
                 } else {

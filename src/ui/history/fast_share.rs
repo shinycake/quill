@@ -7,7 +7,7 @@ use gpui_kit::*;
 use quill::corner_buttons::{FastShare, FastShareChat, FastShareFacts};
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr};
-use quill::state::{HistoryMessage, Session};
+use quill::state::{HistoryMessage, SendState, Session};
 use quill::telegram::envelope::{ChatKind, MessageContent, MessageOrigin, effective_content};
 
 /// The "Verification Codes" system user (tdesktop `isVerifyCodes`).
@@ -54,12 +54,17 @@ pub(super) fn facts(message: &HistoryMessage, session: Option<&Session>) -> Opti
     };
     let properties_forwardable = session
         .messages
-        .message_menu_actions
-        .filter(|(chat, id, _)| *chat == message.chat_id && *id == message.id)
-        .is_none_or(|(_, _, actions)| actions.can_be_forwarded);
+        .menu_actions
+        .get(message.chat_id, message.id)
+        .is_none_or(|actions| actions.can_be_forwarded);
     Some(FastShareFacts {
         chat,
-        sent: !message.pending() && message.id.0 > 0,
+        // A local id is not on the server yet, whatever the row says.
+        send: if message.id.0 > 0 {
+            message.send
+        } else {
+            SendState::Sending
+        },
         outgoing: message.is_outgoing,
         forwardable: !session.chat_has_protected_content(message.chat_id)
             && message.ephemeral.is_none()

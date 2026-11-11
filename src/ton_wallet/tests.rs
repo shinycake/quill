@@ -147,7 +147,7 @@ fn explorer_url_uses_the_app_config_prefix() {
     assert_eq!(explorer_url_from_config(&json!({"members": []})), None);
     let state = TonWalletState {
         explorer_url: explorer_url_from_config(&config),
-        explorer_url_requested: true,
+        explorer: crate::state::fetch::Fetch::Ready(()),
         ..TonWalletState::default()
     };
     assert_eq!(

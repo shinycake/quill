@@ -32,7 +32,7 @@ impl Session {
             SettingsPayload::UpdateActiveNotifications { chat_ids } => {
                 // Notifications of a previous launch: remember the chats so
                 // a later read clears them too.
-                self.settings.shown_notification_chats.extend(chat_ids);
+                self.settings.notified.mark_active(chat_ids);
             }
             // Phase C2i: `getUserPrivacySettingRules` answer — map the
             // rule list to the simple Everybody / Contacts / Nobody
@@ -43,7 +43,11 @@ impl Session {
             SettingsPayload::UserPrivacySettingRules { rules } => {
                 if let Some(purpose) = pending.map(|p| p.purpose) {
                     match purpose {
-                        RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules { setting }) => {
+                        RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules { setting })
+                            if pending.is_some_and(|p| {
+                                self.calls.privacy_asks.answered(setting, p.id)
+                            }) =>
+                        {
                             let names: Vec<String> = rules.iter().map(|r| r.name.clone()).collect();
                             let who = PrivacyWho::from_rule_names(&names);
                             match setting {
@@ -52,14 +56,16 @@ impl Session {
                                 }
                                 CallPrivacySetting::PeerToPeer => self.calls.privacy_p2p = who,
                             }
-                            self.privacy_roundtrip_done();
                         }
                         RequestPurpose::Settings(SettingsPurpose::GetPrivacyRules { key }) => {
                             let detail = PrivacyRuleDetail::from_rules(&rules);
-                            self.mirror_call_privacy(key, &detail);
-                            self.settings
-                                .privacy
-                                .insert(key, PrivacyKeyState::Ready(detail));
+                            if self.settings.finish_privacy_load(
+                                key,
+                                pending.map(|p| p.id),
+                                detail.clone(),
+                            ) {
+                                self.mirror_call_privacy(key, &detail);
+                            }
                         }
                         _ => {}
                     }
@@ -74,21 +80,26 @@ impl Session {
                     .into_iter()
                     .find(|k| k.td_type() == setting)
                 {
-                    self.mirror_call_privacy(key, &detail);
-                    self.settings
-                        .privacy
-                        .insert(key, PrivacyKeyState::Ready(detail));
+                    // A save of ours in flight is settled by its own answer;
+                    // this update is mostly its echo.
+                    let saving = matches!(
+                        self.settings.privacy.get(&key),
+                        Some(PrivacyKeyState::Saving { .. })
+                    );
+                    if !saving {
+                        self.mirror_call_privacy(key, &detail);
+                        self.settings
+                            .privacy
+                            .insert(key, PrivacyKeyState::Ready(detail));
+                    }
                 }
             }
             // Slice S3: `readDatePrivacySettings` answer.
             SettingsPayload::ReadDatePrivacySettings { show_read_date } => {
-                if matches!(
-                    pending.map(|p| p.purpose),
-                    Some(RequestPurpose::GetReadDatePrivacy)
-                ) {
-                    self.settings.read_date_show = Some(show_read_date);
-                    self.settings.read_date_loading = false;
-                    self.settings.read_date_error = false;
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::GetReadDatePrivacy
+                {
+                    self.settings.read_date.got(pending.id, show_read_date);
                 }
             }
             // Slice S3: `messageSenders` answer — one blocked-senders
@@ -111,31 +122,25 @@ impl Session {
                     ..
                 })) = pending.map(|p| p.purpose)
                 {
-                    if let Some(join_as) = self.calls.create_join_as.as_mut()
-                        && Some(join_as.request) == extra
-                    {
-                        join_as.answer = Some(Ok(senders));
+                    if let Some(join_as) = self.calls.create_join_as.as_mut() {
+                        join_as.accept(extra, senders);
                     }
                 } else if let Some(RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
                     offset,
+                    generation,
                 })) = pending.map(|p| p.purpose)
                 {
-                    self.settings.blocked_total = total_count;
-                    if offset == 0 {
-                        self.settings.blocked_senders.succeed(sender_ids);
-                    } else if let Some(mut list) = self.settings.blocked_senders.take_data() {
-                        list.extend(sender_ids);
-                        self.settings.blocked_senders.succeed(list);
-                    }
+                    self.settings
+                        .apply_blocked_page(offset, generation, total_count, sender_ids);
                 }
             }
             SettingsPayload::NotificationSounds { sounds } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::AddSavedNotificationSound) {
-                    self.settings.saved_sounds_stale = true;
+                    self.mark_saved_sounds_stale();
                 }
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::UploadSavedNotificationSound)
                 {
-                    self.finish_tone_upload(sounds);
+                    self.finish_tone_upload(pending.map(|p| p.id), sounds);
                 // Parity slice: `getSavedNotificationSounds` answer.
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetSavedNotificationSounds)
@@ -150,14 +155,12 @@ impl Session {
                     self.settings
                         .sound_file_ids
                         .retain(|_, sound_id| live_ids.contains(sound_id));
-                    self.settings.saved_notification_sounds = sounds;
-                    self.settings.saved_sounds_loaded = true;
-                    self.settings.saved_sounds_stale = false;
+                    self.settings.saved_sounds.succeed(sounds);
                 }
             }
             SettingsPayload::UpdateSavedNotificationSounds { .. } => {
                 // The list changed server-side; refetch on the next ingest.
-                self.settings.saved_sounds_stale = true;
+                self.mark_saved_sounds_stale();
             }
             SettingsPayload::StorageStatistics {
                 total_size,
@@ -167,23 +170,19 @@ impl Session {
                 // Phase S2: `getStorageStatistics` answer — only our own
                 // in-flight request writes the cache (matched by `@extra`).
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStorageStatistics) {
-                    self.settings.storage_stats = Some(StorageStats {
+                    self.settings.storage_stats.succeed(StorageStats {
                         total_size,
                         by_file_type,
                         by_chat,
                     });
-                    self.settings.storage_stats_loading = false;
                 }
                 // Batch 6: `optimizeStorage` answers with the statistics
                 // of the files it deleted. Drop the usage cache so the
                 // driver refetches the post-clear numbers on this same
                 // ingest.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::OptimizeStorage) {
-                    self.settings.storage_freed = Some(total_size);
-                    self.settings.storage_clearing = false;
-                    self.settings.storage_stats = None;
-                    self.settings.storage_stats_loading = false;
-                    self.settings.data_storage_error = None;
+                    self.settings.storage_clear = StorageClear::Freed(total_size);
+                    self.settings.storage_stats = Default::default();
                 }
             }
             SettingsPayload::AutoDownloadSettingsPresets { low, medium, high } => {
@@ -192,16 +191,16 @@ impl Session {
                 // per-network settings (matched by `@extra`), and only
                 // when nothing was loaded from disk. The driver persists
                 // the seed on the next ingest (`data_storage_dirty`).
-                if pending.map(|p| p.purpose)
-                    == Some(RequestPurpose::GetAutoDownloadSettingsPresets)
-                    && !self.settings.data_storage.seeded
+                if self
+                    .settings
+                    .data_storage
+                    .seeded
+                    .waits_for(pending.map(|p| p.id))
                 {
                     self.settings
                         .data_storage
                         .seed_from_presets(low, medium, high);
                     self.settings.data_storage_dirty = true;
-                    self.settings.auto_download_presets_loading = false;
-                    self.settings.data_storage_error = None;
                 }
             }
             SettingsPayload::UpdateUnconfirmedSession { session, count } => {
@@ -214,8 +213,7 @@ impl Session {
                         op: PasswordOp::ResetPassword
                     }))
                 ) {
-                    self.auth_state.password_state_loading = false;
-                    self.auth_state.password_op_error = None;
+                    self.auth_state.settle_password_op(pending.map(|p| p.id));
                     self.apply_reset_password_result(outcome);
                 }
             }
@@ -231,10 +229,9 @@ impl Session {
                 ) {
                     let has_password = state.has_password;
                     self.auth_state.password_state = Some(state);
-                    self.auth_state.password_state_loading = false;
+                    self.auth_state.settle_password_op(pending.map(|p| p.id));
                     self.route_gift_export_on_password(has_password);
                     self.route_gram_withdrawal_on_password(has_password);
-                    self.auth_state.password_op_error = None;
                     if let Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp { op })) =
                         pending.map(|p| p.purpose)
                     {
@@ -243,13 +240,18 @@ impl Session {
                 }
             }
             SettingsPayload::DeviceLoginResult { result } => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::ConfirmDeviceLogin) {
-                    self.settings.device_login_result = Some(result);
-                    self.settings.sessions_mutating = false;
+                if let Some(asked) =
+                    pending.filter(|p| p.purpose == RequestPurpose::ConfirmDeviceLogin)
+                {
+                    self.settings.device_login = DeviceLogin::Done {
+                        request: asked.id,
+                        result,
+                    };
                     if result != crate::auth::DeviceLoginResult::Failed {
-                        self.settings.sessions_stale = true;
+                        self.settings.sessions_op.changed(pending.map(|p| p.id));
                         self.settings.sessions.clear_error();
                     } else {
+                        self.settings.sessions_op.failed(pending.map(|p| p.id));
                         self.settings
                             .sessions
                             .fail("Telegram returned an invalid device session.");
@@ -259,7 +261,7 @@ impl Session {
             SettingsPayload::UpdateContactCloseBirthdays { users } => {
                 // A new list (also an empty one) re-enables the suggestion.
                 self.chat_list.suggestions.close_birthdays = users;
-                self.chat_list.suggestions.birthdays_hidden = false;
+                self.chat_list.suggestions.show_birthdays();
             }
             SettingsPayload::AddedProxies { proxies } => {
                 self.apply_added_proxies(pending, proxies);
@@ -297,7 +299,6 @@ impl Session {
                         self.settings.privacy_data.inactive_session_ttl_days =
                             inactive_session_ttl_days;
                     }
-                    self.settings.sessions_stale = false;
                 }
             }
             SettingsPayload::AccountTtl { days } => {
@@ -306,9 +307,7 @@ impl Session {
                 // `@extra`). Authoritative: replaces the cached days and
                 // clears any stale error.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetAccountTtl) {
-                    self.settings.account_ttl_days = Some(days);
-                    self.settings.account_ttl_loading = false;
-                    self.settings.account_error = None;
+                    self.settings.account_ttl.succeed(days);
                 }
             }
             SettingsPayload::ConnectedWebsites { websites } => {
@@ -318,10 +317,7 @@ impl Session {
                 // clears any stale error. No optimistic mutation ever
                 // happens client-side.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetConnectedWebsites) {
-                    self.settings.connected_websites = Some(websites);
-                    self.settings.connected_websites_loading = false;
-                    self.settings.websites_error = None;
-                    self.settings.websites_stale = false;
+                    self.settings.connected_websites.succeed(websites);
                 }
             }
             SettingsPayload::ScopeNotificationSettings { settings, .. } => {
@@ -339,22 +335,28 @@ impl Session {
             }
             SettingsPayload::UpdateScopeNotificationSettings { scope, settings } => {
                 // Parity slice: scope defaults changed (or our own
-                // `setScopeNotificationSettings` was confirmed).
-                self.settings
-                    .scope_notification_settings
-                    .insert(scope, settings);
+                // `setScopeNotificationSettings` was confirmed). While a save
+                // of ours is out the update is its echo, and what shows is
+                // already the newest edit.
+                if !self.settings.scope_saves.is_saving(&scope) {
+                    self.settings
+                        .scope_notification_settings
+                        .insert(scope, settings);
+                }
                 self.settings.scope_settings_loading.remove(&scope);
             }
             SettingsPayload::UpdateReactionNotificationSettings { settings } => {
                 // Parity slice: no getter exists — the update stream is the
                 // source of truth (it also confirms our own
                 // `setReactionNotificationSettings`).
-                self.settings.reaction_notification_settings = Some(settings);
+                if !self.settings.reaction_saves.is_saving(&()) {
+                    self.settings.reaction_notification_settings = Some(settings);
+                }
             }
             SettingsPayload::QuickReplies(update) => self.apply_quick_replies(update),
             SettingsPayload::TimeZones(zones) => self.apply_time_zones(zones),
             SettingsPayload::BusinessChatLinks(links) => self.apply_chat_links(links),
-            SettingsPayload::BusinessChatLink(link) => self.apply_chat_link(link),
+            SettingsPayload::BusinessChatLink(link) => self.apply_chat_link(link, extra),
             SettingsPayload::BusinessConnectedBot(bot) => self.apply_connected_bot(bot),
         }
     }

@@ -7,7 +7,10 @@ use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::group_type::GroupTypeEdit;
 use crate::ids::{ChatId, RequestId};
-use crate::new_chat::{CreateFailure, CreationOutcome, NewChatKind, NewChatStage, plan_new_chat};
+use crate::new_chat::{
+    CreateFailure, CreateProgress, CreationOutcome, NewChatKind, NewChatStage, TypeSaveStage,
+    plan_new_chat,
+};
 use crate::platform::MemorySecretStore;
 use crate::profile_photo_sources::ChatPhotoInput;
 use crate::telegram::client::copy_and_parse;
@@ -67,7 +70,7 @@ impl Rig {
             .new_chats
             .creations
             .get(&extra)
-            .and_then(|creation| creation.outcome.clone())
+            .and_then(crate::state::NewChatCreation::outcome)
     }
 
     fn create(
@@ -123,13 +126,22 @@ fn a_channel_is_created_then_gets_photo_link_and_subscribers() {
     let link = rig.sent("replacePrimaryChatInviteLink");
     assert_eq!(link.len(), 1);
     assert_eq!(link[0]["chat_id"], CHANNEL);
-    assert_ne!(rig.driver.session.open_chat, Some(chat));
+    assert_ne!(rig.driver.session.open_chat_id(), Some(chat));
     let stage = NewChatStage::Creating {
         request: extra,
         back: crate::new_chat::NewChatBack::Info,
+        progress: CreateProgress::InFlight,
     };
-    let facts = rig.driver.session.new_chat_facts(&stage);
-    assert!(!facts.create_pending);
+    assert_eq!(
+        rig.driver
+            .session
+            .settled_new_chat(NewChatKind::Channel, &stage),
+        NewChatStage::Type {
+            chat,
+            save: TypeSaveStage::Editing,
+        },
+        "the answer moves the stage to the type step, not holding the create"
+    );
 
     let sent = rig
         .driver
@@ -175,7 +187,7 @@ fn a_group_is_created_with_members_and_opened() {
         rig.outcome(extra),
         Some(CreationOutcome::Created(ChatId(GROUP)))
     );
-    assert_eq!(rig.driver.session.open_chat, Some(ChatId(GROUP)));
+    assert_eq!(rig.driver.session.open_chat_id(), Some(ChatId(GROUP)));
     assert!(rig.sent("setChatPhoto").is_empty());
     assert!(rig.sent("replacePrimaryChatInviteLink").is_empty());
 }
@@ -211,4 +223,209 @@ fn an_invalid_photo_is_refused_before_sending() {
     };
     assert!(rig.driver.create_new_chat(&request, Some(photo)).is_err());
     assert!(rig.sent("createNewSupergroupChat").is_empty());
+}
+
+/// Round 4, 006: closing the dialog while a create is out does not block
+/// the next dialog's Create and does not open the group over what the
+/// person is doing.
+#[test]
+fn an_abandoned_create_neither_blocks_nor_opens_its_chat() {
+    let mut rig = Rig::new();
+    let extra = rig.create(NewChatKind::Group, &[5], None);
+    let again = plan_new_chat(NewChatKind::Group, "Again", "", &[5], Some(1), 0).unwrap();
+    assert_eq!(rig.driver.create_new_chat(&again, None).unwrap(), None);
+    rig.driver.abandon_new_chat(extra);
+    assert!(rig.driver.create_new_chat(&again, None).unwrap().is_some());
+    rig.ingest(&format!(
+        r#"{{"@type":"updateNewChat","chat":{{"id":{GROUP},"title":"Quill Notes","type":{{"@type":"chatTypeBasicGroup","basic_group_id":8}},"unread_count":0}}}}"#
+    ));
+    rig.ingest(&format!(
+        r#"{{"@type":"createdBasicGroupChat","chat_id":{GROUP},"failed_to_add_members":{{"@type":"failedToAddMembers","failed_to_add_members":[]}},"@extra":"{}"}}"#,
+        extra.0
+    ));
+    assert_ne!(rig.driver.session.open_chat_id(), Some(ChatId(GROUP)));
+    assert!(
+        !rig.driver
+            .session
+            .groups
+            .new_chats
+            .creations
+            .contains_key(&extra),
+        "nobody reads the answer: the entry is dropped when it is applied"
+    );
+}
+
+/// Round 4, 006: a create's entry goes with its answer, whoever reads it.
+#[test]
+fn an_answered_creation_is_dropped_once_its_dialog_has_taken_it() {
+    let mut rig = Rig::new();
+    let creations = |rig: &Rig| rig.driver.session.groups.new_chats.creations.len();
+    // Refused after the dialog closed: forgotten at once.
+    let closed = rig.create(NewChatKind::Group, &[5], None);
+    rig.driver.abandon_new_chat(closed);
+    rig.ingest(&format!(
+        r#"{{"@type":"error","code":400,"message":"USERS_TOO_FEW","@extra":"{}"}}"#,
+        closed.0
+    ));
+    assert_eq!(creations(&rig), 0);
+    // Refused with the dialog open: the dialog reads the reason, then
+    // leaves the stage (abandon is its "answer taken").
+    let open = rig.create(NewChatKind::Group, &[5], None);
+    rig.ingest(&format!(
+        r#"{{"@type":"error","code":400,"message":"USERS_TOO_FEW","@extra":"{}"}}"#,
+        open.0
+    ));
+    assert!(rig.outcome(open).is_some());
+    rig.driver.abandon_new_chat(open);
+    assert_eq!(creations(&rig), 0);
+}
+
+/// Round 5, 086: a type-step Save that was refused for a reason other
+/// than a bad link, or lost, does not move on to the subscribers step as
+/// if it had saved.
+#[test]
+fn a_refused_or_lost_type_save_keeps_the_type_step() {
+    let mut rig = Rig::new();
+    let extra = rig.create(NewChatKind::Channel, &[], None);
+    rig.answer_channel(extra);
+    let chat = ChatId(CHANNEL);
+    let edits = [crate::group_type::GroupTypeEdit::DisableAllUsernames];
+    let sent = rig.driver.save_group_type(chat, &edits, &[]).unwrap();
+    assert!(!sent.is_empty());
+    rig.driver.watch_new_chat_type_save(&sent);
+    let stage = NewChatStage::Type {
+        chat,
+        save: TypeSaveStage::Saving(sent.clone()),
+    };
+    assert_eq!(
+        rig.driver
+            .session
+            .settled_new_chat(NewChatKind::Channel, &stage),
+        stage,
+        "the Save is still out"
+    );
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_NOT_MODIFIED"}}"#,
+        sent[0].0
+    ));
+    assert!(
+        matches!(
+            rig.driver
+                .session
+                .settled_new_chat(NewChatKind::Channel, &stage),
+            NewChatStage::Type {
+                save: TypeSaveStage::Refused(_),
+                ..
+            }
+        ),
+        "the step stays"
+    );
+    assert!(
+        rig.driver
+            .session
+            .groups
+            .new_chats
+            .type_save_failure(&sent)
+            .is_some()
+    );
+}
+
+/// A type-step Save whose requests all answered well moves the stage on to
+/// the subscribers; a lost request returns a create to its form.
+#[test]
+fn an_answered_type_save_moves_the_stage_on() {
+    let mut rig = Rig::new();
+    let extra = rig.create(NewChatKind::Channel, &[], None);
+    rig.answer_channel(extra);
+    let chat = ChatId(CHANNEL);
+    let edits = [crate::group_type::GroupTypeEdit::DisableAllUsernames];
+    let sent = rig.driver.save_group_type(chat, &edits, &[]).unwrap();
+    rig.driver.watch_new_chat_type_save(&sent);
+    let stage = NewChatStage::Type {
+        chat,
+        save: TypeSaveStage::Saving(sent.clone()),
+    };
+    assert_eq!(
+        rig.driver
+            .session
+            .settled_new_chat(NewChatKind::Channel, &stage),
+        stage
+    );
+    for id in &sent {
+        rig.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, id.0));
+    }
+    assert_eq!(
+        rig.driver
+            .session
+            .settled_new_chat(NewChatKind::Channel, &stage),
+        NewChatStage::Subscribers { chat }
+    );
+    // A create whose request is gone with no answer returns the form.
+    let lost = NewChatStage::Creating {
+        request: RequestId(9_999),
+        back: crate::new_chat::NewChatBack::Info,
+        progress: CreateProgress::InFlight,
+    };
+    assert!(matches!(
+        rig.driver
+            .session
+            .settled_new_chat(NewChatKind::Channel, &lost),
+        NewChatStage::Creating {
+            progress: CreateProgress::Lost,
+            ..
+        }
+    ));
+}
+
+/// A Save request that is gone without an answer did not happen: the step
+/// stays with a reason, and an old refusal of the same chat and field (not
+/// this Save's request) neither moves it nor stops it.
+#[test]
+fn a_lost_type_save_request_lands_in_refused() {
+    let mut rig = Rig::new();
+    let extra = rig.create(NewChatKind::Channel, &[], None);
+    rig.answer_channel(extra);
+    let chat = ChatId(CHANNEL);
+    let lost = RequestId(987_654);
+    rig.driver.watch_new_chat_type_save(&[lost]);
+    let stage = NewChatStage::Type {
+        chat,
+        save: TypeSaveStage::Saving(vec![lost]),
+    };
+    assert!(
+        matches!(
+            rig.driver
+                .session
+                .settled_new_chat(NewChatKind::Channel, &stage),
+            NewChatStage::Type {
+                save: TypeSaveStage::Refused(_),
+                ..
+            }
+        ),
+        "a request that vanished is a failed Save"
+    );
+    // An answered Save moves on even with an older refusal for the chat.
+    let edits = [crate::group_type::GroupTypeEdit::DisableAllUsernames];
+    let sent = rig.driver.save_group_type(chat, &edits, &[]).unwrap();
+    rig.driver.watch_new_chat_type_save(&sent);
+    rig.driver.session.groups.info_edit_errors.insert(
+        chat.0,
+        crate::state::GroupInfoEditError {
+            field: crate::state::GroupInfoField::Username,
+            reason: "old".into(),
+        },
+    );
+    for id in &sent {
+        rig.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, id.0));
+    }
+    let stage = NewChatStage::Type {
+        chat,
+        save: TypeSaveStage::Saving(sent),
+    };
+    assert_eq!(
+        rig.driver
+            .session
+            .settled_new_chat(NewChatKind::Channel, &stage),
+        NewChatStage::Subscribers { chat }
+    );
 }

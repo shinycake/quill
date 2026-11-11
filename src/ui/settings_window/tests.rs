@@ -5,6 +5,7 @@
 
 use super::SubPage;
 use crate::ui::app::QuillApp;
+use crate::ui::dialogs::storage_editor::StorageEditor;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::Root;
@@ -145,7 +146,10 @@ fn log_out_asks_before_signing_out(cx: &mut TestAppContext) {
     assert_eq!(open_dialog(&shell, vcx), None);
     app.read_with(vcx, |app, _| {
         assert!(app.settings.open);
-        assert!(!app.settings.log_out_confirm);
+        assert!(
+            !app.settings
+                .box_open(crate::ui::settings_state::SettingsBox::LogOut)
+        );
     });
 }
 
@@ -197,7 +201,7 @@ fn a_narrow_window_shows_the_list_then_a_page_with_a_way_back(cx: &mut TestAppCo
 }
 
 fn query(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> String {
-    app.read_with(vcx, |app, _| app.settings.search.query.clone())
+    app.read_with(vcx, |app, cx| app.settings.search.query(cx))
 }
 
 #[gpui_kit::test]
@@ -342,11 +346,11 @@ fn privacy_rules_open_over_the_page_and_esc_closes_them_first(cx: &mut TestAppCo
     assert!(shown(vcx, "settings-page-privacy"));
     vcx.update(|window, cx| window.click("privacy-rule-userPrivacySettingShowStatus", cx));
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.privacy.editor.is_some()));
+    assert!(app.read_with(vcx, |app, _| app.privacy.layer.editor().is_some()));
 
     vcx.simulate_keystrokes("escape");
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.privacy.editor.is_none()));
+    assert!(app.read_with(vcx, |app, _| app.privacy.layer.editor().is_none()));
     assert!(shown(vcx, "settings-page-privacy"), "the page stays");
 }
 
@@ -364,15 +368,23 @@ fn data_storage_editor_opens_in_the_page_and_leaving_drops_it(cx: &mut TestAppCo
         let draft = app
             .session()
             .map(|s| *s.settings.data_storage.for_network(network));
-        app.settings.data_storage_editor = draft.map(|draft| (network, draft));
+        app.settings.data_storage_editor = draft
+            .map(|draft| StorageEditor::open(network, draft))
+            .unwrap_or_default();
         cx.notify();
     });
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.settings.data_storage_editor.is_some()));
+    assert!(app.read_with(vcx, |app, _| {
+        app.settings.data_storage_editor.shown().is_some()
+    }));
     vcx.update(|window, cx| window.click("data-storage-back", cx));
     frames(vcx);
     assert!(
-        app.read_with(vcx, |app, _| app.settings.data_storage_editor.is_none()),
+        app.read_with(vcx, |app, _| app
+            .settings
+            .data_storage_editor
+            .shown()
+            .is_none()),
         "back returns to the overview"
     );
 
@@ -381,12 +393,16 @@ fn data_storage_editor_opens_in_the_page_and_leaving_drops_it(cx: &mut TestAppCo
         let draft = app
             .session()
             .map(|s| *s.settings.data_storage.for_network(network));
-        app.settings.data_storage_editor = draft.map(|draft| (network, draft));
+        app.settings.data_storage_editor = draft
+            .map(|draft| StorageEditor::open(network, draft))
+            .unwrap_or_default();
     });
 
     app.update(vcx, |app, cx| app.show_settings_page(Page::Connection, cx));
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.settings.data_storage_editor.is_none()));
+    assert!(app.read_with(vcx, |app, _| {
+        app.settings.data_storage_editor.shown().is_none()
+    }));
     assert!(shown(vcx, "settings-page-connection"));
 }
 
@@ -402,15 +418,17 @@ fn devices_page_esc_leaves_session_details_before_the_page(cx: &mut TestAppConte
             .session()
             .and_then(|s| s.settings.sessions.data())
             .and_then(|list| list.first().map(|s| s.id));
-        app.privacy.extra.session_details = first;
+        if let Some(id) = first {
+            app.privacy.devices.open_details(id);
+        }
         cx.notify();
     });
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.privacy.extra.session_details.is_some()));
+    assert!(app.read_with(vcx, |app, _| app.privacy.devices.details().is_some()));
 
     vcx.simulate_keystrokes("escape");
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.privacy.extra.session_details.is_none()));
+    assert!(app.read_with(vcx, |app, _| app.privacy.devices.details().is_none()));
     assert!(shown(vcx, "settings-page-devices"), "the page stays");
 }
 
@@ -435,4 +453,59 @@ fn leaving_the_calls_page_disarms_the_push_to_talk_capture(cx: &mut TestAppConte
         app.close_settings();
     });
     assert!(!armed(&app, vcx), "Settings closed");
+}
+
+#[gpui_kit::test]
+fn the_reset_statistics_confirm_does_not_come_back_with_the_page(cx: &mut TestAppContext) {
+    use crate::ui::dialogs::data_extra::NetworkReset;
+    let (app, _, mut vcx) = new_app_sized(cx, 1100., 2400.);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.demo_ready_storage_usage(window, cx)
+    });
+    frames(vcx);
+    app.update(vcx, |app, _| {
+        app.privacy.extra.network_reset = NetworkReset::Confirming;
+    });
+    app.update(vcx, |app, cx| app.show_settings_page(Page::Connection, cx));
+    frames(vcx);
+    app.update(vcx, |app, cx| app.show_settings_page(Page::DataStorage, cx));
+    frames(vcx);
+    assert_eq!(
+        app.read_with(vcx, |app, _| app.privacy.extra.network_reset),
+        NetworkReset::Idle,
+        "Reset is not armed again"
+    );
+}
+
+#[gpui_kit::test]
+fn clear_selected_keeps_the_ticks_until_the_clear_went_out(cx: &mut TestAppContext) {
+    use crate::ui::dialogs::local_storage::StorageClear;
+    let (app, _, mut vcx) = new_app_sized(cx, 1100., 2400.);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.demo_ready_storage_usage(window, cx)
+    });
+    frames(vcx);
+    app.update(vcx, |app, cx| {
+        app.settings.storage_selected.insert("fileTypePhoto");
+        app.settings.storage_confirm = Some(StorageClear::Selected);
+        app.run_storage_clear(cx);
+    });
+    // The demo "sends" it: the ticks go with a clear that went out.
+    assert!(app.read_with(vcx, |app, _| app.settings.storage_selected.is_empty()));
+}
+
+#[gpui_kit::test]
+fn a_session_box_whose_session_left_the_list_is_not_a_layer(cx: &mut TestAppContext) {
+    let (app, _, mut vcx) = new_app(cx, 1100.);
+    let vcx = &mut vcx;
+    frames(vcx);
+    app.update(vcx, |app, _| {
+        app.privacy.devices.open_details(i64::MAX);
+    });
+    assert!(
+        !app.read_with(vcx, |app, _| app.sessions_layer_open()),
+        "Esc is not spent on an invisible layer"
+    );
 }

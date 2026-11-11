@@ -4,23 +4,23 @@ use crate::quick_replies::{
     MESSAGES_MAX, QuickRepliesUpdate, QuickReplyMessage, QuickReplyShortcut, SHORTCUTS_MAX,
     count_label,
 };
+use crate::state::fetch::Fetch;
 use crate::state::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct QuickRepliesState {
     /// Shortcut ids in the order TDLib sent (`updateQuickReplyShortcuts`).
     pub order: Vec<i32>,
     pub shortcuts: HashMap<i32, QuickReplyShortcut>,
-    pub messages: HashMap<i32, Vec<QuickReplyMessage>>,
-    /// `loadQuickReplyShortcuts` was sent.
-    pub shortcuts_requested: bool,
-    /// Shortcuts whose messages were asked for. A failed load stays here
-    /// (and in `messages_failed`), so nothing asks again on its own.
-    pub messages_requested: HashSet<i32>,
-    /// Shortcuts whose message load failed. Opening the dialog again
-    /// clears them (`reopen`), so the next look asks once more.
-    pub messages_failed: HashSet<i32>,
+    /// The messages of each shortcut asked for: in flight, in, or failed.
+    /// A failed load stays (so nothing asks again on its own) until the
+    /// dialog opens again (`reopen`); a deleted shortcut takes its entry.
+    pub messages: HashMap<i32, Fetch<Vec<QuickReplyMessage>>>,
+    /// `loadQuickReplyShortcuts`: once per session. A failed load waits for
+    /// the dialog to open again (`reopen`) instead of being asked on every
+    /// poll.
+    pub shortcuts_load: Fetch<()>,
     /// The last refusal, in words, for the open dialog.
     pub error: Option<String>,
     /// TDLib options `quick_reply_shortcut_count_max` and
@@ -29,6 +29,12 @@ pub struct QuickRepliesState {
     pub message_count_max: Option<usize>,
     /// Counter for `sendQuickReplyShortcutMessages.sending_id`.
     pub next_sending_id: i32,
+    /// The shortcuts being sent, by request: pruned once the request is
+    /// answered, so a double tap sends once.
+    pub sending: HashMap<RequestId, (ChatId, i32)>,
+    /// The changes (add, edit, rename, delete) on their way, by request,
+    /// each as the request it sent without its id.
+    pub changing: HashMap<RequestId, String>,
 }
 
 impl QuickRepliesState {
@@ -70,21 +76,26 @@ impl QuickRepliesState {
     /// The shortcut's messages are in, or their load failed: nothing is
     /// left to wait for.
     pub fn messages_settled(&self, shortcut_id: i32) -> bool {
-        self.messages.contains_key(&shortcut_id) || self.messages_failed.contains(&shortcut_id)
+        self.messages
+            .get(&shortcut_id)
+            .is_some_and(|fetch| !fetch.is_loading())
     }
 
     /// The dialog opened: the last refusal's line goes, and a shortcut
     /// whose load failed may be asked for again.
     pub fn reopen(&mut self) {
         self.error = None;
-        for shortcut_id in self.messages_failed.drain() {
-            self.messages_requested.remove(&shortcut_id);
+        self.messages
+            .retain(|_, fetch| !matches!(fetch, Fetch::Failed { .. }));
+        if matches!(self.shortcuts_load, Fetch::Failed { .. }) {
+            self.shortcuts_load = Fetch::Idle;
         }
     }
 
     pub fn messages_of(&self, shortcut_id: i32) -> &[QuickReplyMessage] {
         self.messages
             .get(&shortcut_id)
+            .and_then(Fetch::data)
             .map(Vec::as_slice)
             .unwrap_or(&[])
     }
@@ -138,8 +149,6 @@ impl Session {
             QuickRepliesUpdate::Deleted { shortcut_id } => {
                 state.shortcuts.remove(&shortcut_id);
                 state.messages.remove(&shortcut_id);
-                state.messages_requested.remove(&shortcut_id);
-                state.messages_failed.remove(&shortcut_id);
                 state.order.retain(|id| *id != shortcut_id);
             }
             QuickRepliesUpdate::Order { shortcut_ids } => state.order = shortcut_ids,
@@ -150,8 +159,7 @@ impl Session {
                 if let Some(shortcut) = state.shortcuts.get_mut(&shortcut_id) {
                     shortcut.message_count = messages.len() as i32;
                 }
-                state.messages_failed.remove(&shortcut_id);
-                state.messages.insert(shortcut_id, messages);
+                state.messages.insert(shortcut_id, Fetch::Ready(messages));
             }
         }
     }
@@ -183,6 +191,11 @@ impl Session {
         {
             self.settings.quick_replies.error = None;
         }
+        if let Some(RequestPurpose::Settings(SettingsPurpose::LoadQuickReplyShortcuts)) =
+            pending.map(|p| p.purpose)
+        {
+            self.settings.quick_replies.shortcuts_load.succeed(());
+        }
     }
 
     /// A failed quick reply request; `true` when it was one.
@@ -194,14 +207,18 @@ impl Session {
         let state = &mut self.settings.quick_replies;
         match purpose {
             Some(RequestPurpose::Settings(SettingsPurpose::LoadQuickReplyShortcuts)) => {
-                state.shortcuts_requested = false;
+                state.shortcuts_load.fail(error_reason(err));
             }
             Some(RequestPurpose::Settings(SettingsPurpose::LoadQuickReplyMessages {
                 shortcut_id,
             })) => {
                 // Marked failed, not un-requested: a poll waiting for the
                 // messages stops instead of asking again on every tick.
-                state.messages_failed.insert(shortcut_id);
+                state
+                    .messages
+                    .entry(shortcut_id)
+                    .or_default()
+                    .fail(error_reason(err));
             }
             Some(RequestPurpose::Settings(SettingsPurpose::MutateQuickReplies)) => {}
             _ => return false,

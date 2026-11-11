@@ -234,8 +234,7 @@ async fn cast(
         options,
         pacer: FramePacer::new(options.fps),
         format: None,
-        streamed: false,
-        paused: false,
+        phase: StreamPhase::Connecting,
     };
     let stream = match PwStream::connect(fd, node, Box::new(handler)) {
         Ok(stream) => stream,
@@ -246,6 +245,20 @@ async fn cast(
     Ok(Outcome::Ended)
 }
 
+/// Where the PipeWire stream is. Pausing before frames flowed is setup, so
+/// `Paused` is only reached from `Streaming`. `Gone` is after the stream
+/// went back to unconnected, from any phase: the share ended once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamPhase {
+    /// No frame has flowed yet.
+    Connecting,
+    Streaming,
+    /// The source stopped sending (the shared window is hidden).
+    Paused,
+    /// The stream disconnected (the compositor or the node went away).
+    Gone,
+}
+
 /// Turns PipeWire buffers into call frames, on PipeWire's thread.
 struct Frames {
     sink: FrameSink<VideoFrame>,
@@ -253,9 +266,7 @@ struct Frames {
     options: ScreenOptions,
     pacer: FramePacer,
     format: Option<NegotiatedFormat>,
-    /// Whether frames have flowed: pausing before that is setup.
-    streamed: bool,
-    paused: bool,
+    phase: StreamPhase,
 }
 
 impl StreamHandler for Frames {
@@ -298,14 +309,13 @@ impl StreamHandler for Frames {
     fn state_changed(&mut self, state: StreamState, error: Option<String>) {
         match state {
             StreamState::Streaming => {
-                if self.paused {
-                    self.paused = false;
+                if self.phase == StreamPhase::Paused {
                     self.sink.push_event(CaptureEvent::Resumed);
                 }
-                self.streamed = true;
+                self.phase = StreamPhase::Streaming;
             }
-            StreamState::Paused if self.streamed && !self.paused => {
-                self.paused = true;
+            StreamState::Paused if self.phase == StreamPhase::Streaming => {
+                self.phase = StreamPhase::Paused;
                 self.sink.push_event(CaptureEvent::Paused);
             }
             StreamState::Error => self
@@ -314,10 +324,56 @@ impl StreamHandler for Frames {
                     "Screen sharing failed: {}",
                     error.unwrap_or_default()
                 )))),
-            StreamState::Unconnected if self.streamed => {
+            StreamState::Unconnected if self.phase != StreamPhase::Gone => {
+                self.phase = StreamPhase::Gone;
                 self.sink.push_event(CaptureEvent::Ended);
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn frames() -> (Frames, FrameSink<VideoFrame>) {
+        let sink = FrameSink::new(2);
+        let options = ScreenOptions::default();
+        let frames = Frames {
+            sink: sink.clone(),
+            preview: Arc::new(PreviewSlot::default()),
+            options,
+            pacer: FramePacer::new(options.fps),
+            format: None,
+            phase: StreamPhase::Connecting,
+        };
+        (frames, sink)
+    }
+
+    #[test]
+    fn a_stream_that_disconnects_before_it_streams_ends_the_share_once() {
+        let (mut frames, sink) = frames();
+        frames.state_changed(StreamState::Connecting, None);
+        frames.state_changed(StreamState::Paused, None);
+        assert!(sink.take_events().is_empty(), "setup is not an event");
+        frames.state_changed(StreamState::Unconnected, None);
+        frames.state_changed(StreamState::Unconnected, None);
+        assert!(matches!(
+            sink.take_events().as_slice(),
+            [CaptureEvent::Ended]
+        ));
+    }
+
+    #[test]
+    fn pausing_and_resuming_after_streaming_are_events() {
+        let (mut frames, sink) = frames();
+        frames.state_changed(StreamState::Streaming, None);
+        frames.state_changed(StreamState::Paused, None);
+        frames.state_changed(StreamState::Streaming, None);
+        assert!(matches!(
+            sink.take_events().as_slice(),
+            [CaptureEvent::Paused, CaptureEvent::Resumed]
+        ));
     }
 }

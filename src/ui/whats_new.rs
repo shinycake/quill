@@ -34,10 +34,18 @@ pub(crate) enum Notes {
     Failed,
 }
 
+/// The window: not open, being opened (deferred), or open.
+#[derive(Default, Clone, Copy)]
+enum WhatsNewWindow {
+    #[default]
+    Closed,
+    Opening,
+    Open(AnyWindowHandle),
+}
+
 #[derive(Default)]
 pub(crate) struct WhatsNewUi {
-    window: Option<AnyWindowHandle>,
-    opening: bool,
+    window: WhatsNewWindow,
     pub(crate) notes: Notes,
 }
 
@@ -51,23 +59,24 @@ impl QuillApp {
         ) {
             self.load_release_notes(cx);
         }
-        if let Some(handle) = self.preferences.whats_new.window {
-            let raised = handle.update(cx, |_, window, _| window.activate_window());
-            if raised.is_ok() {
-                return;
+        match self.preferences.whats_new.window {
+            WhatsNewWindow::Open(handle) => {
+                let raised = handle.update(cx, |_, window, _| window.activate_window());
+                if raised.is_ok() {
+                    return;
+                }
+                self.preferences.whats_new.window = WhatsNewWindow::Closed;
             }
-            self.preferences.whats_new.window = None;
+            WhatsNewWindow::Opening => return,
+            WhatsNewWindow::Closed => {}
         }
-        if self.preferences.whats_new.opening {
-            return;
-        }
-        self.preferences.whats_new.opening = true;
+        self.preferences.whats_new.window = WhatsNewWindow::Opening;
         let owner = cx.entity();
         cx.defer(move |cx| {
             let handle = open_window(owner.clone(), cx);
             owner.update(cx, |app, cx| {
-                app.preferences.whats_new.opening = false;
-                app.preferences.whats_new.window = handle;
+                app.preferences.whats_new.window =
+                    handle.map_or(WhatsNewWindow::Closed, WhatsNewWindow::Open);
                 cx.notify();
             });
         });
@@ -96,7 +105,9 @@ impl QuillApp {
     }
 
     fn whats_new_closed(&mut self, cx: &mut Context<Self>) {
-        self.preferences.whats_new.window = None;
+        if matches!(self.preferences.whats_new.window, WhatsNewWindow::Open(_)) {
+            self.preferences.whats_new.window = WhatsNewWindow::Closed;
+        }
         cx.notify();
     }
 }
@@ -164,6 +175,7 @@ impl Render for WhatsNewView {
         let owner = self.owner.clone();
         super::window_frame::sync(
             window,
+            cx,
             owner
                 .upgrade()
                 .is_some_and(|app| app.read(cx).appearance.native_window_frame),
@@ -402,6 +414,9 @@ impl QuillApp {
 
     #[cfg(test)]
     pub(crate) fn whats_new_window(&self) -> Option<AnyWindowHandle> {
-        self.preferences.whats_new.window
+        match self.preferences.whats_new.window {
+            WhatsNewWindow::Open(handle) => Some(handle),
+            WhatsNewWindow::Closed | WhatsNewWindow::Opening => None,
+        }
     }
 }

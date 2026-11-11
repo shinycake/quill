@@ -161,8 +161,9 @@ impl QuillApp {
                     let Some(first) = album_messages.first() else {
                         continue;
                     };
-                    // Same chrome rule as single rows, from the first item.
-                    let spot = spot_of(first, next_same_sender, false);
+                    // Same chrome rule as single rows, from the first item:
+                    // its headers open the album.
+                    let spot = spot_of(first, next_same_sender, true);
                     let chrome = Box::new(build.chrome.chrome(first, spot));
                     let day_label = day_label(first.date);
                     let unread_divider = first_unread(first);
@@ -196,9 +197,9 @@ impl QuillApp {
                         day_label: row_day_label,
                         unread_divider: row_unread_divider,
                         fact_check_expanded: self
-                            .message_ui
+                            .chat_ui
                             .fact_check_expanded
-                            .contains(&(message.chat_id.0, message.id.0)),
+                            .contains(&message.id.0),
                         is_secret: build.is_secret,
                         vanishing: self.vanish_progress(message.chat_id, message.id).is_some(),
                         message,
@@ -218,13 +219,8 @@ impl QuillApp {
     /// A bot's streaming reply (`updatePendingMessage`) is its next
     /// incoming message, growing as it arrives (Telegram Desktop): the
     /// row after the rows that hand down `seed`.
-    pub(super) fn streaming_bot_row(
-        &self,
-        seed: &RowSeed,
-        build: &RowBuild,
-        cx: &mut Context<Self>,
-    ) -> Option<HistoryRow> {
-        let message = self.streaming_bot_message(cx)?;
+    pub(super) fn streaming_bot_row(&self, seed: &RowSeed, build: &RowBuild) -> Option<HistoryRow> {
+        let message = self.streaming_bot_message()?;
         let spot = ChromeSpot {
             sender_changed: seed.previous != Some((message.is_outgoing, message.sender)),
             next_same_sender: true,

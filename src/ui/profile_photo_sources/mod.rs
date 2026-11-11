@@ -87,7 +87,6 @@ pub(crate) struct PhotoSources {
     mode: SourceMode,
     emoji: EmojiBuilder,
     camera: CameraDraft,
-    busy: bool,
     note: Option<String>,
     /// Bumped per request so a late result for an older one is dropped.
     serial: u32,
@@ -208,12 +207,12 @@ impl QuillApp {
         let users = &session.users_state;
         match self.photo_target() {
             Some(PhotoTarget::Chat(_) | PhotoTarget::NewChat) => (
-                &users.chat_photo_emoji_icons,
-                users.chat_photo_emoji_icons_failed,
+                users.chat_photo_emoji_icons.items(),
+                users.chat_photo_emoji_icons.error().is_some(),
             ),
             _ => (
-                &users.profile_photo_emoji_icons,
-                users.profile_photo_emoji_icons_failed,
+                users.profile_photo_emoji_icons.items(),
+                users.profile_photo_emoji_icons.error().is_some(),
             ),
         }
     }
@@ -251,7 +250,6 @@ impl QuillApp {
         if let Some(sources) = self.sources_mut() {
             sources.mode = mode;
             sources.note = None;
-            sources.busy = false;
         }
         if mode == SourceMode::Camera {
             self.start_camera(window, cx);
@@ -268,7 +266,6 @@ impl QuillApp {
             if sources.mode == SourceMode::Camera {
                 sources.mode = SourceMode::Closed;
                 sources.camera = CameraDraft::default();
-                sources.busy = false;
                 sources.serial = sources.serial.wrapping_add(1);
             }
         }
@@ -290,7 +287,6 @@ impl QuillApp {
             sources.camera = CameraDraft::default();
             sources.emoji.close_editor();
             sources.note = None;
-            sources.busy = false;
             sources.serial += 1;
         }
         cx.notify();
@@ -299,7 +295,6 @@ impl QuillApp {
     fn photo_source_note(&mut self, text: impl Into<String>, cx: &mut Context<Self>) {
         if let Some(sources) = self.sources_mut() {
             sources.note = Some(text.into());
-            sources.busy = false;
         }
         cx.notify();
     }

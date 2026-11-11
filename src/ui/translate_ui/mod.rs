@@ -28,8 +28,7 @@ use quill::translate::{
     offer_language, replace_content_text, search_languages, tracking_enabled, translatable_content,
 };
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
+use std::collections::HashMap;
 use std::time::Duration;
 
 /// Messages with a translation request in flight at once (tdesktop sends
@@ -67,16 +66,27 @@ pub(super) enum TranslateView {
     SkipList,
 }
 
+/// Where the box's request stands. `Refused`: it could not be sent
+/// (offline, a closed client), so the box says it failed instead of
+/// showing its placeholder for good.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum TranslateAsk {
+    /// Nothing sent from here (a message's translation is read by its
+    /// key), or not yet.
+    Idle,
+    /// A selection's job.
+    Job(u64),
+    /// The request could not be sent.
+    Refused,
+}
+
 pub(super) struct TranslateDialog {
     pub(super) view: TranslateView,
     pub(super) source: Option<TranslateSource>,
     pub(super) to: &'static str,
-    /// `translateText` job of a selection.
-    pub(super) job: Option<u64>,
+    /// The request the box waits on: a selection's `translateText` job.
+    pub(super) ask: TranslateAsk,
     pub(super) original_expanded: bool,
-    /// Chooser opened from the bar menu: close it after a pick instead of
-    /// returning to the box.
-    pub(super) close_after_choose: bool,
     pub(super) note: Option<String>,
     pub(super) search: Entity<TextareaState>,
     _search_subscription: Subscription,
@@ -89,7 +99,28 @@ pub(super) struct TranslateToast {
     text: String,
     label: &'static str,
     action: ToastAction,
-    id: u64,
+}
+
+/// The toast under the bar: shown with the timer that hides it, or not
+/// there. Replacing or clearing the stage drops the timer, so a newer
+/// toast restarts it and a timer never clears a later toast.
+#[derive(Default)]
+pub(super) enum ToastStage {
+    #[default]
+    None,
+    Shown {
+        toast: TranslateToast,
+        _hide: Task<()>,
+    },
+}
+
+impl ToastStage {
+    fn toast(&self) -> Option<&TranslateToast> {
+        match self {
+            Self::None => None,
+            Self::Shown { toast, .. } => Some(toast),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -97,6 +128,9 @@ enum ToastAction {
     ShowBar,
     OpenSkipList,
 }
+
+/// Chats whose offered language is cached at once.
+const OFFER_CACHE_CHATS: usize = 32;
 
 #[derive(PartialEq, Eq)]
 struct OfferKey {
@@ -136,9 +170,10 @@ impl TranslateUi {
 #[derive(Default)]
 pub(super) struct TranslateScreen {
     pub(super) dialog: Option<TranslateDialog>,
-    toast: Option<TranslateToast>,
-    toast_seq: u64,
-    offer: RefCell<Option<(OfferKey, Option<&'static str>)>>,
+    toast: ToastStage,
+    /// The offered language per chat: each window shows its own chat, and
+    /// one slot thrashed when two showed different ones.
+    offer: RefCell<HashMap<i64, (OfferKey, Option<&'static str>)>>,
     /// What `pump_translation` tested last (`pump_scan`), by chat: each
     /// window pumps the chat it shows.
     pub(super) pump: std::collections::HashMap<i64, pump_scan::PumpScan>,
@@ -146,7 +181,13 @@ pub(super) struct TranslateScreen {
     asked: Vec<(MessageId, &'static str)>,
 }
 
-impl super::on_screen::Farewell for TranslateScreen {}
+/// The dialog's `translateText` job is dropped from the old client's
+/// session (it counts toward the pump's in-flight cap and keeps its result).
+impl super::on_screen::Farewell for TranslateScreen {
+    fn farewell(app: &mut QuillApp, _: &mut Window, cx: &mut Context<QuillApp>) {
+        app.close_translate_dialog(cx);
+    }
+}
 
 impl QuillApp {
     // ---------------------------------------------------------------------
@@ -182,7 +223,7 @@ impl QuillApp {
             revision: history.messages.revision(),
             skip: skip.to_vec(),
         };
-        if let Some((cached, value)) = self.translate.offer.borrow().as_ref()
+        if let Some((cached, value)) = self.translate.offer.borrow().get(&chat_id.0)
             && *cached == key
         {
             return *value;
@@ -195,7 +236,13 @@ impl QuillApp {
             .filter_map(|message| translatable_content(&message.content).map(|(text, _)| text))
             .collect();
         let value = offer_language(texts, skip);
-        *self.translate.offer.borrow_mut() = Some((key, value));
+        let mut offers = self.translate.offer.borrow_mut();
+        // A chat per window is a handful; a long session of chats is not
+        // kept whole.
+        if offers.len() >= OFFER_CACHE_CHATS {
+            offers.clear();
+        }
+        offers.insert(chat_id.0, (key, value));
         value
     }
 
@@ -209,7 +256,7 @@ impl QuillApp {
         let automatic = session.chat_auto_translate(chat_id);
         if !tracking_enabled(prefs.translate_chats, session.is_premium(), automatic)
             || !session.chat_is_translatable(chat_id)
-            || prefs.bar_hidden(chat_id.0)
+            || prefs.bar_hidden(&session.account, chat_id.0)
             || session
                 .chats
                 .get(&chat_id.0)
@@ -239,7 +286,8 @@ impl QuillApp {
             return false;
         };
         let prefs = &self.preferences.translate.prefs;
-        let hidden = !session.chat_is_translatable(chat_id) || prefs.bar_hidden(chat_id.0);
+        let hidden =
+            !session.chat_is_translatable(chat_id) || prefs.bar_hidden(&session.account, chat_id.0);
         let ui = self.translate_ui_language();
         hidden
             && prefs.translate_chats
@@ -288,9 +336,8 @@ impl QuillApp {
             view,
             source,
             to,
-            job: None,
+            ask: TranslateAsk::Idle,
             original_expanded: false,
-            close_after_choose: false,
             note: None,
             search,
             _search_subscription: subscription,
@@ -376,15 +423,13 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A chooser with no box under it (no source) closes after a pick.
         self.new_translate_dialog(TranslateView::ChooseTo, None, to, window, cx);
-        if let Some(dialog) = self.translate.dialog.as_mut() {
-            dialog.close_after_choose = true;
-        }
         cx.notify();
     }
 
     pub(super) fn close_translate_dialog(&mut self, cx: &mut Context<Self>) {
-        if let Some(job) = self.translate.dialog.as_ref().and_then(|d| d.job)
+        if let Some(TranslateAsk::Job(job)) = self.translate.dialog.as_ref().map(|d| d.ask)
             && let Some(live) = self.live.as_mut()
         {
             live.driver.session.drop_text_translation(job);
@@ -407,9 +452,11 @@ impl QuillApp {
                 message_id,
                 ..
             }) => {
+                dialog.ask = TranslateAsk::Idle;
                 if let Some(live) = self.live.as_mut()
                     && let Err(err) = live.driver.translate_message(chat_id, message_id, to)
                 {
+                    dialog.ask = TranslateAsk::Refused;
                     self.set_note(StatusNote::error(user_error_for(
                         keys::Q_NOTES_FAILED_TRANSLATE,
                         &err,
@@ -418,15 +465,18 @@ impl QuillApp {
             }
             Some(TranslateSource::Selection { text, .. }) => {
                 if let Some(live) = self.live.as_mut() {
-                    if let Some(old) = dialog.job.take() {
+                    if let TranslateAsk::Job(old) = dialog.ask {
                         live.driver.session.drop_text_translation(old);
                     }
                     match live.driver.translate_selection(&text, to) {
-                        Ok(job) => dialog.job = Some(job),
-                        Err(err) => self.set_note(StatusNote::error(user_error_for(
-                            keys::Q_NOTES_FAILED_TRANSLATE,
-                            &err,
-                        ))),
+                        Ok(job) => dialog.ask = TranslateAsk::Job(job),
+                        Err(err) => {
+                            dialog.ask = TranslateAsk::Refused;
+                            self.set_note(StatusNote::error(user_error_for(
+                                keys::Q_NOTES_FAILED_TRANSLATE,
+                                &err,
+                            )));
+                        }
                     }
                 }
             }
@@ -442,7 +492,7 @@ impl QuillApp {
             return;
         };
         dialog.to = code;
-        if dialog.close_after_choose {
+        if dialog.view == TranslateView::ChooseTo && dialog.source.is_none() {
             self.translate.dialog = None;
         } else {
             dialog.view = TranslateView::Box;
@@ -503,18 +553,7 @@ impl QuillApp {
                 .overlay(true)
                 .width(px(480.))
                 .title(crate::ui::shell::dialog_title(title))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body)));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::one_shot_dialog_content(body))
                 .footer(footer)
                 .on_close(on_close)
         })
@@ -576,6 +615,10 @@ impl QuillApp {
     fn dialog_translation(&self) -> Option<Translation> {
         let dialog = self.translate.dialog.as_ref()?;
         let session = self.session()?;
+        // The request never went out: failed, not pending.
+        if dialog.ask == TranslateAsk::Refused {
+            return Some(Translation::Failed(String::new()));
+        }
         match dialog.source.as_ref()? {
             TranslateSource::Message {
                 chat_id,
@@ -584,10 +627,10 @@ impl QuillApp {
             } => session
                 .message_translation(*chat_id, *message_id, dialog.to)
                 .cloned(),
-            TranslateSource::Selection { .. } => dialog
-                .job
-                .and_then(|job| session.text_translation(job))
-                .cloned(),
+            TranslateSource::Selection { .. } => match dialog.ask {
+                TranslateAsk::Job(job) => session.text_translation(job).cloned(),
+                TranslateAsk::Idle | TranslateAsk::Refused => None,
+            },
         }
     }
 
@@ -616,7 +659,7 @@ impl QuillApp {
             .is_some_and(|s| s.chat_has_protected_content(chat_id));
         let long = original.chars().count() > LONG_ORIGINAL || original.contains('\n');
         let collapsed = long && !dialog.original_expanded;
-        let seen: HashSet<(i64, u64, u64, bool)> = HashSet::new();
+        let seen = crate::ui::message_text::revealed::Revealed::default();
         let no_emoji = HashMap::new();
 
         let mut original_box =
@@ -716,7 +759,7 @@ impl QuillApp {
                 .into_any_element(),
             // Pending, or the request could not be sent (demo, offline):
             // tdesktop's placeholder is a few grey lines.
-            Some(Translation::Pending) | None => {
+            Some(Translation::Pending { .. }) | None => {
                 let lines = (original.chars().count() / 40 + 1).clamp(1, 3);
                 div()
                     .id("translate-loading")

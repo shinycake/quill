@@ -52,14 +52,10 @@ pub(crate) struct GroupEditBox {
     pub(crate) photo_note: Option<String>,
     /// The camera and emoji panels.
     pub(crate) sources: PhotoSources,
-    /// The name field's emoji toggle opened the emoji panel.
-    pub(crate) title_emoji: bool,
-    /// The text requests of the last Save; `None` until Save sent any.
-    saving: Option<Vec<RequestId>>,
-    /// Save found the name empty (tdesktop `validateTitle`).
-    title_empty: bool,
-    /// The Type box, open over this one.
-    pub(crate) type_box: Option<crate::ui::group_type_box::GroupTypeBox>,
+    /// Where the last Save is.
+    saving: SaveStage,
+    /// The box open over this one, if any.
+    pub(crate) sub: EditSub,
     /// What the Type box's Save chose; sent with this box's Save.
     pub(crate) type_choice: Option<GroupTypeData>,
     /// The signature switches as the box shows them; sent on Save.
@@ -68,8 +64,63 @@ pub(crate) struct GroupEditBox {
     pub(crate) auto_translate: Option<bool>,
     /// What the history box's Save chose; sent with this box's Save.
     pub(crate) history_visible: Option<bool>,
-    /// The history box, open over this one, with its current choice.
-    pub(crate) history_box: Option<bool>,
+}
+
+/// The box open over the Edit box: one at a time. It leaves when its own
+/// Save or Cancel closes it, or with the Edit box. (The name field's emoji
+/// panel is the media panel's `PanelMode::GroupTitle`.)
+#[derive(Default)]
+pub(crate) enum EditSub {
+    #[default]
+    None,
+    /// The Type box, with its draft.
+    Type(crate::ui::group_type_box::GroupTypeBox),
+    /// The history box, with its current choice.
+    History(bool),
+}
+
+impl GroupEditBox {
+    pub(crate) fn type_box(&self) -> Option<&crate::ui::group_type_box::GroupTypeBox> {
+        match &self.sub {
+            EditSub::Type(open) => Some(open),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn type_box_mut(&mut self) -> Option<&mut crate::ui::group_type_box::GroupTypeBox> {
+        match &mut self.sub {
+            EditSub::Type(open) => Some(open),
+            _ => None,
+        }
+    }
+
+    /// The history box's current choice, while it is open.
+    pub(crate) fn history_box(&self) -> Option<bool> {
+        match self.sub {
+            EditSub::History(visible) => Some(visible),
+            _ => None,
+        }
+    }
+}
+
+/// How the last Save went, as far as the box itself knows. TDLib's
+/// answers to the sent requests are read from the session.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) enum SaveStage {
+    /// No Save sent anything yet.
+    #[default]
+    Editing,
+    /// Save found the name empty or too long (tdesktop `validateTitle`);
+    /// the next edit of the name leaves this stage.
+    TitleInvalid,
+    /// The text and setting requests of the last Save.
+    Saving(Vec<RequestId>),
+    /// Delete or Leave of the chat is out. No field names its answer, so
+    /// an earlier refused Save does not speak for it.
+    Exiting(RequestId),
+    /// A send was refused before it left (no right, a request in flight,
+    /// no connection): the box stays open with the typed edits.
+    Refused(String),
 }
 
 /// Where a box is, derived from its requests and TDLib's answers.
@@ -90,8 +141,31 @@ pub(crate) enum EditBoxState {
 
 impl GroupEditBox {
     fn state(&self, session: Option<&Session>) -> EditBoxState {
-        let Some(sent) = &self.saving else {
-            return EditBoxState::Editing;
+        let sent = match &self.saving {
+            SaveStage::Editing | SaveStage::TitleInvalid => return EditBoxState::Editing,
+            SaveStage::Refused(reason) => {
+                return EditBoxState::Failed {
+                    field: GroupInfoField::Settings,
+                    reason: reason.clone(),
+                };
+            }
+            SaveStage::Saving(sent) => sent,
+            SaveStage::Exiting(request) => {
+                let Some(session) = session else {
+                    return EditBoxState::Saved;
+                };
+                return if session.requests.get(*request).is_some() {
+                    EditBoxState::Saving
+                } else {
+                    match session.requests.failure(*request) {
+                        Some(reason) => EditBoxState::Failed {
+                            field: GroupInfoField::Settings,
+                            reason: reason.to_string(),
+                        },
+                        None => EditBoxState::Saved,
+                    }
+                };
+            }
         };
         let Some(session) = session else {
             return EditBoxState::Saved;
@@ -104,7 +178,13 @@ impl GroupEditBox {
                 field: error.field,
                 reason: error.reason.clone(),
             },
-            _ => EditBoxState::Saved,
+            _ => match sent.iter().find_map(|id| session.requests.failure(*id)) {
+                Some(reason) => EditBoxState::Failed {
+                    field: GroupInfoField::Settings,
+                    reason: reason.to_string(),
+                },
+                None => EditBoxState::Saved,
+            },
         }
     }
 
@@ -199,8 +279,10 @@ impl QuillApp {
         // The counter and the name's error follow every keystroke.
         cx.subscribe(&title_input, |this, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
-                if let Some(edit) = this.admin.group_edit_box.as_mut() {
-                    edit.title_empty = false;
+                if let Some(edit) = this.admin.group_edit_box.as_mut()
+                    && edit.saving == SaveStage::TitleInvalid
+                {
+                    edit.saving = SaveStage::Editing;
                 }
                 cx.notify();
             }
@@ -221,15 +303,12 @@ impl QuillApp {
             photo: None,
             photo_note: None,
             sources: PhotoSources::default(),
-            saving: None,
-            title_empty: false,
-            title_emoji: false,
-            type_box: None,
+            saving: SaveStage::Editing,
+            sub: EditSub::None,
             type_choice: None,
             signatures: None,
             auto_translate: None,
             history_visible: None,
-            history_box: None,
         });
         self.open_box(DialogKind::GroupEditBox);
         cx.notify();
@@ -246,6 +325,52 @@ impl QuillApp {
             .is_some_and(|edit| edit.chat_id == chat)
         {
             self.close_group_edit_box(cx);
+        }
+    }
+
+    /// Delete or Leave of `chat` is out: its Edit box stays, saving, and
+    /// closes when TDLib answers, or stays with the reason when it refuses.
+    pub(in crate::ui) fn track_chat_exit(&mut self, chat: ChatId, request: RequestId) {
+        if let Some(edit) = self
+            .admin
+            .group_edit_box
+            .as_mut()
+            .filter(|edit| edit.chat_id == chat)
+        {
+            edit.saving = SaveStage::Exiting(request);
+        }
+    }
+
+    /// A refused Delete or Leave is kept in the box's own stage: the
+    /// registry forgets failures after a while, and the box must not then
+    /// close as saved with the person's edits.
+    pub(in crate::ui) fn settle_group_edit_box(&mut self, cx: &mut Context<Self>) {
+        // A box that saved is gone, not hidden: a later error recorded for
+        // the same chat (another Manage action) must not bring it back.
+        if self
+            .admin
+            .group_edit_box
+            .as_ref()
+            .is_some_and(|edit| edit.state(self.session()) == EditBoxState::Saved)
+        {
+            self.close_group_edit_box(cx);
+            return;
+        }
+        let Some(SaveStage::Exiting(request)) =
+            self.admin.group_edit_box.as_ref().map(|edit| &edit.saving)
+        else {
+            return;
+        };
+        let Some(reason) = self
+            .session()
+            .and_then(|session| session.requests.failure(*request))
+            .map(str::to_string)
+        else {
+            return;
+        };
+        if let Some(edit) = self.admin.group_edit_box.as_mut() {
+            edit.saving = SaveStage::Refused(reason);
+            cx.notify();
         }
     }
 
@@ -288,7 +413,7 @@ impl QuillApp {
             Ok(edits) => edits,
             Err(GroupInfoInvalid::EmptyTitle | GroupInfoInvalid::TitleTooLong) => {
                 if let Some(edit) = self.admin.group_edit_box.as_mut() {
-                    edit.title_empty = true;
+                    edit.saving = SaveStage::TitleInvalid;
                 }
                 cx.notify();
                 return;
@@ -335,14 +460,15 @@ impl QuillApp {
                 if sent.is_empty() {
                     self.admin.group_edit_box = None;
                 } else {
-                    edit.saving = Some(sent);
+                    edit.saving = SaveStage::Saving(sent);
                 }
             }
             Err(err) => {
-                self.set_note(StatusNote::error(user_error_for(
-                    keys::Q_NOTES_FAILED_SAVE_GROUP_INFO,
-                    &err,
-                )));
+                let line = user_error_for(keys::Q_NOTES_FAILED_SAVE_GROUP_INFO, &err);
+                // Edits sent before the refused one stay sent; their
+                // answers update the chat, so a retry sends the rest.
+                edit.saving = SaveStage::Refused(line.clone());
+                self.set_note(StatusNote::error(line));
             }
         }
         cx.notify();
@@ -379,8 +505,7 @@ impl QuillApp {
             )),
             _ => None,
         };
-        let title_error = edit
-            .title_empty
+        let title_error = (edit.saving == SaveStage::TitleInvalid)
             .then(|| error_line(tr(keys::Q_PEOPLE_TITLE_MUST_BE_1_128).to_string()))
             .or_else(|| failed(GroupInfoField::Title));
         let used = edit.description_input.read(cx).value().chars().count();

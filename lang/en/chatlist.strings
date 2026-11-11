@@ -168,6 +168,7 @@
 "qll_chatlist_link_names_are_at_most" = "Link names are at most 32 characters.";
 "qll_chatlist_loading_community" = "Loading community…";
 "qll_chatlist_loading_folder" = "Loading folder…";
+"qll_chatlist_loading_folder_chats_to_leave" = "Loading the chats you can leave…";
 "qll_chatlist_loading_folder_options" = "Loading folder options…";
 "qll_chatlist_loading_links" = "Loading links…";
 "qll_chatlist_manage_chat_folders" = "Manage chat folders";

@@ -1,5 +1,6 @@
 //! Connect driver: call debug logs, call history, call privacy and busy-call handling.
 use super::*;
+use crate::state::{CallUpload, PrivacyAsk, RecentCalls};
 
 impl<S: JsonSender> ConnectDriver<S> {
     pub(crate) fn call_debug_information(&self) -> Result<String, ConnectSendError> {
@@ -8,7 +9,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .calls
             .summary
             .as_ref()
-            .filter(|summary| summary.need_debug_information && !summary.debug_information_sent)
+            .filter(|summary| summary.debug_information.can_send())
             .ok_or(ConnectSendError::InvalidRequest)?;
         Ok(self.call_log_payload(summary).to_string())
     }
@@ -85,7 +86,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         )) {
             self.session.requests.take(extra);
             if let Some(summary) = self.session.calls.summary.as_mut() {
-                summary.debug_information_error = Some(match err {
+                summary.debug_information = CallUpload::Failed(match err {
                     ConnectSendError::InvalidRequest => {
                         "Could not upload diagnostics: invalid request".into()
                     }
@@ -105,8 +106,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         if let Some(summary) = self.session.calls.summary.as_mut() {
-            summary.debug_information_sent = true;
-            summary.debug_information_error = None;
+            summary.debug_information = CallUpload::Sending(extra);
         }
         Ok(extra)
     }
@@ -124,7 +124,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .calls
             .summary
             .as_ref()
-            .filter(|s| s.need_log && !s.log_sent)
+            .filter(|s| s.log.can_send())
             .ok_or(ConnectSendError::InvalidRequest)?;
         let log_text = self.call_log_payload(summary).to_string();
         let call_id = summary.call_id;
@@ -139,9 +139,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             self.session.requests.take(extra);
             if let Some(summary) = self.session.calls.summary.as_mut() {
-                summary.log_error = Some("Could not upload the call log".into());
+                summary.log = CallUpload::Failed("Could not upload the call log".into());
             }
             return Err(err);
+        }
+        if let Some(summary) = self.session.calls.summary.as_mut() {
+            summary.log = CallUpload::Sending(extra);
         }
         Ok(extra)
     }
@@ -154,10 +157,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        if self.session.calls.recent_calls_clearing() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         self.session.calls.recent_calls.clear();
         self.session.calls.recent_calls_offset.clear();
-        self.session.calls.recent_calls_error = false;
-        self.session.calls.recent_calls_request = None;
+        self.session.calls.recent_calls_stage = RecentCalls::Idle;
         self.fetch_call_history_page()
     }
 
@@ -173,7 +178,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if !crate::chatlist_calls::can_clear(
             self.session.calls.recent_calls.len(),
-            self.session.calls.recent_calls_clearing,
+            self.session.calls.recent_calls_stage,
         ) {
             return Ok(None);
         }
@@ -187,7 +192,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.calls.recent_calls_clearing = true;
+        self.session.calls.recent_calls_stage = RecentCalls::Clearing { request: extra };
         Ok(Some(extra))
     }
 
@@ -201,7 +206,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     fn fetch_call_history_page(&mut self) -> Result<RequestId, ConnectSendError> {
-        if self.session.calls.recent_calls_loading() {
+        // A clear in flight keeps its stage: the list reloads after its answer.
+        if self.session.calls.recent_calls_loading() || self.session.calls.recent_calls_clearing() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
@@ -213,10 +219,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&search_call_messages(extra, &offset, 40))
         {
             self.session.requests.take(extra);
-            self.session.calls.recent_calls_error = true;
+            self.session.calls.recent_calls_stage = RecentCalls::Failed;
             return Err(err);
         }
-        self.session.calls.recent_calls_request = Some(extra);
+        // A retry of a failed page shows as loading again.
+        self.session.calls.recent_calls_stage = RecentCalls::Loading { request: extra };
         Ok(extra)
     }
 
@@ -228,7 +235,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.calls.privacy_error = false;
         for setting in [
             CallPrivacySetting::AllowCalls,
             CallPrivacySetting::PeerToPeer,
@@ -242,12 +248,16 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .send_json(&get_user_privacy_setting_rules(extra, setting))
             {
                 self.session.requests.take(extra);
-                self.session.calls.privacy_pending = 0;
-                self.session.calls.privacy_error = true;
+                self.session
+                    .calls
+                    .privacy_asks
+                    .set(setting, PrivacyAsk::Failed);
                 return Err(err);
             }
-            self.session.calls.privacy_pending =
-                self.session.calls.privacy_pending.saturating_add(1);
+            self.session
+                .calls
+                .privacy_asks
+                .set(setting, PrivacyAsk::Asking(extra));
         }
         Ok(())
     }
@@ -272,15 +282,20 @@ impl<S: JsonSender> ConnectDriver<S> {
             .send_json(&set_user_privacy_setting_rules(extra, setting, who))
         {
             self.session.requests.take(extra);
-            self.session.calls.privacy_pending = 0;
-            self.session.calls.privacy_error = true;
+            self.session
+                .calls
+                .privacy_asks
+                .set(setting, PrivacyAsk::Failed);
             return Err(err);
         }
         match setting {
             CallPrivacySetting::AllowCalls => self.session.calls.privacy_allow_calls = Some(who),
             CallPrivacySetting::PeerToPeer => self.session.calls.privacy_p2p = Some(who),
         }
-        self.session.calls.privacy_pending = self.session.calls.privacy_pending.saturating_add(1);
+        self.session
+            .calls
+            .privacy_asks
+            .set(setting, PrivacyAsk::Asking(extra));
         Ok(extra)
     }
 
@@ -294,6 +309,17 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub(crate) fn maybe_decline_busy_calls(&mut self) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() {
             return Ok(());
+        }
+        let created = std::mem::take(&mut self.session.calls.created_call_discards);
+        for (call_id, is_video) in created {
+            let extra = self.session.request(RequestPurpose::DiscardCall, None);
+            if let Err(err) = self
+                .sender
+                .send_json(&discard_call_request(extra, call_id, false, 0, is_video))
+            {
+                self.session.requests.take(extra);
+                return Err(err);
+            }
         }
         let queued: Vec<(i32, i64, bool)> =
             std::mem::take(&mut self.session.calls.busy_decline_queue);

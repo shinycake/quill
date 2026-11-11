@@ -5,17 +5,23 @@
 
 use super::*;
 use crate::premium_hub::{StarAmount, StarTx, StarTxPage, TxFilter};
+use crate::state::fetch::Fetch;
 use std::collections::HashMap;
 
-/// A fetch the page waits on.
+/// A fetch the page waits on: a `Fetch` with a fifth outcome,
+/// `Unavailable`. `Loading` holds the request that asked, so only its
+/// answer or error settles it (not another page's of the same peer).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum Load<T> {
     #[default]
     Idle,
-    Loading,
+    Loading(crate::ids::RequestId),
     Ready(T),
     /// The request failed; the text is shown on the page.
     Failed(String),
+    /// The server has nothing of this kind for the peer (a megagroup
+    /// without TON ads, `BROADCAST_REQUIRED`): the part is left out.
+    Unavailable,
 }
 
 impl<T> Load<T> {
@@ -27,7 +33,20 @@ impl<T> Load<T> {
     }
 
     pub fn is_loading(&self) -> bool {
-        matches!(self, Self::Loading)
+        matches!(self, Self::Loading(_))
+    }
+
+    /// The request the fetch waits for.
+    pub fn asked(&self) -> Option<crate::ids::RequestId> {
+        match self {
+            Self::Loading(request) => Some(*request),
+            _ => None,
+        }
+    }
+
+    /// The fetch waits for the answer of `request`.
+    pub fn waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(self, Self::Loading(asked) if Some(*asked) == request)
     }
 
     /// Settled: loaded, failed or never asked.
@@ -37,7 +56,7 @@ impl<T> Load<T> {
 }
 
 /// Limits and switches from TDLib options and the app config.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EarnLimits {
     /// `star_withdrawal_count_min`.
     pub star_withdrawal_min: Option<i64>,
@@ -53,8 +72,9 @@ pub struct EarnLimits {
     pub starref_join_allowed: bool,
     /// App config `starref_program_allowed` (tdesktop `Setup::Allowed`).
     pub starref_setup_allowed: bool,
-    /// The app config was read at least once.
-    pub app_config_loaded: bool,
+    /// The app config for these switches: asked once, again after it
+    /// failed (the next info panel to open asks).
+    pub app_config: Fetch<()>,
 }
 
 impl EarnLimits {
@@ -98,8 +118,12 @@ pub enum PageLoad {
     /// Nothing asked yet.
     #[default]
     Unasked,
-    /// A page is on its way; `more` when it follows pages already in.
-    Loading { more: bool },
+    /// A page is on its way under `request`; `more` when it follows pages
+    /// already in. Only that request's answer or error settles it.
+    Loading {
+        more: bool,
+        request: crate::ids::RequestId,
+    },
     /// Every page asked for is in.
     Ready,
     /// The last page failed (its error arm, or the send). Nothing asks
@@ -116,7 +140,7 @@ impl PageLoad {
     pub fn has_first_page(self) -> bool {
         matches!(
             self,
-            Self::Loading { more: true } | Self::Ready | Self::Failed { .. }
+            Self::Loading { more: true, .. } | Self::Ready | Self::Failed { .. }
         )
     }
 
@@ -124,10 +148,12 @@ impl PageLoad {
         matches!(self, Self::Failed { .. })
     }
 
-    /// A page was asked for; `append` when it is the next page.
-    pub fn start(&mut self, append: bool) {
+    /// A page was asked for under `request`; `append` when it is the next
+    /// page.
+    pub fn start(&mut self, append: bool, request: crate::ids::RequestId) {
         *self = Self::Loading {
             more: append && self.has_first_page(),
+            request,
         };
     }
 
@@ -136,9 +162,23 @@ impl PageLoad {
         *self = Self::Failed {
             more: matches!(
                 self,
-                Self::Loading { more: true } | Self::Failed { more: true }
+                Self::Loading { more: true, .. } | Self::Failed { more: true }
             ),
         };
+    }
+
+    /// `request` is the page this list waits for: an older page's answer
+    /// (before a sort change or a restart) is not this one's.
+    pub fn waits_for(self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(self, Self::Loading { request: waiting, .. } if Some(waiting) == request)
+    }
+
+    /// The error of `request`: fails the list only when it is the page the
+    /// list waits for.
+    pub fn fail_request(&mut self, request: Option<crate::ids::RequestId>) {
+        if self.waits_for(request) {
+            self.fail();
+        }
     }
 
     /// Whether a scroll near the end may ask the next page: only once the
@@ -201,8 +241,6 @@ pub struct EarnPage {
     pub star_filter: TxFilter,
     /// `getStarAdAccountUrl` (tdesktop's "Buy Ads").
     pub ad_account_url: Option<String>,
-    /// A megagroup without TON ads (`BROADCAST_REQUIRED`).
-    pub ton_unavailable: bool,
 }
 
 impl EarnPage {
@@ -217,7 +255,6 @@ impl EarnPage {
             stars_tab: false,
             star_filter: TxFilter::All,
             ad_account_url: None,
-            ton_unavailable: false,
         }
     }
 
@@ -286,13 +323,15 @@ pub enum WithdrawTarget {
 /// Where a withdrawal stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WithdrawStep {
-    /// The first request, without a password, is out.
-    Checking,
+    /// The first request, without a password, is out as this request.
+    /// Only its answer or error moves the step.
+    Checking(crate::ids::RequestId),
     /// tdesktop's password box: "Two-step verification".
-    Password {
-        sending: bool,
-        error: Option<String>,
-    },
+    Password { error: Option<String> },
+    /// The password went out as this request. Its answer ends the
+    /// withdrawal; its error returns to `Password` with the line; an
+    /// answer of an earlier attempt matches neither.
+    PasswordSending(crate::ids::RequestId),
     /// tdesktop `TransferPasswordError`: no password (`later` false) or a
     /// password or session that is too fresh (`later` true).
     SecurityCheck { later: bool },
@@ -303,16 +342,40 @@ pub enum WithdrawStep {
 pub struct Withdraw {
     pub target: WithdrawTarget,
     pub step: WithdrawStep,
-    /// The URL request this withdrawal waits for. An answer to another
-    /// one (sent before a Cancel) neither opens Fragment nor touches this
-    /// attempt.
-    pub request: Option<crate::ids::RequestId>,
 }
 
 impl Withdraw {
-    pub fn waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
-        request.is_some() && self.request == request
+    /// Whether `request` is the answer the current step waits for: the
+    /// password-less try while `Checking`, the password's own request
+    /// while `PasswordSending`; no other step takes an answer. An answer
+    /// to another one (sent before a Cancel) neither opens Fragment nor
+    /// touches this attempt.
+    pub fn takes_answer(&self, request: Option<crate::ids::RequestId>) -> bool {
+        match self.step {
+            WithdrawStep::Checking(sent) | WithdrawStep::PasswordSending(sent) => {
+                request == Some(sent)
+            }
+            WithdrawStep::Password { .. } | WithdrawStep::SecurityCheck { .. } => false,
+        }
     }
+}
+
+/// Where the setup page's save stands, with the confirmation box that
+/// goes with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetupStage {
+    /// The sliders; no box.
+    Editing,
+    /// A confirmation box is open.
+    Confirming(SetupConfirm),
+    /// The save went out as this request and its `ConfirmUpdate` stays
+    /// open until the answer (tdesktop). Only its answer closes the page;
+    /// its error returns to `Confirming(Save)`.
+    SavingInBox(crate::ids::RequestId),
+    /// A save or end is out with no box open (the end's box closes as it
+    /// goes; a save's box was closed meanwhile). Its error returns to
+    /// `Editing`.
+    Saving(crate::ids::RequestId),
 }
 
 /// The bot setup page (tdesktop `BotStarRef::Setup`).
@@ -323,9 +386,7 @@ pub struct SetupPage {
     pub program: Option<ProgramInfo>,
     /// The sliders' values.
     pub params: ProgramParams,
-    pub confirm: Option<SetupConfirm>,
-    /// The save or end this page waits for; only its answer closes it.
-    pub(crate) saving: Option<crate::ids::RequestId>,
+    stage: SetupStage,
 }
 
 impl SetupPage {
@@ -334,19 +395,80 @@ impl SetupPage {
             bot_user_id,
             program,
             params: setup_start(program),
-            confirm: None,
-            saving: None,
+            stage: SetupStage::Editing,
+        }
+    }
+
+    pub fn stage(&self) -> SetupStage {
+        self.stage
+    }
+
+    /// The confirmation box that is open.
+    pub fn confirm(&self) -> Option<SetupConfirm> {
+        match self.stage {
+            SetupStage::Confirming(confirm) => Some(confirm),
+            SetupStage::SavingInBox(_) => Some(SetupConfirm::Save),
+            SetupStage::Editing | SetupStage::Saving(_) => None,
         }
     }
 
     /// A save or end is in flight.
     pub fn is_saving(&self) -> bool {
-        self.saving.is_some()
+        self.saving_request().is_some()
+    }
+
+    /// The save or end in flight.
+    pub fn saving_request(&self) -> Option<crate::ids::RequestId> {
+        match self.stage {
+            SetupStage::SavingInBox(request) | SetupStage::Saving(request) => Some(request),
+            SetupStage::Editing | SetupStage::Confirming(_) => None,
+        }
     }
 
     /// `request` is the save this page waits for.
     pub(crate) fn waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
-        self.saving.is_some() && self.saving == request
+        self.saving_request().is_some() && self.saving_request() == request
+    }
+
+    /// Open a confirmation box (not while a save is out).
+    pub fn ask_confirm(&mut self, confirm: SetupConfirm) {
+        if !self.is_saving() {
+            self.stage = SetupStage::Confirming(confirm);
+        }
+    }
+
+    /// The box was closed: a save in flight carries on without it.
+    pub fn close_confirm(&mut self) {
+        self.stage = match self.stage {
+            SetupStage::Confirming(_) => SetupStage::Editing,
+            SetupStage::SavingInBox(request) => SetupStage::Saving(request),
+            other => other,
+        };
+    }
+
+    /// The save went out as `request`: its box stays open while it runs.
+    pub(crate) fn save_sent(&mut self, request: crate::ids::RequestId) {
+        self.stage = match self.stage {
+            SetupStage::Confirming(SetupConfirm::Save) => SetupStage::SavingInBox(request),
+            _ => SetupStage::Saving(request),
+        };
+    }
+
+    /// The end went out as `request`: its box closes as it goes.
+    pub(crate) fn end_sent(&mut self, request: crate::ids::RequestId) {
+        self.stage = SetupStage::Saving(request);
+    }
+
+    /// The save or end under `request` was refused: back to the box that
+    /// was open, or to the sliders.
+    pub(crate) fn save_refused(&mut self, request: Option<crate::ids::RequestId>) {
+        if !self.waits_for(request) {
+            return;
+        }
+        self.stage = match self.stage {
+            SetupStage::SavingInBox(_) => SetupStage::Confirming(SetupConfirm::Save),
+            _ => SetupStage::Editing,
+        };
     }
 
     /// A running program (Update instead of Start, End shown, sliders
@@ -412,6 +534,26 @@ impl JoinPage {
     }
 }
 
+/// A confirm box's request: none, or the one it waits for. An answer for
+/// another request (a closed box's, or an earlier box's) is not this box's.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BoxSend {
+    #[default]
+    Idle,
+    Sending(crate::ids::RequestId),
+}
+
+impl BoxSend {
+    pub fn is_sending(self) -> bool {
+        matches!(self, Self::Sending(_))
+    }
+
+    /// `request` is the one this box waits for.
+    pub fn waits_for(self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(self, Self::Sending(waiting) if Some(waiting) == request)
+    }
+}
+
 /// tdesktop `JoinStarRefBox`: join one bot's program.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JoinBox {
@@ -422,7 +564,43 @@ pub struct JoinBox {
     /// The user picks the recipient among their own peers (tdesktop
     /// `requireOthers`: the user's own page or "View existing programs").
     pub choose_recipient: bool,
-    pub joining: bool,
+    pub stage: JoinStage,
+}
+
+/// Where the join box stands: only the answer of `Joining`'s own request
+/// closes it (the error returns it to `Open`), so a late answer of a box
+/// the user left acts on nothing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum JoinStage {
+    #[default]
+    Open,
+    Joining(crate::ids::RequestId),
+}
+
+impl JoinStage {
+    pub fn is_joining(self) -> bool {
+        matches!(self, Self::Joining(_))
+    }
+
+    pub fn waits_for(self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(self, Self::Joining(waiting) if Some(waiting) == request)
+    }
+}
+
+/// A click on a program asks whether it is joined
+/// (`getConnectedAffiliateProgram`). Only that request's answer opens a
+/// box; leaving the page or a newer click returns it to `Idle`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Resolve {
+    #[default]
+    Idle,
+    Asking(crate::ids::RequestId),
+}
+
+impl Resolve {
+    pub fn waits_for(self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(self, Self::Asking(waiting) if Some(waiting) == request)
+    }
 }
 
 /// tdesktop `StarRefLinkBox`: a joined program's link.
@@ -430,6 +608,35 @@ pub struct JoinBox {
 pub struct LinkBox {
     pub program: ConnectedProgram,
     pub recipient: EarnPeer,
+    /// Whether the box's icon animation has started. It lives with the
+    /// box, so a box that goes away (a layer drop, another account) takes
+    /// it along and the next one plays from the start.
+    pub icon: LinkIcon,
+}
+
+/// The link icon's one-time play: waiting for the first draw, then
+/// running from the instant that draw happened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkIcon {
+    Unseen,
+    Playing { since: std::time::Instant },
+}
+
+impl LinkBox {
+    pub fn new(program: ConnectedProgram, recipient: EarnPeer) -> Self {
+        Self {
+            program,
+            recipient,
+            icon: LinkIcon::Unseen,
+        }
+    }
+
+    /// The first draw starts the play; later draws keep its start.
+    pub fn note_drawn(&mut self, now: std::time::Instant) {
+        if self.icon == LinkIcon::Unseen {
+            self.icon = LinkIcon::Playing { since: now };
+        }
+    }
 }
 
 /// The "Revoke Link" confirmation of a joined program.
@@ -437,7 +644,86 @@ pub struct LinkBox {
 pub struct RevokeBox {
     pub program: ConnectedProgram,
     pub recipient: EarnPeer,
-    pub sending: bool,
+    pub send: BoxSend,
+}
+
+/// A move the UI makes once, taken from `EarnState::effect`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EarnEffect {
+    /// The setup page saved or ended the program: go back from it.
+    SetupDone,
+}
+
+/// Who may receive commissions, as the two list requests settle it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Recipients {
+    #[default]
+    Unasked,
+    /// The channel and bot lists are out; `found` is what answered so far.
+    /// `join` is a join box that opens once the recipients arrive; it goes
+    /// with the stage (a failure, the profile it came from closing).
+    Loading {
+        waiting: Vec<crate::ids::RequestId>,
+        found: Vec<EarnPeer>,
+        join: Option<JoinBox>,
+    },
+    Ready(Vec<EarnPeer>),
+    /// A send failed. Answers of the abandoned attempt are dropped and the
+    /// next ask starts over.
+    Failed,
+}
+
+impl EarnState {
+    /// Open `join` now, or park it on the recipients when they are still
+    /// coming (a join box that picks a recipient needs the list).
+    pub fn open_or_park_join(&mut self, join: JoinBox) {
+        if !join.choose_recipient {
+            self.join_box = Some(join);
+        } else if let Some(open) = self.recipients.park(join) {
+            self.join_box = Some(open);
+        }
+    }
+}
+
+impl Recipients {
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading { .. })
+    }
+
+    /// Park `join` until the lists answer. A join box needs no parking
+    /// once they have, so it comes back to be opened at once.
+    pub fn park(&mut self, join: JoinBox) -> Option<JoinBox> {
+        match self {
+            Self::Loading { join: slot, .. } => {
+                *slot = Some(join);
+                None
+            }
+            _ => Some(join),
+        }
+    }
+
+    /// Forget the parked join box.
+    pub fn drop_parked(&mut self) {
+        if let Self::Loading { join, .. } = self {
+            *join = None;
+        }
+    }
+
+    /// The parked join box, if any.
+    pub fn parked(&self) -> Option<&JoinBox> {
+        match self {
+            Self::Loading { join, .. } => join.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// The list, once both requests answered.
+    pub fn list(&self) -> Option<&[EarnPeer]> {
+        match self {
+            Self::Ready(list) => Some(list),
+            _ => None,
+        }
+    }
 }
 
 /// Everything the revenue and affiliate screens keep.
@@ -451,35 +737,73 @@ pub struct EarnState {
     pub ton_balances: HashMap<EarnPeer, TonAmounts>,
     /// Stars balances per peer: `updateStarRevenueStatus` and answers.
     pub star_balances: HashMap<EarnPeer, StarAmount>,
-    /// Peers whose balances were asked for (once per session).
-    pub balances_asked: Vec<EarnPeer>,
+    /// Where each peer's profile balances stand (asked once per session
+    /// unless they failed).
+    pub balance_asks: HashMap<EarnPeer, crate::state::fetch::BatchAsk>,
     pub setup: Option<SetupPage>,
     pub join: Option<JoinPage>,
     pub join_box: Option<JoinBox>,
     pub link_box: Option<LinkBox>,
+    /// The click on a program that is being resolved.
+    pub resolve: Resolve,
     pub revoke: Option<RevokeBox>,
     /// "View existing programs" of the setup page (tdesktop
     /// `ProgramsListBox`).
     pub programs_box: Option<ProgramList<FoundProgram>>,
     /// Who may receive commissions: the user, owned public channels the
     /// user can post in, and owned bots (tdesktop `ResolveRecipients`).
-    pub recipients: Option<Vec<EarnPeer>>,
-    pub recipients_loading: u8,
-    /// A join box that opens once the recipients arrive.
-    pub pending_join: Option<JoinBox>,
-    /// Set when the setup page saved or ended the program: the UI goes
-    /// back from it (tdesktop `showBackFromStack`).
-    pub setup_closed: bool,
+    pub recipients: Recipients,
+    /// Moves the UI makes once, oldest first; it drains them (the setup
+    /// page saved or ended the program: go back, tdesktop
+    /// `showBackFromStack`).
+    pub effects: Vec<EarnEffect>,
     /// One-shot notices the UI shows as toasts.
     pub notes: Vec<String>,
     /// A URL the UI opens in the browser (a Fragment withdrawal page).
     pub open_url: Option<String>,
-    /// `getStarRevenueStatistics` for the user worked: the Stars dialog
-    /// shows "View Statistics" (tdesktop `Credits::statsEnabled`).
-    pub self_stats: Option<bool>,
+    /// `getStarRevenueStatistics` for the user: once it worked (`Ready`) the
+    /// Stars dialog shows "View Statistics" (tdesktop
+    /// `Credits::statsEnabled`); a failed one is not asked again.
+    pub self_stats: crate::state::fetch::Fetch<()>,
 }
 
 impl EarnState {
+    /// A Collect or Withdraw whose first request has not answered.
+    pub fn is_checking_withdrawal(&self) -> bool {
+        self.withdraw
+            .as_ref()
+            .is_some_and(|w| matches!(w.step, WithdrawStep::Checking(_)))
+    }
+
+    /// A balance answer of `request`.
+    pub fn settle_balance(&mut self, peer: EarnPeer, request: Option<crate::ids::RequestId>) {
+        if let Some(ask) = self.balance_asks.get_mut(&peer) {
+            ask.settle(request);
+        }
+    }
+
+    /// A balance request of `request` failed.
+    pub fn fail_balance(&mut self, peer: EarnPeer, request: Option<crate::ids::RequestId>) {
+        if let Some(ask) = self.balance_asks.get_mut(&peer) {
+            ask.fail(request);
+        }
+    }
+
+    /// A failed balance ask is forgotten, so the next profile open asks
+    /// again (a failure never asks again by itself).
+    pub fn forget_failed_balances(&mut self) {
+        self.balance_asks
+            .retain(|_, ask| !matches!(ask, crate::state::fetch::BatchAsk::Failed));
+    }
+
+    /// A failed app-config ask is forgotten, so the next profile open asks
+    /// again (the per-frame upkeep only asks a config never asked).
+    pub fn forget_failed_app_config(&mut self) {
+        if self.limits.app_config.error().is_some() {
+            self.limits.app_config = Fetch::Idle;
+        }
+    }
+
     pub fn note(&mut self, text: impl Into<String>) {
         self.notes.push(text.into());
     }

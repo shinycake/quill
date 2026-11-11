@@ -1,12 +1,17 @@
 //! The self-healing rule: a stream that plays through Quill but sends no
 //! sound within 5 s of going live, or whose output stops, gets its output
-//! reopened, once.
+//! reopened, once. A reopen that fails (the device is not back yet) is
+//! tried again a few times, [`REOPEN_RETRY`] apart.
 #![deny(clippy::indexing_slicing)]
 
 use crate::calls::engine::StreamState;
 use std::time::{Duration, Instant};
 
 pub const NO_SOUND_LIMIT: Duration = Duration::from_secs(5);
+/// How long after a failed reopen the next one is tried.
+pub const REOPEN_RETRY: Duration = Duration::from_secs(5);
+/// Failed reopens before the watch gives up.
+const MAX_REOPEN_ATTEMPTS: u8 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PlaybackHealth {
@@ -22,41 +27,101 @@ pub enum FallBack {
     OutputFailed,
 }
 
+/// Where the watch is: looking, reopened (nothing more to do), waiting to
+/// retry a reopen that failed, or out of attempts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WatchStage {
+    Watching {
+        live_since: Option<Instant>,
+    },
+    Reopened {
+        attempts: u8,
+        reason: FallBack,
+    },
+    Retry {
+        attempts: u8,
+        at: Instant,
+        reason: FallBack,
+    },
+    GaveUp,
+}
+
+impl Default for WatchStage {
+    fn default() -> Self {
+        Self::Watching { live_since: None }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct PlaybackWatch {
-    live_since: Option<Instant>,
-    fell_back: bool,
+    stage: WatchStage,
 }
 
 impl PlaybackWatch {
     /// Returns a reason the first time the stream should fall back, and
-    /// `None` on every call after that.
+    /// `None` after that, unless the reopen failed
+    /// ([`Self::reopen_failed`]) and its retry is due.
     pub fn observe(
         &mut self,
         now: Instant,
         state: StreamState,
         health: PlaybackHealth,
     ) -> Option<FallBack> {
-        if self.fell_back {
-            return None;
-        }
+        let live_since = match &mut self.stage {
+            WatchStage::Reopened { .. } | WatchStage::GaveUp => return None,
+            WatchStage::Retry {
+                attempts,
+                at,
+                reason,
+            } => {
+                if now < *at {
+                    return None;
+                }
+                let (attempts, reason) = (*attempts, *reason);
+                self.stage = WatchStage::Reopened { attempts, reason };
+                return Some(reason);
+            }
+            WatchStage::Watching { live_since } => live_since,
+        };
         let reason = if health.output_failed {
             Some(FallBack::OutputFailed)
         } else if health.frames > 0 || state != StreamState::Live {
-            self.live_since = None;
+            *live_since = None;
             None
         } else {
-            let since = *self.live_since.get_or_insert(now);
+            let since = *live_since.get_or_insert(now);
             (now.saturating_duration_since(since) >= NO_SOUND_LIMIT).then_some(FallBack::NoSound)
         };
-        self.fell_back = reason.is_some();
+        if let Some(reason) = reason {
+            self.stage = WatchStage::Reopened {
+                attempts: 0,
+                reason,
+            };
+        }
         reason
+    }
+
+    /// The reopen the last [`Self::observe`] asked for failed: try again
+    /// after [`REOPEN_RETRY`], a few times, then leave the stream alone.
+    pub fn reopen_failed(&mut self, now: Instant) {
+        if let WatchStage::Reopened { attempts, reason } = self.stage {
+            let attempts = attempts.saturating_add(1);
+            self.stage = if attempts >= MAX_REOPEN_ATTEMPTS {
+                WatchStage::GaveUp
+            } else {
+                WatchStage::Retry {
+                    attempts,
+                    at: now + REOPEN_RETRY,
+                    reason,
+                }
+            };
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{FallBack, NO_SOUND_LIMIT, PlaybackHealth, PlaybackWatch};
+    use super::{FallBack, NO_SOUND_LIMIT, PlaybackHealth, PlaybackWatch, REOPEN_RETRY};
     use crate::calls::engine::StreamState::{Connecting, Live, NoStream};
     use std::time::{Duration, Instant};
 
@@ -166,5 +231,54 @@ mod tests {
             Some(FallBack::OutputFailed)
         );
         assert_eq!(watch.observe(start, Live, failed), None);
+    }
+
+    #[test]
+    fn a_failed_reopen_is_tried_again_a_few_times_then_dropped() {
+        let start = Instant::now();
+        let failed = PlaybackHealth {
+            output_failed: true,
+            ..SILENT
+        };
+        let mut watch = PlaybackWatch::default();
+        assert_eq!(
+            watch.observe(start, Live, failed),
+            Some(FallBack::OutputFailed)
+        );
+        watch.reopen_failed(start);
+        assert_eq!(
+            watch.observe(start + (REOPEN_RETRY / 2), Live, failed),
+            None,
+            "not before the retry is due"
+        );
+        let second = start + REOPEN_RETRY;
+        assert_eq!(
+            watch.observe(second, Live, failed),
+            Some(FallBack::OutputFailed)
+        );
+        watch.reopen_failed(second);
+        let third = second + REOPEN_RETRY;
+        assert_eq!(
+            watch.observe(third, Live, failed),
+            Some(FallBack::OutputFailed)
+        );
+        watch.reopen_failed(third);
+        assert_eq!(
+            watch.observe(third + REOPEN_RETRY * 10, Live, failed),
+            None,
+            "out of attempts"
+        );
+    }
+
+    #[test]
+    fn a_reopen_that_worked_is_not_asked_again() {
+        let start = Instant::now();
+        let failed = PlaybackHealth {
+            output_failed: true,
+            ..SILENT
+        };
+        let mut watch = PlaybackWatch::default();
+        assert!(watch.observe(start, Live, failed).is_some());
+        assert_eq!(watch.observe(start + REOPEN_RETRY * 4, Live, failed), None);
     }
 }

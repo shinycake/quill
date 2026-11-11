@@ -14,7 +14,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 use quill::premium_hub::PremiumFeature;
-use quill::state::{RequestPurpose, StoryStealthMode};
+use quill::state::StoryStealthMode;
 use quill::story_stealth::{
     StealthButton, StealthPeriods, StealthPress, StealthToast, about_text, active_left, press,
 };
@@ -31,9 +31,23 @@ const LOGO: f32 = 88.;
 const LOGO_GLYPH: f32 = 45.;
 const TOAST_MAX_WIDTH: f32 = 340.;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The stealth-mode box, with the once-a-second tick that redraws its
+/// countdown: the tick ends with the box.
 pub(super) struct StealthBox {
     pub(super) open_after: Option<ChatId>,
+    pub(super) stage: StealthStage,
+    _tick: Task<()>,
+}
+
+/// The box's button press. `Activating` leaves with the answer to its own
+/// request: stealth mode on (the box closes), or the refusal (`Failed`,
+/// whose reason the box shows and whose button asks again); closing the box
+/// drops it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum StealthStage {
+    Idle,
+    Activating(quill::ids::RequestId),
+    Failed(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,7 +60,20 @@ struct StealthFacts {
     mode: StoryStealthMode,
     premium: bool,
     periods: StealthPeriods,
-    requested: bool,
+    stage: StealthStage,
+}
+
+impl StealthFacts {
+    fn activating(&self) -> bool {
+        matches!(self.stage, StealthStage::Activating(_))
+    }
+
+    fn failure(&self) -> Option<&str> {
+        match &self.stage {
+            StealthStage::Failed(reason) => Some(reason),
+            _ => None,
+        }
+    }
 }
 
 impl QuillApp {
@@ -58,10 +85,11 @@ impl QuillApp {
             periods: session
                 .map(|s| s.stories.stealth_periods)
                 .unwrap_or_default(),
-            requested: session.is_some_and(|s| {
-                s.requests
-                    .has_purpose(RequestPurpose::ActivateStoryStealthMode)
-            }),
+            stage: self
+                .stories
+                .stealth_box
+                .as_ref()
+                .map_or(StealthStage::Idle, |b| b.stage.clone()),
         }
     }
 
@@ -77,9 +105,13 @@ impl QuillApp {
             }
             self.show_stealth_toast(StealthToast::already(left), cx);
         } else {
-            self.stories.stealth_box = Some(StealthBox { open_after });
+            let tick = self.stealth_box_tick(cx);
+            self.stories.stealth_box = Some(StealthBox {
+                open_after,
+                stage: StealthStage::Idle,
+                _tick: tick,
+            });
             self.open_box(DialogKind::StoryStealth);
-            self.ensure_stealth_box_tick(cx);
         }
         cx.notify();
     }
@@ -95,8 +127,8 @@ impl QuillApp {
     }
 
     fn show_stealth_toast(&mut self, toast: StealthToast, cx: &mut Context<Self>) {
-        if self.stories.viewer.is_open() {
-            self.stories.stealth_toast = Some(ShownStealthToast {
+        if let Some(open) = self.stories.viewer_ui_mut() {
+            open.stealth_toast = Some(ShownStealthToast {
                 toast,
                 until: Instant::now() + TOAST_DURATION,
             });
@@ -108,7 +140,6 @@ impl QuillApp {
 
     fn close_stealth_box(&mut self) {
         self.stories.stealth_box = None;
-        self.stories.stealth_tick = None;
     }
 
     fn press_story_stealth(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -116,7 +147,12 @@ impl QuillApp {
             return;
         }
         let facts = self.stealth_facts();
-        match press(facts.mode, now_unix_secs(), facts.premium, facts.requested) {
+        match press(
+            facts.mode,
+            now_unix_secs(),
+            facts.premium,
+            facts.activating(),
+        ) {
             StealthPress::EnabledToast => {
                 self.close_stealth_box();
                 self.show_stealth_toast(StealthToast::activated(facts.periods), cx);
@@ -130,10 +166,17 @@ impl QuillApp {
             }
             StealthPress::Activate => {
                 if let Some(live) = self.live.as_mut() {
-                    if live.driver.activate_story_stealth_mode().is_err() {
-                        self.set_note(StatusNote::error(tr(
+                    // The stage is entered once the request is out, with its
+                    // id: only its answer (or the refusal to it) moves the box.
+                    match live.driver.activate_story_stealth_mode() {
+                        Ok(request) => {
+                            if let Some(stealth_box) = self.stories.stealth_box.as_mut() {
+                                stealth_box.stage = StealthStage::Activating(request);
+                            }
+                        }
+                        Err(_) => self.set_note(StatusNote::error(tr(
                             keys::Q_MEDIA_COULD_NOT_ENABLE_STEALTH_MODE,
-                        )));
+                        ))),
                     }
                 } else if self.demo_session.is_some() {
                     self.set_note(StatusNote::info(tr(
@@ -148,15 +191,16 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn drain_story_stealth(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(stealth_box) = self.stories.stealth_box else {
+        let Some(open_after) = self.stories.stealth_box.as_ref().map(|b| b.open_after) else {
             return false;
         };
         let facts = self.stealth_facts();
         if !facts.mode.is_active(now_unix_secs()) {
+            self.take_stealth_refusal(cx);
             return false;
         }
         self.close_stealth_box();
-        if let Some(chat_id) = stealth_box.open_after {
+        if let Some(chat_id) = open_after {
             self.open_peer_stories(chat_id, cx);
         }
         self.show_stealth_toast(StealthToast::activated(facts.periods), cx);
@@ -164,11 +208,29 @@ impl QuillApp {
         true
     }
 
-    fn ensure_stealth_box_tick(&mut self, cx: &mut Context<Self>) {
-        if self.stories.stealth_tick.is_some() {
+    /// The server refused the activation this box sent: the box shows why,
+    /// and its button asks again.
+    fn take_stealth_refusal(&mut self, cx: &mut Context<Self>) {
+        let Some(StealthStage::Activating(request)) =
+            self.stories.stealth_box.as_ref().map(|b| b.stage.clone())
+        else {
             return;
+        };
+        let reason = self
+            .session()
+            .and_then(|s| s.stories.stealth_refusal.as_ref())
+            .filter(|(refused, _)| *refused == request)
+            .map(|(_, reason)| reason.clone());
+        if let Some(reason) = reason {
+            if let Some(stealth_box) = self.stories.stealth_box.as_mut() {
+                stealth_box.stage = StealthStage::Failed(reason);
+            }
+            cx.notify();
         }
-        self.stories.stealth_tick = Some(self.spawn_screen(cx, async move |this, cx| {
+    }
+
+    fn stealth_box_tick(&mut self, cx: &mut Context<Self>) -> Task<()> {
+        self.spawn_screen(cx, async move |this, cx| {
             loop {
                 let into_second = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -182,12 +244,13 @@ impl QuillApp {
                     break;
                 }
             }
-        }));
+        })
     }
 
     pub(in crate::ui) fn story_stealth_toast(&self) -> Option<AnyElement> {
         let shown = self
             .stories
+            .viewer_ui()
             .stealth_toast
             .as_ref()
             .filter(|shown| shown.until > Instant::now())?;
@@ -255,6 +318,7 @@ impl QuillApp {
             let open_after = this
                 .stories
                 .stealth_box
+                .as_ref()
                 .is_some_and(|stealth_box| stealth_box.open_after.is_some());
             let button = StealthButton::of(facts.mode, now_unix_secs(), facts.premium, open_after);
             let body = stealth_box_body(&facts, cx);
@@ -353,6 +417,17 @@ fn stealth_box_body(facts: &StealthFacts, cx: &mut Context<QuillApp>) -> AnyElem
                 .text_color(cx.theme().muted_foreground)
                 .child(about_text(facts.premium)),
         )
+        .children(facts.failure().map(str::to_string).map(|reason| {
+            div()
+                .id("story-stealth-failure")
+                .debug_selector(|| "story-stealth-failure".into())
+                .role(gpui_kit::Role::Alert)
+                .w_full()
+                .text_sm()
+                .text_center()
+                .text_color(cx.theme().danger)
+                .child(reason)
+        }))
         .child(
             v_flex()
                 .w_full()

@@ -75,8 +75,35 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn earn_withdraw_stars(&mut self, owner: EarnPeer, cx: &mut Context<Self>) {
-        let typed = typed_amount(&self.earn.amount.read(cx).value());
+    /// The most the open page may withdraw now: the balance, capped by the
+    /// option's maximum.
+    fn open_withdraw_max(&self) -> Option<i64> {
+        let earn = self.earn_state()?;
+        let stats = earn.page.as_ref()?.stars.ready()?;
+        Some(withdraw_max(
+            &earn.limits,
+            stats.status.available.stars.max(0),
+        ))
+    }
+
+    fn earn_withdraw_stars(
+        &mut self,
+        owner: EarnPeer,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut typed = typed_amount(&self.earn.amount.read(cx).value());
+        // The field never holds more than can go out (tdesktop limits the
+        // input to the available balance): a larger amount is brought down
+        // to it, and the field shows what is sent.
+        if let Some(max) = self.open_withdraw_max()
+            && typed > max
+        {
+            typed = max;
+            self.earn
+                .amount
+                .update(cx, |input, cx| input.set_value(max.to_string(), window, cx));
+        }
         let min = self
             .earn_state()
             .map_or(1000, |earn| earn.limits.withdrawal_min());
@@ -159,6 +186,7 @@ impl QuillApp {
             );
         if enabled || ad_url.is_some() {
             let withdraw = Button::new("earn-withdraw")
+                .debug_selector(|| "earn-withdraw".into())
                 .label(if locked {
                     tr_with(
                         keys::Q_MONEY_WITHDRAW_2,
@@ -170,7 +198,10 @@ impl QuillApp {
                 .primary()
                 .flex_1()
                 .disabled(!enabled || locked)
-                .on_click(cx.listener(move |this, _, _, cx| this.earn_withdraw_stars(peer, cx)));
+                .loading(session.payments.earn.is_checking_withdrawal())
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.earn_withdraw_stars(peer, window, cx)
+                }));
             let mut buttons = div().flex().gap_2().child(withdraw);
             if let Some(url) = ad_url {
                 buttons = buttons.child(
@@ -346,7 +377,12 @@ impl QuillApp {
                     }
                     (tr(keys::Q_MONEY_SECURITY_CHECK), body, footer)
                 }
-                WithdrawStep::Password { sending, error } => {
+                step @ (WithdrawStep::Password { .. } | WithdrawStep::PasswordSending(_)) => {
+                    let sending = matches!(step, WithdrawStep::PasswordSending(_));
+                    let error = match step {
+                        WithdrawStep::Password { error } => error,
+                        _ => None,
+                    };
                     let description = match withdraw.target {
                         WithdrawTarget::Ton { .. } | WithdrawTarget::Stars { .. } => {
                             tr(keys::BOT_EARN_BALANCE_PASSWORD_DESCRIPTION)
@@ -424,7 +460,7 @@ impl QuillApp {
                         );
                     (tr(keys::SETTINGS_CLOUD_PASSWORD_START_TITLE), body, footer)
                 }
-                WithdrawStep::Checking => {
+                WithdrawStep::Checking(_) => {
                     return dialog.on_close(on_close);
                 }
             };
@@ -454,7 +490,7 @@ crate::ui::shell::register_dialogs! {
         |app| {
             app.earn_state()
                 .and_then(|e| e.withdraw.as_ref())
-                .is_some_and(|w| w.step != WithdrawStep::Checking)
+                .is_some_and(|w| !matches!(w.step, WithdrawStep::Checking(_)))
         },
         QuillApp::build_earn_withdraw_dialog,
     )

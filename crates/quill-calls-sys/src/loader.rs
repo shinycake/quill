@@ -143,10 +143,17 @@ impl Loader {
     /// ancestor of the executable (the macOS bundle, `cargo run`); then the
     /// bare file name on the system search path.
     pub fn load_default() -> Result<Self, LoadError> {
+        Self::load_default_after(|_| ())
+    }
+
+    /// [`Self::load_default`], calling `found` with each library file right
+    /// before it is opened (the bare file name on the search path excepted).
+    pub fn load_default_after(found: impl Fn(&std::path::Path)) -> Result<Self, LoadError> {
         let mut searched: Vec<PathBuf> = Vec::new();
 
         if let Some(path) = std::env::var_os("QUILL_CALLS_LIB").map(PathBuf::from) {
             searched.push(path.clone());
+            found(&path);
             if let Ok(loader) = Self::load(&path) {
                 return Ok(loader);
             }
@@ -164,6 +171,7 @@ impl Loader {
                 .into_iter()
                 .find(|candidate| candidate.exists())
             }) {
+                found(&candidate);
                 return Self::load(&candidate);
             }
             for ancestor in exe
@@ -177,6 +185,7 @@ impl Loader {
                 ] {
                     let candidate = directory.join(library_filename());
                     if candidate.exists() {
+                        found(&candidate);
                         return Self::load(&candidate);
                     }
                 }

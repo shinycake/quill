@@ -34,8 +34,6 @@ pub(in crate::ui) struct DropTopic {
     chat_id: ChatId,
     payload: DropPayload,
     search: Entity<TextareaState>,
-    /// The request for the forum's topics could not be sent.
-    load_failed: bool,
 }
 
 /// One row of the chooser.
@@ -73,15 +71,15 @@ impl QuillApp {
         )
         .detach();
         // The topics of a forum that is not open are not loaded yet.
-        let load_failed = self
-            .live
-            .as_mut()
-            .is_some_and(|live| live.driver.load_forum_topics(chat_id).is_err());
+        // (A request that cannot be sent marks the forum's load failed in
+        // the session, which `drop_topic_failed` reads.)
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.load_forum_topics(chat_id);
+        }
         self.chat_list.drop_topic = Some(DropTopic {
             chat_id,
             payload,
             search,
-            load_failed,
         });
         self.open_box(DialogKind::DropTopic);
         cx.notify();
@@ -182,13 +180,8 @@ impl QuillApp {
         let Some(waiting) = self.chat_list.drop_topic.as_ref() else {
             return false;
         };
-        waiting.load_failed
-            || self.session().is_some_and(|session| {
-                session
-                    .threads
-                    .forum_topics_failed
-                    .contains(&waiting.chat_id.0)
-            })
+        self.session()
+            .is_some_and(|session| session.threads.forum_topics_failed(waiting.chat_id.0))
     }
 
     fn close_drop_topic(&mut self, cx: &mut Context<Self>) {
@@ -240,10 +233,9 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        self.chat_list.drop_topic = None;
-        cx.notify();
         // What was dropped rides with the open, to the window that shows
-        // the chat.
+        // the chat. The chooser, which holds the payload, stays until the
+        // open went through.
         let mut open = crate::ui::chat_window::ChatOpen::new(chat_id);
         match payload {
             DropPayload::Files { paths, kind } => {
@@ -260,12 +252,20 @@ impl QuillApp {
             if let Some(topic) = topic {
                 open = open.in_topic(topic);
             }
+            self.chat_list.drop_topic = None;
+            cx.notify();
             self.select_chat_request(open, window, cx);
             return;
         }
         let carry = std::mem::take(&mut open.carry);
         if self.enter_drop_topic(chat_id, topic, window, cx) {
+            self.chat_list.drop_topic = None;
+            cx.notify();
             self.apply_open_carry(chat_id, carry, Some(window), cx);
+        } else {
+            // The chat did not open (refused, or no longer there): what
+            // was dropped is still in the chooser, and the person is told.
+            cx.notify();
         }
     }
 
@@ -280,19 +280,20 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> bool {
         self.select_listed_chat(chat_id, window, cx);
-        if self.session().and_then(|s| s.open_chat) != Some(chat_id) {
+        if self.session().and_then(|s| s.open_chat_id()) != Some(chat_id) {
+            self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_OPEN_TOPIC)));
             return false;
         }
         match topic {
             Some(topic) => {
                 self.select_topic_ui(topic, cx);
-                if self.session().and_then(|s| s.open_topic) != Some(topic) {
+                if self.session().and_then(|s| s.open_forum_topic()) != Some(topic) {
                     self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_OPEN_TOPIC)));
                     return false;
                 }
             }
             None => {
-                if self.session().and_then(|s| s.open_topic).is_some() {
+                if self.session().and_then(|s| s.open_forum_topic()).is_some() {
                     self.deselect_topic_ui(cx);
                 }
             }

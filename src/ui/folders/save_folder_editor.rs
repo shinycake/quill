@@ -8,6 +8,8 @@ use quill::lang::{keys, tr, tr_with};
 impl QuillApp {
     pub(in crate::ui) fn save_folder_editor(&mut self, cx: &mut Context<Self>) {
         let (name, folder_id) = match self.folders.editor.as_ref() {
+            // The folder is still loading: its spec would go out blank.
+            Some(dialog) if dialog.load != FolderLoad::Ready => return,
             Some(dialog) => (dialog.name(cx), dialog.folder_id),
             None => return,
         };
@@ -19,12 +21,69 @@ impl QuillApp {
                 return;
             }
         }
-        let spec = self
+        let Some((spec, base)) = self
             .folders
             .editor
             .as_ref()
-            .map(|dialog| dialog.editor.to_spec());
-        let Some(spec) = spec else { return };
+            .map(|dialog| (dialog.editor.to_spec(), dialog.base.clone()))
+        else {
+            return;
+        };
+        // The folder may have changed since the form was filled (a pin, a
+        // chat added or removed, here or on another device). The person's
+        // edits go onto the folder as it is now, never the old copy over
+        // it: onto the fresh copy when there is one, else the folder is
+        // fetched first (the Merging stage).
+        if let Some(folder_id) = folder_id
+            && self.live.is_some()
+        {
+            let fresh = self
+                .session()
+                .and_then(|s| s.chat_list.fresh_spec(folder_id).cloned());
+            let onto = self
+                .folders
+                .editor
+                .as_ref()
+                .and_then(|d| d.editor.spec_onto_current(&base, fresh.as_ref()));
+            match onto {
+                Some(spec) => self.send_folder_editor_spec(Some(folder_id), spec, cx),
+                None => self.start_folder_editor_merge(folder_id, cx),
+            }
+            return;
+        }
+        self.send_folder_editor_spec(folder_id, spec, cx);
+    }
+
+    /// Save found no fresh copy of the folder: ask for it once, and wait in
+    /// `Merging` for the answer. A request that cannot be sent leaves the
+    /// form as it was, with the error shown.
+    fn start_folder_editor_merge(&mut self, folder_id: i32, cx: &mut Context<Self>) {
+        let sent = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.fetch_chat_folder(folder_id));
+        if let Some(dialog) = self.folders.editor.as_mut() {
+            match sent {
+                Some(Err(err)) => {
+                    dialog.error = Some(user_error_for(keys::Q_NOTES_FAILED_FOLDER, &err));
+                }
+                _ => {
+                    dialog.load = FolderLoad::Merging;
+                    dialog.error = None;
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// Check the limits and send the editor's folder (the form's own, or
+    /// the one merged onto the fresh folder).
+    pub(in crate::ui) fn send_folder_editor_spec(
+        &mut self,
+        folder_id: Option<i32>,
+        spec: quill::telegram::envelope::ChatFolderSpec,
+        cx: &mut Context<Self>,
+    ) {
         // tdesktop checks the chosen-chat limits before saving.
         let over = self.session().and_then(|s| {
             s.chat_list.folder_limits.chats_over(
@@ -39,25 +98,26 @@ impl QuillApp {
         }
         let result = match self.live.as_mut() {
             Some(live) => match folder_id {
-                Some(id) => live.driver.edit_chat_folder(id, &spec).map(|_| ()),
-                None => live.driver.create_chat_folder(&spec).map(|_| ()),
+                Some(id) => live.driver.edit_chat_folder(id, &spec).map(Some),
+                None => live.driver.create_chat_folder(&spec).map(Some),
             },
             None => {
                 // Screenshot demo: apply locally so the manage dialog shows
                 // the change without live Telegram.
                 self.apply_demo_folder_save(folder_id, spec);
-                Ok(())
+                Ok(None)
             }
         };
         match result {
-            Ok(()) => {
-                self.folders.editor = None;
-                self.set_note(if folder_id.is_some() {
-                    StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_UPDATED))
-                } else {
-                    StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_CREATED))
-                });
+            // The box waits for its own answer: it closes (and says so)
+            // when the folder is saved, and shows the error when it is not.
+            Ok(Some(request)) => {
+                if let Some(dialog) = self.folders.editor.as_mut() {
+                    dialog.load = FolderLoad::Saving(request);
+                    dialog.error = None;
+                }
             }
+            Ok(None) => self.folder_editor_saved(folder_id.is_some()),
             Err(err) => {
                 if let Some(dialog) = self.folders.editor.as_mut() {
                     dialog.error = Some(user_error_for(keys::Q_NOTES_FAILED_SAVE_FOLDER, &err));
@@ -65,6 +125,16 @@ impl QuillApp {
             }
         }
         cx.notify();
+    }
+
+    /// The folder is saved: the editor closes and the toast says so.
+    pub(in crate::ui) fn folder_editor_saved(&mut self, edited: bool) {
+        self.folders.editor = None;
+        self.set_note(if edited {
+            StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_UPDATED))
+        } else {
+            StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_CREATED))
+        });
     }
 
     pub(in crate::ui) fn open_folder_delete(&mut self, folder_id: i32, cx: &mut Context<Self>) {
@@ -91,8 +161,34 @@ impl QuillApp {
         });
         self.open_box(crate::ui::shell::DialogKind::FolderDelete);
         // Only a shared folder has chats worth leaving with it.
-        if shared
-            && let Some(live) = self.live.as_mut()
+        if shared {
+            if let Some(live) = self.live.as_mut() {
+                if let Err(err) = live.driver.fetch_chat_folder_chats_to_leave(folder_id) {
+                    self.set_note(StatusNote::error(user_error_for(
+                        keys::Q_NOTES_FAILED_FOLDER_CHATS,
+                        &err,
+                    )));
+                }
+            } else if let Some(demo) = self.demo_session.as_mut() {
+                // The screenshot demo has no server to ask: nothing to leave.
+                demo.chat_list
+                    .folder_chats_to_leave
+                    .entry(folder_id)
+                    .or_default()
+                    .succeed(Vec::new());
+            }
+        }
+        cx.notify();
+    }
+
+    /// The Retry of the Delete folder box whose list of chats to leave
+    /// failed to load.
+    pub(in crate::ui) fn retry_folder_chats_to_leave(
+        &mut self,
+        folder_id: i32,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_chat_folder_chats_to_leave(folder_id)
         {
             self.set_note(StatusNote::error(user_error_for(
@@ -104,17 +200,25 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn confirm_folder_delete(&mut self, cx: &mut Context<Self>) {
+        // A shared folder's list of chats to leave is still on its way:
+        // deleting now would skip offering them, so the box waits.
+        let waiting = self.folders.delete_confirm.as_ref().is_some_and(|confirm| {
+            confirm.shared
+                && self
+                    .session()
+                    .and_then(|s| s.chat_list.folder_chats_to_leave.get(&confirm.folder_id))
+                    .is_none_or(|f| f.is_loading() || f.is_idle())
+        });
+        if waiting {
+            return;
+        }
         let Some(confirm) = self.folders.delete_confirm.take() else {
             return;
         };
         let leave: Vec<i64> = if confirm.shared {
             self.session()
-                .and_then(|s| {
-                    s.chat_list
-                        .folder_chats_to_leave
-                        .get(&confirm.folder_id)
-                        .cloned()
-                })
+                .and_then(|s| s.chat_list.folder_chats_to_leave.get(&confirm.folder_id))
+                .and_then(|f| f.data().cloned())
                 .unwrap_or_default()
                 .into_iter()
                 .filter(|id| !confirm.keep.contains(id))
@@ -136,7 +240,10 @@ impl QuillApp {
             Ok(()) => StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_DELETED)),
             Err(err) => StatusNote::error(user_error_for(keys::Q_NOTES_FAILED_DELETE_FOLDER, &err)),
         });
-        if self.folders.tab == Some(confirm.folder_id) {
+        // The tab follows the folder's end: the live app leaves it when
+        // `updateChatFolders` no longer lists the folder (the poll), so a
+        // delete that failed keeps the folder and its tab.
+        if self.live.is_none() && self.folders.tab == Some(confirm.folder_id) {
             self.set_chat_list_view(self.chat_list.filter, None);
         }
         cx.notify();
@@ -213,6 +320,19 @@ impl QuillApp {
         self.notify.ttl_picker = None;
         self.folders.menu_chat = Some(chat_id);
         self.open_box(crate::ui::shell::DialogKind::FolderMenu);
+        if let Some(live) = self.live.as_mut()
+            && let Err(err) = live.driver.fetch_chat_lists_to_add_chat(chat_id)
+        {
+            self.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_FOLDER_OPTIONS,
+                &err,
+            )));
+        }
+        cx.notify();
+    }
+
+    /// The Add to folder box's Retry after a failed ask.
+    fn retry_folder_menu(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_chat_lists_to_add_chat(chat_id)
         {
@@ -323,7 +443,30 @@ impl QuillApp {
                 .map(|f| f.name.clone())
                 .unwrap_or_else(|| tr_with(keys::Q_CHATLIST_FOLDER_2, &[("id", &id.to_string())]))
         };
-        let Some(lists) = session.chat_list.chat_lists_for_add.get(&chat_id.0) else {
+        let fetch = session.chat_list.chat_lists_for_add.get(&chat_id.0);
+        let Some(lists) = fetch.and_then(|fetch| fetch.data()) else {
+            // A failed ask ends in its error with a Retry, not in "Loading".
+            if let Some(error) = fetch.and_then(|fetch| fetch.error()) {
+                return panel
+                    .child(
+                        div()
+                            .id("folder-menu-error")
+                            .text_xs()
+                            .text_color(danger_dark())
+                            .child(error.to_string()),
+                    )
+                    .child(
+                        div().flex().child(
+                            Button::new("folder-menu-retry")
+                                .label(tr(keys::Q_MONEY_RETRY))
+                                .small()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.retry_folder_menu(chat_id, cx);
+                                })),
+                        ),
+                    )
+                    .into_any_element();
+            }
             return panel
                 .child(
                     div()
@@ -421,3 +564,8 @@ impl QuillApp {
         panel.into_any_element()
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "save_folder_editor_tests.rs"]
+mod tests;

@@ -9,8 +9,7 @@ use quill::profile_tab::ProfileTab;
 
 impl QuillApp {
     pub(in crate::ui) fn open_main_tab_dialog(&mut self, cx: &mut Context<Self>) {
-        self.dialogs.profile_dialog = Some(ProfileDialog::MainTab);
-        self.open_box(DialogKind::ProfilePanel);
+        self.open_profile_dialog(ProfileDialog::MainTab);
         cx.notify();
     }
 

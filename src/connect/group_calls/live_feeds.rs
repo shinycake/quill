@@ -69,7 +69,7 @@ fn participant_has_video(
 ) -> bool {
     if screen {
         participant.screen_sharing_enabled
-            || (participant.is_current_user && (call.screen_sharing || call.screen_share_pending))
+            || (participant.is_current_user && (call.screen_share.is_on()))
     } else {
         participant.video_enabled
     }
@@ -120,7 +120,7 @@ impl FeedInputs {
         Self {
             participants: call.participants.revision(),
             my_video: call.is_my_video_enabled,
-            sharing: call.screen_sharing || call.screen_share_pending,
+            sharing: call.screen_share.is_on(),
         }
     }
 }
@@ -139,7 +139,7 @@ pub(crate) fn one_to_one_has_video(call: &ActiveCall, key: LiveKey) -> bool {
     };
     call.id == call_id
         && match (local, screen) {
-            (true, _) => call.camera_on,
+            (true, _) => call.camera_on(),
             (false, false) => call.remote_video != RemoteVideoState::Inactive,
             (false, true) => call.remote_screen != RemoteVideoState::Inactive,
         }
@@ -167,7 +167,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn feed_source(&self, key: LiveKey) -> Option<LiveSource> {
         let calls = &self.session.calls;
         let tracked = key.call_id().is_some_and(|call_id| {
-            calls.left_group_call != Some(call_id)
+            !calls.group_call_left(call_id)
                 && calls
                     .group_call(call_id)
                     .is_some_and(|call| call_has_video(call, key))
@@ -237,7 +237,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let calls = &self.session.calls;
         let call = calls
             .group_call(group_call_id)
-            .filter(|call| calls.left_group_call != Some(call.id));
+            .filter(|call| !call.rejoin.is_left());
         let inputs = call.map(FeedInputs::of);
         let seen = self.group_seen.entry(group_call_id).or_default();
         if inputs.is_some() && seen.feeds == inputs {

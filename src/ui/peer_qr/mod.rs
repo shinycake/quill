@@ -29,8 +29,10 @@ mod view_model;
 mod demo;
 
 use super::app::QuillApp;
+use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use quill::lang::{keys, tr};
 use quill::peer_qr::free::FreeMode;
 use quill::peer_qr::link::OwnLinkState;
 use quill::peer_qr::session::PeerQrData;
@@ -48,54 +50,80 @@ const TOAST: Duration = Duration::from_millis(2800);
 const CLOCK: Duration = Duration::from_secs(1);
 
 /// The panel's open or close motion, for drawing only: the reducer's
-/// `panel` says what is open.
+/// `panel` says what is open. A panel change replaces it whole; a close
+/// stays `Closing` (at rest) until the next change.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct PanelMotion {
-    /// The panel being shown, kept while it closes.
-    pub(super) shown: Option<QrPanel>,
-    pub(super) opening: bool,
-    pub(super) started: Option<Instant>,
+pub(super) enum PanelMotion {
+    /// No panel was shown yet.
+    Idle,
+    /// `panel` opens (or is open) since `since`.
+    Opening { panel: QrPanel, since: Instant },
+    /// `panel` closes (or is closed) since `since`; it is kept to draw
+    /// the close.
+    Closing { panel: QrPanel, since: Instant },
 }
 
 impl PanelMotion {
-    const IDLE: PanelMotion = PanelMotion {
-        shown: None,
-        opening: false,
-        started: None,
-    };
+    pub(super) const IDLE: PanelMotion = PanelMotion::Idle;
+
+    /// The motion after the reducer's panel went to `panel` at `now`.
+    pub(super) fn changed(self, panel: Option<QrPanel>, now: Instant) -> Self {
+        match (panel, self.shown()) {
+            (Some(panel), _) => Self::Opening { panel, since: now },
+            (None, Some(panel)) => Self::Closing { panel, since: now },
+            (None, None) => Self::Idle,
+        }
+    }
+
+    /// The panel being shown, kept while it closes.
+    pub(super) fn shown(&self) -> Option<QrPanel> {
+        match self {
+            Self::Idle => None,
+            Self::Opening { panel, .. } | Self::Closing { panel, .. } => Some(*panel),
+        }
+    }
+
+    fn opening(&self) -> bool {
+        matches!(self, Self::Opening { .. })
+    }
+
+    fn started(&self) -> Option<Instant> {
+        match self {
+            Self::Idle => None,
+            Self::Opening { since, .. } | Self::Closing { since, .. } => Some(*since),
+        }
+    }
+
+    fn duration_ms(&self) -> f64 {
+        if self.opening() {
+            quill::peer_qr::layout::PANEL_OPEN_MS
+        } else {
+            quill::peer_qr::layout::PANEL_CLOSE_MS
+        }
+    }
 
     /// 0 closed, 1 open.
     pub(super) fn progress(&self, now: Instant, animate: bool) -> f64 {
-        let target = if self.opening { 1. } else { 0. };
-        let Some(started) = self.started.filter(|_| animate) else {
+        let target = if self.opening() { 1. } else { 0. };
+        let Some(started) = self.started().filter(|_| animate) else {
             return target;
         };
-        let duration = if self.opening {
-            quill::peer_qr::layout::PANEL_OPEN_MS
-        } else {
-            quill::peer_qr::layout::PANEL_CLOSE_MS
-        };
-        let t = now.duration_since(started).as_secs_f64() * 1000. / duration;
+        let t = now.duration_since(started).as_secs_f64() * 1000. / self.duration_ms();
         let eased = quill::peer_qr::layout::panel_ease(t);
-        if self.opening { eased } else { 1. - eased }
+        if self.opening() { eased } else { 1. - eased }
     }
 
     pub(super) fn running(&self, now: Instant, animate: bool) -> bool {
-        let duration = if self.opening {
-            quill::peer_qr::layout::PANEL_OPEN_MS
-        } else {
-            quill::peer_qr::layout::PANEL_CLOSE_MS
-        };
         animate
-            && self
-                .started
-                .is_some_and(|started| now.duration_since(started).as_secs_f64() * 1000. < duration)
+            && self.started().is_some_and(|started| {
+                now.duration_since(started).as_secs_f64() * 1000. < self.duration_ms()
+            })
     }
 
     /// Milliseconds since the panel started to open.
     pub(super) fn open_elapsed_ms(&self, now: Instant) -> f64 {
-        match self.started {
-            Some(started) if self.opening => now.duration_since(started).as_secs_f64() * 1000.,
+        match self {
+            Self::Opening { since, .. } => now.duration_since(*since).as_secs_f64() * 1000.,
             _ => f64::MAX,
         }
     }
@@ -117,6 +145,38 @@ pub(super) fn plain_picks(picks: &[quill::peer_qr::theme::ThemeEmoji]) -> Vec<St
         .collect()
 }
 
+/// The share chooser the box opened. Another window's chooser (a group
+/// link row's Share) picks or cancels without touching the box.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) enum QrShare {
+    #[default]
+    Idle,
+    /// The chooser of the window `window` (`None`: the main window), with
+    /// the card image to attach in the chat it picks.
+    Chooser {
+        window: Option<ChatId>,
+        image: Option<PathBuf>,
+    },
+}
+
+impl QrShare {
+    #[cfg(test)]
+    pub(super) fn image(&self) -> Option<&PathBuf> {
+        match self {
+            Self::Idle => None,
+            Self::Chooser { image, .. } => image.as_ref(),
+        }
+    }
+
+    /// The chooser is over (or never was): its card image, if any.
+    fn finish(&mut self) -> Option<PathBuf> {
+        match std::mem::take(self) {
+            Self::Idle => None,
+            Self::Chooser { image, .. } => image,
+        }
+    }
+}
+
 /// The box on screen.
 pub(super) struct OpenQr {
     pub(super) state: PeerQrBox,
@@ -127,15 +187,31 @@ pub(super) struct OpenQr {
     /// When the shown gift's pattern began to come in (tdesktop
     /// `PeerQrGiftField::startEntry`).
     pub(super) gift_entry: Instant,
-    /// The card image to attach in the chat the share chooser opens.
-    pub(super) share_image: Option<PathBuf>,
+    /// Whether the box opened a share chooser, and which.
+    pub(super) share: QrShare,
     /// A card image is being made for copy or share.
-    pub(super) exporting: bool,
+    pub(super) export: Export,
     /// The gifts grid's scroll position, kept across frames and reset
     /// each time the panel opens.
     pub(super) gifts_scroll: gpui_kit::base::VirtualListScrollHandle,
-    /// The countdown clock is ticking.
-    clock_running: bool,
+    /// The countdown clock, ticking while a countdown shows. Dropped with
+    /// the box, or by the clock itself when nothing counts down.
+    clock: Option<Task<()>>,
+}
+
+/// The card image behind Copy and Share. The render's task is kept here,
+/// so closing the box ends it and its result never lands.
+pub(super) enum Export {
+    Idle,
+    Rendering(
+        #[expect(dead_code, reason = "held so that closing the box ends the render")] Task<()>,
+    ),
+}
+
+impl Export {
+    pub(super) fn is_rendering(&self) -> bool {
+        matches!(self, Self::Rendering(_))
+    }
 }
 
 /// The QR box's part of the app.
@@ -160,6 +236,8 @@ impl crate::ui::on_screen::Farewell for PeerQrUi {
         if app.peer_qr.open.is_some() {
             app.close_qr_box(cx);
         }
+        // A shared card still waiting for its chat is a file on disk.
+        app.drop_shared_card(cx);
     }
 }
 
@@ -216,10 +294,10 @@ impl QuillApp {
             toast: None,
             swap: None,
             gift_entry: now,
-            share_image: None,
-            exporting: false,
+            share: QrShare::Idle,
+            export: Export::Idle,
             gifts_scroll: gpui_kit::base::VirtualListScrollHandle::new(),
-            clock_running: false,
+            clock: None,
         }));
         self.open_box(crate::ui::shell::DialogKind::PeerQr);
         if own && let Some(data) = self.qr_data_mut() {
@@ -251,7 +329,12 @@ impl QuillApp {
     /// when the box is destroyed).
     pub(super) fn close_qr_box(&mut self, cx: &mut Context<Self>) {
         self.qr_act(QrAction::Closing, cx);
-        if let Some(path) = self.peer_qr.open.take().and_then(|open| open.share_image) {
+        if let Some(path) = self
+            .peer_qr
+            .open
+            .take()
+            .and_then(|mut open| open.share.finish())
+        {
             remove_card_file(path, cx);
         }
         self.peer_qr.art.clear();
@@ -291,13 +374,13 @@ impl QuillApp {
         let before = open.state.clone();
         let effects = open.state.apply(action, env);
         let changed = open.state != before;
-        if open.state.emoji != before.emoji {
+        if open.state.emoji() != before.emoji() {
             open.swap = Some(PatternSwap {
-                previous: plain_picks(&before.emoji),
+                previous: plain_picks(before.emoji()),
                 started: now,
             });
         }
-        let gift = |state: &PeerQrBox| state.gift.as_ref().map(|gift| gift.id);
+        let gift = |state: &PeerQrBox| state.gift().map(|gift| gift.id);
         if gift(&open.state) != gift(&before) {
             open.gift_entry = now;
         }
@@ -305,18 +388,7 @@ impl QuillApp {
             if open.state.panel == Some(QrPanel::Gifts) {
                 open.gifts_scroll = gpui_kit::base::VirtualListScrollHandle::new();
             }
-            open.motion = match open.state.panel {
-                Some(panel) => PanelMotion {
-                    shown: Some(panel),
-                    opening: true,
-                    started: Some(now),
-                },
-                None => PanelMotion {
-                    shown: open.motion.shown,
-                    opening: false,
-                    started: Some(now),
-                },
-            };
+            open.motion = open.motion.changed(open.state.panel, now);
         }
         if !changed && effects.is_empty() {
             return;
@@ -386,8 +458,21 @@ impl QuillApp {
             .map(|data| data.take_save_answers())
             .unwrap_or_default();
         let any = !answers.is_empty();
+        let shown = self.peer_qr.open.as_ref().map(|open| open.state.id);
         for (ticket, result) in answers {
-            self.qr_act(QrAction::SaveAnswer { ticket, result }, cx);
+            if shown == Some(ticket.box_id) {
+                self.qr_act(QrAction::SaveAnswer { ticket, result }, cx);
+            } else if let Err(reason) = result {
+                // A pick saved as its box closed answers after the box is
+                // gone: a failure is told through the app's note, which
+                // outlives it.
+                let line = if reason.is_empty() {
+                    tr(keys::Q_OPS_SHARE_THEME_NOT_SAVED).to_string()
+                } else {
+                    reason
+                };
+                self.set_note(StatusNote::error(line));
+            }
         }
         any
     }
@@ -440,18 +525,17 @@ impl QuillApp {
     /// Start the once-a-second clock when a countdown shows; it stops
     /// itself when none does or the box closes.
     fn sync_qr_clock(&mut self, cx: &mut Context<Self>) {
-        if !self.qr_counts_down() {
+        if self.lock_waits() || !self.qr_counts_down() {
             return;
         }
         let Some(open) = self.peer_qr.open.as_mut() else {
             return;
         };
-        if open.clock_running {
+        if open.clock.is_some() {
             return;
         }
-        open.clock_running = true;
         let id = open.state.id;
-        self.spawn_screen(cx, async move |this, cx| {
+        let clock = self.spawn_screen(cx, async move |this, cx| {
             loop {
                 cx.background_executor().timer(CLOCK).await;
                 let Ok(going) = this.update(cx, |this, cx| this.qr_clock(id, cx)) else {
@@ -461,8 +545,10 @@ impl QuillApp {
                     return;
                 }
             }
-        })
-        .detach();
+        });
+        if let Some(open) = self.peer_qr.open.as_mut() {
+            open.clock = Some(clock);
+        }
     }
 
     /// One clock tick for box `id`: a code may have run out, a countdown
@@ -471,12 +557,20 @@ impl QuillApp {
         if self.peer_qr.open.as_ref().map(|open| open.state.id) != Some(id) {
             return false;
         }
+        // The box stays open under the lock, but nothing is asked or run
+        // for it; the first poll after the unlock starts the clock again.
+        if self.lock_waits() {
+            if let Some(open) = self.peer_qr.open.as_mut() {
+                open.clock = None;
+            }
+            return false;
+        }
         self.ensure_qr_contact_link();
         self.qr_act(QrAction::Tick, cx);
         cx.notify();
         let going = self.qr_counts_down();
         if !going && let Some(open) = self.peer_qr.open.as_mut() {
-            open.clock_running = false;
+            open.clock = None;
         }
         going
     }
@@ -496,10 +590,9 @@ impl QuillApp {
             return false;
         };
         let answers = data.take_free_answers();
-        let failed = if own { data.contact_error.take() } else { None };
+        let failed = if own { data.take_contact_error() } else { None };
         if !open {
-            data.save_answers.clear();
-            return false;
+            return self.qr_take_save_answers(cx);
         }
         let saved = self.qr_take_save_answers(cx);
         let progressed = !answers.is_empty() || failed.is_some() || saved;
@@ -523,6 +616,9 @@ impl QuillApp {
     /// Your own box: the driver asks for a temporary contact link when
     /// there is none (or it ran out) and none is on its way.
     fn ensure_qr_contact_link(&mut self) {
+        if self.lock_waits() {
+            return;
+        }
         let own = self
             .peer_qr
             .open
@@ -538,11 +634,14 @@ impl QuillApp {
     /// The box hides under the share chooser; a cancelled share brings it
     /// back as it was, and its card file goes.
     pub(super) fn qr_share_cancelled(&mut self, cx: &mut Context<Self>) {
+        let asker = self.asking_window().flatten();
+        let ours = |open: &OpenQr| matches!(&open.share, QrShare::Chooser { window, .. } if *window == asker);
         if let Some(path) = self
             .peer_qr
             .open
             .as_mut()
-            .and_then(|open| open.share_image.take())
+            .filter(|open| ours(open))
+            .and_then(|open| open.share.finish())
         {
             remove_card_file(path, cx);
         }
@@ -551,10 +650,15 @@ impl QuillApp {
     /// A chat was picked for the shared link: the box is done, and the
     /// card waits to go into that chat's composer.
     pub(super) fn qr_share_chosen(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        let asker = self.asking_window().flatten();
         let Some(open) = self.peer_qr.open.as_mut() else {
             return;
         };
-        let card = open.share_image.take();
+        // Another window's chooser is not this box's.
+        if !matches!(&open.share, QrShare::Chooser { window, .. } if *window == asker) {
+            return;
+        }
+        let card = open.share.finish();
         self.drop_shared_card(cx);
         self.peer_qr.pending_attach = card.map(|path| (chat_id, path));
         self.close_qr_box(cx);

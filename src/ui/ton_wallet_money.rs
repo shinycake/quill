@@ -27,8 +27,6 @@ use quill::ton_wallet::{
     MoneyTab, TonWalletState, WalletNft, WalletSurface, WalletTx, fiat, format_gram_amount_with,
     own,
 };
-use std::cell::RefCell;
-use std::rc::Rc;
 
 impl QuillApp {
     pub(super) fn ton_wallet_mut(&mut self) -> Option<&mut TonWalletState> {
@@ -57,7 +55,7 @@ impl QuillApp {
     pub(super) fn close_money(&mut self, cx: &mut Context<Self>) {
         if self
             .ton_wallet_mut()
-            .is_some_and(|wallet| wallet.money.hint_open)
+            .is_some_and(|wallet| wallet.money.hint_open())
         {
             self.dismiss_first_grams_hint(cx);
         }
@@ -74,6 +72,17 @@ impl QuillApp {
             let _ = live.driver.set_money_tab(tab);
         } else if let Some(wallet) = self.ton_wallet_mut() {
             wallet.money.tab = tab;
+        }
+        cx.notify();
+    }
+
+    /// Retry of a failed first page of the Money list.
+    fn retry_money(&mut self, tab: MoneyTab, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = match tab {
+                MoneyTab::Transactions => live.driver.fetch_wallet_history(false),
+                MoneyTab::Collectibles => live.driver.fetch_wallet_nfts(false),
+            };
         }
         cx.notify();
     }
@@ -99,18 +108,17 @@ impl QuillApp {
 
     pub(super) fn select_wallet_nft(&mut self, address: Option<String>, cx: &mut Context<Self>) {
         if let Some(wallet) = self.ton_wallet_mut() {
-            wallet.money.selected_nft = address;
-            wallet.money.selected_tx = None;
+            wallet.money.detail = match address {
+                Some(address) => quill::ton_wallet::MoneyDetail::Nft(address),
+                None => quill::ton_wallet::MoneyDetail::Overview,
+            };
         }
         cx.notify();
     }
 
     pub(super) fn money_back(&mut self, cx: &mut Context<Self>) {
         if let Some(wallet) = self.ton_wallet_mut() {
-            wallet.money.selected_tx = None;
-            wallet.money.selected_nft = None;
-            wallet.money.tx_error = None;
-            wallet.money.tx_loading = false;
+            wallet.money.detail = quill::ton_wallet::MoneyDetail::Overview;
         }
         cx.notify();
     }
@@ -120,7 +128,11 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.dismiss_first_transfer_hint();
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.ton_wallet.money.hint_open = false;
+            if let quill::ton_wallet::MoneyDetail::Tx { hint, .. } =
+                &mut session.ton_wallet.money.detail
+            {
+                *hint = false;
+            }
             session
                 .chat_list
                 .suggestions
@@ -196,28 +208,25 @@ impl QuillApp {
                 return dialog.on_close(on_close);
             };
             let money = &session.ton_wallet.money;
-            let body = if money.hint_open {
-                super::ton_wallet_details::first_grams_hint(&session.ton_wallet, cx)
-            } else if let Some(tx) = money.selected_tx.as_ref() {
-                super::ton_wallet_details::tx_details(session, tx, &roots, cx)
-            } else if let Some(nft) = money.selected_nft() {
-                super::ton_wallet_details::nft_details(session, nft, &roots, cx)
-            } else if money.tx_loading || money.tx_error.is_some() {
-                super::ton_wallet_details::tx_lookup_state(money.tx_error.as_deref(), cx)
-            } else {
-                overview(session, &roots, cx)
+            use quill::ton_wallet::MoneyDetail;
+            let body = match &money.detail {
+                MoneyDetail::Tx { hint: true, .. } => {
+                    super::ton_wallet_details::first_grams_hint(&session.ton_wallet, cx)
+                }
+                MoneyDetail::Tx { tx, .. } => {
+                    super::ton_wallet_details::tx_details(session, tx, &roots, cx)
+                }
+                MoneyDetail::Nft(_) => match money.selected_nft() {
+                    Some(nft) => super::ton_wallet_details::nft_details(session, nft, &roots, cx),
+                    None => overview(session, &roots, cx),
+                },
+                MoneyDetail::Lookup { .. } | MoneyDetail::LookupFailed(_) => {
+                    super::ton_wallet_details::tx_lookup_state(money.tx_error(), cx)
+                }
+                MoneyDetail::Overview => overview(session, &roots, cx),
             };
             dialog
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::one_shot_dialog_content(body))
                 .on_close(on_close)
         })
     }
@@ -384,22 +393,33 @@ fn overview(
     body = body.child(tabs);
     let (loading, loaded, error, empty, more) = match money.tab {
         MoneyTab::Transactions => (
-            money.history.loading,
-            money.history.loaded,
-            money.history.error.clone(),
-            money.history.items.is_empty(),
+            money.history.is_loading(),
+            money.history.is_loaded(),
+            money.history.error().map(str::to_string),
+            money.history.items().is_empty(),
             money.history.has_more(),
         ),
         MoneyTab::Collectibles => (
-            money.nfts.loading,
-            money.nfts.loaded,
-            money.nfts.error.clone(),
-            money.nfts.items.is_empty(),
+            money.nfts.is_loading(),
+            money.nfts.is_loaded(),
+            money.nfts.error().map(str::to_string),
+            money.nfts.items().is_empty(),
             money.nfts.has_more(),
         ),
     };
     if let Some(error) = error {
         body = body.child(div().text_sm().child(error));
+        // A first page that failed has nothing shown to page from: Retry asks
+        // for it again (a failed next page retries through Load more).
+        if empty && !loading {
+            let tab = money.tab;
+            body = body.child(
+                Button::new("money-retry")
+                    .label(tr(keys::Q_MONEY_RETRY))
+                    .ghost()
+                    .on_click(cx.listener(move |this, _, _, cx| this.retry_money(tab, cx))),
+            );
+        }
     }
     if loading && empty {
         body = body.child(
@@ -416,12 +436,12 @@ fn overview(
     }
     match money.tab {
         MoneyTab::Transactions => {
-            for (ix, tx) in money.history.items.iter().enumerate() {
+            for (ix, tx) in money.history.items().iter().enumerate() {
                 body = body.child(tx_row(session, ix, tx, cx));
             }
         }
         MoneyTab::Collectibles => {
-            for (ix, nft) in money.nfts.items.iter().enumerate() {
+            for (ix, nft) in money.nfts.items().iter().enumerate() {
                 body = body.child(nft_row(session, ix, nft, roots, cx));
             }
         }

@@ -6,6 +6,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::signin_clock::{ErrorClock, StepClock, Ticker};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea};
@@ -17,11 +18,61 @@ use quill::lang::{keys, tr};
 use quill::phone::{self, Country};
 use quill::signin;
 use quill::state::AuthRequestError;
-use quill::telegram::envelope::{AuthorizationState, CodeDelivery, EmailResetState};
-use std::time::{Duration, Instant};
+use quill::telegram::envelope::{AuthorizationState, EmailResetState};
+use std::time::Duration;
 
 /// The country list under the 380 px sign-in card's button.
 const PICKER_WIDTH: f32 = 356.;
+
+/// The two phone-screen lookups (country list, IP default), asked once from
+/// the transition onto the phone screen. A settled answer, empty or an
+/// error, is not asked again until the screen is left and reopened.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum PhoneLookups {
+    #[default]
+    Idle,
+    Asked,
+}
+
+/// Where the phone number is, on the phone form and the code step after
+/// it: one value, advanced by the answer to `setAuthenticationPhoneNumber`
+/// and not by pressing Continue.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) enum PhoneStep {
+    /// The phone form, or a code step with no number from here (a session
+    /// restored on the code step).
+    #[default]
+    Entering,
+    /// The code was requested for this number.
+    CodeSentTo(String),
+    /// "Wrong number?": the phone form over the code step. The code stays
+    /// requested for `sent_to` until a new number is accepted.
+    Editing { sent_to: String },
+    /// The number is sent. The answer moves to `CodeSentTo(phone)`; a
+    /// rejection returns to `back`, which still holds the old number.
+    Sending { phone: String, back: Box<PhoneStep> },
+}
+
+impl PhoneStep {
+    /// The phone form shows over the code step.
+    pub(super) fn is_editing(&self) -> bool {
+        match self {
+            Self::Editing { .. } => true,
+            Self::Sending { back, .. } => back.is_editing(),
+            Self::Entering | Self::CodeSentTo(_) => false,
+        }
+    }
+
+    /// The number the code step says the code went to.
+    pub(super) fn code_phone(&self) -> &str {
+        match self {
+            Self::Entering => "",
+            Self::CodeSentTo(phone) | Self::Editing { sent_to: phone } => phone,
+            Self::Sending { phone, back } if !back.is_editing() => phone,
+            Self::Sending { back, .. } => back.code_phone(),
+        }
+    }
+}
 
 /// Per-screen UI state for the sign-in steps. Nothing here is a secret:
 /// the phone is shown on screen anyway and the code is never kept.
@@ -32,17 +83,15 @@ pub(super) struct SignInUi {
     pub(super) phone_text: String,
     /// Inline hint under the phone field after a rejected attempt.
     pub(super) hint: Option<&'static str>,
-    /// The number the code was requested for, shown on the code screen.
-    pub(super) submitted_phone: String,
-    /// "Wrong number?" re-opens the phone form over the code step.
-    pub(super) editing_phone: bool,
+    /// The number being sent or the code was requested for, and "Wrong
+    /// number?" over the code step.
+    pub(super) phone_step: PhoneStep,
     /// The user typed or picked a country: the IP-based default stays out.
     pub(super) touched: bool,
-    pub(super) code_clock: Option<(CodeDelivery, Instant)>,
-    pub(super) email_clock: Option<(EmailResetState, Instant)>,
-    pub(super) error_clock: Option<(AuthRequestError, Instant)>,
-    pub(super) banned_dismissed: bool,
-    tick_armed: bool,
+    pub(super) step_clock: StepClock,
+    pub(super) error_clock: ErrorClock,
+    pub(super) lookups: PhoneLookups,
+    ticker: Ticker,
     /// Demo-only fixtures (no live TDLib to ask).
     pub(super) demo_countries: Vec<Country>,
     pub(super) demo_guess: Option<String>,
@@ -79,14 +128,12 @@ impl SignInUi {
             picker_open: false,
             phone_text: String::new(),
             hint: None,
-            submitted_phone: String::new(),
-            editing_phone: false,
+            phone_step: PhoneStep::Entering,
             touched: false,
-            code_clock: None,
-            email_clock: None,
-            error_clock: None,
-            banned_dismissed: false,
-            tick_armed: false,
+            step_clock: StepClock::None,
+            error_clock: ErrorClock::None,
+            lookups: PhoneLookups::Idle,
+            ticker: Ticker::Idle,
             demo_countries: Vec::new(),
             demo_guess: None,
             demo_error: None,
@@ -144,7 +191,8 @@ impl QuillApp {
                 .session
                 .auth_state
                 .countries
-                .clone()
+                .data()
+                .cloned()
                 .unwrap_or_default(),
             None => self.auth_ui.signin.demo_countries.clone(),
         }
@@ -162,34 +210,20 @@ impl QuillApp {
     /// auth state and prefill the default country code.
     pub(super) fn sync_signin(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let auth = self.current_auth();
-        if let Some(live) = self.live.as_mut()
-            && matches!(auth, AuthorizationState::WaitPhoneNumber)
-        {
-            let _ = live.driver.fetch_countries();
-            let _ = live.driver.fetch_country_code();
-        }
-        match &auth {
-            AuthorizationState::WaitCode { delivery, .. } => {
-                if self.auth_ui.signin.code_clock.as_ref().map(|(d, _)| d) != Some(delivery) {
-                    self.auth_ui.signin.code_clock = Some((delivery.clone(), Instant::now()));
-                }
+        if !matches!(auth, AuthorizationState::WaitPhoneNumber) {
+            self.auth_ui.signin.lookups = PhoneLookups::Idle;
+        } else if self.auth_ui.signin.lookups == PhoneLookups::Idle && self.live.is_some() {
+            self.auth_ui.signin.lookups = PhoneLookups::Asked;
+            if let Some(live) = self.live.as_mut() {
+                let _ = live.driver.fetch_countries();
+                let _ = live.driver.fetch_country_code();
             }
-            _ => self.auth_ui.signin.code_clock = None,
         }
-        match &auth {
-            AuthorizationState::WaitEmailCode { reset, .. } => {
-                if self.auth_ui.signin.email_clock.as_ref().map(|(r, _)| r) != Some(reset) {
-                    self.auth_ui.signin.email_clock = Some((*reset, Instant::now()));
-                }
-            }
-            _ => self.auth_ui.signin.email_clock = None,
-        }
-        if !matches!(auth, AuthorizationState::WaitCode { .. }) {
-            self.auth_ui.signin.editing_phone = false;
-        }
+        self.auth_ui.signin.step_clock.follow(&auth);
+        self.sync_phone_step(&auth);
         self.apply_login_code_link(&auth, window, cx);
         let phone_screen = matches!(auth, AuthorizationState::WaitPhoneNumber)
-            || (self.auth_ui.signin.editing_phone
+            || (self.auth_ui.signin.phone_step.is_editing()
                 && matches!(auth, AuthorizationState::WaitCode { .. }));
         if phone_screen
             && !self.auth_ui.signin.touched
@@ -295,6 +329,8 @@ impl QuillApp {
     fn signin_toggle_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.auth_ui.signin.picker_open = !self.auth_ui.signin.picker_open;
         if self.auth_ui.signin.picker_open {
+            // A list that failed is asked again when the picker opens.
+            self.retry_countries(cx);
             // The popover mounts on the next frame and takes focus then.
             let search = self.auth_ui.signin.search.clone();
             window.defer(cx, move |window, cx| {
@@ -328,9 +364,41 @@ impl QuillApp {
         }
     }
 
+    /// Advance `phone_step` by what happened to its request: the answer
+    /// (no auth request left) accepts the number or, with an auth error,
+    /// returns to what was before; leaving the code step ends "Wrong
+    /// number?".
+    fn sync_phone_step(&mut self, auth: &AuthorizationState) {
+        if matches!(self.auth_ui.signin.phone_step, PhoneStep::Sending { .. }) {
+            let (waiting, rejected) = match self.live.as_ref() {
+                Some(live) => (
+                    live.driver.session.requests.has_auth_submit(),
+                    live.driver.session.auth_state.last_auth_error.is_some(),
+                ),
+                None => (false, true),
+            };
+            if waiting {
+                return;
+            }
+            let step = &mut self.auth_ui.signin.phone_step;
+            *step = match std::mem::take(step) {
+                PhoneStep::Sending { back, .. } if rejected => *back,
+                PhoneStep::Sending { phone, .. } => PhoneStep::CodeSentTo(phone),
+                other => other,
+            };
+        }
+        let step = &mut self.auth_ui.signin.phone_step;
+        if !matches!(auth, AuthorizationState::WaitCode { .. })
+            && let PhoneStep::Editing { sent_to } = step
+        {
+            *step = PhoneStep::CodeSentTo(std::mem::take(sent_to));
+        }
+    }
+
     /// "Wrong number?" on the code screen.
     fn signin_wrong_number(&mut self, cx: &mut Context<Self>) {
-        self.auth_ui.signin.editing_phone = true;
+        let sent_to = self.auth_ui.signin.phone_step.code_phone().to_string();
+        self.auth_ui.signin.phone_step = PhoneStep::Editing { sent_to };
         self.auth_ui.signin.hint = None;
         cx.notify();
     }
@@ -340,39 +408,24 @@ impl QuillApp {
             .session()
             .and_then(|session| session.auth_state.last_auth_error)
             .or(self.auth_ui.signin.demo_error);
-        let Some(err) = err else {
-            self.auth_ui.signin.error_clock = None;
-            self.auth_ui.signin.banned_dismissed = false;
-            return None;
-        };
-        match &self.auth_ui.signin.error_clock {
-            Some((seen, since)) if *seen == err => {
-                Some((err, i64::try_from(since.elapsed().as_secs()).unwrap_or(0)))
-            }
-            _ => {
-                self.auth_ui.signin.error_clock = Some((err, Instant::now()));
-                self.auth_ui.signin.banned_dismissed = false;
-                Some((err, 0))
-            }
-        }
+        self.auth_ui.signin.error_clock.observe(err)
     }
 
     /// Re-render once a second while any countdown on screen is running.
     fn arm_signin_tick(&mut self, cx: &mut Context<Self>) {
-        if self.auth_ui.signin.tick_armed {
+        if self.auth_ui.signin.ticker.is_armed() {
             return;
         }
-        self.auth_ui.signin.tick_armed = true;
-        // A tick dropped by a switch leaves nothing stuck: the new screen's
-        // flag starts clear.
-        self.spawn_screen(cx, async move |this, cx| {
+        // The task is the armed state: a tick dropped by a switch leaves
+        // nothing stuck, the new screen's ticker starts idle.
+        let tick = self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(Duration::from_secs(1)).await;
             let _ = this.update(cx, |this, cx| {
-                this.auth_ui.signin.tick_armed = false;
+                this.auth_ui.signin.ticker = Ticker::Idle;
                 cx.notify();
             });
-        })
-        .detach();
+        });
+        self.auth_ui.signin.ticker = Ticker::Armed { _task: tick };
     }
 
     /// Title/body overrides: delivery text on the code step, the phone
@@ -380,7 +433,9 @@ impl QuillApp {
     pub(super) fn signin_view(&self, auth: &AuthView, state: &AuthorizationState) -> AuthView {
         let mut view = auth.clone();
         match state {
-            AuthorizationState::WaitCode { delivery, .. } if self.auth_ui.signin.editing_phone => {
+            AuthorizationState::WaitCode { delivery, .. }
+                if self.auth_ui.signin.phone_step.is_editing() =>
+            {
                 let _ = delivery;
                 view.title = tr(keys::Q_OPS_YOUR_PHONE_NUMBER);
                 view.body = tr(keys::PHONE_DESC).to_string();
@@ -393,7 +448,7 @@ impl QuillApp {
                 view.body = signin::code_step_body(
                     delivery,
                     *code_length,
-                    &self.auth_ui.signin.submitted_phone,
+                    self.auth_ui.signin.phone_step.code_phone(),
                 );
             }
             AuthorizationState::WaitPhoneNumber => {
@@ -406,7 +461,7 @@ impl QuillApp {
 
     pub(super) fn signin_phone_visible(&self, state: &AuthorizationState) -> bool {
         matches!(state, AuthorizationState::WaitPhoneNumber)
-            || (self.auth_ui.signin.editing_phone
+            || (self.auth_ui.signin.phone_step.is_editing()
                 && matches!(state, AuthorizationState::WaitCode { .. }))
     }
 
@@ -425,7 +480,7 @@ impl QuillApp {
             self.arm_signin_tick(cx);
         }
         if err.class == quill::telegram::envelope::ErrorClass::PhoneBanned {
-            if !self.auth_ui.signin.banned_dismissed {
+            if !self.auth_ui.signin.error_clock.banner_dismissed() {
                 out.push(self.banned_box(cx));
             }
             return (out, locked);
@@ -447,7 +502,10 @@ impl QuillApp {
     /// tdesktop's `ShowPhoneBannedError` box: the text, OK, and Help which
     /// opens a prefilled mail to Telegram's login support.
     fn banned_box(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let phone = self.auth_ui.signin.submitted_phone.clone();
+        // The number that was refused is still in the phone field.
+        let countries = self.signin_countries();
+        let value = self.auth_ui.phone_input.read(cx).value().to_string();
+        let phone = phone::format_international(&value, &countries).text;
         div()
             .id("phone-banned-box")
             .role(Role::AlertDialog)
@@ -490,7 +548,7 @@ impl QuillApp {
                             .label(tr(keys::BOX_OK))
                             .primary()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.auth_ui.signin.banned_dismissed = true;
+                                this.auth_ui.signin.error_clock.dismiss_banner();
                                 cx.notify();
                             })),
                     ),
@@ -590,14 +648,15 @@ impl QuillApp {
                 .on_click(cx.listener(|this, _, window, cx| this.submit_phone(window, cx)))
                 .into_any_element(),
         );
-        if self.auth_ui.signin.editing_phone {
+        if let PhoneStep::Editing { sent_to } = &self.auth_ui.signin.phone_step {
+            let sent_to = sent_to.clone();
             out.push(
                 Button::new("phone-edit-back")
                     .label(tr(keys::Q_OPS_BACK))
                     .ghost()
                     .w_full()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.auth_ui.signin.editing_phone = false;
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.auth_ui.signin.phone_step = PhoneStep::CodeSentTo(sent_to.clone());
                         cx.notify();
                     }))
                     .into_any_element(),
@@ -618,7 +677,9 @@ impl QuillApp {
             .overflow_y_scroll()
             .flex()
             .flex_col();
-        if hits.is_empty() {
+        if hits.is_empty() && self.countries_failed() {
+            list = list.child(self.countries_failed_row("signin", cx));
+        } else if hits.is_empty() {
             list = list.child(
                 div()
                     .p_3()
@@ -693,14 +754,7 @@ impl QuillApp {
         let mut ticking = false;
         match &auth {
             AuthorizationState::WaitCode { delivery, .. } => {
-                let elapsed = self
-                    .auth_ui
-                    .signin
-                    .code_clock
-                    .as_ref()
-                    .map_or(0, |(_, since)| {
-                        i64::try_from(since.elapsed().as_secs()).unwrap_or(0)
-                    });
+                let elapsed = self.auth_ui.signin.step_clock.code_elapsed();
                 if let Some(url) = signin::fragment_url(delivery) {
                     let url = url.to_string();
                     out.insert(
@@ -743,14 +797,7 @@ impl QuillApp {
                         .on_click(cx.listener(|this, _, _, cx| this.resend_code(cx)))
                         .into_any_element(),
                 );
-                let elapsed = self
-                    .auth_ui
-                    .signin
-                    .email_clock
-                    .as_ref()
-                    .map_or(0, |(_, since)| {
-                        i64::try_from(since.elapsed().as_secs()).unwrap_or(0)
-                    });
+                let elapsed = self.auth_ui.signin.step_clock.email_elapsed();
                 if let Some(label) = signin::email_reset_label(*reset, elapsed) {
                     match reset {
                         EmailResetState::Available { .. } => out.push(
@@ -798,5 +845,45 @@ impl QuillApp {
             },
         );
         cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod phone_step_tests {
+    use super::PhoneStep;
+
+    /// A number TDLib rejects leaves the old number on the code step.
+    #[test]
+    fn a_rejected_number_returns_to_the_form_with_the_old_number() {
+        let editing = PhoneStep::Editing {
+            sent_to: "+1 555 0100".into(),
+        };
+        let sending = PhoneStep::Sending {
+            phone: "+1 555 0199".into(),
+            back: Box::new(editing.clone()),
+        };
+        assert!(sending.is_editing(), "the phone form stays up while sent");
+        assert_eq!(sending.code_phone(), "+1 555 0100");
+        let PhoneStep::Sending { back, .. } = sending else {
+            panic!("sending");
+        };
+        assert_eq!(*back, editing);
+        assert_eq!(back.code_phone(), "+1 555 0100");
+    }
+
+    /// From the phone form the code step names the number as it is sent.
+    #[test]
+    fn the_code_step_names_the_number_it_was_sent_to() {
+        let first = PhoneStep::Sending {
+            phone: "+1 555 0100".into(),
+            back: Box::new(PhoneStep::Entering),
+        };
+        assert!(!first.is_editing());
+        assert_eq!(first.code_phone(), "+1 555 0100");
+        assert_eq!(PhoneStep::Entering.code_phone(), "");
+        assert_eq!(
+            PhoneStep::CodeSentTo("+1 555 0100".into()).code_phone(),
+            "+1 555 0100"
+        );
     }
 }

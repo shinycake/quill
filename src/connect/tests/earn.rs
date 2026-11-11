@@ -162,8 +162,7 @@ fn megagroup_without_ton_ads_hides_the_ton_part() {
         .unwrap();
     error(&mut p, "getChatRevenueStatistics", "BROADCAST_REQUIRED");
     let page = p.0.session.payments.earn.page.as_ref().unwrap();
-    assert!(page.ton_unavailable);
-    assert_eq!(page.ton, Load::Idle);
+    assert_eq!(page.ton, Load::Unavailable);
 }
 
 #[test]
@@ -230,14 +229,26 @@ fn withdrawal_asks_without_password_then_with_it() {
     // Any other error → the password box.
     error(&mut p, "getStarWithdrawalUrl", "PASSWORD_HASH_INVALID");
     let withdraw = p.0.session.payments.earn.withdraw.clone().unwrap();
-    assert_eq!(
-        withdraw.step,
-        WithdrawStep::Password {
-            sending: false,
-            error: None
-        }
-    );
+    assert_eq!(withdraw.step, WithdrawStep::Password { error: None });
     p.0.submit_withdrawal_password("hunter2").unwrap();
+    let sent = sent_request(&p.1, "getStarWithdrawalUrl")["@extra"].clone();
+    let step =
+        p.0.session
+            .payments
+            .earn
+            .withdraw
+            .as_ref()
+            .unwrap()
+            .step
+            .clone();
+    let WithdrawStep::PasswordSending(id) = step else {
+        panic!("the password is out: {step:?}");
+    };
+    assert_eq!(
+        sent,
+        json!(id.0.to_string()),
+        "the step carries its request"
+    );
     assert_eq!(
         sent_request(&p.1, "getStarWithdrawalUrl")["password"],
         "hunter2"
@@ -246,7 +257,7 @@ fn withdrawal_asks_without_password_then_with_it() {
     error(&mut p, "getStarWithdrawalUrl", "PASSWORD_HASH_INVALID");
     assert!(matches!(
         p.0.session.payments.earn.withdraw.as_ref().unwrap().step,
-        WithdrawStep::Password { error: Some(_), .. }
+        WithdrawStep::Password { error: Some(_) }
     ));
     p.0.submit_withdrawal_password("right").unwrap();
     answer(
@@ -281,9 +292,11 @@ fn a_cancelled_withdrawals_answer_opens_nothing() {
     );
     let earn = &p.0.session.payments.earn;
     assert_eq!(earn.open_url, None, "Fragment does not open after Cancel");
-    assert_eq!(
-        earn.withdraw.as_ref().map(|w| &w.step),
-        Some(&WithdrawStep::Checking),
+    assert!(
+        matches!(
+            earn.withdraw.as_ref().map(|w| &w.step),
+            Some(WithdrawStep::Checking(_))
+        ),
         "the new attempt goes on"
     );
     // Cancel the new attempt from its password box; its wrong-password
@@ -298,10 +311,10 @@ fn a_cancelled_withdrawals_answer_opens_nothing() {
         json!({"@type": "error", "code": 400, "message": "PASSWORD_HASH_INVALID",
             "@extra": cancelled}),
     );
-    assert_eq!(
+    assert!(matches!(
         p.0.session.payments.earn.withdraw.as_ref().map(|w| &w.step),
-        Some(&WithdrawStep::Checking)
-    );
+        Some(WithdrawStep::Checking(_))
+    ));
 }
 
 #[test]
@@ -375,6 +388,29 @@ fn balances_are_fetched_once_and_follow_updates() {
 }
 
 #[test]
+fn a_failed_balance_waits_for_the_next_visit_instead_of_asking_every_frame() {
+    let mut p = parts();
+    let peer = EarnPeer::Chat(CHANNEL);
+    p.0.fetch_earn_balances(peer, true, true).unwrap();
+    error(&mut p, "getChatRevenueStatistics", "FLOOD_WAIT_3");
+    error(&mut p, "getStarTransactions", "FLOOD_WAIT_3");
+    // The failure is not forgotten while the profile stays open: the
+    // upkeep sees it asked and sends nothing.
+    assert!(p.0.session.payments.earn.balance_asks.contains_key(&peer));
+    p.0.fetch_earn_balances(peer, true, true).unwrap();
+    assert_eq!(count(&p.1, "getChatRevenueStatistics"), 1);
+    assert_eq!(count(&p.1, "getStarTransactions"), 1);
+    // Leaving the profile lets the next visit ask again.
+    p.0.session.payments.earn.forget_failed_balances();
+    assert!(!p.0.session.payments.earn.balance_asks.contains_key(&peer));
+    p.0.fetch_earn_balances(peer, true, true).unwrap();
+    assert_eq!(count(&p.1, "getChatRevenueStatistics"), 2);
+    assert_eq!(count(&p.1, "getStarTransactions"), 2);
+    answer(&mut p, "getChatRevenueStatistics", ton_stats(42));
+    assert_eq!(p.0.session.payments.earn.ton_balance(peer), Some(42));
+}
+
+#[test]
 fn options_set_the_limits() {
     let mut p = parts();
     feed(
@@ -387,7 +423,7 @@ fn options_set_the_limits() {
         json!({"@type": "updateOption", "name": "affiliate_program_commission_per_mille_max",
             "value": {"@type": "optionValueInteger", "value": "900"}}),
     );
-    let limits = p.0.session.payments.earn.limits;
+    let limits = p.0.session.payments.earn.limits.clone();
     assert_eq!(limits.withdrawal_min(), 500);
     assert_eq!(limits.commission_range(), (1, 900));
 }
@@ -410,7 +446,7 @@ fn setup_starts_updates_and_ends_a_program() {
     answer(&mut p, "setChatAffiliateProgram", json!({"@type": "ok"}));
     let earn = &p.0.session.payments.earn;
     assert!(earn.setup.is_none());
-    assert!(earn.setup_closed);
+    assert_eq!(earn.effects, vec![EarnEffect::SetupDone]);
     assert!(earn.notes[0].starts_with("Affiliate program started."));
 
     p.0.open_starref_setup(BOT).unwrap();
@@ -434,13 +470,19 @@ fn a_reopened_setup_page_stays_open_for_an_earlier_save() {
     p.0.open_starref_setup(BOT).unwrap();
     answer(&mut p, "setChatAffiliateProgram", json!({"@type": "ok"}));
     let earn = &p.0.session.payments.earn;
-    assert!(earn.setup.is_some() && !earn.setup_closed);
+    assert!(earn.setup.is_some() && earn.effects.is_empty());
 
     p.0.end_starref_program().unwrap();
     p.0.session.payments.earn.setup = None;
     p.0.open_starref_setup(BOT).unwrap();
     p.0.save_starref_program().unwrap();
-    let waiting = p.0.session.payments.earn.setup.as_ref().map(|s| s.saving);
+    let waiting =
+        p.0.session
+            .payments
+            .earn
+            .setup
+            .as_ref()
+            .map(|s| s.saving_request());
     // The end (sent second to last) fails late: the new save still waits.
     let end =
         p.1.snapshot()
@@ -454,7 +496,7 @@ fn a_reopened_setup_page_stays_open_for_an_earlier_save() {
     feed(&mut p, refused);
     let setup = p.0.session.payments.earn.setup.as_ref().unwrap();
     assert!(setup.is_saving());
-    assert_eq!(Some(setup.saving), waiting);
+    assert_eq!(setup.saving_request(), waiting.flatten());
 }
 
 #[test]
@@ -503,7 +545,7 @@ fn join_page_lists_sorts_and_joins_for_a_channel() {
     p.0.session.payments.earn.revoke = Some(RevokeBox {
         program,
         recipient: page,
-        sending: false,
+        send: BoxSend::Idle,
     });
     p.0.revoke_affiliate_link().unwrap();
     let sent = sent_request(&p.1, "disconnectAffiliateProgram");
@@ -554,7 +596,7 @@ fn own_page_waits_for_recipients_and_keeps_postable_channels() {
     let join = earn.join_box.as_ref().unwrap();
     assert!(join.choose_recipient);
     assert_eq!(
-        earn.recipients.as_deref().unwrap(),
+        earn.recipients.list().unwrap(),
         &[
             EarnPeer::User(ME),
             EarnPeer::Chat(CHANNEL),
@@ -590,4 +632,81 @@ fn nothing_is_sent_before_sign_in() {
             .is_err()
     );
     assert_eq!(recorder.snapshot().len(), 0);
+}
+
+/// Sweep s4-payments-2, 09-X034: a join box closed before its answer, and
+/// another program's box opened since, are not touched by the answer or
+/// the error of the first request.
+#[test]
+fn a_closed_join_boxs_answer_leaves_the_box_open_now_alone() {
+    for fails in [false, true] {
+        let mut p = parts();
+        let page = EarnPeer::Chat(CHANNEL);
+        p.0.open_starref_join(page).unwrap();
+        answer(&mut p, "searchAffiliatePrograms", found(&[BOT, BOT + 1]));
+        p.0.open_affiliate_program(BOT, false).unwrap();
+        error(&mut p, "getConnectedAffiliateProgram", "NOT_FOUND");
+        p.0.join_affiliate_program().unwrap();
+        let first = sent_request(&p.1, "connectAffiliateProgram");
+        // The box closes, and the box of the next program opens.
+        p.0.session.payments.earn.join_box = None;
+        p.0.open_affiliate_program(BOT + 1, false).unwrap();
+        error(&mut p, "getConnectedAffiliateProgram", "NOT_FOUND");
+        assert_eq!(
+            p.0.session
+                .payments
+                .earn
+                .join_box
+                .as_ref()
+                .map(|j| j.bot_user_id),
+            Some(BOT + 1)
+        );
+        let mut body = if fails {
+            json!({"@type": "error", "code": 400, "message": "STARREF_HASH_REVOKED"})
+        } else {
+            connected(BOT, "https://t.me/bot?start=_tgr_x")
+        };
+        body["@extra"] = first["@extra"].clone();
+        feed(&mut p, body);
+        let earn = &p.0.session.payments.earn;
+        assert_eq!(
+            earn.join_box.as_ref().map(|j| (j.bot_user_id, j.stage)),
+            Some((BOT + 1, crate::earn::JoinStage::Open)),
+            "the open box is still the second program's, idle"
+        );
+        assert!(earn.link_box.is_none());
+        assert!(earn.notes.is_empty(), "a closed box does not toast");
+    }
+}
+
+/// The user leaves the join page: its list goes and a click still being
+/// resolved is dropped with it.
+fn leave_the_page(p: &mut Parts, to: i64) {
+    p.0.session.payments.earn.join = None;
+    p.0.session
+        .set_open_info_panel(Some(crate::state::InfoPanelTarget::User(to)));
+}
+
+/// Sweep s4-payments-2, 09-X035: a program click answered after the list it
+/// came from closed opens nothing.
+#[test]
+fn a_program_click_answered_after_its_list_closed_opens_nothing() {
+    let mut p = parts();
+    let page = EarnPeer::Chat(CHANNEL);
+    p.0.open_starref_join(page).unwrap();
+    answer(&mut p, "searchAffiliatePrograms", found(&[BOT]));
+    p.0.open_affiliate_program(BOT, false).unwrap();
+    leave_the_page(&mut p, BOT);
+    error(&mut p, "getConnectedAffiliateProgram", "NOT_FOUND");
+    assert!(p.0.session.payments.earn.join_box.is_none());
+    p.0.open_starref_join(page).unwrap();
+    answer(&mut p, "searchAffiliatePrograms", found(&[BOT]));
+    p.0.open_affiliate_program(BOT, false).unwrap();
+    leave_the_page(&mut p, BOT + 1);
+    answer(
+        &mut p,
+        "getConnectedAffiliateProgram",
+        connected(BOT, "https://t.me/bot?start=_tgr_z"),
+    );
+    assert!(p.0.session.payments.earn.link_box.is_none());
 }

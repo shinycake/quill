@@ -2,7 +2,7 @@
 //! chat window's spoilers keep moving while the main window is not drawn
 //! (round 12, area B, the paint-state sweep).
 
-use super::{paint_text_specks, take_text_painted};
+use super::{paint_media_specks, paint_text_specks, take_text_painted, tile_is_idle};
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
     AnyWindowHandle, AppContext, Context, IntoElement, ParentElement, Render, Styled,
@@ -11,6 +11,20 @@ use gpui_kit::{
 
 struct Specks {
     paint: bool,
+}
+
+struct MediaSpecks;
+
+impl Render for MediaSpecks {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().child(
+            canvas(
+                |_, _, _| {},
+                |bounds, _, window, _| paint_media_specks(bounds, window),
+            )
+            .size_full(),
+        )
+    }
 }
 
 impl Render for Specks {
@@ -54,4 +68,20 @@ fn a_window_takes_only_the_specks_it_painted(cx: &mut TestAppContext) {
         painting_took,
         "the window that painted them asks for its tick"
     );
+}
+
+#[gpui_kit::test]
+fn a_window_that_closes_before_its_next_frame_does_not_strand_the_tile_build(
+    cx: &mut TestAppContext,
+) {
+    let handle = cx.open_window(size(px(200.), px(100.)), |_, _| MediaSpecks);
+    let handle: AnyWindowHandle = handle.into();
+    assert!(tile_is_idle());
+    cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+        .expect("the window");
+    cx.update_window(handle, |_, window, _| window.remove_window())
+        .expect("the window");
+    cx.run_until_parked();
+    // Nothing started the build, so the next window to paint asks again.
+    assert!(tile_is_idle());
 }

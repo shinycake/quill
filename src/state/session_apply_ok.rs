@@ -10,6 +10,9 @@ impl Session {
         _seq: u64,
     ) {
         self.settle_own_reaction(extra, false);
+        if let Some(slot) = extra.and_then(|id| self.groups.new_chats.type_saves.get_mut(&id)) {
+            *slot = TypeSave::Done;
+        }
         self.settle_direct_messages_ok(pending);
         if let Some(pending) = pending
             && let RequestPurpose::Bots(BotsPurpose::StopPendingMessage { topic_id, draft_id }) =
@@ -19,14 +22,16 @@ impl Session {
             self.finish_pending_bot_stop(chat_id, topic_id, draft_id);
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::RemoveSavedNotificationSound) {
-            self.settings.saved_sounds_stale = true;
+            self.mark_saved_sounds_stale();
         }
         self.apply_profile_music_ok(pending);
         self.apply_proxy_ok(pending);
         self.apply_gift_code_ok(pending);
         self.apply_giveaway_ok(pending);
         self.apply_gift_manage_ok(pending);
+        self.apply_ton_wallet_ok(pending);
         self.apply_earn_ok(pending);
+        self.apply_paid_reaction_ok(pending);
         self.apply_passkeys_ok(pending);
         self.apply_boost_settings_ok(pending);
         self.apply_web_app_ok(pending);
@@ -36,7 +41,6 @@ impl Session {
         self.apply_quick_replies_ok(pending);
         self.apply_business_extra_ok(pending);
         self.apply_sticker_creator_ok(pending);
-        self.apply_suggested_post_ok(pending);
         self.apply_gift_market_ok(pending);
         self.apply_stories_ok(pending);
         self.apply_share_theme_ok(pending);
@@ -44,12 +48,10 @@ impl Session {
         self.apply_ai_compose_ok(pending);
         self.apply_hang_up_ok(pending);
         self.apply_communities_ok(pending);
+        self.settle_permissions_save(pending);
+        self.apply_backgrounds_ok(pending);
+        self.settle_notification_save(pending, false);
         match pending.map(|p| p.purpose) {
-            Some(
-                RequestPurpose::SetChatTheme
-                | RequestPurpose::SetChatBackground
-                | RequestPurpose::DeleteChatBackground,
-            ) => self.chats_state.chat_look_oks = self.chats_state.chat_look_oks.wrapping_add(1),
             Some(RequestPurpose::Messages(MessagesPurpose::EditMessageSchedulingState {
                 message_id,
                 scheduling,
@@ -59,16 +61,18 @@ impl Session {
             Some(RequestPurpose::DeleteAllCallMessages) => {
                 self.calls.recent_calls.clear();
                 self.calls.recent_calls_offset.clear();
-                self.calls.recent_calls_error = false;
-                self.calls.recent_calls_clearing = false;
                 // A page in flight still lists the calls just deleted.
-                self.calls.recent_calls_request = None;
+                self.calls.recent_calls_stage = RecentCalls::Idle;
             }
             Some(RequestPurpose::DeleteChatMessagesBySender) => {
-                self.messages.message_action_note = Some("messages deleted".into());
+                self.messages
+                    .message_action_note
+                    .push("messages deleted".into());
             }
             Some(RequestPurpose::ReportSupergroupSpam) => {
-                self.messages.message_action_note = Some("spam reported".into());
+                self.messages
+                    .message_action_note
+                    .push("spam reported".into());
             }
             // Forum extras and Saved Messages sublists (batch B16).
             Some(RequestPurpose::Threads(ThreadsPurpose::DeleteSavedMessagesTopicHistory {
@@ -94,7 +98,9 @@ impl Session {
                 message_id,
                 sender,
             })) => {
-                self.messages.message_action_note = Some("reaction deleted".into());
+                self.messages
+                    .message_action_note
+                    .push("reaction deleted".into());
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                     self.drop_reactor_from_audience(chat_id, MessageId(message_id), sender);
                 }
@@ -121,8 +127,7 @@ impl Session {
                     | RequestPurpose::TerminateAllOtherSessions
             )
         ) {
-            self.settings.sessions_stale = true;
-            self.settings.sessions_mutating = false;
+            self.settings.sessions_op.changed(pending.map(|p| p.id));
             self.settings.sessions.clear_error();
         }
         // Slice A4: a `toggleSessionCanAcceptSecretChats` /
@@ -136,16 +141,13 @@ impl Session {
                     | RequestPurpose::Settings(SettingsPurpose::ToggleSessionCalls { .. })
             )
         ) {
-            self.settings.sessions_stale = true;
-            self.settings.sessions_mutating = false;
+            self.settings.sessions_op.changed(pending.map(|p| p.id));
             self.settings.sessions.clear_error();
         }
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetDefaultAutoDelete { seconds })) =
             pending.map(|p| p.purpose)
         {
-            self.settings.default_auto_delete_secs = Some(seconds);
-            self.settings.default_auto_delete_busy = false;
-            self.settings.default_auto_delete_error = None;
+            self.settings.default_auto_delete.succeed(seconds);
         }
         // Slice A7: a `setAccountTtl` succeeded — the server
         // confirmed the write of exactly the sent value, so it
@@ -158,16 +160,13 @@ impl Session {
         if let Some(RequestPurpose::Settings(SettingsPurpose::SetAccountTtl { days })) =
             pending.map(|p| p.purpose)
         {
-            self.settings.account_ttl_days = Some(days);
-            self.settings.account_mutating = false;
-            self.settings.account_error = None;
+            self.settings.account_ttl.succeed(days);
         }
         if matches!(
             pending.map(|p| p.purpose),
             Some(RequestPurpose::DeleteAccount)
         ) {
-            self.settings.account_mutating = false;
-            self.settings.account_error = None;
+            self.settings.account_delete = crate::state::fetch::Fetch::Idle;
         }
         // Slice A8: a `checkPhoneNumberCode` succeeded — the
         // server completed the number change of the number the
@@ -181,19 +180,15 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::CheckPhoneNumberCode)
         ) {
-            if let Some(target) = self.auth_state.change_number_phone.clone()
+            if let Some(target) = self.auth_state.change_number.phone().map(str::to_string)
                 && let Some(my_id) = self.my_user_id
                 && let Some(me) = self.users.get_mut(&my_id)
             {
                 me.phone_number = target;
             }
-            self.auth_state.change_number_phone = None;
-            self.auth_state.change_number_timeout = None;
-            self.auth_state.change_number_checking = false;
             // The send/resend answers are dropped below, so nothing else
-            // would clear this.
-            self.auth_state.change_number_loading = false;
-            self.auth_state.change_number_error = None;
+            // would end a send in flight.
+            self.auth_state.change_number.finish();
             // A8: drop any stale in-flight send/resend purposes —
             // a late resend answer must not resurrect the
             // completed flow (re-write phone/timeout or park a
@@ -213,41 +208,39 @@ impl Session {
         })) = pending.map(|p| p.purpose)
         {
             *self.settings.data_storage.for_network_mut(network) = settings;
-            self.settings.data_storage.seeded = true;
-            self.settings.data_storage_error = None;
+            self.settings.data_storage.seeded = crate::data_settings::PresetsSeed::Seeded;
             self.settings.data_storage_dirty = true;
+            if let Some(request) = extra {
+                self.settings
+                    .auto_download_answers
+                    .push(AutoDownloadAnswer::Saved(request));
+            }
         }
         // Batch 4: a `confirmSession` / `terminateSession` for the
         // new-login alert succeeded.
         if let Some(RequestPurpose::Settings(SettingsPurpose::ReviewUnconfirmedSession {
-            confirmed,
+            session_id,
+            ..
         })) = pending.map(|p| p.purpose)
         {
-            self.finish_login_review(confirmed, None);
+            self.finish_login_review(session_id, None);
         }
         // Batch 4: terms accepted.
         if matches!(
             pending.map(|p| p.purpose),
             Some(RequestPurpose::AcceptTermsOfService)
         ) {
-            self.settings.notices.terms = None;
-            self.settings.notices.terms_in_flight = false;
-            self.settings.notices.terms_error = None;
+            // Only the terms that were accepted: newer ones pushed while
+            // the request was out stay for the user to answer.
+            let accepted = pending.and_then(|p| p.subject_id.as_deref());
+            self.settings.notices.terms.accepted(accepted);
         }
         // Batch 6: a 2FA step answered `ok` (cancel reset, login email
         // code check).
         if let Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp { op })) =
             pending.map(|p| p.purpose)
         {
-            self.apply_password_op_ok(op);
-        }
-        // Batch 6: a storage limit option was accepted; TDLib echoes the
-        // value as `updateOption`.
-        if matches!(
-            pending.map(|p| p.purpose),
-            Some(RequestPurpose::SetStorageOption)
-        ) {
-            self.settings.data_storage_error = None;
+            self.apply_password_op_ok(op, pending.map(|p| p.id));
         }
         // Slice A4: a `disconnectWebsite` /
         // `disconnectAllWebsites` succeeded — same stale pattern
@@ -259,9 +252,8 @@ impl Session {
                     | RequestPurpose::DisconnectAllWebsites
             )
         ) {
-            self.settings.websites_stale = true;
-            self.settings.websites_mutating = false;
-            self.settings.websites_error = None;
+            self.settings.websites_op.changed(pending.map(|p| p.id));
+            self.settings.connected_websites.clear_error();
         }
         // Slice `parity:bots-payment-recurring`: an
         // `editStarSubscription` / `reuseStarSubscription` succeeded —
@@ -271,26 +263,24 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::EditStarSubscription | RequestPurpose::ReuseStarSubscription)
         ) {
-            self.payments.star_subscriptions_stale = true;
-            self.payments.star_subscriptions_mutating = false;
-            self.payments.star_subscriptions_error = None;
+            self.payments.star_subscriptions.edit_done();
         }
         // `toggleGiftIsSaved` / `sellGift` succeeded: refetch the list from
         // the server (the connect driver does it on the same ingest) and,
         // after a conversion, the Stars balance.
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { .. })) => {
-                self.payments.hub.gift_mutating = false;
-                self.payments.hub.gifts_error = None;
-                self.payments.hub.gifts_stale = true;
+                self.payments.hub.received.op.changed(pending.map(|p| p.id));
+                self.payments.hub.received.notice = None;
             }
             Some(RequestPurpose::SellGift) => {
-                self.payments.hub.gift_mutating = false;
-                self.payments.hub.gifts_error = None;
-                self.payments.hub.gift_convert_confirm = None;
-                self.payments.hub.gift_selected = None;
-                self.payments.hub.gifts_stale = true;
-                self.payments.hub.tx_loaded = false;
+                self.payments.hub.received.op.changed(pending.map(|p| p.id));
+                self.payments.hub.received.notice = None;
+                // The panel and the box close only when they are still the
+                // sold gift's: the user may have opened another meanwhile.
+                let sold = pending.and_then(|p| p.subject_id.as_deref());
+                self.payments.hub.received.view.close_if_selected(sold);
+                self.payments.hub.stars.page.invalidate();
             }
             _ => {}
         }
@@ -318,10 +308,11 @@ impl Session {
         if let Some(RequestPurpose::Stickers(StickersPurpose::ManageStickerSet {
             set_id,
             installed,
-            ..
+            archived,
         })) = pending.map(|p| p.purpose)
         {
             self.finish_sticker_batch_item(set_id, true);
+            self.finish_set_change(set_id, SetChange::of(installed, archived), true);
             for sets in [
                 &mut self.stickers.stickers.trending,
                 &mut self.stickers.stickers.found_sets,
@@ -331,19 +322,19 @@ impl Session {
                 }
             }
             self.stickers.stickers.sets.clear();
-            self.stickers.stickers.installed_loaded = false;
+            self.stickers.stickers.lists.installed = crate::state::fetch::Fetch::Idle;
             self.stickers.stickers.archived.clear();
             self.stickers.stickers.archived_has_more = false;
             self.stickers.stickers.archived_next_offset = 0;
             if self.stickers.stickers.tab == StickerTab::Archived {
                 self.stickers.stickers.selected_set_id = None;
-                self.stickers.stickers.loaded_set_id = None;
+                self.stickers.stickers.set = StickerSetStage::Idle;
                 self.stickers.stickers.stickers.clear();
             }
         }
         self.finish_mask_mutation(pending.map(|p| p.purpose));
         // Slice S10: emoji mutations invalidate emoji caches (see emoji.rs).
-        self.invalidate_emoji_caches(pending.map(|p| p.purpose));
+        self.invalidate_emoji_caches(pending.map(|p| p.purpose), pending.map(|p| p.id));
         // Slice S9: a saved-GIF mutation (`addSavedAnimation` /
         // `removeSavedAnimation`) succeeded — drop the saved list so
         // the panel refetches the server-confirmed list instead of
@@ -353,7 +344,7 @@ impl Session {
             Some(RequestPurpose::AddSavedAnimation | RequestPurpose::RemoveSavedAnimation)
         ) {
             self.stickers.gifs.animations.clear();
-            self.stickers.gifs.loaded = false;
+            self.stickers.gifs.saved_forgotten();
         }
         // Phase C3a: a successful `leaveGroupCall` /
         // `endGroupCall` drops the tracked call (the `ok`
@@ -407,7 +398,6 @@ impl Session {
             ) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
                     self.groups.welcome_messages.remove(&chat_id.0);
-                    self.groups.welcome_message_fetches.remove(&chat_id.0);
                 }
             }
             // Slice (communities backend core): a
@@ -416,7 +406,7 @@ impl Session {
             // name itself arrives via `updateCommunity`.
             Some(RequestPurpose::SetCommunityName) => {
                 if let Some(community_id) = pending.and_then(|p| p.community_id) {
-                    self.groups.community_full_infos.remove(&community_id);
+                    self.groups.community_full_infos.outdate(community_id);
                 }
             }
             // TDLib 1.8.68: a deleted community is gone for everyone —
@@ -496,11 +486,11 @@ impl Session {
                 }
                 self.succeed_story_page_op(pending);
             }
-            // B14: `setCloseFriends` confirmed — the staged ids are the
+            // B14: `setCloseFriends` confirmed — the ids it carried are the
             // new list.
             Some(RequestPurpose::SetCloseFriends) => {
-                if let Some(ids) = self.stories.close_friends_pending.take() {
-                    self.stories.close_friends = Some(ids);
+                if let Some(ids) = pending.and_then(|p| p.user_ids.clone()) {
+                    self.stories.close_friends = CloseFriendsList::Ready(ids);
                 }
                 self.succeed_story_page_op(pending);
             }
@@ -517,21 +507,35 @@ impl Session {
         }
         // Phase C2i: `sendCallLog` confirmed — the log upload for
         // the ended call succeeded.
-        if let Some(RequestPurpose::SendCallLog) = pending.map(|p| p.purpose)
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::SendCallLog
             && let Some(summary) = self.calls.summary.as_mut()
+            && summary.log == CallUpload::Sending(pending.id)
         {
-            summary.log_sent = true;
-            summary.log_error = None;
+            summary.log = CallUpload::Sent;
+        }
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::SendCallDebugInformation
+            && let Some(summary) = self.calls.summary.as_mut()
+            && summary.debug_information == CallUpload::Sending(pending.id)
+        {
+            summary.debug_information = CallUpload::Sent;
+        }
+        // `sendCallRating` confirmed: the card says thanks.
+        if let Some(RequestPurpose::SendCallRating) = pending.map(|p| p.purpose)
+            && let Some(summary) = self.calls.summary.as_mut()
+            && let Some(pending) = pending
+            && summary.rating == CallRating::Sending(pending.id)
+        {
+            summary.rating = CallRating::Sent;
         }
         // Phase C2i: `setUserPrivacySettingRules` confirmed (the
         // new value was applied optimistically at send time).
-        if matches!(
-            pending.map(|p| p.purpose),
-            Some(RequestPurpose::Calls(
-                CallsPurpose::SetCallPrivacyRules { .. }
-            ))
-        ) {
-            self.privacy_roundtrip_done();
+        if let Some(pending) = pending
+            && let RequestPurpose::Calls(CallsPurpose::SetCallPrivacyRules { setting }) =
+                pending.purpose
+        {
+            self.calls.privacy_asks.answered(setting, pending.id);
         }
         // Slice S3: `setReadDatePrivacySettings` confirmed — clear
         // the optimistic spinner (the value itself was set at
@@ -539,12 +543,10 @@ impl Session {
         // `setMessageSenderBlockList` are fully optimistic: a
         // confirming `ok` needs no state change; failures are
         // handled in the error arm below.
-        if matches!(
-            pending.map(|p| p.purpose),
-            Some(RequestPurpose::SetReadDatePrivacy)
-        ) {
-            self.settings.read_date_loading = false;
-            self.settings.read_date_error = false;
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::SetReadDatePrivacy
+        {
+            self.settings.read_date.set_confirmed(pending.id);
         }
         // `resetAllNotificationSettings` needs nothing here: TDLib sends
         // `updateScopeNotificationSettings` for each scope it reset before
@@ -554,8 +556,8 @@ impl Session {
         // A short OK is not exhaustion; 404 is. A page that went through
         // ends the wait after an earlier failure.
         match pending.map(|p| p.purpose) {
-            Some(RequestPurpose::LoadChats) => self.chat_list.chats_retry = None,
-            Some(RequestPurpose::LoadArchiveChats) => self.chat_list.archive_retry = None,
+            Some(RequestPurpose::LoadChats) => self.chat_list.main_paging.page_ok(),
+            Some(RequestPurpose::LoadArchiveChats) => self.chat_list.archive_paging.page_ok(),
             _ => {}
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::DeleteChatFolder)
@@ -568,25 +570,26 @@ impl Session {
             self.chat_list.folder_specs.remove(&folder_id);
             self.chat_list.folder_chats_exhausted.remove(&folder_id);
         }
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::ProcessChatFolderNewChats)
+            && let Some(folder_id) = pending.and_then(|p| p.folder_id)
+        {
+            // The offer is answered (joined or hidden): the bar goes.
+            self.chat_list.folder_new_chats.remove(&folder_id);
+        }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::AddChatToList) {
             // "Add to folder" changed some folder's chats; the answer
             // does not say which, so every cached spec is refetched.
             self.chat_list.mark_specs_stale();
-        }
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::AddChatFolderByInviteLink)
-            && self.chat_list.take_folder_invite_answer(pending)
-        {
-            self.chat_list.folder_invite_done = true;
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ToggleHasSponsoredMessagesEnabled)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
             self.accept_sponsored_hidden(chat_id);
         }
-        if pending.map(|p| p.purpose) == Some(RequestPurpose::ViewMessages)
-            && let Some(chat_id) = pending.and_then(|p| p.chat_id)
+        if let Some(viewed) = pending.filter(|p| p.purpose == RequestPurpose::ViewMessages)
+            && let Some(chat_id) = viewed.chat_id
         {
-            self.commit_viewed(chat_id);
+            self.commit_viewed(chat_id, viewed.id);
         }
         // Phase D3b: `setChatMemberStatus` confirmed. TDLib sends
         // `updateChatMember` to bots only (td_api.tl), so the change
@@ -648,6 +651,7 @@ impl Session {
             // Optimistic: `updateChatMember` confirms. TDLib errors
             // keep the old status (Error arm below does not touch it).
             chat.set_member_status(ChannelMemberStatus::Left, None);
+            self.drop_similar_strip_if_not_member(chat_id);
             self.release_chat_history(chat_id);
         }
         // Slice G1: `deleteChat` confirmed — drop the chat locally.
@@ -658,6 +662,7 @@ impl Session {
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
             self.chats.remove(&chat_id.0);
+            self.groups.similar_strips.remove(&chat_id.0);
             self.forget_chat_history(chat_id);
             self.groups
                 .supergroup_members
@@ -685,18 +690,22 @@ impl Session {
                 _,
                 Some(chat_id),
             )) => {
-                // A page asked before this went out would bring handled
-                // requests back.
-                for append in [true, false] {
-                    self.requests.take_purpose_for_chat(
-                        RequestPurpose::GetLinkJoinRequests { append },
-                        chat_id,
-                    );
-                }
-                if let Some(state) = self.groups.invite_pages.join_requests_mut(chat_id.0) {
+                // Only the list of the link that was processed empties;
+                // another link opened meanwhile keeps its rows and page.
+                // That link's page asked before this went out would bring
+                // handled requests back, so it is dropped.
+                let link = pending.and_then(|p| p.invite_link.as_deref());
+                if let Some(state) = self.groups.invite_pages.join_requests_mut(chat_id.0)
+                    && link == Some(state.invite_link.as_str())
+                {
+                    if let PageStage::Loading(page) =
+                        std::mem::replace(&mut state.stage, PageStage::Ready)
+                    {
+                        self.requests.take(page);
+                        state.stage = PageStage::Ready;
+                    }
                     state.requests.clear();
                     state.total_count = 0;
-                    state.request = None;
                 }
                 // The requests list and badge may now be stale; refetch.
                 self.drop_chat_join_request_pages(chat_id);
@@ -713,9 +722,10 @@ impl Session {
                     JoinRequestFetch::Loaded(JoinRequestList {
                         total_count: 0,
                         requests: Vec::new(),
+                        query: String::new(),
+                        more: None,
                     }),
                 );
-                self.groups.join_request_queries.remove(&chat_id.0);
                 self.groups.pending_join_request_counts.insert(chat_id.0, 0);
                 self.groups.pending_join_request_users.remove(&chat_id.0);
             }
@@ -766,16 +776,14 @@ impl Session {
             // Phase 6: the new contact arrives via `updateUser`
             // (`is_contact` flips); invalidate the list so the
             // contacts tab refetches it.
-            self.users_state.contacts = None;
-            self.users_state.contacts_error = false;
+            self.users_state.contacts = crate::state::fetch::Fetch::Idle;
         }
         // Slice A6: a contacts mutation landed — never optimistic:
         // the new list arrives via the `getContacts` refetch the
         // tab triggers.
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::RemoveContact) => {
-                self.users_state.contacts = None;
-                self.users_state.contacts_error = false;
+                self.users_state.contacts = crate::state::fetch::Fetch::Idle;
                 // The delete-synced-contacts batch remove shares
                 // this purpose but carries no user_id — its notice
                 // must not read as a single delete (or overwrite
@@ -796,14 +804,24 @@ impl Session {
                     user.is_contact = false;
                 }
             }
+            Some(RequestPurpose::BlockSenderFromReplies) => {
+                use crate::message_menu_origin::RepliesBlockStage::Submitting;
+                let asked = pending.map(|p| p.id);
+                let box_is_for_it = self
+                    .users_state
+                    .replies_block
+                    .as_ref()
+                    .is_some_and(|b| Some(b.stage) == asked.map(Submitting));
+                if box_is_for_it && let Some(block) = self.users_state.replies_block.take() {
+                    self.users_state.replies_blocked.push(block.name);
+                }
+            }
             Some(RequestPurpose::ImportContacts) => {
-                self.users_state.contacts = None;
-                self.users_state.contacts_error = false;
+                self.users_state.contacts = crate::state::fetch::Fetch::Idle;
                 self.users_state.contacts_notice = Some("Contacts imported.".to_string());
             }
             Some(RequestPurpose::ClearImportedContacts) => {
-                self.users_state.contacts = None;
-                self.users_state.contacts_error = false;
+                self.users_state.contacts = crate::state::fetch::Fetch::Idle;
                 self.users_state.contacts_notice =
                     Some("Synced contacts deleted from the servers.".to_string());
             }
@@ -826,6 +844,43 @@ impl Session {
         }
         if pending.is_some_and(|p| is_auth_submit(p.purpose)) {
             self.auth_state.last_auth_error = None;
+        }
+        if pending
+            .is_some_and(|p| p.purpose == RequestPurpose::RequestAuthenticationPasswordRecovery)
+            && extra.is_some_and(|extra| {
+                self.auth_state.password_recovery == PasswordRecovery::Requested(extra)
+            })
+        {
+            self.auth_state.password_recovery = PasswordRecovery::CodeSent;
+        }
+    }
+}
+
+impl Session {
+    /// A `setChatPermissions` the server accepted: saves still out for the
+    /// chat now roll back to its values, not to the ones from before it.
+    fn settle_permissions_save(&mut self, pending: Option<&PendingRequest>) {
+        let Some(pending) = pending else {
+            return;
+        };
+        let (Some(RequestRollback::ChatPermissions { sent, .. }), Some(chat_id)) =
+            (&pending.rollback, pending.chat_id)
+        else {
+            return;
+        };
+        let sent = *sent;
+        for later in self.requests.pending.values_mut().filter(|p| {
+            p.purpose == RequestPurpose::SetChatPermissions && p.chat_id == Some(chat_id)
+        }) {
+            if let Some(RequestRollback::ChatPermissions {
+                previous,
+                previous_can_send,
+                ..
+            }) = &mut later.rollback
+            {
+                *previous = Some(sent);
+                *previous_can_send = sent.can_send_basic_messages;
+            }
         }
     }
 }

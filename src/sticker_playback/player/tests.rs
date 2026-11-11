@@ -552,14 +552,14 @@ fn the_workers_go_idle_with_frames_asked_of_a_failed_clip() {
     );
 }
 
-/// A worker that panics leaves its clip busy for good.
+/// An opener that panics fails the clip it held.
 #[test]
-fn waiting_for_the_workers_ends_when_one_panics() {
+fn an_opener_that_panics_fails_its_clip() {
     let engine = Engine::new(1, 1 << 20);
     let key = key(1, 16);
     engine.open(key, Origin::Decoded(Box::new(|_, _| panic!("decoder"))));
     engine.wait_idle();
-    assert_eq!(engine.state(&key), Some(ClipState::Opening));
+    assert!(matches!(engine.state(&key), Some(ClipState::Failed(_))));
 }
 
 #[test]
@@ -946,10 +946,15 @@ fn a_clip_reopened_while_its_old_decode_runs_keeps_its_new_frames() {
 #[test]
 fn video_stickers_open_when_no_opener_thread_starts() {
     // The worker thread "starts" without running: the test does its jobs.
-    let spawn = |name: String, _body: Box<dyn FnOnce() + Send>| {
+    // Its body is kept, as a started thread keeps it, so the worker is not
+    // counted as ended.
+    let started = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let kept = started.clone();
+    let spawn = move |name: String, body: Box<dyn FnOnce() + Send>| {
         if name.starts_with("quill-sticker-open") {
             return Err(std::io::Error::other("no more threads"));
         }
+        crate::locks::lock_or_recover(&kept).push(body);
         Ok(())
     };
     let engine = engine::Engine::start(1, 64 << 20, &spawn);
@@ -970,6 +975,44 @@ fn video_stickers_open_when_no_opener_thread_starts() {
 }
 
 #[test]
+fn a_frame_that_cannot_be_drawn_fails_the_clip_instead_of_being_asked_again() {
+    // The worker "starts" without running; its body is kept, as a started
+    // thread keeps it.
+    let started = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let kept = started.clone();
+    let spawn = move |name: String, body: Box<dyn FnOnce() + Send>| {
+        if name.starts_with("quill-sticker-open") {
+            return Err(std::io::Error::other("no more threads"));
+        }
+        crate::locks::lock_or_recover(&kept).push(body);
+        Ok(())
+    };
+    let engine = engine::Engine::start(1, 64 << 20, &spawn);
+    let key = key(1, 16);
+    engine.open(key, synthetic(16, 3));
+    // No source opened for the key: the draw has nothing to render with,
+    // as when ThorVG returns an error.
+    let woke = worker::work(
+        engine.shared(),
+        &mut std::collections::HashMap::new(),
+        &mut Scratch::default(),
+        engine::Job::Frame {
+            key,
+            id: 1,
+            index: 0,
+            stored: None,
+        },
+    );
+    assert!(woke);
+    assert!(matches!(engine.state(&key), Some(ClipState::Failed(_))));
+    let wanted = crate::locks::lock_or_recover(&engine.shared().state)
+        .clips
+        .get(&key)
+        .map(|clip| clip.wanted.len());
+    assert_eq!(wanted, Some(0));
+}
+
+#[test]
 fn a_head_never_counts_time_twice_when_a_paint_reads_earlier() {
     let tl = timeline(60, 60.0, 1);
     let t0 = Instant::now();
@@ -984,4 +1027,46 @@ fn a_head_never_counts_time_twice_when_a_paint_reads_earlier() {
         "played {:?} in 33.3 ms",
         head.pos()
     );
+}
+
+#[test]
+fn clips_of_an_ended_worker_fail_and_new_clips_go_to_the_others() {
+    // Two workers "start" without running; the body of worker 0 is dropped
+    // later, as its thread ending drops it.
+    let started = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let kept = started.clone();
+    let spawn = move |name: String, body: Box<dyn FnOnce() + Send>| {
+        if name.starts_with("quill-sticker-open") {
+            return Err(std::io::Error::other("no more threads"));
+        }
+        crate::locks::lock_or_recover(&kept).push((name, body));
+        Ok(())
+    };
+    let engine = engine::Engine::start(2, 64 << 20, &spawn);
+    let (first, second) = (key(1, 16), key(2, 16));
+    engine.open(first, synthetic(16, 3));
+    engine.open(second, synthetic(16, 3));
+    assert_eq!(engine.state(&first), Some(ClipState::Opening));
+    // Worker 0 ends: the clip it owns fails at once.
+    let ended = {
+        let mut bodies = crate::locks::lock_or_recover(&started);
+        let at = bodies
+            .iter()
+            .position(|(name, _)| name == "quill-sticker-0");
+        at.map(|at| bodies.remove(at))
+    };
+    drop(ended);
+    let states = [engine.state(&first), engine.state(&second)];
+    assert_eq!(
+        states
+            .iter()
+            .filter(|state| matches!(state, Some(ClipState::Failed(_))))
+            .count(),
+        1,
+        "{states:?}"
+    );
+    // A clip opened now goes to the worker that is left.
+    let third = key(3, 16);
+    engine.open(third, synthetic(16, 3));
+    assert_eq!(engine.state(&third), Some(ClipState::Opening));
 }

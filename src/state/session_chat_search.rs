@@ -5,7 +5,7 @@ impl Session {
     /// Resolve a hit: already loaded, tombstoned/deleted, or needs `getChatHistory` around.
     pub fn begin_chat_search_jump(&mut self, message_id: MessageId) -> ChatSearchJumpNeed {
         self.search.chat_search.jump_serial += 1;
-        let Some(chat_id) = self.search.chat_search.chat_id.or(self.open_chat) else {
+        let Some(chat_id) = self.search.chat_search.chat_id.or(self.open_chat_id()) else {
             self.search.chat_search.jump = ChatSearchJump::Missing { message_id };
             return ChatSearchJumpNeed::Missing;
         };
@@ -24,10 +24,10 @@ impl Session {
     }
 
     pub fn apply_local_chat_search_filter(&mut self, query: &str) {
-        let Some(chat_id) = self.open_chat else {
+        let Some(chat_id) = self.open_chat_id() else {
             return;
         };
-        if !self.search.chat_search.open {
+        if !self.search.chat_search.is_open() {
             self.search.chat_search.open_for(chat_id);
         }
         let trimmed = query.trim();
@@ -84,7 +84,7 @@ impl Session {
 
     /// Newest pinned message in the open chat's loaded history.
     pub fn open_chat_pinned_message(&self) -> Option<&HistoryMessage> {
-        let chat_id = self.open_chat?;
+        let chat_id = self.open_chat_id()?;
         self.histories.get(&chat_id.0)?.newest_pinned()
     }
 
@@ -117,11 +117,14 @@ impl Session {
     }
 
     pub fn apply_local_search_filter(&mut self, query: &str) {
-        self.search.search.open = true;
+        self.search.search.surface = if query.trim().is_empty() {
+            SearchSurface::Recents
+        } else {
+            SearchSurface::Query
+        };
         self.search.search.query = query.to_string();
         self.search.search.generation = self.search.search.generation.saturating_add(1);
         self.search.search.clear_results();
-        self.search.search.recents = query.trim().is_empty();
         let chat_ids: Vec<ChatId> = if query.trim().is_empty() {
             Vec::new()
         } else {
@@ -172,9 +175,7 @@ impl Session {
 pub(crate) fn history_message(message: ParsedMessage, pending: bool) -> HistoryMessage {
     use crate::telegram::envelope::MessageSendState;
     let send = match message.send_state {
-        MessageSendState::Failed => SendState::Failed {
-            can_retry: message.can_retry,
-        },
+        MessageSendState::Failed { can_retry } => SendState::Failed { can_retry },
         MessageSendState::Pending => SendState::Sending,
         MessageSendState::Sent if pending => SendState::Sending,
         MessageSendState::Sent => SendState::Sent,

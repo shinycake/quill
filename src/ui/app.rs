@@ -1,6 +1,6 @@
 //! QuillApp struct definition and core app queries.
 
-use super::connect_ui::ConnectUiStatus;
+use super::connect_ui::ConnectStage;
 use super::demo::demo_media_allowlist;
 use super::synthetic::SyntheticChat;
 use gpui_kit::component::menu::AppMenuBar;
@@ -34,7 +34,8 @@ pub struct QuillApp {
     /// The first-run onboarding before sign-in (`ui/first_run_state.rs`).
     pub(super) first_run: super::first_run_state::FirstRun,
     /// Window and per-frame bookkeeping: animation demand, focus restore, quit guard (`ui/frame_state.rs`).
-    pub(super) frame: super::frame_state::FrameUi,
+    /// Boxed: at 3.6 KB it would push `QuillApp` past the main-thread stack budget.
+    pub(super) frame: Box<super::frame_state::FrameUi>,
     /// The next send's attachments and options, per account, chat and topic (`ui/composer_sends.rs`).
     pub(super) composer_sends: super::composer_sends::ComposerSends,
     /// Settings → Language: the open box and recent packs (`ui/language_state.rs`).
@@ -46,7 +47,7 @@ pub struct QuillApp {
     /// The title bar update pill's motion (`ui/update_pill.rs`).
     pub(super) update_pill: super::update_pill::UpdatePill,
     /// Agent access, the app's side: the wake task, the activity rows shown, a send handed over (`ui/agent_state.rs`).
-    pub(super) agent_bridge: super::agent_state::AgentBridge,
+    pub(super) agent_bridge: Box<super::agent_state::AgentBridge>,
     /// The agent takeover's wake-up and Esc (`ui/agent_takeover_state.rs`).
     pub(super) takeover: super::agent_takeover_state::TakeoverUi,
     pub(super) focus_sidebar: FocusHandle,
@@ -176,7 +177,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_ref() {
             session.auth.clone()
         } else {
-            self.auth_demo.demo_state.clone()
+            self.auth_demo.stage.auth()
         }
     }
 
@@ -228,10 +229,8 @@ impl QuillApp {
         {
             return PaneMode::Ready;
         }
-        match self.connection.status {
-            ConnectUiStatus::NeedCredentials
-                if self.live.is_none() && !self.auth_demo.demo_inputs =>
-            {
+        match self.auth_demo.stage {
+            ConnectStage::NeedCredentials if self.live.is_none() && !self.auth_demo.demo_inputs => {
                 PaneMode::Synthetic
             }
             _ => PaneMode::Connecting,

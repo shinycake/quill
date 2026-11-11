@@ -43,11 +43,31 @@ pub(crate) struct DirectMessagesBox {
     pub(super) chat_id: i64,
     pub(super) enabled: bool,
     pub(super) price: PriceSlider,
-    /// The slider was moved: the price is a deliberate choice.
-    pub(super) touched: bool,
-    /// The slider starts from the channel's price, not the default shown
-    /// while that price was still being fetched.
-    pub(super) seeded: bool,
+    /// Where the slider's price came from.
+    pub(super) source: PriceSource,
+    pub(super) stage: DirectStage,
+}
+
+/// Where a Direct Messages box's price came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PriceSource {
+    /// The default shown while the channel's price is still being fetched.
+    Default,
+    /// The slider starts from the channel's price.
+    Channel,
+    /// The slider was moved: the price is a deliberate choice, and the
+    /// channel's price no longer replaces it.
+    Chosen,
+}
+
+/// Where Save stands. The box stays open through `Saving` and closes from
+/// the answer; a refusal returns to `Editing` with the error in the box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DirectStage {
+    Editing,
+    /// `setChatDirectMessagesGroup` is out; the session's `PaidSave` says
+    /// how it ended.
+    Saving,
 }
 
 pub(crate) struct PaidMessagesUi {

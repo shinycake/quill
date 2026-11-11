@@ -17,9 +17,9 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::lang::{keys, tr, tr_with};
 use quill::suggested_posts::{
-    DATE_ABOUT, PriceCheck, STARS_WARNING, SuggestBar, SuggestMode, SuggestTerms, SuggestedPrice,
-    currency_tabs, field_text, price_about_member, price_section_title, price_submit_label,
-    shortfall,
+    BarKind, DATE_ABOUT, PriceCheck, STARS_WARNING, SuggestBar, SuggestMode, SuggestTerms,
+    SuggestedPrice, currency_tabs, field_text, price_about_member, price_section_title,
+    price_submit_label, shortfall,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -55,7 +55,7 @@ impl QuillApp {
                         }
                     }
                     gpui_kit::component::input::InputEvent::Change => {
-                        if let Some(price) = this.suggested_posts.price.as_mut() {
+                        if let Some(price) = this.suggested_posts.price_mut() {
                             price.error = None;
                         }
                         cx.notify();
@@ -65,7 +65,7 @@ impl QuillApp {
             },
         )
         .detach();
-        self.suggested_posts.price = Some(PriceBox {
+        self.suggested_posts.set_price(PriceBox {
             target,
             mode,
             admin,
@@ -79,13 +79,13 @@ impl QuillApp {
     }
 
     fn close_suggest_price(&mut self, cx: &mut Context<Self>) {
-        self.suggested_posts.price = None;
+        self.suggested_posts.close_price();
         cx.notify();
     }
 
     /// The tabs switch the currency; the typed amount carries over.
     fn set_suggest_currency(&mut self, ton: bool, cx: &mut Context<Self>) {
-        if let Some(price) = self.suggested_posts.price.as_mut() {
+        if let Some(price) = self.suggested_posts.price_mut() {
             price.ton = ton;
             price.error = None;
         }
@@ -135,7 +135,7 @@ impl QuillApp {
                 self.open_stars(cx);
             }
             SuggestedPrice::TonCents(_) => {
-                self.suggested_posts.grams_needed = Some(price);
+                self.suggested_posts.set_grams_needed(price);
                 self.open_box(DialogKind::SuggestGramsNeeded);
             }
         }
@@ -146,7 +146,7 @@ impl QuillApp {
     /// closed.
     pub(super) fn submit_suggest_price(&mut self, cx: &mut Context<Self>) -> bool {
         let limits = self.suggest_limits();
-        let Some(price_box) = self.suggested_posts.price.as_ref() else {
+        let Some(price_box) = self.suggested_posts.price() else {
             return true;
         };
         let text = price_box.input.read(cx).value().to_string();
@@ -157,12 +157,12 @@ impl QuillApp {
                     price,
                     send_date: price_box.send_date,
                 };
-                let (target, mode, admin) = (price_box.target, price_box.mode, price_box.admin);
+                let (target, admin, mode) = (price_box.target, price_box.admin, price_box.mode);
                 if !admin && let Some(short) = price.and_then(|p| self.suggest_shortfall(p)) {
                     self.ask_for_balance(short, BalanceFor::Offer, cx);
                     return false;
                 }
-                self.suggested_posts.price = None;
+                self.suggested_posts.close_price();
                 self.apply_suggest_terms(target, mode, terms, cx);
                 return true;
             }
@@ -180,7 +180,7 @@ impl QuillApp {
             }
             PriceCheck::Invalid => tr(keys::Q_MONEY_ENTER_A_NUMBER).into(),
         };
-        if let Some(price_box) = self.suggested_posts.price.as_mut() {
+        if let Some(price_box) = self.suggested_posts.price_mut() {
             price_box.error = Some(error);
         }
         cx.notify();
@@ -197,19 +197,18 @@ impl QuillApp {
     ) {
         match target {
             SuggestTarget::Bar(chat_id) => {
-                let edit_of = self
+                let old = self
                     .session()
-                    .and_then(|session| session.suggest_bar(chat_id))
-                    .and_then(|bar| bar.edit_of);
-                self.set_suggest_bar(
-                    chat_id,
-                    Some(SuggestBar {
-                        terms,
-                        mode,
-                        edit_of,
-                    }),
-                    cx,
-                );
+                    .and_then(|session| session.suggest_bar(chat_id));
+                // A box that changed an edit's terms keeps the edit: with
+                // its bar gone (sent, cleared) there is nothing to change,
+                // and a new offer is not what the user was editing.
+                let kind = match (old, mode) {
+                    (Some(bar), _) => bar.kind,
+                    (None, SuggestMode::New) => BarKind::New,
+                    (None, SuggestMode::Change | SuggestMode::Publish) => return,
+                };
+                self.set_suggest_bar(chat_id, Some(SuggestBar { terms, kind }), cx);
             }
             SuggestTarget::Offer {
                 chat_id,
@@ -247,7 +246,7 @@ impl QuillApp {
             limits.initial_time(now, current),
             limits.send_delay_max,
         );
-        self.suggested_posts.time = Some(TimeBox {
+        self.suggested_posts.set_time(TimeBox {
             target,
             mode,
             picker,
@@ -258,7 +257,7 @@ impl QuillApp {
     }
 
     fn close_suggest_time(&mut self, cx: &mut Context<Self>) {
-        self.suggested_posts.time = None;
+        self.suggested_posts.close_time();
         cx.notify();
     }
 
@@ -270,7 +269,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(time_box) = self.suggested_posts.time.as_ref() else {
+        let Some(time_box) = self.suggested_posts.time() else {
             return;
         };
         let send_date = if anytime {
@@ -278,7 +277,7 @@ impl QuillApp {
         } else {
             let lead = self.suggest_limits().min_lead();
             let Some(picked) = super::scheduled::picked_unix(&time_box.picker, lead, cx) else {
-                if let Some(time_box) = self.suggested_posts.time.as_mut() {
+                if let Some(time_box) = self.suggested_posts.time_mut() {
                     time_box.error = Some(tr(keys::Q_MONEY_PICK_A_DATE_AND_TIME).into());
                 }
                 cx.notify();
@@ -290,10 +289,10 @@ impl QuillApp {
             i32::try_from(clamped).unwrap_or(i32::MAX)
         };
         let target = time_box.target;
-        self.suggested_posts.time = None;
+        self.suggested_posts.close_time();
         match target {
             TimeTarget::PriceBox => {
-                if let Some(price_box) = self.suggested_posts.price.as_mut() {
+                if let Some(price_box) = self.suggested_posts.price_mut() {
                     price_box.send_date = send_date;
                 }
             }
@@ -471,13 +470,13 @@ impl QuillApp {
                 this.close_suggest_price(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(price_box) = this.suggested_posts.price.take() else {
+            let Some(price_box) = this.suggested_posts.take_price() else {
                 return dialog.on_close(on_close);
             };
             let title = price_box.mode.price_title();
             let body = this.suggest_price_body(&price_box, cx);
             // box-host: put back while the dialog builds; it stays where it shows
-            this.suggested_posts.price = Some(price_box);
+            this.suggested_posts.set_price(price_box);
             let body = Rc::new(RefCell::new(Some(body)));
             dialog
                 .overlay(true)
@@ -506,7 +505,7 @@ impl QuillApp {
                 this.close_suggest_time(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(time_box) = this.suggested_posts.time.as_ref() else {
+            let Some(time_box) = this.suggested_posts.time() else {
                 return dialog.on_close(on_close);
             };
             let mode = time_box.mode;
@@ -580,14 +579,14 @@ crate::ui::shell::register_dialogs! {
     /// returns to.
     SuggestTime => DialogSpec::new(
         3960,
-        |app| app.suggested_posts.time.is_some(),
+        |app| app.suggested_posts.time().is_some(),
         QuillApp::build_suggest_time_dialog,
     )
     .close(|app, _, cx| app.close_suggest_time(cx)),
     /// "Suggest a Message" / "Suggest Changes".
     SuggestPrice => DialogSpec::new(
         3968,
-        |app| app.suggested_posts.price.is_some(),
+        |app| app.suggested_posts.price().is_some(),
         QuillApp::build_suggest_price_dialog,
     )
     .close(|app, _, cx| app.close_suggest_price(cx)),

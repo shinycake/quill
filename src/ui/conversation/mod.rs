@@ -345,7 +345,7 @@ impl QuillApp {
                 if session.is_some_and(|s| s.is_frozen()) {
                     return false;
                 }
-                let open = session.and_then(|s| s.open_chat);
+                let open = session.and_then(|s| s.open_chat_id());
                 let chat = open.and_then(|id| session.and_then(|s| s.chats.get(&id.0)));
                 // Parity slice 4: posting into a forum topic is supported —
                 // `sendMessage` carries `topic_id = messageTopicForum`
@@ -353,7 +353,7 @@ impl QuillApp {
                 // chats without the basic send permission keep the composer
                 // hidden.
                 let topic = open.and_then(|id| session.and_then(|s| s.open_topic_info(id)));
-                let in_topic = session.is_some_and(|s| s.open_topic.is_some());
+                let in_topic = session.is_some_and(|s| s.open_forum_topic().is_some());
                 // A group that lets the viewer send nothing swaps the
                 // composer for the reason (`composer_restriction`).
                 let restricted = self.composer_restriction().is_some();
@@ -536,6 +536,7 @@ mod history_message_list;
 mod history_reads;
 mod history_scroll_memory;
 pub(super) mod landing;
+mod older_retry;
 mod render_history_row_body;
 mod row_build;
 pub(super) mod row_chrome;

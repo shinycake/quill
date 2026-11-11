@@ -23,7 +23,7 @@ use quill::agent::ui_driver::guard;
 use quill::file_prefs::{self, OpenWarning};
 use quill::lang::{keys, tr, tr_with};
 use quill::privacy::GiftSettings;
-use quill::state::PasswordCheck;
+use quill::state::{PasswordCheck, PrivacyControl};
 use quill::telegram::requests::PrivacyWho;
 use quill::telegram::requests_privacy::PrivacySettingKey;
 use std::cell::RefCell;
@@ -36,6 +36,8 @@ use zeroize::Zeroize;
 pub(crate) struct FileOpenConfirm {
     pub path: PathBuf,
     pub warning: OpenWarning,
+    /// "Remember for this file type" / "Don't ask me again" ticked.
+    pub remember: bool,
 }
 
 /// Transient state of the B13 privacy / security UI.
@@ -44,19 +46,11 @@ pub(crate) struct PrivacyUi {
     pub file_ext_input: Entity<TextareaState>,
     /// Draft of the IP-reveal switch inside the whitelist editor.
     pub file_open_ip_draft: bool,
-    /// The exception picker lists groups instead of contacts.
-    pub exception_picker_groups: bool,
     /// The open-time warning, when one is showing.
     pub file_open: Option<FileOpenConfirm>,
-    /// "Remember for this file type" / "Don't ask me again" ticked.
-    pub file_open_remember: bool,
-    /// The session details view inside the sessions dialog.
-    pub session_details: Option<i64>,
-    /// "Rename current device" form is open on the details view.
-    pub renaming_device: bool,
     pub rename_input: Entity<gpui_kit::component::input::InputState>,
     /// "Reset statistics" is awaiting its confirmation.
-    pub network_reset_confirm: bool,
+    pub network_reset: crate::ui::dialogs::data_extra::NetworkReset,
 }
 
 impl PrivacyUi {
@@ -70,16 +64,12 @@ impl PrivacyUi {
         Self {
             file_ext_input,
             file_open_ip_draft: true,
-            exception_picker_groups: false,
             file_open: None,
-            file_open_remember: false,
-            session_details: None,
-            renaming_device: false,
             rename_input: cx.new(|cx| {
                 gpui_kit::component::input::InputState::new(window, cx)
                     .placeholder(quill::settings::DEFAULT_DEVICE_MODEL)
             }),
-            network_reset_confirm: false,
+            network_reset: Default::default(),
         }
     }
 }
@@ -135,10 +125,8 @@ impl QuillApp {
         let current: Option<PrivacyWho> = self
             .session()
             .and_then(|s| s.settings.privacy.get(&key))
-            .and_then(|st| match st {
-                quill::privacy::PrivacyKeyState::Ready(d) => d.who,
-                _ => None,
-            });
+            .and_then(|st| st.detail())
+            .and_then(|d| d.who);
         let mut block = div().flex().flex_col().gap_1().mt_2();
         block = block.child(
             div()
@@ -163,6 +151,12 @@ impl QuillApp {
             .and_then(|s| s.my_gift_settings())
             .unwrap_or_default();
         let premium = session.is_some_and(|s| s.payments.premium_option == Some(true));
+        let error = session.and_then(|s| {
+            s.settings
+                .privacy_data
+                .error(PrivacyControl::Gifts)
+                .map(str::to_string)
+        });
         let mut block = div().flex().flex_col().gap_1().mt_1();
         block = block.child(self.gift_switch(
             cx,
@@ -232,6 +226,9 @@ impl QuillApp {
                     tr(keys::Q_PREFS_CHOOSE_THE_TYPES_OF_GIFTS)
                 }),
         );
+        if let Some(line) = error {
+            block = block.child(div().text_xs().px_2().text_color(danger()).child(line));
+        }
         block.into_any_element()
     }
 
@@ -313,7 +310,12 @@ impl QuillApp {
         let ignore = session
             .and_then(|s| s.settings.privacy_data.ignore_sensitive)
             .unwrap_or(false);
-        let error = session.and_then(|s| s.settings.privacy_data.error.clone());
+        let error = session.and_then(|s| {
+            s.settings
+                .privacy_data
+                .error(PrivacyControl::Sensitive)
+                .map(str::to_string)
+        });
         let mut section = div().flex().flex_col().gap_1();
         let heading = div()
             .text_sm()
@@ -431,7 +433,9 @@ impl QuillApp {
             .file_ext_input
             .update(cx, |input, cx| input.set_value(&text, window, cx));
         self.privacy.extra.file_open_ip_draft = prefs.ip_reveal_warning;
-        self.privacy.editor = Some(PrivacyEditorTarget::FileOpen);
+        self.privacy
+            .layer
+            .open_editor(PrivacyEditorTarget::FileOpen);
         cx.notify();
     }
 
@@ -502,7 +506,7 @@ impl QuillApp {
                             .label(tr(keys::CANCEL))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.privacy.editor = None;
+                                this.privacy.layer.close_editor();
                                 cx.notify();
                             })),
                     )
@@ -538,7 +542,7 @@ impl QuillApp {
             prefs.no_warning_extensions = extensions;
             prefs.ip_reveal_warning = ip;
         });
-        self.privacy.editor = None;
+        self.privacy.layer.close_editor();
         self.set_note(StatusNote::silent(tr(
             keys::Q_PREFS_FILE_OPEN_SETTINGS_SAVED,
         )));
@@ -558,8 +562,11 @@ impl QuillApp {
         match file_prefs::open_warning(&path, &prefs, false) {
             None => self.open_file_now(&path, cx),
             Some(warning) => {
-                self.privacy.extra.file_open_remember = false;
-                self.privacy.extra.file_open = Some(FileOpenConfirm { path, warning });
+                self.privacy.extra.file_open = Some(FileOpenConfirm {
+                    path,
+                    warning,
+                    remember: false,
+                });
                 self.open_box(DialogKind::FileOpenConfirm);
                 cx.notify();
             }
@@ -581,7 +588,7 @@ impl QuillApp {
         let Some(confirm) = self.privacy.extra.file_open.take() else {
             return;
         };
-        if self.privacy.extra.file_open_remember {
+        if confirm.remember {
             let extension = file_prefs::file_extension(&confirm.path);
             file_prefs::update(|prefs| match confirm.warning {
                 OpenWarning::IpReveal => prefs.ip_reveal_warning = false,
@@ -653,7 +660,7 @@ impl QuillApp {
                 .and_then(|n| n.to_str())
                 .unwrap_or("")
                 .to_string();
-            let remember = this.privacy.extra.file_open_remember;
+            let remember = confirm.as_ref().is_some_and(|c| c.remember);
             let can_remember = confirm.as_ref().is_some_and(|c| {
                 c.warning == OpenWarning::IpReveal
                     || !file_prefs::file_extension(&c.path).is_empty()
@@ -671,7 +678,9 @@ impl QuillApp {
                                 .label(remember_label)
                                 .checked(remember)
                                 .on_click(cx.listener(|this, &on: &bool, _, cx| {
-                                    this.privacy.extra.file_open_remember = on;
+                                    if let Some(open) = this.privacy.extra.file_open.as_mut() {
+                                        open.remember = on;
+                                    }
                                     cx.notify();
                                 })),
                         )
@@ -871,7 +880,7 @@ impl QuillApp {
                     Button::new("password-check-submit")
                         .label(tr(keys::Q_PREFS_CHECK))
                         .primary()
-                        .disabled(check == PasswordCheck::Checking)
+                        .disabled(check.is_checking())
                         .on_click({
                             let field = field.clone();
                             cx.listener(move |this, _, window, cx| {
@@ -974,13 +983,13 @@ mod dispatch_tests {
     use crate::ui::app::QuillApp;
     use crate::ui::keybindings::bind_keys;
     use crate::ui::privacy::ExceptionFlag;
+    use crate::ui::privacy::{PrivacyEditorTarget, PrivacyExceptionKind};
     use crate::ui::screenshot_demo::ScreenshotDemo;
     use crate::ui::shell::QuillShell;
-    use crate::ui::{PrivacyEditorTarget, PrivacyExceptionKind};
     use gpui_kit::component::Root;
     use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
     use quill::file_prefs::{self, FilePrefs, OpenWarning};
-    use quill::privacy::{NewChatPrivacyState, PrivacyKeyState};
+    use quill::privacy::NewChatPrivacyState;
     use quill::telegram::requests::PrivacyWho;
     use quill::telegram::requests_privacy::PrivacySettingKey;
 
@@ -1008,10 +1017,13 @@ mod dispatch_tests {
     }
 
     fn rule_who(app: &QuillApp, key: PrivacySettingKey) -> Option<PrivacyWho> {
-        match app.demo_session.as_ref()?.settings.privacy.get(&key)? {
-            PrivacyKeyState::Ready(detail) => detail.who,
-            _ => None,
-        }
+        app.demo_session
+            .as_ref()?
+            .settings
+            .privacy
+            .get(&key)?
+            .detail()?
+            .who
     }
 
     #[gpui_kit::test]
@@ -1127,7 +1139,9 @@ mod dispatch_tests {
         app.read_with(vcx, |app, _| {
             let session = app.demo_session.as_ref().unwrap();
             let detail = |key| match session.settings.privacy.get(&key) {
-                Some(PrivacyKeyState::Ready(d)) => d.clone(),
+                Some(state) if state.detail().is_some() => {
+                    state.detail().cloned().unwrap_or_default()
+                }
                 other => panic!("{other:?}"),
             };
             let invites = detail(PrivacySettingKey::AllowChatInvites);
@@ -1157,7 +1171,8 @@ mod dispatch_tests {
                 app.privacy.extra.file_open,
                 Some(FileOpenConfirm {
                     path: path.clone(),
-                    warning: OpenWarning::Executable
+                    warning: OpenWarning::Executable,
+                    remember: false,
                 })
             );
         });
@@ -1167,7 +1182,9 @@ mod dispatch_tests {
         // Confirm with it ticked: the extension opens directly afterwards.
         app.update_in(vcx, |app, _, cx| {
             app.open_file_guarded(path.clone(), cx);
-            app.privacy.extra.file_open_remember = true;
+            if let Some(open) = app.privacy.extra.file_open.as_mut() {
+                open.remember = true;
+            }
             app.confirm_file_open(cx);
         });
         assert!(file_prefs::current().no_warning_extensions.contains("bin"));

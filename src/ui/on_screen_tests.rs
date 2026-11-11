@@ -59,7 +59,7 @@ struct Surfaces {
 
 fn surfaces(app: &QuillApp) -> Surfaces {
     Surfaces {
-        rich_editor: app.chat_ui.rich_editor_open,
+        rich_editor: app.chat_ui.rich.editor_open(),
         context_menu: app.chat_list.archive_menu.is_some(),
         selection: app.chat_list.selected.len(),
         player_chat: app.playback.player.chat,
@@ -91,10 +91,10 @@ fn open_everything(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     });
     frames(vcx);
     app.update(vcx, |app, cx| {
-        app.chat_ui.rich_editor_open = true;
+        app.chat_ui.rich.set_editor(true);
         app.chat_list.archive_menu = Some(point(px(10.), px(10.)));
         app.chat_list.selected.insert(CHAT.0);
-        app.playback.playing_audio = Some(MessageId(1));
+        app.playback.active = crate::ui::playback_state::ActiveTrack::Audio(MessageId(1));
         app.playback.player.chat = Some(CHAT);
         cx.notify();
     });
@@ -138,8 +138,10 @@ fn a_switch_replaces_every_surface_and_nothing_comes_back(cx: &mut TestAppContex
         app.spawn_screen(cx, async move |this, cx| {
             let _ = wait.await;
             seen.set(Some(
-                this.update(cx, |app, _| app.stories.composer.open = true)
-                    .is_ok(),
+                this.update(cx, |app, _| {
+                    *app.stories.composer = quill::story_composer::StoryComposer::open()
+                })
+                .is_ok(),
             ));
         })
         .detach();
@@ -163,7 +165,7 @@ fn a_switch_replaces_every_surface_and_nothing_comes_back(cx: &mut TestAppContex
         Some(false),
         "the task's update came back Gone"
     );
-    app.read_with(&vcx, |app, _| assert!(!app.stories.composer.open));
+    app.read_with(&vcx, |app, _| assert!(!app.stories.composer.is_open()));
 
     // Back to the first account: a third screen, with nothing restored.
     switch(&app, &mut vcx, &AccountKey::primary().0);
@@ -198,7 +200,7 @@ fn the_chat_leave_saves_the_draft_through_the_old_client(cx: &mut TestAppContext
         assert_eq!(app.open_chat_id(), None);
         let session = app.session().expect("session");
         let draft = session.draft_for(CHAT, DraftTopic::Chat).expect("saved");
-        assert_eq!(draft.text, "meet at 5");
+        assert_eq!(draft.text(), "meet at 5");
         assert!(!session.draft_is_dirty(CHAT, DraftTopic::Chat));
     });
 }
@@ -210,7 +212,7 @@ fn a_field_no_list_named_goes_too(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, "ready-chats");
     frames(&mut vcx);
     app.update(&mut vcx, |app, _| {
-        app.pickers.media_panel.panel_mode = crate::ui::media_panel::PanelMode::Compose;
+        app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
         app.folders.tab_menu = Some(crate::ui::folder_extras::FolderTabMenu {
             folder_id: Some(2),
             position: point(px(10.), px(10.)),
@@ -234,31 +236,29 @@ fn a_switch_ends_the_link_flow_the_account_was_running(cx: &mut TestAppContext) 
     frames(&mut vcx);
     app.update(&mut vcx, |app, _| {
         let session = app.demo_session.as_mut().expect("a demo session");
-        session.chats_state.deep_link = Some(DeepLinkState::InvitePreview {
-            hash: "AbCd".into(),
-            title: "Book club".into(),
-            member_count: 12,
-            creates_join_request: false,
-            is_channel: false,
-            generation: 3,
-        });
-        session.chats_state.deep_link_from_agent = true;
+        session.chats_state.start_deep_link(
+            DeepLinkState::InvitePreview {
+                hash: "AbCd".into(),
+                title: "Book club".into(),
+                member_count: 12,
+                creates_join_request: false,
+                is_channel: false,
+                generation: 3,
+            },
+            true,
+        );
     });
     switch(&app, &mut vcx, "other");
     frames(&mut vcx);
     app.read_with(&vcx, |app, _| {
         let session = app.session().expect("a session");
         assert!(session.chats_state.deep_link.is_none(), "the flow ended");
-        assert!(!session.chats_state.deep_link_from_agent);
-        assert!(app.links.deep_link_invite.is_none());
+        assert!(app.links.flow.invite().is_none());
     });
     switch(&app, &mut vcx, &AccountKey::primary().0);
     frames(&mut vcx);
     app.read_with(&vcx, |app, _| {
-        assert!(
-            app.links.deep_link_invite.is_none(),
-            "no Join box came back"
-        );
-        assert!(app.links.pending_deep_link_open.is_none());
+        assert!(app.links.flow.invite().is_none(), "no Join box came back");
+        assert!(app.links.resolved.is_none());
     });
 }

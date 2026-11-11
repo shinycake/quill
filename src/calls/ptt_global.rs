@@ -26,6 +26,7 @@ mod platform {
     use super::*;
     #[derive(Debug)]
     pub struct Handle;
+    impl super::HookLife for Handle {}
     pub fn start(_key: &str, _sink: Sink) -> Result<Handle, StartError> {
         Err(StartError::Unsupported("No system-wide keys here.".into()))
     }
@@ -42,6 +43,14 @@ mod platform {
 
 /// Live hook; dropping it stops listening.
 pub type Handle = platform::Handle;
+
+/// A hook that can end on its own (its connection to the system broke).
+pub trait HookLife {
+    /// Why the hook thread ended without being dropped, once it has.
+    fn ended(&self) -> Option<String> {
+        None
+    }
+}
 
 /// A press or release of the configured key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,6 +102,11 @@ pub struct KeyFilter {
 }
 
 impl KeyFilter {
+    /// The key is down as far as this filter has seen.
+    pub fn is_held(&self) -> bool {
+        self.held
+    }
+
     pub fn new(target: u32) -> Self {
         KeyFilter {
             target,
@@ -107,6 +121,15 @@ impl KeyFilter {
         }
         self.held = pressed;
         Some(if pressed { KeyEdge::Down } else { KeyEdge::Up })
+    }
+}
+
+impl KeyFilter {
+    /// The hook lost events (a disabled tap, a skipped call, a dead stream):
+    /// forget the held key. Returns the `Up` the caller never saw, if the
+    /// key was held, so the microphone does not stay open without a key down.
+    pub fn resync(&mut self) -> Option<KeyEdge> {
+        std::mem::take(&mut self.held).then_some(KeyEdge::Up)
     }
 }
 
@@ -311,76 +334,126 @@ pub fn linux_session(
     }
 }
 
+/// Where the controller's hook stands.
+#[derive(Debug)]
+enum HookStage<H> {
+    Off,
+    Active {
+        key: String,
+        handle: H,
+    },
+    /// The last start of `key` failed; not retried until
+    /// [`Controller::retry`].
+    Failed {
+        key: String,
+        state: HookState,
+    },
+    /// A failed start may be tried again on the next `sync`; Settings
+    /// keeps showing why it failed until then.
+    RetryDue {
+        state: HookState,
+    },
+}
+
+static OFF: HookState = HookState::Off;
+static ACTIVE: HookState = HookState::Active;
+
 /// Owns at most one live hook and decides when to (re)start or stop it.
 #[derive(Debug)]
 pub struct Controller<H> {
-    running: Option<(String, H)>,
-    /// Key whose last start failed; not retried until [`Controller::retry`].
-    failed_for: Option<String>,
-    state: HookState,
+    stage: HookStage<H>,
 }
 
 impl<H> Default for Controller<H> {
     fn default() -> Self {
         Controller {
-            running: None,
-            failed_for: None,
-            state: HookState::Off,
+            stage: HookStage::Off,
         }
     }
 }
 
-impl<H> Controller<H> {
-    pub fn state(&self) -> &HookState {
-        &self.state
-    }
-
-    /// Whether a hook is delivering system-wide key events.
-    pub fn is_active(&self) -> bool {
-        self.running.is_some()
-    }
-
-    /// Allow a failed start to be attempted again on the next `sync`.
-    pub fn retry(&mut self) {
-        self.failed_for = None;
-    }
-
-    /// Bring the hook in line with `want` (the key while joined with
-    /// push-to-talk on, else `None`). Returns whether the state changed.
+impl<H: HookLife> Controller<H> {
+    /// Brings the hook in line with `want`, as [`Self::sync`] does, and
+    /// first notices a hook thread that ended on its own: it counts as a
+    /// failed start of its key, shown in Settings, and is tried again only
+    /// after [`Controller::retry`].
     pub fn sync(
         &mut self,
         want: Option<&str>,
         start: impl FnOnce(&str) -> Result<H, StartError>,
     ) -> bool {
-        let before = self.state.clone();
+        let before = self.state().clone();
+        let ended = match &self.stage {
+            HookStage::Active { key, handle } => handle.ended().map(|why| (key.clone(), why)),
+            _ => None,
+        };
+        if let Some((key, why)) = ended {
+            self.stage = HookStage::Failed {
+                key,
+                state: HookState::Failed(why),
+            };
+        }
+        let moved = self.sync_wanted(want, start);
+        moved || *self.state() != before
+    }
+}
+
+impl<H> Controller<H> {
+    pub fn state(&self) -> &HookState {
+        match &self.stage {
+            HookStage::Off => &OFF,
+            HookStage::Active { .. } => &ACTIVE,
+            HookStage::Failed { state, .. } | HookStage::RetryDue { state } => state,
+        }
+    }
+
+    /// Whether a hook is delivering system-wide key events.
+    pub fn is_active(&self) -> bool {
+        matches!(self.stage, HookStage::Active { .. })
+    }
+
+    /// Allow a failed start to be attempted again on the next `sync`.
+    pub fn retry(&mut self) {
+        if let HookStage::Failed { state, .. } = &mut self.stage {
+            let state = std::mem::replace(state, HookState::Off);
+            self.stage = HookStage::RetryDue { state };
+        }
+    }
+
+    /// Bring the hook in line with `want` (the key while joined with
+    /// push-to-talk on, else `None`). Returns whether the state changed.
+    fn sync_wanted(
+        &mut self,
+        want: Option<&str>,
+        start: impl FnOnce(&str) -> Result<H, StartError>,
+    ) -> bool {
+        let before = self.state().clone();
         match want {
-            None => {
-                self.running = None;
-                self.failed_for = None;
-                self.state = HookState::Off;
-            }
+            None => self.stage = HookStage::Off,
             Some(key) => {
-                if self.running.as_ref().is_some_and(|(k, _)| k == key)
-                    || self.failed_for.as_deref() == Some(key)
-                {
-                    return false;
+                match &self.stage {
+                    HookStage::Active { key: k, .. } | HookStage::Failed { key: k, .. }
+                        if k == key =>
+                    {
+                        return false;
+                    }
+                    _ => {}
                 }
                 // Stop the old key's hook before starting the new one.
-                self.running = None;
-                match start(key) {
-                    Ok(handle) => {
-                        self.running = Some((key.to_string(), handle));
-                        self.failed_for = None;
-                        self.state = HookState::Active;
-                    }
-                    Err(err) => {
-                        self.failed_for = Some(key.to_string());
-                        self.state = HookState::from(&err);
-                    }
-                }
+                self.stage = HookStage::Off;
+                self.stage = match start(key) {
+                    Ok(handle) => HookStage::Active {
+                        key: key.to_string(),
+                        handle,
+                    },
+                    Err(err) => HookStage::Failed {
+                        key: key.to_string(),
+                        state: HookState::from(&err),
+                    },
+                };
             }
         }
-        self.state != before
+        *self.state() != before
     }
 }
 
@@ -425,8 +498,8 @@ pub fn status_note(state: &HookState, limit: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        Controller, HookState, KeyEdge, KeyFilter, LinuxSession, StartError, function_key,
-        linux_session, mac_keycode, status_note, windows_vk, x11_keysym,
+        Controller, HookLife, HookState, KeyEdge, KeyFilter, LinuxSession, StartError,
+        function_key, linux_session, mac_keycode, status_note, windows_vk, x11_keysym,
     };
 
     #[test]
@@ -469,6 +542,19 @@ mod tests {
     }
 
     #[test]
+    fn resync_ends_a_hold_whose_release_was_missed() {
+        let mut filter = KeyFilter::new(49);
+        assert_eq!(filter.resync(), None, "nothing held, nothing to end");
+        assert_eq!(filter.feed(49, true), Some(KeyEdge::Down));
+        assert_eq!(filter.resync(), Some(KeyEdge::Up));
+        assert_eq!(filter.resync(), None, "ends once");
+        // The key is still down: its auto-repeat starts a fresh hold, and the
+        // late release ends it.
+        assert_eq!(filter.feed(49, true), Some(KeyEdge::Down));
+        assert_eq!(filter.feed(49, false), Some(KeyEdge::Up));
+    }
+
+    #[test]
     fn controller_starts_once_restarts_on_key_change_and_stops() {
         let mut ctl: Controller<u32> = Controller::default();
         let starts = std::cell::Cell::new(0);
@@ -485,6 +571,46 @@ mod tests {
         assert!(ctl.sync(None, start));
         assert!(!ctl.is_active());
         assert_eq!(ctl.state(), &HookState::Off);
+        assert_eq!(starts.get(), 2);
+    }
+
+    /// A hook that ends when `ended` is set.
+    struct Ending(std::rc::Rc<std::cell::Cell<bool>>);
+
+    impl HookLife for Ending {
+        fn ended(&self) -> Option<String> {
+            self.0.get().then(|| "The X server went away.".to_string())
+        }
+    }
+
+    impl HookLife for u32 {}
+
+    #[test]
+    fn a_hook_that_ended_on_its_own_is_failed_not_active() {
+        let ended = std::rc::Rc::new(std::cell::Cell::new(false));
+        let mut ctl: Controller<Ending> = Controller::default();
+        let starts = std::cell::Cell::new(0);
+        let flag = ended.clone();
+        let start = |_: &str| {
+            starts.set(starts.get() + 1);
+            Ok(Ending(flag.clone()))
+        };
+        assert!(ctl.sync(Some("space"), start));
+        assert!(ctl.is_active());
+        ended.set(true);
+        assert!(ctl.sync(Some("space"), start), "the change is noticed");
+        assert!(!ctl.is_active());
+        assert_eq!(
+            ctl.state(),
+            &HookState::Failed("The X server went away.".into())
+        );
+        // Not restarted in a loop; Settings' retry brings it back.
+        assert!(!ctl.sync(Some("space"), start));
+        assert_eq!(starts.get(), 1);
+        ended.set(false);
+        ctl.retry();
+        assert!(ctl.sync(Some("space"), start));
+        assert!(ctl.is_active());
         assert_eq!(starts.get(), 2);
     }
 

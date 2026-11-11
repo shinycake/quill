@@ -11,8 +11,26 @@ impl Session {
         } else {
             None
         };
-        self.requests
-            .register(self.account_generation, purpose, chat_id, view)
+        let id = self
+            .requests
+            .register(self.account_generation, purpose, chat_id, view);
+        if matches!(
+            purpose,
+            RequestPurpose::GetHistory | RequestPurpose::GetHistoryNewer
+        ) {
+            self.stamp_window_epoch(id, chat_id);
+        }
+        id
+    }
+
+    /// A history page asked for `chat_id` belongs to the window it has now.
+    pub(crate) fn stamp_window_epoch(&mut self, id: RequestId, chat_id: Option<ChatId>) {
+        let epoch = chat_id
+            .and_then(|chat| self.histories.get(&chat.0))
+            .map_or(0, |history| history.window_epoch);
+        if let Some(pending) = self.requests.pending_mut(id) {
+            pending.window_epoch = Some(epoch);
+        }
     }
 
     /// Slice bots-games: like `request`, but also stamps the message id for
@@ -135,6 +153,42 @@ impl Session {
         if let Some(pending) = self.requests.pending.get_mut(&id.0) {
             pending.story_ids = story_ids;
             pending.story_album_id = story_album_id;
+        }
+        id
+    }
+
+    /// Like `request`, but stamps the user ids a `setCloseFriends` sent
+    /// (`PendingRequest::user_ids`); its `ok` carries none.
+    pub fn request_for_user_ids(&mut self, purpose: RequestPurpose, user_ids: &[i64]) -> RequestId {
+        let id = self.request(purpose, None);
+        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
+            pending.user_ids = Some(user_ids.to_vec());
+        }
+        id
+    }
+
+    /// Like `request`, but stamps the invite link a link-scoped request
+    /// acts on (`PendingRequest::invite_link`); its `ok` carries none.
+    pub fn request_for_invite_link(
+        &mut self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+        invite_link: &str,
+    ) -> RequestId {
+        let id = self.request(purpose, Some(chat_id));
+        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
+            pending.invite_link = Some(invite_link.to_owned());
+        }
+        id
+    }
+
+    /// Like `request`, but stamps the string id of what it acts on
+    /// (`PendingRequest::subject_id`: the terms `acceptTermsOfService`
+    /// accepts, the gift `sellGift` sells); its `ok` carries none.
+    pub fn request_for_subject(&mut self, purpose: RequestPurpose, subject_id: &str) -> RequestId {
+        let id = self.request(purpose, None);
+        if let Some(pending) = self.requests.pending.get_mut(&id.0) {
+            pending.subject_id = Some(subject_id.to_owned());
         }
         id
     }

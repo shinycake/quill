@@ -107,15 +107,17 @@ impl QuillApp {
         self.demo_topic_session(|session| {
             session
                 .threads
-                .topic_load_failed
-                .insert((FORUM, OPEN_TOPIC));
+                .topic_histories
+                .entry((FORUM, OPEN_TOPIC))
+                .or_default()
+                .older = quill::state::OlderEnd::Failed;
         });
     }
 
     fn demo_topic_empty(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
         self.demo_topic_session(|session| {
             let history = TopicHistory {
-                loaded_complete: true,
+                older: quill::state::OlderEnd::Complete,
                 ..TopicHistory::default()
             };
             session

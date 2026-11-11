@@ -22,7 +22,7 @@ fn window_state() -> Option<WindowState> {
     }
     match bridge::send(&super::current_agent(), UiCommand::State, WINDOW_WAIT) {
         Ok(UiReply::State(state)) => Some(state.window),
-        Err(BridgeError::Timeout) => Some(WindowState::NotAnswering),
+        Err(BridgeError::Timeout | BridgeError::RanNoAnswer) => Some(WindowState::NotAnswering),
         Ok(_) | Err(BridgeError::Busy) => None,
     }
 }
@@ -129,5 +129,6 @@ Screenshots: one a second and 20 a minute, cut to your grants like the tree.\n"
                 },
             },
         }),
+        images: Vec::new(),
     })
 }

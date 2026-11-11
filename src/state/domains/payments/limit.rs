@@ -43,11 +43,10 @@ impl Session {
                 *fetch = crate::state::PublicChatsFetch::None;
             }
         }
-        if kind.shows_toast() {
-            self.payments.hub.limit_toast = Some(kind);
-        } else {
-            self.payments.hub.limit_box = Some((kind, extra));
-        }
+        crate::premium_hub::limit_notice::raise(
+            &mut self.payments.hub.limit_notice,
+            crate::premium_hub::limit_notice::LimitNotice::of(kind, extra),
+        );
     }
 
     /// The free and Premium value of `kind`: `getPremiumFeatures`, then
@@ -55,7 +54,7 @@ impl Session {
     pub fn premium_limit_pair(&self, kind: PremiumLimitKind) -> LimitPair {
         let hub = &self.payments.hub;
         hub.premium
-            .as_ref()
+            .data()
             .and_then(|info| info.limit_pair(kind))
             .or_else(|| hub.limits.answered(kind))
             .unwrap_or_else(|| limit_pair(None, kind))

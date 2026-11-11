@@ -11,8 +11,7 @@ pub(crate) struct TwoStepUi {
     /// status screen or one of the forms; the four textareas back the
     /// enable/change/disable/recovery-email forms. Passwords live in the
     /// inputs only and are cleared on submit/close — never on the session.
-    pub(super) open: bool,
-    pub(super) view: TwofaView,
+    stage: TwoFaBox,
     pub(super) current_password: Entity<InputState>,
     /// The Privacy page's "Your password" check card. Its own field: the
     /// 2FA box stays over that page, so the box's forms and the card are
@@ -28,11 +27,21 @@ pub(crate) struct TwoStepUi {
     /// Slice A2 fixup: local validation notice for the 2FA forms ("enter
     /// your current password") — the driver rejects doomed requests
     /// silently, so the form must speak before sending.
-    pub(super) notice: Option<String>,
     /// Batch 6: code entry (recovery email, password recovery, login
     /// email) and the inline confirmation on the recovery screen.
     pub(super) code: Entity<InputState>,
-    pub(super) confirm: Option<TwofaConfirm>,
+}
+
+/// The box's stage: closed, or open at one view with that view's inline
+/// confirmation and local notice. Moving to another view or closing
+/// replaces the whole value, so neither outlives its view.
+pub(crate) enum TwoFaBox {
+    Closed,
+    Open {
+        view: TwofaView,
+        confirm: Option<TwofaConfirm>,
+        notice: Option<String>,
+    },
 }
 
 impl crate::ui::on_screen::Farewell for TwoStepUi {}
@@ -82,17 +91,74 @@ impl TwoStepUi {
                 .submit_on_enter(false)
         });
         Self {
-            open: false,
-            view: TwofaView::Status,
+            stage: TwoFaBox::Closed,
             current_password: twofa_current_password,
             check_password,
             status_check_password,
             new_password: twofa_new_password,
             hint: twofa_hint,
             email: twofa_email,
-            notice: None,
             code: twofa_code,
+        }
+    }
+
+    pub(crate) fn is_open(&self) -> bool {
+        matches!(self.stage, TwoFaBox::Open { .. })
+    }
+
+    /// The view shown; the status screen while the box is closed.
+    pub(crate) fn view(&self) -> TwofaView {
+        match &self.stage {
+            TwoFaBox::Open { view, .. } => *view,
+            TwoFaBox::Closed => TwofaView::Status,
+        }
+    }
+
+    pub(crate) fn notice(&self) -> Option<&String> {
+        match &self.stage {
+            TwoFaBox::Open { notice, .. } => notice.as_ref(),
+            TwoFaBox::Closed => None,
+        }
+    }
+
+    pub(crate) fn confirm(&self) -> Option<TwofaConfirm> {
+        match &self.stage {
+            TwoFaBox::Open { confirm, .. } => *confirm,
+            TwoFaBox::Closed => None,
+        }
+    }
+
+    /// Open the box on `view`, with no confirmation or notice.
+    pub(super) fn open_at(&mut self, view: TwofaView) {
+        self.stage = TwoFaBox::Open {
+            view,
             confirm: None,
+            notice: None,
+        };
+    }
+
+    /// Switch an open box to `view`, dropping its confirmation and notice.
+    /// A closed box stays closed.
+    pub(super) fn goto(&mut self, view: TwofaView) {
+        if self.is_open() {
+            self.open_at(view);
+        }
+    }
+
+    pub(super) fn close(&mut self) {
+        self.stage = TwoFaBox::Closed;
+    }
+
+    /// Set the local notice line; an open box only.
+    pub(super) fn set_notice(&mut self, line: Option<String>) {
+        if let TwoFaBox::Open { notice, .. } = &mut self.stage {
+            *notice = line;
+        }
+    }
+
+    pub(super) fn set_confirm(&mut self, ask: Option<TwofaConfirm>) {
+        if let TwoFaBox::Open { confirm, .. } = &mut self.stage {
+            *confirm = ask;
         }
     }
 }

@@ -2,6 +2,7 @@ use super::{
     TranslatePrefs, bar_label, bar_label_for, choose_translate_to, detect_language, language_name,
     normalize_code, offer_language, search_languages, skip_translate, tracking_enabled,
 };
+use crate::ids::AccountKey;
 
 #[test]
 fn normalize_maps_regional_and_legacy_tags() {
@@ -91,12 +92,18 @@ fn skip_list_keeps_at_least_one_language() {
 #[test]
 fn hidden_chats_toggle() {
     let mut prefs = TranslatePrefs::default();
-    prefs.set_bar_hidden(7, true);
-    prefs.set_bar_hidden(7, true);
-    assert!(prefs.bar_hidden(7));
+    let primary = AccountKey::primary();
+    let other = AccountKey::new("account-1").unwrap();
+    prefs.set_bar_hidden(&primary, 7, true);
+    prefs.set_bar_hidden(&primary, 7, true);
+    assert!(prefs.bar_hidden(&primary, 7));
     assert_eq!(prefs.hidden_chats, vec![7]);
-    prefs.set_bar_hidden(7, false);
-    assert!(!prefs.bar_hidden(7));
+    // The same chat id in another account is another chat.
+    assert!(!prefs.bar_hidden(&other, 7));
+    prefs.set_bar_hidden(&other, 7, true);
+    prefs.set_bar_hidden(&primary, 7, false);
+    assert!(!prefs.bar_hidden(&primary, 7));
+    assert!(prefs.bar_hidden(&other, 7));
 }
 
 #[test]

@@ -23,10 +23,7 @@ fn another_gift_drops_the_first_gifts_upgrade_box(cx: &mut TestAppContext) {
     window
         .update(cx, |app, _, cx| {
             if let Some(manage) = app.gift_manage_mut() {
-                manage.flow = Some(GiftFlow::Upgrade {
-                    id: "first".into(),
-                    keep_details: true,
-                });
+                manage.flow = Some(GiftFlow::upgrade("first".into(), true));
             }
             app.select_gift(Some("first".into()), cx);
             let flow = |app: &mut QuillApp| app.gift_manage_mut().and_then(|m| m.flow.clone());
@@ -45,7 +42,7 @@ fn buy_by_name_from_send_gift_buys_for_its_recipient(cx: &mut TestAppContext) {
             if let Some(session) = app.demo_session.as_mut() {
                 session.open_chat(ChatId(11));
                 let send = &mut session.payments.gifts_manage.send;
-                send.open = true;
+                send.stage = quill::gift_manage::SendStage::Idle;
                 send.recipient = Some(GiftRecipient {
                     sender: MessageSender::User { user_id: 501 },
                     name: "Ada".into(),
@@ -56,8 +53,35 @@ fn buy_by_name_from_send_gift_buys_for_its_recipient(cx: &mut TestAppContext) {
             let chat = app.send_gift_recipient_chat();
             assert_eq!(chat, Some(ChatId(501)));
             app.open_marketplace_for(chat, window, cx);
-            assert!(app.payments.marketplace_open);
-            assert_eq!(app.payments.marketplace_chat, Some(ChatId(501)));
+            assert!(app.payments.marketplace.is_open());
+            assert_eq!(app.payments.marketplace.chat(), Some(ChatId(501)));
+        })
+        .unwrap();
+}
+
+/// Sweep 10-171: a purchase on its way stays the chat it started in; the
+/// box opened from another chat does not take it over.
+#[gpui_kit::test]
+fn a_purchase_on_its_way_is_not_taken_over_by_another_chats_box(cx: &mut TestAppContext) {
+    let window = demo(cx);
+    window
+        .update(cx, |app, window, cx| {
+            if let Some(session) = app.demo_session.as_mut() {
+                session.payments.marketplace_gift = Some(quill::marketplace::GiftPurchase {
+                    chat_id: ChatId(501),
+                    recipient: MessageSender::User { user_id: 501 },
+                    recipient_name: "Ada".into(),
+                    requested_name: "plush".into(),
+                    stage: quill::marketplace::GiftPurchaseStage::Loading(quill::ids::RequestId(1)),
+                });
+            }
+            app.payments.marketplace.open_for(ChatId(501), false);
+            app.payments.marketplace.close();
+            app.open_marketplace_for(Some(ChatId(502)), window, cx);
+            assert!(!app.payments.marketplace.is_open(), "B's box does not open");
+            assert_eq!(app.payments.marketplace.chat(), Some(ChatId(501)));
+            app.open_marketplace_for(Some(ChatId(501)), window, cx);
+            assert!(app.payments.marketplace.is_open(), "A's own box reopens");
         })
         .unwrap();
 }

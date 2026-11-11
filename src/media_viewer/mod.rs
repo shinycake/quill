@@ -15,7 +15,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ids::{ChatId, FileId, MessageId};
-use crate::state::HistoryMessage;
+use crate::state::{HistoryMessage, PhotoOwner};
 use crate::telegram::envelope::{MessageActions, MessageContent, PhotoContent, ServiceAction};
 use crate::text::TextEntity;
 use crate::voice::format_voice_duration;
@@ -134,11 +134,26 @@ pub enum ViewerSource {
     /// user), so the message-bound actions (forward, show in chat, album
     /// pin) do not apply; delete, set as main and report follow
     /// `Session::photo_actions`.
-    Profile,
+    Profile(PhotoOwner),
     /// The picture or clip of one poll option. The item carries the poll's
     /// chat and message, but it is not a message of its own: forward, delete
     /// and the other message actions do not apply.
     Poll,
+}
+
+impl ViewerSource {
+    /// A profile photo gallery.
+    pub fn is_profile(self) -> bool {
+        matches!(self, Self::Profile(_))
+    }
+
+    /// Whose photos the gallery pages over.
+    pub fn profile_owner(self) -> Option<PhotoOwner> {
+        match self {
+            Self::Profile(owner) => Some(owner),
+            _ => None,
+        }
+    }
 }
 
 /// Items left before the loaded edge at which the viewer asks for the
@@ -261,9 +276,14 @@ impl MediaViewer {
 
     /// B10: open over a user's, group's or channel's photos (newest
     /// first) on `index`. `total` counts the photos not loaded yet.
-    pub fn open_profile(items: Vec<MediaViewerItem>, index: usize, total: usize) -> Self {
+    pub fn open_profile(
+        owner: PhotoOwner,
+        items: Vec<MediaViewerItem>,
+        index: usize,
+        total: usize,
+    ) -> Self {
         let mut viewer = Self::open(items, index);
-        viewer.source = ViewerSource::Profile;
+        viewer.source = ViewerSource::Profile(owner);
         viewer.total = total;
         viewer
     }
@@ -272,7 +292,7 @@ impl MediaViewer {
     /// photos that the next page should be requested.
     pub fn wants_more_photos(&self) -> bool {
         self.is_open()
-            && self.source == ViewerSource::Profile
+            && self.source.is_profile()
             && self.index + VIEWER_PROFILE_PHOTOS_AROUND >= self.items.len()
             && self.total > self.items.len()
     }
@@ -282,7 +302,7 @@ impl MediaViewer {
     /// and the total updated; any other change is left for the next open.
     /// Returns how many were added.
     pub fn extend_photos(&mut self, gallery: Vec<MediaViewerItem>, total: usize) -> usize {
-        if self.source != ViewerSource::Profile || !self.is_open() {
+        if !self.source.is_profile() || !self.is_open() {
             return 0;
         }
         let prefix = self.items.len() <= gallery.len()
@@ -450,7 +470,7 @@ impl MediaViewer {
         // Shared Media lists oldest first, so the unloaded items come
         // before; profile photos list newest first, so they come after.
         let unloaded = match self.source {
-            ViewerSource::Profile => 0,
+            ViewerSource::Profile(_) => 0,
             _ => total - self.items.len(),
         };
         self.is_open().then(|| (unloaded + self.index + 1, total))
@@ -617,8 +637,8 @@ mod tests {
         assert_eq!(items[0].display_file_ids, vec![FileId(12), FileId(11)]);
         assert_eq!(items[0].natural_size, Some((800, 600)));
         assert_eq!(items[1].natural_size, None);
-        let mut viewer = MediaViewer::open_profile(items, 0, 2);
-        assert_eq!(viewer.source(), ViewerSource::Profile);
+        let mut viewer = MediaViewer::open_profile(PhotoOwner::User(9), items, 0, 2);
+        assert_eq!(viewer.source(), ViewerSource::Profile(PhotoOwner::User(9)));
         assert_eq!(viewer.position(), Some((1, 2)));
         assert!(!viewer.wants_older());
         assert!(!viewer.wants_more_photos());
@@ -679,7 +699,8 @@ mod tests {
     #[test]
     fn profile_viewer_counts_the_unloaded_photos_after_the_loaded_ones() {
         // 140 photos, the newest 100 loaded.
-        let mut viewer = MediaViewer::open_profile(profile_items(0..100), 0, 140);
+        let mut viewer =
+            MediaViewer::open_profile(PhotoOwner::User(9), profile_items(0..100), 0, 140);
         assert_eq!(viewer.position(), Some((1, 140)));
         assert!(!viewer.wants_more_photos(), "far from the loaded end");
         for _ in 0..(100 - VIEWER_PROFILE_PHOTOS_AROUND - 1) {
@@ -705,7 +726,7 @@ mod tests {
 
     #[test]
     fn profile_viewer_ignores_a_gallery_that_changed_its_start() {
-        let mut viewer = MediaViewer::open_profile(profile_items(0..3), 1, 5);
+        let mut viewer = MediaViewer::open_profile(PhotoOwner::User(9), profile_items(0..3), 1, 5);
         assert_eq!(viewer.extend_photos(profile_items(1..6), 5), 0);
         assert_eq!(viewer.len(), 3);
         assert_eq!(viewer.position(), Some((2, 5)));

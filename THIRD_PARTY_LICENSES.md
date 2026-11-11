@@ -1441,8 +1441,8 @@ Apache License
 Used by:
 - [constant_time_eq 0.6.1](https://codeberg.org/cesarb/constant_time_eq)
 - [dunce 1.0.5](https://gitlab.com/kornelski/dunce)
-- [gpui-kit-assets 0.9.0](https://github.com/longbridge/gpui-kit)
-- [gpui-kit 0.9.0](https://github.com/longbridge/gpui-kit)
+- [gpui-kit-assets 0.9.1](https://github.com/longbridge/gpui-kit)
+- [gpui-kit 0.9.1](https://github.com/longbridge/gpui-kit)
 - [interprocess 2.4.8](https://github.com/kotauskas/interprocess)
 - [ryu 1.0.23](https://github.com/dtolnay/ryu)
 - [spirv 0.4.0+sdk-1.4.341.0](https://github.com/gfx-rs/rspirv)
@@ -1527,24 +1527,24 @@ limitations under the License.
 ### Apache License 2.0
 
 Used by:
-- [gpui-pre 0.3.11](https://github.com/zed-industries/zed)
-- [gpui-pre-apple 0.3.11](https://github.com/zed-industries/zed)
-- [gpui-pre-linux 0.3.11](https://github.com/zed-industries/zed)
-- [gpui-pre-macos 0.3.11](https://github.com/zed-industries/zed)
-- [gpui-pre-wgpu 0.3.11](https://github.com/zed-industries/zed)
-- [gpui-pre-windows 0.3.11](https://github.com/zed-industries/zed)
-- [gpui-pre-collections 0.3.11](https://github.com/zed-industries/zed)
-- [gpui-pre-derive-refineable 0.3.11](https://github.com/zed-industries/zed)
-- [gpui-pre-http-client 0.3.11](https://github.com/zed-industries/zed)
-- [gpui-pre-macros 0.3.11](https://github.com/zed-industries/zed)
-- [gpui-pre-platform 0.3.11](https://github.com/zed-industries/zed)
-- [gpui-pre-refineable 0.3.11](https://github.com/zed-industries/zed)
-- [gpui-pre-scheduler 0.3.11](https://github.com/zed-industries/zed)
-- [gpui-pre-shared-string 0.3.11](https://github.com/zed-industries/zed)
-- [gpui-pre-sum-tree 0.3.11](https://github.com/zed-industries/zed)
-- [gpui-pre-util 0.3.11](https://github.com/zed-industries/zed)
-- [gpui-pre-ztracing-macro 0.3.11](https://github.com/zed-industries/zed)
-- [gpui-pre-ztracing 0.3.11](https://github.com/zed-industries/zed)
+- [gpui-pre 0.3.12](https://github.com/zed-industries/zed)
+- [gpui-pre-apple 0.3.12](https://github.com/zed-industries/zed)
+- [gpui-pre-linux 0.3.12](https://github.com/zed-industries/zed)
+- [gpui-pre-macos 0.3.12](https://github.com/zed-industries/zed)
+- [gpui-pre-wgpu 0.3.12](https://github.com/zed-industries/zed)
+- [gpui-pre-windows 0.3.12](https://github.com/zed-industries/zed)
+- [gpui-pre-collections 0.3.12](https://github.com/zed-industries/zed)
+- [gpui-pre-derive-refineable 0.3.12](https://github.com/zed-industries/zed)
+- [gpui-pre-http-client 0.3.12](https://github.com/zed-industries/zed)
+- [gpui-pre-macros 0.3.12](https://github.com/zed-industries/zed)
+- [gpui-pre-platform 0.3.12](https://github.com/zed-industries/zed)
+- [gpui-pre-refineable 0.3.12](https://github.com/zed-industries/zed)
+- [gpui-pre-scheduler 0.3.12](https://github.com/zed-industries/zed)
+- [gpui-pre-shared-string 0.3.12](https://github.com/zed-industries/zed)
+- [gpui-pre-sum-tree 0.3.12](https://github.com/zed-industries/zed)
+- [gpui-pre-util 0.3.12](https://github.com/zed-industries/zed)
+- [gpui-pre-ztracing-macro 0.3.12](https://github.com/zed-industries/zed)
+- [gpui-pre-ztracing 0.3.12](https://github.com/zed-industries/zed)
 
 ````text
 Copyright 2022 - 2025 Zed Industries, Inc.
@@ -1775,9 +1775,9 @@ Apache License
 ### Apache License 2.0
 
 Used by:
-- [gpui-base 0.9.0](https://github.com/longbridge/gpui-kit)
-- [gpui-component 0.9.0](https://github.com/longbridge/gpui-kit)
-- [gpui-component-macros 0.9.0](https://crates.io/crates/gpui-component-macros)
+- [gpui-base 0.9.1](https://github.com/longbridge/gpui-kit)
+- [gpui-component 0.9.1](https://github.com/longbridge/gpui-kit)
+- [gpui-component-macros 0.9.1](https://crates.io/crates/gpui-component-macros)
 
 ````text
 Copyright 2024 - 2026 Longbridge <https://longbridge.com>
@@ -2624,7 +2624,7 @@ express Statement of Purpose.
 ### Community Data License Agreement Permissive 2.0
 
 Used by:
-- [webpki-roots 1.0.11](https://github.com/rustls/webpki-roots)
+- [webpki-roots 1.0.12](https://github.com/rustls/webpki-roots)
 
 ````text
 # Community Data License Agreement - Permissive - Version 2.0
@@ -7041,7 +7041,7 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [arc-swap 1.9.4](https://github.com/vorner/arc-swap)
+- [arc-swap 1.9.5](https://github.com/vorner/arc-swap)
 
 ````text
 Copyright (c) 2017 arc-swap developers
@@ -8730,7 +8730,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [const-oid 0.10.2](https://github.com/RustCrypto/formats)
+- [const-oid 0.10.3](https://github.com/RustCrypto/formats)
 - [cpufeatures 0.3.1](https://github.com/RustCrypto/utils)
 - [der 0.8.3](https://github.com/RustCrypto/formats)
 
@@ -9177,7 +9177,7 @@ DEALINGS IN THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [rustls-pki-types 1.15.1](https://github.com/rustls/pki-types)
+- [rustls-pki-types 1.16.0](https://github.com/rustls/pki-types)
 
 ````text
 Copyright (c) 2023 Dirkjan Ochtman <dirkjan@ochtman.nl>
@@ -9266,7 +9266,7 @@ THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [notify-types 2.2.0](https://github.com/notify-rs/notify.git)
+- [notify-types 2.3.0](https://github.com/notify-rs/notify.git)
 
 ````text
 Copyright (c) 2023 Notify Contributors
@@ -10565,7 +10565,7 @@ SOFTWARE.
 ### MIT License
 
 Used by:
-- [crc32fast 1.5.4](https://github.com/srijs/rust-crc32fast)
+- [crc32fast 1.5.5](https://github.com/srijs/rust-crc32fast)
 
 ````text
 MIT License
@@ -12426,7 +12426,7 @@ SOFTWARE.
 
 Used by:
 - [tracing-core 0.1.36](https://github.com/tokio-rs/tracing)
-- [zip 9.5.0](https://github.com/zip-rs/zip2)
+- [zip 9.5.1](https://github.com/zip-rs/zip2)
 
 ````text
 The MIT License (MIT)
@@ -12802,7 +12802,7 @@ THE SOFTWARE.
 ### MIT License
 
 Used by:
-- [bit_field 0.10.3](https://github.com/phil-opp/rust-bit-field)
+- [bit_field 0.10.4](https://github.com/phil-opp/rust-bit-field)
 
 ````text
 The MIT License (MIT)

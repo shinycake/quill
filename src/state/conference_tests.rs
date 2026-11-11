@@ -53,7 +53,7 @@ fn the_join_answer_tracks_the_conference_with_its_payload() {
     assert_eq!(call.id, 77);
     assert!(call.is_conference());
     assert!(call.is_muted_self);
-    assert_eq!(call.join_payload, "{}");
+    assert_eq!(call.transport.answer(), "{}");
     assert_eq!(
         call.conference_input(),
         Some(ConferenceInput::Message {
@@ -78,7 +78,7 @@ fn a_created_conference_keeps_its_upgrade_and_rejoins_by_its_link() {
     apply(&mut session, &joined_answer(extra, 78));
     let call = session.calls.active_group_call.as_mut().expect("tracked");
     assert_eq!(
-        call.conference.as_ref().and_then(|c| c.upgrade.clone()),
+        call.conference.as_ref().and_then(|c| c.upgrade().cloned()),
         Some(upgrade())
     );
     // Nothing to rejoin with until TDLib reports the link.
@@ -195,4 +195,29 @@ fn a_failed_follow_of_the_other_sides_conference_shows_the_failed_call() {
     assert_eq!(summary.end_line, CONFERENCE_FOLLOW_FAILED);
     assert!(session.calls.group_call_error.is_none());
     assert!(session.calls.active_group_call.is_none());
+}
+
+#[test]
+fn the_share_link_panel_closes_back_to_upgraded_and_keeps_the_migration() {
+    let mut call = ConferenceCall {
+        input: None,
+        stage: ConferenceStage::SharingLink { from: 4 },
+    };
+    assert!(call.link_open());
+    assert_eq!(call.migrated_from(), Some(4));
+    call.close_link();
+    assert!(!call.link_open());
+    assert_eq!(
+        call.migrated_from(),
+        Some(4),
+        "its end still shows no screen"
+    );
+    // A conference that took no 1:1 call over has nothing to close.
+    let mut plain = ConferenceCall {
+        input: None,
+        stage: ConferenceStage::Running,
+    };
+    plain.close_link();
+    assert_eq!(plain.migrated_from(), None);
+    assert!(plain.upgrade().is_none());
 }

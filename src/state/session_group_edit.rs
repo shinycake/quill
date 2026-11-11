@@ -9,13 +9,13 @@ impl Session {
         match chat.kind {
             ChatKind::Supergroup { supergroup_id, .. } => self
                 .supergroup_own_status(supergroup_id)
-                .or(chat.my_member_status),
+                .or(chat.member_status()),
             ChatKind::BasicGroup { basic_group_id } => self
                 .groups
                 .basic_group_status
                 .get(&basic_group_id)
                 .copied()
-                .or(chat.my_member_status),
+                .or(chat.member_status()),
             _ => None,
         }
     }
@@ -83,27 +83,43 @@ impl Session {
                 GroupInfoField::Description,
                 super::request_errors::error_reason(err),
             ),
-            RequestPurpose::SetChatPhoto => (
-                GroupInfoField::Photo,
-                super::request_errors::error_reason(err),
-            ),
+            // The photo uploads after the box closes (tdesktop), so the
+            // box cannot show its refusal: say it as the action error.
+            RequestPurpose::SetChatPhoto => {
+                self.chats_state
+                    .chat_action_error
+                    .push(crate::lang::tr_with(
+                        crate::lang::keys::Q_PEOPLE_COULD_NOT_CHANGE_PHOTO,
+                        &[("reason", &super::request_errors::error_reason(err))],
+                    ));
+                (
+                    GroupInfoField::Photo,
+                    super::request_errors::error_reason(err),
+                )
+            }
             RequestPurpose::UpgradeBasicGroup
             | RequestPurpose::ToggleSupergroupIsAllHistoryAvailable
             | RequestPurpose::ToggleSupergroupAutoTranslate
-            | RequestPurpose::ToggleSupergroupSignMessages => (
+            | RequestPurpose::ToggleSupergroupSignMessages
+            | RequestPurpose::ToggleChatHasProtectedContent
+            | RequestPurpose::ToggleSupergroupJoinToSendMessages
+            | RequestPurpose::ToggleSupergroupJoinByRequest
+            | RequestPurpose::ReorderSupergroupUsernames
+            | RequestPurpose::Groups(GroupsPurpose::GroupType(
+                GroupTypePurpose::DisableAllUsernames,
+            )) => (
                 GroupInfoField::Settings,
                 super::request_errors::error_reason(err),
             ),
-            RequestPurpose::SetSupergroupUsername if err.premium_limit.is_some() => return,
-            RequestPurpose::SetSupergroupUsername => {
+            // A link past the Premium limit opens the limit box; the Edit
+            // box still has to stay open with the link unsaved.
+            RequestPurpose::SetSupergroupUsername => (
+                GroupInfoField::Username,
                 match crate::group_type::username_save_problem(err.server_type.as_deref()) {
-                    Some(problem) => (
-                        GroupInfoField::Username,
-                        crate::lang::tr(problem.text()).to_string(),
-                    ),
-                    None => return,
-                }
-            }
+                    Some(problem) => crate::lang::tr(problem.text()).to_string(),
+                    None => super::request_errors::error_reason(err),
+                },
+            ),
             _ => return,
         };
         if let Some(chat_id) = pending.chat_id {

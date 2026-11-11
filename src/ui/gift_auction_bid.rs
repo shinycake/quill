@@ -124,15 +124,16 @@ impl QuillApp {
         };
         let range = state.slider();
         let bounds = (range.min, range.max);
-        let previous = self
-            .gift_market
-            .slider
-            .as_ref()
-            .filter(|ui| ui.gift_id == gift_id);
-        if previous.is_some_and(|ui| ui.bounds == bounds) {
+        let Some(slot) = self.gift_market.bid_slot(gift_id) else {
+            return;
+        };
+        if slot.as_ref().is_some_and(|ui| ui.bounds == bounds) {
             return;
         }
-        let chosen = allowed(range, previous.map_or(range.initial(), |ui| ui.chosen));
+        // Another bid moved the bounds: the open "Custom Amount" field
+        // (typed text and error) stays on the rebuilt slider.
+        let custom = slot.as_mut().and_then(|ui| ui.custom.take());
+        let chosen = allowed(range, slot.as_ref().map_or(range.initial(), |ui| ui.chosen));
         let slider = cx.new(|_| {
             SliderState::new()
                 .min(0.)
@@ -149,34 +150,38 @@ impl QuillApp {
                 return;
             };
             let amount = state.slider().amount_at(value.end());
-            if let Some(ui) = this.gift_market.slider.as_mut() {
+            if let Some(ui) = this.gift_market.bid_mut() {
                 ui.chosen = amount;
             }
             cx.notify();
         })
         .detach();
-        self.gift_market.slider = Some(BidSliderUi {
-            gift_id,
-            state: slider,
-            chosen,
-            bounds,
-        });
+        if let Some(slot) = self.gift_market.bid_slot(gift_id) {
+            *slot = Some(BidSliderUi {
+                state: slider,
+                chosen,
+                bounds,
+                custom,
+            });
+        }
     }
 
     /// "+" and the bubble: the "Custom Amount" field.
-    fn open_custom_bid(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let chosen = self.gift_market.slider.as_ref().map_or(0, |ui| ui.chosen);
+    pub(super) fn open_custom_bid(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let chosen = self.gift_market.bid().map_or(0, |ui| ui.chosen);
         let input = cx.new(|cx| {
             let mut input = InputState::new(window, cx).placeholder(tr(keys::Q_MONEY_STARS));
             input.set_value(chosen.to_string(), window, cx);
             input
         });
-        self.gift_market.custom = Some(CustomBidUi { input, error: None });
+        if let Some(bid) = self.gift_market.bid_mut() {
+            bid.custom = Some(CustomBidUi { input, error: None });
+        }
         cx.notify();
     }
 
     fn save_custom_bid(&mut self, gift_id: i64, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(custom) = self.gift_market.custom.as_ref() else {
+        let Some(custom) = self.gift_market.bid().and_then(|bid| bid.custom.as_ref()) else {
             return;
         };
         let typed: String = custom
@@ -205,15 +210,21 @@ impl QuillApp {
             None
         };
         if let Some(error) = error {
-            if let Some(custom) = self.gift_market.custom.as_mut() {
+            if let Some(custom) = self
+                .gift_market
+                .bid_mut()
+                .and_then(|bid| bid.custom.as_mut())
+            {
                 custom.error = Some(error);
             }
             cx.notify();
             return;
         }
-        self.gift_market.custom = None;
+        if let Some(bid) = self.gift_market.bid_mut() {
+            bid.custom = None;
+        }
         let range = state.slider();
-        if let Some(ui) = self.gift_market.slider.as_mut() {
+        if let Some(ui) = self.gift_market.bid_mut() {
             ui.chosen = amount;
             let step = range.step_of(amount);
             ui.state
@@ -236,7 +247,7 @@ impl QuillApp {
         let Some(state) = self.auction_state_cloned(gift_id) else {
             return;
         };
-        let chosen = self.gift_market.slider.as_ref().map_or(0, |ui| ui.chosen);
+        let chosen = self.gift_market.bid().map_or(0, |ui| ui.chosen);
         let stars = match state.bid_action(chosen) {
             BidAction::Close => {
                 self.market_back(cx);
@@ -245,13 +256,24 @@ impl QuillApp {
             }
             BidAction::Place(n) | BidAction::Increase(n) => n,
         };
-        let Some(MessageSender::User { user_id }) = self.auction_recipient() else {
+        let Some(recipient) = self.auction_recipient(gift_id) else {
+            return;
+        };
+        // A raise keeps the bid's owner and needs no user; only a new bid
+        // has to go to one.
+        let owner_is_recipient = state
+            .my()
+            .and_then(|my| my.owner.as_ref())
+            .is_none_or(|owner| *owner == recipient);
+        if !matches!(recipient, MessageSender::User { .. })
+            && !(state.my_stars() > 0 && owner_is_recipient)
+        {
             self.set_note(StatusNote::info(tr(
                 keys::Q_MONEY_AUCTION_GIFTS_CAN_ONLY_BE,
             )));
             cx.notify();
             return;
-        };
+        }
         let add = stars.saturating_sub(state.my_stars());
         let poor = self
             .session()
@@ -275,7 +297,7 @@ impl QuillApp {
         let sent = match self.live.as_mut() {
             Some(live) => live
                 .driver
-                .bid_gift_auction(gift_id, stars, user_id, &text, hide)
+                .bid_gift_auction(gift_id, stars, recipient, &text, hide)
                 .is_ok(),
             None => {
                 self.set_note(StatusNote::info(tr(keys::Q_MONEY_BIDS_NEED_A_SIGNED_IN)));
@@ -285,8 +307,8 @@ impl QuillApp {
         if sent {
             // The send and change boxes are done; the bid box stays and
             // shows the new place when the update arrives.
-            self.gift_market.stack.retain(|entry| {
-                !matches!(
+            self.gift_market.close_where(|entry| {
+                matches!(
                     entry,
                     MarketBox::AuctionSend { .. } | MarketBox::ChangeRecipient { .. }
                 )
@@ -306,7 +328,7 @@ impl QuillApp {
         let Some(state) = session.payments.gift_market.auctions.get(&gift_id) else {
             return BoxView::new(tr(keys::AUCTION_JOIN_BID), div());
         };
-        let Some(slider) = self.gift_market.slider.as_ref() else {
+        let Some(slider) = self.gift_market.bid() else {
             return BoxView::new(tr(keys::AUCTION_JOIN_BID), div());
         };
         self.request_animation_tick(1, cx);
@@ -401,7 +423,7 @@ impl QuillApp {
                         })),
                 ),
         );
-        if let Some(custom) = self.gift_market.custom.as_ref() {
+        if let Some(custom) = self.gift_market.bid().and_then(|bid| bid.custom.as_ref()) {
             body =
                 body.child(
                     div()
@@ -432,7 +454,9 @@ impl QuillApp {
                                         .ghost()
                                         .small()
                                         .on_click(cx.listener(|this, _, _, cx| {
-                                            this.gift_market.custom = None;
+                                            if let Some(bid) = this.gift_market.bid_mut() {
+                                                bid.custom = None;
+                                            }
                                             cx.notify();
                                         })),
                                 )
@@ -549,7 +573,11 @@ impl QuillApp {
                 &[("stars", &(stars_text(balance.stars)).to_string())],
             )));
         }
-        let bidding = session.payments.gift_market.bidding == Some(gift_id);
+        let bidding = session
+            .payments
+            .gift_market
+            .bidding
+            .is_some_and(|(gift, _)| gift == gift_id);
         let action = state.bid_action(chosen);
         let button = Button::new("auction-bid-submit")
             .label(action.label(state.my_stars()))
@@ -580,7 +608,7 @@ impl QuillApp {
             return;
         };
         let step = state.slider().step_of(amount);
-        if let Some(ui) = self.gift_market.slider.as_mut() {
+        if let Some(ui) = self.gift_market.bid_mut() {
             ui.chosen = amount;
             ui.state
                 .update(cx, |slider, cx| slider.set_value(step, window, cx));

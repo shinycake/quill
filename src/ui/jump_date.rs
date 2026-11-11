@@ -61,13 +61,18 @@ impl QuillApp {
 
     fn jump_date_pick(&mut self, day: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            self.screen.connection.set_note_for(
-                &self.screen.windows,
-                match live.driver.jump_to_date(day) {
-                    Ok(_) => StatusNote::silent(tr(keys::Q_MISC_JUMPING_TO_DATE)),
-                    Err(_) => StatusNote::error(tr(keys::Q_MISC_COULD_NOT_JUMP_TO_THAT)),
-                },
-            );
+            // `Ok(None)`: the jump was refused locally (nothing sent), so
+            // there is nothing to say "Jumping" about.
+            let note = match live.driver.jump_to_date(day) {
+                Ok(Some(_)) => Some(StatusNote::silent(tr(keys::Q_MISC_JUMPING_TO_DATE))),
+                Ok(None) => None,
+                Err(_) => Some(StatusNote::error(tr(keys::Q_MISC_COULD_NOT_JUMP_TO_THAT))),
+            };
+            if let Some(note) = note {
+                self.screen
+                    .connection
+                    .set_note_for(&self.screen.windows, note);
+            }
         } else if let Some(session) = self.demo_session.as_mut() {
             session.close_history_calendar();
         }
@@ -222,7 +227,7 @@ impl QuillApp {
             grid = grid.child(row);
         }
 
-        let hint = if calendar.loading {
+        let hint = if calendar.is_loading() {
             tr(keys::Q_MISC_LOADING_DAYS).to_string()
         } else if calendar.media == SearchMediaKind::All {
             tr(keys::Q_MISC_PICK_A_DAY_TO_SEE).to_string()
@@ -235,7 +240,7 @@ impl QuillApp {
                 )],
             )
         };
-        let note = self.session().and_then(|s| s.search.date_jump_note.clone());
+        let note = self.session().and_then(|s| s.search.date_jump_note());
         div()
             .id("jump-date")
             .mx_auto()

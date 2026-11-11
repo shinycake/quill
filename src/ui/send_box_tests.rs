@@ -52,7 +52,11 @@ fn own_paid_channel(app: &mut QuillApp, allowed: bool) {
             ..quill::state::SupergroupFullInfoData::default()
         },
     );
-    session.chats.get_mut(&13).unwrap().my_member_status = Some(ChannelMemberStatus::Creator);
+    session
+        .chats
+        .get_mut(&13)
+        .unwrap()
+        .assume_member_status(Some(ChannelMemberStatus::Creator));
 }
 
 fn tray(app: &mut QuillApp, files: &[(&str, AttachmentKind)]) {
@@ -92,8 +96,10 @@ fn paid_media_is_for_channels_that_allow_it_and_the_price_box_sets_it(cx: &mut T
             .clone();
         input.update(cx, |input, cx| input.set_value("10001", window, cx));
         assert!(!app.submit_price_dialog(cx), "over the limit stays open");
-        assert!(app.composer_ui.send_box.price.as_ref().unwrap().too_high);
+        assert!(app.price_too_high(cx));
+        // Editing the price clears the refusal of the old text.
         input.update(cx, |input, cx| input.set_value("250", window, cx));
+        assert!(!app.price_too_high(cx), "the line goes with the edit");
         assert!(app.submit_price_dialog(cx));
         assert!(app.composer_ui.send_box.price.is_none());
         assert_eq!(app.composer_media_options().paid_stars, 250);
@@ -125,12 +131,18 @@ fn high_quality_is_offered_for_photos_over_1280_only(cx: &mut TestAppContext) {
         .unwrap();
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
-    app.update_in(vcx, |app, _, _| {
+    app.update_in(vcx, |app, _, cx| {
         tray(app, &[("demo-thumb.png", AttachmentKind::Photo)]);
         assert!(!app.tray_has_large_photo());
         let photo = ComposerAttachment::pick(&big, AttachmentKind::Photo).unwrap();
         app.update_pending_attachments(|tray| tray.push(photo))
             .expect("an open chat");
+        // The header is read by the media check's worker, not on render.
+        assert!(!app.tray_has_large_photo());
+        app.check_tray_videos(cx);
+    });
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, _| {
         assert!(app.tray_has_large_photo());
         assert!(!app.composer_media_options().hd_photos);
         app.update_pending_send(|send| send.hd_photos = true);
@@ -141,6 +153,38 @@ fn high_quality_is_offered_for_photos_over_1280_only(cx: &mut TestAppContext) {
         })
         .expect("an open chat");
         assert!(!app.composer_media_options().hd_photos);
+    });
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 12-D008: a photo that goes out as a converted JPEG (a picture the header
+/// reader cannot open, or one with a JPEG preset) is sized by that JPEG, so
+/// the High quality offer is not lost.
+#[gpui_kit::test]
+fn high_quality_is_offered_for_a_photo_sent_as_its_converted_jpeg(cx: &mut TestAppContext) {
+    let dir = std::env::temp_dir().join(format!("quill-send-box-jpeg-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("shot.heic");
+    std::fs::write(&source, b"a picture the header reader cannot open").unwrap();
+    let converted = dir.join("shot.jpg");
+    image::RgbImage::from_pixel(1400, 300, image::Rgb([9, 9, 9]))
+        .save(&converted)
+        .unwrap();
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| {
+        let mut photo = ComposerAttachment::pick(&source, AttachmentKind::Photo).unwrap();
+        photo
+            .extras
+            .set_photo(quill::composer::PhotoPrep::Jpeg(converted.clone()));
+        app.update_pending_attachments(|tray| tray.push(photo))
+            .expect("an open chat");
+        assert!(!app.tray_has_large_photo(), "not read yet");
+        app.check_tray_videos(cx);
+    });
+    vcx.run_until_parked();
+    app.update_in(vcx, |app, _, _| {
+        assert!(app.tray_has_large_photo(), "sized by the JPEG it goes as");
     });
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -175,12 +219,58 @@ fn a_soundless_mp4_becomes_a_gif_after_the_background_check(cx: &mut TestAppCont
         app.attach_dropped_files(std::slice::from_ref(&clip), cx);
         // The probe runs in the background: the tray waits for it.
         assert!(app.tray_videos_checking());
-        assert!(!app.pending_attachments()[0].extras.gif);
+        assert!(!app.pending_attachments()[0].extras.is_gif());
     });
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
         assert!(!app.tray_videos_checking());
-        assert!(app.pending_attachments()[0].extras.gif);
+        assert!(app.pending_attachments()[0].extras.is_gif());
+    });
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[gpui_kit::test]
+fn a_video_read_settles_when_the_screen_moves_on_before_it_lands(cx: &mut TestAppContext) {
+    let dir = std::env::temp_dir().join(format!("quill-send-box-switch-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let clip = dir.join("silent.mp4");
+    let made = quill::media_tools::command("ffmpeg")
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=1:size=64x64:rate=5",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+        ])
+        .arg(&clip)
+        .output()
+        .is_ok_and(|out| out.status.success());
+    if !made {
+        // Skipped where ffmpeg isn't installed.
+        return;
+    }
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    // The tray holds the file under its canonical path (the temp folder is
+    // a link on macOS), and the read is kept by that path.
+    let read = app.update_in(vcx, |app, window, cx| {
+        app.attach_dropped_files(std::slice::from_ref(&clip), cx);
+        let read = app.pending_attachments()[0].path.clone();
+        assert!(app.composer_sends.reads.sound.is_reading(&read));
+        // The account changes before the probe answers.
+        app.switch_account(&quill::ids::AccountKey("other".into()), "", window, cx);
+        read
+    });
+    vcx.run_until_parked();
+    app.read_with(vcx, |app, _| {
+        assert!(
+            app.composer_sends.reads.sound.done(&read).is_some(),
+            "the read ended with its answer, not with the screen"
+        );
     });
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -202,7 +292,8 @@ fn the_same_picture_added_again_still_goes_as_its_jpeg(cx: &mut TestAppContext) 
     app.update_in(vcx, |app, _, cx| {
         assert!(!app.tray_media_checks_pending());
         let mut again = app.pending_attachments()[0].clone();
-        let jpeg = again.extras.photo_jpeg.take().expect("a JPEG");
+        let jpeg = again.extras.photo_jpeg().expect("a JPEG").to_path_buf();
+        again.extras.set_photo(quill::composer::PhotoPrep::AsIs);
         app.update_pending_send(|send| send.attachments.push(again));
         app.check_tray_videos(cx);
         assert_eq!(
@@ -306,7 +397,7 @@ fn photos(count: usize) -> Vec<ComposerAttachment> {
 /// each sent photo came from, and its album.
 fn newest_photos(app: &QuillApp, count: usize) -> Vec<(String, i64)> {
     let session = app.demo_session.as_ref().expect("demo session");
-    let chat = session.open_chat.expect("an open chat");
+    let chat = session.open_chat_id().expect("an open chat");
     let history = session.histories.get(&chat.0).expect("history");
     let newest: Vec<_> = history.ordered().into_iter().rev().take(count).collect();
     newest
@@ -356,7 +447,7 @@ fn removing_cards_before_and_past_the_tenth_sends_the_rest_in_order(cx: &mut Tes
     vcx.run_until_parked();
     app.update_in(&mut vcx, |app, window, cx| {
         app.set_composer_group_media(Some(true));
-        app.submit_composer(String::new(), window, cx);
+        app.submit_composer(String::new(), Default::default(), window, cx);
         assert!(app.pending_attachments().is_empty(), "the tray went");
         let sent = newest_photos(app, 11);
         let names: Vec<&str> = sent.iter().map(|(name, _)| name.as_str()).collect();

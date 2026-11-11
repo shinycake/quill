@@ -33,10 +33,10 @@ impl QuillApp {
             };
             let (title, message, confirm_label): (String, String, String) =
                 match dialog_state.action {
-                    GroupConfirmAction::DeleteChat => {
+                    GroupConfirmAction::DeleteChat { chat_id } => {
                         let is_channel = this
                             .session()
-                            .and_then(|session| session.chats.get(&dialog_state.chat_id.0))
+                            .and_then(|session| session.chats.get(&chat_id.0))
                             .is_some_and(|chat| chat.is_channel());
                         (
                             if is_channel {
@@ -54,10 +54,10 @@ impl QuillApp {
                             tr(keys::BOX_DELETE).to_string(),
                         )
                     }
-                    GroupConfirmAction::RemoveFromList => {
+                    GroupConfirmAction::RemoveFromList { chat_id } => {
                         let group = this
                             .session()
-                            .and_then(|session| session.chats.get(&dialog_state.chat_id.0))
+                            .and_then(|session| session.chats.get(&chat_id.0))
                             .filter(|chat| {
                                 matches!(
                                     chat.kind,
@@ -78,7 +78,7 @@ impl QuillApp {
                             ),
                         }
                     }
-                    GroupConfirmAction::BlockUser { block } => {
+                    GroupConfirmAction::BlockUser { block, .. } => {
                         if block {
                             (
                                 tr(keys::PROFILE_BLOCK_USER).to_string(),
@@ -93,27 +93,27 @@ impl QuillApp {
                             )
                         }
                     }
-                    GroupConfirmAction::RemoveSelectedChats => (
+                    GroupConfirmAction::RemoveSelectedChats { .. } => (
                         tr(keys::Q_PEOPLE_DELETE_CHATS).to_string(),
                         tr(keys::Q_PEOPLE_DELETE_THE_SELECTED_CHATS_AND).to_string(),
                         tr(keys::GROUP_INVITE_CONTEXT_DELETE).to_string(),
                     ),
-                    GroupConfirmAction::LeaveChat => (
+                    GroupConfirmAction::LeaveChat { .. } => (
                         tr(keys::Q_PEOPLE_LEAVE_CHAT).to_string(),
                         tr(keys::Q_PEOPLE_LEAVE_THIS_CHAT_YOU_CAN).to_string(),
                         tr(keys::Q_PEOPLE_LEAVE).to_string(),
                     ),
-                    GroupConfirmAction::BroadcastIntro => (
+                    GroupConfirmAction::BroadcastIntro { .. } => (
                         tr(keys::Q_PEOPLE_BROADCAST_GROUPS).to_string(),
                         quill::admin_extras::broadcast_features_text(),
                         tr(keys::Q_PEOPLE_CONVERT).to_string(),
                     ),
-                    GroupConfirmAction::BroadcastUpgrade => (
+                    GroupConfirmAction::BroadcastUpgrade { .. } => (
                         tr(keys::Q_PEOPLE_ARE_YOU_SURE).to_string(),
                         quill::admin_extras::BROADCAST_WARNING.to_string(),
                         tr(keys::Q_PEOPLE_CONVERT).to_string(),
                     ),
-                    GroupConfirmAction::RestartBot => (
+                    GroupConfirmAction::RestartBot { .. } => (
                         tr(keys::Q_PEOPLE_RESTART_BOT).to_string(),
                         tr(keys::Q_PEOPLE_CLEAR_THIS_BOTS_CHAT_HISTORY).to_string(),
                         tr(keys::Q_PEOPLE_RESTART).to_string(),
@@ -153,19 +153,19 @@ impl QuillApp {
                         tr(keys::Q_PEOPLE_THIS_WILL_REMOVE_YOUR_CONTACTS).to_string(),
                         tr(keys::GROUP_INVITE_CONTEXT_DELETE).to_string(),
                     ),
-                    GroupConfirmAction::DeleteForumTopic { forum_topic_id } => {
+                    GroupConfirmAction::DeleteForumTopic {
+                        chat_id,
+                        forum_topic_id,
+                    } => {
                         let name = this
                             .session()
                             .and_then(|s| {
-                                s.threads
-                                    .forum_topics
-                                    .get(&dialog_state.chat_id.0)
-                                    .and_then(|topics| {
-                                        topics
-                                            .iter()
-                                            .find(|t| t.forum_topic_id == forum_topic_id)
-                                            .map(|t| t.name.clone())
-                                    })
+                                s.threads.forum_topics.get(&chat_id.0).and_then(|topics| {
+                                    topics
+                                        .iter()
+                                        .find(|t| t.forum_topic_id == forum_topic_id)
+                                        .map(|t| t.name.clone())
+                                })
                             })
                             .unwrap_or_else(|| tr(keys::Q_PEOPLE_THIS_TOPIC).to_string());
                         (
@@ -207,9 +207,9 @@ impl QuillApp {
                         tr(keys::Q_PEOPLE_REMOVE_THIS_EMOJI_PACK_YOU).to_string(),
                         tr(keys::BOX_REMOVE).to_string(),
                     ),
-                    GroupConfirmAction::RemoveMember { user_id } => {
+                    GroupConfirmAction::RemoveMember { chat_id, user_id } => {
                         let name = this.contact_display_name(user_id);
-                        let place = if this.group_flavor(dialog_state.chat_id)
+                        let place = if this.group_flavor(chat_id)
                             == Some(quill::moderation::GroupFlavor::Channel)
                         {
                             "channel"
@@ -313,7 +313,7 @@ impl QuillApp {
     /// behavior (composer hidden).
     pub(in crate::ui) fn channel_footer(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        if !session.chats.get(&session.open_chat?.0)?.is_channel() {
+        if !session.chats.get(&session.open_chat_id()?.0)?.is_channel() {
             return None;
         }
         self.channel_footer_body(cx)
@@ -326,12 +326,12 @@ impl QuillApp {
     #[inline(never)]
     fn channel_footer_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let open = session.open_chat?;
+        let open = session.open_chat_id()?;
         let chat = session.chats.get(&open.0)?;
         if !chat.is_channel() {
             return None;
         }
-        let status = chat.my_member_status;
+        let status = chat.member_status();
         let muted = chat.is_muted();
         let footer = div()
             .p_3()
@@ -499,12 +499,16 @@ impl QuillApp {
     }
 
     /// `joinChat` for the open public channel. Demo sessions flip the status
-    /// locally (no live driver).
-    pub(in crate::ui) fn join_channel(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+    /// locally (no live driver). Returns whether the join was sent (or done
+    /// in a demo session), so a caller words its own note only then.
+    pub(in crate::ui) fn join_channel(&mut self, chat_id: ChatId, cx: &mut Context<Self>) -> bool {
+        let mut sent = false;
         if let Some(live) = self.live.as_mut() {
+            let result = live.driver.join_channel(chat_id);
+            sent = result.is_ok();
             self.screen.connection.set_note_for(
                 &self.screen.windows,
-                match live.driver.join_channel(chat_id) {
+                match result {
                     Ok(()) => StatusNote::silent(tr(keys::Q_PEOPLE_JOINING_CHANNEL)),
                     Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_JOIN_CHANNEL)),
                 },
@@ -514,8 +518,10 @@ impl QuillApp {
                 chat.set_member_status(ChannelMemberStatus::Member, None);
             }
             self.set_note(StatusNote::silent(tr(keys::Q_PEOPLE_JOINED_CHANNEL_DEMO)));
+            sent = true;
         }
         cx.notify();
+        sent
     }
 
     /// `leaveChat` for the open channel. Demo sessions flip the status locally.
@@ -524,7 +530,7 @@ impl QuillApp {
             self.screen.connection.set_note_for(
                 &self.screen.windows,
                 match live.driver.leave_channel(chat_id) {
-                    Ok(()) => StatusNote::silent(tr(keys::Q_PEOPLE_LEAVING_CHANNEL)),
+                    Ok(_) => StatusNote::silent(self.leaving_line(chat_id)),
                     Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_LEAVE_CHANNEL)),
                 },
             );

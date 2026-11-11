@@ -11,19 +11,26 @@ impl Session {
             &self.stickers.stickers.favorites,
             &self.stickers.stickers.found_stickers,
             &self.stickers.stickers.suggestions,
-            &self.payments.hub.premium_stickers,
         ]
         .into_iter()
         .flatten()
-        .chain(self.media.media_library.set_stickers.values().flatten())
+        .chain(
+            self.payments
+                .hub
+                .premium_stickers
+                .data()
+                .into_iter()
+                .flatten(),
+        )
+        .chain(self.media.media_library.values().flatten())
         .find(|sticker| sticker.file_id == file_id)
     }
 
     pub fn sticker_requires_premium(&self, file_id: FileId) -> bool {
         self.panel_sticker(file_id)
-            .is_some_and(|sticker| sticker.requires_premium)
+            .is_some_and(|sticker| sticker.requires_premium())
             || self.histories.values().flat_map(|history| history.messages.values()).chain(self.threads.topic_histories.values().flat_map(|history| history.messages.values())).any(|message| {
-                matches!(&message.content, MessageContent::Sticker(sticker) if sticker.file_id == file_id && sticker.requires_premium)
+                matches!(&message.content, MessageContent::Sticker(sticker) if sticker.file_id == file_id && sticker.requires_premium())
             })
     }
 
@@ -41,6 +48,37 @@ impl Session {
             } else {
                 self.stickers.stickers.batch_failed += 1;
             }
+        }
+    }
+
+    /// The box's change of the viewed set went out.
+    pub fn begin_set_change(&mut self, set_id: i64, change: SetChange) {
+        if let Some(view) = self.stickers.sticker_set_view.as_mut()
+            && view.set_id == set_id
+        {
+            view.change = SetChangeStage::Working(change);
+        }
+    }
+
+    /// The change box asked for answered (`ok`) or failed. Only the answer
+    /// to the change it waits on counts.
+    pub(crate) fn finish_set_change(&mut self, set_id: i64, change: SetChange, success: bool) {
+        if let Some(view) = self.stickers.sticker_set_view.as_mut()
+            && view.set_id == set_id
+            && view.change == SetChangeStage::Working(change)
+        {
+            view.change = if success {
+                SetChangeStage::Done(change)
+            } else {
+                SetChangeStage::Failed(change)
+            };
+        }
+    }
+
+    /// The box took the outcome of its change: back to idle.
+    pub fn settle_set_change(&mut self) {
+        if let Some(view) = self.stickers.sticker_set_view.as_mut() {
+            view.change = SetChangeStage::Idle;
         }
     }
 
@@ -63,14 +101,11 @@ impl Session {
             .stickers
             .archived
             .extend(sets.into_iter().filter(|set| ids.insert(set.id)));
-        self.stickers.stickers.failed = false;
     }
 
     pub fn accept_installed_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
-        self.stickers.stickers.loading_sets = false;
-        self.stickers.stickers.failed = false;
         self.stickers.stickers.sets = sets;
-        self.stickers.stickers.installed_loaded = true;
+        self.stickers.stickers.lists.installed.succeed(());
         if self.stickers.stickers.tab != StickerTab::Installed {
             return;
         }
@@ -82,7 +117,7 @@ impl Session {
         if !still_selected {
             self.stickers.stickers.selected_set_id =
                 self.stickers.stickers.sets.first().map(|set| set.id);
-            self.stickers.stickers.loaded_set_id = None;
+            self.stickers.stickers.set = StickerSetStage::Idle;
             self.stickers.stickers.stickers.clear();
         }
     }
@@ -151,8 +186,7 @@ impl Session {
     /// Slice S12: drop the composer sticker suggestions.
     pub fn clear_sticker_suggestions(&mut self) {
         self.stickers.stickers.suggestions.clear();
-        self.stickers.stickers.suggest_for = None;
-        self.stickers.stickers.suggest_waiting_for_sets = false;
+        self.stickers.stickers.suggest_for = SuggestFor::Nothing;
     }
 
     /// Slice S12: store a `searchStickers` answer issued for the
@@ -188,10 +222,10 @@ impl Session {
     /// cache so the panel refetches the authoritative list instead of
     /// showing a stale order.
     pub fn invalidate_installed_sticker_sets(&mut self) {
-        self.stickers.stickers.installed_loaded = false;
+        self.stickers.stickers.lists.installed = crate::state::fetch::Fetch::Idle;
         self.stickers.stickers.sets.clear();
         self.stickers.stickers.selected_set_id = None;
-        self.stickers.stickers.loaded_set_id = None;
+        self.stickers.stickers.set = StickerSetStage::Idle;
         self.stickers.stickers.stickers.clear();
     }
 
@@ -221,24 +255,17 @@ impl Session {
             return;
         }
         self.stickers.stickers.selected_set_id = Some(set_id);
-        self.stickers.stickers.loaded_set_id = None;
+        self.stickers.stickers.set = StickerSetStage::Idle;
         self.stickers.stickers.stickers.clear();
-        self.stickers.stickers.loading_set = false;
-        self.stickers.stickers.failed = false;
-        self.stickers.stickers.failed_set_id = None;
     }
 
-    pub fn mark_sticker_set_loading(&mut self) {
-        self.stickers.stickers.loading_set = true;
-        self.stickers.stickers.failed = false;
+    /// The selected set's `getStickerSet` went out as `request`.
+    pub fn mark_sticker_set_loading(&mut self, set_id: i64, request: RequestId) {
+        self.stickers.stickers.set = StickerSetStage::Loading { set_id, request };
     }
 
     pub fn accept_saved_animations(&mut self, animations: Vec<AnimationItem>) {
-        self.stickers.gifs.loading = false;
-        self.stickers.gifs.failed = false;
-        self.stickers.gifs.stale = false;
-        self.stickers.gifs.animations = animations;
-        self.stickers.gifs.loaded = true;
+        self.stickers.gifs.saved_answered(animations);
     }
 
     /// Slice S9: store a GIF-search `inlineQueryResults` page. A first page
@@ -248,50 +275,43 @@ impl Session {
     /// `first_page`.
     pub fn accept_gif_search_results(
         &mut self,
+        request: Option<RequestId>,
         animations: Vec<AnimationItem>,
         next_offset: String,
         first_page: bool,
     ) {
-        self.stickers.gifs.search_loading = false;
-        self.stickers.gifs.search_failed = false;
-        if first_page {
-            self.stickers.gifs.search_results = animations;
-        } else {
-            for item in animations {
-                if !self
-                    .stickers
-                    .gifs
-                    .search_results
-                    .iter()
-                    .any(|r| r.file_id == item.file_id)
-                {
-                    self.stickers.gifs.search_results.push(item);
-                }
-            }
-        }
-        self.stickers.gifs.search_next_offset =
-            if !next_offset.is_empty() && next_offset == self.stickers.gifs.search_offset {
-                String::new()
-            } else {
-                next_offset
-            };
-        let gifs = &mut self.stickers.gifs;
-        gifs.searches_kept
-            .keep(&gifs.search_query, &gifs.search_results);
-    }
-
-    pub fn accept_sticker_set(&mut self, id: i64, stickers: Vec<StickerItem>) {
-        self.stickers.stickers.loading_set = false;
-        if self
-            .stickers
-            .stickers
-            .selected_set_id
-            .is_some_and(|selected| selected != id)
-        {
+        // A page of an earlier search, or of one that was left, is not the
+        // search's now.
+        if !self.stickers.gifs.search_waits_for(request) {
             return;
         }
-        self.stickers.stickers.failed = false;
-        self.stickers.stickers.loaded_set_id = Some(id);
-        self.stickers.stickers.stickers = stickers;
+        self.stickers
+            .gifs
+            .search_page_answered(animations, next_offset, first_page);
+        let gifs = &mut self.stickers.gifs;
+        let query = gifs.search_query().to_string();
+        let found = gifs.search_results().to_vec();
+        gifs.searches_kept.keep(&query, &found);
+    }
+
+    /// The answer of `request`; one for a set that is no longer the asked
+    /// one (the user chose another meanwhile) changes nothing.
+    pub fn accept_sticker_set(
+        &mut self,
+        request: Option<RequestId>,
+        id: i64,
+        stickers: Vec<StickerItem>,
+    ) {
+        let panel = &mut self.stickers.stickers;
+        if let StickerSetStage::Loading {
+            set_id,
+            request: asked,
+        } = panel.set
+            && Some(asked) == request
+            && set_id == id
+        {
+            panel.set = StickerSetStage::Ready { set_id };
+            panel.stickers = stickers;
+        }
     }
 }

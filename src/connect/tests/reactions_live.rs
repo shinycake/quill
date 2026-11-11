@@ -62,8 +62,7 @@ fn sticker(file: i32) -> crate::telegram::envelope::StickerItem {
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,
-        requires_premium: false,
-        premium_animation: None,
+        premium: None,
     }
 }
 
@@ -136,7 +135,7 @@ fn default_reaction_is_kept_and_set() {
     );
     assert_eq!(driver.session.stickers.active_reactions, vec!["👍", "❤"]);
 
-    driver
+    let request = driver
         .set_default_reaction(&ReactionChoice::Emoji("🔥".into()))
         .unwrap();
     let sent = sent_request(&recorder, "setDefaultReactionType");
@@ -144,6 +143,20 @@ fn default_reaction_is_kept_and_set() {
     assert_eq!(
         driver.session.stickers.default_reaction,
         Some(ReactionChoice::Emoji("🔥".into()))
+    );
+    // TDLib refuses it: the choice shown goes back to the one before.
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"REACTION_INVALID"}}"#,
+            request.0
+        ),
+    );
+    assert_eq!(
+        driver.session.stickers.default_reaction,
+        Some(ReactionChoice::Emoji("❤".into()))
     );
 }
 
@@ -161,6 +174,7 @@ fn picker_options_are_refetched_when_reactions_change() {
             popular: Vec::new(),
             allow_custom_emoji: false,
             premium_locked: Vec::new(),
+            paid_offered: false,
         });
     // Another chat's change leaves the options alone.
     feed(
@@ -237,7 +251,7 @@ fn reactor_tabs_page_per_reaction() {
     let ready = audience.filtered[&key].ready().unwrap();
     assert_eq!(ready.reactions.len(), 2);
     assert!(ready.next_offset.is_empty());
-    assert!(audience.more_loading.is_empty());
+    assert!(!audience.filtered[&key].is_paging());
     assert!(matches!(audience.reactions, Audience::NotAsked));
     // Nothing more to load.
     driver
@@ -304,9 +318,27 @@ fn keyword_emoji_search_uses_the_typed_language() {
             .stickers
             .emoji
             .keyword_emojis
-            .emojis
+            .for_query("")
             .is_empty()
     );
+}
+
+#[test]
+fn a_refused_greeting_request_fails_and_is_not_asked_again() {
+    let (mut driver, recorder, sink, seq) = driver();
+    driver.fetch_greeting_stickers().unwrap();
+    assert!(driver.session.stickers.stickers.greeting.is_loading());
+    let sent = sent_request(&recorder, "getGreetingStickers");
+    let body = format!(
+        r#"{{"@type":"error","code":500,"message":"INTERNAL","@extra":"{}"}}"#,
+        sent["@extra"].as_str().unwrap()
+    );
+    feed(&mut driver, &seq, &sink, &body);
+    assert!(!driver.session.stickers.stickers.greeting.is_loading());
+    assert!(driver.session.stickers.stickers.greeting.error().is_some());
+    // The next frame does not ask again.
+    driver.fetch_greeting_stickers().unwrap();
+    assert_eq!(count(&recorder, "getGreetingStickers"), 1);
 }
 
 #[test]
@@ -322,7 +354,16 @@ fn greeting_and_attached_stickers_load() {
         sent["@extra"].as_str().unwrap()
     );
     feed(&mut driver, &seq, &sink, &body);
-    assert_eq!(driver.session.stickers.stickers.greeting.len(), 1);
+    assert_eq!(
+        driver
+            .session
+            .stickers
+            .stickers
+            .greeting
+            .data()
+            .map(Vec::len),
+        Some(1)
+    );
 
     driver.fetch_attached_sticker_sets(FileId(42)).unwrap();
     let sent = sent_request(&recorder, "getAttachedStickerSets");

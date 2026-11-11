@@ -63,7 +63,15 @@ fn gift_code_is_applied_only_by_the_explicit_call() {
         sent_request(&recorder, "checkPremiumGiftCode")["code"],
         "AbC"
     );
-    assert!(driver.session.payments.gift_code.as_ref().unwrap().loading);
+    assert!(
+        driver
+            .session
+            .payments
+            .gift_code
+            .as_ref()
+            .unwrap()
+            .loading()
+    );
     // Not known yet: apply refuses.
     assert!(driver.apply_gift_code().is_err());
     feed(
@@ -78,11 +86,19 @@ fn gift_code_is_applied_only_by_the_explicit_call() {
     // Checking a code never applies it.
     assert_eq!(count_sent(&recorder, "applyPremiumGiftCode"), 0);
     let lookup = driver.session.payments.gift_code.as_ref().unwrap();
-    assert!(!lookup.loading && lookup.info.is_some());
+    assert!(!lookup.loading() && lookup.info().is_some());
 
     let extra = driver.apply_gift_code().unwrap();
     assert_eq!(count_sent(&recorder, "applyPremiumGiftCode"), 1);
-    assert!(driver.session.payments.gift_code.as_ref().unwrap().applying);
+    assert!(
+        driver
+            .session
+            .payments
+            .gift_code
+            .as_ref()
+            .unwrap()
+            .applying()
+    );
     // A second click while applying sends nothing.
     assert!(driver.apply_gift_code().is_err());
     feed(
@@ -92,7 +108,7 @@ fn gift_code_is_applied_only_by_the_explicit_call() {
         json!({"@type":"ok","@extra":extra.as_extra()}),
     );
     let lookup = driver.session.payments.gift_code.as_ref().unwrap();
-    assert!(lookup.applied && !lookup.applying);
+    assert!(lookup.applied() && !lookup.applying());
     assert!(driver.apply_gift_code().is_err());
     assert_eq!(count_sent(&recorder, "applyPremiumGiftCode"), 1);
     std::fs::remove_dir_all(dir).unwrap();
@@ -124,7 +140,7 @@ fn used_or_invalid_gift_codes_cannot_be_applied() {
         json!({"@type":"error","@extra":extra.as_extra(),"code":400,"message":"PREMIUM_GIFT_CODE_INVALID"}),
     );
     let lookup = driver.session.payments.gift_code.as_ref().unwrap();
-    assert!(!lookup.loading && lookup.info.is_none() && lookup.error.is_some());
+    assert!(!lookup.loading() && lookup.info().is_none() && lookup.error().is_some());
     assert!(driver.apply_gift_code().is_err());
     assert_eq!(count_sent(&recorder, "applyPremiumGiftCode"), 0);
     std::fs::remove_dir_all(dir).unwrap();
@@ -152,8 +168,19 @@ fn a_failed_apply_keeps_the_box_open_with_the_reason() {
         json!({"@type":"error","@extra":extra.as_extra(),"code":400,"message":"USER_ALREADY_PREMIUM"}),
     );
     let lookup = driver.session.payments.gift_code.as_ref().unwrap();
-    assert!(!lookup.applying && !lookup.applied && lookup.error.is_some());
-    assert!(lookup.info.is_some());
+    assert!(!lookup.applying() && !lookup.applied() && lookup.error().is_some());
+    assert!(lookup.info().is_some());
+    // The failed apply is a way out, not a dead end: Apply asks again.
+    assert!(driver.apply_gift_code().is_ok());
+    assert!(
+        driver
+            .session
+            .payments
+            .gift_code
+            .as_ref()
+            .unwrap()
+            .applying()
+    );
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -179,8 +206,8 @@ fn language_pack_link_only_reads_the_pack_info() {
             "total_string_count":10,"translated_string_count":9}),
     );
     let lookup = driver.session.settings.language_link.as_ref().unwrap();
-    assert!(!lookup.loading);
-    assert_eq!(lookup.info.as_ref().unwrap().native_name, "Português");
+    assert!(!lookup.loading());
+    assert_eq!(lookup.info().unwrap().native_name, "Português");
     for forbidden in [
         "setOption",
         "setCustomLanguagePack",
@@ -213,7 +240,7 @@ fn a_gift_code_box_takes_only_its_own_answers() {
         json!({"@type":"ok","@extra":a_apply.as_extra()}),
     );
     let b = driver.session.payments.gift_code.as_ref().unwrap();
-    assert!(!b.applied && b.loading, "A's ok is not B's");
+    assert!(!b.applied() && b.loading(), "A's ok is not B's");
     feed(
         &mut driver,
         &seq,
@@ -221,10 +248,10 @@ fn a_gift_code_box_takes_only_its_own_answers() {
         json!({"@type":"error","@extra":a_check.as_extra(),"code":400,"message":"GIFT_CODE_INVALID"}),
     );
     let b = driver.session.payments.gift_code.as_ref().unwrap();
-    assert!(b.loading && b.error.is_none(), "A's error is not B's");
+    assert!(b.loading() && b.error().is_none(), "A's error is not B's");
     feed(&mut driver, &seq, &sink, info(&b_check));
     let b = driver.session.payments.gift_code.as_ref().unwrap();
-    assert!(!b.loading && b.info.is_some());
+    assert!(!b.loading() && b.info().is_some());
     assert!(driver.apply_gift_code().is_ok(), "B can still be applied");
     std::fs::remove_dir_all(dir).unwrap();
 }
@@ -247,6 +274,44 @@ fn a_language_link_box_takes_only_its_own_answer() {
     );
     let lookup = driver.session.settings.language_link.as_ref().unwrap();
     assert_eq!(lookup.id, "de");
-    assert!(lookup.loading && lookup.error.is_none());
+    assert!(lookup.loading() && lookup.error().is_none());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A second gift code link while an apply is out is refused (the apply's
+/// answer would find no box), and a refused check keeps the box as it was.
+#[test]
+fn a_gift_code_check_never_replaces_an_apply_or_a_box_it_could_not_send() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let check = driver.request_gift_code_info("A").unwrap();
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type":"premiumGiftCodeInfo","@extra":check.as_extra(),"month_count":3,"day_count":90}),
+    );
+    let apply = driver.apply_gift_code().unwrap();
+    assert!(driver.request_gift_code_info("B").is_err());
+    let lookup = driver.session.payments.gift_code.as_ref().unwrap();
+    assert_eq!(lookup.code, "A", "the apply keeps its box");
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        json!({"@type":"ok","@extra":apply.as_extra()}),
+    );
+    assert!(
+        driver
+            .session
+            .payments
+            .gift_code
+            .as_ref()
+            .unwrap()
+            .applied()
+    );
     std::fs::remove_dir_all(dir).unwrap();
 }

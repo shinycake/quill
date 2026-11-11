@@ -2,6 +2,7 @@
 use super::*;
 use crate::ids::{ChatId, RequestId};
 use crate::quick_replies as qr;
+use crate::state::fetch::Fetch;
 use crate::state::{RequestPurpose, SettingsPurpose};
 
 impl<S: JsonSender> ConnectDriver<S> {
@@ -17,27 +18,50 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         purpose: RequestPurpose,
         chat_id: Option<ChatId>,
-        build: impl FnOnce(&str) -> String,
-    ) -> Result<RequestId, ConnectSendError> {
+        build: impl Fn(&str) -> String,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         self.quick_replies_ready()?;
+        // The same change is not sent twice while the first is on its way:
+        // a double click on Add must not create the message twice. The
+        // answer (or error) ends it.
+        let is_change = purpose == RequestPurpose::Settings(SettingsPurpose::MutateQuickReplies);
+        let probe = if is_change { build("") } else { String::new() };
+        if is_change {
+            let requests = &self.session.requests;
+            let state = &mut self.session.settings.quick_replies;
+            state
+                .changing
+                .retain(|request, _| requests.get(*request).is_some());
+            if state.changing.values().any(|sent| *sent == probe) {
+                return Ok(None);
+            }
+        }
         let extra = self.session.request(purpose, chat_id);
         let json = build(&extra.as_extra());
-        self.send_json_request(extra, &json)
+        let request = self.send_json_request(extra, &json)?;
+        if is_change {
+            self.session
+                .settings
+                .quick_replies
+                .changing
+                .insert(request, probe);
+        }
+        Ok(Some(request))
     }
 
     /// `loadQuickReplyShortcuts`, once per session unless a load failed.
     pub fn ensure_quick_reply_shortcuts(&mut self) -> Result<(), ConnectSendError> {
-        if self.session.settings.quick_replies.shortcuts_requested {
+        if !self.session.settings.quick_replies.shortcuts_load.is_idle() {
             return Ok(());
         }
-        self.session.settings.quick_replies.shortcuts_requested = true;
         let sent = self.send_quick_reply_request(
             RequestPurpose::Settings(SettingsPurpose::LoadQuickReplyShortcuts),
             None,
             qr::load_shortcuts_request,
         );
-        if sent.is_err() {
-            self.session.settings.quick_replies.shortcuts_requested = false;
+        // A send that did not leave stays unasked: the next look asks again.
+        if sent.is_ok() {
+            self.session.settings.quick_replies.shortcuts_load.begin();
         }
         sent.map(|_| ())
     }
@@ -48,12 +72,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         shortcut_id: i32,
     ) -> Result<(), ConnectSendError> {
-        if !self
+        if self
             .session
             .settings
             .quick_replies
-            .messages_requested
-            .insert(shortcut_id)
+            .messages
+            .contains_key(&shortcut_id)
         {
             return Ok(());
         }
@@ -62,18 +86,25 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
             |extra| qr::load_messages_request(extra, shortcut_id),
         );
-        if sent.is_err() {
-            self.session
-                .settings
-                .quick_replies
-                .messages_requested
-                .remove(&shortcut_id);
+        if sent.is_ok() {
+            self.session.settings.quick_replies.messages.insert(
+                shortcut_id,
+                Fetch::Loading {
+                    stale: None,
+                    request: None,
+                },
+            );
         }
         sent.map(|_| ())
     }
 
     /// Add a text message; the shortcut `name` is created when new.
-    pub fn add_quick_reply_text(&mut self, name: &str, text: &str) -> Result<(), ConnectSendError> {
+    /// The request, or `None` when the same change is already on its way.
+    pub fn add_quick_reply_text(
+        &mut self,
+        name: &str,
+        text: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         let name = qr::validate_name(name).map_err(|_| ConnectSendError::InvalidRequest)?;
         if text.trim().is_empty() {
             return Err(ConnectSendError::InvalidRequest);
@@ -84,7 +115,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
             |extra| qr::add_message_request(extra, &name, text),
         )
-        .map(|_| ())
     }
 
     pub fn edit_quick_reply_text(
@@ -92,7 +122,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         shortcut_id: i32,
         message_id: i64,
         text: &str,
-    ) -> Result<(), ConnectSendError> {
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         if text.trim().is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -102,7 +132,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             None,
             |extra| qr::edit_message_request(extra, shortcut_id, message_id, text),
         )
-        .map(|_| ())
     }
 
     /// Delete a message; the list updates when TDLib reports it. Deleting a
@@ -156,16 +185,37 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         shortcut_id: i32,
     ) -> Result<(), ConnectSendError> {
+        // A shortcut being sent to a chat is not sent there again until its
+        // answer (or error) ends that request: a double tap would deliver
+        // every message twice.
+        let requests = &self.session.requests;
         let state = &mut self.session.settings.quick_replies;
+        state
+            .sending
+            .retain(|request, _| requests.get(*request).is_some());
+        if state
+            .sending
+            .values()
+            .any(|key| *key == (chat_id, shortcut_id))
+        {
+            return Ok(());
+        }
         state.next_sending_id = state.next_sending_id.wrapping_add(1).max(1);
         let sending_id = state.next_sending_id;
-        self.send_quick_reply_request(
+        let sent = self.send_quick_reply_request(
             // The `messages` answer is stored like an album send's, and a
             // refusal gets the same send-permission notice.
             RequestPurpose::SendMessageAlbum,
             Some(chat_id),
             |extra| qr::send_request(extra, chat_id.0, shortcut_id, sending_id),
-        )
-        .map(|_| ())
+        )?;
+        if let Some(request) = sent {
+            self.session
+                .settings
+                .quick_replies
+                .sending
+                .insert(request, (chat_id, shortcut_id));
+        }
+        Ok(())
     }
 }

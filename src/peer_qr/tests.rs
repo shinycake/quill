@@ -57,7 +57,7 @@ fn ticket(qr: &PeerQrBox, request: FreeRequest) -> FreeTicket {
     FreeTicket {
         request,
         box_id: qr.id,
-        serial: qr.free.serial,
+        serial: qr.free.last_serial,
     }
 }
 
@@ -154,7 +154,10 @@ fn hidden_number_asks_for_a_contact_link() {
     };
     assert_eq!(hidden(&UserLinkFetch::Idle), OwnLinkState::NeedsContactLink);
     assert_eq!(hidden(&UserLinkFetch::Loading), OwnLinkState::Waiting);
-    assert_eq!(hidden(&UserLinkFetch::Failed), OwnLinkState::Unavailable);
+    assert_eq!(
+        hidden(&UserLinkFetch::Failed(None)),
+        OwnLinkState::Unavailable
+    );
     let live = UserLinkFetch::Ready(UserLinkData {
         url: "https://t.me/contact/abc".into(),
         expires_at: 1_075,
@@ -243,7 +246,7 @@ fn picking_a_color_changes_the_appearance() {
     assert_eq!(qr.appearance(&list).center, Rgb::hex(0x5A_8CF0));
     qr.apply(QrAction::ClosePanel, env(0));
     assert_eq!(qr.panel, None);
-    assert_eq!(qr.color, SwatchKey::Backdrop(3));
+    assert_eq!(qr.color(), SwatchKey::Backdrop(3));
     assert_eq!(qr.appearance(&[Swatch::DEFAULT]).center, DEFAULT_CENTER);
 }
 
@@ -253,11 +256,11 @@ fn emoji_toggle_and_keep_the_last_six() {
     for emoji in ["😀", "🐱", "🍕", "🎉", "🚀", "🌈", "⭐"] {
         qr.apply(QrAction::ToggleEmoji(emoji.into()), env(0));
     }
-    assert_eq!(qr.emoji.len(), MAX_EMOJI);
-    assert_eq!(qr.emoji.first().and_then(|e| e.plain()), Some("🐱"));
+    assert_eq!(qr.emoji().len(), MAX_EMOJI);
+    assert_eq!(qr.emoji().first().and_then(|e| e.plain()), Some("🐱"));
     qr.apply(QrAction::ToggleEmoji("🍕".into()), env(0));
-    assert_eq!(qr.emoji, vec!["🐱", "🎉", "🚀", "🌈", "⭐"]);
-    assert_eq!(qr.appearance(&[]).emoji, qr.emoji);
+    assert_eq!(qr.emoji(), vec!["🐱", "🎉", "🚀", "🌈", "⭐"]);
+    assert_eq!(qr.appearance(&[]).emoji, qr.emoji());
 }
 
 #[test]
@@ -341,7 +344,7 @@ fn unasked_and_empty_answers() {
         env(100),
     );
     assert_eq!(empty, vec![QrEffect::Toast(QrToast::Unavailable)]);
-    assert_eq!(qr.free.requesting, None);
+    assert_eq!(qr.free.requesting(), None);
     assert_eq!(qr.check_share(None, 100), Err(Some(QrToast::Unavailable)));
 }
 
@@ -372,7 +375,7 @@ fn a_server_error_is_shown_and_keeps_the_code() {
         vec![QrEffect::Toast(QrToast::Failed("Too many tries".into()))]
     );
     assert!(matches!(qr.free.mode, FreeMode::Temporary { .. }));
-    assert_eq!(qr.free.requesting, None);
+    assert_eq!(qr.free.requesting(), None);
 }
 
 #[test]
@@ -408,7 +411,7 @@ fn answers_for_another_box_or_a_dropped_request_are_ignored() {
         result: Ok(code("https://t.me/old", 160)),
     };
     assert!(qr.apply(other_box, env(100)).is_empty());
-    assert_eq!(qr.free.requesting, Some(FreeRequest::Temporary));
+    assert_eq!(qr.free.requesting(), Some(FreeRequest::Temporary));
     let dropped = ticket(&qr, FreeRequest::Temporary);
     qr.apply(
         QrAction::Sync,
@@ -417,7 +420,7 @@ fn answers_for_another_box_or_a_dropped_request_are_ignored() {
             ..env(100)
         },
     );
-    assert_eq!(qr.free.requesting, None);
+    assert_eq!(qr.free.requesting(), None);
     qr.apply(QrAction::PillClicked, env(101));
     let late = QrAction::FreeAnswer {
         ticket: dropped,
@@ -440,7 +443,7 @@ fn menu_switches_timer_resets_and_restores() {
         env(100),
     );
     qr.apply(QrAction::PillClicked, env(101));
-    assert!(qr.free.menu_open);
+    assert!(qr.free.menu_open());
     assert_eq!(
         qr.free.menu_items(false),
         vec![
@@ -461,7 +464,7 @@ fn menu_switches_timer_resets_and_restores() {
             FreeRequest::Permanent
         ))]
     );
-    assert!(!qr.free.menu_open);
+    assert!(!qr.free.menu_open());
     let effects = qr.apply(
         answer(
             &qr,

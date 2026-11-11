@@ -9,7 +9,7 @@ use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::diagnostics::DiagnosticSink;
 use quill::ids::{ChatId, RequestId};
-use quill::new_chat::{CreationOutcome, NewChatBack, NewChatKind, NewChatStage};
+use quill::new_chat::{CreateProgress, CreationOutcome, NewChatBack, NewChatKind, NewChatStage};
 use quill::state::NewChatCreation;
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::UsernameCheckResult;
@@ -90,7 +90,7 @@ impl QuillApp {
         self.demo_ingest(&updates);
         let ids: Vec<i64> = CONTACTS.iter().map(|(id, ..)| *id).collect();
         if let Some(session) = self.demo_session.as_mut() {
-            session.users_state.contacts = Some(ids.clone());
+            session.users_state.contacts = quill::state::fetch::Fetch::Ready(ids.clone());
         }
         ids.into_iter().take(picked).collect()
     }
@@ -174,16 +174,14 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             session.groups.new_chats.creations.insert(
                 CREATE_REQUEST,
-                NewChatCreation {
-                    outcome: Some(CreationOutcome::Created(ChatId(NEW_CHANNEL))),
-                    ..NewChatCreation::default()
-                },
+                NewChatCreation::settled(CreationOutcome::Created(ChatId(NEW_CHANNEL))),
             );
         }
         if let Some(dialog) = self.admin.create_chat_dialog.as_mut() {
             dialog.stage = NewChatStage::Creating {
                 request: CREATE_REQUEST,
                 back: NewChatBack::Info,
+                progress: CreateProgress::InFlight,
             };
         }
         cx.notify();

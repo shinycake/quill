@@ -71,7 +71,7 @@ fn panels() -> Vec<(&'static str, &'static str, Opener, IsOpen)> {
             "story composer",
             "story-composer-panel",
             |app, window, cx| app.open_story_composer(window, cx),
-            |app| app.stories.composer.open,
+            |app| app.stories.composer.is_open(),
         ),
         (
             "story page",
@@ -86,11 +86,13 @@ fn panels() -> Vec<(&'static str, &'static str, Opener, IsOpen)> {
             "privacy editor",
             "privacy-dialog-editor",
             |app, _, _| {
-                app.privacy.editor = Some(crate::ui::privacy::PrivacyEditorTarget::Rule(
-                    quill::telegram::requests_privacy::PrivacySettingKey::ShowStatus,
-                ));
+                app.privacy
+                    .layer
+                    .open_editor(crate::ui::privacy::PrivacyEditorTarget::Rule(
+                        quill::telegram::requests_privacy::PrivacySettingKey::ShowStatus,
+                    ));
             },
-            |app| app.privacy.editor.is_some(),
+            |app| app.privacy.layer.editor().is_some(),
         ),
     ]
 }
@@ -176,7 +178,7 @@ fn open_call(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext, V
     app.update(&mut main, |app, cx| app.sync_call_window(cx));
     frames(&mut main);
     let window = app
-        .read_with(&main, |app, _| app.calls.window)
+        .read_with(&main, |app, _| app.calls.window.handle())
         .expect("the call window opens");
     let mut call = VisualTestContext::from_window(window, cx);
     frames(&mut call);

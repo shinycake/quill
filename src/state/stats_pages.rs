@@ -3,6 +3,7 @@
 //! forwards, previews of recent posts, and which page the statistics
 //! panel shows (tdesktop `info/statistics/`).
 use super::*;
+use crate::state::paged::{Page, Paged};
 use crate::state::session_reply::{story_thumb_candidates, thumb_candidates};
 use crate::telegram::envelope::{
     MessageStatisticsView, ParsedMessage, PublicForwardsView, StatisticalGraph,
@@ -46,23 +47,74 @@ pub enum MessageStatsFetch {
     Failed(String),
 }
 
-/// Pages of public forwards received so far.
+/// The public forwards received so far.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PublicForwardsList {
+pub struct PublicForwardsPage {
     pub forwards: Vec<crate::telegram::envelope::PublicForwardView>,
     pub total: i32,
     pub next_offset: String,
-    pub loading: bool,
-    pub error: Option<String>,
+}
+
+impl Page for PublicForwardsPage {
+    fn next_offset(&self) -> &str {
+        &self.next_offset
+    }
+
+    fn append(&mut self, later: Self) {
+        self.forwards.extend(later.forwards);
+        self.total = later.total;
+        self.next_offset = later.next_offset;
+    }
+}
+
+/// Pages of public forwards of one post. The page on its way names its
+/// request: only its answer lands here, so a page asked for a post shown
+/// before cannot join this post's list, and an empty answer is an answer
+/// (not "never asked").
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PublicForwardsList {
+    pub list: Paged<PublicForwardsPage>,
 }
 
 impl PublicForwardsList {
-    fn accept(&mut self, view: PublicForwardsView) {
-        self.loading = false;
-        self.error = None;
-        self.total = view.total_count;
-        self.next_offset = view.next_offset;
-        self.forwards.extend(view.forwards);
+    pub fn items(&self) -> &[crate::telegram::envelope::PublicForwardView] {
+        self.list.data().map_or(&[], |p| p.forwards.as_slice())
+    }
+
+    pub fn total(&self) -> i32 {
+        self.list.data().map_or(0, |p| p.total)
+    }
+
+    pub fn next_offset(&self) -> &str {
+        self.list.next_offset()
+    }
+
+    /// A page is on its way.
+    pub fn loading(&self) -> bool {
+        self.list.loading()
+    }
+
+    /// The list answered at least once (also with no forwards).
+    pub fn loaded(&self) -> bool {
+        self.list.data().is_some()
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        self.list.error()
+    }
+
+    /// Whether `request` is the page this list is waiting for.
+    pub(crate) fn asked(&self, request: RequestId) -> bool {
+        self.list.waits_for(Some(request))
+    }
+
+    /// Show `forwards` as the answered list (a fixture, or a test).
+    pub fn set(&mut self, forwards: Vec<crate::telegram::envelope::PublicForwardView>, total: i32) {
+        self.list = Paged::Ready(PublicForwardsPage {
+            forwards,
+            total,
+            next_offset: String::new(),
+        });
     }
 }
 
@@ -223,10 +275,15 @@ impl StatsState {
             .filter(|m| m.chat_id == chat_id && m.message_id == message_id)
     }
 
-    pub(crate) fn forwards_requested(&mut self, chat_id: i64, message_id: i64) {
+    pub(crate) fn forwards_requested(
+        &mut self,
+        chat_id: i64,
+        message_id: i64,
+        request: RequestId,
+        append: bool,
+    ) {
         if let Some(state) = self.message_mut(chat_id, message_id) {
-            state.forwards.loading = true;
-            state.forwards.error = None;
+            state.forwards.list.begin(request, append);
         }
     }
 
@@ -245,10 +302,20 @@ impl StatsState {
         &mut self,
         chat_id: i64,
         message_id: i64,
+        request: RequestId,
         view: PublicForwardsView,
     ) {
-        if let Some(state) = self.message_mut(chat_id, message_id) {
-            state.forwards.accept(view);
+        if let Some(state) = self.message_mut(chat_id, message_id)
+            && state.forwards.asked(request)
+        {
+            state.forwards.list.answer(
+                request,
+                PublicForwardsPage {
+                    forwards: view.forwards,
+                    total: view.total_count,
+                    next_offset: view.next_offset,
+                },
+            );
         }
     }
 
@@ -258,10 +325,17 @@ impl StatsState {
         }
     }
 
-    pub(crate) fn fail_message_forwards(&mut self, chat_id: i64, message_id: i64, error: String) {
-        if let Some(state) = self.message_mut(chat_id, message_id) {
-            state.forwards.loading = false;
-            state.forwards.error = Some(error);
+    pub(crate) fn fail_message_forwards(
+        &mut self,
+        chat_id: i64,
+        message_id: i64,
+        request: RequestId,
+        error: String,
+    ) {
+        if let Some(state) = self.message_mut(chat_id, message_id)
+            && state.forwards.asked(request)
+        {
+            state.forwards.list.fail(Some(request), error);
         }
     }
 
@@ -320,6 +394,20 @@ impl Session {
         if let Some(InfoPanelTarget::Statistics(chat_id)) = target {
             self.groups.stats.reset(chat_id);
         }
+        // A join box parked for the recipients came from that bot's
+        // profile: once the profile is gone it must not open, unasked.
+        let earn = &mut self.payments.earn;
+        if self.users_state.open_info_panel != target {
+            // A program being resolved belongs to the page it was asked on.
+            earn.resolve = crate::earn::Resolve::Idle;
+        }
+        if earn
+            .recipients
+            .parked()
+            .is_some_and(|join| target != Some(InfoPanelTarget::User(join.bot_user_id)))
+        {
+            earn.recipients.drop_parked();
+        }
         self.users_state.open_info_panel = target;
     }
 
@@ -343,7 +431,7 @@ impl Session {
                 }
             }
             StatsPage::Overview => {
-                if let Some(ChatStatisticsFetch::Loaded(stats)) =
+                if let Some(ChatStatisticsFetch::Loaded { stats, .. }) =
                     self.groups.chat_statistics.get(&chat_id)
                     && let ChatStatistics::Channel(channel) = stats.as_ref()
                 {

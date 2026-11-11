@@ -63,8 +63,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let current = open
-            .preview
-            .as_ref()
+            .preview()
             .is_some_and(|shown| std::ptr::eq(shown, preview));
         let toggle = Duration::from_millis(PREVIEW_TOGGLE_MS);
         // The executor's clock: simulated in tests, the real one otherwise.
@@ -80,7 +79,7 @@ impl QuillApp {
         }
         let session = self.session()?;
         let effect = session.stickers.effects.get(preview.effect_id)?;
-        let parent = if open.expanded {
+        let parent = if open.expanded() {
             open.areas.panel.get()
         } else {
             open.areas.column.get()

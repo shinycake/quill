@@ -24,6 +24,7 @@ impl QuillApp {
             let editing = editor.id;
             let kind = editor.kind;
             let error = editor.error.clone();
+            let saving = editor.save != super::ProxySave::Editing;
             let (server, web_host, port, username, password, secret) = (
                 editor.server.clone(),
                 editor.web_host.clone(),
@@ -157,6 +158,7 @@ impl QuillApp {
                     Button::new("proxy-edit-save")
                         .label(tr(keys::SETTINGS_SAVE))
                         .primary()
+                        .disabled(saving)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.save_proxy_editor(cx);
                             this.close_kit_dialog_if_done(DialogKind::ProxyEdit, window, cx);
@@ -227,10 +229,11 @@ impl QuillApp {
                     .on_close(on_close);
             };
             let draft = link.draft.clone();
-            let warn = link.warn;
-            let ping = this
+            let stage = this
                 .session()
-                .and_then(|s| s.settings.proxy.pings.get(&LINK_PING_ID).copied());
+                .map_or(LinkCheck::Review, |s| s.settings.proxy.link_check);
+            let warn = stage == LinkCheck::Warn;
+            let ping = stage.status();
             let mut body = div().flex().flex_col().gap_2().child(Self::link_row(
                 tr(keys::PROXY_BOX_SERVER),
                 draft.display_address(),
@@ -269,7 +272,7 @@ impl QuillApp {
             let status = match ping {
                 Some(status) => {
                     let (text, color) = match status {
-                        PingStatus::Checking => {
+                        PingStatus::Checking(_) => {
                             (tr(keys::PROXY_BOX_TABLE_CHECKING).to_string(), text_muted())
                         }
                         PingStatus::Available(ms) => (

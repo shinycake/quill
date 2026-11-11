@@ -168,7 +168,7 @@ fn reply_outside_the_window_is_fetched_and_filled_in() {
     session
         .messages
         .reply_targets
-        .insert((GROUP, 500), ReplyTarget::Loading);
+        .insert((GROUP, 500), ReplyTarget::Loading(RequestId(1)));
     assert!(session.reply_fetch_candidates().is_empty());
     apply_json(
         &mut session,
@@ -242,9 +242,9 @@ fn reply_from_another_chat_names_sender_and_chat() {
         ),
     );
     let reply = message(&session, 12).reply_to.unwrap();
-    assert_eq!(reply.origin_send_date, 1699000000);
-    assert!(matches!(reply.origin, Some(MessageOrigin::User { .. })));
-    assert!(reply.content.is_some());
+    assert_eq!(reply.origin_send_date(), 1699000000);
+    assert!(matches!(reply.origin(), Some(MessageOrigin::User { .. })));
+    assert!(reply.content().is_some());
     let header = session.reply_header(&message(&session, 12)).unwrap();
     assert_eq!(header.state, ReplyState::Ready);
     assert_eq!(header.external_chat.as_deref(), Some("Ada Lovelace"));
@@ -486,4 +486,23 @@ fn an_edited_original_fetched_for_a_reply_updates_the_strip() {
     let header = session.reply_header(&message(&session, 500)).unwrap();
     assert_ne!(header.text, "the old question");
     assert_eq!(session.reply_thumb_file_ids(), vec![FileId(5)]);
+}
+
+#[test]
+fn a_failed_replied_message_fetch_that_may_pass_is_asked_again_after_a_wait() {
+    use std::time::Instant;
+    let mut session = Session::new(AccountKey::primary(), Arc::new(MemorySink::new()));
+    let now = Instant::now();
+    // A rate limit: the strip keeps loading, and the row waits out the clock.
+    session.reject_replied_message(ChatId(GROUP), MessageId(500), 429, now);
+    assert!(matches!(
+        session.messages.reply_targets.get(&(GROUP, 500)),
+        Some(ReplyTarget::Retry { .. })
+    ));
+    // Only a not-found or invalid answer is "Deleted message".
+    session.reject_replied_message(ChatId(GROUP), MessageId(501), 404, now);
+    assert_eq!(
+        session.messages.reply_targets.get(&(GROUP, 501)),
+        Some(&ReplyTarget::Missing)
+    );
 }

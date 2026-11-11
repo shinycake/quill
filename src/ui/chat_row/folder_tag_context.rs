@@ -50,7 +50,7 @@ impl QuillApp {
                 let Some(chat) = self.session().and_then(|s| s.chats.get(&id.0)) else {
                     return div().into_any_element();
                 };
-                let open = self.session().and_then(|s| s.open_chat);
+                let open = self.session().and_then(|s| s.open_chat_id());
                 let selected = open == Some(chat.id);
                 // Parity slice: folder names + tags flag for chat-row chips,
                 // built with the item list this row belongs to.
@@ -71,18 +71,16 @@ impl QuillApp {
                 // archive has its own pinned set.
                 // (Pinned flag first: looking for a second pinned chat walks
                 // the chats, so only pinned rows pay for it.)
-                let draggable = if archived {
+                let pinned = if archived {
                     chat.archive_is_pinned
-                        && self.chat_list.filter == ChatListFilter::Archived
-                        && self.session().is_some_and(|s| s.has_two_pinned_chats(true))
                 } else {
                     chat.is_pinned
-                        && self.chat_list.filter == ChatListFilter::All
-                        && self.folders.tab.is_none()
-                        && self
-                            .session()
-                            .is_some_and(|s| s.has_two_pinned_chats(false))
                 };
+                let draggable = pinned
+                    && self.pinned_list_shown(archived)
+                    && self
+                        .session()
+                        .is_some_and(|s| s.has_two_pinned_chats(archived));
                 // The activity indicator is clock-driven: keep ticking while
                 // a visible row shows one (the chat list's animation layer
                 // ticks its own).
@@ -99,7 +97,7 @@ impl QuillApp {
                     Some(forum) => forum.unread_topics > 0,
                     None => chat_unread_indicator(chat).is_some(),
                 };
-                let fx = self.frame.row_fx.borrow_mut().observe(
+                let fx = self.chat_list.row_fx.borrow_mut().observe(
                     chat.id.0,
                     online,
                     has_badge,
@@ -163,7 +161,8 @@ impl QuillApp {
                 } else {
                     self.chat_swipe_label(chat)
                 };
-                let pin_drag = self.chat_list.pin_reorder.as_ref().map(|r| {
+                let pin_drag = self.chat_list.pin.drag().map(|drag| {
+                    let r = &drag.reorder;
                     let now = std::time::Instant::now();
                     (r.offset(chat.id.0, now), r.lift(chat.id.0, now))
                 });

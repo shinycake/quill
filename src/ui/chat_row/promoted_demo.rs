@@ -44,7 +44,7 @@ impl QuillApp {
     fn demo_promoted_chat_about(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.demo_promoted_chats(window, cx);
         if let Some(session) = self.demo_session.as_mut() {
-            session.chat_list.psa_about.restore(Default::default());
+            session.restore_psa_about(Default::default(), std::time::Instant::now());
             session.open_chat(quill::ids::ChatId(91));
         }
     }
@@ -80,13 +80,16 @@ impl QuillApp {
             .store(seq.load(Ordering::SeqCst), Ordering::SeqCst);
         for id in [91, 92] {
             if let Some(chat) = session.chats.get_mut(&id) {
-                chat.my_member_status = Some(ChannelMemberStatus::Left);
+                chat.assume_member_status(Some(ChannelMemberStatus::Left));
             }
         }
-        session.chat_list.psa_labels.take_wanted("en", ["covid"]);
-        let (epoch, _) = session.chat_list.psa_labels.take_wanted("en", []);
-        session.chat_list.psa_labels.store(
-            epoch,
+        let labels = &mut session.chat_list.psa_labels;
+        let plan = labels.plan("en", ["covid"]);
+        let request = quill::ids::RequestId(1);
+        labels.begin(&plan, request);
+        labels.store(
+            plan.epoch,
+            Some(request),
             vec![(
                 "cloud_lng_badge_psa_covid".into(),
                 PackValue::Ordinary("COVID-19 Info".into()),

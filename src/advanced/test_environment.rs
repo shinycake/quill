@@ -141,13 +141,26 @@ pub fn add_environment_account(
     app_root: &Path,
     action: TestModeAction,
 ) -> std::io::Result<(AccountKey, &'static str)> {
+    add_environment_account_marking(app_root, action, mark_test_environment)
+}
+
+/// [`add_environment_account`] with the marker write given. The account
+/// and its environment are one step: when the marker cannot be written the
+/// account is removed again, so no production account is left under the
+/// name "Test environment".
+fn add_environment_account_marking(
+    app_root: &Path,
+    action: TestModeAction,
+    mark: impl FnOnce(&AccountPaths) -> std::io::Result<()>,
+) -> std::io::Result<(AccountKey, &'static str)> {
     let (name, test, toast) = match action {
         TestModeAction::AddTest => (TEST_ACCOUNT_NAME, true, SWITCHED_TO_TEST),
         TestModeAction::AddProduction => (PRODUCTION_ACCOUNT_NAME, false, SWITCHED_TO_PRODUCTION),
     };
     let key = add_account(app_root, name)?;
-    if test {
-        mark_test_environment(&AccountPaths::for_root(app_root, &key))?;
+    if test && let Err(err) = mark(&AccountPaths::for_root(app_root, &key)) {
+        let _ = crate::settings::remove_account(app_root, &key);
+        return Err(err);
     }
     Ok((key, toast))
 }
@@ -162,6 +175,22 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn a_failed_marker_write_leaves_no_account_behind() {
+        let root = temp_root("rollback");
+        let before = list_accounts(&root).len();
+        let failed = add_environment_account_marking(&root, TestModeAction::AddTest, |_| {
+            Err(std::io::Error::other("disk full"))
+        });
+        assert!(failed.is_err());
+        assert_eq!(
+            list_accounts(&root).len(),
+            before,
+            "the account was rolled back"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -122,15 +122,25 @@ impl RequestPurpose {
                 | RequestPurpose::SearchMessages
                 | RequestPurpose::SearchChatMessages
                 | RequestPurpose::SearchChatMessagesMore
+                | RequestPurpose::SearchMessagesMore
+                | RequestPurpose::SearchPublicPosts
+                | RequestPurpose::SearchPublicPostsMore
+                | RequestPurpose::SearchPublicMessagesByTag
+                | RequestPurpose::GetRecommendedChats
+                | RequestPurpose::CanTransferOwnership
                 | RequestPurpose::SearchChats
                 | RequestPurpose::SearchPublicChats
                 | RequestPurpose::GetSharedMedia { .. }
                 | RequestPurpose::Media(MediaPurpose::GetSharedMediaMore { .. })
+                | RequestPurpose::Media(MediaPurpose::SearchDiskPausedDownloads)
                 | RequestPurpose::GetPinnedMessages
                 | RequestPurpose::GetUserFullInfo
                 | RequestPurpose::GetSupergroupFullInfo
                 | RequestPurpose::GetBasicGroupFullInfo
                 | RequestPurpose::GetChatMember
+                // A widget's public data poll: the widget stays "asking"
+                // until it is settled, which polls again a period later.
+                | RequestPurpose::Bots(BotsPurpose::GetWidgetPublicData)
         )
     }
 }
@@ -149,27 +159,18 @@ impl Session {
     /// The request must already be out of the registry.
     pub(crate) fn settle_lost_request(&mut self, pending: PendingRequest) {
         let extra = pending.id;
+        self.drop_admin_followups_of_lost(extra);
         let seq = self.last_seq;
         let error = TdError::from_code(LOST_REQUEST_ERROR_CODE);
+        // An export's worker waits on its link for this answer: without it
+        // the link stays busy and no further export request goes out.
+        self.settings.fail_lost_export(pending.purpose, extra);
         self.apply_payload_in_asking_view(
             EnvelopePayload::Error(error),
             Some(&pending),
             Some(extra),
             seq,
         );
-    }
-
-    /// The account is going away (logout, close): no answer can land any
-    /// more, so settle every pending lookup the way a failure would and
-    /// forget the stale-window marks. User actions (sends, edits, ...) are
-    /// dropped without a failure notice about a session the user left.
-    pub(crate) fn settle_account_requests(&mut self) {
-        for pending in self.requests.drain_all() {
-            if !super::session_apply_error::is_user_action(pending.purpose) {
-                self.settle_lost_request(pending);
-            }
-        }
-        self.stale_history_requests.clear();
     }
 }
 
@@ -387,71 +388,25 @@ impl ForwardResult {
     }
 }
 
-/// Sponsored messages for one chat (`getChatSponsoredMessages` response).
-/// Rows render with a **Sponsored** / **Recommended** label.
-#[derive(Debug, Clone, Default)]
-pub struct ChatSponsoredMessages {
-    pub messages: Vec<SponsoredMessage>,
-    /// Schema `messages_between`: minimum number of ordinary messages between
-    /// shown sponsored rows (0 = after all ordinary messages).
-    pub messages_between: i32,
-    /// Ids already reported to TDLib as viewed (`viewMessages`): an ad is
-    /// counted once per fetched list, however often it scrolls into view.
-    pub viewed: std::collections::HashSet<i64>,
-    /// Ids the user reported or hid; never shown again for this list.
-    pub dismissed: std::collections::HashSet<i64>,
-    /// When the response arrived (tdesktop `lastReceived`): refetches inside
-    /// `SPONSORED_REFETCH_AFTER` are skipped.
-    pub fetched_at: Option<std::time::Instant>,
-}
-
-/// tdesktop `kRequestTimeLimit`: a chat's sponsored messages are not
-/// requested again for five minutes.
-pub const SPONSORED_REFETCH_AFTER: std::time::Duration = std::time::Duration::from_secs(5 * 60);
-
-impl ChatSponsoredMessages {
-    /// Rows in TDLib's response order. The schema does not promise an order,
-    /// so the vector order is preserved verbatim.
-    pub fn ordered(&self) -> Vec<&SponsoredMessage> {
-        self.messages.iter().collect()
-    }
-}
-
-/// `reportChatSponsoredMessage` waiting on the user's option choice
-/// (`reportSponsoredResultOptionRequired`).
-#[derive(Debug, Clone)]
-pub struct SponsoredReportFlight {
-    pub extra: RequestId,
-    pub chat_id: ChatId,
-    /// int53 sponsored message id.
-    pub message_id: i64,
-    pub title: String,
-    pub options: Vec<ReportOption>,
-}
-
-/// Last `reportChatSponsoredMessage` outcome (no TDLib text is echoed).
-#[derive(Debug, Clone)]
-pub struct SponsoredReportOutcome {
-    pub chat_id: ChatId,
-    /// int53 sponsored message id.
-    pub message_id: i64,
-    pub result: ReportSponsoredResult,
-}
-
-/// Slice B2: fetch state of `getBotSimilarBots` for a bot profile. The
-/// `users` payload carries only ids (names resolve through
-/// `Session::users`); presence records "fetched" so the driver never
-/// retries, and `Loading` dedupes the request.
-#[derive(Debug, Clone, Default)]
-pub enum SimilarBotsFetch {
+/// Whose view a request was registered in: the main window's, or a chat
+/// window's.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AskingView {
     #[default]
-    Loading,
-    Loaded(Vec<i64>),
+    Main,
+    /// The window of `chat`, in its `opening`-th opening
+    /// (`WindowViews::opening_of`): a window closed and opened again for
+    /// the same chat is a new one.
+    Window { chat: ChatId, opening: u64 },
 }
 
-impl SponsoredReportOutcome {
-    pub fn user_message(&self) -> &'static str {
-        self.result.user_message()
+impl AskingView {
+    /// The chat window, `None` for the main window's.
+    pub fn chat(self) -> Option<ChatId> {
+        match self {
+            Self::Main => None,
+            Self::Window { chat, .. } => Some(chat),
+        }
     }
 }
 
@@ -462,6 +417,10 @@ pub struct PendingRequest {
     pub purpose: RequestPurpose,
     pub chat_id: Option<ChatId>,
     pub view_generation: Option<ViewGeneration>,
+    /// For a history page: the epoch of the chat's window it was asked for
+    /// ([`HistoryState::window_epoch`]). An answer for another epoch asks
+    /// about a window that has since been replaced.
+    pub window_epoch: Option<u64>,
     pub file_id: Option<i32>,
     pub search_generation: Option<u64>,
     pub around_message_id: Option<MessageId>,
@@ -486,6 +445,9 @@ pub struct PendingRequest {
     /// story ids) and `ReorderStoryAlbums` (the sent album id order) so
     /// the id-less `ok` response applies to the right list.
     pub story_ids: Option<Vec<i32>>,
+    /// `user_ids` for `SetCloseFriends` (the sent list), so its `ok`
+    /// applies the list this request sent and not a later one.
+    pub user_ids: Option<Vec<i64>>,
     /// Phase 9.7: `story_album_id` for `DeleteStoryAlbum` so the `ok`
     /// response drops the right album from `Session::story_albums`.
     pub story_album_id: Option<i32>,
@@ -503,17 +465,23 @@ pub struct PendingRequest {
     /// `CloseSecretChat` so the id-less `secretChat` response and
     /// purpose-gating correlate to the right secret chat.
     pub secret_chat_id: Option<i32>,
+    /// The invite link a `ProcessLinkJoinRequests` acts on.
+    pub invite_link: Option<String>,
+    /// The string id of the thing an id-less `ok` is for (the terms an
+    /// `AcceptTermsOfService` accepts, the received gift a `SellGift`
+    /// sells), so the answer settles that one and not what the user picked
+    /// or was sent meanwhile.
+    pub subject_id: Option<String>,
     /// Slice G1: rollback for requests the driver applies optimistically
     /// at send time (`setChatPermissions`,
     /// `toggleSupergroupJoinByRequest`, `setSupergroupUsername`). On a
     /// TDLib error the pre-request value is restored so the UI never
     /// keeps showing a change the server rejected.
     pub rollback: Option<RequestRollback>,
-    /// The chat window whose view was in the session's place when the
-    /// request was registered (`None`: the main window's). An answer that
-    /// lands in a view applies to that window's
+    /// The view that was in the session's place when the request was
+    /// registered. An answer that lands in a view applies to that window's
     /// (`Session::apply_payload_in_asking_view`).
-    pub window: Option<ChatId>,
+    pub asked_in: AskingView,
     /// When the request was registered. The periodic sweep
     /// ([`RequestRegistry::sweep_stale`]) drops dedupe-guard entries whose
     /// answer never came, so a lost response cannot block a chat forever.
@@ -524,13 +492,15 @@ pub struct PendingRequest {
 pub struct RequestRegistry {
     pub(crate) next: u64,
     pub(crate) pending: HashMap<u64, PendingRequest>,
-    /// The chat window whose view is in the session's place (`None`: the
-    /// main window's). `Session::enter_view` keeps it; every request
-    /// registered meanwhile carries it (`PendingRequest::window`).
-    pub(crate) window: Option<ChatId>,
+    /// The view that is in the session's place. `Session::enter_view`
+    /// keeps it; every request registered meanwhile carries it
+    /// (`PendingRequest::asked_in`).
+    pub(crate) view: AskingView,
     /// In-flight `DownloadFile` requests per file id, so the
     /// already-downloading check does not scan `pending`.
     downloads: HashMap<i32, u32>,
+    /// The last requests TDLib refused (`Submit` reads them).
+    pub(super) failures: super::submit::Failures,
 }
 
 impl RequestRegistry {
@@ -560,6 +530,7 @@ impl RequestRegistry {
             purpose,
             chat_id: None,
             view_generation: None,
+            window_epoch: None,
             file_id: None,
             search_generation: None,
             around_message_id: None,
@@ -569,12 +540,15 @@ impl RequestRegistry {
             community_id: None,
             story_id: None,
             story_ids: None,
+            user_ids: None,
             story_album_id: None,
             folder_id: None,
             scope: None,
             secret_chat_id: None,
+            invite_link: None,
+            subject_id: None,
             rollback: None,
-            window: self.window,
+            asked_in: self.view,
             created_at: Instant::now(),
         }
     }
@@ -793,6 +767,13 @@ impl RequestRegistry {
         self.pending.len()
     }
 
+    /// The ids in flight now, oldest first.
+    pub fn pending_ids(&self) -> Vec<RequestId> {
+        let mut ids: Vec<RequestId> = self.pending.values().map(|p| p.id).collect();
+        ids.sort_by_key(|id| id.0);
+        ids
+    }
+
     pub fn is_empty(&self) -> bool {
         self.pending.is_empty()
     }
@@ -834,9 +815,20 @@ impl RequestRegistry {
     }
 
     pub fn has_purpose_for_chat(&self, purpose: RequestPurpose, chat_id: ChatId) -> bool {
+        self.id_for_purpose_for_chat(purpose, chat_id).is_some()
+    }
+
+    /// The in-flight request for a purpose and chat, to wait for it
+    /// instead of asking again.
+    pub fn id_for_purpose_for_chat(
+        &self,
+        purpose: RequestPurpose,
+        chat_id: ChatId,
+    ) -> Option<RequestId> {
         self.pending
             .values()
-            .any(|p| p.purpose == purpose && p.chat_id == Some(chat_id))
+            .find(|p| p.purpose == purpose && p.chat_id == Some(chat_id))
+            .map(|p| p.id)
     }
 
     /// An in-flight request for a purpose and message (`request_for_message`).
@@ -850,23 +842,6 @@ impl RequestRegistry {
             p.purpose == purpose
                 && p.chat_id == Some(chat_id)
                 && p.around_message_id == Some(message_id)
-        })
-    }
-
-    /// Bots slice: whether a `getInlineQueryResults` request is in flight
-    /// for the (chat, bot) pair, whatever the page. `has_purpose_for_chat`
-    /// compares the full purpose (including `first_page`), so it cannot
-    /// dedup across pages.
-    pub fn has_inline_query_in_flight(&self, chat_id: ChatId, bot_user_id: i64) -> bool {
-        self.pending.values().any(|p| {
-            matches!(
-                p.purpose,
-                RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
-                    chat_id: c,
-                    bot_user_id: b,
-                    ..
-                }) if c == chat_id && b == bot_user_id
-            )
         })
     }
 

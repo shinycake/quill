@@ -37,7 +37,7 @@ fn facts(app: &QuillApp) -> (String, ChatId, NotificationSettingsScope) {
     let Some(session) = app.session() else {
         panic!("demo session missing");
     };
-    let Some(chat_id) = session.open_chat else {
+    let Some(chat_id) = session.open_chat_id() else {
         panic!("demo has no open chat");
     };
     let Some(chat) = session.chats.get(&chat_id.0) else {

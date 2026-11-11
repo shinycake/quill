@@ -159,3 +159,32 @@ fn a_recording_for_a_closed_topic_is_refused_whatever_is_open() {
         .unwrap();
     assert_eq!(f.last_voice()["topic_id"]["forum_topic_id"], 5);
 }
+
+#[test]
+fn a_sticker_goes_to_the_place_fixed_at_send_whatever_is_open_later() {
+    use crate::telegram::requests::StickerSend;
+    let mut f = Fixture::forum();
+    let place = f.driver.send_place(ChatId(16));
+    f.driver.select_topic(5).unwrap();
+    let sticker = StickerSend {
+        file_id: crate::ids::FileId(41),
+        emoji: "x",
+        width: 512,
+        height: 512,
+        thumb: None,
+        reply_to: None,
+        topic_id: None,
+    };
+    f.driver
+        .send_sticker_to(ChatId(16), &place, sticker)
+        .unwrap();
+    let sent: Value = f
+        .recorder
+        .snapshot()
+        .into_iter()
+        .rev()
+        .find(|json| json.contains("inputMessageSticker"))
+        .map(|json| serde_json::from_str(&json).unwrap())
+        .expect("a sticker was sent");
+    assert_eq!(sent["topic_id"]["forum_topic_id"], 3);
+}

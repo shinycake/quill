@@ -97,12 +97,16 @@ fn return_recent_hashtags(app_root: &Path) {
     let primary = AccountKey::primary();
     let owner = AccountPaths::for_root(app_root, &primary).root;
     let registered = list_accounts(app_root).iter().any(|r| r.key == primary);
-    if registered
-        && std::fs::create_dir_all(&owner).is_ok()
-        && let Err(err) = move_item(&stray, &owner.join(RECENT_HASHTAGS), &owner)
-    {
-        log::warn!("app prefs: could not move {RECENT_HASHTAGS} back: {err}");
-        return;
+    if registered {
+        if let Err(err) = std::fs::create_dir_all(&owner) {
+            // The only copy stays where it is, to be moved at a later start.
+            log::warn!("app prefs: could not create {}: {err}", owner.display());
+            return;
+        }
+        if let Err(err) = move_item(&stray, &owner.join(RECENT_HASHTAGS), &owner) {
+            log::warn!("app prefs: could not move {RECENT_HASHTAGS} back: {err}");
+            return;
+        }
     }
     if let Err(err) = remove_any(&stray) {
         log::warn!("app prefs: could not remove the stray {RECENT_HASHTAGS}: {err}");

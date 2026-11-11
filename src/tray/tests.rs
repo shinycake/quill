@@ -9,6 +9,18 @@ fn startup_reveal_waits_then_decides() {
     assert_eq!(tray_startup_reveal(false, false, 10), Some(true));
 }
 #[test]
+fn the_notification_toggles_are_left_out_while_locked() {
+    assert_eq!(
+        TrayToggles::for_session(None, false),
+        TrayToggles::Shown {
+            notifications: true,
+            sounds: true
+        }
+    );
+    assert_eq!(TrayToggles::for_session(None, true), TrayToggles::Hidden);
+}
+
+#[test]
 fn tray_menu_routes_only_its_own_actions() {
     assert_eq!(menu_action("quill-tray-open"), Some(TrayAction::Open));
     assert_eq!(menu_action("quill-tray-quit"), Some(TrayAction::Quit));
@@ -56,16 +68,8 @@ fn chat(id: i64, unread_count: i32) -> ChatSummary {
         last_message: None,
         sender_actions: Vec::new(),
         draft: None,
-        my_member_status: None,
-        my_admin_can_post_messages: None,
-        my_admin_can_invite_users: None,
-        my_admin_can_change_info: None,
-        my_admin_can_send_welcome_messages: None,
-        my_admin_can_promote_members: None,
-        my_admin_can_restrict_members: None,
-        my_admin_can_pin_messages: None,
-        my_restriction: None,
-        my_rights_fetched: false,
+        my_member: Default::default(),
+        my_restriction: Default::default(),
         is_forum: None,
         photo_file_id: None,
         can_send_basic_messages: true,
@@ -534,7 +538,7 @@ fn badge_count_skips_topics_of_a_forum_the_user_left() {
     let mut session = session_with(&[]);
     let mut left = chat(1, 0);
     left.is_forum = Some(true);
-    left.my_member_status = Some(crate::telegram::envelope::ChannelMemberStatus::Left);
+    left.assume_member_status(Some(crate::telegram::envelope::ChannelMemberStatus::Left));
     session.chats.insert(1, left);
     session.threads.forum_topics.insert(1, vec![topic(1, 3)]);
     assert_eq!(badge_count(&session, &BadgePrefs::default()), 0);

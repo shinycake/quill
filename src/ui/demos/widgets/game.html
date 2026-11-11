@@ -1,0 +1,32 @@
+<style>
+body { margin: 0; background: #12142b; color: #fff; }
+.hud { display: flex; justify-content: space-between; padding: 10px 14px 0; font-size: 11px; color: #a9acd6; letter-spacing: 0.5px; }
+.score { font-size: 20px; font-weight: 700; color: #fff; }
+canvas { display: block; touch-action: none; }
+</style>
+<div class="hud"><div>SCORE<div class="score" id="score">1,340</div></div><div style="text-align:right">LEVEL 3<div style="color:#f472b6;font-size:16px">●●●</div></div></div>
+<canvas id="c" height="210"></canvas>
+<script>
+var c = document.getElementById('c'), g = c.getContext('2d');
+var W = c.width = document.documentElement.clientWidth || 320, H = 210;
+var colors = ['#f472b6', '#fb923c', '#facc15', '#4ade80', '#60a5fa'];
+var rows = 5, cols = 7, bw = (W - 28 - (cols - 1) * 6) / cols, bricks = [];
+for (var r = 0; r < rows; r++) for (var k = 0; k < cols; k++) bricks.push({ x: 14 + k * (bw + 6), y: 10 + r * 16, on: (r * 3 + k) % 5 != 2, c: colors[r] });
+var ball = { x: W * 0.62, y: 150, dx: 2.2, dy: -2.6 }, pad = W / 2, score = 1340;
+function frame() {
+  ball.x += ball.dx; ball.y += ball.dy;
+  if (ball.x < 5 || ball.x > W - 5) ball.dx = -ball.dx;
+  if (ball.y < 5) ball.dy = -ball.dy;
+  if (ball.y > H - 22 && ball.dy > 0) ball.dy = -ball.dy;
+  pad += (ball.x - pad) * 0.12;
+  bricks.forEach(function (b) {
+    if (b.on && ball.x > b.x && ball.x < b.x + bw && ball.y > b.y && ball.y < b.y + 11) { b.on = false; ball.dy = -ball.dy; score += 10; document.getElementById('score').textContent = score.toLocaleString('en-US'); }
+  });
+  g.clearRect(0, 0, W, H);
+  bricks.forEach(function (b) { if (b.on) { g.fillStyle = b.c; g.beginPath(); g.roundRect(b.x, b.y, bw, 11, 4); g.fill(); } });
+  g.fillStyle = '#e0e7ff'; g.beginPath(); g.roundRect(pad - 32, H - 16, 64, 7, 4); g.fill();
+  g.fillStyle = '#fff'; g.beginPath(); g.arc(ball.x, ball.y, 5, 0, Math.PI * 2); g.fill();
+  requestAnimationFrame(frame);
+}
+frame();
+</script>

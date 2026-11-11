@@ -66,8 +66,7 @@ impl Session {
         self.open_chat_message_stories()
             .into_iter()
             .filter(|key| {
-                !self.stories.stories.contains_key(key)
-                    && !self.stories.reply_attempted.contains(key)
+                !self.stories.stories.contains_key(key) && !self.stories.story_fetch.is_asked(*key)
             })
             .map(|(chat, story)| (ChatId(chat), story))
             .collect()
@@ -86,7 +85,7 @@ impl Session {
     pub fn story_card_state(&self, chat_id: i64, story_id: i32) -> StoryCardState {
         if self.stories.stories.contains_key(&(chat_id, story_id)) {
             StoryCardState::Ready
-        } else if self.stories.missing.contains(&(chat_id, story_id)) {
+        } else if self.stories.story_fetch.is_gone((chat_id, story_id)) {
             StoryCardState::Expired
         } else {
             StoryCardState::Loading

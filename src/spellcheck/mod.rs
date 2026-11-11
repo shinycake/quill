@@ -22,9 +22,12 @@
 
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
-use std::sync::{Arc, LazyLock, Mutex, RwLock};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use unicode_segmentation::UnicodeSegmentation;
+
+mod user_words;
+use user_words::UserWords;
 
 /// Embedded English wordlist, one word per line, most frequent first.
 const WORDLIST: &str = include_str!("../../assets/spellcheck/en.txt");
@@ -208,6 +211,13 @@ pub trait SpellBackend: Send + Sync {
     /// dictionary are skipped).
     fn handles(&self, script: Script, word: &str) -> bool;
     fn is_correct(&self, word: &str) -> bool;
+    /// The judgement of [`Self::is_correct`], or `None` when the backend
+    /// could not give one now (a check that timed out). [`SpellChecker`]
+    /// shows no underline for it and does not remember it, so the word is
+    /// asked again.
+    fn judge(&self, word: &str) -> Option<bool> {
+        Some(self.is_correct(word))
+    }
     /// Up to `limit` replacements, best first.
     fn suggestions(&self, word: &str, limit: usize) -> Vec<String>;
     /// Learn into the backend's own persistent dictionary. `false` when
@@ -226,8 +236,9 @@ pub trait SpellBackend: Send + Sync {
     fn ignore(&self, _word: &str) {}
     /// Load any lazily parsed data now. Called once from a background
     /// thread at startup so the first check or suggestion never parses a
-    /// large dictionary on the thread that asked.
-    fn warm(&self) {}
+    /// large dictionary on the thread that asked. Stops early once `cancel`
+    /// is set (the engine that wanted it was replaced).
+    fn warm(&self, _cancel: &std::sync::atomic::AtomicBool) {}
 }
 
 /// Where "Add to Dictionary" stored the word.
@@ -242,22 +253,17 @@ pub enum LearnedIn {
 
 pub struct SpellChecker {
     backend: Arc<dyn SpellBackend>,
-    /// Words the user added and the backend can't store (lowercased).
-    app_words: RwLock<HashSet<String>>,
-    /// Session ignores ("Ignore"), lowercased. Like tdesktop's
-    /// `ignoreWord:inSpellDocumentWithTag:0` they last until quit.
-    ignored: RwLock<HashSet<String>>,
-    /// Backend answers per exact word (case matters: "Paris" ≠ "paris").
-    cache: Mutex<HashMap<String, bool>>,
+    /// The user's words and the verdicts they decide, behind one lock: a
+    /// change to the words drops the verdicts in the same step, so a
+    /// stale underline cannot outlive an Add to Dictionary.
+    words: Mutex<UserWords>,
 }
 
 impl SpellChecker {
     pub fn new(backend: Arc<dyn SpellBackend>) -> Self {
         Self {
             backend,
-            app_words: RwLock::new(HashSet::new()),
-            ignored: RwLock::new(HashSet::new()),
-            cache: Mutex::new(HashMap::new()),
+            words: Mutex::new(UserWords::default()),
         }
     }
 
@@ -268,13 +274,12 @@ impl SpellChecker {
 
     pub fn set_app_words(&self, words: impl IntoIterator<Item = String>) {
         let words = words.into_iter().map(|w| normalize(&w)).collect();
-        *write(&self.app_words) = words;
-        self.clear_cache();
+        lock(&self.words).replace_app_words(words);
     }
 
     /// The app-level learned words, sorted (for persisting).
     pub fn app_words(&self) -> Vec<String> {
-        let mut out: Vec<String> = read(&self.app_words).iter().cloned().collect();
+        let mut out: Vec<String> = lock(&self.words).app_words.iter().cloned().collect();
         out.sort();
         out
     }
@@ -293,18 +298,26 @@ impl SpellChecker {
             return true;
         }
         let lower = normalize(&word);
-        if read(&self.ignored).contains(&lower) || read(&self.app_words).contains(&lower) {
+        let asked_in = {
+            let words = lock(&self.words);
+            if words.ignored.contains(&lower) || words.app_words.contains(&lower) {
+                return true;
+            }
+            if let Some(&known) = words.cache.words.get(&*word) {
+                return known;
+            }
+            words.cache.generation
+        };
+        let Some(correct) = self.backend.judge(&word) else {
             return true;
+        };
+        let mut words = lock(&self.words);
+        if words.cache.generation == asked_in {
+            if words.cache.words.len() >= CACHE_LIMIT {
+                words.cache.words.clear();
+            }
+            words.cache.words.insert(word.into_owned(), correct);
         }
-        if let Some(&known) = lock(&self.cache).get(&*word) {
-            return known;
-        }
-        let correct = self.backend.is_correct(&word);
-        let mut cache = lock(&self.cache);
-        if cache.len() >= CACHE_LIMIT {
-            cache.clear();
-        }
-        cache.insert(word.into_owned(), correct);
         correct
     }
 
@@ -347,45 +360,40 @@ impl SpellChecker {
     /// "Add to Dictionary".
     pub fn learn(&self, word: &str) -> LearnedIn {
         let word = normalize_apostrophes(word);
-        let learned = if self.backend.learn(&word) {
+        if self.backend.learn(&word) {
+            lock(&self.words).clear_cache();
             LearnedIn::System
         } else {
-            write(&self.app_words).insert(normalize(&word));
+            lock(&self.words).add_app_word(normalize(&word));
             LearnedIn::App
-        };
-        self.clear_cache();
-        learned
+        }
     }
 
     /// "Remove from Dictionary". `Some` with where it was removed from.
     pub fn unlearn(&self, word: &str) -> Option<LearnedIn> {
         let word = normalize_apostrophes(word);
-        let removed = if write(&self.app_words).remove(&normalize(&word)) {
+        let removed = if lock(&self.words).remove_app_word(&normalize(&word)) {
             Some(LearnedIn::App)
         } else if self.backend.unlearn(&word) {
             Some(LearnedIn::System)
         } else {
             None
         };
-        self.clear_cache();
+        lock(&self.words).clear_cache();
         removed
     }
 
     /// Whether the user added this word (offers "Remove from Dictionary").
     pub fn is_learned(&self, word: &str) -> bool {
         let word = normalize_apostrophes(word);
-        read(&self.app_words).contains(&normalize(&word)) || self.backend.has_learned(&word)
+        lock(&self.words).app_words.contains(&normalize(&word)) || self.backend.has_learned(&word)
     }
 
     /// "Ignore": accepted for the rest of the app session.
     pub fn ignore(&self, word: &str) {
         let word = normalize_apostrophes(word);
-        write(&self.ignored).insert(normalize(&word));
+        lock(&self.words).ignored.insert(normalize(&word));
         self.backend.ignore(&word);
-    }
-
-    fn clear_cache(&self) {
-        lock(&self.cache).clear();
     }
 }
 
@@ -397,12 +405,6 @@ impl Default for SpellChecker {
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     crate::locks::lock_or_recover(m)
-}
-fn read<T>(m: &RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
-    crate::locks::read_or_recover(m)
-}
-fn write<T>(m: &RwLock<T>) -> std::sync::RwLockWriteGuard<'_, T> {
-    crate::locks::write_or_recover(m)
 }
 
 /// Lowercase for ignore / app-word comparison.

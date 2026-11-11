@@ -349,9 +349,7 @@ impl QuillApp {
     pub(in crate::ui) fn stars_stats_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         let me = session.my_user_id?;
-        if session.payments.earn.self_stats != Some(true) {
-            return None;
-        }
+        session.payments.earn.self_stats.data()?;
         Some(
             Button::new("stars-view-statistics")
                 .label(tr(keys::Q_MONEY_VIEW_STATISTICS))
@@ -407,6 +405,11 @@ impl QuillApp {
     /// (tdesktop asks when the profile or the edit box opens).
     pub(super) fn earn_balances_upkeep(&mut self) {
         let Some(target) = self.session().and_then(|s| s.users_state.open_info_panel) else {
+            // A failed ask is asked again at the next profile open.
+            if let Some(earn) = self.earn_mut() {
+                earn.forget_failed_balances();
+                earn.forget_failed_app_config();
+            }
             return;
         };
         let ask = {
@@ -447,7 +450,16 @@ impl QuillApp {
         if matches!(
             target,
             InfoPanelTarget::User(_) | InfoPanelTarget::Supergroup(_)
-        ) {
+        ) && live
+            .driver
+            .session
+            .payments
+            .earn
+            .limits
+            .app_config
+            .is_idle()
+        {
+            // Never a failed one: that waits for the next panel open.
             let _ = live.driver.ensure_earn_app_config();
         }
         if let Some((peer, ton, stars)) = ask
@@ -456,8 +468,8 @@ impl QuillApp {
                 .session
                 .payments
                 .earn
-                .balances_asked
-                .contains(&peer)
+                .balance_asks
+                .contains_key(&peer)
         {
             let _ = live.driver.fetch_earn_balances(peer, ton, stars);
         }

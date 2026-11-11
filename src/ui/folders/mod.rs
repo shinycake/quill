@@ -44,6 +44,17 @@ impl QuillApp {
                 None => tr(keys::FILTERS_NEW),
             };
             let body = this.folder_editor_panel(cx);
+            let loading = this.folders.editor.as_ref().is_some_and(|d| {
+                !matches!(
+                    d.load,
+                    FolderLoad::Ready | FolderLoad::Merging | FolderLoad::Saving(_)
+                )
+            });
+            let saving = this
+                .folders
+                .editor
+                .as_ref()
+                .is_some_and(|d| matches!(d.load, FolderLoad::Merging | FolderLoad::Saving(_)));
             let footer = div()
                 .flex()
                 .justify_end()
@@ -61,6 +72,8 @@ impl QuillApp {
                 .child(
                     Button::new("folder-editor-save")
                         .label(tr(keys::SETTINGS_SAVE))
+                        .loading(saving)
+                        .disabled(loading || saving)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.save_folder_editor(cx);
                             this.close_kit_dialog_if_done(DialogKind::FolderEditor, window, cx);
@@ -109,13 +122,28 @@ impl QuillApp {
             };
             let muted = cx.theme().muted_foreground;
             let folder_id = confirm.folder_id;
-            let suggested: Vec<i64> = if confirm.shared {
+            // A shared folder's list of chats to leave is asked when the box
+            // opens: until it answers the box says so and cannot confirm,
+            // and a failed ask ends in a line with a Retry.
+            let to_leave = if confirm.shared {
                 this.session()
-                    .and_then(|s| s.chat_list.folder_chats_to_leave.get(&folder_id).cloned())
-                    .unwrap_or_default()
+                    .and_then(|s| s.chat_list.folder_chats_to_leave.get(&folder_id))
+                    .cloned()
             } else {
-                Vec::new()
+                None
             };
+            let waiting = confirm.shared
+                && to_leave
+                    .as_ref()
+                    .is_none_or(|f| f.is_loading() || f.is_idle());
+            let leave_error = to_leave
+                .as_ref()
+                .and_then(|f| f.error())
+                .map(str::to_string);
+            let suggested: Vec<i64> = to_leave
+                .as_ref()
+                .and_then(|f| f.data().cloned())
+                .unwrap_or_default();
             let leaving = suggested
                 .iter()
                 .filter(|id| !confirm.keep.contains(id))
@@ -205,6 +233,40 @@ impl QuillApp {
                         .child(tr(keys::FILTERS_BY_LINK_ABOUT_QUIT)),
                 );
             }
+            if waiting {
+                body = body.child(
+                    div()
+                        .id("folder-delete-chats-loading")
+                        .text_xs()
+                        .text_color(muted)
+                        .child(tr(keys::Q_CHATLIST_LOADING_FOLDER_CHATS_TO_LEAVE)),
+                );
+            }
+            if let Some(error) = leave_error {
+                body = body.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            div()
+                                .id("folder-delete-chats-error")
+                                .text_xs()
+                                .text_color(danger_dark())
+                                .child(error),
+                        )
+                        .child(
+                            div().flex().child(
+                                Button::new("folder-delete-chats-retry")
+                                    .label(tr(keys::Q_MONEY_RETRY))
+                                    .small()
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.retry_folder_chats_to_leave(folder_id, cx);
+                                    })),
+                            ),
+                        ),
+                );
+            }
             let body = body.into_any_element();
             // tdesktop: "Remove Folder and Keep Chats" until a chat is ticked.
             let confirm_label = if !suggested.is_empty() {
@@ -235,6 +297,7 @@ impl QuillApp {
                     Button::new("folder-delete-confirm")
                         .label(confirm_label)
                         .danger()
+                        .disabled(waiting)
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.confirm_folder_delete(cx);
                             this.close_kit_dialog_if_done(DialogKind::FolderDelete, window, cx);
@@ -295,23 +358,22 @@ impl QuillApp {
                 .unwrap_or_default();
             // Telegram's suggestions, minus the folders already made
             // (tdesktop hides a recommendation once it is added).
-            let recommended: Vec<(usize, String, String, String)> = session
+            let adding_names: std::collections::HashSet<String> =
+                this.folders.recommended_adds.keys().cloned().collect();
+            let recommended: Vec<(String, String, String, bool)> = session
                 .as_ref()
                 .and_then(|s| s.chat_list.recommended_folders.as_ref())
                 .map(|list| {
                     list.iter()
-                        .enumerate()
-                        .filter(|(_, r)| {
-                            !folders.iter().any(|(_, name, _, _)| *name == r.spec.name)
-                        })
-                        .map(|(ix, r)| {
+                        .filter(|r| !folders.iter().any(|(_, name, _, _)| *name == r.spec.name))
+                        .map(|r| {
                             (
-                                ix,
                                 r.spec.name.clone(),
                                 r.description.clone(),
                                 r.spec.icon_name.clone().unwrap_or_else(|| {
                                     quill::folder_icons::default_icon_name(&r.spec).to_string()
                                 }),
+                                adding_names.contains(&r.spec.name),
                             )
                         })
                         .collect()
@@ -462,7 +524,8 @@ impl QuillApp {
             let recommended_shown = !recommended.is_empty();
             let recommended_rows: Vec<AnyElement> = recommended
                 .into_iter()
-                .map(|(ix, name, description, icon)| {
+                .map(|(name, description, icon, adding)| {
+                    let add_name = name.clone();
                     div()
                         .flex()
                         .items_center()
@@ -490,13 +553,21 @@ impl QuillApp {
                                 ),
                         )
                         .child(
-                            Button::new(("folder-recommended-add", ix))
-                                .label(tr(keys::FILTERS_RECOMMENDED_ADD))
-                                .outline()
-                                .small()
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.add_recommended_folder(ix, cx);
-                                })),
+                            Button::new(("folder-recommended-add", {
+                                let mut hasher = std::hash::DefaultHasher::new();
+                                std::hash::Hash::hash(&add_name, &mut hasher);
+                                std::hash::Hasher::finish(&hasher)
+                            }))
+                            .label(tr(keys::FILTERS_RECOMMENDED_ADD))
+                            .outline()
+                            .small()
+                            .loading(adding)
+                            .disabled(adding)
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.add_recommended_folder(&add_name, cx);
+                                },
+                            )),
                         )
                         .into_any_element()
                 })
@@ -555,15 +626,39 @@ impl QuillApp {
                     .child(error),
             );
         }
-        if dialog.fetch_pending {
-            return panel
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tr(keys::Q_CHATLIST_LOADING_FOLDER)),
-                )
-                .into_any_element();
+        match &dialog.load {
+            FolderLoad::Ready | FolderLoad::Merging | FolderLoad::Saving(_) => {}
+            FolderLoad::Loading => {
+                return panel
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(tr(keys::Q_CHATLIST_LOADING_FOLDER)),
+                    )
+                    .into_any_element();
+            }
+            FolderLoad::Failed(message) => {
+                return panel
+                    .child(
+                        div()
+                            .id("folder-editor-load-error")
+                            .text_xs()
+                            .text_color(danger_dark())
+                            .child(message.clone()),
+                    )
+                    .child(
+                        div().flex().child(
+                            Button::new("folder-editor-load-retry")
+                                .label(tr(keys::Q_MONEY_RETRY))
+                                .small()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.retry_folder_editor_load(cx);
+                                })),
+                        ),
+                    )
+                    .into_any_element();
+            }
         }
         if let Some(mode) = dialog.picker {
             return self.folder_chat_picker(mode, cx);
@@ -759,38 +854,6 @@ impl QuillApp {
         })
     }
 
-    /// Add recommended folder `ix` of `Session::recommended_folders`
-    /// (`createChatFolder` with Telegram's own spec, as tdesktop's "Add").
-    pub(super) fn add_recommended_folder(&mut self, ix: usize, cx: &mut Context<Self>) {
-        if self.folders_full() {
-            self.show_folder_limit(quill::folder_limits::FolderLimitKind::Folders, cx);
-            return;
-        }
-        let Some(spec) = self
-            .session()
-            .and_then(|s| s.chat_list.recommended_folders.as_ref())
-            .and_then(|list| list.get(ix))
-            .map(|r| r.spec.clone())
-        else {
-            return;
-        };
-        let result = match self.live.as_mut() {
-            Some(live) => live.driver.create_chat_folder(&spec).map(|_| ()),
-            None => {
-                self.apply_demo_folder_save(None, spec.clone());
-                Ok(())
-            }
-        };
-        self.set_note(match result {
-            Ok(()) => StatusNote::silent(tr_with(
-                keys::Q_CHATLIST_FOLDER_ADDED_2,
-                &[("name", &spec.name.to_string())],
-            )),
-            Err(err) => StatusNote::error(user_error_for(keys::Q_NOTES_FAILED_ADD_FOLDER, &err)),
-        });
-        cx.notify();
-    }
-
     pub(super) fn open_folder_manage(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.fetch_recommended_chat_folders()
@@ -813,60 +876,6 @@ impl QuillApp {
         }
         self.folders.editor = Some(FolderEditorDialog::new(window, cx, None));
         self.open_box(DialogKind::FolderEditor);
-        cx.notify();
-    }
-
-    pub(super) fn open_folder_edit(
-        &mut self,
-        folder_id: i32,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        // Reuse the cached spec while nothing changed the folder since it
-        // was fetched; otherwise fetch the full folder for the prefill (a
-        // Save writes the prefilled chat lists back).
-        let cached = self
-            .session()
-            .and_then(|s| s.chat_list.fresh_spec(folder_id).cloned());
-        let mut dialog = FolderEditorDialog::new(window, cx, Some(folder_id));
-        if let Some(spec) = cached {
-            dialog.prefill_from_spec(&spec, window, cx);
-        } else if let Some(live) = self.live.as_mut()
-            && let Err(err) = live.driver.fetch_chat_folder(folder_id)
-        {
-            self.set_note(StatusNote::error(user_error_for(
-                keys::Q_NOTES_FAILED_FOLDER,
-                &err,
-            )));
-        }
-        self.folders.editor = Some(dialog);
-        self.open_box(DialogKind::FolderEditor);
-        cx.notify();
-    }
-
-    /// Edit flow: once the `getChatFolder` spec arrives, prefill the open
-    /// editor (no-op for create, or when already prefilled).
-    pub(super) fn maybe_prefill_folder_editor(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let folder_id = match self.folders.editor.as_ref() {
-            Some(dialog) if dialog.fetch_pending => dialog.folder_id,
-            _ => return,
-        };
-        let Some(folder_id) = folder_id else {
-            return;
-        };
-        let Some(spec) = self
-            .session()
-            .and_then(|s| s.chat_list.fresh_spec(folder_id).cloned())
-        else {
-            return;
-        };
-        if let Some(dialog) = self.folders.editor.as_mut() {
-            dialog.prefill_from_spec(&spec, window, cx);
-        }
         cx.notify();
     }
 }
@@ -893,8 +902,12 @@ crate::ui::shell::register_dialogs! {
         }),
 }
 
+mod editor_stages;
 mod save_folder_editor;
 
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod box_stage_tests;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod menu_tests;

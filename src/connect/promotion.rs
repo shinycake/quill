@@ -13,8 +13,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn badge_language(&self) -> String {
         let language = &self.session.settings.language;
         let info = language
-            .switching
-            .as_ref()
+            .switching()
             .map(|switch| &switch.info)
             .or(language.current.as_ref());
         match info {
@@ -41,29 +40,35 @@ impl<S: JsonSender> ConnectDriver<S> {
             .filter_map(|chat| top_promotion(session, chat))
             .filter_map(|promotion| promotion.psa_kind().map(str::to_string))
             .collect();
-        let (epoch, keys) = self
+        let plan = self
             .session
             .chat_list
             .psa_labels
-            .take_wanted(&pack, kinds.iter().map(String::as_str));
-        if keys.is_empty() {
+            .plan(&pack, kinds.iter().map(String::as_str));
+        if plan.keys.is_empty() {
             return;
         }
         let purpose =
             RequestPurpose::Settings(SettingsPurpose::Language(LanguagePurpose::PsaLabels {
-                epoch,
+                epoch: plan.epoch,
             }));
         let extra = self.session.request(purpose, None);
-        // A failed send leaves the generic "PSA" badge, which is fine.
-        let _ = self.send_json_request(extra, &get_language_pack_keys(extra, &pack, &keys));
+        self.session.chat_list.psa_labels.begin(&plan, extra);
+        // A send that did not leave counts as a failed ask: the next pump
+        // asks again while attempts last.
+        if self
+            .send_json_request(extra, &get_language_pack_keys(extra, &pack, &plan.keys))
+            .is_err()
+        {
+            self.session.chat_list.psa_labels.fail_request(extra);
+        }
     }
 
     /// Read the saved "box was shown" flags (in the background, once),
     /// show the box of a chat that waited for them, and save new flags.
     pub(crate) fn sync_psa_about(&mut self) {
-        self.session.chat_list.psa_about.start_load();
         self.session.poll_psa_about(std::time::Instant::now());
-        self.session.chat_list.psa_about.save_unsaved();
+        self.session.chat_list.psa_about.sync_save();
     }
 
     /// "Hide this announcement": only where tdesktop offers it, a promoted

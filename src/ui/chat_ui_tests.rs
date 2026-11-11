@@ -62,7 +62,7 @@ fn open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, chat: ChatId) {
 /// Open the three surfaces the old hand list missed, and a reply.
 fn open_chat_surfaces(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     app.update(vcx, |app, cx| {
-        app.chat_ui.rich_editor_open = true;
+        app.chat_ui.rich.set_editor(true);
         app.chat_ui.send_as_open = true;
         app.chat_ui.link_popup = Some(LinkPopup {
             position: point(px(10.), px(10.)),
@@ -83,7 +83,7 @@ struct Shown {
 
 fn shown(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Shown {
     app.read_with(vcx, |app, _| Shown {
-        rich_editor: app.chat_ui.rich_editor_open,
+        rich_editor: app.chat_ui.rich.editor_open(),
         send_as: app.chat_ui.send_as_open,
         link_popup: app.chat_ui.link_popup.is_some(),
         reply: app.chat_ui.has_reply(),
@@ -166,7 +166,7 @@ fn a_reply_aimed_at_the_next_chat_comes_along(cx: &mut TestAppContext) {
     app.update(&mut vcx, |app, _| {
         let reply = ComposerReplyTo::new(CHAT, MessageId(1)).into_chat(other);
         app.chat_ui.set_reply(Some(reply));
-        app.chat_ui.rich_editor_open = true;
+        app.chat_ui.rich.set_editor(true);
     });
     open(&app, &mut vcx, other);
     let after = shown(&app, &mut vcx);
@@ -203,6 +203,26 @@ fn leaving_the_chat_drops_its_state(cx: &mut TestAppContext) {
     assert!(!after.rich_editor && !after.send_as && !after.link_popup && !after.reply);
     let made_for = app.read_with(&vcx, |app, _| app.chat_ui.chat());
     assert_eq!(made_for, None);
+}
+
+/// The reducer closes a chat (removed, left) with no goodbye from the view:
+/// the next frame still drops what was open, so reopening starts clean.
+#[gpui_kit::test]
+fn a_chat_the_reducer_closed_does_not_keep_its_bars(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    open(&app, &mut vcx, CHAT);
+    open_chat_surfaces(&app, &mut vcx);
+    app.update(&mut vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.open = quill::state::OpenView::of(None);
+        }
+        cx.notify();
+    });
+    frames(&mut vcx);
+    assert_eq!(app.read_with(&vcx, |app, _| app.chat_ui.chat()), None);
+    open(&app, &mut vcx, CHAT);
+    let after = shown(&app, &mut vcx);
+    assert!(!after.rich_editor && !after.send_as && !after.link_popup && !after.reply);
 }
 
 /// A forum's topics share the chat id: an edit opened in one topic does
@@ -285,12 +305,12 @@ fn another_chat_drops_the_reschedule_picker_and_the_scheduled_list(cx: &mut Test
     let other = other_chat(&app, &mut vcx);
     open(&app, &mut vcx, CHAT);
     app.update_in(&mut vcx, |app, window, cx| {
-        app.chat_ui.scheduled_dialog_open = true;
+        app.chat_ui.scheduled_dialog = crate::ui::composer::ScheduledDialog::Ready;
         app.open_schedule_picker(ScheduleTarget::Reschedule(MessageId(5)), window, cx);
     });
     frames(&mut vcx);
     app.read_with(&vcx, |app, _| {
-        assert!(app.chat_ui.schedule_picker.is_some() && app.chat_ui.schedule_popup_open);
+        assert!(app.chat_ui.schedule_popup_shown());
     });
     open(&app, &mut vcx, other);
     app.read_with(&vcx, |app, _| {
@@ -298,9 +318,9 @@ fn another_chat_drops_the_reschedule_picker_and_the_scheduled_list(cx: &mut Test
             app.chat_ui.schedule_picker.is_none(),
             "the picker was the last chat's"
         );
-        assert!(!app.chat_ui.schedule_popup_open);
+        assert!(!app.chat_ui.schedule_popup_shown());
         assert!(
-            !app.chat_ui.scheduled_dialog_open,
+            !app.chat_ui.scheduled_dialog.is_open(),
             "the list was the last chat's"
         );
     });
@@ -313,14 +333,34 @@ fn another_chat_closes_the_info_cards(cx: &mut TestAppContext) {
     let other = other_chat(&app, &mut vcx);
     open(&app, &mut vcx, CHAT);
     app.update(&mut vcx, |app, cx| {
-        app.chat_ui.topic_info_open = true;
-        app.chat_ui.thread_info_open = true;
+        app.chat_ui.info_card = crate::ui::chat_ui_state::InfoCard::Topic;
         cx.notify();
     });
     open(&app, &mut vcx, other);
     app.read_with(&vcx, |app, _| {
-        assert!(!app.chat_ui.topic_info_open && !app.chat_ui.thread_info_open);
+        assert_eq!(
+            app.chat_ui.info_card,
+            crate::ui::chat_ui_state::InfoCard::Closed
+        );
     });
+}
+
+/// A thread's card opens over a topic's; closing the thread brings the
+/// topic's back.
+#[test]
+fn a_thread_card_keeps_the_topic_card_under_it() {
+    use crate::ui::chat_ui_state::InfoCard;
+    let mut card = InfoCard::Closed;
+    card.toggle_topic();
+    card.toggle_thread();
+    assert!(card.topic() && card.thread());
+    card.close_thread();
+    assert_eq!(card, InfoCard::Topic);
+    card.toggle_thread();
+    card.toggle_thread();
+    assert_eq!(card, InfoCard::Topic);
+    card.toggle_topic();
+    assert_eq!(card, InfoCard::Closed);
 }
 
 /// Round 8, 2a: a new poll or checklist goes to the chat shown at Create,
@@ -487,11 +527,11 @@ fn a_forward_bar_into_the_selections_forum_is_no_selection_mode(cx: &mut TestApp
     });
 }
 
-/// Round 17 (area B, finding 7): a forward's answer ends the selection it
-/// was sent from, not a newer one made since in another topic of the same
-/// chat.
+/// Round 17 (area B, finding 7) and round 18 (area B, finding 5): a
+/// forward's answer arrives after its send ended the stage, so a selection
+/// it finds is a newer forward, from another topic or from the same one.
 #[gpui_kit::test]
-fn a_forward_answer_keeps_a_newer_selection_of_another_topic(cx: &mut TestAppContext) {
+fn a_forward_answer_keeps_a_newer_selection(cx: &mut TestAppContext) {
     use crate::ui::demos::composer::{FORUM_CHAT, RELEASES_TOPIC};
     use quill::ids::TopicId;
     let (app, mut vcx) = forum_with_selection(cx);
@@ -517,6 +557,54 @@ fn a_forward_answer_keeps_a_newer_selection_of_another_topic(cx: &mut TestAppCon
         app.present_forward_result(answer(TopicId::forum(1)), cx);
     });
     app.read_with(&vcx, |app, _| {
-        assert!(!app.selecting_in(FORUM_CHAT), "its own answer ends it");
+        assert!(
+            app.selecting_in(FORUM_CHAT),
+            "a late answer from the same topic does not end the newer selection"
+        );
+        assert!(app.share.forward_result.is_some(), "the answer still shows");
+    });
+}
+
+/// Sweep 09-X001: the secret-chat inline-bot alert is the chat's: another
+/// chat's value starts without it, so its confirm cannot insert the query
+/// there.
+#[gpui_kit::test]
+fn another_chat_drops_the_secret_inline_bot_alert(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let other = other_chat(&app, &mut vcx);
+    open(&app, &mut vcx, CHAT);
+    app.update(&mut vcx, |app, _| {
+        app.chat_ui.bot_alert = crate::ui::inline_mode::BotAlert::Switch("@bot query".into());
+    });
+    open(&app, &mut vcx, other);
+    assert!(
+        app.read_with(&vcx, |app, _| !app.chat_ui.bot_alert.is_pending()),
+        "the alert stayed with the chat it was raised in"
+    );
+}
+
+/// TDLib answered with no identity to send as: the menu has nothing to
+/// pick and does not open (a tap, or an answer that lands while it waits).
+#[gpui_kit::test]
+fn an_answered_empty_send_as_list_opens_no_menu(cx: &mut TestAppContext) {
+    use quill::state::fetch::Fetch;
+    let (app, mut vcx) = new_app(cx);
+    open(&app, &mut vcx, CHAT);
+    app.update(&mut vcx, |app, cx| {
+        app.toggle_send_as(cx);
+        assert!(
+            app.chat_ui.send_as_open,
+            "not asked yet: it opens and waits"
+        );
+        app.toggle_send_as(cx);
+        if let Some(session) = app.demo_session.as_mut() {
+            session
+                .chats_state
+                .send_as_options
+                .insert(CHAT.0, Fetch::Ready(Vec::new()));
+        }
+        assert!(app.send_as_list_empty());
+        app.toggle_send_as(cx);
+        assert!(!app.chat_ui.send_as_open, "an empty list is not a menu");
     });
 }

@@ -19,10 +19,12 @@ impl QuillApp {
     /// open in the main window, hidden behind the call window that just
     /// closed, or not drawn under the lock.
     pub(in crate::ui) fn redial(&mut self, user_id: i64, is_video: bool, cx: &mut Context<Self>) {
-        self.dismiss_call_summary(cx);
-        if self.refuse_offline_call(cx) {
+        // The summary (its rating and uploads) goes only once the dial is
+        // accepted; a refusal leaves it to be answered.
+        if self.refuse_without_call_engine(cx) || self.refuse_offline_call(cx) {
             return;
         }
+        self.dismiss_call_summary(cx);
         self.dial_user(user_id, is_video, cx);
     }
 
@@ -49,7 +51,7 @@ impl QuillApp {
         is_video: bool,
         cx: &mut Context<Self>,
     ) {
-        if self.refuse_offline_call(cx) {
+        if self.refuse_without_call_engine(cx) || self.refuse_offline_call(cx) {
             return;
         }
         let confirm = self
@@ -80,7 +82,7 @@ impl QuillApp {
             scrolled_near_end(&self.call_boxes.history_scroll),
             !calls.recent_calls_offset.is_empty(),
             calls.recent_calls_loading(),
-        ) || calls.recent_calls_error && !scrolled
+        ) || calls.recent_calls_error() && !scrolled
             || !self.call_boxes.history_asked.allow(loaded, scrolled)
         {
             return;
@@ -105,9 +107,9 @@ impl QuillApp {
                 (
                     session.calls.recent_calls.clone(),
                     session.calls.recent_calls_loading(),
-                    session.calls.recent_calls_error,
+                    session.calls.recent_calls_error(),
                     !session.calls.recent_calls_offset.is_empty(),
-                    session.calls.recent_calls_clearing,
+                    session.calls.recent_calls_stage,
                 )
             })
             .unwrap_or_default();
@@ -136,7 +138,7 @@ impl QuillApp {
                     },
                 ),
         );
-        if failed {
+        if failed && entries.is_empty() {
             list = list
                 .child(
                     div()
@@ -188,7 +190,33 @@ impl QuillApp {
                     list = list.child(self.recent_call_row(entry, run.len(), &now, cx));
                 }
             }
-            if has_more {
+            if failed {
+                // A later page failed: the loaded calls stay, and Retry asks
+                // for that page again.
+                list = list
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(tr(keys::Q_OPS_COULDN_T_LOAD_CALL_HISTORY)),
+                    )
+                    .child(
+                        Button::new("calls-retry-more")
+                            .label(tr(keys::Q_OPS_RETRY))
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if let Some(live) = this.live.as_mut()
+                                    && let Err(err) = live.driver.fetch_more_call_history()
+                                {
+                                    this.set_note(StatusNote::error(user_error_for(
+                                        keys::Q_NOTES_FAILED_CALL_HISTORY,
+                                        &err,
+                                    )));
+                                }
+                                cx.notify();
+                            })),
+                    );
+            } else if has_more {
                 list = list.child(loading_row("calls-loading-more", cx));
             }
         }

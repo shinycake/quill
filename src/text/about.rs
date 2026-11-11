@@ -13,6 +13,16 @@ use crate::link_policy::host_of;
 /// hashtags (tdesktop's about flags). Empty without a loaded `libtdjson`
 /// (offline demos and tests carry their own entities).
 pub fn about_entities(text: &str) -> Vec<TextEntity> {
+    parsed_entities(text, false)
+}
+
+/// [`about_entities`] for a bot's description, which also keeps its
+/// `/commands` (tdesktop's `AboutView` parses bot commands too).
+pub fn bot_description_entities(text: &str) -> Vec<TextEntity> {
+    parsed_entities(text, true)
+}
+
+fn parsed_entities(text: &str, commands: bool) -> Vec<TextEntity> {
     if text.is_empty() {
         return Vec::new();
     }
@@ -21,7 +31,7 @@ pub fn about_entities(text: &str) -> Vec<TextEntity> {
     };
     let request = serde_json::json!({ "@type": "getTextEntities", "text": text }).to_string();
     match api.execute(&request) {
-        Ok(Some(body)) => entities_from_response(text, &body),
+        Ok(Some(body)) => kept_entities(text, &body, commands),
         _ => Vec::new(),
     }
 }
@@ -29,6 +39,12 @@ pub fn about_entities(text: &str) -> Vec<TextEntity> {
 /// The kept entities of a `textEntities` answer over `text`, with UTF-8
 /// offsets.
 pub fn entities_from_response(text: &str, body: &str) -> Vec<TextEntity> {
+    kept_entities(text, body, false)
+}
+
+/// The entities of a `textEntities` answer that an about text links;
+/// `commands` keeps `/commands` too.
+fn kept_entities(text: &str, body: &str, commands: bool) -> Vec<TextEntity> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
         return Vec::new();
     };
@@ -45,7 +61,7 @@ pub fn entities_from_response(text: &str, body: &str) -> Vec<TextEntity> {
                     | TextEntityKind::EmailAddress
                     | TextEntityKind::Mention
                     | TextEntityKind::Hashtag
-            )
+            ) || (commands && entity.kind == TextEntityKind::BotCommand)
         })
         .collect()
 }
@@ -135,6 +151,26 @@ mod tests {
         assert_eq!(
             covered(text, &entities),
             ["https://x.com/a_(b)", "@quill_app"]
+        );
+    }
+
+    #[test]
+    fn only_a_bot_description_links_its_commands() {
+        let text = "Try /start or see https://x.com";
+        let body = answer(
+            text,
+            &[
+                ("/start", "textEntityTypeBotCommand"),
+                ("https://x.com", "textEntityTypeUrl"),
+            ],
+        );
+        assert_eq!(
+            covered(text, &kept_entities(text, &body, true)),
+            ["/start", "https://x.com"]
+        );
+        assert_eq!(
+            covered(text, &entities_from_response(text, &body)),
+            ["https://x.com"]
         );
     }
 

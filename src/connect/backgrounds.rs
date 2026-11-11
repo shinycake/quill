@@ -1,7 +1,7 @@
 //! Connect driver: installed chat backgrounds (Telegram wallpapers).
 use super::*;
 use crate::ids::{ChatId, FileId, RequestId};
-use crate::state::RequestPurpose;
+use crate::state::{ChatsPurpose, RequestPurpose};
 use crate::telegram::envelope::{Background, BackgroundType};
 use crate::telegram::requests::{
     delete_chat_background, delete_default_background, get_background_url,
@@ -14,7 +14,9 @@ use crate::telegram::requests::{
 const CHAT_LOOK_DOWNLOAD_PRIORITY: i32 = 8;
 
 impl<S: JsonSender> ConnectDriver<S> {
-    /// `getInstalledBackgrounds` for a theme. Deduped while in flight.
+    /// `getInstalledBackgrounds` for a theme; each theme has its own list.
+    /// Asked from Idle only (a request in flight is not asked again), and the
+    /// answer is taken by the request that asked.
     pub fn fetch_installed_backgrounds(
         &mut self,
         for_dark_theme: bool,
@@ -22,26 +24,53 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self
+        // A failed list waits for `retry_installed_backgrounds`.
+        if !self
             .session
-            .requests
-            .pending
-            .values()
-            .any(|p| p.purpose == RequestPurpose::GetInstalledBackgrounds)
+            .chats_state
+            .installed_backgrounds
+            .theme(for_dark_theme)
+            .is_idle()
         {
             return Ok(None);
         }
-        let extra = self
+        let extra = self.session.request(
+            RequestPurpose::Chats(ChatsPurpose::GetInstalledBackgrounds { for_dark_theme }),
+            None,
+        );
+        let fetch = self
             .session
-            .request(RequestPurpose::GetInstalledBackgrounds, None);
+            .chats_state
+            .installed_backgrounds
+            .theme_mut(for_dark_theme);
+        fetch.begin();
+        fetch.sent(extra);
         if let Err(err) = self
             .sender
             .send_json(&get_installed_backgrounds(extra, for_dark_theme))
         {
             self.session.requests.take(extra);
+            self.session
+                .chats_state
+                .installed_backgrounds
+                .theme_mut(for_dark_theme)
+                .cancel();
             return Err(err);
         }
         Ok(Some(extra))
+    }
+
+    /// The wallpaper page's Retry after a failed list.
+    pub fn retry_installed_backgrounds(
+        &mut self,
+        for_dark_theme: bool,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.session
+            .chats_state
+            .installed_backgrounds
+            .theme_mut(for_dark_theme)
+            .clear_error();
+        self.fetch_installed_backgrounds(for_dark_theme)
     }
 
     /// `setDefaultBackground` with an installed or searched background:
@@ -56,10 +85,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.chats_state.background_set_for_dark = for_dark_theme;
-        let extra = self
-            .session
-            .request(RequestPurpose::SetDefaultBackground, None);
+        let extra = self.session.request(
+            RequestPurpose::Chats(ChatsPurpose::SetDefaultBackground { for_dark_theme }),
+            None,
+        );
         if let Err(err) = self.sender.send_json(&set_default_background(
             extra,
             background_id,
@@ -81,9 +110,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::DeleteDefaultBackground, None);
+        let extra = self.session.request(
+            RequestPurpose::Chats(ChatsPurpose::DeleteDefaultBackground { for_dark_theme }),
+            None,
+        );
         if let Err(err) = self
             .sender
             .send_json(&delete_default_background(extra, for_dark_theme))
@@ -91,14 +121,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session
-            .chats_state
-            .default_backgrounds
-            .remove(&for_dark_theme);
         Ok(extra)
     }
 
-    /// `removeInstalledBackground`; the entry leaves the list at once.
+    /// `removeInstalledBackground`; the entry leaves the list when the
+    /// server confirms.
     pub fn remove_installed_background(
         &mut self,
         background_id: i64,
@@ -106,18 +133,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::RemoveInstalledBackground, None);
+        let extra = self.session.request(
+            RequestPurpose::Chats(ChatsPurpose::RemoveInstalledBackground { background_id }),
+            None,
+        );
         if let Err(err) = self
             .sender
             .send_json(&remove_installed_background(extra, background_id))
         {
             self.session.requests.take(extra);
             return Err(err);
-        }
-        if let Some(list) = self.session.chats_state.installed_backgrounds.as_mut() {
-            list.retain(|b| b.id != background_id);
         }
         Ok(extra)
     }
@@ -132,10 +157,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || path.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.chats_state.background_set_for_dark = for_dark_theme;
-        let extra = self
-            .session
-            .request(RequestPurpose::SetDefaultBackgroundLocal, None);
+        let extra = self.session.request(
+            RequestPurpose::Chats(ChatsPurpose::SetDefaultBackgroundLocal { for_dark_theme }),
+            None,
+        );
         if let Err(err) = self.sender.send_json(&set_default_background_local(
             extra,
             path,
@@ -165,7 +190,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// `getBackgroundUrl`: the shareable link; the answer lands in
-    /// `Session::chats_state.background_url`.
+    /// `Session::chats_state.background_answers`, under the returned request.
     pub fn get_background_url(
         &mut self,
         name: &str,
@@ -174,7 +199,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || name.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.chats_state.background_url = None;
         let extra = self.session.request(RequestPurpose::GetBackgroundUrl, None);
         if let Err(err) = self
             .sender
@@ -242,7 +266,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(extra)
     }
 
-    /// `deleteChatBackground`; the wallpaper leaves the chat at once.
+    /// `deleteChatBackground`; the wallpaper leaves the chat when the server
+    /// confirms.
     pub fn delete_chat_background(
         &mut self,
         chat_id: ChatId,
@@ -261,7 +286,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.set_chat_background(chat_id.0, None);
         Ok(extra)
     }
 
@@ -304,7 +328,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn download_background_files(&mut self) {
         let chats = &self.session.chats_state;
         let wanted = gallery_files(
-            chats.installed_backgrounds.iter().flatten(),
+            chats.installed_backgrounds.all(),
             chats.default_backgrounds.values(),
         );
         self.fetch_background_files(wanted.into_iter().cloned().collect());
@@ -328,7 +352,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .get(&f.id.0)
                     .unwrap_or(f)
                     .local
-                    .is_downloading_completed
+                    .is_downloading_completed()
             })
             .map(|f| f.id)
             .collect();

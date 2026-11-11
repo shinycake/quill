@@ -3,9 +3,10 @@
 use super::*;
 use crate::ids::{ChatId, RequestId};
 use crate::state::GroupsPurpose;
+use crate::state::send_failed_line;
 use crate::state::{
     INVITE_ADMIN_PAGE_SIZE, InviteLinkCountsFetch, InviteLinkFetch, InviteLinkMembersState,
-    JoinRequestFetch, RequestPurpose,
+    JoinRequestFetch, PageStage, RequestPurpose,
 };
 use crate::telegram::requests::{
     create_chat_subscription_invite_link, delete_all_revoked_chat_invite_links,
@@ -50,26 +51,57 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetChatJoinRequests, Some(chat_id));
-        self.session
-            .groups
-            .join_request_latest
-            .insert(chat_id.0, extra);
-        self.session
-            .groups
-            .join_request_queries
-            .insert(chat_id.0, query.clone());
-        self.session
-            .groups
-            .join_requests
-            .insert(chat_id.0, JoinRequestFetch::Loading);
+        let previous = self.session.groups.join_requests.get(&chat_id.0).cloned();
+        self.session.groups.join_requests.insert(
+            chat_id.0,
+            JoinRequestFetch::Loading {
+                query: query.clone(),
+                request: extra,
+            },
+        );
         let payload =
             get_chat_join_requests_page(extra, chat_id.0, "", &query, None, INVITE_ADMIN_PAGE_SIZE);
         let sent = self.send_invite_admin(extra, &payload);
         if sent.is_err() {
-            self.session.groups.join_request_latest.remove(&chat_id.0);
-            self.session.groups.join_requests.remove(&chat_id.0);
+            // A search that never left keeps the list it was going to
+            // replace, with its own query.
+            let groups = &mut self.session.groups;
+            match previous {
+                Some(fetch) => {
+                    groups.join_requests.insert(chat_id.0, fetch);
+                }
+                None => {
+                    groups.join_requests.remove(&chat_id.0);
+                }
+            }
         }
         sent
+    }
+
+    /// Ask for the join-request list: `query` empty and `refresh` set re-sends
+    /// the whole list, anything else searches. A request that cannot go out
+    /// (not connected, no right to invite, a refused send) leaves the list
+    /// `Failed`, which the box draws with Retry; `None` never means "being
+    /// asked".
+    pub fn ask_join_requests(&mut self, chat_id: ChatId, query: &str, refresh: bool) {
+        let sent = if query.is_empty() && refresh {
+            self.refresh_chat_join_requests(chat_id)
+        } else {
+            self.search_chat_join_requests(chat_id, query)
+        };
+        let settled = matches!(
+            self.session.groups.join_requests.get(&chat_id.0),
+            Some(JoinRequestFetch::Loading { .. } | JoinRequestFetch::Loaded(_))
+        );
+        if !settled && !matches!(sent, Ok(Some(_))) {
+            self.session.groups.join_requests.insert(
+                chat_id.0,
+                JoinRequestFetch::Failed(
+                    crate::lang::tr(crate::lang::keys::Q_CHAT_COULD_NOT_LOAD_JOIN_REQUESTS)
+                        .to_string(),
+                ),
+            );
+        }
     }
 
     /// Next page of the (possibly searched) join-request list, appended.
@@ -80,19 +112,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.invite_admin_ready(chat_id)? {
             return Ok(None);
         }
-        if self
-            .session
-            .groups
-            .join_request_latest
-            .contains_key(&chat_id.0)
-        {
-            return Ok(None);
-        }
         let Some(JoinRequestFetch::Loaded(list)) =
             self.session.groups.join_requests.get(&chat_id.0)
         else {
             return Ok(None);
         };
+        if list.more.is_some() {
+            return Ok(None);
+        }
         let Some(last) = list.requests.last() else {
             return Ok(None);
         };
@@ -100,20 +127,15 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let offset = (last.user_id, last.date);
-        let query = self
-            .session
-            .groups
-            .join_request_queries
-            .get(&chat_id.0)
-            .cloned()
-            .unwrap_or_default();
+        let query = list.query.clone();
         let extra = self
             .session
             .request(RequestPurpose::GetMoreChatJoinRequests, Some(chat_id));
-        self.session
-            .groups
-            .join_request_latest
-            .insert(chat_id.0, extra);
+        if let Some(JoinRequestFetch::Loaded(list)) =
+            self.session.groups.join_requests.get_mut(&chat_id.0)
+        {
+            list.more = Some(extra);
+        }
         let payload = get_chat_join_requests_page(
             extra,
             chat_id.0,
@@ -123,8 +145,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             INVITE_ADMIN_PAGE_SIZE,
         );
         let sent = self.send_invite_admin(extra, &payload);
-        if sent.is_err() {
-            self.session.groups.join_request_latest.remove(&chat_id.0);
+        if sent.is_err()
+            && let Some(fetch) = self.session.groups.join_requests.get_mut(&chat_id.0)
+        {
+            fetch.forget_page_in_flight();
         }
         sent
     }
@@ -166,22 +190,29 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if matches!(
             self.session.groups.revoked_invite_links.get(&chat_id.0),
-            Some(InviteLinkFetch::Loading | InviteLinkFetch::Loaded(_))
+            Some(InviteLinkFetch::Loading(_) | InviteLinkFetch::Loaded(_))
         ) {
             return Ok(None);
         }
+        // The creator is the viewer: until getMe has answered there is no
+        // id to ask with (0 would ask for nobody's links).
+        let Some(creator) = self.session.my_user_id else {
+            return Ok(None);
+        };
         let extra = self
             .session
             .request(RequestPurpose::GetRevokedChatInviteLinks, Some(chat_id));
         self.session
             .groups
             .revoked_invite_links
-            .insert(chat_id.0, InviteLinkFetch::Loading);
-        let creator = self.session.my_user_id.unwrap_or(0);
+            .insert(chat_id.0, InviteLinkFetch::Loading(extra));
         let payload = get_chat_invite_links(extra, chat_id.0, creator, true, 0, "", 100);
         let sent = self.send_invite_admin(extra, &payload);
         if sent.is_err() {
-            self.session.groups.revoked_invite_links.remove(&chat_id.0);
+            self.session.groups.revoked_invite_links.insert(
+                chat_id.0,
+                InviteLinkFetch::Failed(send_failed_line("Could not load revoked links")),
+            );
         }
         sent
     }
@@ -209,7 +240,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             .insert(chat_id.0, InviteLinkCountsFetch::Loading);
         let sent = self.send_invite_admin(extra, &get_chat_invite_link_counts(extra, chat_id.0));
         if sent.is_err() {
-            self.session.groups.invite_link_counts.remove(&chat_id.0);
+            self.session.groups.invite_link_counts.insert(
+                chat_id.0,
+                InviteLinkCountsFetch::Failed(crate::state::send_failed_line(
+                    "Could not load invite links",
+                )),
+            );
         }
         sent
     }
@@ -238,7 +274,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(state) = self.session.groups.invite_pages.members(chat_id.0) else {
             return Ok(None);
         };
-        if state.loading || state.members.len() as i32 >= state.total_count {
+        if state.loading() || state.members.len() as i32 >= state.total_count {
             return Ok(None);
         }
         let Some(last) = state.members.last() else {
@@ -264,16 +300,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             invite_link: invite_link.to_owned(),
             total_count: 0,
             members: Vec::new(),
-            loading: true,
-            error: None,
-            request: Some(extra),
+            stage: PageStage::Loading(extra),
         };
         match self.session.groups.invite_pages.members_mut(chat_id.0) {
-            Some(state) if append => {
-                state.loading = true;
-                state.error = None;
-                state.request = Some(extra);
-            }
+            Some(state) if append => state.stage = PageStage::Loading(extra),
             _ => {
                 self.session
                     .groups
@@ -291,7 +321,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         let sent = self.send_invite_admin(extra, &payload);
         if sent.is_err() {
-            self.session.groups.invite_pages.close_members(chat_id.0);
+            // The members already loaded stay when only the next page did
+            // not leave; a first page has nothing to keep.
+            match self.session.groups.invite_pages.members_mut(chat_id.0) {
+                Some(state) if append && !state.members.is_empty() => {
+                    state.stage = PageStage::Failed(
+                        crate::lang::tr(
+                            crate::lang::keys::Q_INVITE_LINK_COULD_NOT_LOAD_MORE_MEMBERS,
+                        )
+                        .into(),
+                    );
+                }
+                _ => self.session.groups.invite_pages.close_members(chat_id.0),
+            }
         }
         sent
     }
@@ -340,8 +382,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
+        let Some(creator) = self.session.my_user_id else {
+            return Ok(None);
+        };
         let extra = self.session.request(purpose, Some(chat_id));
-        let creator = self.session.my_user_id.unwrap_or(0);
         self.send_invite_admin(
             extra,
             &delete_all_revoked_chat_invite_links(extra, chat_id.0, creator),

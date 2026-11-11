@@ -174,7 +174,9 @@ fn a_full_disk_shows_its_screen_in_place_of_an_open_viewer(cx: &mut TestAppConte
 fn a_call_held_open_at_full_draws_no_full_screen(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     fill(&app, &mut vcx, Some(0));
-    app.update_in(&mut vcx, |app, _, _| app.disk.held_for_call = true);
+    app.update_in(&mut vcx, |app, _, _| {
+        app.disk.stage = app.disk.stage.hold_for_call(true)
+    });
     vcx.update(|window, cx| window.render_frame(cx));
     assert!(vcx.debug_bounds("disk-full-cover").is_none());
 }
@@ -229,7 +231,9 @@ fn space_freed_during_a_held_call_keeps_the_call_client(cx: &mut TestAppContext)
     let (app, mut vcx) = new_app(cx);
     let start = shown(&app, &mut vcx).2;
     fill(&app, &mut vcx, Some(0));
-    app.update_in(&mut vcx, |app, _, _| app.disk.held_for_call = true);
+    app.update_in(&mut vcx, |app, _, _| {
+        app.disk.stage = app.disk.stage.hold_for_call(true)
+    });
     read(&app, &mut vcx, Some(FLOORS.warn_clear));
     assert_eq!(
         shown(&app, &mut vcx),
@@ -237,7 +241,9 @@ fn space_freed_during_a_held_call_keeps_the_call_client(cx: &mut TestAppContext)
         "the client in the call was never closed, so it is not replaced"
     );
     fill(&app, &mut vcx, Some(0));
-    app.update_in(&mut vcx, |app, _, _| app.disk.held_for_call = true);
+    app.update_in(&mut vcx, |app, _, _| {
+        app.disk.stage = app.disk.stage.hold_for_call(true)
+    });
     app.update_in(&mut vcx, |app, _, _| {
         app.account.passcode.force_locked(true)
     });
@@ -310,9 +316,9 @@ fn a_client_opened_on_a_low_disk_holds_automatic_downloads_at_once(cx: &mut Test
         credentials,
         prepared,
     );
-    assert!(!driver.session.media.disk_holds_auto_downloads);
+    assert!(!driver.session.media.disk.holds_auto_downloads());
     app.read_with(&vcx, |app, _| app.disk.seed(&mut driver));
-    assert!(driver.session.media.disk_holds_auto_downloads);
+    assert!(driver.session.media.disk.holds_auto_downloads());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -403,7 +409,9 @@ fn a_data_folder_that_cannot_be_written_closes_with_its_own_screen(cx: &mut Test
 fn a_call_held_open_at_full_keeps_the_app_with_the_bar(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     fill(&app, &mut vcx, Some(0));
-    app.update_in(&mut vcx, |app, _, _| app.disk.held_for_call = true);
+    app.update_in(&mut vcx, |app, _, _| {
+        app.disk.stage = app.disk.stage.hold_for_call(true)
+    });
     assert!(shown(&app, &mut vcx).0, "the bar");
     assert!(!shown(&app, &mut vcx).1, "no full screen during the call");
     vcx.update(|window, cx| window.render_frame(cx));
@@ -412,7 +420,7 @@ fn a_call_held_open_at_full_keeps_the_app_with_the_bar(cx: &mut TestAppContext) 
         "the bar is on screen"
     );
     read(&app, &mut vcx, Some(FLOORS.warn_clear));
-    app.read_with(&vcx, |app, _| assert!(!app.disk.held_for_call));
+    app.read_with(&vcx, |app, _| assert!(!app.disk.held_for_call()));
 }
 
 #[gpui_kit::test]
@@ -484,8 +492,11 @@ fn the_storage_list_stays_in_view_when_rows_above_arrive(cx: &mut TestAppContext
     };
     let rows = |app: &mut QuillApp, arrived: bool| {
         if let Some(demo) = app.demo_session.as_mut() {
-            demo.settings.data_storage.seeded = arrived;
-            demo.settings.auto_download_presets_loading = !arrived;
+            demo.settings.data_storage.seeded = if arrived {
+                quill::data_settings::PresetsSeed::Seeded
+            } else {
+                quill::data_settings::PresetsSeed::Loading(quill::ids::RequestId(1))
+            };
         }
     };
     app.update_in(&mut vcx, |app, _, cx| {
@@ -585,7 +596,8 @@ fn a_running_update_download_waits_for_space_and_starts_again(cx: &mut TestAppCo
     };
     let progress = DownloadProgress::default();
     app.update_in(&mut vcx, |app, _, _| {
-        app.preferences.update_state = UpdateState::Downloading(release.clone(), progress.clone());
+        app.preferences.update_state =
+            UpdateState::Downloading(release.clone(), progress.clone(), Default::default());
     });
     read(&app, &mut vcx, Some(FLOORS.warn - 1));
     assert!(progress.is_held(), "the low disk stops the download");

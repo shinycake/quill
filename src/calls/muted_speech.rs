@@ -53,17 +53,28 @@ pub struct HintCall {
     pub live: bool,
 }
 
+/// Where the hint stands in one call.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+enum HintStage {
+    #[default]
+    Idle,
+    /// Listening: the counts, when the next check is due and the loudest
+    /// peak since the last check.
+    Listening {
+        tester: MicLevelTester,
+        due: u64,
+        peak: f32,
+    },
+    Showing,
+    /// Unmuted or closed: not again in this call.
+    Done,
+}
+
 /// The hint's state for the joined group call.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct MutedSpeechHint {
     call_id: Option<i32>,
-    /// Listening: the counts and when the next check is due.
-    tester: Option<(MicLevelTester, u64)>,
-    /// The loudest peak since the last check.
-    peak: f32,
-    showing: bool,
-    /// Unmuted or closed: not again in this call.
-    done: bool,
+    stage: HintStage,
     /// Whether the microphone was live at the last update: only a change
     /// to live ends the hint, never the state the call joined in
     /// (tdesktop `mutedValue() | rpl::skip(1)`).
@@ -76,7 +87,7 @@ impl MutedSpeechHint {
     /// scale), when one was measured. Returns whether the hint appeared
     /// or went away.
     pub fn update(&mut self, call: Option<HintCall>, peak: Option<f32>, now_ms: u64) -> bool {
-        let was = self.showing;
+        let was = self.showing();
         if self.call_id != call.map(|call| call.call_id) {
             *self = Self {
                 call_id: call.map(|call| call.call_id),
@@ -85,58 +96,71 @@ impl MutedSpeechHint {
         }
         let live = call.map(|call| call.live);
         if self.was_live == Some(false) && live == Some(true) {
-            self.done = true;
+            self.stage = HintStage::Done;
         }
         self.was_live = live;
         // Not ready, muted by an admin, unmuted or closed: stop listening
-        // (an admin's mute keeps `done` as it was, tdesktop's
+        // (an admin's mute keeps `Done` as it was, tdesktop's
         // `StickedTooltipHide::Unavailable`).
-        let listening = call.is_some_and(|call| call.muted) && !self.done;
-        if !listening {
-            self.tester = None;
-            self.showing = false;
-        }
-        if listening && !self.showing {
-            match self.tester.as_mut() {
-                None => {
-                    // The tester starts now: what was heard before is not counted.
-                    self.tester = Some((MicLevelTester::default(), now_ms + CHECK_EVERY_MS));
-                    self.peak = 0.0;
+        let muted = call.is_some_and(|call| call.muted);
+        self.stage = match self.stage {
+            HintStage::Done => HintStage::Done,
+            _ if !muted => HintStage::Idle,
+            HintStage::Showing => HintStage::Showing,
+            HintStage::Idle => {
+                // The tester starts now: what was heard before is not counted.
+                HintStage::Listening {
+                    tester: MicLevelTester::default(),
+                    due: now_ms.saturating_add(CHECK_EVERY_MS),
+                    peak: 0.0,
                 }
-                Some((tester, due)) => {
-                    self.peak = self.peak.max(peak.unwrap_or(0.0));
-                    if now_ms >= *due {
-                        let show = tester.check(self.peak);
-                        self.peak = 0.0;
-                        *due = now_ms + CHECK_EVERY_MS;
-                        if show {
-                            self.showing = true;
-                            self.tester = None;
+            }
+            HintStage::Listening {
+                mut tester,
+                due,
+                peak: heard,
+            } => {
+                let heard = heard.max(peak.unwrap_or(0.0));
+                if now_ms >= due {
+                    if tester.check(heard) {
+                        HintStage::Showing
+                    } else {
+                        HintStage::Listening {
+                            tester,
+                            due: now_ms.saturating_add(CHECK_EVERY_MS),
+                            peak: 0.0,
                         }
+                    }
+                } else {
+                    HintStage::Listening {
+                        tester,
+                        due,
+                        peak: heard,
                     }
                 }
             }
-        }
-        was != self.showing
+        };
+        was != self.showing()
     }
 
     /// The close button: gone for this call (tdesktop
     /// `StickedTooltipHide::Discarded`).
     pub fn dismiss(&mut self) -> bool {
-        let was = self.showing;
-        self.showing = false;
-        self.tester = None;
-        self.done = true;
+        let was = self.showing();
+        self.stage = HintStage::Done;
         was
     }
 
     pub fn showing(&self) -> bool {
-        self.showing
+        self.stage == HintStage::Showing
     }
 
     /// When the next check is due, while listening.
     pub fn next_check_ms(&self) -> Option<u64> {
-        self.tester.map(|(_, due)| due)
+        match self.stage {
+            HintStage::Listening { due, .. } => Some(due),
+            _ => None,
+        }
     }
 }
 

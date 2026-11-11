@@ -178,15 +178,17 @@ fn heading(level: u8, value: &Value, field: &str) -> RichBlock {
 struct JoinedLines {
     text: String,
     entities: Vec<TextEntity>,
-    started: bool,
+    /// How many lines were pushed; a line follows a newline unless it is
+    /// the first.
+    lines: usize,
 }
 
 impl JoinedLines {
     fn push(&mut self, text: &str, entities: Vec<TextEntity>) {
-        if self.started {
+        if self.lines > 0 {
             self.text.push('\n');
         }
-        self.started = true;
+        self.lines += 1;
         let shift = self.text.len();
         self.text.push_str(text);
         self.entities

@@ -16,16 +16,17 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::fragment_password::keep_password_field;
 use super::gift_manage_ui::{hint, stars};
 use super::gift_transfer_view::{StageView, stage_view};
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::fragment_password::Showing;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::gift_manage::{
-    ExportError, ProbeOutcome, TransferPicker, TransferStage, fragment_gift_url,
+    ExportError, ExportSend, GiftEvent, ProbeOutcome, TransferPicker, TransferStage,
+    fragment_gift_url,
 };
 use quill::lang::{keys, tr, tr_with};
 use quill::local_time::now_unix;
@@ -42,7 +43,7 @@ impl QuillApp {
     ) {
         let picker = self
             .session()
-            .and_then(|s| s.payments.hub.gifts.iter().find(|g| g.id == id))
+            .and_then(|s| s.payments.hub.received.rows.iter().find(|g| g.id == id))
             .map(TransferPicker::for_gift);
         let Some(picker) = picker else {
             return;
@@ -76,7 +77,9 @@ impl QuillApp {
     /// Close the picker and every step on it.
     pub(super) fn close_gift_transfer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(manage) = self.gift_manage_mut()
-            && manage.transfer().is_some()
+            && manage
+                .transfer()
+                .is_some_and(|picker| !picker.transferring())
         {
             manage.flow = None;
         }
@@ -114,7 +117,7 @@ impl QuillApp {
         let now = now_unix();
         let state = self.session().and_then(|s| {
             let id = &s.payments.gifts_manage.transfer()?.id;
-            let gift = s.payments.hub.gifts.iter().find(|g| g.id == *id)?;
+            let gift = s.payments.hub.received.rows.iter().find(|g| g.id == *id)?;
             Some(gift.export_state(now))
         });
         let to_wallet = self.session().is_some_and(|s| s.ton_wallet.can_use);
@@ -148,8 +151,9 @@ impl QuillApp {
             }
             // The demo has no connection: straight to the password box.
             None => self.edit_transfer(cx, |picker| {
-                picker.open_fragment();
-                picker.probe_failed(ProbeOutcome::Other, None);
+                let probe = quill::ids::RequestId(0);
+                picker.open_fragment(probe);
+                picker.probe_failed(Some(probe), ProbeOutcome::Other, None);
             }),
         }
     }
@@ -193,7 +197,7 @@ impl QuillApp {
             // seen (a note would sit behind the picker).
             Some(Err(_)) => self.edit_transfer(cx, |picker| {
                 if let TransferStage::Password {
-                    sending: false,
+                    send: ExportSend::Idle,
                     error,
                 } = &mut picker.stage
                 {
@@ -247,37 +251,44 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (url, done, in_password, idle_password) = match self.gift_manage_mut() {
+        let (events, in_password, idle_password) = match self.gift_manage_mut() {
             Some(manage) => {
                 let stage = manage.transfer().map(|p| &p.stage);
                 let in_password = matches!(stage, Some(TransferStage::Password { .. }));
-                let idle = matches!(stage, Some(TransferStage::Password { sending: false, .. }));
-                (
-                    manage.export_url.take(),
-                    manage.transferred.take(),
-                    in_password,
-                    idle,
-                )
+                let idle = matches!(
+                    stage,
+                    Some(TransferStage::Password {
+                        send: ExportSend::Idle,
+                        ..
+                    })
+                );
+                (manage.take_events(), in_password, idle)
             }
-            None => (None, None, false, false),
+            None => (Vec::new(), false, false),
         };
-        keep_password_field(
-            &self.screen.payments.gift_export_password,
-            &mut self.screen.payments.gift_export_password_focused,
-            in_password,
-            idle_password,
-            window,
-            cx,
-        );
+        let (mut url, mut done, mut deleted) = (None, None, false);
+        for event in events {
+            match event {
+                GiftEvent::ExportUrl(found) => url = Some(found),
+                GiftEvent::Transferred(found) => done = Some(found),
+                GiftEvent::Deleted => deleted = true,
+            }
+        }
+        let field = match (in_password, idle_password) {
+            (false, _) => Showing::Off,
+            (true, true) => Showing::Idle,
+            (true, false) => Showing::Sending,
+        };
+        self.screen
+            .payments
+            .gift_export_password
+            .keep(field, window, cx);
         if let Some(url) = url {
             self.open_fragment_url(&url, cx);
             self.clear_transfer_inputs(window, cx);
             cx.notify();
         }
-        if self
-            .gift_manage_mut()
-            .is_some_and(|m| std::mem::take(&mut m.deleted))
-        {
+        if deleted {
             // tdesktop `DeleteStarGift`: the `lng_gift_deleted` toast.
             cx.defer_in(window, |_, window, cx| {
                 window.push_notification(Notification::new().message(tr(keys::GIFT_DELETED)), cx);
@@ -382,7 +393,7 @@ crate::ui::shell::register_dialogs! {
         3870,
         |app| {
             app.session().is_some_and(|s| {
-                s.payments.hub.gifts_open && s.payments.gifts_manage.transfer().is_some()
+                s.payments.hub.received.is_open() && s.payments.gifts_manage.transfer().is_some()
             })
         },
         QuillApp::build_gift_transfer_dialog,

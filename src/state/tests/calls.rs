@@ -125,7 +125,7 @@ fn join_as_answer_fills_options_and_preselects_the_saved_default() {
         ),
     );
     let call = session.calls.active_group_call.as_ref().unwrap();
-    assert_eq!(call.join_as_options.len(), 2);
+    assert_eq!(call.join_as_options.data().map(Vec::len), Some(2));
     assert_eq!(call.join_as, Some(MessageSender::Chat { chat_id: -300 }));
     // The blocked-users list is untouched by a join-as answer.
     assert!(session.settings.blocked_senders.is_idle());
@@ -141,6 +141,10 @@ fn call_privacy_get_maps_rules_and_set_failure_clears() {
         }),
         None,
     );
+    session
+        .calls
+        .privacy_asks
+        .set(CallPrivacySetting::AllowCalls, PrivacyAsk::Asking(extra));
     apply_json(
         &mut session,
         &seq,
@@ -154,7 +158,7 @@ fn call_privacy_get_maps_rules_and_set_failure_clears() {
         session.calls.privacy_allow_calls,
         Some(PrivacyWho::Contacts)
     );
-    assert!(!session.calls.privacy_error);
+    assert!(!session.calls.privacy_error());
 
     // Optimistic set, then a TDLib error: the optimistic value is
     // cleared (the next fetch restores the truth) and the error
@@ -166,6 +170,10 @@ fn call_privacy_get_maps_rules_and_set_failure_clears() {
         }),
         None,
     );
+    session
+        .calls
+        .privacy_asks
+        .set(CallPrivacySetting::AllowCalls, PrivacyAsk::Asking(extra));
     apply_json(
         &mut session,
         &seq,
@@ -176,7 +184,7 @@ fn call_privacy_get_maps_rules_and_set_failure_clears() {
         ),
     );
     assert_eq!(session.calls.privacy_allow_calls, None);
-    assert!(session.calls.privacy_error);
+    assert!(session.calls.privacy_error());
 }
 
 #[test]
@@ -186,15 +194,22 @@ fn call_privacy_loading_clears_only_after_both_gets_land() {
     // nothing selected instead of "Loading…".
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.calls.privacy_pending = 2;
-    for setting in [
+    let settings = [
         CallPrivacySetting::AllowCalls,
         CallPrivacySetting::PeerToPeer,
-    ] {
+    ];
+    let asked = settings.map(|setting| {
         let extra = session.request(
             RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules { setting }),
             None,
         );
+        session
+            .calls
+            .privacy_asks
+            .set(setting, PrivacyAsk::Asking(extra));
+        extra
+    });
+    for (setting, extra) in settings.into_iter().zip(asked) {
         apply_json(
             &mut session,
             &seq,
@@ -261,6 +276,51 @@ fn second_incoming_while_prompt_open_busy_declines() {
 }
 
 #[test]
+fn a_created_call_that_finds_the_slot_taken_is_queued_for_discard() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request_for_user(
+        RequestPurpose::Calls(CallsPurpose::CreateCall { is_video: true }),
+        50,
+    );
+    // An incoming call took the slot before the `callId` answer.
+    apply_json(&mut session, &seq, &sink, &swap_active_json(77, 41));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"callId","id":90,"@extra":"{}"}}"#, extra.0),
+    );
+    assert_eq!(session.calls.created_call_discards, vec![(90, true)]);
+    assert_eq!(session.calls.active_call.as_ref().map(|c| c.id), Some(77));
+}
+
+#[test]
+fn the_end_of_a_discarded_created_call_is_not_a_missed_call() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request_for_user(
+        RequestPurpose::Calls(CallsPurpose::CreateCall { is_video: false }),
+        50,
+    );
+    apply_json(&mut session, &seq, &sink, &swap_active_json(77, 41));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"callId","id":90,"@extra":"{}"}}"#, extra.0),
+    );
+    // Its updates are no one's: a late pending does not take the window.
+    apply_json(&mut session, &seq, &sink, &swap_pending_json(90, 50, false));
+    assert_eq!(session.calls.active_call.as_ref().map(|c| c.id), Some(77));
+    assert!(session.calls.second_call.prompt().is_none());
+    // Its end shows no "Missed call" for the call the user placed.
+    apply_json(&mut session, &seq, &sink, &swap_discarded_json(90, 50));
+    assert!(session.calls.summary.is_none());
+    assert!(session.calls.busy_decline_queue.is_empty());
+}
+
+#[test]
 fn caller_hangup_clears_swap_prompt() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
@@ -313,7 +373,10 @@ fn hanging_up(session: &mut Session, call_id: i32) -> RequestId {
     let request = session.request(RequestPurpose::DiscardCall, None);
     let call = session.calls.active_call.as_mut().expect("active call");
     let resume = std::mem::replace(&mut call.state, CallState::HangingUp);
-    session.calls.hang_up = Some(crate::state::HangUp::new(request, call_id, resume));
+    session
+        .calls
+        .progress
+        .hang_up_sent(crate::state::HangUp::new(request, call_id, resume));
     request
 }
 
@@ -343,7 +406,7 @@ fn non_terminal_update_keeps_a_hang_up_in_flight() {
     // The hang-up fails: the call is back in the phase it moved to.
     apply_json(&mut session, &seq, &sink, &error_json(request));
     assert_eq!(state(&session), Some(CallState::ExchangingKeys));
-    assert!(session.calls.hang_up.is_none());
+    assert!(session.calls.progress.hang_up().is_none());
     assert!(session.calls.error.is_some());
 }
 
@@ -379,11 +442,178 @@ fn other_discard_errors_leave_the_hang_up_alone() {
     apply_json(&mut session, &seq, &sink, &error_json(other));
     let call = session.calls.active_call.as_ref().expect("active call");
     assert_eq!(call.state, CallState::HangingUp);
-    assert!(session.calls.hang_up.is_some());
+    assert!(session.calls.progress.hang_up().is_some());
     // TDLib's own hanging-up update is kept as the phase to go back to.
     apply_json(&mut session, &seq, &sink, &hanging_up_update_json(77, 41));
     assert_eq!(
-        session.calls.hang_up.as_ref().map(|h| h.resume.clone()),
+        session.calls.progress.hang_up().map(|h| h.resume.clone()),
         Some(CallState::HangingUp)
     );
+}
+
+/// Sweep 05-251: a send that failed marks only its own rule, so the answer
+/// of the other get neither hides the failure nor looks like a full load.
+#[test]
+fn a_failed_privacy_send_survives_the_other_rules_answer() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let first = session.request(
+        RequestPurpose::Calls(CallsPurpose::GetCallPrivacyRules {
+            setting: CallPrivacySetting::AllowCalls,
+        }),
+        None,
+    );
+    let calls = &mut session.calls;
+    calls
+        .privacy_asks
+        .set(CallPrivacySetting::AllowCalls, PrivacyAsk::Asking(first));
+    // The second get never left.
+    calls
+        .privacy_asks
+        .set(CallPrivacySetting::PeerToPeer, PrivacyAsk::Failed);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"userPrivacySettingRules","@extra":"{}","rules":[{{"@type":"userPrivacySettingRuleAllowAll"}}]}}"#,
+            first.0,
+        ),
+    );
+    assert_eq!(
+        session.calls.privacy_allow_calls,
+        Some(PrivacyWho::Everybody)
+    );
+    assert!(session.calls.privacy_error(), "the failure line stays");
+    assert!(!session.calls.privacy_loading());
+}
+
+fn rated_summary(session: &mut Session, seq: &AtomicU64, sink: &Arc<MemorySink>) {
+    apply_json(session, seq, sink, &swap_active_json(77, 41));
+    apply_json(
+        session,
+        seq,
+        sink,
+        r#"{"@type":"updateCall","call":{"@type":"call","id":77,"unique_id":"97","user_id":41,"is_outgoing":false,"is_video":false,"state":{"@type":"callStateDiscarded","reason":{"@type":"callDiscardReasonHungUp"},"need_rating":true,"need_debug_information":false,"need_log":false}}}"#,
+    );
+}
+
+fn rating(session: &Session) -> Option<CallRating> {
+    Some(session.calls.summary.as_ref()?.rating.clone())
+}
+
+#[test]
+fn a_failed_rating_brings_the_card_back_and_an_ok_says_thanks() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    rated_summary(&mut session, &seq, &sink);
+    let request = session.request(RequestPurpose::SendCallRating, None);
+    session.calls.summary.as_mut().expect("summary").rating = CallRating::Sending(request);
+    apply_json(&mut session, &seq, &sink, &error_json(request));
+    let failed = rating(&session).expect("summary");
+    assert!(matches!(failed, CallRating::Failed(_)));
+    assert!(failed.is_open(), "the card is drawn again");
+    // The retry is answered ok.
+    let retry = session.request(RequestPurpose::SendCallRating, None);
+    session.calls.summary.as_mut().expect("summary").rating = CallRating::Sending(retry);
+    // An answer to the first, stale request changes nothing.
+    apply_json(&mut session, &seq, &sink, &error_json(request));
+    assert_eq!(rating(&session), Some(CallRating::Sending(retry)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, retry.as_extra()),
+    );
+    assert_eq!(rating(&session), Some(CallRating::Sent));
+}
+
+#[test]
+fn a_failed_busy_decline_does_not_blame_the_active_call() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    apply_json(&mut session, &seq, &sink, &swap_active_json(77, 41));
+    let decline = session.request(RequestPurpose::DiscardCall, None);
+    apply_json(&mut session, &seq, &sink, &error_json(decline));
+    assert!(session.calls.error.is_none());
+    // The active call's own hang-up still reports.
+    let request = hanging_up(&mut session, 77);
+    apply_json(&mut session, &seq, &sink, &error_json(request));
+    assert!(session.calls.error.is_some());
+}
+
+#[test]
+fn a_call_ending_untracked_keeps_another_calls_open_rating() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    rated_summary(&mut session, &seq, &sink);
+    assert!(session.calls.active_call.is_none());
+    // A missed call from someone else ends with no active call.
+    apply_json(&mut session, &seq, &sink, &swap_discarded_json(90, 42));
+    let summary = session.calls.summary.as_ref().expect("summary");
+    assert_eq!(summary.call_id, 77, "the rating card is still call 77's");
+    assert!(summary.rating.is_open());
+}
+
+fn own_row(muted: bool) -> String {
+    format!(
+        r#"{{"@type":"updateGroupCallParticipant","group_call_id":555,"participant":{{"@type":"groupCallParticipant","participant_id":{{"@type":"messageSenderUser","user_id":1}},"audio_source_id":0,"screen_sharing_audio_source_id":0,"video_info":null,"screen_sharing_video_info":null,"bio":"","is_current_user":true,"is_speaking":false,"is_hand_raised":false,"can_be_muted_for_all_users":false,"can_be_unmuted_for_all_users":false,"can_be_muted_for_current_user":false,"can_be_unmuted_for_current_user":false,"is_muted_for_all_users":{muted},"is_muted_for_current_user":false,"can_unmute_self":true,"volume_level":10000,"order":"a1"}}}}"#
+    )
+}
+
+#[test]
+fn muting_someone_else_does_not_hold_back_your_own_row() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let mut call = ActiveGroupCall::fresh(555);
+    call.is_joined = true;
+    call.is_muted_self = true;
+    session.calls.active_group_call = Some(call);
+    let mute = |participant| {
+        RequestPurpose::Calls(CallsPurpose::ToggleGroupCallParticipantMute {
+            group_call_id: 555,
+            participant,
+        })
+    };
+    // An admin mutes another participant: that toggle is in flight.
+    let other = session.request(mute(MessageSender::User { user_id: 41 }), None);
+    apply_json(&mut session, &seq, &sink, &own_row(false));
+    let call = session.calls.active_group_call.as_ref().unwrap();
+    assert!(!call.is_muted_self, "your own row settles");
+    // Your own toggle in flight holds the row back.
+    session.requests.take(other);
+    session.request(mute(MessageSender::User { user_id: 1 }), None);
+    apply_json(&mut session, &seq, &sink, &own_row(true));
+    let call = session.calls.active_group_call.as_ref().unwrap();
+    assert!(!call.is_muted_self, "held while your own toggle is out");
+}
+
+#[test]
+fn join_as_failure_leaves_the_picker_out_and_is_not_asked_again() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.calls.active_group_call = Some(ActiveGroupCall::fresh(555));
+    if let Some(call) = session.calls.active_group_call.as_mut() {
+        call.join_as_options.begin();
+    }
+    let extra = session.request(
+        RequestPurpose::Calls(CallsPurpose::GetVideoChatAvailableParticipants {
+            group_call_id: 555,
+        }),
+        None,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_ADMIN_REQUIRED"}}"#,
+            extra.0
+        ),
+    );
+    let call = session.calls.active_group_call.as_ref().unwrap();
+    assert!(!call.join_as_options.is_loading());
+    assert!(call.join_as_options.error().is_some());
+    assert!(!call.join_as_options.is_idle());
+    assert!(call.join_as_options.data().is_none());
 }

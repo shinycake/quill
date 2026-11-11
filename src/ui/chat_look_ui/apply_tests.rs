@@ -33,7 +33,7 @@ fn new_app(cx: &mut TestAppContext, premium: bool) -> (Entity<QuillApp>, VisualT
         let chat = demo_private_chat(session)?;
         app.open_chat_look_dialog(chat, cx);
         let dialog = app.dialogs.chat_look_dialog.as_mut()?;
-        dialog.background = Some(901);
+        dialog.wallpaper = crate::ui::chat_look_ui::WallpaperChoice::Installed(901);
         Some(chat)
     });
     frames(&mut vcx);
@@ -97,8 +97,8 @@ fn a_free_account_unlocks_both_through_the_preview(cx: &mut TestAppContext) {
     let page = app.read_with(vcx, |app, _| {
         app.session().map(|session| {
             (
-                session.payments.hub.premium_open,
-                session.payments.hub.promo_page,
+                session.payments.hub.premium_open(),
+                session.payments.hub.promo_page(),
             )
         })
     });
@@ -127,7 +127,7 @@ fn premium_applies_for_both(cx: &mut TestAppContext) {
     assert!(!look_open(&app, vcx));
     assert_eq!(chat_wallpaper(&app, vcx, chat), Some(901));
     let premium_open = app.read_with(vcx, |app, _| {
-        app.session().is_some_and(|s| s.payments.hub.premium_open)
+        app.session().is_some_and(|s| s.payments.hub.premium_open())
     });
     assert!(!premium_open);
 }
@@ -138,7 +138,7 @@ fn a_theme_alone_keeps_one_apply(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
         if let Some(dialog) = app.dialogs.chat_look_dialog.as_mut() {
-            dialog.background = None;
+            dialog.wallpaper = crate::ui::chat_look_ui::WallpaperChoice::Keep;
         }
         cx.notify();
     });

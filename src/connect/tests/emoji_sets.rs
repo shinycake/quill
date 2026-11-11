@@ -64,7 +64,7 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
         &mut driver,
         json!({"@type":"trendingStickerSets","@extra":first.as_extra(),"total_count":3,"sets":[set(1,true),set(2,false)],"is_premium":false}),
     );
-    assert!(driver.session.stickers.emoji.trending_has_more);
+    assert!(driver.session.stickers.emoji.lists.trending.has_more());
     assert_eq!(
         sent_request(&recorder, "viewTrendingStickerSets")["sticker_set_ids"],
         json!([1, 2])
@@ -78,18 +78,21 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
         &mut driver,
         json!({"@type":"trendingStickerSets","@extra":more.as_extra(),"total_count":3,"sets":[set(2,false)]}),
     );
-    assert_eq!(driver.session.stickers.emoji.trending_sets.len(), 2);
-    assert!(!driver.session.stickers.emoji.trending_has_more); // Raw page length, not deduped count.
+    assert_eq!(driver.session.stickers.emoji.lists.trending.sets().len(), 2);
+    assert!(!driver.session.stickers.emoji.lists.trending.has_more()); // Raw page length, not deduped count.
     assert!(driver.session.stickers.stickers.stickers.is_empty());
     let remove = driver.set_emoji_pack_installed(1, false).unwrap().unwrap();
-    assert_eq!(driver.session.stickers.emoji.mutating_set, Some((1, false)));
+    assert_eq!(
+        driver.session.stickers.emoji.mutation.running(),
+        Some((1, false))
+    );
     assert!(driver.set_emoji_pack_installed(2, true).unwrap().is_none());
     ingest(
         &mut driver,
         json!({"@type":"error","@extra":remove.as_extra(),"code":500,"message":"test"}),
     );
     assert_eq!(driver.session.stickers.emoji.installed_sets.len(), 1);
-    assert!(driver.session.stickers.emoji.mutation_failed);
+    assert!(driver.session.stickers.emoji.mutation.is_failed());
     assert!(
         driver
             .session
@@ -100,12 +103,15 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
             .all(|s| s.id == 1)
     );
     let install = driver.set_emoji_pack_installed(2, true).unwrap().unwrap();
-    assert_eq!(driver.session.stickers.emoji.mutating_set, Some((2, true)));
+    assert_eq!(
+        driver.session.stickers.emoji.mutation.running(),
+        Some((2, true))
+    );
     ingest(
         &mut driver,
         json!({"@type":"error","@extra":install.as_extra(),"code":500,"message":"test"}),
     );
-    assert_eq!(driver.session.stickers.emoji.mutating_set, None);
+    assert_eq!(driver.session.stickers.emoji.mutation.running(), None);
     let remove = driver.set_emoji_pack_installed(1, false).unwrap().unwrap();
     // An installed list issued before mutation success must not restore removed entries later.
     let stale = driver
@@ -116,7 +122,7 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
         &mut driver,
         json!({"@type":"ok","@extra":remove.as_extra()}),
     );
-    assert!(!driver.session.stickers.emoji.mutation_failed);
+    assert!(!driver.session.stickers.emoji.mutation.is_failed());
     assert!(driver.session.stickers.emoji.installed_sets.is_empty());
     ingest(
         &mut driver,
@@ -145,7 +151,9 @@ fn custom_emoji_pack_search_paging_previews_and_mutation_races() {
             .session
             .stickers
             .emoji
-            .trending_sets
+            .lists
+            .trending
+            .sets()
             .iter()
             .all(|set| !set.is_installed)
     );
@@ -282,16 +290,6 @@ fn emoji_status_choices_resolution_timing_and_confirmed_clear() {
         json!({"@type":"error","@extra":set.as_extra(),"code":400,"message":"PRIVATE_DETAIL"}),
     );
     assert_eq!(driver.session.stickers.emoji.recent_statuses.len(), 1);
-    assert!(
-        !driver
-            .session
-            .stickers
-            .emoji
-            .status_note
-            .as_ref()
-            .unwrap()
-            .contains("PRIVATE_DETAIL")
-    );
     let set = driver.change_emoji_status(Some(92), 0).unwrap().unwrap();
     assert_eq!(
         sent_request(&recorder, "setEmojiStatus")["emoji_status"]["expiration_date"],
@@ -305,10 +303,6 @@ fn emoji_status_choices_resolution_timing_and_confirmed_clear() {
     assert_eq!(
         crate::settings::load_media_prefs(&driver.paths).recent_emoji_packs,
         vec![1]
-    );
-    assert_eq!(
-        driver.session.stickers.emoji.status_note.as_deref(),
-        Some("Emoji status updated.")
     );
     driver
         .session
@@ -350,10 +344,6 @@ fn emoji_status_choices_resolution_timing_and_confirmed_clear() {
         json!({"@type":"emojiStatuses","@extra":stale.as_extra(),"emoji_statuses":[{"@type":"emojiStatus","type":{"@type":"emojiStatusTypeCustomEmoji","custom_emoji_id":"91"},"expiration_date":0}]}),
     );
     assert!(driver.session.stickers.emoji.recent_statuses.is_empty());
-    assert_eq!(
-        driver.session.stickers.emoji.status_note.as_deref(),
-        Some("Recent emoji statuses cleared.")
-    );
     // The selector also lists the collectibles, and sets one as its gift.
     driver.load_emoji_status_choices().unwrap();
     let gifts = request_id("getUpgradedGiftEmojiStatuses");
@@ -434,14 +424,65 @@ fn animated_emoji_suggestion_requests_once_per_emoji_and_clears() {
         &mut driver,
         json!({"@type":"animatedEmoji","@extra":first.as_extra(),"sticker":null,"sticker_width":0,"sticker_height":0,"fitzpatrick_type":0,"sound":null}),
     );
-    assert!(driver.session.stickers.emoji.animated_emoji.is_none());
+    assert!(driver.session.stickers.emoji.animated.sticker().is_none());
     // No trailing emoji clears the suggestion and the dedupe marker.
     assert_eq!(
         driver.update_animated_emoji_suggestion("hello").unwrap(),
         None
     );
-    assert!(driver.session.stickers.emoji.animated_emoji.is_none());
-    assert!(driver.session.stickers.emoji.animated_emoji_for.is_none());
+    assert!(driver.session.stickers.emoji.animated.sticker().is_none());
+    assert!(driver.session.stickers.emoji.animated.emoji_for().is_none());
     drop(driver);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// 09-080, 09-X037: the composer's emoji suggestions ask for the installed
+/// list from the driver's own state: a send that did not go out, or an
+/// answer that failed, is asked for again; an answered list is not.
+#[test]
+fn the_suggestion_bar_asks_for_the_installed_sets_until_they_answer() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let asked = |recorder: &RecordingSender| {
+        recorder
+            .snapshot()
+            .iter()
+            .filter(|json| json.contains(r#""@type":"getInstalledStickerSets""#))
+            .count()
+    };
+    recorder.refuse_sends(true);
+    assert!(driver.ensure_suggestion_emoji_sets().is_err());
+    assert_eq!(asked(&recorder), 0);
+    recorder.refuse_sends(false);
+    driver.ensure_suggestion_emoji_sets().unwrap();
+    assert_eq!(asked(&recorder), 1);
+    driver.ensure_suggestion_emoji_sets().unwrap();
+    assert_eq!(asked(&recorder), 1, "one request in flight is enough");
+    let sent = recorder
+        .snapshot()
+        .into_iter()
+        .rev()
+        .find(|json| json.contains(r#""@type":"getInstalledStickerSets""#))
+        .expect("the request");
+    let extra = serde_json::from_str::<serde_json::Value>(&sent).unwrap()["@extra"].clone();
+    let failure = json!({"@type":"error","@extra":extra,"code":500,"message":"later"});
+    driver
+        .ingest(copy_and_parse(&failure.to_string(), &seq, &sink).unwrap())
+        .unwrap();
+    assert!(
+        driver
+            .session
+            .stickers
+            .emoji
+            .lists
+            .installed
+            .error()
+            .is_some()
+    );
+    driver.ensure_suggestion_emoji_sets().unwrap();
+    assert_eq!(asked(&recorder), 2, "a failed list is asked for again");
+    let _ = dir;
 }

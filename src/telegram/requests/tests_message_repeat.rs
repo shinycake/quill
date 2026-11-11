@@ -6,8 +6,7 @@ use serde_json::Value;
 #[test]
 fn a_repeat_period_rides_a_scheduled_send_only() {
     let repeating = SendOptions {
-        scheduling: ComposerScheduling::SendAtDate(1_700_000_000),
-        schedule_repeat_period: 7 * 86_400,
+        scheduling: ComposerScheduling::at(1_700_000_000).repeating(7 * 86_400),
         ..SendOptions::default()
     };
     let v: Value = serde_json::from_str(&send_text(
@@ -26,7 +25,7 @@ fn a_repeat_period_rides_a_scheduled_send_only() {
 
     // Without a send date there is nothing to repeat.
     let loose = SendOptions {
-        schedule_repeat_period: 86_400,
+        scheduling: ComposerScheduling::None.repeating(86_400),
         disable_notification: true,
         ..SendOptions::default()
     };
@@ -45,8 +44,7 @@ fn a_repeat_period_rides_a_scheduled_send_only() {
 #[test]
 fn forwarding_repeats_only_a_single_message() {
     let repeating = SendOptions {
-        scheduling: ComposerScheduling::SendAtDate(1_700_000_000),
-        schedule_repeat_period: 86_400,
+        scheduling: ComposerScheduling::at(1_700_000_000).repeating(86_400),
         ..SendOptions::default()
     };
     let forward = |ids: &[MessageId]| -> Value {

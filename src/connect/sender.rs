@@ -118,29 +118,28 @@ pub struct RetryStash {
 }
 
 impl RetryStash {
-    pub fn note(&self, request: &str) {
+    /// Keeps `request` when it is retryable; returns its `@extra` then.
+    pub fn note(&self, request: &str) -> Option<RequestId> {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(request) else {
-            return;
+            return None;
         };
         let retryable = value
             .get("@type")
             .and_then(serde_json::Value::as_str)
             .is_some_and(|kind| RETRYABLE_TYPES.contains(&kind));
-        let Some(extra) = value
+        let extra = value
             .get("@extra")
             .and_then(serde_json::Value::as_str)
-            .and_then(|extra| extra.parse::<u64>().ok())
-        else {
-            return;
-        };
+            .and_then(|extra| extra.parse::<u64>().ok())?;
         if !retryable {
-            return;
+            return None;
         }
         let mut map = self.map.lock_or_recover();
         if map.len() >= RETRY_STASH_LIMIT {
             map.clear();
         }
         map.insert(extra, request.to_string());
+        Some(RequestId(extra))
     }
 
     pub fn take(&self, extra: RequestId) -> Option<String> {
@@ -160,9 +159,13 @@ impl RetryStash {
 #[derive(Default)]
 pub struct RecordingSender {
     pub sent: Mutex<Vec<String>>,
+    /// The `@type` whose sends fail (a client that closed between two
+    /// sends); nothing by default.
+    refused: Mutex<Option<&'static str>>,
     stash: RetryStash,
     guard: crate::paid_messages_guard::PaidGuard,
     agent: AgentScreen,
+    refuse: std::sync::atomic::AtomicBool,
 }
 
 impl RecordingSender {
@@ -170,15 +173,35 @@ impl RecordingSender {
         Self::default()
     }
 
+    /// Makes every later send fail (a closed client), or lets them through
+    /// again.
+    pub fn refuse_sends(&self, refuse: bool) {
+        self.refuse
+            .store(refuse, std::sync::atomic::Ordering::Relaxed);
+    }
+
     pub fn snapshot(&self) -> Vec<String> {
         self.sent.lock_or_recover().clone()
+    }
+
+    /// Make every later send of `type_name` fail (`None` stops).
+    pub fn refuse(&self, type_name: Option<&'static str>) {
+        *self.refused.lock_or_recover() = type_name;
     }
 }
 
 impl JsonSender for RecordingSender {
     fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
+        if self.refuse.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(ConnectSendError::Native);
+        }
         // The same agent screen as the live sender (a no-op unless a test
         // injects).
+        if let Some(type_name) = *self.refused.lock_or_recover()
+            && request.contains(&format!(r#""@type":"{type_name}""#))
+        {
+            return Err(ConnectSendError::Native);
+        }
         if !self.agent.screen(request)? {
             return Ok(());
         }
@@ -281,13 +304,18 @@ impl JsonSender for LiveSender {
             return Ok(());
         };
         let request = request.as_str();
-        self.api
-            .send(self.client_id, request)
-            .map_err(|e| match e {
+        // Stashed before it goes out: a rate-limit answer can reach the
+        // receive thread before `send` returns and must find its request.
+        let stashed = self.stash.note(request);
+        self.api.send(self.client_id, request).map_err(|e| {
+            if let Some(extra) = stashed {
+                self.stash.take(extra);
+            }
+            match e {
                 TdJsonError::InvalidRequest => ConnectSendError::InvalidRequest,
                 _ => ConnectSendError::Native,
-            })?;
-        self.stash.note(request);
+            }
+        })?;
         Ok(())
     }
 

@@ -34,28 +34,31 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
+        let asked = pending.map(|p| p.id);
         match payload {
             CommunitiesPayload::Communities { community_ids } => {
                 if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::Communities(CommunitiesPurpose::GetJoined))
                 {
-                    self.communities.joined = Fetch::Ready(community_ids);
+                    self.communities.joined.answered(asked, community_ids);
                 }
             }
             CommunitiesPayload::AddChatRequests(page) => {
                 if let Some((CommunitiesPurpose::GetAddChatRequests { first_page }, community_id)) =
                     communities_purpose(pending)
                 {
-                    self.apply_add_chat_requests_page(community_id, first_page, page);
+                    self.apply_add_chat_requests_page(community_id, first_page, asked, page);
                 }
             }
             CommunitiesPayload::MemberChats(chats) => {
                 if let Some((CommunitiesPurpose::GetMemberChats { member }, community_id)) =
                     communities_purpose(pending)
-                {
-                    self.communities
+                    && let Some(fetch) = self
+                        .communities
                         .member_chats
-                        .insert((community_id, member), Fetch::Ready(chats));
+                        .get_mut(&(community_id, member))
+                {
+                    fetch.answered(asked, chats);
                 }
             }
         }
@@ -74,7 +77,9 @@ impl Session {
         {
             return false;
         }
-        self.communities.owned_bots = Fetch::Ready(user_ids.to_vec());
+        self.communities
+            .owned_bots
+            .answered(pending.map(|p| p.id), user_ids.to_vec());
         true
     }
 
@@ -82,6 +87,7 @@ impl Session {
         &mut self,
         community_id: i64,
         first_page: bool,
+        asked: Option<RequestId>,
         page: CommunityAddChatRequests,
     ) {
         let fetch = self
@@ -89,12 +95,19 @@ impl Session {
             .add_chat_requests
             .entry(community_id)
             .or_default();
+        if !asked.is_some_and(|id| fetch.waits_for(id)) {
+            return;
+        }
         let mut list = if first_page {
             AddChatRequestList::default()
         } else {
             fetch.take_data().unwrap_or_default()
         };
+        let handled = self.communities.handled_add_requests.get(&community_id);
         for request in page.requests {
+            if handled.is_some_and(|handled| handled.contains(&request.chat_id)) {
+                continue;
+            }
             if !list.requests.iter().any(|r| r.chat_id == request.chat_id) {
                 list.requests.push(request);
             }
@@ -175,6 +188,12 @@ impl Session {
     /// `ok` (`CommunityManager::on_change_community_dialogs`), so the new
     /// count has already come with `updateCommunityFullInfo`.
     fn drop_add_chat_request(&mut self, community_id: i64, chat_id: i64) {
+        // A page asked before this request was handled may still list it.
+        self.communities
+            .handled_add_requests
+            .entry(community_id)
+            .or_default()
+            .insert(chat_id);
         let Some(list) = self
             .communities
             .add_chat_requests
@@ -195,6 +214,7 @@ impl Session {
     /// dropped (its answer then has no pending request and is ignored) and
     /// the list is an answered empty one.
     fn reset_add_chat_requests(&mut self, community_id: i64) {
+        self.communities.handled_add_requests.remove(&community_id);
         for first_page in [true, false] {
             self.requests.take_purpose_for_community(
                 RequestPurpose::Communities(CommunitiesPurpose::GetAddChatRequests { first_page }),
@@ -206,14 +226,23 @@ impl Session {
         }
     }
 
-    /// A failed `getCommunityFullInfo`: not asked again in the background
-    /// until the community changes (`CommunitiesState::full_info_failed`).
-    pub(crate) fn note_community_full_info_failed(&mut self, pending: Option<&PendingRequest>) {
+    /// A failed `getCommunityFullInfo`: its fetch fails, and the
+    /// background asks wait until the community changes
+    /// (`CommunityFullInfos::forget_failure`).
+    pub(crate) fn note_community_full_info_failed(
+        &mut self,
+        err: &TdError,
+        pending: Option<&PendingRequest>,
+    ) {
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::GetCommunityFullInfo
             && let Some(community_id) = pending.community_id
         {
-            self.communities.full_info_failed.insert(community_id);
+            self.groups.community_full_infos.failed(
+                community_id,
+                Some(pending.id),
+                &error_reason(err),
+            );
         }
     }
 
@@ -225,6 +254,7 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
+        let asked = pending.map(|p| p.id);
         let Some((purpose, community_id)) = communities_purpose(pending) else {
             let fetch = match pending.map(|p| p.purpose) {
                 Some(RequestPurpose::Communities(CommunitiesPurpose::GetJoined)) => {
@@ -235,11 +265,7 @@ impl Session {
                 }
                 _ => return,
             };
-            let stale = fetch.take_data();
-            *fetch = Fetch::Failed {
-                error: error_reason(err),
-                stale,
-            };
+            fetch.failed(asked, error_reason(err), false);
             return;
         };
         let outcome = match purpose {
@@ -292,21 +318,17 @@ impl Session {
                     .add_chat_requests
                     .entry(community_id)
                     .or_default();
-                let stale = fetch.take_data();
-                *fetch = Fetch::Failed {
-                    error: error_reason(err),
-                    stale,
-                };
+                fetch.failed(asked, error_reason(err), false);
                 return;
             }
             CommunitiesPurpose::GetMemberChats { member } => {
-                self.communities.member_chats.insert(
-                    (community_id, member),
-                    Fetch::Failed {
-                        error: error_reason(err),
-                        stale: None,
-                    },
-                );
+                if let Some(fetch) = self
+                    .communities
+                    .member_chats
+                    .get_mut(&(community_id, member))
+                {
+                    fetch.failed(asked, error_reason(err), true);
+                }
                 return;
             }
             CommunitiesPurpose::GetJoined | CommunitiesPurpose::GetOwnedBots => return,

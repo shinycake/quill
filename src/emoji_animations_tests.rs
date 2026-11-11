@@ -16,8 +16,7 @@ fn sticker(file: i32, emoji: &str) -> StickerItem {
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,
-        requires_premium: false,
-        premium_animation: None,
+        premium: None,
     }
 }
 
@@ -168,8 +167,39 @@ fn a_failed_load_drops_what_waited() {
         emoji: "👍".into(),
     });
     pack.failed();
-    assert!(pack.take_waiting().is_empty());
-    assert!(!pack.is_ready());
+    assert!(
+        pack.apply_set(&[], &[]).is_empty(),
+        "nothing waits any more"
+    );
+}
+
+#[test]
+fn a_message_that_waited_for_a_failed_load_can_play_later() {
+    let mut pack = EmojiAnimations::default();
+    pack.loading(1);
+    assert!(pack.mark_watched((1, 2)));
+    pack.wait(Waiting {
+        chat_id: ChatId(1),
+        message_id: MessageId(2),
+        emoji: "👍".into(),
+    });
+    pack.failed();
+    assert!(pack.mark_watched((1, 2)));
+}
+
+#[test]
+fn a_message_pushed_out_of_the_queue_is_unwatched() {
+    let mut pack = EmojiAnimations::default();
+    for id in 0..=MAX_WAITING as i64 {
+        assert!(pack.mark_watched((1, id)));
+        pack.wait(Waiting {
+            chat_id: ChatId(1),
+            message_id: MessageId(id),
+            emoji: "👍".into(),
+        });
+    }
+    assert!(pack.mark_watched((1, 0)));
+    assert!(!pack.mark_watched((1, 1)));
 }
 
 #[test]
@@ -182,10 +212,10 @@ fn waiting_keeps_the_newest() {
             emoji: "👍".into(),
         });
     }
-    let waiting = pack.take_waiting();
+    let waiting = pack.apply_set(&[], &[]);
     assert_eq!(waiting.len(), MAX_WAITING);
     assert_eq!(waiting.first().map(|w| w.message_id), Some(MessageId(12)));
-    assert!(pack.take_waiting().is_empty());
+    assert!(pack.apply_set(&[], &[]).is_empty());
 }
 
 #[test]
@@ -203,4 +233,36 @@ fn the_request_searches_the_pack_by_name() {
     assert_eq!(v["name"], "EmojiAnimations");
     assert_eq!(v["ignore_cache"], false);
     assert_eq!(v["@extra"], RequestId(8).as_extra());
+}
+
+#[test]
+fn a_failed_refresh_keeps_the_set_and_a_failed_first_load_has_none() {
+    let mut pack = pack();
+    pack.loading(10);
+    assert!(pack.is_ready(), "the set stays while it is fetched again");
+    pack.failed();
+    assert!(pack.is_ready());
+    assert!(pack.animations_for("👍").is_some());
+    let mut first = EmojiAnimations::default();
+    first.loading(10);
+    first.failed();
+    assert!(!first.is_ready());
+}
+
+#[test]
+fn a_message_read_while_the_load_has_failed_is_not_kept_waiting() {
+    let mut pack = EmojiAnimations::default();
+    pack.loading(1);
+    pack.failed();
+    assert!(pack.mark_watched((1, 2)));
+    pack.wait(Waiting {
+        chat_id: ChatId(1),
+        message_id: MessageId(2),
+        emoji: "👍".into(),
+    });
+    assert!(
+        pack.mark_watched((1, 2)),
+        "unwatched, so a later read plays it"
+    );
+    assert!(pack.apply_set(&[], &[]).is_empty());
 }

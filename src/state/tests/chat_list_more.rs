@@ -36,7 +36,7 @@ fn cl3_report_and_block_errors_surface() {
         ),
     );
     assert_eq!(
-        session.chats_state.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.last(),
         Some("could not report the chat (error 400)")
     );
     let extra = session.request(
@@ -53,7 +53,7 @@ fn cl3_report_and_block_errors_surface() {
         ),
     );
     assert_eq!(
-        session.chats_state.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.last(),
         Some("could not change the block state (error 403)")
     );
 }
@@ -118,7 +118,7 @@ fn cl2_pin_order_error_rolls_back_and_surfaces() {
     assert_eq!(session.chats.get(&11).expect("chat").order, 300);
     assert_eq!(session.chats.get(&12).expect("chat").order, 200);
     assert_eq!(
-        session.chats_state.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.last(),
         Some("could not reorder pinned chats (error 400)")
     );
 }
@@ -132,7 +132,8 @@ fn cl2_archive_settings_fetch_stores_and_set_rolls_back() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetArchiveChatListSettings, None);
-    session.chat_list.archive_settings_loading = true;
+    session.chat_list.archive_settings.begin();
+    session.chat_list.archive_settings.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -143,26 +144,28 @@ fn cl2_archive_settings_fetch_stores_and_set_rolls_back() {
         ),
     );
     assert_eq!(
-        session.chat_list.archive_chat_list_settings,
+        session.chat_list.archive_chat_list_settings(),
         Some(ArchiveChatListSettings {
             archive_and_mute_new_chats_from_unknown_users: true,
             keep_unmuted_chats_archived: false,
             keep_chats_from_folders_archived: true,
         })
     );
-    assert!(!session.chat_list.archive_settings_loading);
+    assert!(!session.chat_list.archive_settings_loading());
 
-    let old = session.chat_list.archive_chat_list_settings;
+    let old = session.chat_list.archive_chat_list_settings();
     let extra = session.request(RequestPurpose::SetArchiveChatListSettings, None);
     session
         .requests
         .pending_mut(extra)
         .expect("pending")
         .rollback = Some(RequestRollback::ArchiveChatListSettings { previous: old });
-    session.chat_list.archive_chat_list_settings = Some(ArchiveChatListSettings {
-        keep_unmuted_chats_archived: true,
-        ..old.unwrap_or_default()
-    });
+    session
+        .chat_list
+        .edit_archive_settings(Some(ArchiveChatListSettings {
+            keep_unmuted_chats_archived: true,
+            ..old.unwrap_or_default()
+        }));
     apply_json(
         &mut session,
         &seq,
@@ -172,11 +175,32 @@ fn cl2_archive_settings_fetch_stores_and_set_rolls_back() {
             extra.0
         ),
     );
-    assert_eq!(session.chat_list.archive_chat_list_settings, old);
+    assert_eq!(session.chat_list.archive_chat_list_settings(), old);
     assert_eq!(
-        session.chats_state.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.last(),
         Some("could not save archive settings (error 400)")
     );
+}
+
+#[test]
+fn a_refused_archive_settings_fetch_leaves_loading() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request(RequestPurpose::GetArchiveChatListSettings, None);
+    session.chat_list.archive_settings.begin();
+    session.chat_list.archive_settings.sent(extra);
+    assert!(session.chat_list.archive_settings.is_loading());
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"INTERNAL"}}"#,
+            extra.0
+        ),
+    );
+    assert!(!session.chat_list.archive_settings.is_loading());
+    assert!(session.chat_list.archive_settings.error().is_some());
 }
 
 #[test]
@@ -196,7 +220,7 @@ fn cl2_mark_all_read_and_clear_recents_errors_surface() {
         ),
     );
     assert_eq!(
-        session.chats_state.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.last(),
         Some("could not mark all chats as read (error 500)")
     );
     let extra = session.request(RequestPurpose::ClearRecentlyFoundChats, None);
@@ -210,7 +234,7 @@ fn cl2_mark_all_read_and_clear_recents_errors_surface() {
         ),
     );
     assert_eq!(
-        session.chats_state.chat_action_error.as_deref(),
+        session.chats_state.chat_action_error.last(),
         Some("could not clear recent searches (error 500)")
     );
 }
@@ -405,11 +429,15 @@ fn folder_invite_links_list_create_edit_and_errors() {
             extra.0
         ),
     );
-    assert_eq!(session.chat_list.folder_invite_links[&3].len(), 1);
-    assert_eq!(
-        session.chat_list.folder_invite_links[&3][0].chat_ids,
-        vec![5, 6]
-    );
+    let links = |session: &Session| {
+        session.chat_list.folder_shares[&3]
+            .links
+            .data()
+            .cloned()
+            .unwrap_or_default()
+    };
+    assert_eq!(links(&session).len(), 1);
+    assert_eq!(links(&session)[0].chat_ids, vec![5, 6]);
     // A create adds a link and flips the one-shot + the folder flags.
     let extra = session.request_for_folder(RequestPurpose::CreateChatFolderInviteLink, 3);
     apply_json(
@@ -421,8 +449,13 @@ fn folder_invite_links_list_create_edit_and_errors() {
             extra.0
         ),
     );
-    assert_eq!(session.chat_list.folder_invite_links[&3].len(), 2);
-    assert!(session.chat_list.folder_link_saved);
+    assert_eq!(links(&session).len(), 2);
+    // The box that sent the create takes its answer by request id.
+    assert_eq!(
+        session.chat_list.dialog_answers.take(extra),
+        Some(DialogAnswer::Done)
+    );
+    assert_eq!(session.chat_list.dialog_answers.take(extra), None, "once");
     assert!(session.chat_list.chat_folders[0].is_shareable);
     // An edit replaces by link, never duplicates.
     let extra = session.request_for_folder(RequestPurpose::EditChatFolderInviteLink, 3);
@@ -435,8 +468,8 @@ fn folder_invite_links_list_create_edit_and_errors() {
             extra.0
         ),
     );
-    assert_eq!(session.chat_list.folder_invite_links[&3].len(), 2);
-    assert_eq!(session.chat_list.folder_invite_links[&3][1].name, "Renamed");
+    assert_eq!(links(&session).len(), 2);
+    assert_eq!(links(&session)[1].name, "Renamed");
     // Too many links opens the limit box rather than an error line.
     let extra = session.request_for_folder(RequestPurpose::CreateChatFolderInviteLink, 3);
     apply_json(
@@ -449,11 +482,13 @@ fn folder_invite_links_list_create_edit_and_errors() {
         ),
     );
     assert_eq!(
-        session.chat_list.folder_limit_hit.take(),
-        Some(crate::folder_limits::FolderLimitKind::InviteLinks)
+        session.chat_list.take_folder_limit_hit(),
+        Some((
+            crate::folder_limits::FolderLimitKind::InviteLinks,
+            Some(extra)
+        ))
     );
-    assert!(session.chat_list.folder_share_error.is_none());
-    // Any other refusal surfaces for the dialog.
+    // Any other refusal surfaces for the dialog that sent it.
     let extra = session.request_for_folder(RequestPurpose::CreateChatFolderInviteLink, 3);
     apply_json(
         &mut session,
@@ -464,7 +499,10 @@ fn folder_invite_links_list_create_edit_and_errors() {
             extra.0
         ),
     );
-    assert!(session.chat_list.folder_share_error.is_some());
+    assert!(matches!(
+        session.chat_list.dialog_answers.take(extra),
+        Some(DialogAnswer::Failed(_))
+    ));
 }
 
 #[test]
@@ -492,7 +530,6 @@ fn recommended_folders_and_addlist_check_are_cached() {
     assert_eq!(recommended[0].description, "All unread chats");
 
     let extra = session.request(RequestPurpose::CheckChatFolderInviteLink, None);
-    session.chat_list.folder_invite_request = Some(extra);
     apply_json(
         &mut session,
         &seq,
@@ -502,23 +539,26 @@ fn recommended_folders_and_addlist_check_are_cached() {
             extra.0
         ),
     );
-    let info = session.chat_list.folder_invite_info.as_ref().expect("info");
+    let Some(DialogAnswer::Checked(info)) = session.chat_list.dialog_answers.take(extra) else {
+        panic!("the check answers its box with the folder");
+    };
     assert_eq!(info.folder.id, 0);
     assert_eq!(info.missing_chat_ids, vec![8, 9]);
     assert_eq!(info.added_chat_ids, vec![4]);
 
     // Adding confirms through `ok`; a failure shows its reason.
     let extra = session.request(RequestPurpose::AddChatFolderByInviteLink, None);
-    session.chat_list.folder_invite_request = Some(extra);
     apply_json(
         &mut session,
         &seq,
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(session.chat_list.folder_invite_done);
+    assert_eq!(
+        session.chat_list.dialog_answers.take(extra),
+        Some(DialogAnswer::Done)
+    );
     let extra = session.request(RequestPurpose::AddChatFolderByInviteLink, None);
-    session.chat_list.folder_invite_request = Some(extra);
     apply_json(
         &mut session,
         &seq,
@@ -528,7 +568,10 @@ fn recommended_folders_and_addlist_check_are_cached() {
             extra.0
         ),
     );
-    assert!(session.chat_list.folder_invite_error.is_some());
+    assert!(matches!(
+        session.chat_list.dialog_answers.take(extra),
+        Some(DialogAnswer::Failed(_))
+    ));
 }
 
 #[test]
@@ -546,7 +589,7 @@ fn folder_link_chats_are_cached_per_folder() {
         ),
     );
     assert_eq!(
-        session.chat_list.folder_link_chats.get(&3),
+        session.chat_list.folder_shares[&3].chats.data(),
         Some(&vec![5, 6])
     );
 }
@@ -555,7 +598,17 @@ fn folder_link_chats_are_cached_per_folder() {
 fn installed_backgrounds_and_default_updates_are_cached() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    let extra = session.request(RequestPurpose::GetInstalledBackgrounds, None);
+    let extra = session.request(
+        RequestPurpose::Chats(ChatsPurpose::GetInstalledBackgrounds {
+            for_dark_theme: false,
+        }),
+        None,
+    );
+    {
+        let fetch = session.chats_state.installed_backgrounds.theme_mut(false);
+        fetch.begin();
+        fetch.sent(extra);
+    }
     apply_json(
         &mut session,
         &seq,
@@ -568,7 +621,8 @@ fn installed_backgrounds_and_default_updates_are_cached() {
     let list = session
         .chats_state
         .installed_backgrounds
-        .as_ref()
+        .theme(false)
+        .data()
         .expect("list");
     assert_eq!(list.len(), 2);
     assert!(
@@ -587,8 +641,12 @@ fn installed_backgrounds_and_default_updates_are_cached() {
     assert!(!session.chats_state.default_backgrounds.contains_key(&false));
 
     // A set answer files under the theme it was sent for; errors surface.
-    session.chats_state.background_set_for_dark = false;
-    let extra = session.request(RequestPurpose::SetDefaultBackground, None);
+    let extra = session.request(
+        RequestPurpose::Chats(ChatsPurpose::SetDefaultBackground {
+            for_dark_theme: false,
+        }),
+        None,
+    );
     apply_json(
         &mut session,
         &seq,
@@ -599,7 +657,38 @@ fn installed_backgrounds_and_default_updates_are_cached() {
         ),
     );
     assert_eq!(session.chats_state.default_backgrounds[&false].id, 5);
-    let extra = session.request(RequestPurpose::RemoveInstalledBackground, None);
+
+    // Two sets in flight (light, then dark): each answer files under the
+    // theme of the request it answers, not the latest one sent (02-086).
+    let light = session.request(
+        RequestPurpose::Chats(ChatsPurpose::SetDefaultBackground {
+            for_dark_theme: false,
+        }),
+        None,
+    );
+    let dark = session.request(
+        RequestPurpose::Chats(ChatsPurpose::SetDefaultBackgroundLocal {
+            for_dark_theme: true,
+        }),
+        None,
+    );
+    for (extra, id) in [(light, 11), (dark, 12)] {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"background","@extra":"{}","id":{id},"is_default":true,"is_dark":false,"name":"w{id}","type":{{"@type":"backgroundTypeFill","fill":{{"@type":"backgroundFillSolid","color":2}}}}}}"#,
+                extra.0
+            ),
+        );
+    }
+    assert_eq!(session.chats_state.default_backgrounds[&false].id, 11);
+    assert_eq!(session.chats_state.default_backgrounds[&true].id, 12);
+    let extra = session.request(
+        RequestPurpose::Chats(ChatsPurpose::RemoveInstalledBackground { background_id: 1 }),
+        None,
+    );
     apply_json(
         &mut session,
         &seq,
@@ -760,50 +849,51 @@ fn a_late_background_search_answer_never_lands_under_another_link() {
 }
 
 #[test]
-fn chat_look_requests_count_acks_and_surface_errors() {
+fn chat_look_requests_settle_per_request_and_keep_the_wallpaper_error_out() {
+    use crate::state::Answer;
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    for purpose in [
+    let purposes = [
         RequestPurpose::SetChatTheme,
         RequestPurpose::SetChatBackground,
         RequestPurpose::DeleteChatBackground,
-    ] {
+    ];
+    let mut ids = Vec::new();
+    for purpose in purposes {
         let extra = session.request(purpose, Some(ChatId(7)));
-        apply_json(
-            &mut session,
-            &seq,
-            &sink,
-            &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
-        );
+        session.acks.expect(extra);
+        ids.push(extra);
     }
-    assert_eq!(session.chats_state.chat_look_oks, 3);
-    assert!(session.chats_state.background_error.is_none());
-
-    for purpose in [
-        RequestPurpose::SetChatTheme,
-        RequestPurpose::SetChatBackground,
-        RequestPurpose::DeleteChatBackground,
-    ] {
-        session.chats_state.background_error = None;
-        let extra = session.request(purpose, Some(ChatId(7)));
-        apply_json(
-            &mut session,
-            &seq,
-            &sink,
-            &format!(
+    // One answer settles one request, in either order.
+    for (i, extra) in ids.iter().enumerate().rev() {
+        let json = if i == 1 {
+            format!(
                 r#"{{"@type":"error","@extra":"{}","code":400,"message":"BACKGROUND_INVALID"}}"#,
                 extra.0
-            ),
-        );
-        assert!(
-            session.chats_state.background_error.is_some(),
-            "{purpose:?}"
-        );
+            )
+        } else {
+            format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0)
+        };
+        apply_json(&mut session, &seq, &sink, &json);
     }
-    assert_eq!(
-        session.chats_state.chat_look_oks, 3,
-        "errors are not acknowledgements"
+    let acks = &mut session.acks;
+    assert_eq!(acks.take(ids[0]), Some(Answer::Done));
+    assert!(matches!(acks.take(ids[1]), Some(Answer::Failed(_))));
+    assert_eq!(acks.take(ids[2]), Some(Answer::Done));
+    assert!(
+        session.chats_state.background_error.is_none(),
+        "the chat look's error is not the wallpaper pages'"
     );
+
+    // An answer of a request no dialog waits for is not kept.
+    let stray = session.request(RequestPurpose::SetChatTheme, Some(ChatId(7)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, stray.0),
+    );
+    assert_eq!(session.acks.take(stray), None);
 }
 
 #[test]
@@ -865,8 +955,13 @@ fn background_share_links_land_once_and_errors_surface() {
         ),
     );
     assert_eq!(
-        session.chats_state.background_url.as_deref(),
-        Some("https://t.me/bg/abc?mode=blur")
+        session.chats_state.background_answers.take_for(&[extra]),
+        vec![(
+            extra,
+            Ok(BackgroundOutcome::Link(
+                "https://t.me/bg/abc?mode=blur".into()
+            ))
+        )]
     );
     let extra = session.request(RequestPurpose::GetBackgroundUrl, None);
     apply_json(
@@ -879,4 +974,27 @@ fn background_share_links_land_once_and_errors_surface() {
         ),
     );
     assert!(session.chats_state.background_error.is_some());
+}
+
+/// 05-067: two sets for different themes in flight each land under their
+/// own theme, whichever answers last.
+#[test]
+fn set_default_background_answers_file_under_their_own_theme() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let purpose = |for_dark_theme| {
+        RequestPurpose::Chats(ChatsPurpose::SetDefaultBackground { for_dark_theme })
+    };
+    let light = session.request(purpose(false), None);
+    let dark = session.request(purpose(true), None);
+    let background = |id: i64, extra: RequestId| {
+        format!(
+            r#"{{"@type":"background","@extra":"{}","id":{id},"is_default":true,"is_dark":false,"name":"w","type":{{"@type":"backgroundTypeFill","fill":{{"@type":"backgroundFillSolid","color":2}}}}}}"#,
+            extra.0
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &background(10, dark));
+    apply_json(&mut session, &seq, &sink, &background(11, light));
+    assert_eq!(session.chats_state.default_backgrounds[&true].id, 10);
+    assert_eq!(session.chats_state.default_backgrounds[&false].id, 11);
 }

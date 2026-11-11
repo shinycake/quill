@@ -48,7 +48,25 @@ pub struct UpdatesSync {
     pub freeze: Option<FreezeInfo>,
     pub speech_trial: Option<SpeechTrialUpdate>,
     pub live_shares: Vec<LiveShare>,
-    pub age_verification: Option<AgeVerificationParams>,
+    /// The age verification the server asks for. It lives as long as the
+    /// condition: how far the user took it goes with it.
+    pub age_verification: Option<AgeVerification>,
+}
+
+/// How far the user took the age verification.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AgeCheck {
+    #[default]
+    NotStarted,
+    /// The verification bot was opened.
+    Started,
+}
+
+/// The server's age verification request and the user's progress on it.
+#[derive(Debug, Clone)]
+pub struct AgeVerification {
+    pub params: AgeVerificationParams,
+    pub check: AgeCheck,
 }
 
 /// Dice emoji Telegram supports when the server has not sent a list yet.
@@ -157,8 +175,29 @@ impl UpdatesSync {
         self.live_shares.iter().filter(move |s| s.expires_at > now)
     }
 
+    /// The server repeats or lifts the request. A repeat keeps the user's
+    /// progress; lifting it ends the check, so a later request starts over.
     pub fn set_age_verification(&mut self, parameters: Option<AgeVerificationParams>) {
-        self.age_verification = parameters;
+        let check = self
+            .age_verification
+            .as_ref()
+            .map(|verification| verification.check)
+            .unwrap_or_default();
+        self.age_verification = parameters.map(|params| AgeVerification { params, check });
+    }
+
+    /// The user opened the verification bot.
+    pub fn start_age_check(&mut self) {
+        if let Some(verification) = self.age_verification.as_mut() {
+            verification.check = AgeCheck::Started;
+        }
+    }
+
+    /// Whether the user already started the verification being asked for.
+    pub fn age_check_started(&self) -> bool {
+        self.age_verification
+            .as_ref()
+            .is_some_and(|verification| verification.check == AgeCheck::Started)
     }
 }
 
@@ -306,9 +345,23 @@ impl Session {
     /// healthy reading if the disk went low again meanwhile. Saved messages
     /// the list no longer has are dropped; a pause saved or undone since the
     /// search went out is left as it stands.
-    pub(crate) fn apply_disk_paused_found(&mut self, found: Vec<ParsedFileDownload>) {
-        let asked = std::mem::take(&mut self.media.disk_search_keys);
-        let low = self.media.disk_room.is_some();
+    pub(crate) fn apply_disk_paused_found(
+        &mut self,
+        request: RequestId,
+        found: Vec<ParsedFileDownload>,
+    ) {
+        let DiskSearch::Asked {
+            request: asked_as,
+            keys: asked,
+        } = self.media.disk_search.clone()
+        else {
+            return;
+        };
+        if asked_as != request {
+            return;
+        }
+        self.media.disk_search = DiskSearch::Done;
+        let low = self.media.disk.is_pressed();
         let mut held = std::collections::BTreeSet::new();
         for download in found {
             let key = download
@@ -331,7 +384,6 @@ impl Session {
         }
         let saved = &mut self.settings.data_storage.disk_paused;
         saved.retain(|key| !asked.contains(key) || held.contains(key));
-        self.media.disk_paused_saved_changed = true;
     }
 
     /// The download left the list (removed here or on another device).

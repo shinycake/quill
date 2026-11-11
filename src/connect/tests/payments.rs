@@ -49,6 +49,65 @@ fn clear_saved_payment_info_refuses_without_ready_path() {
 }
 
 #[test]
+fn a_failed_gift_text_limit_lookup_is_noted_and_asked_again_on_buy() {
+    use crate::ids::ChatId;
+    use crate::marketplace::GiftPrice;
+    use crate::telegram::client::copy_and_parse;
+    use serde_json::{Value, json};
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let apply = |driver: &mut ConnectDriver<Arc<RecordingSender>>, value: Value| {
+        driver
+            .ingest(copy_and_parse(&value.to_string(), &seq, &sink).unwrap())
+            .unwrap();
+    };
+    apply(
+        &mut driver,
+        json!({"@type":"updateNewChat","chat":{"id":11,"title":"Recipient","type":{"@type":"chatTypePrivate","user_id":42}}}),
+    );
+    let quote = driver
+        .fetch_marketplace_gift(ChatId(11), "PlushPepe-123")
+        .unwrap();
+    let option = sent_request(&recorder, "getOption");
+    apply(
+        &mut driver,
+        json!({"@type":"error","@extra":option["@extra"],"code":500,"message":"Timeout"}),
+    );
+    apply(
+        &mut driver,
+        json!({"@type":"upgradedGift","@extra":quote.as_extra(),"name":"PlushPepe-123","title":"Plush Pepe","resale_parameters":{"@type":"giftResaleParameters","star_count":25,"gram_cent_count":0,"gram_only":false}}),
+    );
+    assert_eq!(driver.session.payments.gift_text_length_max, None);
+    let asked = |recorder: &RecordingSender| {
+        recorder
+            .snapshot()
+            .iter()
+            .filter(|json| json.contains("gift_text_length_max"))
+            .count()
+    };
+    assert_eq!(asked(&recorder), 1);
+    assert!(
+        driver
+            .buy_marketplace_gift(GiftPrice::Stars(25), "Hi", true)
+            .is_err()
+    );
+    assert_eq!(asked(&recorder), 2, "the limit is asked for again");
+    assert!(
+        driver
+            .session
+            .payments
+            .marketplace_gift
+            .as_ref()
+            .is_some_and(|gift| gift.note().is_some()),
+        "the Buy press says why it did nothing"
+    );
+}
+
+#[test]
 fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
     use crate::ids::ChatId;
     use crate::marketplace::GiftPrice;
@@ -141,7 +200,7 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
             .marketplace_gift
             .as_ref()
             .unwrap()
-            .completed
+            .is_completed()
     );
     assert!(
         driver
@@ -159,7 +218,7 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
             .marketplace_gift
             .as_ref()
             .unwrap()
-            .completed,
+            .is_completed(),
         "unsolicited success is ignored"
     );
     let retry = driver
@@ -176,7 +235,7 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
             .marketplace_gift
             .as_ref()
             .unwrap()
-            .sending
+            .is_sending()
     );
     assert!(
         !driver
@@ -185,7 +244,7 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
             .marketplace_gift
             .as_ref()
             .unwrap()
-            .completed
+            .is_completed()
     );
     let success = driver
         .buy_marketplace_gift(GiftPrice::Stars(40), "Hi", false)
@@ -205,7 +264,7 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
             .marketplace_gift
             .as_ref()
             .unwrap()
-            .completed,
+            .is_completed(),
         "receipt id is empty for gifts to other users"
     );
     assert!(
@@ -231,8 +290,7 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
             .marketplace_gift
             .as_ref()
             .unwrap()
-            .quote
-            .as_ref()
+            .quote()
             .unwrap()
             .stars
             .is_none()
@@ -266,7 +324,7 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
             .marketplace_gift
             .as_ref()
             .unwrap()
-            .quote
+            .quote()
             .is_none()
     );
     assert!(
@@ -288,7 +346,7 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
             .marketplace_gift
             .as_ref()
             .unwrap()
-            .loading
+            .is_loading()
     );
     assert!(
         driver
@@ -297,7 +355,7 @@ fn marketplace_comment_purchase_binds_price_recipient_and_correlated_result() {
             .marketplace_gift
             .as_ref()
             .unwrap()
-            .quote
+            .quote()
             .is_none()
     );
 }

@@ -17,17 +17,16 @@ impl Session {
             PaymentsPayload::BankCardInfo(info) => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBankCardInfo)
                     && let Some(lookup) = self.payments.bank_card.as_mut()
+                    && lookup.waits_for(pending.map(|p| p.id))
                 {
-                    lookup.loading = false;
-                    lookup.info = Some(info);
+                    lookup.stage = BankCardStage::Ready(info);
                 }
             }
             PaymentsPayload::CollectibleInfo(info) => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetCollectibleInfo)
                     && let Some(lookup) = self.payments.hub.collectible.as_mut()
                 {
-                    lookup.loading = false;
-                    lookup.info = Some(info);
+                    lookup.answer(extra, info);
                 }
             }
             PaymentsPayload::PaymentForm(form) => {
@@ -36,16 +35,10 @@ impl Session {
                 // answer to an earlier checkout's fetch is not this one's.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPaymentForm)
                     && extra.is_some()
-                    && self.payments.form_request == extra
+                    && self.payments.checkout.waits_for(extra)
+                    && let CheckoutForm::Loading { invoice, .. } = &self.payments.checkout
                 {
-                    self.payments.form_request = None;
-                    self.payments.form = Some(form);
-                    self.payments.form_loading = false;
-                    self.payments.form_paid = false;
-                    self.payments.validated = None;
-                    self.payments.validate_request = None;
-                    self.payments.shipping_id = None;
-                    self.payments.note = None;
+                    self.payments.checkout = CheckoutForm::ready(form, invoice.clone());
                 }
             }
             PaymentsPayload::ValidatedOrderInfo(validated) => {
@@ -55,13 +48,17 @@ impl Session {
                 // is not this one's.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::ValidateOrderInfo)
                     && extra.is_some()
-                    && self.payments.validate_request == extra
+                    && let CheckoutForm::Ready(checkout) = &mut self.payments.checkout
+                    && let OrderInfoStage::Validating { request, order } = &checkout.order_info
+                    && Some(*request) == extra
                 {
-                    self.payments.validate_request = None;
-                    self.payments.shipping_id =
-                        validated.shipping_options.first().map(|o| o.id.clone());
-                    self.payments.validated = Some(validated);
-                    self.payments.note = None;
+                    let order = order.clone();
+                    checkout.shipping_id = validated.shipping_options.first().map(|o| o.id.clone());
+                    checkout.order_info = OrderInfoStage::Validated {
+                        order,
+                        info: validated,
+                    };
+                    checkout.note = None;
                 }
             }
             PaymentsPayload::PaymentResult(result) => {
@@ -73,47 +70,69 @@ impl Session {
                 {
                     let shown = self.payments.shows(&paid.invoice);
                     if shown {
-                        self.payments.verification_started = false;
+                        self.payments.checkout.end_verification();
                     }
                     if result.success {
                         self.note_paid_media_unlocked(&paid);
+                        if let Some(chat_id) = paid.invoice.giveaway_chat_id() {
+                            self.payments
+                                .giveaway
+                                .launches
+                                .set(chat_id, GiveawayLaunch::Paid);
+                        }
+                        if !shown && self.payments.unlocked_notice.is_none() {
+                            // The checkout was closed while it paid.
+                            self.payments.notify(
+                                NoticeKind::Info,
+                                crate::lang::tr(crate::lang::keys::Q_MONEY_PAYMENT_SUCCESS_NOTE),
+                            );
+                        }
                         if shown {
-                            self.payments.form_paid = true;
-                            self.payments.note = Some("✅ Payment successful".to_string());
+                            self.payments.checkout.mark_paid();
+                            self.payments.checkout.set_note(Some(format!(
+                                "✅ {}",
+                                crate::lang::tr(crate::lang::keys::Q_MONEY_PAYMENT_SUCCESS_NOTE)
+                            )));
                         }
                     } else if !result.verification_url.is_empty() {
                         // Schema: the URL is for additional payment
                         // credentials verification (e.g. 3-D Secure) — the
                         // UI opens it in the OS browser. It is this
                         // payment's own step, shown or not.
+                        // Whatever the checkout shows, the giveaway's
+                        // payment is now in the provider's hands.
+                        if let Some(chat_id) = paid.invoice.giveaway_chat_id() {
+                            self.payments
+                                .giveaway
+                                .launches
+                                .set(chat_id, GiveawayLaunch::Verifying);
+                        }
                         self.payments.verification_url = Some(PaymentVerification {
                             url: result.verification_url,
                             closes_checkout: shown,
+                            giveaway_chat_id: paid.invoice.giveaway_chat_id(),
                         });
                         if shown {
-                            self.payments.verification_started = true;
+                            self.payments.checkout.mark_verifying();
                         }
                     } else if shown {
-                        self.payments.note = Some("Payment failed".to_string());
+                        self.payments.checkout.set_note(Some(
+                            crate::lang::tr(crate::lang::keys::Q_MONEY_PAYMENT_FAILED).to_string(),
+                        ));
+                    } else {
+                        self.payments.notify(
+                            NoticeKind::Error,
+                            crate::lang::tr(crate::lang::keys::Q_MONEY_PAYMENT_FAILED),
+                        );
                     }
                 }
             }
             PaymentsPayload::MarketplaceGift(quote) => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetMarketplaceGift)
                     && let Some(gift) = self.payments.marketplace_gift.as_mut()
+                    && pending.is_some_and(|p| gift.waits_for(p.id))
                 {
-                    gift.loading = false;
-                    if let Some(quote) = quote.filter(|q| q.name == gift.requested_name) {
-                        gift.price = quote.stars.or(quote.ton);
-                        gift.note = gift
-                            .price
-                            .is_none()
-                            .then(|| "This gift is not available for resale.".into());
-                        gift.quote = Some(quote);
-                    } else {
-                        gift.note =
-                            Some("Could not verify the returned gift. Load the gift again.".into());
-                    }
+                    gift.accept_quote(quote);
                 }
             }
             PaymentsPayload::GiftTextLimit(limit) => {
@@ -129,40 +148,17 @@ impl Session {
             PaymentsPayload::GiftPurchaseResult(result) => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::SendMarketplaceGift)
                     && let Some(gift) = self.payments.marketplace_gift.as_mut()
+                    && pending.is_some_and(|p| gift.waits_for(p.id))
                 {
-                    gift.sending = false;
-                    match result {
-                        crate::marketplace::GiftPurchaseResult::Sent(_) => {
-                            // The receipt id is intentionally empty for gifts sent to others.
-                            gift.completed = true;
-                            gift.note = Some("Gift sent successfully.".into());
-                            gift.price = None;
-                        }
-                        crate::marketplace::GiftPurchaseResult::PriceIncreased(price) => {
-                            gift.price = price;
-                            if price.is_none() {
-                                gift.quote = None;
-                            }
-                            if let (Some(q), Some(price)) = (gift.quote.as_mut(), price) {
-                                match price {
-                                    crate::marketplace::GiftPrice::Stars(_) => {
-                                        q.stars = Some(price)
-                                    }
-                                    crate::marketplace::GiftPrice::TonCents(_) => {
-                                        q.ton = Some(price)
-                                    }
-                                }
-                            }
-                            gift.note=Some("The price increased. Review the new amount and confirm again; nothing was purchased.".into());
-                        }
-                    }
+                    gift.accept_result(result);
                 }
             }
             PaymentsPayload::PaymentReceipt(receipt) => {
                 // Slice P1: `getPaymentReceipt` answer (matched by `@extra`).
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPaymentReceipt) {
-                    self.payments.receipt = Some(receipt);
-                    self.payments.receipt_open = true;
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPaymentReceipt)
+                    && self.payments.receipt.waits_for(extra)
+                {
+                    self.payments.receipt = ReceiptStage::Open(receipt);
                 }
             }
             PaymentsPayload::StarSubscriptions(subs) => {
@@ -175,17 +171,11 @@ impl Session {
                         append,
                     }) = p.purpose
                 {
-                    self.payments.star_subscriptions_loading = false;
-                    self.payments.star_subscriptions_error = None;
-                    self.payments.star_subscriptions_stale = false;
-                    self.payments.star_subscriptions_offset = subs.next_offset.clone();
-                    if append && let Some(existing) = self.payments.star_subscriptions.as_mut() {
-                        existing.star_amount = subs.star_amount;
-                        existing.required_star_count = subs.required_star_count;
-                        existing.subscriptions.extend(subs.subscriptions);
-                    } else {
-                        self.payments.star_subscriptions = Some(subs);
-                    }
+                    // Only the page in flight lands (older ones are
+                    // dropped); only a first page answers a refetch.
+                    self.payments
+                        .star_subscriptions
+                        .page_answered(p.id, append, subs);
                 }
             }
             PaymentsPayload::StarTransactions(page) if self.is_earn_request(pending) => {
@@ -195,7 +185,7 @@ impl Session {
                 if let Some(p) = pending
                     && let RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { append }) =
                         p.purpose
-                    && p.id.0 == self.payments.hub.tx_request
+                    && self.payments.hub.stars.page.waits_for(p.id)
                 {
                     self.payments.hub.apply_transactions(page, append);
                 }
@@ -225,16 +215,16 @@ impl Session {
                         .flat_map(|gift| gift.gift.files.iter().cloned())
                         .collect();
                     self.remember_files(&files);
-                    self.users_state.wearable_gifts = page
-                        .gifts
-                        .into_iter()
-                        .filter(|gift| gift.gift.colors.is_some())
-                        .collect();
-                    self.users_state.wearable_gifts_loaded = true;
+                    self.users_state.wearable_gifts.succeed(
+                        page.gifts
+                            .into_iter()
+                            .filter(|gift| gift.gift.colors.is_some())
+                            .collect(),
+                    );
                 } else if let Some(p) = pending
                     && let RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append }) =
                         p.purpose
-                    && p.id.0 == self.payments.hub.gifts_request
+                    && self.payments.hub.received.page.waits_for(p.id)
                 {
                     let files: Vec<ParsedFile> = page
                         .gifts
@@ -246,21 +236,30 @@ impl Session {
                 }
             }
             PaymentsPayload::PremiumFeatures(info) => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPremiumFeatures) {
-                    self.payments.hub.premium_loading = false;
-                    self.payments.hub.premium_error = None;
-                    self.payments.hub.premium = Some(info);
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::GetPremiumFeatures
+                {
+                    self.payments.hub.premium.answered(Some(pending.id), info);
                 }
             }
             PaymentsPayload::PremiumState(info) => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPremiumState) {
-                    self.payments.hub.premium_state = Some(info);
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::GetPremiumState
+                {
+                    self.payments
+                        .hub
+                        .premium_state
+                        .answered(Some(pending.id), info);
                 }
             }
             PaymentsPayload::BusinessFeatures(features) => {
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBusinessFeatures) {
-                    self.payments.hub.business_features_loading = false;
-                    self.payments.hub.business_features = Some(features);
+                if let Some(pending) = pending
+                    && pending.purpose == RequestPurpose::GetBusinessFeatures
+                {
+                    self.payments
+                        .hub
+                        .business_features
+                        .answered(Some(pending.id), features);
                 }
             }
             PaymentsPayload::GiveawayInfo(info) => self.apply_giveaway_info(info, pending),
@@ -272,16 +271,9 @@ impl Session {
             }
             PaymentsPayload::StarPackOptions(options) => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarGiftOptions) {
-                    let gift = &mut self.payments.stars_gift;
-                    gift.loading = false;
-                    gift.error = None;
-                    gift.options = options;
+                    self.payments.stars_gift.answer(extra, options);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarPackOptions) {
-                    let packs = &mut self.payments.star_packs;
-                    packs.loading = false;
-                    packs.loaded = true;
-                    packs.error = None;
-                    packs.options = options;
+                    self.payments.star_packs.options.succeed(options);
                 }
             }
             PaymentsPayload::GiftManage(payload) => self.apply_gift_manage(payload, pending),
@@ -293,7 +285,7 @@ impl Session {
             PaymentsPayload::GiftMarket(payload) => self.apply_gift_market(payload, pending),
             PaymentsPayload::UpdateOwnedStarCount(amount) => {
                 // The subscriptions list carries its own copy of the balance.
-                if let Some(subs) = self.payments.star_subscriptions.as_mut() {
+                if let Some(subs) = self.payments.star_subscriptions.data_mut() {
                     subs.star_amount = amount.stars;
                 }
                 self.payments.hub.balance = Some(amount);

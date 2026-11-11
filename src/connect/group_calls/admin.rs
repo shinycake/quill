@@ -96,12 +96,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                 group_call_id,
                 can_self_unmute,
             )) {
+                // A refused send is not an answer: its slot (and that of
+                // the request after it, which is never sent) stays idle,
+                // so a later click asks again. Only a server error leaves
+                // the speaker link out.
                 self.session.requests.take(extra);
-                if let Some(call) = self.session.calls.active_group_call.as_mut() {
-                    call.share_links.failed(can_self_unmute);
-                    call.share_links.generating = false;
-                }
                 return Err(err);
+            }
+            if let Some(call) = self.session.calls.active_group_call.as_mut() {
+                call.share_links.sent(can_self_unmute, extra);
             }
         }
         Ok(ready)

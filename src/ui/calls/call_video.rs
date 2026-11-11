@@ -388,19 +388,18 @@ mod tests {
             is_video: true,
             state,
             started_at: Instant::now(),
-            ready_at: None,
             ready: None,
             transport: Default::default(),
             signaling_queue: Vec::new(),
             signaling_dropped: 0,
             muted: false,
-            camera_on: true,
-            screen_sharing: false,
+            video: quill::state::LocalVideo::Camera,
             remote_video,
             remote_screen,
             remote_audio_muted: false,
             remote_battery_low: false,
             signal_bars: None,
+            media_note: None,
         }
     }
 

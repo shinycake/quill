@@ -7,14 +7,7 @@ fn file(id: i32, path: &str) -> ParsedFile {
         id: FileId(id),
         size: 10,
         expected_size: 10,
-        uploading: false,
-        local: LocalFileState {
-            path: path.into(),
-            can_be_downloaded: true,
-            is_downloading_active: false,
-            is_downloading_completed: !path.is_empty(),
-            downloaded_size: 0,
-        },
+        local: LocalFileState::from_parts(path, true, false, !path.is_empty(), 0),
     }
 }
 
@@ -24,7 +17,7 @@ fn a_path_moves_the_paths_revision_and_progress_does_not() {
     files.insert(file(1, ""));
     let start = files.paths_revision();
     let mut progress = file(1, "");
-    progress.local.downloaded_size = 5;
+    progress.local = LocalFileState::from_parts("", true, true, false, 5);
     files.insert(progress);
     assert_eq!(files.paths_revision(), start, "progress moves no path");
     files.insert(file(1, "/tmp/1.jpg"));

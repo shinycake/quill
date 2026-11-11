@@ -51,10 +51,10 @@ fn the_microphone_opens_on_a_worker_and_the_pump_picks_it_up() {
         "opened off the driver's thread"
     );
 
-    let answer = driver.call_audio.opening.take().unwrap().recv().unwrap();
+    let answer = driver.call_audio.take_opening().unwrap().recv().unwrap();
     let (worker, opening) = std::sync::mpsc::channel();
     worker.send(answer).unwrap();
-    driver.call_audio.opening = Some(opening);
+    driver.call_audio.set_opening(opening);
     driver.pump_call_audio(std::time::Instant::now()).unwrap();
     assert!(driver.call_audio.is_open(), "the pump took the source");
     let _ = std::fs::remove_dir_all(dir);
@@ -84,7 +84,11 @@ fn a_tap_opened_after_the_call_stopped_wanting_it_is_dropped() {
 
     driver.session.calls.active_group_call = Some(joined_unmuted_call(4242));
     driver.pump_call_audio(std::time::Instant::now()).unwrap();
-    assert_eq!(driver.call_audio.error, None, "nobody waits for that open");
+    assert_eq!(
+        driver.call_audio.error(),
+        None,
+        "nobody waits for that open"
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -168,6 +172,69 @@ fn speaking_is_sent_to_tdlib_and_withdrawn_on_mute() {
     *level.0.lock().unwrap() = Some(2.0);
     driver.pump_call_audio(std::time::Instant::now()).unwrap();
     assert_eq!(sent().len(), 2);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+/// A tap whose device can be lost: `lost` makes `error` report it.
+struct LosableLevel {
+    level: Mutex<Option<f32>>,
+    lost: std::sync::atomic::AtomicBool,
+}
+
+impl LevelSource for LosableLevel {
+    fn take_level(&self) -> Option<f32> {
+        self.level.lock().unwrap().take()
+    }
+
+    fn error(&self) -> Option<String> {
+        self.lost
+            .load(std::sync::atomic::Ordering::SeqCst)
+            .then(|| "The microphone was unplugged.".to_string())
+    }
+}
+
+struct SharedLosable(Arc<LosableLevel>);
+
+impl LevelSource for SharedLosable {
+    fn take_level(&self) -> Option<f32> {
+        self.0.take_level()
+    }
+
+    fn error(&self) -> Option<String> {
+        self.0.error()
+    }
+}
+
+#[test]
+fn a_lost_microphone_withdraws_the_speaking_mark() {
+    let (dir, recorder, mut driver, _seq) = group_call_test_driver();
+    let sent = || {
+        recorder
+            .snapshot()
+            .iter()
+            .map(|s| serde_json::from_str::<Value>(s).unwrap())
+            .filter(|v| v["@type"] == "setGroupCallParticipantIsSpeaking")
+            .map(|v| v["is_speaking"].as_bool().unwrap())
+            .collect::<Vec<_>>()
+    };
+    let tap = Arc::new(LosableLevel {
+        level: Mutex::new(Some(1.3)),
+        lost: Default::default(),
+    });
+    driver
+        .call_audio
+        .inject(Box::new(SharedLosable(tap.clone())));
+    driver.session.calls.active_group_call = Some(joined_unmuted_call(4242));
+    driver.pump_call_audio(std::time::Instant::now()).unwrap();
+    assert_eq!(driver.group_call_self_level(), (1.3, true));
+    assert_eq!(sent(), vec![true]);
+    // The microphone goes: the tile stops speaking and TDLib is told.
+    tap.lost.store(true, std::sync::atomic::Ordering::SeqCst);
+    driver.pump_call_audio(std::time::Instant::now()).unwrap();
+    assert!(!driver.call_audio.is_open());
+    assert_eq!(driver.group_call_self_level(), (0.0, false));
+    assert_eq!(sent(), vec![true, false]);
+    assert!(driver.group_call_level_error().is_some());
     std::fs::remove_dir_all(dir).ok();
 }
 
@@ -368,5 +435,40 @@ fn signal_bars_follow_the_engine_event() {
     });
     driver.request_tick(std::time::Instant::now());
     assert_eq!(bars(&driver), Some(3));
+    std::fs::remove_dir_all(dir).ok();
+}
+
+/// A speaking send the sender refuses is not recorded as told: the next
+/// poll sends it again, and TDLib hears you speak.
+#[test]
+fn a_refused_speaking_send_is_offered_again_on_the_next_poll() {
+    use std::time::{Duration, Instant};
+    let (dir, mut driver, sender, _sink, _seq) = super::support::toggle_driver();
+    let level = Arc::new(TestLevel(Mutex::new(None)));
+    driver
+        .call_audio
+        .inject(Box::new(SharedLevel(level.clone())));
+    driver.session.calls.active_group_call = Some(joined_unmuted_call(4242));
+    let t0 = Instant::now();
+    let at = |ms: u64| t0 + Duration::from_millis(ms);
+    let speaking_sent = || {
+        sender
+            .snapshot()
+            .iter()
+            .filter(|s| s.contains("setGroupCallParticipantIsSpeaking"))
+            .count()
+    };
+    sender.refuse(true);
+    *level.0.lock().unwrap() = Some(1.3);
+    driver.pump_call_audio(at(92)).unwrap_err();
+    assert_eq!(speaking_sent(), 0);
+    sender.refuse(false);
+    *level.0.lock().unwrap() = Some(1.3);
+    driver.pump_call_audio(at(184)).unwrap();
+    assert_eq!(
+        speaking_sent(),
+        1,
+        "the edge goes out once the sender takes it"
+    );
     std::fs::remove_dir_all(dir).ok();
 }

@@ -4,7 +4,6 @@
 //! listing, and the status line a restart set.
 
 use crate::ui::app::QuillApp;
-use crate::ui::group_call_stream_layout::StreamJoinIntent;
 use crate::ui::on_screen::OnScreen;
 use crate::ui::screen_chooser_demo::DemoScreens;
 use crate::ui::screen_share_state::ScreenFor;
@@ -67,7 +66,7 @@ fn the_account_dialog_does_not_reopen_over_the_next_account(cx: &mut TestAppCont
     frames(&mut vcx);
     app.update_in(&mut vcx, |app, window, cx| {
         app.open_account_lifecycle(cx);
-        app.account_boxes.lifecycle.confirm_delete = true;
+        app.account_boxes.lifecycle.stage = crate::ui::LifecycleStage::ConfirmDelete;
         app.account_boxes
             .lifecycle
             .password
@@ -81,9 +80,33 @@ fn the_account_dialog_does_not_reopen_over_the_next_account(cx: &mut TestAppCont
     assert!(!dialog_up(&mut vcx), "it did not come back");
     app.read_with(&vcx, |app, cx| {
         let lifecycle = &app.account_boxes.lifecycle;
-        assert!(!lifecycle.open && !lifecycle.confirm_delete && !lifecycle.confirm_logout);
+        assert!(!lifecycle.is_open());
         assert_eq!(lifecycle.password.read(cx).value().to_string(), "");
         assert!(QuillShell::open_dialog_names(app).is_empty());
+    });
+}
+
+/// Log out from the Account box empties the typed password and reason.
+#[gpui_kit::test]
+fn logging_out_from_the_account_box_empties_its_inputs(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    frames(&mut vcx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.open_account_lifecycle(cx);
+        app.account_boxes.lifecycle.stage = crate::ui::LifecycleStage::ConfirmLogout;
+        for input in [
+            &app.account_boxes.lifecycle.password,
+            &app.account_boxes.lifecycle.reason,
+        ] {
+            input.update(cx, |input, cx| input.set_value("typed", window, cx));
+        }
+        app.confirm_logout_in_account_box(window, cx);
+    });
+    app.read_with(&vcx, |app, cx| {
+        let lifecycle = &app.account_boxes.lifecycle;
+        assert!(!lifecycle.is_open());
+        assert_eq!(lifecycle.password.read(cx).value().to_string(), "");
+        assert_eq!(lifecycle.reason.read(cx).value().to_string(), "");
     });
 }
 
@@ -97,11 +120,15 @@ fn call_ids_and_video_chat_boxes_do_not_carry_over(cx: &mut TestAppContext) {
     frames(&mut vcx);
     app.update_in(&mut vcx, |app, window, cx| {
         app.call_screen.window_closed_by_user = Some(1);
-        app.call_screen.ended_at = Some((1, std::time::Instant::now()));
+        app.call_screen.end = crate::ui::calls_state::CallEnd::Ended {
+            call_id: 1,
+            at: std::time::Instant::now(),
+        };
         app.group_call_screen.window_closed_by_user = Some(1);
         app.group_call_screen.settings_open = true;
-        app.group_call_screen.stream_join = Some((StreamJoinIntent::Call(1), None));
-        app.group_call_screen.stream_joining = Some(1);
+        app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
+            crate::ui::group_call_state::StreamJoining::new(1, gpui_kit::Task::ready(())),
+        );
         app.group_call_screen
             .composer
             .update(cx, |input, cx| input.set_value("for A's chat", window, cx));
@@ -110,12 +137,18 @@ fn call_ids_and_video_chat_boxes_do_not_carry_over(cx: &mut TestAppContext) {
     frames(&mut vcx);
     app.read_with(&vcx, |app, cx| {
         assert_eq!(app.call_screen.window_closed_by_user, None);
-        assert!(app.call_screen.ended_at.is_none());
+        assert_eq!(
+            app.call_screen.end,
+            crate::ui::calls_state::CallEnd::Running
+        );
         let group = &app.group_call_screen;
         assert_eq!(group.window_closed_by_user, None);
         assert!(!group.settings_open);
-        assert!(group.stream_join.is_none(), "no join waits for B's call 1");
-        assert_eq!(group.stream_joining, None, "no Join button waits for it");
+        assert!(
+            group.stream_wish().is_none(),
+            "no join waits for B's call 1"
+        );
+        assert_eq!(group.joining_call(), None, "no Join button waits for it");
         assert_eq!(group.composer.read(cx).value().to_string(), "");
     });
 }
@@ -143,7 +176,7 @@ fn share_screen_works_after_a_switch_during_the_listing(cx: &mut TestAppContext)
     // Switched before the listing comes back.
     switch(&app, &mut vcx);
     frames(&mut vcx);
-    app.read_with(&vcx, |app, _| assert!(app.screen_share.window.is_none()));
+    app.read_with(&vcx, |app, _| assert!(app.screen_share.window().is_none()));
     app.update_in(&mut vcx, |app, _, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             session.calls.active_group_call = Some(call());
@@ -152,7 +185,7 @@ fn share_screen_works_after_a_switch_during_the_listing(cx: &mut TestAppContext)
     });
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
-        assert!(app.screen_share.window.is_some(), "the chooser opened");
+        assert!(app.screen_share.window().is_some(), "the chooser opened");
     });
 }
 

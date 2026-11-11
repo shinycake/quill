@@ -301,12 +301,8 @@ impl QuillApp {
 
     fn open_story_stats(&mut self, chat_id: i64, story_id: i32, cx: &mut Context<Self>) {
         let is_dark = super::chat_theme::is_dark_palette();
-        if let Some(session) = self.stats_session() {
-            session
-                .groups
-                .stats
-                .set_page(chat_id, StatsPage::Story(story_id));
-        }
+        // The page opens once the request is accepted: a refused one
+        // would leave a page that waits for an answer nothing will give.
         if let Some(live) = self.live.as_mut()
             && live
                 .driver
@@ -316,6 +312,14 @@ impl QuillApp {
             self.set_note(StatusNote::error(tr(
                 keys::Q_MONEY_COULD_NOT_LOAD_STORY_STATISTICS,
             )));
+            cx.notify();
+            return;
+        }
+        if let Some(session) = self.stats_session() {
+            session
+                .groups
+                .stats
+                .set_page(chat_id, StatsPage::Story(story_id));
         }
         cx.notify();
     }
@@ -371,7 +375,7 @@ impl QuillApp {
         // The numbers come from the chat's recent interactions when the
         // post is among them, else from the post itself.
         let recent = match session.groups.chat_statistics.get(&chat_id) {
-            Some(ChatStatisticsFetch::Loaded(stats)) => match stats.as_ref() {
+            Some(ChatStatisticsFetch::Loaded { stats, .. }) => match stats.as_ref() {
                 ChatStatistics::Channel(c) => c
                     .recent_interactions
                     .iter()
@@ -418,7 +422,7 @@ impl QuillApp {
         let forwards = recent
             .map(|r| r.forward_count)
             .or(post.as_ref().map(|p| p.forwards));
-        let public = state.map_or(0, |s| s.forwards.total);
+        let public = state.map_or(0, |s| s.forwards.total());
         let mut cells = Vec::new();
         if let Some(views) = views {
             cells.push(OverviewCell::plain(
@@ -456,12 +460,19 @@ impl QuillApp {
                             .small()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 let is_dark = super::chat_theme::is_dark_palette();
-                                if let Some(live) = this.live.as_mut() {
-                                    let _ = live.driver.retry_message_statistics(
-                                        ChatId(chat_id),
-                                        MessageId(message_id),
-                                        is_dark,
-                                    );
+                                if let Some(live) = this.live.as_mut()
+                                    && live
+                                        .driver
+                                        .retry_message_statistics(
+                                            ChatId(chat_id),
+                                            MessageId(message_id),
+                                            is_dark,
+                                        )
+                                        .is_err()
+                                {
+                                    this.set_note(StatusNote::error(tr(
+                                        keys::Q_MONEY_COULD_NOT_LOAD_STATISTICS,
+                                    )));
                                 }
                                 cx.notify();
                             })),
@@ -508,12 +519,40 @@ impl QuillApp {
                         page = page.child(divider(cx)).child(section);
                     }
                 }
-                _ => {}
+                Some(PollStatsFetch::Loading) => {}
+                Some(PollStatsFetch::Failed(message)) => {
+                    page = page
+                        .child(divider(cx))
+                        .child(div().text_sm().text_color(danger()).child(message.clone()))
+                        .child(
+                            Button::new("message-poll-votes-retry")
+                                .label(tr(keys::Q_MONEY_RETRY))
+                                .small()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    let is_dark = super::chat_theme::is_dark_palette();
+                                    if let Some(live) = this.live.as_mut()
+                                        && live
+                                            .driver
+                                            .retry_stats_poll_votes(
+                                                ChatId(chat_id),
+                                                MessageId(message_id),
+                                                is_dark,
+                                            )
+                                            .is_err()
+                                    {
+                                        this.set_note(StatusNote::error(tr(
+                                            keys::Q_MONEY_COULD_NOT_LOAD_STATISTICS,
+                                        )));
+                                    }
+                                    cx.notify();
+                                })),
+                        );
+                }
             }
         }
         if let Some(state) = state {
             let forwards = &state.forwards;
-            let more = (!forwards.next_offset.is_empty()).then(|| {
+            let more = (!forwards.next_offset().is_empty()).then(|| {
                 Button::new("message-forwards-more")
                     .label(tr(keys::Q_MONEY_SHOW_MORE))
                     .ghost()
@@ -528,10 +567,10 @@ impl QuillApp {
             });
             page = page.child(self.public_shares(
                 "message-forward",
-                forwards.total,
-                &forwards.forwards,
-                forwards.loading,
-                forwards.error.clone(),
+                forwards.total(),
+                forwards.items(),
+                forwards.loading(),
+                forwards.error().map(str::to_string),
                 more,
                 cx,
             ));
@@ -612,7 +651,27 @@ impl QuillApp {
                 page = page.child(loading_line(tr(keys::Q_MONEY_LOADING_STATISTICS)))
             }
             StoryStatsFetch::Failed(message) => {
-                page = page.child(div().text_sm().text_color(danger()).child(message.clone()));
+                page = page
+                    .child(div().text_sm().text_color(danger()).child(message.clone()))
+                    .child(
+                        Button::new("story-stats-retry")
+                            .label(tr(keys::Q_MONEY_RETRY))
+                            .small()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                let is_dark = super::chat_theme::is_dark_palette();
+                                if let Some(live) = this.live.as_mut()
+                                    && live
+                                        .driver
+                                        .retry_story_statistics(ChatId(chat_id), story_id, is_dark)
+                                        .is_err()
+                                {
+                                    this.set_note(StatusNote::error(tr(
+                                        keys::Q_MONEY_COULD_NOT_LOAD_STORY_STATISTICS,
+                                    )));
+                                }
+                                cx.notify();
+                            })),
+                    );
             }
             StoryStatsFetch::Loaded(stats) => {
                 for (id, title, graph, kind) in [
@@ -663,8 +722,8 @@ impl QuillApp {
             "story-forward",
             state.forwards_total,
             &state.forwards,
-            state.forwards_loading,
-            state.forwards_error.clone(),
+            state.forwards_loading(),
+            state.forwards_error().map(str::to_string),
             more,
             cx,
         ))

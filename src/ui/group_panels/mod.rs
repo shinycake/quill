@@ -119,7 +119,7 @@ impl QuillApp {
                 InfoPanelTarget::Statistics(_)
                     | InfoPanelTarget::Community(_)
                     | InfoPanelTarget::Earn(_)
-            ) && let Some(chat_id) = live.driver.session.open_chat
+            ) && let Some(chat_id) = live.driver.session.open_chat_id()
             {
                 let _ = live.driver.fetch_chat_media_counts(chat_id);
             }
@@ -246,15 +246,8 @@ impl QuillApp {
         // Slice G2: the event-log section's search box (created lazily;
         // its value syncs to the panel chat's stored query). The per-admin
         // filter lives in the session and follows the chat.
-        self.ensure_event_log_search(window, cx);
         if let Some(chat_id) = invite_panel_chat_id {
-            let query = self
-                .session()
-                .and_then(|session| session.groups.event_log_queries.get(&chat_id.0).cloned())
-                .unwrap_or_default();
-            if let Some(input) = self.admin.event_log_search.clone() {
-                input.update(cx, |state, cx| state.set_value(&query, window, cx));
-            }
+            self.ensure_event_log_search(chat_id, window, cx);
         }
         self.inline_members_opened(target, window, cx);
         cx.notify();
@@ -267,6 +260,8 @@ impl QuillApp {
             session.users_state.open_info_panel = None;
         }
         self.common_groups.close();
+        // The members block belongs to the panel that closed.
+        self.inline_members.reset(None);
         cx.notify();
     }
 
@@ -286,7 +281,7 @@ impl QuillApp {
         // peer only when the panel is that chat's own (not a group
         // member's profile opened from a sender avatar).
         let counts = session
-            .open_chat
+            .open_chat_id()
             .filter(|chat_id| {
                 let open = self.shown_info_target();
                 session.chat_info_target(*chat_id) == open

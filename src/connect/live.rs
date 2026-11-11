@@ -183,6 +183,7 @@ impl LiveConnect {
     fn load_chats_when_ready(&self) {
         let api = self._live.api.clone();
         let client_id = self._live.client_id;
+        crate::telegram::hub::LAUNCH_CHATS.claim(client_id);
         let request = crate::telegram::requests::load_chats_untracked(MAIN_CHAT_LOAD_LIMIT);
         self._live.hub.routes().on_ready(
             client_id,
@@ -265,6 +266,9 @@ fn open_prepared_client(
     // way (seeded from `getAutoDownloadSettingsPresets` on first open
     // when no file exists).
     session.settings.data_storage = load_data_storage_prefs(&prepared.paths);
+    // What the file holds is what was saved: the first pause change is
+    // compared with it, not with an empty set.
+    session.media.disk_paused_persisted = session.settings.data_storage.disk_paused.clone();
     // `parity:data-proxy-web`: web proxy carriers run in the web view
     // helper next to Quill's executable, with this account's web view
     // files under its own folder.

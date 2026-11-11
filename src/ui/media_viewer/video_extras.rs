@@ -29,7 +29,7 @@ impl QuillApp {
         self.viewer
             .state
             .current()
-            .is_some_and(|item| item.kind.is_playable() && self.viewer.player.is_some())
+            .is_some_and(|item| item.kind.is_playable() && self.viewer.clip.player().is_some())
     }
 
     /// "Rotate": a quarter turn of the playing video (tdesktop turns by
@@ -55,7 +55,7 @@ impl QuillApp {
     /// when it is a decoded image or CPU surface pixels (Windows NV12); a
     /// GPU surface (macOS) can't be read back.
     pub(in crate::ui) fn viewer_oriented_frame(&self) -> Option<Arc<RenderImage>> {
-        self.viewer.player.as_ref()?.current_picture()?.snapshot()
+        self.viewer.clip.player()?.current_picture()?.snapshot()
     }
 
     /// The playback position of the playing video, in whole seconds.
@@ -97,7 +97,15 @@ impl QuillApp {
         }
         self.close_media_viewer(cx);
         self.begin_forward_one(chat_id, message_id, false, window, cx);
-        self.viewer.extra.share_at = Some((chat_id, message_id, secs));
+        // Only a picker that opened over this very message holds the
+        // position (a refused forward, or a toggle that took the message
+        // out of the draft, leaves none).
+        let picking =
+            self.share.forward.picker_open()
+                && self.share.forward.draft().is_some_and(|draft| {
+                    draft.from_chat_id == chat_id && draft.contains(message_id)
+                });
+        self.viewer.extra.share_at = picking.then_some((chat_id, message_id, secs));
     }
 
     /// The picker's "Copy link" for the message the viewer was shared at a

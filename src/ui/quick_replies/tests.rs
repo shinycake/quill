@@ -77,7 +77,8 @@ fn error(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Option<String> {
             .quick_replies_dialog
             .as_ref()
             .unwrap()
-            .local_error
+            .pane
+            .error
             .clone()
     })
 }
@@ -227,14 +228,19 @@ fn opening_the_box_clears_the_last_refusal_and_retries_a_failed_load(cx: &mut Te
     app.update(vcx, |app, _| {
         let state = &mut app.demo_session.as_mut().unwrap().settings.quick_replies;
         state.error = Some("Quick replies: FLOOD_WAIT".into());
-        state.messages_requested.insert(1);
-        state.messages_failed.insert(1);
+        state.messages.insert(
+            1,
+            quill::state::fetch::Fetch::Failed {
+                error: "FLOOD_WAIT".into(),
+                stale: None,
+            },
+        );
     });
     open(&app, vcx);
     app.read_with(vcx, |app, _| {
         let state = &app.demo_session.as_ref().unwrap().settings.quick_replies;
         assert!(state.error.is_none());
-        assert!(!state.messages_requested.contains(&1));
+        assert!(!state.messages.contains_key(&1));
         assert!(!state.messages_settled(1));
     });
 }
@@ -284,7 +290,7 @@ fn type_slash(app: &Entity<QuillApp>, cx: &mut VisualTestContext, text: &str) {
     cx.update(|window, cx| {
         app.update(cx, |app, cx| {
             let session = app.demo_session.as_mut().expect("demo session");
-            let chat = session.open_chat.expect("open chat");
+            let chat = session.open_chat_id().expect("open chat");
             let user_id = quill::ids::UserId(chat.0);
             session.chats.get_mut(&chat.0).unwrap().kind =
                 quill::telegram::envelope::ChatKind::Private { user_id };
@@ -307,7 +313,7 @@ fn the_slash_list_starts_below_the_edit_row_and_tab_inserts(cx: &mut TestAppCont
     let (items, selected) = app.update(vcx, |app, cx| {
         (
             app.command_menu_state(cx).expect("menu is open").1,
-            app.chat_ui.command_menu_selected,
+            app.chat_ui.command_menu.selected(),
         )
     });
     assert_eq!(items[0].quick_reply, Some(quill::quick_replies::EDIT_ROW));
@@ -347,4 +353,32 @@ fn the_edit_row_opens_the_dialog_and_clears_the_slash(cx: &mut TestAppContext) {
     assert!(app.read_with(vcx, |app, _| app.dialogs.quick_replies_dialog.is_some()));
     let text = app.read_with(vcx, |app, cx| app.composer.read(cx).value().to_string());
     assert!(text.is_empty());
+}
+
+#[gpui_kit::test]
+fn a_new_shortcut_nobody_reported_does_not_keep_the_poll_running(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx);
+    open(&app, vcx);
+    go(
+        &app,
+        vcx,
+        View::Shortcut {
+            name: "brand-new".into(),
+            id: None,
+        },
+    );
+    let done =
+        vcx.update(|window, cx| app.update(cx, |app, cx| app.quick_replies_pump(window, cx)));
+    assert!(done, "nothing was accepted, so there is no id to wait for");
+    let waiting = vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            if let Some(dialog) = app.dialogs.quick_replies_dialog.as_mut() {
+                dialog.pane.save = super::TextSave::Accepted;
+            }
+            app.quick_replies_pump(window, cx)
+        })
+    });
+    assert!(!waiting, "an accepted text waits for its shortcut's id");
 }

@@ -13,6 +13,9 @@ pub(crate) struct PaidBox {
     /// How the Stars show in Top Senders.
     pub(super) sender: quill::paid_reaction::PaidSender,
     pub(super) slider: Entity<SliderState>,
+    /// Why the last Send was refused or could not go out; the box stays
+    /// open with it.
+    pub(super) error: Option<String>,
 }
 
 pub(crate) struct PaidReactionUi {

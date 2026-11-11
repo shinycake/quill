@@ -8,7 +8,7 @@ use crate::ui::app::QuillApp;
 use crate::ui::demo::{demo_file_json, demo_media_allowlist};
 use crate::ui::groups::apply_ready_channels;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
-use crate::ui::story_page::StoryPage;
+use crate::ui::story_page::{AlbumView, StoryPage};
 use gpui_kit::*;
 use quill::diagnostics::DiagnosticSink;
 use quill::ids::ChatId;
@@ -133,7 +133,7 @@ impl QuillApp {
             },
         );
         let mut page = StoryPage::new(ChatId(CHANNEL), window, cx);
-        page.open_album = Some(ALBUM);
+        page.view = AlbumView::album(ALBUM);
         self.stories.page = Some(page);
         self.open_album_picker(AlbumPickerTarget::Album(ALBUM), cx);
         if let Some(picker) = self

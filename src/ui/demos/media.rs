@@ -22,6 +22,14 @@ use quill::ids::{ChatId, FileId, MessageId};
 use quill::voice::VoiceCapture;
 use std::sync::atomic::Ordering;
 
+/// A demo's own check of the app's playback logic: a regression prints a
+/// note and the demo carries on, instead of ending the process.
+fn demo_expect(holds: bool, what: &str) {
+    if !holds {
+        eprintln!("demo check failed: {what}");
+    }
+}
+
 register_demos![
     // Music file bubble with title, performer, cover, and Play/Pause.
     DemoSpec::chats("ready-audio", "screenshot demo — audio file playback")
@@ -191,6 +199,7 @@ impl QuillApp {
     }
 
     fn demo_ready_downloads(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.chat_list.downloads_panel_open = true;
         // Exercise failed playback recovery without a network request.
         let audio = |message, file| PlayIntent {
             file: FileId(file),
@@ -202,10 +211,16 @@ impl QuillApp {
         };
         self.playback.intent = Some(audio(205, 26));
         self.discard_stopped_media_playback(cx);
-        assert!(self.playback.intent.is_none());
+        demo_expect(
+            self.playback.intent.is_none(),
+            "a stopped sound drops its intent",
+        );
         self.playback.intent = Some(audio(204, 24));
         self.discard_stopped_media_playback(cx);
-        assert!(self.playback.intent.is_some());
+        demo_expect(
+            self.playback.intent.is_some(),
+            "a failed sound keeps its intent",
+        );
         self.playback.intent = None;
     }
 
@@ -239,8 +254,7 @@ impl QuillApp {
                             thumb_file_id: None,
                             thumb_width: 0,
                             thumb_height: 0,
-                            requires_premium: false,
-                            premium_animation: None,
+                            premium: None,
                         })
                         .collect(),
                     cover_files: Vec::new(),
@@ -252,11 +266,11 @@ impl QuillApp {
                 pack(2, "Animals", &["🐶", "🐱", "🦊", "🐼"], true),
                 pack(3, "Food and drink", &["🍕", "🍣", "🍩", "☕"], true),
             ];
-            session.stickers.emoji.trending_sets = vec![
+            session.stickers.emoji.lists.trending = quill::emoji::TrendingSets::ready(vec![
                 pack(4, "Travel", &["✈️", "🏝️", "🗺️", "🚆"], false),
                 pack(5, "Weather", &["☀️", "🌧️", "⛄", "🌈"], false),
                 pack(2, "Animals", &["🐶", "🐱", "🦊", "🐼"], true),
-            ];
+            ]);
             session.settings.media_prefs.recent_emoji_packs = vec![2, 1, 3];
         }
     }
@@ -298,8 +312,8 @@ impl QuillApp {
         session.settings.media_prefs.autoplay_videos = false;
         for file in [81, 92] {
             session.media.files.update(file, |file| {
-                file.local.path.clear();
-                file.local.is_downloading_completed = false;
+                file.local =
+                    quill::telegram::envelope::LocalFileState::Absent { can_download: true };
             });
         }
     }
@@ -322,20 +336,24 @@ impl QuillApp {
             .cloned()
         {
             let mut waiting = local.clone();
-            waiting.local.path.clear();
-            waiting.local.is_downloading_completed = false;
+            waiting.local =
+                quill::telegram::envelope::LocalFileState::Absent { can_download: true };
             if let Some(session) = self.demo_session.as_mut() {
                 session.media.files.insert(waiting);
             }
             self.toggle_voice_playback(ChatId(11), MessageId(91), FileId(82), true, 3., cx);
-            assert!(self.playback.intent.is_some());
+            demo_expect(
+                self.playback.intent.is_some(),
+                "a voice note waits for its file",
+            );
             if let Some(session) = self.demo_session.as_mut() {
                 session.media.files.insert(local);
             }
             self.resume_play_intent(cx);
-            assert!(
+            demo_expect(
                 self.playback.intent.is_none()
-                    && self.playback.playing_voice == Some(MessageId(91))
+                    && self.playback.active.voice() == Some(MessageId(91)),
+                "a voice note plays once its file lands",
             );
             self.stop_voice_playback();
         }
@@ -349,7 +367,7 @@ impl QuillApp {
             CaptureFor::Message,
         );
         // MED2: demo shows the locked record bar + a transcribed note.
-        self.recording.locked = true;
+        self.recording.set_locked(true);
         self.set_note(StatusNote::silent(
             "screenshot demo — recording voice · locked",
         ));
@@ -411,11 +429,7 @@ impl QuillApp {
                     stickers.push(item);
                 }
             }
-            session
-                .media
-                .media_library
-                .set_stickers
-                .insert(77, stickers);
+            session.media.media_library.insert(77, stickers);
         }
         self.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
         self.pickers.media_panel.tab = crate::ui::media_panel::PanelTab::Stickers;

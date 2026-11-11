@@ -137,7 +137,7 @@ fn contacts_and_added_chats_are_editable(cx: &mut TestAppContext) {
     assert!(now().contacts);
 
     assert!(vcx.debug_bounds("agent-chats-empty").is_some());
-    grants::update(&AccountKey::primary(), |g| {
+    let _ = grants::update(&AccountKey::primary(), |g| {
         g.chats.insert(
             7,
             ChatGrant {

@@ -2,17 +2,17 @@
 //! sublists and tags (batch B16).
 use super::*;
 use crate::ids::{ChatId, FileId, RequestId};
-use crate::state::ThreadsPurpose;
+use crate::state::{OlderEnd, SavedPage, SavedTopicsLoad, ThreadsPurpose};
 use crate::state::{RequestPurpose, SAVED_PAGE, SAVED_TOPICS_PAGE};
 use crate::telegram::envelope::ReactionType;
 use crate::telegram::requests::{TOPIC_ICON_COLORS, valid_topic_icon_color};
 use crate::telegram::requests::{
-    create_forum_topic_with_icon, delete_saved_messages_topic_history, edit_forum_topic_with_icon,
-    get_forum_topic, get_forum_topic_default_icons, get_forum_topic_link, get_saved_messages_tags,
-    get_saved_messages_topic_history, load_saved_messages_topics, read_all_forum_topic_mentions,
-    read_all_forum_topic_reactions, search_saved_messages, set_pinned_forum_topics,
-    set_saved_messages_tag_label, toggle_chat_view_as_topics, toggle_saved_messages_topic_pinned,
-    unpin_all_forum_topic_messages,
+    create_bot_thread, create_forum_topic_with_icon, delete_saved_messages_topic_history,
+    edit_forum_topic_with_icon, get_forum_topic, get_forum_topic_default_icons,
+    get_forum_topic_link, get_saved_messages_tags, get_saved_messages_topic_history,
+    load_saved_messages_topics, read_all_forum_topic_mentions, read_all_forum_topic_reactions,
+    search_saved_messages, set_pinned_forum_topics, set_saved_messages_tag_label,
+    toggle_chat_view_as_topics, toggle_saved_messages_topic_pinned, unpin_all_forum_topic_messages,
 };
 
 type Sent = Result<Option<RequestId>, ConnectSendError>;
@@ -193,6 +193,34 @@ impl<S: JsonSender> ConnectDriver<S> {
         })
     }
 
+    /// A new thread in a bot chat that lets users create them, for a
+    /// message sent from its "All" view (tdesktop `reserveNewBotTopic`:
+    /// "New Chat" with a random icon color). One at a time per chat.
+    pub fn start_bot_thread(&mut self, chat_id: ChatId, name: &str) -> Sent {
+        if !self
+            .session
+            .bot_topics(chat_id)
+            .is_some_and(|bot| bot.allows_users_to_create_topics)
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if self
+            .session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::StartBotThread, chat_id)
+        {
+            return Ok(None);
+        }
+        let color = {
+            use rand::RngExt as _;
+            let at = rand::rng().random_range(0..TOPIC_ICON_COLORS.len());
+            TOPIC_ICON_COLORS.get(at).copied().unwrap_or(0x6FB9F0)
+        };
+        self.send_purpose(RequestPurpose::StartBotThread, Some(chat_id), |extra| {
+            create_bot_thread(extra, chat_id, name, color)
+        })
+    }
+
     /// Rename a topic and change its custom emoji (`editForumTopic`).
     pub fn edit_forum_topic_with_icon(
         &mut self,
@@ -224,7 +252,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Ask for more sublists (`loadSavedMessagesTopics`); deduped, and
     /// silent once TDLib said everything is loaded.
     pub fn load_saved_topics(&mut self) -> Sent {
-        if self.session.threads.saved.topics_exhausted
+        if self.session.threads.saved.topics_exhausted()
             || self
                 .session
                 .requests
@@ -232,10 +260,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.session.threads.saved.topics_requested = true;
-        self.send_purpose(RequestPurpose::LoadSavedMessagesTopics, None, |extra| {
+        let sent = self.send_purpose(RequestPurpose::LoadSavedMessagesTopics, None, |extra| {
             load_saved_messages_topics(extra, SAVED_TOPICS_PAGE)
-        })
+        });
+        // A page that never left waits for the connection like a failed one.
+        let saved = &mut self.session.threads.saved;
+        match &sent {
+            Ok(Some(_)) if saved.topics_load != SavedTopicsLoad::Exhausted => {
+                saved.topics_load = SavedTopicsLoad::Started;
+            }
+            Err(_) => saved.topics_load = SavedTopicsLoad::Retry,
+            _ => {}
+        }
+        sent
     }
 
     /// `getSavedMessagesTags` for all of Saved Messages (once; updates keep
@@ -245,9 +282,28 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.has_purpose(purpose) {
             return Ok(None);
         }
-        self.send_purpose(purpose, None, |extra| {
+        if topic_id != 0 {
+            return self.send_purpose(purpose, None, |extra| {
+                get_saved_messages_tags(extra, topic_id)
+            });
+        }
+        // All of Saved Messages: the list's fetch records the ask, so a
+        // send that fails lands in `Failed` (the pump waits for the
+        // connection) instead of being asked again at every pump.
+        let saved = &mut self.session.threads.saved;
+        if !saved.tags.is_idle() {
+            return Ok(None);
+        }
+        saved.tags.begin();
+        let sent = self.send_purpose(purpose, None, |extra| {
             get_saved_messages_tags(extra, topic_id)
-        })
+        });
+        let tags = &mut self.session.threads.saved.tags;
+        match &sent {
+            Ok(Some(extra)) => tags.sent(*extra),
+            _ => tags.fail_dropping_data("could not send the request"),
+        }
+        sent
     }
 
     /// Enter a sublist: reset its view, load its first page and its tags.
@@ -270,17 +326,36 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(view) = self.session.threads.saved.sublist.as_ref() else {
             return Ok(None);
         };
-        if view.history.loaded_complete {
+        // A failed page waits for Retry; a page out for this view is not
+        // asked again. (A page out for a view that was left is no reason
+        // to hold this one back: its answer is dropped on arrival.)
+        if view.history.loaded_complete()
+            || view.history.older == OlderEnd::Failed
+            || view.page != SavedPage::Idle
+        {
             return Ok(None);
         }
         let (topic_id, from) = (view.topic_id, view.history.next_from_message_id.0);
         let purpose = RequestPurpose::GetSavedMessagesTopicHistory { topic_id };
-        if self.session.requests.has_purpose(purpose) {
-            return Ok(None);
-        }
-        self.send_purpose(purpose, None, |extra| {
+        let sent = self.send_purpose(purpose, None, |extra| {
             get_saved_messages_topic_history(extra, topic_id, from, 0, SAVED_PAGE)
-        })
+        })?;
+        if let (Some(extra), Some(view)) = (sent, self.session.threads.saved.sublist.as_mut()) {
+            view.page = SavedPage::Asking(extra);
+        }
+        Ok(sent)
+    }
+
+    /// "Retry" over a Saved Messages view whose last older page failed.
+    pub fn retry_saved_older(&mut self) -> Sent {
+        if let Some(search) = self.session.threads.saved.tag_search.as_mut() {
+            search.history.reopen_older();
+            return self.fetch_saved_tag_page();
+        }
+        if let Some(view) = self.session.threads.saved.sublist.as_mut() {
+            view.history.reopen_older();
+        }
+        self.fetch_saved_sublist_history()
     }
 
     /// Pin or unpin a sublist (`toggleSavedMessagesTopicIsPinned`); the new
@@ -333,7 +408,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .threads
             .saved
             .tags
-            .iter_mut()
+            .data_mut()
+            .into_iter()
+            .flatten()
             .find(|entry| entry.tag == *tag)
         {
             entry.label = label;
@@ -363,12 +440,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(search) = self.session.threads.saved.tag_search.as_ref() else {
             return Ok(None);
         };
-        if search.history.loaded_complete {
+        if search.history.loaded_complete() || search.history.older == OlderEnd::Failed {
             return Ok(None);
         }
         // A page for this filter is out. One asked for another tag does not
         // hold this one back: its answer is dropped on arrival.
-        if search.request.is_some() {
+        if search.page != SavedPage::Idle {
             return Ok(None);
         }
         let topic_id = search.topic_id;
@@ -378,8 +455,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         let sent = self.send_purpose(purpose, None, |extra| {
             search_saved_messages(extra, topic_id, Some(&tag), "", from, SAVED_PAGE)
         })?;
-        if let Some(search) = self.session.threads.saved.tag_search.as_mut() {
-            search.request = sent;
+        if let (Some(extra), Some(search)) = (sent, self.session.threads.saved.tag_search.as_mut())
+        {
+            search.page = SavedPage::Asking(extra);
         }
         Ok(sent)
     }

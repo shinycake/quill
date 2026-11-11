@@ -47,7 +47,7 @@ fn rows_run_oldest_first_with_the_message_each_action_concerns(cx: &mut TestAppC
     app.update_in(&mut vcx, |app, _, _| {
         let page = match app
             .session()
-            .and_then(|session| session.groups.event_logs.get(&CHANNEL.0))
+            .and_then(|session| session.groups.event_log_fetch(CHANNEL.0))
         {
             Some(ChatEventLogFetch::Loaded(page)) => page.clone(),
             other => panic!("log not loaded: {other:?}"),
@@ -120,10 +120,8 @@ fn another_admins_links_close_with_the_group_settings_box(cx: &mut TestAppContex
             CHANNEL.0,
             quill::state::AdminLinksState {
                 creator_user_id: 77,
-                active: quill::state::InviteLinkFetch::Loading,
-                revoked: quill::state::InviteLinkFetch::Loading,
-                active_request: None,
-                revoked_request: None,
+                active: quill::state::InviteLinkFetch::Loading(quill::ids::RequestId(1)),
+                revoked: quill::state::InviteLinkFetch::Loading(quill::ids::RequestId(2)),
             },
         );
         app.close_group_settings_dialog(cx);
@@ -154,10 +152,8 @@ fn the_box_for_another_chat_replaces_the_invite_pages(cx: &mut TestAppContext) {
             CHANNEL.0,
             quill::state::AdminLinksState {
                 creator_user_id: 77,
-                active: quill::state::InviteLinkFetch::Loading,
-                revoked: quill::state::InviteLinkFetch::Loading,
-                active_request: None,
-                revoked_request: None,
+                active: quill::state::InviteLinkFetch::Loading(quill::ids::RequestId(1)),
+                revoked: quill::state::InviteLinkFetch::Loading(quill::ids::RequestId(2)),
             },
         );
         // The same chat again keeps its pages.
@@ -173,5 +169,108 @@ fn the_box_for_another_chat_replaces_the_invite_pages(cx: &mut TestAppContext) {
         assert_eq!(pages, Some(None), "no page of either chat is left");
         let dialog = app.admin.group_settings_dialog.as_ref().expect("the box");
         assert!(!dialog.revoked_open && dialog.details_link.is_none());
+    });
+}
+
+/// Recent actions of another group shows that group's own query, not the
+/// text typed in the previous one's box, however the page was reached.
+#[gpui_kit::test]
+fn the_search_box_follows_the_chat_whose_log_is_open(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let other = ChatId(CHANNEL.0 + 1);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let shown = |app: &QuillApp, cx: &gpui_kit::App| {
+            app.admin
+                .event_log_page
+                .as_ref()
+                .and_then(|page| page.search.as_ref())
+                .map(|search| search.input.read(cx).value().to_string())
+        };
+        app.ensure_event_log_search(CHANNEL, window, cx);
+        app.open_group_settings_view(CHANNEL, GroupSettingsView::RecentActions, cx);
+        app.event_log_search_upkeep(window, cx);
+        // "foo" is typed in this group's box.
+        if let Some(search) = app
+            .admin
+            .event_log_page
+            .as_ref()
+            .and_then(|page| page.search.as_ref())
+        {
+            search
+                .input
+                .update(cx, |state, cx| state.set_value("foo", window, cx));
+        }
+        if let Some(session) = app.session_mut() {
+            session
+                .groups
+                .event_logs
+                .entry(CHANNEL.0)
+                .or_default()
+                .query = "foo".to_string();
+        }
+        assert_eq!(shown(app, cx).as_deref(), Some("foo"));
+        // Another group's box (Manage > Recent actions): its own, empty query.
+        app.close_group_settings_dialog(cx);
+        app.open_group_settings_view(other, GroupSettingsView::RecentActions, cx);
+        app.event_log_search_upkeep(window, cx);
+        assert_eq!(shown(app, cx).as_deref(), Some(""));
+        // Back to the first: its stored query comes back.
+        app.close_group_settings_dialog(cx);
+        app.open_group_settings_view(CHANNEL, GroupSettingsView::RecentActions, cx);
+        app.event_log_search_upkeep(window, cx);
+        assert_eq!(shown(app, cx).as_deref(), Some("foo"));
+    });
+}
+
+/// The "load older events" mark is per chat and goes when the list starts
+/// over, so a page of the same length asks again.
+#[gpui_kit::test]
+fn the_older_events_mark_is_cleared_when_the_list_starts_over(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update(&mut vcx, |app, _| {
+        app.event_log_page_for(CHANNEL).autoload.set(Some(3));
+        app.event_log_reset_list();
+        let mark = app.admin.event_log_page.as_ref().map(|p| p.autoload.get());
+        assert_eq!(mark, Some(None));
+    });
+}
+
+/// A second chat's page replaces the first's with its timers, instead of
+/// leaving the first one's mark to answer for it.
+#[gpui_kit::test]
+fn a_second_chats_page_replaces_the_first(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update(&mut vcx, |app, _| {
+        app.event_log_page_for(CHANNEL).autoload.set(Some(3));
+        let other = ChatId(CHANNEL.0 + 1);
+        let page = app.event_log_page_for(other);
+        assert_eq!((page.chat, page.autoload.get()), (other, None));
+    });
+}
+
+/// The recent-actions poll stops while the app is in the background: the
+/// timer's tick ends it, and the page has no poll until a window wakes.
+#[gpui_kit::test]
+fn the_poll_stops_while_the_window_is_inactive(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.open_group_settings_view(CHANNEL, GroupSettingsView::RecentActions, cx);
+        app.event_log_page_for(CHANNEL).poll = Some(cx.spawn(async |_, _| {}));
+        app.frame.window_active.set(true);
+        assert!(app.event_log_poll_tick(CHANNEL, cx), "active: keeps going");
+        assert!(
+            app.admin
+                .event_log_page
+                .as_ref()
+                .is_some_and(|p| p.poll.is_some())
+        );
+        app.frame.window_active.set(false);
+        assert!(!app.event_log_poll_tick(CHANNEL, cx), "inactive: stops");
+        assert!(
+            app.admin
+                .event_log_page
+                .as_ref()
+                .is_some_and(|p| p.poll.is_none())
+        );
     });
 }

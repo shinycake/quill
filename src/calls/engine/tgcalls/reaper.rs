@@ -108,8 +108,17 @@ impl Reaper {
         self.backlog.add();
         let job: Job = Box::new(job);
         if let Err(SendError(no_thread_took_it)) = self.jobs.send(job) {
-            ffi_boundary((), no_thread_took_it);
-            self.backlog.finish();
+            // The reaper thread never started: a slow teardown must not run
+            // on the caller (the UI thread), so it gets a thread of its own,
+            // and is leaked if even that can't start.
+            let finished = Arc::clone(&self.backlog);
+            let spawned = spawn_guarded("quill-call-reaper-lone", move || {
+                ffi_boundary((), no_thread_took_it);
+                finished.finish();
+            });
+            if spawned.is_err() {
+                self.backlog.finish();
+            }
         }
     }
 }
@@ -177,6 +186,23 @@ mod tests {
     use super::*;
     use std::sync::mpsc::channel;
     use std::thread::{self, ThreadId};
+
+    #[test]
+    fn a_dead_reaper_thread_does_not_run_the_teardown_on_the_caller() {
+        let (jobs, queue) = channel::<Job>();
+        drop(queue);
+        let reaper = Reaper {
+            jobs,
+            backlog: Arc::new(Backlog::default()),
+        };
+        let caller = thread::current().id();
+        let (done, ran_on) = channel::<ThreadId>();
+        reaper.hand_off(move || {
+            let _ = done.send(thread::current().id());
+        });
+        reaper.wait_drained();
+        assert_ne!(ran_on.recv().ok(), Some(caller));
+    }
 
     #[test]
     fn a_stuck_teardown_never_holds_up_the_caller() {

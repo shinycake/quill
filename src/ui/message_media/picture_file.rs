@@ -47,7 +47,7 @@ pub(in crate::ui) fn picture_file_attachment(
         doc.file_name.clone()
     };
     let status = if downloading_now {
-        let done = file.map(|f| f.local.downloaded_size).unwrap_or(0);
+        let done = file.map(|f| f.local.downloaded_size()).unwrap_or(0);
         if done > 0 && size > 0 {
             format!("{} / {}", format_bytes(done), format_bytes(size))
         } else {

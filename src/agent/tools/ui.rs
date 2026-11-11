@@ -222,17 +222,26 @@ pub(super) fn bridge_error(error: BridgeError) -> ToolError {
         BridgeError::Timeout => ToolError::new(
             "Quill's window did not answer within 15 seconds. Make sure Quill's window is open and not minimised, then retry.",
         ),
+        BridgeError::RanNoAnswer => ToolError::new(
+            "Quill's window ran this command but did not answer within 15 seconds, so the result is lost. Do NOT repeat it: call read_ui_tree to see what it did.",
+        ),
     }
 }
 
 /// The switches, then `command` on the UI thread, which decides the rest
 /// from its own state.
 fn run(command: UiCommand) -> Result<UiReply, ToolError> {
-    run_shot(command, None)
+    run_with(command, None)
 }
 
-/// [`run`] with a screenshot after the command.
-fn run_shot(command: UiCommand, shot: Option<ShotOptions>) -> Result<UiReply, ToolError> {
+/// [`run`] with the screenshot `asked` for after the command. A command
+/// that fails takes no picture, and `asked` dropping on the error return
+/// gives its rate-limit slot back.
+fn run_shot(command: UiCommand, asked: &Asked) -> Result<UiReply, ToolError> {
+    run_with(command, asked.options())
+}
+
+fn run_with(command: UiCommand, shot: Option<ShotOptions>) -> Result<UiReply, ToolError> {
     if let Some(refusal) = policy::switch_refusal() {
         return Err(ToolError::new(refusal));
     }
@@ -297,6 +306,11 @@ fn describe(node: Option<&UiNode>) -> String {
 /// queue, the activity log), then the box is told to clear.
 fn finish_ui_send(send: UiSend) -> Result<String, ToolError> {
     let ctx = Ctx::active()?;
+    if ctx.account != send.account {
+        return Err(ToolError::new(
+            "The message stays in Quill's message box: the window switched to another account before it could be sent. Ask the user to switch back and send it again.",
+        ));
+    }
     let me = my_user_id(&ctx)?;
     let target = granted(&ctx, send.chat_id, me)?.ok_or_else(|| {
         ToolError::new(format!(
@@ -322,11 +336,13 @@ fn finish_ui_send(send: UiSend) -> Result<String, ToolError> {
         ))));
     }
     common::confirm(&ctx, &target, "ui_send", &send.text).map_err(keep_draft)?;
-    let sent =
-        common::send(&ctx, &target, "ui_send", &send.text, send.request, 1).map_err(keep_draft)?;
-    let _ = bridge::post(
+    let sent = common::send(&ctx, &target, "ui_send", &send.text, send.request, 1)
+        .map_err(keep_draft)?
+        .messages;
+    let cleared = bridge::post(
         &current_agent(),
         UiCommand::ComposerSent {
+            account: send.account,
             chat_id: send.chat_id,
             text: send.text,
         },
@@ -336,8 +352,13 @@ fn finish_ui_send(send: UiSend) -> Result<String, ToolError> {
         .and_then(|message| message.get("id"))
         .and_then(Value::as_i64)
         .unwrap_or(0);
+    let note = if cleared.is_err() {
+        " Quill's message box could not be cleared; it may still hold the text, so tell the user not to press Enter again."
+    } else {
+        ""
+    };
     Ok(format!(
-        "Sent to \"{}\" through the agent path (message {id}).",
+        "Sent to \"{}\" through the agent path (message {id}).{note}",
         target.title
     ))
 }
@@ -406,6 +427,7 @@ fn done_output(
         ));
     };
     let sent = ui_send.map(finish_ui_send).transpose()?;
+    let skipped = asked.settle(matches!(shot, Some(Ok(_))));
     let focus = tree.focus.as_deref().and_then(|id| tree.node(id));
     let mut text = lead;
     if let Some(sent) = &sent {
@@ -437,8 +459,8 @@ fn done_output(
             map.insert(key.clone(), value.clone());
         }
     }
-    ui_shot::add_to_answer(shot, asked.skipped, tree.frame, &mut text, &mut data);
-    Ok(ToolOutput { text, data })
+    let images = ui_shot::add_to_answer(shot, skipped, tree.frame, &mut text, &mut data);
+    Ok(ToolOutput { text, data, images })
 }
 
 fn target_json(target: &Target, tree: &UiTree) -> Value {
@@ -475,7 +497,11 @@ pub fn read_ui_tree(args: &Value) -> Result<ToolOutput, ToolError> {
     }
     text.push_str(&tree.text_lines(&nodes, limit));
     let data = tree.to_json(&nodes, limit);
-    Ok(ToolOutput { text, data })
+    Ok(ToolOutput {
+        text,
+        data,
+        images: Vec::new(),
+    })
 }
 
 pub fn click_element(args: &Value) -> Result<ToolOutput, ToolError> {
@@ -498,7 +524,7 @@ pub fn click_element(args: &Value) -> Result<ToolOutput, ToolError> {
             button,
             count,
         },
-        asked.options,
+        &asked,
     )?;
     let clicked = match &reply {
         UiReply::Done { tree, .. } => target_json(&target, tree),
@@ -538,7 +564,7 @@ pub fn type_text(args: &Value) -> Result<ToolOutput, ToolError> {
         UiCommand::TypeText {
             text: text.to_string(),
         },
-        asked.options,
+        &asked,
     )?;
     let typed = text.chars().count();
     done_output(
@@ -565,7 +591,7 @@ pub fn press_keys(args: &Value) -> Result<ToolOutput, ToolError> {
     }
     let pressed: Vec<String> = chords.iter().map(|chord| chord.describe()).collect();
     let asked = ui_shot::asked(args);
-    let reply = run_shot(UiCommand::PressKeys { chords }, asked.options)?;
+    let reply = run_shot(UiCommand::PressKeys { chords }, &asked)?;
     done_output(
         reply,
         format!("Pressed {}.", pressed.join(", ")),
@@ -593,7 +619,7 @@ pub fn scroll_view(args: &Value) -> Result<ToolOutput, ToolError> {
         ));
     }
     let asked = ui_shot::asked(args);
-    let reply = run_shot(UiCommand::Scroll { target, dx, dy }, asked.options)?;
+    let reply = run_shot(UiCommand::Scroll { target, dx, dy }, &asked)?;
     done_output(
         reply,
         format!("Scrolled by ({dx}, {dy})."),
@@ -609,7 +635,7 @@ pub fn hover_element(args: &Value) -> Result<ToolOutput, ToolError> {
         UiCommand::Hover {
             target: target.clone(),
         },
-        asked.options,
+        &asked,
     )?;
     let hovered = match &reply {
         UiReply::Done { tree, .. } => target_json(&target, tree),
@@ -626,7 +652,7 @@ pub fn hover_element(args: &Value) -> Result<ToolOutput, ToolError> {
 pub fn open_menu(args: &Value) -> Result<ToolOutput, ToolError> {
     let target = target_arg(args)?;
     let asked = ui_shot::asked(args);
-    let reply = run_shot(UiCommand::OpenMenu { target }, asked.options)?;
+    let reply = run_shot(UiCommand::OpenMenu { target }, &asked)?;
     let menu: Vec<Value> = match &reply {
         UiReply::Done { added, .. } => added
             .iter()
@@ -646,8 +672,9 @@ pub fn open_menu(args: &Value) -> Result<ToolOutput, ToolError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{click_element, not_plain, read_ui_tree, target_arg, type_text};
-    use crate::agent::ui_driver::bridge::Target;
+    use super::{click_element, not_plain, read_ui_tree, run_shot, target_arg, type_text};
+    use crate::agent::tools::ui_shot;
+    use crate::agent::ui_driver::bridge::{Target, UiCommand};
     use crate::composer::{ComposerScheduling, SendOptions};
     use crate::ids::{ChatId, RequestId};
     use crate::telegram::requests::send_text;
@@ -735,6 +762,21 @@ mod tests {
             .map(|e| e.0)
             .unwrap_or_default();
         assert!(error.contains("Agent access is off"), "{error}");
+    }
+
+    #[test]
+    fn a_screenshot_slot_goes_back_when_the_command_fails() {
+        let _guard = crate::locks::lock_or_recover(&crate::agent::access::TEST_LOCK);
+        crate::fast_buttons::set_persistence(false);
+        crate::agent::access::set_enabled(false);
+        crate::agent::ui_driver::shot::reset_limits();
+        let asked = ui_shot::asked(&json!({"screenshot": true}));
+        assert!(asked.options().is_some());
+        assert!(run_shot(UiCommand::ReadTree, &asked).is_err());
+        drop(asked);
+        let again = ui_shot::asked(&json!({"screenshot": true}));
+        assert!(again.options().is_some());
+        crate::agent::ui_driver::shot::reset_limits();
     }
 
     #[test]

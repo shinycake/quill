@@ -1,8 +1,18 @@
 //! Chat-level look and actions: backgrounds, themes, accents, action bars, deep links, reactions, send-as: the `chats` domain's share of `Session`.
 //! Added to by features in this domain only; `Session::new` builds it
 //! with `new`.
+use crate::state::answers::Answers;
 use crate::state::*;
 use crate::telegram::envelope::{ChatAccent, ChatBackground, EmojiChatTheme};
+
+/// What a wallpaper preview request came back with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BackgroundOutcome {
+    /// `setDefaultBackground` was accepted.
+    Applied,
+    /// `getBackgroundUrl`: the `bg/` link.
+    Link(String),
+}
 
 /// Where the link preview's `searchBackground` for a `bg/` link stands.
 /// Only the search it waits for lands, so a late answer (or failure) for an
@@ -33,15 +43,64 @@ impl BackgroundSearch {
     }
 }
 
+/// The `getInstalledBackgrounds` answer of each theme: the server filters
+/// the list by theme, so each has its own fetch, asked and answered under
+/// its own request.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct InstalledBackgrounds {
+    light: crate::state::fetch::Fetch<Vec<Background>>,
+    dark: crate::state::fetch::Fetch<Vec<Background>>,
+}
+
+impl InstalledBackgrounds {
+    pub fn theme(&self, dark: bool) -> &crate::state::fetch::Fetch<Vec<Background>> {
+        if dark { &self.dark } else { &self.light }
+    }
+
+    pub fn theme_mut(&mut self, dark: bool) -> &mut crate::state::fetch::Fetch<Vec<Background>> {
+        if dark {
+            &mut self.dark
+        } else {
+            &mut self.light
+        }
+    }
+
+    /// Every installed background held, of either theme.
+    pub fn all(&self) -> impl Iterator<Item = &Background> {
+        [&self.light, &self.dark]
+            .into_iter()
+            .filter_map(|fetch| fetch.data())
+            .flatten()
+    }
+
+    /// An installed background by id, from either theme's list.
+    pub fn find(&self, id: i64) -> Option<&Background> {
+        self.all().find(|background| background.id == id)
+    }
+
+    /// Forget the last error of each list (a page opened: a failed list may
+    /// be asked once more).
+    pub fn clear_errors(&mut self) {
+        self.light.clear_error();
+        self.dark.clear_error();
+    }
+
+    /// `id` left the account's installed wallpapers: out of every list.
+    pub fn forget(&mut self, id: i64) {
+        for fetch in [&mut self.light, &mut self.dark] {
+            if let Some(list) = fetch.data_mut() {
+                list.retain(|background| background.id != id);
+            }
+        }
+    }
+}
+
 pub struct ChatsState {
-    /// `getInstalledBackgrounds` answer for the current theme; `None` until
-    /// fetched.
-    pub installed_backgrounds: Option<Vec<Background>>,
+    /// `getInstalledBackgrounds` answers, per theme; nothing until fetched.
+    pub installed_backgrounds: InstalledBackgrounds,
     /// The account's default wallpaper per theme (`false` light, `true`
     /// dark), from `updateDefaultBackground` and `setDefaultBackground`.
     pub default_backgrounds: HashMap<bool, Background>,
-    /// Which theme the pending `setDefaultBackground` was for.
-    pub background_set_for_dark: bool,
     /// `chat.background` / `updateChatBackground`, by chat id.
     pub chat_backgrounds: HashMap<i64, ChatBackground>,
     /// `chat.theme` (emoji theme name) / `updateChatTheme`, by chat id.
@@ -52,24 +111,23 @@ pub struct ChatsState {
     pub emoji_chat_themes: Vec<EmojiChatTheme>,
     /// The link preview's `searchBackground` ([`BackgroundSearch`]).
     pub background_search: BackgroundSearch,
-    /// One-shot `getBackgroundUrl` answer: the link the wallpaper preview
-    /// copies.
-    pub background_url: Option<String>,
+    /// Answers of the requests the wallpaper preview waits for
+    /// (`setDefaultBackground`, `getBackgroundUrl`), each under the
+    /// request that asked. The preview takes its own and drops the rest.
+    pub background_answers: Answers<BackgroundOutcome>,
     /// One-shot: a wallpaper request failed; shown in Appearance.
     pub background_error: Option<String>,
-    /// Acknowledged (`ok`) chat-look requests (`setChatTheme`,
-    /// `setChatBackground`, `deleteChatBackground`); the chat colors dialog
-    /// waits for them before it closes.
-    pub chat_look_oks: u32,
     /// `updateChatOnlineMemberCount`, keyed by chat id.
     pub chat_online_counts: HashMap<i64, i32>,
-    /// Slice CL1: one-shot error from a refused chat-list action
+    /// Slice CL1: the errors of refused chat-list actions, oldest first, so
+    /// two that fail before the UI drains them are both shown
     /// (`toggleChatIsPinned`, `toggleChatIsMarkedAsUnread`,
     /// `deleteChatHistory`). The UI drains it into the status note so a
     /// refused action never looks like it worked.
-    pub chat_action_error: Option<String>,
-    /// Why the last channel or group appearance change was refused.
-    pub appearance_error: Option<String>,
+    pub chat_action_error: crate::state::Notes,
+    /// Answers of the Appearance box's requests (name, profile, status
+    /// and emoji pack), under the request that asked.
+    pub appearance_answers: Answers<()>,
     /// Slice CL3: one-shot `reportChat` outcome (`reportChatResultOk`
     /// vs option/text/messages required). The UI drains it into the
     /// status note next to `chat_action_error`.
@@ -77,8 +135,9 @@ pub struct ChatsState {
     /// `chat.message_sender_id` / `updateChatMessageSender`: the "send as"
     /// identity selected per chat (absent when the user cannot change it).
     pub chat_message_sender: HashMap<i64, MessageSender>,
-    /// `getChatAvailableMessageSenders` answers per chat.
-    pub send_as_options: HashMap<i64, Vec<AvailableMessageSender>>,
+    /// `getChatAvailableMessageSenders` per chat: asked, answered or failed
+    /// (the picker shows a spinner, the list or a Retry).
+    pub send_as_options: HashMap<i64, crate::state::fetch::Fetch<Vec<AvailableMessageSender>>>,
     /// Batch 8: `chat.action_bar` / `updateChatActionBar` per chat — the
     /// Add contact / Block / Report spam / Share phone strip.
     pub chat_action_bars: HashMap<i64, ChatActionBar>,
@@ -116,36 +175,29 @@ pub struct ChatsState {
     pub chat_upgrades: Vec<(i64, i64)>,
     /// `parity:platform-deep-links`: the single active deep-link flow
     /// (launch link → `getDeepLinkInfo` → follow-up → open chat).
-    pub deep_link: Option<DeepLinkState>,
+    /// The stage and the origin are one value ([`DeepLinkFlow`]); the UI
+    /// takes it at every terminal state and puts it back while the flow
+    /// goes on.
+    pub deep_link: Option<DeepLinkFlow>,
     /// Generation counter for deep-link request correlation.
     pub deep_link_seq: u64,
-    /// The link text being resolved by `getInternalLinkType` (the proxy
-    /// hand-off needs it back).
-    pub deep_link_original: String,
-    /// The flow in `deep_link` was started by a step the agent UI driver
-    /// injected. Set at every start of a flow, kept while it continues,
-    /// taken by the UI at every terminal state; the UI re-checks what an
-    /// agent's flow opens (`guard::with_injecting`).
-    pub deep_link_from_agent: bool,
 }
 
 impl ChatsState {
     pub(crate) fn new() -> Self {
         Self {
-            installed_backgrounds: None,
+            installed_backgrounds: InstalledBackgrounds::default(),
             default_backgrounds: HashMap::new(),
-            background_set_for_dark: false,
             chat_backgrounds: HashMap::new(),
             chat_theme_names: HashMap::new(),
             chat_gift_themes: HashMap::new(),
             emoji_chat_themes: Vec::new(),
             background_search: BackgroundSearch::Idle,
-            background_url: None,
+            background_answers: Answers::default(),
             background_error: None,
-            chat_look_oks: 0,
             chat_online_counts: HashMap::new(),
-            chat_action_error: None,
-            appearance_error: None,
+            chat_action_error: Default::default(),
+            appearance_answers: Answers::default(),
             report_chat_outcome: None,
             chat_message_sender: HashMap::new(),
             send_as_options: HashMap::new(),
@@ -163,8 +215,6 @@ impl ChatsState {
             chat_upgrades: Vec::new(),
             deep_link: None,
             deep_link_seq: 0,
-            deep_link_original: String::new(),
-            deep_link_from_agent: false,
         }
     }
 
@@ -174,7 +224,62 @@ impl ChatsState {
     /// by itself (tdesktop ties the flow to the session's window).
     pub fn end_deep_link_flow(&mut self) {
         self.deep_link = None;
-        self.deep_link_from_agent = false;
-        self.deep_link_original.clear();
+    }
+
+    /// The next generation for a request of the flow: answers of an older
+    /// one are dropped by comparing it.
+    pub fn next_deep_link_generation(&mut self) -> u64 {
+        self.deep_link_seq = self.deep_link_seq.wrapping_add(1);
+        self.deep_link_seq
+    }
+
+    /// The flow's step the UI acts on now. A request in flight is left in
+    /// place (`None`); an invite preview waiting for the user's answer is
+    /// copied and stays; any other terminal stage is taken, so it is
+    /// consumed once.
+    pub fn take_deep_link_step(&mut self) -> Option<DeepLinkFlow> {
+        match self.deep_link_stage()? {
+            DeepLinkState::ResolvingInfo { .. } | DeepLinkState::ResolvingChat { .. } => None,
+            DeepLinkState::InvitePreview { .. } => self.deep_link.clone(),
+            _ => self.deep_link.take(),
+        }
+    }
+
+    /// The user closed the invite box of `generation` unanswered: the flow
+    /// ends when it is still that preview.
+    pub fn cancel_deep_link_invite(&mut self, generation: u64) {
+        if matches!(
+            self.deep_link_stage(),
+            Some(DeepLinkState::InvitePreview { generation: shown, .. }) if *shown == generation
+        ) {
+            self.deep_link = None;
+        }
+    }
+
+    /// The stage of the flow in progress.
+    pub fn deep_link_stage(&self) -> Option<&DeepLinkState> {
+        self.deep_link.as_ref().map(|flow| &flow.stage)
+    }
+
+    /// The link text the flow's `getInternalLinkType` lookup resolves, while
+    /// it is in flight; empty otherwise.
+    pub fn deep_link_original(&self) -> &str {
+        match self.deep_link_stage() {
+            Some(DeepLinkState::ResolvingInfo { original, .. }) => original,
+            _ => "",
+        }
+    }
+
+    /// The flow moves to `stage`, keeping who started it. With no flow in
+    /// progress it starts one from the user.
+    pub fn enter_deep_link_stage(&mut self, stage: DeepLinkState) {
+        let from_agent = self.deep_link.as_ref().is_some_and(|flow| flow.from_agent);
+        self.deep_link = Some(DeepLinkFlow { stage, from_agent });
+    }
+
+    /// A flow `from_agent` starts at `stage` (a new flow, whoever started
+    /// the last one).
+    pub fn start_deep_link(&mut self, stage: DeepLinkState, from_agent: bool) {
+        self.deep_link = Some(DeepLinkFlow { stage, from_agent });
     }
 }

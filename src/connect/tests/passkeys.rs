@@ -3,7 +3,9 @@
 use super::super::*;
 use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
+use crate::ids::AccountKey;
 use crate::platform::MemorySecretStore;
+use crate::state::Session;
 use crate::telegram::client::copy_and_parse;
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -73,8 +75,8 @@ fn lists_the_passkeys_once_while_fresh() {
     assert!(p.0.request_passkeys().unwrap().is_none());
     answer(&mut p, "getLoginPasskeys", two_passkeys());
     let state = &p.0.session.settings.passkeys;
-    assert!(state.known);
-    assert_eq!(state.list.len(), 2);
+    assert!(state.is_known());
+    assert_eq!(state.passkeys().len(), 2);
     assert_eq!(state.row_label().text(), "2");
     // Fresh for 5 seconds: no new request.
     assert!(p.0.request_passkeys().unwrap().is_none());
@@ -107,13 +109,13 @@ fn a_removal_waits_for_the_server_then_refetches() {
     let sent = sent_request(&p.1, "removeLoginPasskey");
     assert_eq!(sent["passkey_id"], "k2");
     // Nothing leaves the list before the answer, and one removal at a time.
-    assert_eq!(p.0.session.settings.passkeys.list.len(), 2);
+    assert_eq!(p.0.session.settings.passkeys.passkeys().len(), 2);
     assert!(p.0.remove_passkey("k1").is_err());
     answer(&mut p, "removeLoginPasskey", json!({"@type": "ok"}));
     let state = &p.0.session.settings.passkeys;
     assert!(state.find("k2").is_none());
-    assert!(state.removing.is_none());
-    assert!(!state.known);
+    assert!(!state.is_removing());
+    assert!(!state.is_known());
     // The same ingest asked for the list again.
     assert_eq!(count(&p.1, "getLoginPasskeys"), 2);
     answer(
@@ -124,7 +126,7 @@ fn a_removal_waits_for_the_server_then_refetches() {
              "addition_date": 1_790_000_000}]}),
     );
     let state = &p.0.session.settings.passkeys;
-    assert!(state.known);
+    assert!(state.is_known());
     assert_eq!(state.row_label().text(), "iCloud Keychain");
 }
 
@@ -147,10 +149,10 @@ fn failures_are_shown_and_keep_the_list() {
         json!({"@type": "error", "code": 400, "message": "PASSKEY_INVALID"}),
     );
     let state = &p.0.session.settings.passkeys;
-    assert_eq!(state.list.len(), 2);
-    assert!(state.removing.is_none());
+    assert_eq!(state.passkeys().len(), 2);
+    assert!(!state.is_removing());
     assert_eq!(
-        state.error.as_deref(),
+        state.remove_error(),
         Some("Could not delete the passkey: Telegram refused the request")
     );
     // No refetch after a failed removal.
@@ -164,10 +166,10 @@ fn failures_are_shown_and_keep_the_list() {
         json!({"@type": "error", "code": 500, "message": "INTERNAL"}),
     );
     let state = &p.0.session.settings.passkeys;
-    assert!(!state.known);
+    assert!(!state.is_known());
     assert_eq!(state.row_label().text(), "Loading...");
     assert_eq!(
-        state.error.as_deref(),
+        state.list_error(),
         Some("Could not load the passkeys (error 500)")
     );
     // The failure does not loop: no retry on the next ingest.
@@ -204,12 +206,12 @@ fn creating_a_passkey_fetches_options_then_adds_the_result() {
         "getPasskeyParameters",
         json!({"@type": "text", "text": OPTIONS}),
     );
-    let options = p.0.session.settings.passkeys.ceremony.take().unwrap();
+    let options = p.0.session.settings.passkeys.take_starting().unwrap();
     assert_eq!(options.rp_id, "telegram.org");
     assert_eq!(options.challenge, vec![0xde, 0xad, 0xbe, 0xef]);
     // Within their timeout the same options are used again, no request.
     assert!(p.0.begin_register().unwrap().is_none());
-    assert!(p.0.session.settings.passkeys.ceremony.take().is_some());
+    assert!(p.0.session.settings.passkeys.take_starting().is_some());
     assert_eq!(count(&p.1, "getPasskeyParameters"), 1);
 
     let registration = registration_for(&options);
@@ -230,10 +232,9 @@ fn creating_a_passkey_fetches_options_then_adds_the_result() {
                "software_icon_custom_emoji_id": "0"}),
     );
     let state = &p.0.session.settings.passkeys;
-    assert_eq!(state.list.len(), 3);
-    assert_eq!(state.list.last().map(|k| k.id.as_str()), Some("k3"));
-    assert!(state.added && !state.adding);
-    assert!(state.registration.is_none());
+    assert_eq!(state.passkeys().len(), 3);
+    assert_eq!(state.passkeys().last().map(|k| k.id.as_str()), Some("k3"));
+    assert!(matches!(state.add, crate::passkeys::PasskeyAdd::Added));
 }
 
 #[test]
@@ -249,7 +250,7 @@ fn a_failed_registration_forgets_the_options() {
         "getPasskeyParameters",
         json!({"@type": "text", "text": OPTIONS}),
     );
-    let options = p.0.session.settings.passkeys.ceremony.take().unwrap();
+    let options = p.0.session.settings.passkeys.take_starting().unwrap();
     p.0.finish_register(&registration_for(&options)).unwrap();
     answer(
         &mut p,
@@ -257,10 +258,9 @@ fn a_failed_registration_forgets_the_options() {
         json!({"@type": "error", "code": 400, "message": "PASSKEY_CREDENTIAL_NOT_FOUND"}),
     );
     let state = &p.0.session.settings.passkeys;
-    assert!(!state.adding && !state.added);
-    assert!(state.registration.is_none());
-    assert_eq!(state.list.len(), 2);
-    assert!(state.error.is_some());
+    assert!(matches!(state.add, crate::passkeys::PasskeyAdd::Failed(_)));
+    assert_eq!(state.passkeys().len(), 2);
+    assert!(state.add_error().is_some());
     // The next try asks for new options.
     p.0.begin_register().unwrap();
     assert_eq!(count(&p.1, "getPasskeyParameters"), 2);
@@ -271,15 +271,15 @@ fn a_failed_registration_forgets_the_options() {
         json!({"@type": "text", "text": "{}"}),
     );
     let state = &p.0.session.settings.passkeys;
-    assert!(state.ceremony.is_none());
-    assert!(state.error.is_some());
+    assert!(!state.add_busy());
+    assert!(state.add_error().is_some());
 }
 
 /// Round 17 C finding 23: options that landed after the lock (and were never
-/// started) do not start the next Create's ceremony: a new request drops
-/// them, and the fresh answer is the one the dialog starts.
+/// started) do not start the next Create's ceremony: the lock drops them, and
+/// the next Create asks again.
 #[test]
-fn a_new_options_request_drops_unstarted_options() {
+fn the_lock_drops_unstarted_options() {
     if !crate::passkeys::webauthn_supported() {
         return;
     }
@@ -291,12 +291,153 @@ fn a_new_options_request_drops_unstarted_options() {
         "getPasskeyParameters",
         json!({"@type": "text", "text": OPTIONS}),
     );
-    assert!(p.0.session.settings.passkeys.ceremony.is_some());
-    // The options went stale while nobody started them.
-    p.0.session.settings.passkeys.registration = None;
+    p.0.cancel_register();
+    assert!(p.0.session.settings.passkeys.take_starting().is_none());
     assert!(p.0.begin_register().unwrap().is_some());
-    assert!(
-        p.0.session.settings.passkeys.ceremony.is_none(),
-        "the stale options never start a ceremony"
+}
+
+/// Cancel before `getPasskeyParameters` answers: the late options start
+/// no ceremony for the box that was closed.
+#[test]
+fn options_after_a_cancel_start_nothing() {
+    if !crate::passkeys::webauthn_supported() {
+        return;
+    }
+    let mut p = parts();
+    listed(&mut p);
+    assert!(p.0.begin_register().unwrap().is_some());
+    p.0.cancel_register();
+    answer(
+        &mut p,
+        "getPasskeyParameters",
+        json!({"@type": "text", "text": OPTIONS}),
     );
+    assert!(p.0.session.settings.passkeys.take_starting().is_none());
+    assert!(!p.0.session.settings.passkeys.add_busy());
+}
+
+/// An `addLoginPasskey` answer without an id ends the Sending stage.
+#[test]
+fn an_unreadable_add_answer_ends_the_registration() {
+    if !crate::passkeys::webauthn_supported() {
+        return;
+    }
+    let mut p = parts();
+    listed(&mut p);
+    p.0.begin_register().unwrap();
+    answer(
+        &mut p,
+        "getPasskeyParameters",
+        json!({"@type": "text", "text": OPTIONS}),
+    );
+    let options = p.0.session.settings.passkeys.take_starting().unwrap();
+    p.0.finish_register(&registration_for(&options)).unwrap();
+    answer(&mut p, "addLoginPasskey", json!({"@type": "passkey"}));
+    let state = &p.0.session.settings.passkeys;
+    assert!(!state.add_busy());
+    assert!(state.add_error().is_some());
+    assert!(p.0.begin_register().is_ok());
+}
+
+/// Fails every send while `down` is set.
+#[derive(Default)]
+struct FlakySender {
+    down: std::sync::atomic::AtomicBool,
+    sent: std::sync::Mutex<Vec<String>>,
+}
+
+impl JsonSender for Arc<FlakySender> {
+    fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
+        use std::sync::atomic::Ordering;
+        if self.down.load(Ordering::SeqCst) {
+            return Err(ConnectSendError::Native);
+        }
+        if let Ok(mut sent) = self.sent.lock() {
+            sent.push(request.to_string());
+        }
+        Ok(())
+    }
+}
+
+fn flaky_driver() -> (ConnectDriver<Arc<FlakySender>>, Arc<FlakySender>) {
+    let (_dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let sender = Arc::new(FlakySender::default());
+    let session = Session::new(AccountKey::primary(), sink.clone());
+    let mut driver = ConnectDriver::new(session, sender.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    let ready = r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#;
+    driver
+        .ingest(copy_and_parse(ready, &seq, &sink).unwrap())
+        .unwrap();
+    (driver, sender)
+}
+
+/// A removal marks the list stale; if the refetch cannot be sent the list
+/// stays stale with the throttle open, so the next look asks again.
+#[test]
+fn a_failed_refetch_send_keeps_the_list_stale() {
+    use std::sync::atomic::Ordering;
+    let (mut driver, sender) = flaky_driver();
+    driver.session.settings.passkeys.finish_remove("gone");
+    sender.down.store(true, Ordering::SeqCst);
+    assert!(driver.request_passkeys().is_err());
+    let state = &driver.session.settings.passkeys;
+    assert!(state.is_stale());
+    sender.down.store(false, Ordering::SeqCst);
+    assert!(driver.request_passkeys().unwrap().is_some());
+}
+
+/// The list asked before a removal answers after it: the removed passkey
+/// does not come back, and the list is asked for again.
+#[test]
+fn a_list_in_flight_during_a_removal_is_asked_again() {
+    let mut p = parts();
+    listed(&mut p);
+    let shown = p.0.session.settings.passkeys.passkeys().to_vec();
+    p.0.session.settings.passkeys.list = crate::passkeys::PasskeyList::Stale(shown);
+    p.0.request_passkeys().unwrap();
+    let old = sent_request(&p.1, "getLoginPasskeys");
+    p.0.remove_passkey("k2").unwrap();
+    answer(&mut p, "removeLoginPasskey", json!({"@type": "ok"}));
+    // The stale list answers (still with k2), then is ignored.
+    let mut body = two_passkeys();
+    body["@extra"] = old["@extra"].clone();
+    feed(&mut p, body);
+    assert!(p.0.session.settings.passkeys.find("k2").is_none());
+    // The list is asked for again and waits for that answer.
+    assert!(!p.0.session.settings.passkeys.is_known());
+    assert_eq!(count(&p.1, "getLoginPasskeys"), 3);
+}
+
+/// A passkey added while the ticker was ended by the lock leaves "added"
+/// waiting; the next Create must not close its own box with it.
+#[test]
+fn a_stale_added_does_not_close_the_next_create() {
+    if !crate::passkeys::webauthn_supported() {
+        return;
+    }
+    let mut p = parts();
+    listed(&mut p);
+    p.0.begin_register().unwrap();
+    answer(
+        &mut p,
+        "getPasskeyParameters",
+        json!({"@type": "text", "text": OPTIONS}),
+    );
+    let options = p.0.session.settings.passkeys.take_starting().unwrap();
+    p.0.finish_register(&registration_for(&options)).unwrap();
+    answer(
+        &mut p,
+        "addLoginPasskey",
+        json!({"@type": "passkey", "id": "k9", "name": "Key"}),
+    );
+    assert!(matches!(
+        p.0.session.settings.passkeys.add,
+        crate::passkeys::PasskeyAdd::Added
+    ));
+    // The next Create starts over; the old "added" is gone.
+    p.0.begin_register().unwrap();
+    assert!(!p.0.session.settings.passkeys.take_added());
+    assert!(p.0.passkey_parameters_pending());
 }

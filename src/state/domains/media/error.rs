@@ -13,17 +13,26 @@ impl Session {
         _seq: u64,
     ) {
         self.apply_profile_music_error(err, pending);
+        // The saved-pause search failed: the next healthy reading asks again.
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::Media(MediaPurpose::SearchDiskPausedDownloads)
+            && matches!(&self.media.disk_search, DiskSearch::Asked { request, .. } if *request == pending.id)
+        {
+            self.media.disk_search = DiskSearch::NotAsked;
+        }
         // A place without a tile keeps the coordinate card.
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::GetMapThumbnailFile
         {
-            self.media.map_thumbs.failed(pending.id);
+            self.media.map_thumbs.failed(pending.id, pending.chat_id);
         }
         if let Some(pending) = pending
             && let RequestPurpose::Media(MediaPurpose::LocationPicker(purpose)) = pending.purpose
         {
             match purpose {
-                LocationPickerPurpose::ResolveVenueBot => self.location.venue_bot_failed(),
+                LocationPickerPurpose::ResolveVenueBot => {
+                    self.location.venue_bot_failed(pending.id.0)
+                }
                 LocationPickerPurpose::SearchVenues { generation } => {
                     self.location.venues_failed(generation)
                 }
@@ -51,15 +60,16 @@ impl Session {
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
             let tab = match purpose {
-                RequestPurpose::Media(MediaPurpose::GetProfileGifts { .. }) => {
-                    Some(SharedMediaTab::Gifts)
+                RequestPurpose::Media(MediaPurpose::GetProfileGifts { generation, .. }) => {
+                    Some((SharedMediaTab::Gifts, generation))
                 }
                 _ => None,
             };
-            if let Some(tab) = tab {
+            if let Some((tab, generation)) = tab {
                 self.fail_profile_tab(
                     chat_id,
                     tab,
+                    Some(generation),
                     call_request_error_line(err, "Could not load this tab"),
                 );
             }
@@ -70,6 +80,7 @@ impl Session {
         {
             self.fail_profile_audios(
                 user_id,
+                pending.map(|p| p.id),
                 call_request_error_line(err, "Could not load the playlist"),
             );
         }
@@ -77,7 +88,15 @@ impl Session {
             pending.map(|p| p.purpose)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
-            self.media.shared_media.fail_more(chat_id, tab, generation);
+            self.media.shared_media.fail_more(
+                chat_id,
+                tab,
+                generation,
+                call_request_error_line(
+                    err,
+                    crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_LOAD_MORE_MEDIA),
+                ),
+            );
         }
     }
 }

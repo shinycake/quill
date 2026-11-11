@@ -76,12 +76,25 @@ impl Session {
             .collect();
     }
 
+    /// The `searchChatMembers` `request` failed: its search ends, so the
+    /// same query is asked again. An older query's error changes nothing.
+    pub(crate) fn fail_mention_search(&mut self, request: RequestId) {
+        if self
+            .messages
+            .mention_search
+            .as_ref()
+            .is_some_and(|s| s.request == Some(request))
+        {
+            self.messages.mention_search = None;
+        }
+    }
+
     /// The chat's first history page failed or timed out and the window is
     /// still empty: the UI offers "Couldn't load messages · Retry".
     pub fn history_load_failed(&self, chat_id: ChatId) -> bool {
         self.histories
             .get(&chat_id.0)
-            .is_some_and(|h| h.load_failed && h.messages.is_empty())
+            .is_some_and(|h| h.load_failed() && h.messages.is_empty())
     }
 
     /// The open history waits for its first page (no entry yet, or a page
@@ -93,7 +106,7 @@ impl Session {
         match self.histories.get(&chat_id.0) {
             None => true,
             Some(history) => {
-                !history.load_failed && self.history_page_in_flight(chat_id, WindowEdge::First)
+                !history.load_failed() && self.history_page_in_flight(chat_id, WindowEdge::First)
             }
         }
     }
@@ -147,11 +160,9 @@ impl Session {
     }
 
     /// Replace `chat_id`'s loaded window with an empty one. In-flight pages
-    /// for the old window are marked stale and dropped when they answer.
+    /// for the old window carry its epoch, so they read as stale when they
+    /// answer.
     pub fn reset_history_window(&mut self, chat_id: ChatId) {
-        for id in self.requests.ids_for_chat(&WINDOW_PURPOSES, chat_id) {
-            self.stale_history_requests.insert(id.0);
-        }
         self.histories.entry(chat_id.0).or_default().reset_window();
     }
 
@@ -186,9 +197,16 @@ impl Session {
     }
 
     /// Whether `pending` was issued for a window that has since been
-    /// replaced (consumes the stale mark).
-    pub(crate) fn take_stale_history_request(&mut self, pending: &PendingRequest) -> bool {
-        self.stale_history_requests.remove(&pending.id.0)
+    /// replaced.
+    pub(crate) fn history_request_stale(&self, pending: &PendingRequest) -> bool {
+        let Some(asked) = pending.window_epoch else {
+            return false;
+        };
+        let current = pending
+            .chat_id
+            .and_then(|chat| self.histories.get(&chat.0))
+            .map_or(0, |history| history.window_epoch);
+        asked != current
     }
 
     /// The newest message `chat_id` is known to have, from its summary
@@ -252,8 +270,8 @@ impl Session {
         self.requests
             .ids_for_chat(&WINDOW_PURPOSES, chat_id)
             .into_iter()
-            .filter(|id| !self.stale_history_requests.contains(&id.0))
             .filter_map(|id| self.requests.get(id))
+            .filter(|pending| !self.history_request_stale(pending))
             .map(Self::window_edge)
             .any(|pending_edge| {
                 std::mem::discriminant(&pending_edge) == std::mem::discriminant(&edge)
@@ -265,7 +283,7 @@ impl Session {
     /// asked for was replaced, the chat is no longer shown, or the page no
     /// longer attaches. Records why.
     pub(crate) fn history_page_detached(&mut self, pending: &PendingRequest, seq: u64) -> bool {
-        let note = if self.take_stale_history_request(pending) {
+        let note = if self.history_request_stale(pending) {
             "stale-history-window"
         } else if pending.chat_id.is_none_or(|chat| !self.chat_is_shown(chat)) {
             "stale-chat-history"
@@ -314,7 +332,7 @@ impl Session {
             for id in doomed {
                 history.remove(id, false);
             }
-            history.loaded_complete = false;
+            history.set_loaded_complete(false);
             history.window_epoch = history.window_epoch.wrapping_add(1);
         }
         for message in messages {
@@ -330,13 +348,19 @@ impl Session {
     pub fn prepare_history_window(&mut self, chat_id: ChatId) {
         let has_newer = self.history_has_newer(chat_id);
         let history = self.histories.entry(chat_id.0).or_default();
-        history.newer_failed = false;
+        history.clear_newer_failed();
+        // An older page that failed on a window with messages has no Retry
+        // row (that is the empty window's), and a short window cannot be
+        // scrolled away from its top: the chat opened again asks once more.
+        if !history.messages.is_empty() {
+            history.clear_load_failed();
+        }
         let keep = !has_newer
             && match history.unread_anchor {
                 // A tail window that reaches back to the boundary shows the
                 // unread run as is.
                 Some(anchor) => {
-                    history.loaded_complete
+                    history.loaded_complete()
                         || history
                             .oldest_id()
                             .is_some_and(|oldest| oldest.0 <= anchor.0)
@@ -381,7 +405,7 @@ impl Session {
         let history = self.histories.entry(chat_id.0).or_default();
         history.unread_anchor = Some(anchor);
         let covered = history.unread_bar_message().is_some()
-            && (history.loaded_complete
+            && (history.loaded_complete()
                 || history
                     .oldest_id()
                     .is_some_and(|oldest| oldest.0 <= anchor.0));
@@ -416,7 +440,7 @@ impl Session {
         if !any_newer {
             let latest = self.chat_latest_id(chat_id);
             if let Some(history) = self.histories.get_mut(&chat_id.0) {
-                history.newer_exhausted = Some((latest.max(history.latest_seen), from));
+                history.set_newer_exhausted(Some((latest.max(history.latest_seen), from)));
             }
         }
         // R6: reading forward through a long window — drop the oldest end.
@@ -425,13 +449,13 @@ impl Session {
 
     /// A newer-page request failed: stop auto-paging this window.
     pub(crate) fn fail_history_newer(&mut self, pending: &PendingRequest) {
-        if self.take_stale_history_request(pending) {
+        if self.history_request_stale(pending) {
             return;
         }
         if let Some(chat_id) = pending.chat_id
             && let Some(history) = self.histories.get_mut(&chat_id.0)
         {
-            history.newer_failed = true;
+            history.fail_newer();
         }
     }
 
@@ -451,7 +475,8 @@ impl Session {
                 .requests
                 .ids_for_chat(&[RequestPurpose::GetHistoryAround], chat_id)
                 .into_iter()
-                .any(|id| !self.stale_history_requests.contains(&id.0));
+                .filter_map(|id| self.requests.get(id))
+                .any(|pending| !self.history_request_stale(pending));
         if !around_in_flight && !self.history_has_newer(chat_id) {
             // tdesktop `History::newItemAdded`: an own message ends the
             // unread bar.

@@ -41,15 +41,13 @@ impl QuillApp {
         // Presses queued while a decode runs build on the pending target.
         let mut target = self
             .viewer
-            .reorient_pending
+            .reorient
+            .pending()
             .unwrap_or(self.viewer.orientation);
         change(&mut target);
-        self.viewer.reorient_gen = self.viewer.reorient_gen.wrapping_add(1);
-        let generation = self.viewer.reorient_gen;
         if target.is_identity() {
-            self.viewer.reorient_pending = None;
             self.viewer.orientation = target;
-            self.viewer.rotated = None;
+            self.viewer.reorient.reset();
             cx.notify();
             return;
         }
@@ -58,46 +56,48 @@ impl QuillApp {
         let roots = self.media_display_roots();
         let path = viewer_display_path(&item, files, &roots);
         let Some(path) = path else {
-            self.viewer.reorient_pending = None;
+            self.viewer.reorient.cancel();
             self.set_note(StatusNote::silent(tr(
                 keys::Q_AV_DOWNLOAD_THE_PHOTO_FIRST_TO,
             )));
             cx.notify();
             return;
         };
-        self.viewer.reorient_pending = Some(target);
         let decode_path = path.clone();
         let job =
             cx.background_spawn(async move { Self::rotated_render_image(&decode_path, target) });
-        self.spawn_scoped(cx, async move |this, cx| {
+        let task = self.spawn_scoped(cx, async move |this, cx| {
             let image = job.await;
             let _ = this.update(cx, |this, cx| {
-                this.finish_viewer_reorient(generation, path, target, image, cx);
+                this.finish_viewer_reorient(path, target, image, cx);
             });
-        })
-        .detach();
+        });
+        self.viewer.reorient.begin(target, task);
     }
 
     /// The decode started by `reorient_viewer_photo` finished: apply it
     /// unless the viewer moved on (another press, a step, a close).
     fn finish_viewer_reorient(
         &mut self,
-        generation: u64,
         path: PathBuf,
         target: ViewerOrientation,
         image: Option<Arc<RenderImage>>,
         cx: &mut Context<Self>,
     ) {
-        if self.viewer.reorient_gen != generation || !self.viewer.state.is_open() {
+        if !self.viewer.reorient.is_decoding() || !self.viewer.state.is_open() {
             return;
         }
-        self.viewer.reorient_pending = None;
         match image {
             Some(image) => {
                 self.viewer.orientation = target;
-                self.viewer.rotated = Some((path, target.code(), image.into()));
+                self.viewer
+                    .reorient
+                    .finish((path, target.code(), image.into()));
             }
-            None => self.set_note(StatusNote::error(tr(keys::Q_AV_COULDNT_ROTATE_THIS_PHOTO))),
+            None => {
+                self.viewer.reorient.cancel();
+                self.set_note(StatusNote::error(tr(keys::Q_AV_COULDNT_ROTATE_THIS_PHOTO)));
+            }
         }
         cx.notify();
     }
@@ -224,27 +224,28 @@ impl QuillApp {
             quill::media_viewer::downloads_dir().as_deref(),
             video,
         );
-        self.viewer.extra.saved_toast = Some(quill::viewer_extras::SavedToast { dest, text });
-        self.viewer.extra.saved_toast_gen += 1;
-        let generation = self.viewer.extra.saved_toast_gen;
-        self.spawn_scoped(cx, async move |this, cx| {
+        let hide = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(quill::viewer_extras::SAVED_TOAST_MS))
                 .await;
             let _ = this.update(cx, |this, cx| {
-                if this.viewer.extra.saved_toast_gen == generation {
-                    this.viewer.extra.saved_toast = None;
-                    cx.notify();
-                }
+                this.viewer.extra.saved_toast = SavedToastStage::None;
+                cx.notify();
             });
-        })
-        .detach();
+        });
+        // A newer save replaces the stage, which drops the older timer.
+        self.viewer.extra.saved_toast = SavedToastStage::Shown {
+            toast: quill::viewer_extras::SavedToast { dest, text },
+            _hide: hide,
+        };
         cx.notify();
     }
 
     /// The toast's folder link: show the saved file in the file manager.
     pub(super) fn reveal_saved_toast_file(&mut self, cx: &mut Context<Self>) {
-        let Some(toast) = self.viewer.extra.saved_toast.take() else {
+        let SavedToastStage::Shown { toast, .. } =
+            std::mem::take(&mut self.viewer.extra.saved_toast)
+        else {
             return;
         };
         self.reveal_in_folder(&toast.dest, cx);
@@ -268,11 +269,7 @@ impl QuillApp {
             message.is_outgoing,
             message.pending(),
         )?;
-        let actions = session
-            .messages
-            .message_menu_actions
-            .filter(|(c, m, _)| *c == chat_id && *m == item.message_id)
-            .map(|(_, _, actions)| actions);
+        let actions = session.messages.menu_actions.get(chat_id, item.message_id);
         let is_channel_post = matches!(
             session.chats.get(&chat_id.0).map(|chat| &chat.kind),
             Some(quill::telegram::envelope::ChatKind::Supergroup {
@@ -300,7 +297,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.viewer.state.source() == ViewerSource::Profile {
+        if self.viewer.state.source().is_profile() {
             self.delete_viewer_profile_photo(cx);
         } else if let Some(confirm) = self.viewer_delete_confirm() {
             self.open_delete_dialog(confirm, window, cx);
@@ -316,7 +313,7 @@ impl QuillApp {
         // does not mean deleted.
         if matches!(
             self.viewer.state.source(),
-            ViewerSource::SharedMedia | ViewerSource::Profile | ViewerSource::Poll
+            ViewerSource::SharedMedia | ViewerSource::Profile(_) | ViewerSource::Poll
         ) {
             return;
         }
@@ -572,20 +569,21 @@ impl QuillApp {
     /// The controls finished fading out: from then on they take no pointer
     /// input (`viewer_chrome` leaves them out).
     pub(super) fn viewer_controls_gone(&self) -> bool {
-        self.viewer.controls_hidden
-            && self.viewer.controls_hidden_at.elapsed()
-                >= Duration::from_millis(controls_fade_ms(true))
+        self.viewer.visibility.is_gone()
     }
 
-    /// Draw again once the fade-out ends, so the faded controls drop out.
-    fn redraw_viewer_after_fade(&self, cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
+    /// The task that ends a fade-out: it draws again once the fade is over,
+    /// so the faded controls drop out. The hidden stage owns it.
+    fn viewer_fade_end(&self, cx: &mut Context<Self>) -> Task<()> {
+        self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(controls_fade_ms(true)))
                 .await;
-            let _ = this.update(cx, |_, cx| cx.notify());
+            let _ = this.update(cx, |this, cx| {
+                this.viewer.visibility.fade_ended();
+                cx.notify();
+            });
         })
-        .detach();
     }
 
     /// Activity in the viewer: show the controls and restart the 1100 ms
@@ -593,28 +591,24 @@ impl QuillApp {
     /// pointer rests on one (`over_controls`).
     pub(in crate::ui) fn viewer_note_activity(&mut self, cx: &mut Context<Self>) {
         self.viewer.last_activity = std::time::Instant::now();
-        if self.viewer.controls_hidden {
-            self.viewer.controls_hidden = false;
-            self.viewer.controls_gen += 1;
+        if self.viewer.visibility.show() {
             cx.notify();
         }
-        if self.viewer.hide_timer || controls_stay_up() {
+        if self.viewer.visibility.has_timer() || controls_stay_up() {
             return;
         }
-        self.viewer.hide_timer = true;
-        self.spawn_scoped(cx, async move |this, cx| {
+        let timer = self.spawn_scoped(cx, async move |this, cx| {
             loop {
                 let wait = this
                     .update(cx, |this, cx| {
                         let idle = this.viewer.last_activity.elapsed().as_millis() as u64;
-                        let done = !this.viewer.state.is_open() || this.viewer.controls_hidden;
+                        let done =
+                            !this.viewer.state.is_open() || this.viewer.visibility.is_hidden();
                         // Never mid-drag (a seek, volume or speed thumb).
                         let held = this.viewer.over_controls || this.viewer.controls.dragging();
                         if !done && controls_should_hide(idle, held) {
-                            this.viewer.controls_hidden = true;
-                            this.viewer.controls_hidden_at = std::time::Instant::now();
-                            this.viewer.controls_gen += 1;
-                            this.redraw_viewer_after_fade(cx);
+                            let end = this.viewer_fade_end(cx);
+                            this.viewer.visibility.hide(end);
                             cx.notify();
                         } else if !done {
                             return Some(if held {
@@ -623,7 +617,7 @@ impl QuillApp {
                                 controls_hide_wait_ms(idle).max(16)
                             });
                         }
-                        this.viewer.hide_timer = false;
+                        this.viewer.visibility.timer_done();
                         None
                     })
                     .ok()
@@ -637,8 +631,8 @@ impl QuillApp {
                     None => break,
                 }
             }
-        })
-        .detach();
+        });
+        self.viewer.visibility.set_timer(timer);
     }
 
     /// "Attached Stickers": the sticker sets whose stickers were added to
@@ -658,7 +652,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.fetch_attached_sticker_sets(file_id).is_err()
         {
-            self.message_ui.menu_ui.sticker_set_open = false;
+            self.message_ui.menu_ui.end_sticker_set();
             self.set_note(StatusNote::error(tr(
                 keys::Q_AV_COULD_NOT_LOAD_THE_ATTACHED,
             )));
@@ -710,7 +704,8 @@ impl QuillApp {
                 .get(&item.chat_id.0)
                 .and_then(|history| history.messages.get(&item.message_id.0))
                 .is_none_or(|message| !message.pending());
-        sent && session.open_chat == Some(item.chat_id) && self.composer_available(self.pane_mode())
+        sent && session.open_chat_id() == Some(item.chat_id)
+            && self.composer_available(self.pane_mode())
     }
 
     /// Reply from the viewer: close it and start a reply to the shown

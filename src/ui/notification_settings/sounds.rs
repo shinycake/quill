@@ -20,7 +20,7 @@ impl QuillApp {
         self.session()
             .and_then(|s| {
                 s.settings
-                    .saved_notification_sounds
+                    .saved_notification_sounds()
                     .iter()
                     .find(|sound| sound.id == settings.sound_id)
                     .map(|sound| sound.title.clone())
@@ -41,7 +41,7 @@ impl QuillApp {
         self.session()
             .and_then(|s| {
                 s.settings
-                    .saved_notification_sounds
+                    .saved_notification_sounds()
                     .iter()
                     .find(|sound| sound.id == settings.story_sound_id)
                     .map(|sound| sound.title.clone())
@@ -58,11 +58,15 @@ impl QuillApp {
         sound_id: i64,
         cx: &mut Context<Self>,
     ) {
-        self.notify.notif_sound_picker_open = false;
         if let Some(live) = self.live.as_mut() {
             let result = live
                 .driver
                 .set_chat_sound(chat_id, use_default_sound, sound_id);
+            // The picker closes once the change went out; a refusal leaves
+            // it open to choose again.
+            if result.is_ok() {
+                self.notify.collapse_mute_section(MuteSection::SoundPicker);
+            }
             self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_PREFS_SOUND_UPDATED)),
                 Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_CHANGE_SOUND)),
@@ -71,6 +75,7 @@ impl QuillApp {
             return;
         }
         if self.demo_session.is_some() {
+            self.notify.collapse_mute_section(MuteSection::SoundPicker);
             self.apply_demo_notification_settings(
                 chat_id,
                 |settings| {
@@ -192,11 +197,14 @@ impl QuillApp {
         story_sound_id: i64,
         cx: &mut Context<Self>,
     ) {
-        self.notify.story_sound_picker_open = false;
         if let Some(live) = self.live.as_mut() {
             let result =
                 live.driver
                     .set_chat_story_sound(chat_id, use_default_story_sound, story_sound_id);
+            if result.is_ok() {
+                self.notify
+                    .collapse_mute_section(MuteSection::StorySoundPicker);
+            }
             self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_PREFS_STORY_SOUND_UPDATED)),
                 Err(_) => StatusNote::error(tr(keys::Q_PREFS_COULD_NOT_CHANGE_STORY_SOUND)),
@@ -205,6 +213,8 @@ impl QuillApp {
             return;
         }
         if self.demo_session.is_some() {
+            self.notify
+                .collapse_mute_section(MuteSection::StorySoundPicker);
             self.apply_demo_notification_settings(
                 chat_id,
                 |settings| {

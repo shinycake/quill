@@ -195,7 +195,7 @@ impl QuillApp {
         if !self.recording_active() {
             return;
         }
-        self.recording.discard_confirm = true;
+        self.recording.set_discard_confirming(true);
         cx.notify();
     }
 
@@ -210,8 +210,9 @@ impl QuillApp {
         if !self.recording_active() {
             return;
         }
-        self.recording.locked = !self.recording.locked;
-        self.set_note(if self.screen.recording.locked {
+        let locked = !self.recording.locked();
+        self.recording.set_locked(locked);
+        self.set_note(if locked {
             StatusNote::silent(tr(keys::Q_MISC_RECORDING_LOCKED_ESC_WONT_CANCEL))
         } else {
             StatusNote::silent(tr(keys::Q_MISC_RECORDING_UNLOCKED))
@@ -237,9 +238,17 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The voice capture, for a send: its preview stops first, since the
+    /// preview's clock goes with the capture and nothing would end the
+    /// player after it.
+    pub(super) fn take_voice_capture(&mut self) -> Option<quill::voice::VoiceCapture> {
+        self.stop_record_preview();
+        self.recording.take_voice()
+    }
+
     /// Stop the preview of a paused recording.
     pub(super) fn stop_record_preview(&mut self) {
-        if self.recording.preview.take().is_some() {
+        if self.recording.take_preview().is_some() {
             self.kill_shared_player();
         }
     }
@@ -259,7 +268,7 @@ impl QuillApp {
         };
         let seconds = f64::from(capture.elapsed_secs());
         let mut resumed_preview = false;
-        if let Some(clock) = self.screen.recording.preview.as_mut() {
+        if let Some(clock) = self.screen.recording.preview_mut() {
             if clock.is_playing() {
                 clock.pause();
                 self.players.audio.pause();
@@ -289,7 +298,7 @@ impl QuillApp {
         if self.start_player(&path, 0.0, seconds, cx) {
             let mut clock = PlaybackClock::new(seconds);
             clock.resume();
-            self.recording.preview = Some(clock);
+            self.recording.set_preview(clock);
             self.spawn_voice_tick(cx);
         } else {
             self.set_note(StatusNote::error(tr(
@@ -301,19 +310,22 @@ impl QuillApp {
 
     /// The preview ran to its end: show it stopped, ready to play again.
     pub(super) fn check_record_preview(&mut self) {
-        let ended = self.recording.preview.as_ref().is_some_and(|clock| {
+        let ended = self.recording.preview().is_some_and(|clock| {
             clock.is_playing() && (clock.finished() || self.players.audio.is_ended())
         });
         if ended {
-            self.recording.preview = None;
+            self.recording.take_preview();
             self.kill_shared_player();
         }
     }
 
     /// Switch "Play once" for the voice message being recorded.
     pub(super) fn toggle_record_once(&mut self, cx: &mut Context<Self>) {
-        self.recording.once = !self.recording.once;
-        self.set_note(if self.screen.recording.once {
+        if !self.recording_active() {
+            return;
+        }
+        let once = self.recording.toggle_play_once();
+        self.set_note(if once {
             StatusNote::info(tr(keys::RECORD_ONCE_ACTIVE_TOOLTIP))
         } else {
             StatusNote::silent(tr(keys::Q_MISC_PLAY_ONCE_OFF))
@@ -323,8 +335,14 @@ impl QuillApp {
 
     /// Self-destructing messages exist only in private chats.
     fn once_allowed(&self) -> bool {
+        let recording_chat = self.recording.origin().flatten().or(self.viewed_chat());
+        self.once_allowed_in(recording_chat)
+    }
+
+    /// Whether `chat` takes a play-once voice message.
+    pub(super) fn once_allowed_in(&self, chat: Option<ChatId>) -> bool {
         self.session()
-            .and_then(|session| session.chats.get(&session.open_chat?.0))
+            .and_then(|session| session.chats.get(&chat?.0))
             .is_some_and(|chat| {
                 matches!(
                     chat.kind,
@@ -408,7 +426,7 @@ impl QuillApp {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        let Some(chat_id) = session.open_chat else {
+        let Some(chat_id) = session.open_chat_id() else {
             return;
         };
         // Past the session's last update, or it is dropped as one already
@@ -478,11 +496,14 @@ impl QuillApp {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
+        // The recording's own window decides the chat, not the main
+        // window's open chat.
+        let origin = self.recording.origin().flatten();
         if let Some(live) = self.live.as_mut() {
             if video {
-                let _ = live.driver.sync_video_note_recording(true, now_ms);
+                let _ = live.driver.sync_video_note_recording(origin, true, now_ms);
             } else {
-                let _ = live.driver.sync_voice_recording(voice, now_ms);
+                let _ = live.driver.sync_voice_recording(origin, voice, now_ms);
             }
         }
     }
@@ -516,12 +537,11 @@ impl QuillApp {
                 .is_some_and(|capture| capture.is_paused());
         let previewing = self
             .recording
-            .preview
-            .as_ref()
+            .preview()
             .is_some_and(|clock| clock.is_playing());
         // While a paused recording plays, the time and the lit part of the
         // waveform follow the playhead.
-        let (shown_seconds, lit) = match &self.recording.preview {
+        let (shown_seconds, lit) = match self.recording.preview() {
             Some(clock) if paused => (clock.elapsed_secs().floor() as i32, clock.fraction() as f32),
             _ => (seconds, 1.0),
         };
@@ -608,7 +628,7 @@ impl QuillApp {
     /// MED2: the record bar's right-side row — either the normal
     /// Lock/Cancel/Send buttons or the discard-confirmation row.
     pub(super) fn record_bar_actions(&self, cx: &mut Context<Self>) -> AnyElement {
-        if self.recording.discard_confirm {
+        if self.recording.discard_confirming() {
             return div()
                 .flex()
                 .items_center()
@@ -629,7 +649,7 @@ impl QuillApp {
                         .ghost()
                         .small()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.recording.discard_confirm = false;
+                            this.recording.set_discard_confirming(false);
                             cx.notify();
                         })),
                 )
@@ -652,13 +672,13 @@ impl QuillApp {
                 RecordControl::Lock => Button::new("lock-record")
                     .icon(gpui_kit::assets::IconName::Lock)
                     .ghost()
-                    .selected(self.recording.locked)
-                    .tooltip(if self.recording.locked {
+                    .selected(self.recording.locked())
+                    .tooltip(if self.recording.locked() {
                         tr(keys::Q_MISC_LOCKED_ESC_WONT_CANCEL_CLICK)
                     } else {
                         tr(keys::Q_MISC_LOCK_HANDS_FREE_RECORDING_ESC)
                     })
-                    .accessibility_label(control.label(self.recording.locked))
+                    .accessibility_label(control.label(self.recording.locked()))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.toggle_record_lock(cx);
                     }))
@@ -685,9 +705,9 @@ impl QuillApp {
                     .label(tr(keys::Q_MISC_PLAY_ONCE))
                     .ghost()
                     .small()
-                    .selected(self.recording.once)
-                    .tooltip(control.label(self.recording.once))
-                    .accessibility_label(control.label(self.recording.once))
+                    .selected(self.recording.play_once())
+                    .tooltip(control.label(self.recording.play_once()))
+                    .accessibility_label(control.label(self.recording.play_once()))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.toggle_record_once(cx);
                     }))

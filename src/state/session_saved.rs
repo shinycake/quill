@@ -112,10 +112,22 @@ impl Session {
     }
 
     /// `updateSavedMessagesTags` / `getSavedMessagesTags`.
-    pub(crate) fn apply_saved_tags(&mut self, topic_id: i64, tags: Vec<SavedMessagesTag>) {
+    /// An answer (`request`) lands only in the fetch that waits for it; an
+    /// update (`None`) is the server's current list, whatever the fetch.
+    pub(crate) fn apply_saved_tags(
+        &mut self,
+        topic_id: i64,
+        tags: Vec<SavedMessagesTag>,
+        request: Option<RequestId>,
+    ) {
         if topic_id == 0 {
-            self.threads.saved.tags = tags;
-            self.threads.saved.tags_loaded = true;
+            let fetch = &mut self.threads.saved.tags;
+            match request {
+                Some(_) => {
+                    fetch.answered(request, tags);
+                }
+                None => fetch.succeed(tags),
+            }
         } else {
             self.threads.saved.topic_tags.insert(topic_id, tags);
         }
@@ -153,6 +165,7 @@ impl Session {
         self.threads.saved.sublist = Some(SavedSublistView {
             topic_id,
             history: TopicHistory::default(),
+            page: SavedPage::Idle,
         });
         self.view_generation.bump();
     }
@@ -169,8 +182,7 @@ impl Session {
             topic_id,
             tag,
             history: TopicHistory::default(),
-            loaded: false,
-            request: None,
+            page: SavedPage::Idle,
         });
         self.view_generation.bump();
     }
@@ -183,19 +195,32 @@ impl Session {
     ) -> Option<&mut SavedTagSearch> {
         let pending = pending?;
         let search = self.threads.saved.tag_search.as_mut()?;
-        if search.request != Some(pending.id) {
+        if search.page != SavedPage::Asking(pending.id) {
             return None;
         }
-        search.request = None;
+        search.page = SavedPage::Idle;
         Some(search)
     }
 
-    /// A `searchSavedMessages` page failed: the filter stops paging (the
-    /// error line says why) instead of waiting on it.
+    /// A `searchSavedMessages` page failed: the filter stops paging and
+    /// offers Retry. It is not complete: only TDLib saying so ends it.
     pub(crate) fn fail_saved_tag_page(&mut self, pending: Option<&PendingRequest>) {
         if let Some(search) = self.awaiting_saved_tag_search(pending) {
-            search.loaded = true;
-            search.history.loaded_complete = true;
+            search.history.fail_older();
+        }
+    }
+
+    /// A `getSavedMessagesTopicHistory` page failed: the sublist stops
+    /// paging (no re-ask on every scroll) and offers Retry.
+    pub(crate) fn fail_saved_topic_page(&mut self, pending: Option<&PendingRequest>) {
+        let Some(pending) = pending else {
+            return;
+        };
+        if let Some(view) = self.threads.saved.sublist.as_mut()
+            && view.page == SavedPage::Asking(pending.id)
+        {
+            view.page = SavedPage::Idle;
+            view.history.fail_older();
         }
     }
 
@@ -220,32 +245,30 @@ impl Session {
             self.remember_files(&message.files);
             self.index_poll_parsed(message);
         }
+        // Only the page this view asked for: the same sublist entered
+        // again asked another, and a duplicate would add no rows.
         let Some(view) = self
             .threads
             .saved
             .sublist
             .as_mut()
             .filter(|view| view.topic_id == topic_id)
+            .filter(|view| pending.is_some_and(|p| view.page == SavedPage::Asking(p.id)))
         else {
             return;
         };
+        view.page = SavedPage::Idle;
         let empty = messages.is_empty();
         let mut oldest: Option<i64> = None;
-        let mut added = 0usize;
         for message in messages {
             let id = message.id.0;
             oldest = Some(oldest.map_or(id, |old| old.min(id)));
-            if view
-                .history
+            view.history
                 .messages
-                .insert(id, history_message(message, false))
-                .is_none()
-            {
-                added += 1;
-            }
+                .insert(id, history_message(message, false));
         }
-        if empty || added == 0 {
-            view.history.loaded_complete = true;
+        if empty {
+            view.history.mark_complete();
         }
         if let Some(oldest) = oldest {
             view.history.next_from_message_id = MessageId(oldest);
@@ -284,11 +307,10 @@ impl Session {
                 .insert(message.id.0, history_message(message, false));
         }
         if next_from_message_id.0 == 0 || empty {
-            search.history.loaded_complete = true;
+            search.history.mark_complete();
         }
         search.history.next_from_message_id = next_from_message_id;
         search.history.total_count = total_count.max(search.history.messages.len() as i32);
-        search.loaded = true;
         self.view_generation.bump();
     }
 
@@ -333,7 +355,7 @@ impl Session {
     /// own tags (named from the global list) or all tags.
     pub fn saved_tag_choices(&self) -> Vec<SavedMessagesTag> {
         let Some(view) = &self.threads.saved.sublist else {
-            return self.threads.saved.tags.clone();
+            return self.threads.saved.tag_list().to_vec();
         };
         self.threads
             .saved
@@ -347,7 +369,7 @@ impl Session {
                             && let Some(named) = self
                                 .threads
                                 .saved
-                                .tags
+                                .tag_list()
                                 .iter()
                                 .find(|other| other.tag == tag.tag)
                         {

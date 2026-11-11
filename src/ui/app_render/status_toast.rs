@@ -66,23 +66,17 @@ impl QuillApp {
         if !self.demo_pins_toast() {
             self.connection.advance_toasts(now);
         }
-        let deadline = self.connection.toasts.deadline(now);
-        if deadline != self.connection.toast_wake {
-            self.connection.toast_wake = deadline;
-            if let Some(deadline) = deadline {
-                self.spawn_screen(cx, async move |this, cx| {
-                    cx.background_executor()
-                        .timer(deadline.saturating_duration_since(std::time::Instant::now()))
-                        .await;
-                    let _ = this.update(cx, |this, cx| {
-                        if this.connection.toast_wake == Some(deadline) {
-                            this.connection.toast_wake = None;
-                        }
-                        cx.notify();
-                    });
-                })
-                .detach();
-            }
+        if let Some(deadline) = self.connection.toasts.rewake(now) {
+            self.spawn_screen(cx, async move |this, cx| {
+                cx.background_executor()
+                    .timer(deadline.saturating_duration_since(std::time::Instant::now()))
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    this.connection.toasts.woke(deadline);
+                    cx.notify();
+                });
+            })
+            .detach();
         }
         self.connection.toasts.visible().cloned()
     }
@@ -160,7 +154,7 @@ impl QuillApp {
     /// height (a taller composer, with a reply or attachments, lifts it). A toast only shows with a session, when the footer
     /// line is absent (demos that pin the toast hide it).
     pub(super) fn toast_bottom(&self) -> Pixels {
-        let composer = if self.session().is_some_and(|s| s.open_chat.is_some()) {
+        let composer = if self.session().is_some_and(|s| s.open_chat_id().is_some()) {
             self.slices.composer_height()
         } else {
             px(0.)
@@ -267,8 +261,9 @@ impl QuillApp {
         if let Some(path) = reveal {
             self.reveal_in_folder(&path, cx);
         }
-        self.connection.toasts.dismiss(std::time::Instant::now());
-        self.connection.toast_wake = None;
+        self.connection
+            .toasts
+            .dismiss_by_click(std::time::Instant::now());
         cx.notify();
     }
 

@@ -140,11 +140,12 @@ fn a_failed_spec_fetch_drops_the_removal_instead_of_asking_again() {
     ));
     assert!(rig.driver.session.chat_list.folder_remove_queue.is_empty());
     assert_eq!(rig.sent("getChatFolder").len(), 1, "no request loop");
-    assert!(rig.driver.session.chats_state.chat_action_error.is_some());
+    assert!(!rig.driver.session.chats_state.chat_action_error.is_empty());
 }
 
 #[test]
-fn an_add_folder_answer_for_an_earlier_link_is_dropped() {
+fn an_add_folder_box_takes_only_the_answer_of_its_own_request() {
+    use crate::state::DialogAnswer;
     let mut rig = Rig::new();
     let first = rig
         .driver
@@ -161,18 +162,17 @@ fn an_add_folder_answer_for_an_earlier_link_is_dropped() {
         )
     };
     rig.ingest(&info(first, 41));
-    assert!(rig.driver.session.chat_list.folder_invite_info.is_none());
-    rig.ingest(&format!(
-        r#"{{"@type":"error","@extra":"{}","code":400,"message":"INVITE_SLUG_EXPIRED"}}"#,
-        first.0
-    ));
-    assert!(rig.driver.session.chat_list.folder_invite_error.is_none());
     rig.ingest(&info(second, 42));
-    let shown = rig.driver.session.chat_list.folder_invite_info.as_ref();
-    assert_eq!(shown.map(|i| i.missing_chat_ids.clone()), Some(vec![42]));
+    // The box open now waits for `second`: `first`'s answer is not its.
+    let Some(DialogAnswer::Checked(shown)) =
+        rig.driver.session.chat_list.dialog_answers.take(second)
+    else {
+        panic!("the check answers its own box");
+    };
+    assert_eq!(shown.missing_chat_ids, vec![42]);
 
     // Confirm for this link, then another link opens before the answer:
-    // the join does not say "done" in the new link's dialog.
+    // the join's `ok` is for the first box, not the new link's.
     let add = rig
         .driver
         .add_folder_by_invite_link("https://t.me/addlist/bbb", &[42])
@@ -182,14 +182,20 @@ fn an_add_folder_answer_for_an_earlier_link_is_dropped() {
         .check_folder_invite_link("https://t.me/addlist/ccc")
         .unwrap();
     rig.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, add.0));
-    assert!(!rig.driver.session.chat_list.folder_invite_done);
+    assert_eq!(
+        rig.driver.session.chat_list.dialog_answers.take(third),
+        None,
+        "the new link's box has no answer yet"
+    );
     rig.ingest(&info(third, 43));
-    let add = rig
-        .driver
-        .add_folder_by_invite_link("https://t.me/addlist/ccc", &[43])
-        .unwrap();
-    rig.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, add.0));
-    assert!(rig.driver.session.chat_list.folder_invite_done);
+    assert!(matches!(
+        rig.driver.session.chat_list.dialog_answers.take(third),
+        Some(DialogAnswer::Checked(_))
+    ));
+    assert_eq!(
+        rig.driver.session.chat_list.dialog_answers.take(add),
+        Some(DialogAnswer::Done)
+    );
 }
 
 #[test]
@@ -216,7 +222,13 @@ fn main_list_paging_resumes_after_a_failed_page_and_the_archive_starts() {
     assert_eq!(main(&rig), 1);
     // Before the wait is over nothing goes out; after it, the page again.
     let now = std::time::Instant::now();
-    let (at, _) = rig.driver.session.chat_list.chats_retry.expect("waiting");
+    let (at, _) = rig
+        .driver
+        .session
+        .chat_list
+        .main_paging
+        .retry()
+        .expect("waiting");
     assert!(!rig.driver.chat_list_tick(now.min(at)));
     assert_eq!(main(&rig), 1);
     assert!(rig.driver.chat_list_tick(at));
@@ -231,5 +243,23 @@ fn main_list_paging_resumes_after_a_failed_page_and_the_archive_starts() {
             .unwrap(),
     );
     rig.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, page.0));
-    assert!(rig.driver.session.chat_list.chats_retry.is_none());
+    assert!(rig.driver.session.chat_list.main_paging.retry().is_none());
+}
+
+#[test]
+fn a_failed_folder_fetch_is_recorded_for_the_editor_and_cleared_by_the_retry() {
+    let mut rig = Rig::new();
+    let extra = rig.driver.fetch_chat_folder(5).unwrap().expect("asked");
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":500,"message":"Timeout"}}"#,
+        extra.0
+    ));
+    assert!(rig.driver.session.chat_list.folder_specs.error(5).is_some());
+    assert!(rig.driver.fetch_chat_folder(5).unwrap().is_some());
+    assert!(
+        !rig.driver.session.chat_list.folder_specs.any_error(),
+        "asking again clears the error"
+    );
+    rig.answer_spec(&[7]);
+    assert!(rig.driver.session.chat_list.fresh_spec(5).is_some());
 }

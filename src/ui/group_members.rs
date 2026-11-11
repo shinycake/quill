@@ -23,8 +23,6 @@ use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::state::{ContactRow, MemberListFilter, SupergroupMembersFetch};
 use quill::telegram::envelope::{ChannelMemberStatus, ChatKind, MessageSender};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// How close to the end of a member list the next page is asked for.
 /// A picker row's userpic (tdesktop `peerListItem.photoSize` is 42; the
@@ -144,13 +142,23 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        let note = match self.live.as_mut() {
+        let (note, sent) = match self.live.as_mut() {
             Some(live) => match live.driver.add_chat_members(chat_id, &user_ids) {
-                Ok(_) => StatusNote::silent(tr(keys::Q_PEOPLE_ADDING_MEMBERS)),
-                Err(_) => StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_ADD_MEMBERS)),
+                Ok(_) => (StatusNote::silent(tr(keys::Q_PEOPLE_ADDING_MEMBERS)), true),
+                Err(_) => (
+                    StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_ADD_MEMBERS)),
+                    false,
+                ),
             },
-            None => StatusNote::info(tr(keys::Q_PEOPLE_ADDING_MEMBERS_NEEDS_A_LIVE)),
+            None => (
+                StatusNote::info(tr(keys::Q_PEOPLE_ADDING_MEMBERS_NEEDS_A_LIVE)),
+                false,
+            ),
         };
+        // An add that did not go out keeps the picked contacts to try again.
+        if !sent && let Some(dialog) = self.admin.member_dialog.as_mut() {
+            dialog.add_selected = user_ids;
+        }
         self.set_note(note);
         // TDLib sends `updateChatMember` to bots only: the add's own answer
         // (`failedToAddMembers`) drops the cached pages and marks the chat
@@ -323,7 +331,10 @@ impl QuillApp {
                             .child(tr(keys::Q_PEOPLE_LOADING_MEMBERS)),
                     );
                 }
-                Some(SupergroupMembersFetch::Failed(message)) => {
+                Some(
+                    SupergroupMembersFetch::Failed(message)
+                    | SupergroupMembersFetch::NotSent(message),
+                ) => {
                     list = list.child(
                         div()
                             .flex()
@@ -475,18 +486,9 @@ impl QuillApp {
                 } else {
                     tr(keys::Q_PEOPLE_MANAGE_MEMBERS)
                 }))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    // `content` needs an `Fn` closure, but the body is built once
-                    // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::one_shot_dialog_content(
+                    body.into_any_element(),
+                ))
                 .on_close(on_close)
         })
     }
@@ -709,7 +711,7 @@ impl QuillApp {
             });
         let tab = self.admin.member_dialog.as_ref().map(|dialog| dialog.tab);
         let set_by = self.member_set_by(member);
-        let status_label = match (tab, set_by, member.restriction) {
+        let status_label = match (tab, set_by, member.restriction()) {
             (Some(MemberTab::Restricted), Some(by), _) => {
                 tr_with(keys::CHANNEL_BANNED_STATUS_RESTRICTED_BY, &[("user", &by)])
             }
@@ -719,7 +721,7 @@ impl QuillApp {
             (_, _, Some(restriction)) => {
                 super::restricted_exceptions::restricted_row_status(restriction)
             }
-            _ => Self::member_status_label(member.status).to_string(),
+            _ => Self::member_status_label(member.status()).to_string(),
         };
         // Slice G1: show the admin custom title (`chatMember.tag`,
         // schema 1.8.67 line 2526) next to the status when set.

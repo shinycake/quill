@@ -30,7 +30,6 @@ use crate::locks::LockExt;
 #[cfg(any(test, target_os = "macos"))]
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 /// Who handles `tg:` links right now.
@@ -421,19 +420,106 @@ fn query_state() -> LinkHandlerState {
 
 const CACHE_TTL: Duration = Duration::from_secs(2);
 
-/// The last answer, when it was read and which [`GENERATION`] it belongs to.
+/// The last answer, when it was read and which generation it belongs to.
 struct Cached {
     at: Instant,
     state: LinkHandlerState,
     generation: u64,
 }
 
-static CACHE: Mutex<Option<Cached>> = Mutex::new(None);
-/// Bumped by [`invalidate`]: an answer from an earlier generation is stale,
-/// whatever its age (right after boot an `Instant` cannot even be moved back
-/// by the TTL).
-static GENERATION: AtomicU64 = AtomicU64::new(0);
-static REFRESHING: AtomicBool = AtomicBool::new(false);
+/// Called once when a background read lands (or dies).
+type Waker = Box<dyn FnOnce() + Send>;
+
+/// Where the handler read stands: nothing yet, an answer, or a read on its
+/// own thread (the older answer stays to show meanwhile). The read leaves
+/// `Reading` by landing its answer or, when it dies, by putting back what
+/// was there as just read (or "could not read" when there was nothing).
+enum Stage {
+    Empty,
+    Known(Cached),
+    Reading {
+        last: Option<Cached>,
+        /// The one watcher to wake when the read ends.
+        waker: Option<Waker>,
+    },
+}
+
+struct Cell {
+    /// Bumped by [`invalidate`]: an answer from an earlier generation is
+    /// stale, whatever its age (right after boot an `Instant` cannot even be
+    /// moved back by the TTL).
+    generation: u64,
+    stage: Stage,
+}
+
+impl Cell {
+    const fn new() -> Self {
+        Self {
+            generation: 0,
+            stage: Stage::Empty,
+        }
+    }
+
+    fn last(&self) -> Option<&Cached> {
+        match &self.stage {
+            Stage::Empty => None,
+            Stage::Known(cached) => Some(cached),
+            Stage::Reading { last, .. } => last.as_ref(),
+        }
+    }
+
+    /// Starts a background read; `None` when one already runs.
+    fn begin_read(&mut self) -> Option<u64> {
+        let last = match std::mem::replace(&mut self.stage, Stage::Empty) {
+            Stage::Reading { last, waker } => {
+                self.stage = Stage::Reading { last, waker };
+                return None;
+            }
+            Stage::Known(cached) => Some(cached),
+            Stage::Empty => None,
+        };
+        self.stage = Stage::Reading { last, waker: None };
+        Some(self.generation)
+    }
+
+    /// The read started at `generation` ended with `fresh` (`None`: it
+    /// died); returns the watcher to wake.
+    fn settle(&mut self, generation: u64, fresh: Option<LinkHandlerState>) -> Option<Waker> {
+        let (last, waker) = match std::mem::replace(&mut self.stage, Stage::Empty) {
+            Stage::Reading { last, waker } => (last, waker),
+            other => {
+                self.stage = other;
+                return None;
+            }
+        };
+        self.stage = match (fresh, last) {
+            (Some(state), _) => Stage::Known(Cached {
+                at: Instant::now(),
+                state,
+                generation,
+            }),
+            // A read that died is a read that ended: what was known stays,
+            // stamped now so the page does not start another read at its
+            // next draw, but after the TTL like any other answer (and an
+            // `invalidate` since still makes it stale).
+            (None, Some(last)) => Stage::Known(Cached {
+                at: Instant::now(),
+                generation: self.generation,
+                state: last.state,
+            }),
+            (None, None) => Stage::Known(Cached {
+                at: Instant::now(),
+                generation: self.generation,
+                state: LinkHandlerState::Unavailable(
+                    tr(keys::Q_PREFS_DEFAULT_APP_TOOL_FAILED).into(),
+                ),
+            }),
+        };
+        waker
+    }
+}
+
+static CELL: Mutex<Cell> = Mutex::new(Cell::new());
 
 /// The cached answer (if any) and whether it must be read again.
 fn lookup(cache: Option<&Cached>, generation: u64) -> (Option<LinkHandlerState>, bool) {
@@ -466,8 +552,11 @@ pub fn state() -> LinkHandlerState {
     if let Some(pinned) = lock_demo_pin().clone() {
         return pinned;
     }
-    let generation = GENERATION.load(Ordering::Acquire);
-    let (cached, stale) = lookup(CACHE.lock_or_recover().as_ref(), generation);
+    let (generation, cached, stale) = {
+        let cell = CELL.lock_or_recover();
+        let (cached, stale) = lookup(cell.last(), cell.generation);
+        (cell.generation, cached, stale)
+    };
     match cached {
         None if READ_ON_CALLER => read_on_caller(generation),
         cached => {
@@ -483,7 +572,7 @@ pub fn state() -> LinkHandlerState {
 /// [`READ_ON_CALLER`]).
 fn read_on_caller(generation: u64) -> LinkHandlerState {
     let fresh = query_state();
-    *CACHE.lock_or_recover() = Some(Cached {
+    CELL.lock_or_recover().stage = Stage::Known(Cached {
         at: Instant::now(),
         state: fresh.clone(),
         generation,
@@ -500,7 +589,8 @@ pub fn read_now() {
         return;
     }
     if READ_ON_CALLER {
-        read_on_caller(GENERATION.load(Ordering::Acquire));
+        let generation = CELL.lock_or_recover().generation;
+        read_on_caller(generation);
     } else {
         invalidate();
         start_refresh();
@@ -521,36 +611,41 @@ fn lock_demo_pin() -> std::sync::MutexGuard<'static, Option<LinkHandlerState>> {
 
 /// A background read of the handler is running.
 pub fn refreshing() -> bool {
-    REFRESHING.load(Ordering::Acquire)
+    matches!(CELL.lock_or_recover().stage, Stage::Reading { .. })
 }
 
-/// Ends a refresh, also when the read panics.
-struct RefreshDone;
-
-impl Drop for RefreshDone {
-    fn drop(&mut self) {
-        REFRESHING.store(false, Ordering::Release);
+/// Asks to be woken once when the background read ends (the answer landed,
+/// or the read died). Returns `false`, and drops `wake`, when no read runs
+/// or another watcher already waits.
+pub fn wake_when_read(wake: impl FnOnce() + Send + 'static) -> bool {
+    match &mut CELL.lock_or_recover().stage {
+        Stage::Reading { waker, .. } if waker.is_none() => {
+            *waker = Some(Box::new(wake));
+            true
+        }
+        _ => false,
     }
 }
 
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 fn start_refresh() {
-    if REFRESHING.swap(true, Ordering::AcqRel) {
+    // An `invalidate` while the OS is asked leaves this answer stale: the
+    // generation is the one the read started at.
+    let Some(generation) = CELL.lock_or_recover().begin_read() else {
         return;
-    }
-    let spawned = crate::thread_guard::spawn_guarded("link-handler", || {
-        let _done = RefreshDone;
-        // An `invalidate` while the OS is asked leaves this answer stale.
-        let generation = GENERATION.load(Ordering::Acquire);
-        let fresh = query_state();
-        *CACHE.lock_or_recover() = Some(Cached {
-            at: Instant::now(),
-            state: fresh,
-            generation,
-        });
+    };
+    let spawned = crate::thread_guard::spawn_guarded("link-handler", move || {
+        let fresh = std::panic::catch_unwind(query_state).ok();
+        let waker = CELL.lock_or_recover().settle(generation, fresh);
+        if let Some(wake) = waker {
+            wake();
+        }
     });
     if spawned.is_err() {
-        REFRESHING.store(false, Ordering::Release);
+        let waker = CELL.lock_or_recover().settle(generation, None);
+        if let Some(wake) = waker {
+            wake();
+        }
     }
 }
 
@@ -558,7 +653,8 @@ fn start_refresh() {
 /// (macOS: [`state`] never asks; [`read_now`] replaces the answer).
 /// The old answer stays to show meanwhile.
 pub fn invalidate() {
-    GENERATION.fetch_add(1, Ordering::AcqRel);
+    let mut cell = CELL.lock_or_recover();
+    cell.generation = cell.generation.wrapping_add(1);
 }
 
 #[cfg(all(target_os = "macos", feature = "ui"))]
@@ -641,6 +737,32 @@ mod tests {
     };
     use std::path::Path;
     use std::time::Instant;
+
+    /// r2-05 (03-C001): a read that died is not read again at the next draw.
+    #[test]
+    fn a_dead_read_is_not_stale_until_its_ttl() {
+        let mut cell = super::Cell::new();
+        let generation = cell.begin_read().expect("the first read starts");
+        assert_eq!(cell.begin_read(), None, "one at a time");
+        cell.settle(generation, None);
+        let (answer, stale) = lookup(cell.last(), cell.generation);
+        assert!(matches!(answer, Some(LinkHandlerState::Unavailable(_))));
+        assert!(!stale, "not re-read from the next render");
+        // With an older answer, a dead read keeps it.
+        let generation = {
+            cell.generation += 1;
+            cell.begin_read().expect("read again after invalidate")
+        };
+        cell.settle(generation, Some(LinkHandlerState::Ours));
+        let generation = {
+            cell.generation += 1;
+            cell.begin_read().expect("another read")
+        };
+        cell.settle(generation, None);
+        let (answer, stale) = lookup(cell.last(), cell.generation);
+        assert_eq!(answer, Some(LinkHandlerState::Ours));
+        assert!(!stale);
+    }
 
     #[test]
     fn nothing_cached_is_stale_and_has_no_answer() {

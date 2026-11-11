@@ -13,11 +13,12 @@ struct ThreadWindow {
     unread_count: i32,
     has_newer: bool,
     window_epoch: u64,
-    /// The older replies are loaded down to the root post.
-    loaded_complete: bool,
+    /// The older end of the replies: complete once they are loaded down
+    /// to the root post.
+    older: quill::state::OlderEnd,
 }
 
-/// The reader's scroll goal in this render (`HistoryUi::scroll_goal`).
+/// The reader's scroll goal in this render (`HistoryUi::aim`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GoalNow {
     /// None, or its rows are not in yet.
@@ -68,9 +69,9 @@ impl QuillApp {
                 thread_id: thread.thread_id,
                 unread_anchor: thread.unread_anchor,
                 unread_count: thread.unread_count,
-                has_newer: thread.history.has_newer,
+                has_newer: thread.history.has_newer(),
                 window_epoch: thread.history.window_epoch,
-                loaded_complete: thread.history.loaded_complete,
+                older: thread.history.older,
             });
         // A Saved Messages sublist or tag filter is its own history.
         let saved_scope = self.saved_view_scope();
@@ -85,7 +86,7 @@ impl QuillApp {
         );
         let saved_window = saved_scope
             .and_then(|_| self.saved_history())
-            .map(|(_, history)| (None, history.has_newer, history.window_epoch));
+            .map(|(_, history)| (None, history.has_newer(), history.window_epoch));
         // The loaded window: the thread's own (it opens around its read
         // position and pages forward like the main history), the topic's
         // (no unread divider) or the main history's.
@@ -100,7 +101,7 @@ impl QuillApp {
                             .threads
                             .topic_histories
                             .get(&(chat.0, topic))
-                            .map(|h| (None, h.has_newer, h.window_epoch)),
+                            .map(|h| (None, h.has_newer(), h.window_epoch)),
                         None => s
                             .histories
                             .get(&chat.0)
@@ -147,9 +148,7 @@ impl QuillApp {
         };
         // Rows of the same window keep the view where it is; a new window
         // lands instead (`rows_replaced`).
-        let same_window = self.history.key == Some(history_key)
-            && self.history.window_epoch == window_epoch
-            && !self.history.anchor_pending;
+        let same_window = self.history.anchor.is_placed_for(history_key, window_epoch);
         // A goal the reader asked for that these rows reach: it places the
         // view, so nothing is held.
         let goal = self.scroll_goal_now(thread_window.as_ref());
@@ -160,7 +159,7 @@ impl QuillApp {
             // Deleted messages dissolve in place before they go.
             self.merge_vanishing(&mut messages);
             let (mut rows, seed) = self.build_rows(messages, Default::default(), None, &row_build);
-            if let Some(row) = self.streaming_bot_row(&seed, &row_build, cx) {
+            if let Some(row) = self.streaming_bot_row(&seed, &row_build) {
                 rows.push(row);
             }
             // kit Phase 3: sync the scroller state with the new row list.
@@ -175,7 +174,7 @@ impl QuillApp {
             // so remeasure rows whose inputs changed. File readiness affects
             // any media row, so a change there remeasures every row.
             let media_signature = self.history_media_signature();
-            if self.history.key == Some(history_key)
+            if self.history.anchor.key() == Some(history_key)
                 && count == self.history.rows.len()
                 && count == self.history.scroller.read(cx).item_count()
             {
@@ -201,26 +200,24 @@ impl QuillApp {
                 }
             }
             self.history.media_signature = media_signature;
-            if self.history.key != Some(history_key) || self.history.window_epoch != window_epoch {
-                // A new or replaced window anchors once its rows are in.
-                self.history.window_epoch = window_epoch;
-                self.history.anchor_pending = true;
+            let same_chat = self.history.anchor.key() == Some(history_key);
+            // A new or replaced window anchors once its rows are in.
+            if self.history.anchor.sync(history_key, window_epoch) && same_chat {
                 // The window of a chat already open was replaced (jump to
                 // the latest, a date jump): the position left behind is not
                 // where the reader goes back to.
-                if self.history.key == Some(history_key) {
-                    self.history.scroll_memory.forget(history_key);
-                }
+                self.history.scroll_memory.forget(history_key);
             }
-            if self.history.key != Some(history_key) {
+            if !same_chat {
                 // New chat/topic (or first render): reset; the anchor below
-                // picks the position.
-                self.history.key = Some(history_key);
-                // Message ids are chat-local: a stale highlight id in the new
-                // chat must not suppress its search-jump scroll.
-                self.history.last_highlight = None;
+                // picks the position. Message ids are chat-local, so the
+                // anchor starts with no landed jump: a stale highlight id in
+                // the new chat must not suppress its search-jump scroll.
                 self.history.scroll_date = Default::default();
                 self.history.scroll_top_probe.set(None);
+                // The painted row range is the old history's: the page
+                // keys, the chrome and a11y wait for the new first paint.
+                self.history.scroll_view_probe.set(None);
                 self.history.scroller.update(cx, |state, cx| {
                     state.reset(count, cx);
                 });
@@ -313,7 +310,7 @@ impl QuillApp {
             self.history.chrome_epoch = mark.epoch;
             self.history.chrome_seen = mark.revision;
             if let Ok(mut due) = self.history.chrome_due.try_borrow_mut() {
-                due.clear();
+                due.take();
             }
             self.history.row_stats.note_built(rows_started);
             self.history.row_stats.messages_cloned += cloned;
@@ -342,7 +339,9 @@ impl QuillApp {
         self.land_new_jump(jump, cx);
         match goal {
             GoalNow::Due => self.reach_scroll_goal(cx),
-            GoalNow::Stale => self.history.scroll_goal = None,
+            GoalNow::Stale => {
+                self.history.aim.take_goal();
+            }
             GoalNow::Waiting => {}
         }
         // Read by the next render's view hold and by the landing.
@@ -359,6 +358,7 @@ impl QuillApp {
             _ => {}
         }
         let count = self.history.rows.len();
+        self.sync_sponsored_spots(id, cx);
         let corner_buttons = self.jump_corner_buttons(
             chat.as_ref().map_or(0, |c| c.unread_mention_count),
             chat.as_ref().map_or(0, |c| c.unread_reaction_count),
@@ -378,7 +378,7 @@ impl QuillApp {
         self.players.inline_videos.begin_render(
             self.windows.scope,
             target,
-            self.history.pane_width.get(),
+            self.history.measure.get().pane(),
             cx,
         );
         self.begin_widget_pass(target, cx);
@@ -597,13 +597,22 @@ impl QuillApp {
                         viewport.set(Some(bounds));
                         let moved = drag_app.clone();
                         window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
-                            if phase.bubble() && event.pressed_button == Some(MouseButton::Left) {
-                                let _ = moved.update(cx, |this, cx| {
-                                    if this.message_ui.selection_drag.is_some() {
-                                        this.selection_drag_pointer(event.position, window, cx);
-                                    }
-                                });
+                            if !phase.bubble() {
+                                return;
                             }
+                            let held = event.pressed_button == Some(MouseButton::Left);
+                            let _ = moved.update(cx, |this, cx| {
+                                if this.message_ui.selection_drag.is_none() {
+                                    return;
+                                }
+                                if held {
+                                    this.selection_drag_pointer(event.position, window, cx);
+                                } else {
+                                    // The button is up and no release came:
+                                    // the press ended elsewhere.
+                                    this.selection_drag_lost(cx);
+                                }
+                            });
                         });
                         let released = drag_app.clone();
                         window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
@@ -764,7 +773,10 @@ impl QuillApp {
                 .into_any_element(),
             None => element,
         };
-        div()
+        // A channel's ads follow the message they were placed after, under
+        // its row and outside the row's tracked bounds (`sponsored_spots`).
+        let sponsored = self.sponsored_under_row(row, cx);
+        let row = div()
             .relative()
             .flex()
             .flex_col()
@@ -784,8 +796,16 @@ impl QuillApp {
                     unread_divider(wide, bar_focused, bar_probe.clone(), cx)
                 }))
             })
-            .child(element)
-            .into_any_element()
+            .child(element);
+        match sponsored {
+            Some(footer) => div()
+                .flex()
+                .flex_col()
+                .child(row)
+                .child(footer)
+                .into_any_element(),
+            None => row.into_any_element(),
+        }
     }
 }
 
@@ -830,9 +850,13 @@ impl QuillApp {
     /// Where the reader's scroll goal stands with the rows this render
     /// shows.
     fn scroll_goal_now(&self, thread: Option<&ThreadWindow>) -> GoalNow {
-        match (self.history.scroll_goal, thread) {
+        match (self.history.aim.goal(), thread) {
             (None, _) => GoalNow::Waiting,
-            (Some(ScrollGoal::ThreadRoot), Some(thread)) if thread.loaded_complete => GoalNow::Due,
+            (Some(ScrollGoal::ThreadRoot), Some(thread))
+                if thread.older == quill::state::OlderEnd::Complete =>
+            {
+                GoalNow::Due
+            }
             (Some(ScrollGoal::ThreadRoot), Some(_)) => GoalNow::Waiting,
             // The thread closed: the goal goes with it.
             (Some(ScrollGoal::ThreadRoot), None) => GoalNow::Stale,
@@ -844,7 +868,7 @@ impl QuillApp {
         if self.history.rows.is_empty() {
             return;
         }
-        let Some(goal) = self.history.scroll_goal.take() else {
+        let Some(goal) = self.history.aim.take_goal() else {
             return;
         };
         self.end_landing();
@@ -871,8 +895,8 @@ impl QuillApp {
         self.history_a11y_rows_changed(cx);
         // A new or replaced window: start at the saved position, else the
         // jump target, else the "Unread messages" divider, else the bottom.
-        if self.history.anchor_pending && !self.history.rows.is_empty() {
-            self.history.anchor_pending = false;
+        if self.history.anchor.is_anchoring() && !self.history.rows.is_empty() {
+            self.history.anchor.placed();
             self.anchor_opened_history(history_key, jump, cx);
         }
         self.land_new_jump(jump, cx);
@@ -882,10 +906,10 @@ impl QuillApp {
     /// the middle of the view once per jump. Jumps are told apart by their
     /// serial, so the same message asked for again lands again.
     fn land_new_jump(&mut self, jump: Option<(u64, MessageId)>, cx: &mut Context<Self>) {
-        if jump == self.history.last_highlight {
+        if jump == self.history.anchor.landed() {
             return;
         }
-        self.history.last_highlight = jump;
+        self.history.anchor.set_landed(jump);
         if let Some((_, target)) = jump {
             self.start_landing(super::landing::LandingGoal::Message(target), cx);
         }

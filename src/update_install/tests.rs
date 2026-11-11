@@ -193,7 +193,7 @@ impl Fixture {
     }
 
     fn receipt(&self) -> InstallResult {
-        serde_json::from_slice(&fs::read(receipt_for(&self.target)).unwrap()).unwrap()
+        InstallResult::parse(&fs::read(receipt_for(&self.target)).unwrap()).unwrap()
     }
 
     fn backup(&self) -> PathBuf {
@@ -250,6 +250,10 @@ fn write_app(package: &Path, app: App, payload: &[u8]) {
 /// An installed package `opt/quill` (`opt/Quill.app`) and a staged one
 /// beside it, as `download_and_stage` leaves them.
 fn bundle_fixture(tag: &str, old_app: App, new_app: App) -> Fixture {
+    bundle_fixture_staged_as(tag, old_app, new_app, &staged_dir_name(1, 1))
+}
+
+fn bundle_fixture_staged_as(tag: &str, old_app: App, new_app: App, staged_name: &str) -> Fixture {
     let root = std::env::temp_dir().join(format!("quill-apply-{tag}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(root.join("opt")).unwrap();
@@ -265,7 +269,7 @@ fn bundle_fixture(tag: &str, old_app: App, new_app: App) -> Fixture {
     // folder on macOS (created closed to other users, as staging does).
     let layout = Layout::of(&target).unwrap();
     ensure_private_dir(&layout.stage_root).unwrap();
-    let staged = layout.stage_root.join(".quill-update-1-999.0.0-1.new");
+    let staged = layout.stage_root.join(staged_name);
     write_app(&staged, new_app, b"new-td");
     let plan_path = layout.plans.join(".quill-update-1-999.0.0-1.json");
     let old_exe = fs::read(&target).unwrap();
@@ -277,6 +281,29 @@ fn bundle_fixture(tag: &str, old_app: App, new_app: App) -> Fixture {
         target,
         old_exe,
     }
+}
+
+#[test]
+fn the_staging_folder_name_has_no_extension() {
+    // macOS would take the unpacked package for an app bundle otherwise.
+    let name = staged_dir_name(4321, 1_794_268_905_000_000_000);
+    assert!(name.starts_with(swap::TEMP_PREFIX), "{name}");
+    assert!(!name.chars().skip(1).any(|c| c == '.'), "{name}");
+    assert_ne!(name, staged_dir_name(4321, 1_794_268_905_000_000_001));
+}
+
+#[test]
+fn a_package_staged_under_the_old_folder_name_still_installs() {
+    let fx = bundle_fixture_staged_as(
+        "bundle-old-name",
+        App::Old,
+        App::New,
+        ".quill-update-1-999.0.0-1.new",
+    );
+    let (claim, plan) = fx.take(exited_pid(), &[]);
+    apply_plan(claim, plan, fx.target.clone(), start_directly).unwrap();
+    assert!(probe_binary(&fx.target, "999.0.0").is_ok());
+    assert!(!fx.staged.exists() && fx.no_claim_left());
 }
 
 #[test]
@@ -293,7 +320,7 @@ fn apply_plan_installs_a_bundle_and_keeps_the_old_tree_until_the_next_start() {
     assert!(probe_binary(&fx.target, "999.0.0").is_ok());
     assert_eq!(fs::read(fx.payload(&fx.install)).unwrap(), b"new-td");
     let result = fx.receipt();
-    assert!(!result.failed);
+    assert_eq!(result.outcome, Outcome::Installed);
     assert_eq!(result.release.version, "999.0.0");
     assert!(!fx.staged.exists() && fx.no_claim_left());
     // The new version starts with the launch's flags and links.
@@ -314,7 +341,7 @@ fn apply_plan_installs_a_bundle_and_keeps_the_old_tree_until_the_next_start() {
 fn assert_failed_and_old_version_restarted(fx: &Fixture) {
     assert_eq!(fs::read(&fx.target).unwrap(), fx.old_exe);
     assert_eq!(fs::read(fx.payload(&fx.install)).unwrap(), b"old-td");
-    assert!(fx.receipt().failed);
+    assert_eq!(fx.receipt().outcome, Outcome::Failed);
     assert!(!fx.staged.exists() && fx.no_claim_left());
     assert!(!fx.backup().exists());
     assert_eq!(fx.started().as_deref(), Some("--start-minimized"));
@@ -548,10 +575,10 @@ fn a_release_refused_as_signed_differently_is_not_downloaded_again() {
 fn the_update_receipt_is_read_once() {
     let path = std::env::temp_dir().join(format!("quill-receipt-{}.json", std::process::id()));
     let _ = fs::remove_file(&path);
-    write_result(path.clone(), &release(), false).unwrap();
+    write_result(path.clone(), &release(), Outcome::Installed).unwrap();
     let first = take_receipt(&path).expect("the first start reads the receipt");
     assert_eq!(first.release.version, release().version);
-    assert!(!first.failed);
+    assert_eq!(first.outcome, Outcome::Installed);
     assert!(!path.exists());
     assert!(take_receipt(&path).is_none());
 }
@@ -561,7 +588,7 @@ fn a_receipt_that_fails_leaves_no_temp_file_so_the_next_one_lands() {
     let dir = crate::scratch::process_dir("quill-receipt-retry");
     let path = dir.join("update-result.json");
     fs::create_dir_all(&path).unwrap();
-    assert!(write_result(path.clone(), &release(), false).is_err());
+    assert!(write_result(path.clone(), &release(), Outcome::Installed).is_err());
     let left: Vec<_> = fs::read_dir(&dir)
         .unwrap()
         .map(|entry| entry.unwrap().file_name())
@@ -569,7 +596,25 @@ fn a_receipt_that_fails_leaves_no_temp_file_so_the_next_one_lands() {
     assert_eq!(left, ["update-result.json"], "no temp file stays behind");
 
     fs::remove_dir(&path).unwrap();
-    write_result(path.clone(), &release(), true).unwrap();
-    assert!(take_receipt(&path).is_some_and(|receipt| receipt.failed));
+    write_result(path.clone(), &release(), Outcome::Failed).unwrap();
+    assert!(take_receipt(&path).is_some_and(|receipt| receipt.outcome == Outcome::Failed));
     let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_receipt_written_with_the_old_failed_flag_still_reads() {
+    let release = serde_json::to_value(release()).unwrap();
+    let old = |failed: bool| {
+        serde_json::to_vec(&serde_json::json!({ "release": release, "failed": failed })).unwrap()
+    };
+    assert_eq!(
+        InstallResult::parse(&old(true)).map(|r| r.outcome),
+        Some(Outcome::Failed)
+    );
+    assert_eq!(
+        InstallResult::parse(&old(false)).map(|r| r.outcome),
+        Some(Outcome::Installed)
+    );
+    let unknown = serde_json::to_vec(&serde_json::json!({ "release": release, "outcome": "x" }));
+    assert!(InstallResult::parse(&unknown.unwrap()).is_none());
 }

@@ -44,7 +44,7 @@ impl QuillApp {
     fn demo_story_repost_gone(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.demo_story_photo(window, cx);
         if let Some(session) = self.demo_session.as_mut() {
-            session.stories.missing.insert((CHANNEL, GONE_ORIGIN));
+            session.stories.story_fetch.gone((CHANNEL, GONE_ORIGIN));
         }
     }
 

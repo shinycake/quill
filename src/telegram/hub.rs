@@ -24,7 +24,7 @@ use crate::diagnostics::{Diagnostic, DiagnosticSink};
 use crate::telegram::client::{OwnedEnvelope, ReceiveBridge, copy_and_parse};
 use crate::telegram::ffi::{MAX_NATIVE_LOG_VERBOSITY, TdJson, TdJsonError};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
@@ -98,10 +98,17 @@ pub const LAUNCH_CHATS_EXTRA: &str = "quill-launch-chats";
 /// first frame before the chats could draw. A TDLib still opening its
 /// database is further off, and the window does not wait for it.
 pub struct LaunchChats {
+    /// The client whose page the first frame waits for: the on-screen
+    /// account's, claimed when it asks for the page. Another account's
+    /// states move nothing. `NO_OWNER` before the claim.
+    owner: AtomicI64,
     stage: AtomicU8,
     lock: Mutex<()>,
     came: Condvar,
 }
+
+/// No client has claimed the launch page.
+const NO_OWNER: i64 = -1;
 
 /// TDLib is opening its database.
 const STARTING: u8 = 0;
@@ -127,10 +134,17 @@ pub static LAUNCH_CHATS: LaunchChats = LaunchChats::new();
 impl LaunchChats {
     pub const fn new() -> Self {
         Self {
+            owner: AtomicI64::new(NO_OWNER),
             stage: AtomicU8::new(STARTING),
             lock: Mutex::new(()),
             came: Condvar::new(),
         }
+    }
+
+    /// `client_id` asks for the launch page: only its envelopes move the
+    /// wait from now on.
+    pub fn claim(&self, client_id: i32) {
+        self.owner.store(i64::from(client_id), Ordering::SeqCst);
     }
 
     fn stage(&self) -> u8 {
@@ -174,7 +188,8 @@ impl LaunchChats {
     /// authorization state that means no chats are coming.
     fn observe(&self, json: &str, owned: &OwnedEnvelope) {
         use crate::telegram::envelope::{AuthPayload, AuthorizationState, EnvelopePayload};
-        if self.is_in() {
+        if self.is_in() || owned.client_id.map(i64::from) != Some(self.owner.load(Ordering::SeqCst))
+        {
             return;
         }
         let no_chats = match &owned.envelope.payload {
@@ -228,6 +243,7 @@ impl Routes {
     pub fn unregister(&self, client_id: i32) {
         lock(&self.map).remove(&client_id);
         lock(&self.on_ready).remove(&client_id);
+        crate::agent::td::client_closed(client_id);
     }
 
     /// Run `send` on the receive thread when `client_id` next reports
@@ -265,6 +281,7 @@ impl Routes {
             Delivery::Delivered
         } else {
             map.remove(&client_id);
+            crate::agent::td::client_closed(client_id);
             Delivery::ReaderGone
         }
     }
@@ -319,14 +336,31 @@ static SHARED: Mutex<Option<Arc<TdHub>>> = Mutex::new(None);
 enum Reuse {
     None,
     Running(Arc<TdHub>),
-    /// A hub whose receive thread ended unexpectedly, with its library.
-    Stopped(Option<Arc<TdJson>>),
+    /// A hub whose receive thread ended unexpectedly, with its library and
+    /// what its clients are tied to ([`Handover`]).
+    Stopped(Option<Arc<TdJson>>, Handover),
+}
+
+/// What a replacement hub takes over from a stopped one: the routing table
+/// and the stopped flag the live clients' bridges hold. Without it every
+/// open client would be unrouted on the new hub and still report itself
+/// stopped, while its TDLib instance stays open on the database.
+#[derive(Clone)]
+pub struct Handover {
+    routes: Arc<Routes>,
+    stopped: Arc<AtomicBool>,
+    /// The sequence counter: each client's `Session` ignores envelopes at or
+    /// below its last seen `seq`, so a counter restarting at 0 would make
+    /// every surviving client drop everything the new hub delivers.
+    seq: Arc<AtomicU64>,
 }
 
 fn reusable(slot: Option<&Arc<TdHub>>) -> Reuse {
     match slot {
         None => Reuse::None,
-        Some(hub) if hub.stopped_unexpectedly() => Reuse::Stopped(hub.api().cloned()),
+        Some(hub) if hub.stopped_unexpectedly() => {
+            Reuse::Stopped(hub.api().cloned(), hub.handover())
+        }
         Some(hub) => Reuse::Running(hub.clone()),
     }
 }
@@ -336,19 +370,23 @@ impl TdHub {
     /// use. A failed load is not remembered, so a later call can retry.
     pub fn shared(sink: Arc<dyn DiagnosticSink>) -> Result<Arc<TdHub>, TdJsonError> {
         let mut slot = lock(&SHARED);
+        let mut took_over = None;
         let api = match reusable(slot.as_ref()) {
             Reuse::Running(hub) => return Ok(hub),
             // The receive thread died: keep the loaded library (it is
             // already secured and must stay loaded for TDLib's worker
             // threads) and only start a new receive thread over it.
-            Reuse::Stopped(Some(api)) => api,
-            Reuse::Stopped(None) | Reuse::None => Self::load_secured_api()?,
+            Reuse::Stopped(Some(api), handover) => {
+                took_over = Some(handover);
+                api
+            }
+            Reuse::Stopped(None, _) | Reuse::None => Self::load_secured_api()?,
         };
         let receive = api.clone();
         let source: ReceiveSource = Box::new(move |timeout| receive.receive(timeout));
         let waker = api.clone();
         let wake: ReceiveWake = Box::new(move || waker.wake_receive());
-        let mut hub = TdHub::with_source(source, wake, sink).map_err(|_| TdJsonError::Load)?;
+        let mut hub = TdHub::start(source, wake, sink, took_over).map_err(|_| TdJsonError::Load)?;
         hub.api = Some(api);
         let hub = Arc::new(hub);
         *slot = Some(hub.clone());
@@ -387,10 +425,52 @@ impl TdHub {
         wake: ReceiveWake,
         sink: Arc<dyn DiagnosticSink>,
     ) -> std::io::Result<Self> {
-        let routes = Arc::new(Routes::default());
-        let seq = Arc::new(AtomicU64::new(0));
+        Self::start(source, wake, sink, None)
+    }
+
+    /// A hub taking over a stopped one's routes and stopped flag, so the
+    /// clients that were on it keep receiving.
+    pub fn with_source_replacing(
+        source: ReceiveSource,
+        wake: ReceiveWake,
+        sink: Arc<dyn DiagnosticSink>,
+        stopped_hub: &TdHub,
+    ) -> std::io::Result<Self> {
+        Self::start(source, wake, sink, Some(stopped_hub.handover()))
+    }
+
+    /// What a replacement of this hub takes over.
+    pub fn handover(&self) -> Handover {
+        Handover {
+            routes: self.routes.clone(),
+            stopped: self.stopped.clone(),
+            seq: self.seq.clone(),
+        }
+    }
+
+    fn start(
+        source: ReceiveSource,
+        wake: ReceiveWake,
+        sink: Arc<dyn DiagnosticSink>,
+        handover: Option<Handover>,
+    ) -> std::io::Result<Self> {
+        let (routes, stopped, seq) = match handover {
+            // The old loop is gone: the clients' flag reads running again.
+            Some(Handover {
+                routes,
+                stopped,
+                seq,
+            }) => {
+                stopped.store(false, Ordering::SeqCst);
+                (routes, stopped, seq)
+            }
+            None => (
+                Arc::new(Routes::default()),
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(AtomicU64::new(0)),
+            ),
+        };
         let shutdown = Arc::new(AtomicBool::new(false));
-        let stopped = Arc::new(AtomicBool::new(false));
         let guard = StopGuard {
             shutdown: shutdown.clone(),
             stopped: stopped.clone(),

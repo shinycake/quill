@@ -64,6 +64,7 @@ pub(crate) fn ready_driver(
 pub(crate) struct ViewCtlSender {
     pub(crate) sent: Mutex<Vec<String>>,
     pub(crate) fail_view: Mutex<bool>,
+    pub(crate) fail_open_chat: Mutex<bool>,
 }
 
 impl ViewCtlSender {
@@ -71,6 +72,7 @@ impl ViewCtlSender {
         Arc::new(Self {
             sent: Mutex::new(Vec::new()),
             fail_view: Mutex::new(false),
+            fail_open_chat: Mutex::new(false),
         })
     }
 
@@ -80,6 +82,10 @@ impl ViewCtlSender {
 
     pub(crate) fn set_fail_view(&self, fail: bool) {
         *self.fail_view.lock().expect("view ctl sender") = fail;
+    }
+
+    pub(crate) fn set_fail_open_chat(&self, fail: bool) {
+        *self.fail_open_chat.lock().expect("view ctl sender") = fail;
     }
 
     pub(crate) fn view_count(&self) -> usize {
@@ -392,7 +398,11 @@ pub(crate) fn tracked_group_call(
         is_video_chat: false,
         is_live_story: false,
         is_joined: true,
-        need_rejoin,
+        rejoin: if need_rejoin {
+            crate::state::GroupCallRejoin::Wanted { attempts: 0 }
+        } else {
+            crate::state::GroupCallRejoin::Idle
+        },
         can_be_managed,
         is_owned,
         is_muted_self: true,
@@ -525,10 +535,10 @@ pub(crate) fn pump_until_mic_answers(driver: &mut ConnectDriver<Arc<RecordingSen
 }
 
 pub(crate) fn pump_until_screen_answers(driver: &mut ConnectDriver<Arc<RecordingSender>>) {
-    driver.pump_call_screen();
+    driver.pump_call_screen(std::time::Instant::now());
     while driver.call_screen().opening() {
         std::thread::yield_now();
-        driver.pump_call_screen();
+        driver.pump_call_screen(std::time::Instant::now());
     }
 }
 
@@ -536,4 +546,78 @@ pub(crate) fn until(mut done: impl FnMut() -> bool) {
     while !done() {
         std::thread::yield_now();
     }
+}
+
+/// Records every request and refuses them all while `refuse` is set (a
+/// closing client, a native send error).
+#[derive(Default)]
+pub(crate) struct ToggleSender {
+    pub(crate) sent: Mutex<Vec<String>>,
+    pub(crate) refuse: std::sync::atomic::AtomicBool,
+    /// Refuses every send once this many have been recorded.
+    pub(crate) refuse_after: Mutex<Option<usize>>,
+}
+
+impl ToggleSender {
+    pub(crate) fn refuse_after(&self, recorded: usize) {
+        *self.refuse_after.lock().expect("toggle sender") = Some(recorded);
+    }
+
+    pub(crate) fn refuse(&self, on: bool) {
+        self.refuse.store(on, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub(crate) fn snapshot(&self) -> Vec<String> {
+        self.sent.lock().expect("toggle sender").clone()
+    }
+}
+
+impl JsonSender for Arc<ToggleSender> {
+    fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
+        if self.refuse.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(ConnectSendError::Native);
+        }
+        let mut sent = self.sent.lock().expect("toggle sender");
+        if self
+            .refuse_after
+            .lock()
+            .expect("toggle sender")
+            .is_some_and(|limit| sent.len() >= limit)
+        {
+            return Err(ConnectSendError::Native);
+        }
+        sent.push(request.to_string());
+        Ok(())
+    }
+}
+
+/// What [`toggle_driver`] returns: the dir to keep alive, the driver, its
+/// sender, the sink and the sequence counter.
+pub(crate) type ToggleRig = (
+    std::path::PathBuf,
+    ConnectDriver<Arc<ToggleSender>>,
+    Arc<ToggleSender>,
+    Arc<dyn DiagnosticSink>,
+    AtomicU64,
+);
+
+/// A Ready driver over a [`ToggleSender`]; keep the returned dir alive.
+pub(crate) fn toggle_driver() -> ToggleRig {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let sender = Arc::new(ToggleSender::default());
+    let seq = AtomicU64::new(0);
+    let session = Session::new(AccountKey::primary(), sink.clone());
+    let mut driver = ConnectDriver::new(session, sender.clone(), test_credentials(), prepared);
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
+                &seq,
+                &sink,
+            )
+            .expect("parse"),
+        )
+        .expect("ingest");
+    (dir, driver, sender, sink, seq)
 }

@@ -203,7 +203,7 @@ fn from_member_search_filters_by_sender_and_pages_with_total() {
     let more = fx.last_request("searchChatMessages");
     assert_eq!(more["from_message_id"], 40i64 << 20);
     assert_eq!(more["sender_id"]["user_id"], 5);
-    assert!(fx.driver.session.search.chat_search.loading_more);
+    assert!(fx.driver.session.search.chat_search.loading_more());
     fx.feed(&format!(
         r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":120,"next_from_message_id":{},"messages":[{}]}}"#,
         extra_of(&more),
@@ -212,7 +212,7 @@ fn from_member_search_filters_by_sender_and_pages_with_total() {
     ));
     let state = &fx.driver.session.search.chat_search;
     assert_eq!(state.hits.len(), 3);
-    assert!(!state.loading_more);
+    assert!(!state.loading_more());
     // Appending must not steal the selection or restart the jump.
     assert_eq!(state.position_label(), "2 of 120");
     assert_eq!(fx.count("searchChatMessages"), 2);
@@ -233,7 +233,7 @@ fn private_chats_and_channels_have_no_from_picker() {
         r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#,
     );
     for id in [8, 7] {
-        fx.driver.session.open_chat = Some(ChatId(id));
+        fx.driver.session.open = crate::state::OpenView::of(Some(ChatId(id)));
         assert!(fx.driver.session.open_chat_search());
         assert!(!fx.driver.session.chat_search_can_pick_sender(), "{id}");
         assert!(fx.driver.open_chat_search_from_picker().is_err());
@@ -286,7 +286,7 @@ fn calendar_highlights_media_days_and_jumps_to_their_first_message() {
     ));
     let cal = fx.driver.session.search.history_calendar.as_ref().unwrap();
     assert_eq!(cal.days.len(), 2);
-    assert!(!cal.loading);
+    assert!(!cal.is_loading());
     let picked = crate::search_filters::local_day_number(1_789_000_000);
 
     // Paging back for an older month continues from the oldest message.
@@ -316,8 +316,37 @@ fn unfiltered_calendar_sends_no_calendar_request() {
             .history_calendar
             .as_ref()
             .unwrap()
-            .exhausted
+            .paging
+            == crate::state::CalendarPaging::Exhausted
     );
+}
+
+#[test]
+fn a_failed_calendar_page_is_asked_again_on_the_next_month() {
+    let mut fx = Fixture::new();
+    assert!(fx.driver.open_chat_search().unwrap());
+    fx.driver
+        .set_chat_search_media(SearchMediaKind::Media)
+        .unwrap();
+    fx.driver.open_history_calendar().unwrap();
+    let first = fx.last_request("getChatMessageCalendar");
+    fx.feed(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":429,"message":"Too Many Requests: retry after 3"}}"#,
+        extra_of(&first)
+    ));
+    let calendar = || {
+        fx.driver
+            .session
+            .search
+            .history_calendar
+            .as_ref()
+            .map(|c| c.paging)
+    };
+    assert_eq!(calendar(), Some(crate::state::CalendarPaging::Failed));
+    let asked = fx.count("getChatMessageCalendar");
+    let older = crate::search_filters::YearMonth::of(1_700_000_000);
+    fx.driver.show_calendar_month(older).unwrap();
+    assert_eq!(fx.count("getChatMessageCalendar"), asked + 1);
 }
 
 #[test]
@@ -391,29 +420,70 @@ fn jump_to_a_date_before_the_chat_starts_goes_to_the_oldest_message() {
 
 #[test]
 fn global_search_filters_reach_search_messages() {
-    use crate::search_filters::{
-        GlobalSearchFilters, SearchChatType, SearchDateRange, SearchMediaKind,
-    };
+    use crate::search_filters::{GlobalSearchFilters, SearchChatType, SearchDateRange};
+    use crate::search_tabs::SearchTab;
     let mut fx = Fixture::new();
     commit_typed_search(&mut fx.driver, "dune");
     fx.driver
-        .set_search_filters(GlobalSearchFilters {
-            chat_type: SearchChatType::Channels,
-            media: SearchMediaKind::Files,
-            date: SearchDateRange::Week,
-            ..GlobalSearchFilters::default()
-        })
+        .set_search_filters(GlobalSearchFilters::default().with_chat_type(SearchChatType::Channels))
         .unwrap();
     let search = fx.last_request("searchMessages");
-    assert_eq!(search["query"], "dune");
     assert_eq!(
         search["chat_type_filter"]["@type"],
         "searchMessagesChatTypeFilterChannel"
     );
+    let mut files = GlobalSearchFilters::default().on_tab(SearchTab::Files);
+    files.date = SearchDateRange::Week;
+    fx.driver.set_search_filters(files).unwrap();
+    let search = fx.last_request("searchMessages");
+    assert_eq!(search["query"], "dune");
     assert_eq!(search["filter"]["@type"], "searchMessagesFilterDocument");
     assert!(search["min_date"].as_i64().unwrap() > 0);
     assert_eq!(search["max_date"], 0);
     // Closing the search drops the filters.
     fx.driver.close_search();
     assert!(fx.driver.session.search.search.filters.is_default());
+}
+
+#[test]
+fn a_failed_older_page_waits_for_a_retry_and_keeps_the_results() {
+    let mut fx = Fixture::new();
+    assert!(fx.driver.open_chat_search().unwrap());
+    fx.driver
+        .set_chat_search_sender(Some(MessageSender::User { user_id: 5 }))
+        .unwrap();
+    let search = fx.last_request("searchChatMessages");
+    fx.feed(&format!(
+        r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":120,"next_from_message_id":{},"messages":[{},{}]}}"#,
+        extra_of(&search),
+        40i64 << 20,
+        text_message(50 << 20, 5, "newest from five"),
+        text_message(40 << 20, 5, "older from five"),
+    ));
+
+    fx.driver.load_more_chat_search().unwrap();
+    let more = fx.last_request("searchChatMessages");
+    fx.feed(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":500,"message":"Timeout"}}"#,
+        extra_of(&more),
+    ));
+    let state = &fx.driver.session.search.chat_search;
+    assert!(state.more_failed(), "the strip offers Retry");
+    assert_eq!(state.hits.len(), 2, "the results stay");
+    assert!(!state.can_load_more(), "nothing asks again by itself");
+
+    // Retry asks the same page.
+    let before = fx.count("searchChatMessages");
+    fx.driver.load_more_chat_search().unwrap();
+    assert_eq!(fx.count("searchChatMessages"), before + 1);
+    let retry = fx.last_request("searchChatMessages");
+    assert_eq!(retry["from_message_id"], 40i64 << 20);
+    fx.feed(&format!(
+        r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":120,"next_from_message_id":0,"messages":[{}]}}"#,
+        extra_of(&retry),
+        text_message(30 << 20, 5, "third from five"),
+    ));
+    let state = &fx.driver.session.search.chat_search;
+    assert_eq!(state.hits.len(), 3);
+    assert!(!state.more_failed() && !state.loading_more());
 }

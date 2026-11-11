@@ -56,10 +56,11 @@ impl Session {
             self.remember_files(std::slice::from_ref(file));
         }
         self.apply_business_bot_exact(&kind, pending);
-        if pending.map(|p| p.purpose)
-            == Some(RequestPurpose::Media(MediaPurpose::LocationPicker(
-                crate::location_picker::LocationPickerPurpose::ResolveVenueBot,
-            )))
+        if let Some(pending) = pending
+            && pending.purpose
+                == RequestPurpose::Media(MediaPurpose::LocationPicker(
+                    crate::location_picker::LocationPickerPurpose::ResolveVenueBot,
+                ))
         {
             // tdesktop takes only an inline bot (`isBotInlineGeo`).
             let bot = match &kind {
@@ -70,7 +71,7 @@ impl Session {
                     .map(|_| user_id.0),
                 _ => None,
             };
-            self.location.venue_bot_resolved(bot);
+            self.location.venue_bot_resolved(pending.id.0, bot);
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ResolveGifSearchBot) {
             self.stickers.gifs.search_bot_user_id = match &kind {
@@ -83,8 +84,7 @@ impl Session {
                 _ => None,
             };
             if self.stickers.gifs.search_bot_user_id.is_none() {
-                self.stickers.gifs.search_failed = true;
-                self.stickers.gifs.search_loading = false;
+                self.stickers.gifs.search_failed_now();
             }
         }
         // Bots slice: `searchPublicChat` answer for `@botname`
@@ -147,13 +147,14 @@ impl Session {
             && let Some(DeepLinkState::ResolvingChat {
                 action,
                 generation: slot_generation,
-            }) = self.chats_state.deep_link.as_ref()
+            }) = self.chats_state.deep_link_stage()
             && *slot_generation == generation
         {
-            self.chats_state.deep_link = Some(DeepLinkState::ChatReady {
-                chat_id,
-                action: action.clone(),
-            });
+            self.chats_state
+                .enter_deep_link_stage(DeepLinkState::ChatReady {
+                    chat_id,
+                    action: action.clone(),
+                });
         }
         if let ChatKind::Supergroup { supergroup_id, .. } = kind {
             self.groups
@@ -230,6 +231,9 @@ impl Session {
         self.replace_avatar(old_photo_file_id, photo_file_id);
         // `updateSupergroup` precedes `updateNewChat`: adopt its status now.
         self.adopt_supergroup_status_for_chat(chat_id);
+        // A story of this poster that `getStory` refused before the chat was
+        // known is asked for again.
+        self.stories.poster_chat_known(chat_id.0);
     }
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply_update_supergroup(
@@ -429,20 +433,19 @@ impl Session {
                                 }
                             }
                         }
-                        fetch => {
-                            *fetch = InviteLinkFetch::Loaded(InviteLinkList {
-                                total_count: 1,
-                                links: vec![link],
-                            });
+                        // The list is still on its way: its answer is the
+                        // whole list, this link included once the server
+                        // has it. Nothing is invented from one entry.
+                        InviteLinkFetch::Loading(_) => {}
+                        // A failed list is dropped so the next fetch asks
+                        // again, instead of showing one link as the list.
+                        InviteLinkFetch::Failed(_) => {
+                            entry.remove();
                         }
                     }
                 }
-                std::collections::hash_map::Entry::Vacant(entry) => {
-                    entry.insert(InviteLinkFetch::Loaded(InviteLinkList {
-                        total_count: 1,
-                        links: vec![link],
-                    }));
-                }
+                // Never fetched: the first fetch gets the whole list.
+                std::collections::hash_map::Entry::Vacant(_) => {}
             }
         }
     }
@@ -624,11 +627,14 @@ impl Session {
             )
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
-            let albums = self.stories.albums.entry(chat_id.0).or_default();
-            if let Some(existing) = albums.iter_mut().find(|a| a.id == album.id) {
-                *existing = album.clone();
-            } else {
-                albums.push(album.clone());
+            // Merge into a list that was fetched: a list started here from
+            // one album would read as the chat's whole list.
+            if let Some(albums) = self.stories.albums.get_mut(&chat_id.0) {
+                if let Some(existing) = albums.iter_mut().find(|a| a.id == album.id) {
+                    *existing = album.clone();
+                } else {
+                    albums.push(album.clone());
+                }
             }
             if !matches!(purpose, RequestPurpose::SetStoryAlbumName) {
                 self.stories.album_stories.remove(&(chat_id.0, album.id));
@@ -656,12 +662,19 @@ impl Session {
         {
             self.chat_list
                 .folder_chats_to_leave
-                .insert(folder_id, chat_ids.iter().map(|id| id.0).collect());
+                .entry(folder_id)
+                .or_default()
+                .succeed(chat_ids.iter().map(|id| id.0).collect());
         }
         // `getChatFolderNewChats` answer: the "N new chats" bar.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatFolderNewChats)
             && let Some(folder_id) = pending.and_then(|p| p.folder_id)
         {
+            // Asked now that it answered: a request that never left is
+            // asked again, one that answered waits out the update period.
+            self.chat_list
+                .folder_new_chats_asked
+                .insert(folder_id, std::time::Instant::now());
             let ids: Vec<i64> = chat_ids.iter().map(|id| id.0).collect();
             if ids.is_empty() {
                 self.chat_list.folder_new_chats.remove(&folder_id);
@@ -674,8 +687,11 @@ impl Session {
             && let Some(folder_id) = pending.and_then(|p| p.folder_id)
         {
             self.chat_list
-                .folder_link_chats
-                .insert(folder_id, chat_ids.iter().map(|id| id.0).collect());
+                .folder_shares
+                .entry(folder_id)
+                .or_default()
+                .chats
+                .succeed(chat_ids.iter().map(|id| id.0).collect());
         }
         // B10: profile panel lists (groups in common, similar channels,
         // personal channel candidates).
@@ -688,7 +704,9 @@ impl Session {
         // composer's "post as" picker options. Runs before the
         // search branch below consumes `chat_ids`.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatsToPostStories) {
-            self.stories.post_as_chats = chat_ids.iter().map(|id| id.0).collect();
+            self.stories
+                .post_as
+                .succeed(chat_ids.iter().map(|id| id.0).collect());
         }
         // Parity slice: `getChatNotificationSettingsExceptions`
         // answer — the scope is correlated via `pending.scope`
@@ -696,11 +714,14 @@ impl Session {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetChatNotificationSettingsExceptions)
             && let Some(scope) = pending.and_then(|p| p.scope)
         {
-            self.settings
-                .notification_exceptions
-                .entry(scope)
-                .or_default()
-                .succeed(chat_ids.iter().map(|id| id.0).collect());
+            // Only the ask that waits for it takes the list: an answer for a
+            // list dropped as stale meanwhile is not the list now wanted.
+            if let Some(list) = self.settings.notification_exceptions.get_mut(&scope) {
+                list.answered(
+                    pending.map(|p| p.id),
+                    chat_ids.iter().map(|id| id.0).collect(),
+                );
+            }
         }
         if let Some(pending) = pending
             && matches!(

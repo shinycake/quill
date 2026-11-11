@@ -85,7 +85,7 @@ impl QuillApp {
     ) {
         let text = self.composer.read(cx).value().to_string();
         let (range, existing) = match self.composer_date_at_caret(cx) {
-            Some((range, time)) if !self.chat_ui.rich_editor_open => (range, Some(time)),
+            Some((range, time)) if !self.chat_ui.rich.editor_open() => (range, Some(time)),
             _ => (self.composer.read(cx).selected_range(), None),
         };
         let Some(selected) = text.get(range.clone()).filter(|s| !s.is_empty()) else {
@@ -99,7 +99,7 @@ impl QuillApp {
                 .hour_cycle(HourCycle::H23)
         });
         let picker = TimePicker::open(state, initial, window, cx);
-        self.composer_ui.date_dialog = Some(ComposerDateDialog {
+        self.chat_ui.date_dialog = Some(ComposerDateDialog {
             range,
             selected,
             picker,
@@ -112,7 +112,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.composer_ui.date_dialog.take().is_some() {
+        if self.chat_ui.date_dialog.take().is_some() {
             self.composer
                 .update(cx, |input, cx| input.focus(window, cx));
             cx.notify();
@@ -121,7 +121,7 @@ impl QuillApp {
 
     /// "Save": the remembered text becomes the picked date.
     fn apply_composer_date(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(dialog) = self.composer_ui.date_dialog.as_ref() else {
+        let Some(dialog) = self.chat_ui.date_dialog.as_ref() else {
             return;
         };
         let Some(time) = picked_unix(&dialog.picker, 0, cx)
@@ -144,7 +144,7 @@ impl QuillApp {
             return;
         }
         let url = date_link(time);
-        if self.chat_ui.rich_editor_open {
+        if self.chat_ui.rich.editor_open() {
             let (new_text, selection) = apply_format_markup(&text, range, &FormatAction::Link(url));
             self.composer.update(cx, |input, cx| {
                 input.set_value(&new_text, window, cx);
@@ -177,7 +177,7 @@ impl QuillApp {
         match std::env::var("QUILL_DEMO_COMPOSER_BOX").as_deref() {
             Ok("link") => self.open_composer_link_dialog(window, cx),
             Ok("code") => {
-                self.chat_ui.rich_editor_open = true;
+                self.chat_ui.rich.set_editor(true);
                 self.composer.update(cx, |input, cx| {
                     input.set_value("```rust\nfn main() {}\n```", window, cx);
                     input.set_selected_range(12..12, cx);
@@ -196,7 +196,7 @@ impl QuillApp {
 
     /// The date box's body: the date and time picker.
     pub(super) fn composer_date_dialog_panel(&self, _: &mut Context<Self>) -> Option<AnyElement> {
-        let dialog = self.composer_ui.date_dialog.as_ref()?;
+        let dialog = self.chat_ui.date_dialog.as_ref()?;
         Some(
             div()
                 .id("composer-date-dialog")
@@ -257,7 +257,8 @@ pub(super) fn demo_contacts(
             session.apply(owned);
         }
     }
-    session.users_state.contacts = Some(people.iter().map(|(id, _, _)| *id).collect());
+    session.users_state.contacts =
+        quill::state::fetch::Fetch::Ready(people.iter().map(|(id, _, _)| *id).collect());
 }
 
 #[cfg(test)]

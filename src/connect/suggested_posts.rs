@@ -5,7 +5,7 @@
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::{PaymentsPurpose, RequestPurpose};
-use crate::suggested_posts::{SuggestTerms, SuggestedPostPurpose};
+use crate::suggested_posts::{BarSend, SuggestTerms, SuggestedPostPurpose};
 use crate::telegram::requests::{
     add_offer, approve_suggested_post, decline_suggested_post, send_suggested_change,
 };
@@ -82,6 +82,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         is_media: bool,
         terms: SuggestTerms,
     ) -> Result<RequestId, ConnectSendError> {
+        if self
+            .session
+            .payments
+            .suggested_posts
+            .bars
+            .get(&chat_id.0)
+            .is_some_and(|bar| bar.send().is_sending())
+        {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let purpose = SuggestedPostPurpose::SendChange {
             chat_id: chat_id.0,
             message_id: message_id.0,
@@ -92,16 +102,21 @@ impl<S: JsonSender> ConnectDriver<S> {
             .histories
             .get(&chat_id.0)
             .and_then(|history| history.messages.get(&message_id.0))
-            .map_or(0, |message| message.extras.direct_messages_topic_id);
+            .map_or(0, |message| message.extras.direct_messages_topic_id());
         let result = self.send_suggested(purpose, chat_id, message_id, |extra| {
             send_suggested_change(extra, chat_id, message_id, topic_id, text, is_media, terms)
         });
-        if result.is_ok() {
-            self.session
+        // The bar stays up until the send answers (`apply_suggested_post_ok`
+        // takes it down, the error returns it to `Idle`).
+        if let Ok(request) = result
+            && let Some(bar) = self
+                .session
                 .payments
                 .suggested_posts
                 .bars
-                .remove(&chat_id.0);
+                .get_mut(&chat_id.0)
+        {
+            bar.set_send(BarSend::Sending(request));
         }
         result
     }
@@ -120,14 +135,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             purpose,
             SuggestedPostPurpose::Approve { .. } | SuggestedPostPurpose::Decline { .. }
         );
-        if busy
-            && self
-                .session
-                .payments
-                .suggested_posts
-                .busy
-                .contains(&purpose.key())
-        {
+        let (post_chat, post_message) = purpose.key();
+        if busy && self.session.suggested_post_busy(post_chat, post_message) {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(
@@ -135,16 +144,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(chat_id),
         );
         match self.sender.send_json(&json(extra)) {
-            Ok(()) => {
-                if busy {
-                    self.session
-                        .payments
-                        .suggested_posts
-                        .busy
-                        .insert(purpose.key());
-                }
-                Ok(extra)
-            }
+            Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)

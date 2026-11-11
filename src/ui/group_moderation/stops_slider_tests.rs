@@ -115,3 +115,18 @@ fn thumb_follows_the_server_and_release_reports_the_stop(cx: &mut TestAppContext
     vcx.run_until_parked();
     assert_eq!(slider.read_with(&vcx, |s, _| s.value().end()), 6.0);
 }
+
+#[gpui_kit::test]
+fn thumb_returns_when_the_caller_keeps_its_value(cx: &mut TestAppContext) {
+    let (mut vcx, delay, sent, slot) = harness(cx, 30);
+    vcx.run_until_parked();
+    let slider = slot.borrow().clone().expect("the rendered slider");
+    slider.update(&mut vcx, |_, cx| {
+        cx.emit(SliderEvent::Release(SliderValue::Single(6.0)))
+    });
+    assert_eq!(*sent.borrow(), vec![900]);
+    // The caller refused: its delay is still 30, so is the thumb.
+    assert_eq!(delay.get(), 30);
+    vcx.run_until_parked();
+    assert_eq!(slider.read_with(&vcx, |s, _| s.value().end()), 3.0);
+}

@@ -131,6 +131,28 @@ fn a_pinned_click_shows_hidden_comments() {
 }
 
 #[test]
+fn a_pinned_click_marks_the_comments_read() {
+    let me = Some(MessageSender::User { user_id: 1 });
+    let seen = [message(1, 7, 1, 0)];
+    let mut tracker = CommentsTracker::default();
+    tracker.on_messages(&seen, me);
+    tracker.toggle();
+    let fresh = [message(1, 7, 1, 0), message(2, 8, 2, 0)];
+    tracker.on_messages(&fresh, me);
+    assert_eq!(tracker.state(), CommentsState::WithNew);
+    tracker.show_from_pinned();
+    assert_eq!(tracker.state(), CommentsState::Shown);
+    tracker.toggle();
+    assert_eq!(tracker.state(), CommentsState::Hidden);
+    // The same comments again: still read, so no dot comes back.
+    tracker.on_messages(&fresh, me);
+    assert_eq!(tracker.state(), CommentsState::Hidden);
+    tracker.on_messages(&seen, me);
+    tracker.on_messages(&fresh, me);
+    assert_eq!(tracker.state(), CommentsState::Hidden);
+}
+
+#[test]
 fn taps_add_up_and_restart_the_timer() {
     let first = PendingLiveReaction::add(None, 1, 1_000);
     assert_eq!(first.commit_at_ms, 6_500);

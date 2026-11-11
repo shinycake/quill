@@ -1,13 +1,13 @@
 # Changes made by the Quill project
 
-This directory is gpui-pre 0.3.11 from crates.io (Apache-2.0,
+This directory is gpui-pre 0.3.12 from crates.io (Apache-2.0,
 `LICENSE-APACHE`), GPUI's core, used through `[patch.crates-io]` in Quill's
-`Cargo.toml`. Commit `1398c875` added the registry copy without its
+`Cargo.toml`. The commit "Vendor the unmodified gpui-pre 0.3.12 registry copy of gpui-pre" added the registry copy without its
 `examples/` directory and their `[[example]]` tables (and without the
 registry's `.cargo-ok`, `.cargo_vcs_info.json`, `Cargo.toml.orig` and
-`Cargo.lock`), so `git diff 1398c875 -- third_party/gpui-pre` shows every
+`Cargo.lock`), so `git diff <that commit> -- third_party/gpui-pre` shows every
 later change. (The patch was first made on 0.3.8, vendored in `f55b3086`,
-and carried to 0.3.9 in `docs/decisions/gpui-kit-0-7-3.md`, to 0.3.10 in `docs/decisions/gpui-kit-0-8-1.md`, and to 0.3.11 in `docs/decisions/gpui-kit-0-9-0.md`.)
+and carried to 0.3.9 in `docs/decisions/gpui-kit-0-7-3.md`, to 0.3.10 in `docs/decisions/gpui-kit-0-8-1.md`, to 0.3.11 in `docs/decisions/gpui-kit-0-9-0.md`, and to 0.3.12 in `docs/decisions/gpui-pre-0-3-12.md`.)
 
 The Quill project changed it in 2026 so the `surface` element can carry CPU
 pixels where CoreVideo doesn't exist, for HDR stills on Windows
@@ -122,6 +122,14 @@ Desktop does (`docs/decisions/history-preload.md`). `src/elements/list.rs`:
 `ListState::estimated_distance_to_edges` returns the distance from the
 viewport to the list's start and end, counting each item not measured yet at
 the mean height of the measured ones, and the viewport's height.
+
+## A list estimates its items' heights
+
+Channel ads go between posts at least two screens apart, as Telegram
+Desktop does (`SponsoredMessages::inject`, `docs/decisions/sponsored-placement.md`).
+`src/elements/list.rs`: `ListState::estimated_item_heights` returns the
+height of each item in a range, measured items at their height and the
+others at the mean height of the measured ones.
 
 ## The accessibility tree can be forced and read in-process
 
@@ -416,7 +424,9 @@ cache off:
   now, since it can arrive with the hit test unchanged. A drawn frame whose
   hovered hitboxes moved under a still pointer (`note_drag_hover`) refreshes
   once, so cached `drag_over` styles follow them. Tests:
-  `src/ui/drag_redraw_tests.rs`.
+  `src/ui/drag_redraw_tests.rs`. Since 0.3.12 upstream resolves the cursor at
+  the end of `dispatch_mouse_event` on every event, so the patch only keeps
+  the `hit_test_changed` flag the drag branch reads.
 
 The Quill project also changed it in 2026 so the end of a scroll doesn't keep
 presenting:

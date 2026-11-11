@@ -9,6 +9,7 @@ use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, Focusable, TestAppContext, VisualTestContext, px, size};
 use quill::ids::ChatId;
 use quill::platform::{os_launch_attempts, os_opened_last};
+use quill::premium_hub::ton::WithdrawOutcome;
 
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
@@ -95,7 +96,7 @@ fn a_withdrawal_page_that_lands_under_the_lock_opens_after_the_unlock(cx: &mut T
     let url = "https://fragment.com/withdraw?token=2";
     app.update(vcx, |app, cx| {
         if let Some(grams) = app.demo_session.as_mut().map(|s| &mut s.payments.hub.grams) {
-            grams.withdraw_url = Some(url.to_string());
+            grams.withdraw_outcome = Some(WithdrawOutcome::Url(url.to_string()));
         }
         cx.notify();
     });
@@ -104,11 +105,11 @@ fn a_withdrawal_page_that_lands_under_the_lock_opens_after_the_unlock(cx: &mut T
     assert_ne!(os_opened_last().as_deref(), Some(url), "not under the lock");
     let kept = app.read_with(vcx, |app, _| {
         app.session()
-            .and_then(|s| s.payments.hub.grams.withdraw_url.clone())
+            .and_then(|s| s.payments.hub.grams.withdraw_outcome.clone())
     });
     assert_eq!(
-        kept.as_deref(),
-        Some(url),
+        kept,
+        Some(WithdrawOutcome::Url(url.to_string())),
         "the answer waits where it landed"
     );
     unlock(&app, vcx);
@@ -227,7 +228,8 @@ fn the_lock_closes_the_call_windows_boxes_and_refuses_new_ones(cx: &mut TestAppC
     let vcx = &mut vcx;
     app.update_in(vcx, |app, window, cx| {
         app.call_boxes.add_people = Some(crate::ui::call_add_people::AddPeopleBox::new(1));
-        app.group_call.stream.key_shown = true;
+        app.group_call.stream.overlay =
+            Some(crate::ui::group_call_stream_boxes::StreamOverlay::Settings { key_shown: true });
         app.group_call_screen.settings_open = true;
         app.group_call_screen.title_dialog = Some(
             crate::ui::dialogs::group_call::GroupCallTitleDialog::new(window, cx, "x"),
@@ -236,7 +238,10 @@ fn the_lock_closes_the_call_windows_boxes_and_refuses_new_ones(cx: &mut TestAppC
     lock(&app, vcx);
     app.update_in(vcx, |app, window, cx| {
         assert!(app.call_boxes.add_people.is_none(), "Add People goes");
-        assert!(!app.group_call.stream.key_shown, "the stream key hides");
+        assert!(
+            app.group_call.stream.overlay.is_none(),
+            "the stream key hides"
+        );
         assert!(!app.group_call_screen.settings_open);
         assert!(app.group_call_screen.title_dialog.is_none());
         app.open_group_call_settings(cx);

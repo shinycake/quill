@@ -14,6 +14,7 @@
 #![cfg(feature = "demo-capture")]
 
 use super::tests::{Harness, OPEN, OTHER, new_app};
+use crate::ui::links_state::ResolvedStep;
 use crate::ui::recording_state::CaptureFor;
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::test::TestWindowExt as _;
@@ -132,10 +133,13 @@ fn a_link_clicked_in_a_chat_window_does_not_wait_for_the_main_window(cx: &mut Te
     let chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, cx| {
         app.set_window_scope(None);
-        app.links.pending_deep_link_ui = Some(DeepLinkUi::ConferenceCall {
-            link: "https://t.me/call/abc".into(),
-        });
-        app.hold_resolved_link(Some(OTHER), cx);
+        app.hold_resolved_link(
+            ResolvedStep::Ui(DeepLinkUi::ConferenceCall {
+                link: "https://t.me/call/abc".into(),
+            }),
+            Some(OTHER),
+            cx,
+        );
         assert_eq!(app.resolved_link_frame(), Some(OTHER));
     });
     for _ in 0..2 {
@@ -144,7 +148,7 @@ fn a_link_clicked_in_a_chat_window_does_not_wait_for_the_main_window(cx: &mut Te
     let in_chat_window = chat_window_shell(&h, cx);
     assert_eq!(shown(&in_chat_window, cx), Some(DialogKind::ConferenceLink));
     h.app.read_with(cx, |app, _| {
-        assert!(app.links.pending_deep_link_ui.is_none(), "it ran once");
+        assert!(app.links.resolved.is_none(), "it ran once");
     });
 }
 
@@ -157,50 +161,67 @@ fn a_resolved_link_runs_in_the_frame_it_belongs_to(cx: &mut TestAppContext) {
     let _chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, cx| {
         app.set_window_scope(None);
-        app.links.pending_deep_link_ui = Some(DeepLinkUi::ConferenceCall {
-            link: "https://t.me/call/abc".into(),
-        });
-        app.hold_resolved_link(Some(OTHER), cx);
+        app.hold_resolved_link(
+            ResolvedStep::Ui(DeepLinkUi::ConferenceCall {
+                link: "https://t.me/call/abc".into(),
+            }),
+            Some(OTHER),
+            cx,
+        );
     });
     draw(h.main, cx);
     h.app.update(cx, |app, cx| {
         assert!(
-            app.links.pending_deep_link_ui.is_some(),
+            app.links.resolved.is_some(),
             "the main frame leaves the chat window's link"
         );
-        app.links.pending_deep_link_ui = Some(DeepLinkUi::Settings(SettingsTarget::Language));
-        app.hold_resolved_link(Some(OTHER), cx);
+        app.hold_resolved_link(
+            ResolvedStep::Ui(DeepLinkUi::Settings(SettingsTarget::Language)),
+            Some(OTHER),
+            cx,
+        );
         assert_eq!(
             app.resolved_link_frame(),
             None,
             "a settings page is the main window's"
         );
-        app.links.pending_deep_link_ui = Some(DeepLinkUi::Settings(SettingsTarget::QrCode));
+        app.hold_resolved_link(
+            ResolvedStep::Ui(DeepLinkUi::Settings(SettingsTarget::QrCode)),
+            Some(OTHER),
+            cx,
+        );
         assert_eq!(
             app.resolved_link_frame(),
             Some(OTHER),
             "a box shows where it was clicked"
         );
-        app.links.pending_deep_link_ui = None;
-        app.links.pending_deep_link_open = Some(crate::ui::links_state::PendingOpen::user(
-            OPEN,
-            quill::state::DeepLinkAction::ShareDraft { text: "hi".into() },
-        ));
+        app.hold_resolved_link(
+            ResolvedStep::Open(crate::ui::links_state::PendingOpen::user(
+                OPEN,
+                quill::state::DeepLinkAction::ShareDraft { text: "hi".into() },
+            )),
+            Some(OTHER),
+            cx,
+        );
         assert_eq!(
             app.resolved_link_frame(),
             None,
             "a chat with no window of its own opens in the main window"
         );
-        app.links.pending_deep_link_open = Some(crate::ui::links_state::PendingOpen::user(
-            OTHER,
-            quill::state::DeepLinkAction::ShareDraft { text: "hi".into() },
-        ));
+        app.hold_resolved_link(
+            ResolvedStep::Open(crate::ui::links_state::PendingOpen::user(
+                OTHER,
+                quill::state::DeepLinkAction::ShareDraft { text: "hi".into() },
+            )),
+            Some(OTHER),
+            cx,
+        );
         assert_eq!(
             app.resolved_link_frame(),
             Some(OTHER),
             "a windowed chat goes there"
         );
-        app.links.pending_deep_link_open = None;
+        app.links.resolved = None;
     });
 }
 
@@ -214,10 +235,12 @@ fn a_share_pick_is_the_windows_that_picked(cx: &mut TestAppContext) {
         app.note_window_press(Some(OTHER));
         app.share.link_text = Some("https://example.com".into());
         app.choose_share_chat(OTHER, cx);
-        assert_eq!(app.links.pending_flow_window, Some(OTHER));
+        assert_eq!(
+            app.links.resolved.as_ref().and_then(|link| link.window),
+            Some(OTHER)
+        );
         assert_eq!(app.resolved_link_frame(), Some(OTHER));
-        app.links.pending_deep_link_open = None;
-        app.links.pending_flow_window = None;
+        app.links.resolved = None;
     });
 }
 
@@ -228,13 +251,18 @@ fn the_folder_limit_box_follows_the_box_that_hit_it(cx: &mut TestAppContext) {
     let h = new_app(cx);
     let chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, cx| {
-        app.windows
-            .open_box_in(DialogKind::FolderEditor, Some(OTHER));
+        app.windows.open_box_in(
+            DialogKind::FolderEditor,
+            Some(OTHER),
+            crate::ui::chat_window::AskWaits::Demo,
+        );
         app.note_window_press(None);
         app.set_window_scope(None);
         if let Some(session) = app.demo_session.as_mut() {
-            session.chat_list.folder_limit_hit =
-                Some(quill::folder_limits::FolderLimitKind::Folders);
+            session
+                .chat_list
+                .folder_limit_hits
+                .push_back((quill::folder_limits::FolderLimitKind::Folders, None));
         }
         app.unasked(|app| assert!(app.drain_folder_limit(cx)));
     });
@@ -303,7 +331,7 @@ fn the_custom_emoji_card_shows_where_the_emoji_was_tapped(cx: &mut TestAppContex
     let _chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, cx| {
         app.set_window_scope(Some(OTHER));
-        app.message_ui.custom_emoji_tapped = Some(77);
+        app.note_custom_emoji_tap(77);
         if let Some(session) = app.demo_session.as_mut() {
             session.stickers.custom_emoji_preview = Some(quill::state::CustomEmojiPreview {
                 emoji_id: 77,
@@ -314,6 +342,46 @@ fn the_custom_emoji_card_shows_where_the_emoji_was_tapped(cx: &mut TestAppContex
         assert!(app.custom_emoji_card(cx).is_some(), "the window of the tap");
         app.set_window_scope(None);
         assert!(app.custom_emoji_card(cx).is_none(), "not the main window");
+    });
+}
+
+/// 09-019: tapping the emoji again while its card shows starts the timer
+/// over; the first tap's timer does not close the card early.
+#[gpui_kit::test]
+fn tapping_the_same_custom_emoji_again_restarts_the_card_timer(cx: &mut TestAppContext) {
+    let h = new_app(cx);
+    h.app.update(cx, |app, cx| {
+        app.note_custom_emoji_tap(77);
+        if let Some(session) = app.demo_session.as_mut() {
+            session.stickers.custom_emoji_preview = Some(quill::state::CustomEmojiPreview {
+                emoji_id: 77,
+                set_id: 5,
+                title: "Pack".into(),
+            });
+        }
+        assert!(app.custom_emoji_card(cx).is_some());
+    });
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(5));
+    cx.run_until_parked();
+    h.app.update(cx, |app, cx| {
+        app.note_custom_emoji_tap(77);
+        assert!(app.custom_emoji_card(cx).is_some(), "shown again");
+    });
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(2));
+    cx.run_until_parked();
+    h.app.update(cx, |app, cx| {
+        assert!(
+            app.custom_emoji_card(cx).is_some(),
+            "the first tap's timer ended, the second's has not"
+        );
+    });
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(5));
+    cx.run_until_parked();
+    h.app.update(cx, |app, cx| {
+        assert!(app.custom_emoji_card(cx).is_none(), "its own timer ended");
     });
 }
 
@@ -398,13 +466,13 @@ fn the_gif_tab_follows_its_windows_field(cx: &mut TestAppContext) {
     let _chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.stickers.gifs.search_mode = true;
-            session.stickers.gifs.search_query = "cats".into();
+            session.stickers.gifs.search_begun("cats".into());
         }
         app.set_window_scope(Some(OTHER));
         app.follow_gif_field(cx);
         assert!(
-            app.session().is_some_and(|s| !s.stickers.gifs.search_mode),
+            app.session()
+                .is_some_and(|s| !s.stickers.gifs.search_mode()),
             "an empty field shows the saved GIFs"
         );
     });
@@ -426,7 +494,7 @@ fn each_window_keeps_its_own_gif_section(cx: &mut TestAppContext) {
         let searching = |app: &crate::ui::app::QuillApp| {
             app.session().and_then(|s| {
                 let gifs = &s.stickers.gifs;
-                gifs.search_mode.then(|| gifs.search_query.clone())
+                gifs.search_mode().then(|| gifs.search_query().to_string())
             })
         };
         app.choose_gif_section(GifSection::Emoji(EMOJI.into()), cx);
@@ -436,11 +504,11 @@ fn each_window_keeps_its_own_gif_section(cx: &mut TestAppContext) {
             Some(EMOJI),
             "the emoji section stays"
         );
-        app.pickers.media_panel.panel_mode = crate::ui::media_panel::PanelMode::Compose;
+        app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
         app.pickers.media_panel.tab = PanelTab::Gifs;
         // The chat window opens its GIF tab; the main window's stays open.
         app.note_window_press(Some(OTHER));
-        app.pickers.media_panel.panel_mode = crate::ui::media_panel::PanelMode::Compose;
+        app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
         app.pickers.media_panel.tab = PanelTab::Gifs;
         app.gif_tab_upkeep(cx);
         assert_eq!(
@@ -479,7 +547,7 @@ fn a_gif_tab_shows_its_section_without_a_press(cx: &mut TestAppContext) {
         let searching = |app: &crate::ui::app::QuillApp| {
             app.session().and_then(|s| {
                 let gifs = &s.stickers.gifs;
-                gifs.search_mode.then(|| gifs.search_query.clone())
+                gifs.search_mode().then(|| gifs.search_query().to_string())
             })
         };
         let shown_found = |app: &crate::ui::app::QuillApp| {
@@ -488,14 +556,14 @@ fn a_gif_tab_shows_its_section_without_a_press(cx: &mut TestAppContext) {
         };
         // The main window searched "dogs" and is in use.
         app.note_window_press(None);
-        app.pickers.media_panel.panel_mode = crate::ui::media_panel::PanelMode::Compose;
+        app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
         app.pickers.media_panel.tab = PanelTab::Gifs;
         app.pickers.gif_wanted = GifWanted::Search("dogs".into());
         app.gif_tab_upkeep(cx);
         assert_eq!(searching(app).as_deref(), Some("dogs"));
         // The chat window's tab wants "cats", never answered.
         app.set_window_scope(Some(OTHER));
-        app.pickers.media_panel.panel_mode = crate::ui::media_panel::PanelMode::Compose;
+        app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
         app.pickers.media_panel.tab = PanelTab::Gifs;
         app.pickers.gif_wanted = GifWanted::Search("cats".into());
         app.gif_tab_upkeep(cx);

@@ -220,9 +220,28 @@ fn split_forwarded(args: &[String]) -> (Vec<PathBuf>, Vec<String>) {
 }
 
 static INBOX: Mutex<VecDeque<PathBuf>> = Mutex::new(VecDeque::new());
+/// Files the full inbox turned away, until the UI tells the user.
+static DROPPED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 fn inbox() -> std::sync::MutexGuard<'static, VecDeque<PathBuf>> {
     INBOX.lock_or_recover()
+}
+
+/// Adds `files` that are not queued yet, up to `MAX_QUEUED`; returns how
+/// many new ones did not fit (a repeated path is the same file, not a loss).
+fn queue_files(queue: &mut VecDeque<PathBuf>, files: Vec<PathBuf>) -> usize {
+    let mut dropped = 0;
+    for file in files {
+        if queue.contains(&file) {
+            continue;
+        }
+        if queue.len() < MAX_QUEUED {
+            queue.push_back(file);
+        } else {
+            dropped += 1;
+        }
+    }
+    dropped
 }
 
 /// Queues files for the UI and asks for the window to be raised.
@@ -231,12 +250,11 @@ pub fn push_files(files: Vec<PathBuf>) {
         return;
     }
     let mut queue = inbox();
-    for file in files {
-        if queue.len() < MAX_QUEUED && !queue.contains(&file) {
-            queue.push_back(file);
-        }
-    }
+    let dropped = queue_files(&mut queue, files);
     drop(queue);
+    if dropped > 0 {
+        DROPPED.fetch_add(dropped, std::sync::atomic::Ordering::Relaxed);
+    }
     crate::deep_link_inbox::request_activation();
 }
 
@@ -277,6 +295,11 @@ pub fn handle_forwarded_launch(args: &[String]) {
     }
 }
 
+/// How many files were turned away since the last call, for the toast.
+pub fn take_dropped() -> usize {
+    DROPPED.swap(0, std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Everything queued so far, oldest first.
 pub fn take_files() -> Vec<PathBuf> {
     inbox().drain(..).collect()
@@ -285,8 +308,8 @@ pub fn take_files() -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        FORWARD_PREFIX, MAX_ARG_BYTES, QUIT_FLAG, StartArgs, forwarded_args, parse_start_args,
-        quit_requested, relaunch_args, split_forwarded,
+        FORWARD_PREFIX, MAX_ARG_BYTES, MAX_QUEUED, QUIT_FLAG, StartArgs, forwarded_args,
+        parse_start_args, queue_files, quit_requested, relaunch_args, split_forwarded,
     };
     use std::path::PathBuf;
 
@@ -447,5 +470,21 @@ mod tests {
         std::fs::write(dir.join("0"), b"x").unwrap();
         let parsed = parse_start_args(&args(&["--dock-action", "0"]), &dir);
         assert!(parsed.files.is_empty());
+    }
+
+    /// 05-033: files past the queue's size are counted, not lost silently;
+    /// a path queued twice is not counted.
+    #[test]
+    fn files_that_do_not_fit_are_counted() {
+        let mut queue = std::collections::VecDeque::new();
+        let files: Vec<PathBuf> = (0..MAX_QUEUED + 44)
+            .map(|n| PathBuf::from(format!("/f/{n}")))
+            .collect();
+        assert_eq!(queue_files(&mut queue, files.clone()), 44);
+        assert_eq!(queue.len(), MAX_QUEUED);
+        assert_eq!(
+            queue_files(&mut queue, files.into_iter().take(3).collect()),
+            0
+        );
     }
 }

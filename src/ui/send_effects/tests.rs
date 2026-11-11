@@ -227,16 +227,17 @@ fn the_send_menu_offers_effects_and_sends_with_the_chosen_one(cx: &mut TestAppCo
 
     // The send carries the effect once, then the menu closes.
     app.update(vcx, |app, _| {
-        app.composer_ui.send_effect_once = fire;
-        assert_eq!(app.composer_send_options().effect_id, fire);
-        app.composer_ui.send_effect_once = 0;
+        let once = crate::ui::composer_sends::SendOnce {
+            effect: fire,
+            ..Default::default()
+        };
+        assert_eq!(app.composer_send_options(once).effect_id, fire);
     });
     vcx.update(|window, cx| window.click("send-with-effect", cx));
     frames(vcx);
     assert!(!menu_open(&app, vcx));
     app.update(vcx, |app, _| {
-        assert_eq!(app.composer_ui.send_effect_once, 0);
-        assert_eq!(app.composer_send_options().effect_id, 0);
+        assert_eq!(app.composer_send_options(Default::default()).effect_id, 0);
     });
 }
 
@@ -254,7 +255,7 @@ fn a_click_on_the_card_hides_it_and_one_outside_closes_the_menu(cx: &mut TestApp
     frames(vcx);
     app.update(vcx, |app, _| {
         let open = app.composer_ui.send_menu.open.as_ref().expect("still open");
-        assert!(open.preview.as_ref().is_some_and(|p| p.hiding.is_some()));
+        assert!(open.preview().is_some_and(|p| p.hiding.is_some()));
     });
     // A hiding card takes no presses.
     assert!(!shown(vcx, card));
@@ -323,13 +324,11 @@ fn the_full_list_shows_every_effect_and_searches_them(cx: &mut TestAppContext) {
 
     // A sticker effect opens its card from the list too.
     app.update_in(vcx, |app, window, cx| {
-        app.composer_ui
-            .send_menu
-            .open
-            .as_mut()
-            .expect("open")
-            .query
-            .clear();
+        if let Some(open) = app.composer_ui.send_menu.open.as_mut()
+            && let super::EffectList::Expanded { query, .. } = &mut open.list
+        {
+            query.clear();
+        }
         let _ = window;
         cx.notify();
     });
@@ -419,5 +418,36 @@ fn the_cards_schedule_sends_with_the_effect_after_the_time_is_picked(cx: &mut Te
         assert!(picker.send_after);
         assert_eq!(picker.send_effect, fire);
         assert!(app.composer_ui.send_menu.open.is_none());
+    });
+}
+
+/// The menu was opened over one chat's composer: another chat showing
+/// closes it, so it does not come back when the first returns.
+#[gpui_kit::test]
+fn the_send_menu_closes_when_the_chat_changes(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    vcx.update(|window, cx| window.right_click("composer-send-wrap", cx));
+    frames(vcx);
+    assert!(menu_open(&app, vcx));
+    app.update(vcx, |app, cx| {
+        app.enter_chat_ui(quill::ids::ChatId(CHAT + 1), cx);
+    });
+    assert!(!menu_open(&app, vcx));
+}
+
+/// A chat's Send button starts settled: it does not fade from the glyph
+/// of the chat before.
+#[gpui_kit::test]
+fn a_new_chat_starts_with_a_settled_send_button(cx: &mut TestAppContext) {
+    use quill::send_button::{SendButtonKind, SendMorph};
+    let (app, mut vcx) = open_demo(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.chat_ui
+            .send_morph
+            .set(Some(SendMorph::new(SendButtonKind::Send)));
+        app.enter_chat_ui(quill::ids::ChatId(CHAT + 1), cx);
+        assert!(app.chat_ui.send_morph.get().is_none());
     });
 }

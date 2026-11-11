@@ -6,14 +6,14 @@ description: 'How to build desktop applications with GPUI Kit, the Rust framewor
 # GPUI Kit
 
 > **Quill pin (local note, not upstream).** This copy is vendored from
-> `longbridge/gpui-kit` (formerly `gpui-component`) tag `v0.9.0` (Apache-2.0,
-> see `LICENSE-APACHE`), matching `gpui-kit = "=0.9.0"` in Quill's
+> `longbridge/gpui-kit` (formerly `gpui-component`) tag `v0.9.1` (Apache-2.0,
+> see `LICENSE-APACHE`), matching `gpui-kit = "=0.9.1"` in Quill's
 > `Cargo.toml`. gpui-kit.com docs track the *latest* release and may describe
 > APIs this version lacks. The source of truth for signatures is the local
 > registry source: `~/.cargo/registry/src/index.crates.io-*/` →
-> `gpui-kit-0.9.0` (plus `gpui-pre-*` sub-crates at 0.3.11). Quill builds
-> patched copies of `gpui-base` and `gpui-component` 0.9.0 and of GPUI itself
-> (`gpui-pre`) and `gpui-pre-{apple,macos,linux,windows,wgpu}` 0.3.11 from
+> `gpui-kit-0.9.1` (plus `gpui-pre-*` sub-crates at 0.3.12). Quill builds
+> patched copies of `gpui-base` and `gpui-component` 0.9.1 and of GPUI itself
+> (`gpui-pre`) and `gpui-pre-{apple,macos,linux,windows,wgpu}` 0.3.12 from
 > `third_party/` (`[patch.crates-io]`), so for those crates the code that
 > runs, and the source to grep, is in `third_party/`. Grep there before using
 > any API. Quill does not enable the `speech` or `gpui-fast` features, so

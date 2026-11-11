@@ -20,6 +20,7 @@
 
 use super::app::{ChatListFilter, QuillApp};
 use super::chat_row::{ChatListItem, chat_row_height};
+use crate::ui::chat_list_state::SidebarTab;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -327,10 +328,7 @@ impl QuillApp {
     /// The list the keys drive now, or `None` when the chat list does not
     /// have the keyboard (the key then goes to the next binding).
     fn chat_list_key_scope(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<Scope> {
-        if self.shortcut_blocked(window, cx)
-            || self.chat_list.contacts_tab_open
-            || self.chat_list.calls_tab_open
-        {
+        if self.shortcut_blocked(window, cx) || self.chat_list.tab != SidebarTab::Chats {
             return None;
         }
         let list_focused = self.focus_sidebar.is_focused(window);
@@ -472,7 +470,7 @@ impl QuillApp {
     /// notification hands the keys to its composer. A chat without one leaves
     /// them where they are.
     pub(super) fn focus_opened_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let open = self.session().is_some_and(|s| s.open_chat.is_some());
+        let open = self.session().is_some_and(|s| s.open_chat_id().is_some());
         if open && self.composer_available(self.pane_mode()) {
             self.composer
                 .update(cx, |input, cx| input.focus(window, cx));
@@ -581,7 +579,7 @@ impl QuillApp {
     /// Close the open chat and give the list the keyboard (Escape in the
     /// chat, and the one-column back button).
     pub(super) fn back_to_chat_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(chat) = self.session().and_then(|s| s.open_chat) {
+        if let Some(chat) = self.session().and_then(|s| s.open_chat_id()) {
             // The closed chat's row becomes the selection (tdesktop
             // keeps `_selected` on it), the one state the list paints
             // and the next key steps from.
@@ -596,7 +594,7 @@ impl QuillApp {
         if self.shortcut_blocked(window, cx) || self.windows.scope.is_some() {
             return;
         }
-        let open = self.session().and_then(|s| s.open_chat);
+        let open = self.session().and_then(|s| s.open_chat_id());
         if !self.focus_sidebar.contains_focused(window, cx) {
             // `HistoryWidget::escape` → `handleHistoryBack`: close the chat
             // (`clearSectionStack`) and give the list the keyboard; in a

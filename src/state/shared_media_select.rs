@@ -147,9 +147,9 @@ impl SharedMediaState {
         true
     }
 
-    /// A `getMessageProperties` answer from the shared slot: refresh the
-    /// ticked row it describes. The slot is shared with other callers, so an
-    /// answer for another chat's message with the same id is ignored.
+    /// A `getMessageProperties` answer: refresh the ticked row it
+    /// describes. An answer for another chat's message with the same id is
+    /// ignored.
     pub fn refresh_from_answer(
         &mut self,
         answer: Option<(crate::ids::ChatId, MessageId, MessageActions)>,

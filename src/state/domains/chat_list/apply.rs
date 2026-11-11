@@ -1,6 +1,6 @@
 //! Applies TDLib updates and answers for the chat list: loading, folders, archive and pins.
 use crate::state::*;
-use crate::telegram::envelope::ChatListPayload;
+use crate::telegram::envelope::{ChatListPayload, LastMessageUpdate};
 
 impl Session {
     /// Applies one chat list payload; called by
@@ -82,13 +82,15 @@ impl Session {
                 last_message,
                 positions,
             } => {
-                if let Some(ref message) = last_message {
-                    self.remember_files(&message.files);
+                match &last_message {
+                    LastMessageUpdate::Message(message) => {
+                        self.remember_files(&message.files);
+                        self.set_chat_last_message(chat_id, Some(message));
+                    }
+                    LastMessageUpdate::Cleared => self.set_chat_last_message(chat_id, None),
+                    // Unreadable: the preview stays; the positions still apply.
+                    LastMessageUpdate::Unreadable => {}
                 }
-                // Slice chatlist-list-style: the preview's style inputs
-                // (media icon, formatted-text entities) and the 3-line
-                // sender name are pure functions of the same content.
-                self.set_chat_last_message(chat_id, last_message.as_ref());
                 // `positions` is the full set of lists this chat belongs to.
                 self.replace_main_list_from_positions(chat_id, &positions);
                 self.sync_chat_order();
@@ -139,17 +141,16 @@ impl Session {
                 // `createChatFolderInviteLink` / `editChatFolderInviteLink`:
                 // upsert into the folder's cached link list.
                 if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
-                    let links = self
-                        .chat_list
-                        .folder_invite_links
-                        .entry(folder_id)
-                        .or_default();
-                    match links
-                        .iter_mut()
-                        .find(|existing| existing.invite_link == link.invite_link)
-                    {
-                        Some(existing) => *existing = link,
-                        None => links.push(link),
+                    let share = self.chat_list.folder_shares.entry(folder_id).or_default();
+                    share.links.insert_data_if_missing(Vec::new);
+                    if let Some(links) = share.links.data_mut() {
+                        match links
+                            .iter_mut()
+                            .find(|existing| existing.invite_link == link.invite_link)
+                        {
+                            Some(existing) => *existing = link,
+                            None => links.push(link),
+                        }
                     }
                     if let Some(info) = self
                         .chat_list
@@ -160,12 +161,16 @@ impl Session {
                         info.is_shareable = true;
                         info.has_my_invite_links = true;
                     }
-                    self.chat_list.folder_link_saved = true;
                 }
             }
             ChatListPayload::ChatFolderInviteLinks(links) => {
                 if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
-                    self.chat_list.folder_invite_links.insert(folder_id, links);
+                    self.chat_list
+                        .folder_shares
+                        .entry(folder_id)
+                        .or_default()
+                        .links
+                        .succeed(links);
                 }
             }
             ChatListPayload::PremiumLimit {
@@ -187,19 +192,19 @@ impl Session {
             ChatListPayload::RecommendedChatFolders(folders) => {
                 self.chat_list.recommended_folders = Some(folders);
             }
-            ChatListPayload::ChatFolderInviteLinkInfo(info) => {
-                if pending.is_some_and(|p| p.purpose == RequestPurpose::CheckChatFolderInviteLink)
-                    && self.chat_list.take_folder_invite_answer(pending)
-                {
-                    self.chat_list.folder_invite_info = Some(info);
-                }
-            }
+            // The answer to the "Add folder" box's check goes to the box
+            // (`DialogAnswers`), keyed by its request.
+            ChatListPayload::ChatFolderInviteLinkInfo(_) => {}
             ChatListPayload::ChatLists { lists } => {
                 // Parity slice: `getChatListsToAddChat` response — cache per
                 // chat for the folder picker (correlated via
                 // `PendingRequest::chat_id`).
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.chat_list.chat_lists_for_add.insert(chat_id.0, lists);
+                    self.chat_list
+                        .chat_lists_for_add
+                        .entry(chat_id.0)
+                        .or_default()
+                        .succeed(lists);
                 }
             }
             ChatListPayload::Chats {
@@ -212,10 +217,15 @@ impl Session {
             ChatListPayload::ArchiveChatListSettings { settings } => {
                 // Slice CL2: `getArchiveChatListSettings` answer — only
                 // our own in-flight request writes the cache.
-                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetArchiveChatListSettings) {
-                    self.chat_list.archive_chat_list_settings = Some(settings);
-                    self.chat_list.archive_settings_loading = false;
-                    self.chat_list.archive_mute.note_settings(&settings);
+                if pending.map(|p| p.purpose) == Some(RequestPurpose::GetArchiveChatListSettings)
+                    && self
+                        .chat_list
+                        .archive_settings
+                        .answered(pending.map(|p| p.id), settings)
+                {
+                    self.chat_list
+                        .archive_mute
+                        .note_settings(pending.map(|p| p.id), &settings);
                 }
             }
         }

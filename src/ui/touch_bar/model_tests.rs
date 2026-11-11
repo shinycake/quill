@@ -38,8 +38,7 @@ fn sticker(id: i64, premium: bool) -> StickerItem {
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,
-        requires_premium: premium,
-        premium_animation: None,
+        premium: premium.then_some(quill::telegram::envelope::PremiumSticker { animation: None }),
     }
 }
 
@@ -228,4 +227,35 @@ fn long_badge_counts_keep_their_last_two_digits() {
     assert_eq!(badge_text(7), "7");
     assert_eq!(badge_text(999), "999");
     assert_eq!(badge_text(1234), "..34");
+}
+
+#[test]
+fn only_an_ended_drag_commits_and_a_cancelled_one_snaps_back() {
+    use super::{PinTouch, TouchEnd};
+    let pressed = PinTouch::Pressed {
+        index: 2,
+        start_x: 100.,
+    };
+    // A tap opens; a touch that wandered without dragging does nothing.
+    assert_eq!(pressed.end(103., true), TouchEnd::Open(2));
+    assert_eq!(pressed.end(103., false), TouchEnd::Nothing);
+    // A chat that may not move never starts a drag.
+    assert_eq!(pressed.moved(150., false), pressed);
+    let dragging = pressed.moved(150., true);
+    assert_eq!(
+        dragging,
+        PinTouch::Dragging {
+            index: 2,
+            start_x: 100.
+        }
+    );
+    assert_eq!(
+        dragging.end(150., true),
+        TouchEnd::Drop {
+            index: 2,
+            start_x: 100.
+        }
+    );
+    // The system cancelled the press: nothing is saved.
+    assert_eq!(dragging.end(150., false), TouchEnd::SnapBack);
 }

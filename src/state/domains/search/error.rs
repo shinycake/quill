@@ -13,13 +13,13 @@ impl Session {
     ) {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::RemoveRecentlyFoundChat) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not remove the recent search (error {})",
                     err.code
                 ));
             }
             Some(RequestPurpose::RemoveTopChat | RequestPurpose::SetTopChatsDisabled) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not update frequent contacts (error {})",
                     err.code
                 ));
@@ -28,7 +28,11 @@ impl Session {
         }
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::GetRecommendedChats) => {
-                self.search.search.tabs.recommended_loading = false;
+                self.search
+                    .search
+                    .tabs
+                    .recommended
+                    .fail(format!("error {}", err.code));
             }
             Some(RequestPurpose::SearchMessagesMore | RequestPurpose::SearchPublicPostsMore)
                 if self.search.search.matches_generation(pending) =>
@@ -60,8 +64,8 @@ impl Session {
         if self.search.chat_search.matches_generation(pending)
             && pending.map(|p| p.purpose) == Some(RequestPurpose::SearchChatMessagesMore)
         {
-            self.search.chat_search.loading_more = false;
-            self.search.chat_search.next_from_message_id = MessageId(0);
+            // The page stays askable: the Retry strip asks it again.
+            self.search.chat_search.fail_more();
         }
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::GetChatMessageByDate) => {

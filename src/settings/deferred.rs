@@ -28,9 +28,7 @@ type Sink = dyn Fn(&Path, &[u8]) -> std::io::Result<()> + Send + Sync;
 struct State {
     /// Kept until the bytes are on disk, so a read during the write sees them.
     pending: HashMap<PathBuf, Queued>,
-    writer_running: bool,
-    /// The path the writer is writing now, so a discard can wait for it.
-    in_flight: Option<PathBuf>,
+    writer: Writer,
     /// Writes the sink has finished, ok or not, so a wait can tell a slow
     /// disk from a stuck one.
     finished: u64,
@@ -40,21 +38,73 @@ struct State {
     closed: Vec<PathBuf>,
 }
 
-struct Queued {
-    bytes: Arc<Vec<u8>>,
+/// Whether a writer is draining the queue.
+#[derive(Default)]
+enum Writer {
+    #[default]
+    Idle,
+    Running {
+        /// The path the writer is writing now, so a discard can wait for
+        /// it.
+        in_flight: Option<PathBuf>,
+    },
+}
+
+enum Queued {
+    Ready(Arc<Vec<u8>>),
     /// The last try failed: the writer leaves it until a submit or a
     /// flush asks for another.
-    failed: bool,
+    Failed(Arc<Vec<u8>>),
+}
+
+impl Queued {
+    fn bytes(&self) -> &Arc<Vec<u8>> {
+        match self {
+            Self::Ready(bytes) | Self::Failed(bytes) => bytes,
+        }
+    }
+
+    fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed(_))
+    }
 }
 
 impl State {
     fn has_work(&self) -> bool {
-        self.pending.values().any(|queued| !queued.failed)
+        self.pending.values().any(|queued| !queued.is_failed())
     }
 
     fn retry_failed(&mut self) {
         for queued in self.pending.values_mut() {
-            queued.failed = false;
+            if let Queued::Failed(bytes) = queued {
+                *queued = Queued::Ready(bytes.clone());
+            }
+        }
+    }
+
+    fn writer_running(&self) -> bool {
+        matches!(self.writer, Writer::Running { .. })
+    }
+
+    /// The one place a writer starts or stops.
+    fn set_writer_running(&mut self, running: bool) {
+        self.writer = if running {
+            Writer::Running { in_flight: None }
+        } else {
+            Writer::Idle
+        };
+    }
+
+    fn in_flight(&self) -> Option<&Path> {
+        match &self.writer {
+            Writer::Running { in_flight } => in_flight.as_deref(),
+            Writer::Idle => None,
+        }
+    }
+
+    fn set_in_flight(&mut self, path: Option<PathBuf>) {
+        if let Writer::Running { in_flight } = &mut self.writer {
+            *in_flight = path;
         }
     }
 }
@@ -90,26 +140,21 @@ impl DeferredWriter {
 
     /// Queue `bytes` for `path`, replacing anything still queued for it.
     pub(crate) fn submit(&self, path: PathBuf, bytes: Vec<u8>) {
-        let start = {
-            let mut state = self.shared.lock();
-            if state.closed.iter().any(|folder| path.starts_with(folder)) {
-                return;
-            }
-            state.retry_failed();
-            state.pending.insert(
-                path,
-                Queued {
-                    bytes: Arc::new(bytes),
-                    failed: false,
-                },
-            );
-            !std::mem::replace(&mut state.writer_running, true)
-        };
-        if start && !self.spawn_writer() {
-            // No thread to write on: keep the bytes queued (reads still see
-            // them), so the UI thread never waits for the disk. The next
-            // submit tries a thread again, and `flush` writes them at quit.
-            self.shared.lock().writer_running = false;
+        let mut state = self.shared.lock();
+        if state.closed.iter().any(|folder| path.starts_with(folder)) {
+            return;
+        }
+        state.retry_failed();
+        state.pending.insert(path, Queued::Ready(Arc::new(bytes)));
+        if !state.writer_running() {
+            // Started under the lock, so a submit from another thread sees
+            // either a running writer or none, never one that is about to
+            // be given up. With no thread to write on, the bytes stay
+            // queued (reads still see them), so the UI thread never waits
+            // for the disk. The next submit tries a thread again, and
+            // `flush` writes them at quit.
+            let started = self.spawn_writer();
+            state.set_writer_running(started);
         }
     }
 
@@ -120,7 +165,7 @@ impl DeferredWriter {
             .lock()
             .pending
             .get(path)
-            .map(|queued| queued.bytes.as_ref().clone())
+            .map(|queued| queued.bytes().as_ref().clone())
     }
 
     /// The latest write that failed since the last call, for the status note.
@@ -140,19 +185,20 @@ impl DeferredWriter {
     /// stopped. Runs on the writer thread, or inside `flush` if none could
     /// start.
     fn drain(&self) {
+        let _stopped = WriterExit(self);
         loop {
             let batch = {
                 let mut state = self.shared.lock();
                 if !state.has_work() {
-                    state.writer_running = false;
+                    state.set_writer_running(false);
                     self.shared.idle.notify_all();
                     return;
                 }
                 state
                     .pending
                     .iter()
-                    .filter(|(_, queued)| !queued.failed)
-                    .map(|(path, queued)| (path.clone(), queued.bytes.clone()))
+                    .filter(|(_, queued)| !queued.is_failed())
+                    .map(|(path, queued)| (path.clone(), queued.bytes().clone()))
                     .collect::<Vec<_>>()
             };
             for (path, bytes) in batch {
@@ -161,22 +207,22 @@ impl DeferredWriter {
                     let current = state
                         .pending
                         .get(&path)
-                        .is_some_and(|queued| Arc::ptr_eq(&queued.bytes, &bytes));
+                        .is_some_and(|queued| Arc::ptr_eq(queued.bytes(), &bytes));
                     if !current {
                         // Replaced or discarded since the batch was taken.
                         continue;
                     }
-                    state.in_flight = Some(path.clone());
+                    state.set_in_flight(Some(path.clone()));
                 }
                 let written = (self.shared.sink)(&path, &bytes);
                 let mut state = self.shared.lock();
-                state.in_flight = None;
+                state.set_in_flight(None);
                 state.finished += 1;
                 self.shared.idle.notify_all();
                 let current = state
                     .pending
                     .get_mut(&path)
-                    .filter(|queued| Arc::ptr_eq(&queued.bytes, &bytes));
+                    .filter(|queued| Arc::ptr_eq(queued.bytes(), &bytes));
                 match written {
                     Ok(()) => {
                         if current.is_some() {
@@ -185,7 +231,7 @@ impl DeferredWriter {
                     }
                     Err(err) => {
                         if let Some(queued) = current {
-                            queued.failed = true;
+                            *queued = Queued::Failed(bytes.clone());
                         }
                         state.failure = Some(err);
                     }
@@ -200,11 +246,11 @@ impl DeferredWriter {
         let mut state = self.shared.lock();
         state.retry_failed();
         let mut stalled = Stall::new(stall, state.finished);
-        while state.writer_running || state.has_work() {
-            if !state.writer_running {
+        while state.writer_running() || state.has_work() {
+            if !state.writer_running() {
                 // Queued with no writer (its thread never started): write
                 // here, the one place that is allowed to wait for the disk.
-                state.writer_running = true;
+                state.set_writer_running(true);
                 drop(state);
                 self.drain();
                 state = self.shared.lock();
@@ -238,8 +284,7 @@ impl DeferredWriter {
         state.pending.retain(|path, _| !path.starts_with(folder));
         let mut stalled = Stall::new(stall, state.finished);
         while state
-            .in_flight
-            .as_deref()
+            .in_flight()
             .is_some_and(|path| path.starts_with(folder))
         {
             let Some(left) = stalled.left(state.finished) else {
@@ -249,6 +294,36 @@ impl DeferredWriter {
             state = self.wait(state, left);
         }
         Some(closed)
+    }
+}
+
+/// Leaves the writer stopped however `drain` ends. A sink that panics must
+/// not leave `writer_running` set, or no later submit would start a writer
+/// and quit would wait out its whole stall budget.
+struct WriterExit<'a>(&'a DeferredWriter);
+
+impl Drop for WriterExit<'_> {
+    fn drop(&mut self) {
+        // A clean exit already cleared the flag under the lock, and another
+        // writer may have started since: only an unwind acts here.
+        if !std::thread::panicking() {
+            return;
+        }
+        let mut state = self.0.shared.lock();
+        let cut_short = state.in_flight().map(Path::to_path_buf);
+        if let Some(path) = cut_short {
+            // Cut short inside the sink: the bytes stay queued as failed,
+            // for the next submit or the flush to try again.
+            if let Some(queued) = state.pending.get_mut(&path) {
+                *queued = Queued::Failed(queued.bytes().clone());
+            }
+            state.failure = Some(std::io::Error::other(crate::lang::tr(
+                crate::lang::keys::Q_OPS_ERR_SETTINGS_WRITER_STOPPED,
+            )));
+            state.finished += 1;
+        }
+        state.set_writer_running(false);
+        self.0.shared.idle.notify_all();
     }
 }
 
@@ -314,6 +389,12 @@ fn global() -> &'static DeferredWriter {
 /// A settings write that failed on the writer thread since the last call.
 pub fn take_deferred_write_failure() -> Option<std::io::Error> {
     global().take_failure()
+}
+
+/// Raise the status note for a settings write that failed outside the
+/// queue (the window geometry's own writer), so it is reported the same way.
+pub(super) fn note_write_failure(err: std::io::Error) {
+    global().shared.lock().failure = Some(err);
 }
 
 /// Holds the test thread's writer before it writes one path, so a test can
@@ -473,18 +554,83 @@ mod tests {
         let (writer, log) = recording(None);
         let path = PathBuf::from("/x/stuck.json");
         // The state `submit` leaves when its writer thread cannot start.
-        writer.shared.lock().pending.insert(
-            path.clone(),
-            super::Queued {
-                bytes: Arc::new(b"q".to_vec()),
-                failed: false,
-            },
-        );
+        writer
+            .shared
+            .lock()
+            .pending
+            .insert(path.clone(), super::Queued::Ready(Arc::new(b"q".to_vec())));
         assert_eq!(writer.pending(&path), Some(b"q".to_vec()));
         assert_eq!(log.lock().map(|l| l.len()).unwrap_or(9), 0);
         writer.flush(super::STALL_BUDGET);
         assert_eq!(log.lock().map(|l| l.len()).unwrap_or(0), 1);
         assert_eq!(writer.pending(&path), None);
+    }
+
+    #[test]
+    fn a_sink_that_panics_does_not_stop_later_writes() {
+        let calls = Arc::new(Mutex::new(0u32));
+        let (seen, written) = (calls.clone(), Log::default());
+        let log = written.clone();
+        let writer = DeferredWriter::new(Box::new(move |path, bytes| {
+            let first = seen.lock().map(|mut n| (*n, *n += 1).0).unwrap_or(1) == 0;
+            if first {
+                panic!("sink panic");
+            }
+            if let Ok(mut log) = log.lock() {
+                log.push((path.to_path_buf(), bytes.to_vec()));
+            }
+            Ok(())
+        }));
+        let (first, second) = (PathBuf::from("/x/a.json"), PathBuf::from("/x/b.json"));
+        writer.submit(first.clone(), b"a".to_vec());
+        writer.flush(super::STALL_BUDGET);
+        assert_eq!(writer.pending(&first), Some(b"a".to_vec()), "kept queued");
+        assert!(writer.take_failure().is_some());
+        writer.submit(second.clone(), b"b".to_vec());
+        writer.flush(super::STALL_BUDGET);
+        let mut on_disk = written.lock().map(|l| l.clone()).unwrap_or_default();
+        on_disk.sort();
+        assert_eq!(
+            on_disk,
+            vec![(first, b"a".to_vec()), (second, b"b".to_vec())]
+        );
+    }
+
+    /// A guard dropped by a writer that finished cleanly must leave the
+    /// flag alone: another writer may have started since it cleared it.
+    #[test]
+    fn a_clean_writer_exit_leaves_the_running_flag_to_the_next_writer() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let (open, gate) = mpsc::channel::<()>();
+        let (entered_tx, entered) = mpsc::channel();
+        let (active, most) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let (now, peak) = (active.clone(), most.clone());
+        let gate = Mutex::new(gate);
+        let writer = DeferredWriter::new(Box::new(move |_, _| {
+            let running = now.fetch_add(1, Ordering::SeqCst) + 1;
+            peak.fetch_max(running, Ordering::SeqCst);
+            let _ = entered_tx.send(());
+            if let Ok(gate) = gate.lock() {
+                let _ = gate.recv();
+            }
+            now.fetch_sub(1, Ordering::SeqCst);
+            Ok(())
+        }));
+        writer.submit(PathBuf::from("/x/a.json"), b"a".to_vec());
+        assert!(entered.recv().is_ok(), "the writer is inside the sink");
+        // An earlier writer's guard drops cleanly while this one runs.
+        drop(super::WriterExit(&writer));
+        assert!(
+            writer.shared.lock().writer_running(),
+            "still marked running"
+        );
+        writer.submit(PathBuf::from("/x/b.json"), b"b".to_vec());
+        for _ in 0..2 {
+            let _ = open.send(());
+        }
+        writer.flush(super::STALL_BUDGET);
+        assert_eq!(most.load(Ordering::SeqCst), 1, "one writer at a time");
+        assert_eq!(writer.pending(Path::new("/x/b.json")), None);
     }
 
     #[test]
@@ -550,13 +696,11 @@ mod tests {
         let (writer, log) = recording(None);
         let (gone, kept) = (PathBuf::from("/x/acct/a.json"), PathBuf::from("/x/b.json"));
         for path in [&gone, &kept] {
-            writer.shared.lock().pending.insert(
-                path.clone(),
-                super::Queued {
-                    bytes: Arc::new(b"q".to_vec()),
-                    failed: true,
-                },
-            );
+            writer
+                .shared
+                .lock()
+                .pending
+                .insert(path.clone(), super::Queued::Failed(Arc::new(b"q".to_vec())));
         }
         assert!(
             writer

@@ -3,7 +3,7 @@
 //! group, offer state updates, the Grams balance and refused requests.
 use crate::state::*;
 use crate::suggested_posts::{
-    DirectMessagesRole, SuggestedPostPayload, SuggestedPostPurpose, error_note,
+    BarSend, DirectMessagesRole, SuggestedPostPayload, SuggestedPostPurpose, error_note,
 };
 
 fn suggested_purpose(pending: Option<&PendingRequest>) -> Option<SuggestedPostPurpose> {
@@ -14,6 +14,29 @@ fn suggested_purpose(pending: Option<&PendingRequest>) -> Option<SuggestedPostPu
 }
 
 impl Session {
+    /// The approve or decline of this post was sent and its answer has not
+    /// come: the pending request is the only record of it, so an answer, an
+    /// error or a lost request frees the post.
+    pub fn suggested_post_busy(&self, chat_id: i64, message_id: i64) -> bool {
+        [
+            SuggestedPostPurpose::Approve {
+                chat_id,
+                message_id,
+            },
+            SuggestedPostPurpose::Decline {
+                chat_id,
+                message_id,
+            },
+        ]
+        .into_iter()
+        .any(|purpose| {
+            self.requests
+                .has_purpose(RequestPurpose::Payments(PaymentsPurpose::SuggestedPost(
+                    purpose,
+                )))
+        })
+    }
+
     pub(crate) fn apply_suggested_post(&mut self, payload: SuggestedPostPayload) {
         match payload {
             SuggestedPostPayload::InfoUpdated {
@@ -24,10 +47,6 @@ impl Session {
                 self.edit_loaded_message(chat_id, message_id, |message| {
                     message.extras.suggested_post = info;
                 });
-                self.payments
-                    .suggested_posts
-                    .busy
-                    .remove(&(chat_id.0, message_id.0));
             }
             SuggestedPostPayload::GramBalance(nanos) => {
                 self.payments.suggested_posts.gram_balance = Some(nanos);
@@ -35,11 +54,19 @@ impl Session {
         }
     }
 
-    /// `ok` for an approve or decline: the state update follows, so the
-    /// buttons only stop waiting.
-    pub(crate) fn apply_suggested_post_ok(&mut self, pending: Option<&PendingRequest>) {
-        if let Some(purpose) = suggested_purpose(pending) {
-            self.payments.suggested_posts.busy.remove(&purpose.key());
+    /// The `message` answer of an edit's send: the bar's terms rode it, so
+    /// the bar goes (when it is the bar that sent).
+    pub(crate) fn settle_suggested_send(&mut self, pending: Option<&PendingRequest>) {
+        let Some(SuggestedPostPurpose::SendChange { chat_id, .. }) = suggested_purpose(pending)
+        else {
+            return;
+        };
+        let bars = &mut self.payments.suggested_posts.bars;
+        if bars
+            .get(&chat_id)
+            .is_some_and(|bar| bar.send().waits_for(pending.map(|p| p.id)))
+        {
+            bars.remove(&chat_id);
         }
     }
 
@@ -47,11 +74,17 @@ impl Session {
         &mut self,
         err: &TdError,
         purpose: SuggestedPostPurpose,
+        request: Option<RequestId>,
     ) {
         let posts = &mut self.payments.suggested_posts;
-        posts.busy.remove(&purpose.key());
+        if let SuggestedPostPurpose::SendChange { chat_id, .. } = purpose
+            && let Some(bar) = posts.bars.get_mut(&chat_id)
+            && bar.send().waits_for(request)
+        {
+            bar.set_send(BarSend::Idle);
+        }
         if err.earn_hint == Some(crate::earn::EarnErrorHint::BalanceTooLow) {
-            posts.balance_low = Some(purpose);
+            posts.balance_low.push(purpose);
         } else {
             posts.notes.push(error_note(purpose, &error_reason(err)));
         }
@@ -101,9 +134,9 @@ impl Session {
         });
     }
 
-    /// Takes the request refused for a low balance, if any.
-    pub fn take_suggested_post_balance_low(&mut self) -> Option<SuggestedPostPurpose> {
-        self.payments.suggested_posts.balance_low.take()
+    /// Takes the requests refused for a low balance.
+    pub fn take_suggested_post_balance_low(&mut self) -> Vec<SuggestedPostPurpose> {
+        std::mem::take(&mut self.payments.suggested_posts.balance_low)
     }
 
     /// Takes the one-shot error notes for the UI's toasts.

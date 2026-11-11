@@ -35,7 +35,10 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
 fn open_premium(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, purchase: PremiumPurchase) {
     app.update_in(vcx, |app, _, cx| {
         let session = app.demo_session.as_mut().expect("demo session");
-        session.payments.hub.premium_open = true;
+        session
+            .payments
+            .hub
+            .open_premium_box(PromoPage::default(), "");
         session.payments.hub.purchase = purchase;
         cx.notify();
     });
@@ -48,7 +51,12 @@ fn hub_state(
 ) -> (bool, Option<(String, String)>) {
     app.read_with(vcx, |app, _| {
         let hub = &app.session().expect("session").payments.hub;
-        (hub.premium_open, hub.auto_start.clone())
+        (
+            hub.premium_open(),
+            hub.auto_start
+                .as_ref()
+                .map(|a| (a.username.clone(), a.start_ref.clone())),
+        )
     })
 }
 
@@ -66,7 +74,7 @@ fn the_bot_from_the_app_config_gets_the_ref_and_the_dialog_closes(cx: &mut TestA
     );
     app.update_in(vcx, |app, window, cx| {
         let session = app.demo_session.as_mut().expect("demo session");
-        session.payments.hub.promo_page = PromoPage::Limits;
+        session.payments.hub.set_promo_page(PromoPage::Limits);
         app.start_premium_payment(window, cx);
     });
     vcx.run_until_parked();
@@ -102,4 +110,29 @@ fn the_invoice_slug_is_used_when_no_bot_is_named(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     // No bot start is armed; the payment form opens instead.
     assert_eq!(hub_state(&app, vcx), (false, None));
+}
+
+/// The account leaves the screen before the Premium bot's chat opened: its
+/// session stays in the background, so the queued `/start` is dropped, or
+/// it would go out unasked on a later visit to the bot.
+#[gpui_kit::test]
+fn the_queued_start_does_not_outlive_the_screen(cx: &mut TestAppContext) {
+    use crate::ui::on_screen::Farewell;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_premium(
+        &app,
+        vcx,
+        PremiumPurchase {
+            bot_username: "PremiumBot".into(),
+            invoice_slug: String::new(),
+        },
+    );
+    app.update_in(vcx, |app, window, cx| app.start_premium_payment(window, cx));
+    vcx.run_until_parked();
+    assert!(hub_state(&app, vcx).1.is_some());
+    app.update_in(vcx, |app, window, cx| {
+        crate::ui::payments_state::PaymentUi::farewell(app, window, cx)
+    });
+    assert_eq!(hub_state(&app, vcx).1, None);
 }

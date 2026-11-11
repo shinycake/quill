@@ -5,6 +5,7 @@
 
 use super::appearance::{ShareThemeBackdrop, SwatchKey};
 use super::color::Rgb;
+use crate::ids::RequestId;
 use crate::premium_hub::upgraded::{Collectible, parse_collectible};
 use crate::telegram::envelope::{ParsedFile, StickerContent};
 use serde_json::{Value, json};
@@ -327,25 +328,83 @@ pub fn can_save(rights: SaveRights) -> bool {
     }
 }
 
+/// A gifts request on its way: which one (its serial) and when it was sent
+/// (unix seconds).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GiftsAsk {
+    pub serial: u64,
+    pub at: i64,
+}
+
+/// Where the gifts panel's list is. The first page and what follows it are
+/// different stages, so a list can never be "loaded" and "complete" at the
+/// same time as "failed". A request on its way and the offset of the next
+/// page live in the stage they belong to.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum GiftsStage {
+    /// No first page yet; its request is on its way (or not sent yet).
+    #[default]
+    First,
+    /// The first page's request is out as `ask`.
+    FirstAsking(GiftsAsk),
+    /// The first page could not be asked for (the driver refused): the
+    /// panel says so and offers Retry.
+    FirstFailed,
+    /// The first page is in; `rest` is about the pages after it.
+    Listed(GiftsRest),
+}
+
+/// The pages after the first one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GiftsRest {
+    /// The list is whole.
+    Complete,
+    /// There is more from `offset`, and no request is on its way.
+    More { offset: String },
+    /// A request is on its way as `ask` (the next page from `offset`, or a
+    /// refresh that shows the list meanwhile).
+    Loading { ask: GiftsAsk, offset: String },
+    /// The next page failed: the panel stops asking for more until `at`
+    /// (unix seconds).
+    Waiting { at: i64, offset: String },
+}
+
+impl GiftsRest {
+    /// Where the next page starts; empty when the list is whole.
+    fn offset(&self) -> &str {
+        match self {
+            Self::Complete => "",
+            Self::More { offset } | Self::Loading { offset, .. } | Self::Waiting { offset, .. } => {
+                offset
+            }
+        }
+    }
+
+    /// The rest after a request that began at `since` failed: a whole list
+    /// stays whole (no offset is left), else the next page waits
+    /// [`GIFTS_RETRY_SECS`].
+    fn failed_at(&self, since: i64) -> Self {
+        match self.offset() {
+            "" => Self::Complete,
+            offset => Self::Waiting {
+                at: since.saturating_add(GIFTS_RETRY_SECS),
+                offset: offset.to_string(),
+            },
+        }
+    }
+}
+
 /// The gifts panel's list for one owner (tdesktop `CreateQrGiftList`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ThemeGifts {
     pub owner: Option<ThemeOwner>,
     pub list: Vec<ThemeGift>,
-    pub offset: String,
-    /// The first page came back.
-    pub loaded: bool,
-    pub complete: bool,
-    pub loading: bool,
-    /// Tells a page for the current request from an older one. It keeps
-    /// counting when the list moves to another owner, so a late page for
-    /// the old owner never matches.
-    pub serial: u64,
-    /// When the request on its way was sent (unix seconds).
-    pub requested_at: i64,
-    /// The next page failed: the panel stops asking for more until
-    /// `retry_at` (unix seconds).
-    pub retry_at: Option<i64>,
+    pub stage: GiftsStage,
+    /// The serial of the last request sent (an id generator: the stage
+    /// holds the serial that is current). It keeps counting when the list
+    /// moves to another owner, so a late page for the old owner never
+    /// matches.
+    pub last_serial: u64,
 }
 
 /// How long the gifts panel waits after a failed page before it asks for
@@ -360,6 +419,31 @@ pub struct GiftsRequest {
 }
 
 impl ThemeGifts {
+    /// A list of `owner` that is shown as loaded: `list`, with the next
+    /// page at `offset` (none when it is whole).
+    pub fn listed(owner: ThemeOwner, list: Vec<ThemeGift>, offset: String) -> Self {
+        let rest = if offset.is_empty() {
+            GiftsRest::Complete
+        } else {
+            GiftsRest::More { offset }
+        };
+        Self {
+            owner: Some(owner),
+            list,
+            stage: GiftsStage::Listed(rest),
+            last_serial: 0,
+        }
+    }
+
+    /// Where the next page starts; empty when the list is whole or has no
+    /// page yet.
+    pub fn offset(&self) -> &str {
+        match &self.stage {
+            GiftsStage::Listed(rest) => rest.offset(),
+            GiftsStage::First | GiftsStage::FirstAsking(_) | GiftsStage::FirstFailed => "",
+        }
+    }
+
     /// A request for `owner`'s list: the first page again, or the next
     /// one when there is one, none is on its way and none failed in the
     /// last few seconds. A list for another owner starts empty.
@@ -367,50 +451,86 @@ impl ThemeGifts {
         if self.owner != Some(owner) {
             *self = ThemeGifts {
                 owner: Some(owner),
-                serial: self.serial,
+                last_serial: self.last_serial,
                 ..ThemeGifts::default()
             };
         }
         if more && !self.wants_more(now) {
             return None;
         }
-        self.serial += 1;
-        self.loading = true;
-        self.requested_at = now;
-        self.retry_at = None;
+        self.last_serial += 1;
+        let ask = GiftsAsk {
+            serial: self.last_serial,
+            at: now,
+        };
+        let offset = self.offset().to_string();
+        // A refresh keeps showing the list it has until its page lands.
+        self.stage = match std::mem::take(&mut self.stage) {
+            GiftsStage::Listed(rest) => GiftsStage::Listed(GiftsRest::Loading {
+                ask,
+                offset: rest.offset().to_string(),
+            }),
+            GiftsStage::First | GiftsStage::FirstAsking(_) | GiftsStage::FirstFailed => {
+                GiftsStage::FirstAsking(ask)
+            }
+        };
         Some(GiftsRequest {
-            serial: self.serial,
-            offset: if more {
-                self.offset.clone()
-            } else {
-                String::new()
-            },
+            serial: ask.serial,
+            offset: if more { offset } else { String::new() },
         })
     }
 
     /// The panel may ask for the next page.
     pub fn wants_more(&self, now: i64) -> bool {
-        self.loaded && !self.complete && !self.loading && self.retry_at.is_none_or(|at| now >= at)
+        match &self.stage {
+            GiftsStage::Listed(GiftsRest::More { .. }) => true,
+            GiftsStage::Listed(GiftsRest::Waiting { at, .. }) => now >= *at,
+            _ => false,
+        }
     }
 
     /// A page or failure belongs to the request now on its way.
     pub fn is_current(&self, owner: ThemeOwner, serial: u64) -> bool {
-        self.owner == Some(owner) && self.serial == serial
+        let ask = match &self.stage {
+            GiftsStage::FirstAsking(ask) | GiftsStage::Listed(GiftsRest::Loading { ask, .. }) => {
+                ask
+            }
+            _ => return false,
+        };
+        self.owner == Some(owner) && ask.serial == serial
     }
 
     /// The request failed. The list stays as it was; the empty state shows
     /// only when there is nothing to list. A failed next page is retried
     /// [`GIFTS_RETRY_SECS`] after it was asked for.
     pub fn fail(&mut self) {
-        self.loading = false;
-        if self.loaded {
-            self.retry_at = Some(self.requested_at.saturating_add(GIFTS_RETRY_SECS));
-        } else {
+        self.stage = match std::mem::take(&mut self.stage) {
+            GiftsStage::Listed(GiftsRest::Loading { ask, offset }) => {
+                GiftsStage::Listed(GiftsRest::Loading { ask, offset }.failed_at(ask.at))
+            }
+            // No request is out: nothing failed.
+            GiftsStage::Listed(rest) => GiftsStage::Listed(rest),
             // No first page ever came: show what there is (nothing) as
             // a whole list, as tdesktop does.
-            self.loaded = true;
-            self.complete = true;
-        }
+            GiftsStage::First | GiftsStage::FirstAsking(_) | GiftsStage::FirstFailed => {
+                GiftsStage::Listed(GiftsRest::Complete)
+            }
+        };
+    }
+
+    /// The driver would not send the request at all (not ready, no right
+    /// to save, the owner not known). A next page waits
+    /// [`GIFTS_RETRY_SECS`] so the panel does not ask again on every
+    /// frame; with no first page the panel says it could not load, with
+    /// Retry (a refusal is not an empty list: reopening is not the only
+    /// way out).
+    pub fn refuse(&mut self, now: i64) {
+        self.stage = match std::mem::take(&mut self.stage) {
+            GiftsStage::Listed(rest) => GiftsStage::Listed(rest.failed_at(now)),
+            GiftsStage::First | GiftsStage::FirstAsking(_) | GiftsStage::FirstFailed => {
+                GiftsStage::FirstFailed
+            }
+        };
     }
 
     /// A page came back. The first page replaces the list; burned gifts
@@ -424,11 +544,13 @@ impl ThemeGifts {
                 self.list.push(gift);
             }
         }
-        self.complete = next_offset.is_empty();
-        self.offset = next_offset;
-        self.loaded = true;
-        self.loading = false;
-        self.retry_at = None;
+        self.stage = GiftsStage::Listed(if next_offset.is_empty() {
+            GiftsRest::Complete
+        } else {
+            GiftsRest::More {
+                offset: next_offset,
+            }
+        });
     }
 }
 
@@ -436,6 +558,8 @@ impl ThemeGifts {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GiftsLayout {
     Loading,
+    /// The first page could not be asked for: a message and Retry.
+    Failed,
     Empty,
     /// One, two or three wide tiles in a row.
     Wide(usize),
@@ -447,11 +571,14 @@ pub const GIFT_COLUMNS: usize = 3;
 
 pub fn gifts_layout(gifts: &ThemeGifts) -> GiftsLayout {
     let count = gifts.list.len();
-    if !gifts.loaded {
-        GiftsLayout::Loading
-    } else if count == 0 {
+    let complete = match &gifts.stage {
+        GiftsStage::First | GiftsStage::FirstAsking(_) => return GiftsLayout::Loading,
+        GiftsStage::FirstFailed => return GiftsLayout::Failed,
+        GiftsStage::Listed(rest) => *rest == GiftsRest::Complete,
+    };
+    if count == 0 {
         GiftsLayout::Empty
-    } else if !gifts.complete || count > GIFT_COLUMNS {
+    } else if !complete || count > GIFT_COLUMNS {
         GiftsLayout::Grid
     } else {
         GiftsLayout::Wide(count)
@@ -462,39 +589,63 @@ pub fn gifts_layout(gifts: &ThemeGifts) -> GiftsLayout {
 /// after the last request.
 pub const BACKDROPS_REFRESH_SECS: i64 = 3600;
 
+/// A request that has not answered this long is given up on, so a dropped
+/// answer cannot keep the list from being asked for again.
+pub const BACKDROPS_LOAD_SECS: i64 = 60;
+
+/// Where the backdrop list is: never asked, on its way, or answered.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BackdropsStage {
+    /// Never asked, or the last request failed (the next box asks again).
+    #[default]
+    Idle,
+    /// The request `id`, sent at this unix time, is on its way. Only its
+    /// own answer or error leaves the stage; if neither comes, it expires
+    /// after [`BACKDROPS_LOAD_SECS`].
+    Loading { id: RequestId, at: i64 },
+    /// The list was asked for at this unix time and the answer is in.
+    Ready { at: i64 },
+}
+
 /// The server's backdrops and when they were last asked for.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Backdrops {
     pub list: Vec<ShareThemeBackdrop>,
-    pub loading: bool,
-    /// Unix time of the last request; cleared by a failure so the next
-    /// box asks again.
-    pub requested_at: Option<i64>,
+    pub stage: BackdropsStage,
 }
 
 impl Backdrops {
     /// tdesktop `backdropsValue`: ask when never asked, or an hour after
-    /// the last request, and never twice at once.
+    /// the last request, and never twice at once (until a request that
+    /// never answered expires).
     pub fn due(&self, now: i64) -> bool {
-        !self.loading
-            && self
-                .requested_at
-                .is_none_or(|at| now.saturating_sub(at) >= BACKDROPS_REFRESH_SECS)
+        match self.stage {
+            BackdropsStage::Idle => true,
+            BackdropsStage::Loading { at, .. } => now.saturating_sub(at) >= BACKDROPS_LOAD_SECS,
+            BackdropsStage::Ready { at } => now.saturating_sub(at) >= BACKDROPS_REFRESH_SECS,
+        }
     }
 
-    pub fn start(&mut self, now: i64) {
-        self.loading = true;
-        self.requested_at = Some(now);
+    /// The request `id` goes out; an older one still out is forgotten.
+    pub fn start(&mut self, id: RequestId, now: i64) {
+        self.stage = BackdropsStage::Loading { id, at: now };
     }
 
-    /// A refresh keeps the old list until the new one is here.
-    pub fn accept(&mut self, list: Vec<ShareThemeBackdrop>) {
-        self.list = list;
-        self.loading = false;
+    /// The answer of request `id`, kept with the old list replaced. An
+    /// answer of any other request is dropped.
+    pub fn accept(&mut self, id: RequestId, list: Vec<ShareThemeBackdrop>) {
+        if let BackdropsStage::Loading { id: asked, at } = self.stage
+            && asked == id
+        {
+            self.list = list;
+            self.stage = BackdropsStage::Ready { at };
+        }
     }
 
-    pub fn fail(&mut self) {
-        self.loading = false;
-        self.requested_at = None;
+    /// Request `id` failed (or could not be sent): the next box asks again.
+    pub fn fail(&mut self, id: RequestId) {
+        if matches!(self.stage, BackdropsStage::Loading { id: asked, .. } if asked == id) {
+            self.stage = BackdropsStage::Idle;
+        }
     }
 }

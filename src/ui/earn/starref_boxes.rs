@@ -115,10 +115,16 @@ fn opened_through(users: i64, app: &str) -> String {
 impl QuillApp {
     /// Close every earn box whose state is the session's (a switch).
     pub(in crate::ui) fn close_earn_boxes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // A join box still waiting for the recipients must not open later,
+        // unasked, in the next account or after the layer was left.
+        if let Some(earn) = self.earn_mut() {
+            earn.recipients.drop_parked();
+            earn.resolve = quill::earn::Resolve::Idle;
+        }
         let Some(earn) = self.earn_state() else {
             return;
         };
-        let confirm = earn.setup.as_ref().is_some_and(|s| s.confirm.is_some());
+        let confirm = earn.setup.as_ref().is_some_and(|s| s.confirm().is_some());
         let (programs, join, link, revoke, withdraw) = (
             earn.programs_box.is_some(),
             earn.join_box.is_some(),
@@ -148,7 +154,7 @@ impl QuillApp {
 
     fn close_setup_confirm(&mut self, cx: &mut Context<Self>) {
         if let Some(setup) = self.earn_mut().and_then(|e| e.setup.as_mut()) {
-            setup.confirm = None;
+            setup.close_confirm();
         }
         cx.notify();
     }
@@ -168,7 +174,7 @@ impl QuillApp {
             let Some(setup) = this.earn_state().and_then(|e| e.setup.clone()) else {
                 return dialog.on_close(on_close);
             };
-            let Some(confirm) = setup.confirm else {
+            let Some(confirm) = setup.confirm() else {
                 return dialog.on_close(on_close);
             };
             let exists = setup.exists();
@@ -287,6 +293,7 @@ impl QuillApp {
     fn close_programs_box(&mut self, cx: &mut Context<Self>) {
         if let Some(earn) = self.earn_mut() {
             earn.programs_box = None;
+            earn.resolve = quill::earn::Resolve::Idle;
         }
         cx.notify();
     }
@@ -399,7 +406,7 @@ impl QuillApp {
     fn close_join_box(&mut self, cx: &mut Context<Self>) {
         if let Some(earn) = self.earn_mut() {
             earn.join_box = None;
-            earn.pending_join = None;
+            earn.recipients.drop_parked();
         }
         cx.notify();
     }
@@ -512,7 +519,7 @@ impl QuillApp {
             let list = if join.choose_recipient {
                 recipient_list(
                     session,
-                    earn.recipients.as_deref().unwrap_or(&[]),
+                    earn.recipients.list().unwrap_or(&[]),
                     join.bot_user_id,
                     join.recipient,
                 )
@@ -578,8 +585,8 @@ impl QuillApp {
                         .label(tr(keys::Q_MONEY_JOIN_PROGRAM))
                         .primary()
                         .w_full()
-                        .loading(join.joining)
-                        .disabled(join.joining)
+                        .loading(join.stage.is_joining())
+                        .disabled(join.stage.is_joining())
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.earn_call(
                                 tr(keys::Q_MONEY_COULDNT_JOIN_THE_PROGRAM),
@@ -624,9 +631,16 @@ impl QuillApp {
     /// a quarter turn and settles with a small overshoot (tdesktop plays
     /// the `starref_link` animation once in `CreateLinkIcon`).
     fn link_icon_motion(&self, cx: &mut Context<Self>) -> Transformation {
-        let elapsed = self.earn.link_shown.map_or(LINK_PLAY, |since| {
-            crate::ui::motion::elapsed_since(since, Instant::now())
-        });
+        let elapsed = match self
+            .earn_state()
+            .and_then(|e| e.link_box.as_ref())
+            .map(|l| l.icon)
+        {
+            Some(LinkIcon::Playing { since }) => {
+                crate::ui::motion::elapsed_since(since, Instant::now())
+            }
+            Some(LinkIcon::Unseen) | None => LINK_PLAY,
+        };
         let t = if crate::ui::motion::interface_animations_off() {
             1.
         } else {
@@ -652,10 +666,16 @@ impl QuillApp {
                 this.close_link_box(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(session) = this.session() else {
+            let Some(link) = this
+                .session()
+                .and_then(|session| session.payments.earn.link_box.clone())
+            else {
                 return dialog.on_close(on_close);
             };
-            let Some(link) = session.payments.earn.link_box.clone() else {
+            if let Some(open) = this.earn_mut().and_then(|e| e.link_box.as_mut()) {
+                open.note_drawn(Instant::now());
+            }
+            let Some(session) = this.session() else {
                 return dialog.on_close(on_close);
             };
             let bot = EarnPeer::User(link.program.bot_user_id);
@@ -834,8 +854,8 @@ impl QuillApp {
                         .debug_selector(|| "earn-revoke-ok".into())
                         .label(tr(keys::BOX_OK))
                         .primary()
-                        .loading(revoke.sending)
-                        .disabled(revoke.sending)
+                        .loading(revoke.send.is_sending())
+                        .disabled(revoke.send.is_sending())
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.earn_call(
                                 tr(keys::Q_MONEY_COULDNT_REVOKE_THE_LINK),
@@ -857,7 +877,7 @@ crate::ui::shell::register_dialogs! {
     /// The setup page's "Warning" boxes.
     EarnSetupConfirm => DialogSpec::new(
         7615,
-        |app| app.earn_state().and_then(|e| e.setup.as_ref()).is_some_and(|s| s.confirm.is_some()),
+        |app| app.earn_state().and_then(|e| e.setup.as_ref()).is_some_and(|s| s.confirm().is_some()),
         QuillApp::build_earn_setup_confirm_dialog,
     )
     .close(|app, _, cx| app.close_setup_confirm(cx)),

@@ -47,7 +47,7 @@ fn pip_player(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<Vid
             .live_pip
             .as_ref()?
             .window
-            .as_ref()?
+            .window()?
             .view
             .upgrade()?;
         view.read(cx).player().cloned()
@@ -57,7 +57,7 @@ fn pip_player(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<Vid
 fn pip_window_id(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<WindowId> {
     app.read_with(vcx, |app, _| {
         let link = app.group_call.live_pip.as_ref()?;
-        link.window.as_ref().map(|window| window.window.window_id())
+        link.window.window().map(|window| window.window.window_id())
     })
 }
 
@@ -192,8 +192,10 @@ fn a_left_feed_closes_the_pip_once_the_call_is_left(cx: &mut TestAppContext) {
     let pip = &mut pip;
     let _old = leave_stream_feed(&app, main);
     app.update_in(main, |app, _, cx| {
-        if let Some(session) = app.demo_session.as_mut() {
-            session.calls.left_group_call = Some(CALL);
+        if let Some(session) = app.demo_session.as_mut()
+            && let Some(call) = session.calls.group_call_mut(CALL)
+        {
+            call.rejoin.leave();
         }
         cx.notify();
     });
@@ -221,7 +223,7 @@ fn enlarge_after_a_swap_hands_back_the_new_player(cx: &mut TestAppContext) {
     pip.run_until_parked();
     settle(main);
     let window = app
-        .read_with(main, |app, _| app.group_call.window)
+        .read_with(main, |app, _| app.group_call.window.handle())
         .expect("the stream window is back");
     let mut stream = VisualTestContext::from_window(window, cx);
     settle(&mut stream);
@@ -256,13 +258,13 @@ fn story_player(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<V
 fn the_story_viewer_survives_a_feed_swap(cx: &mut TestAppContext) {
     let (app, mut main) = open_live_story(cx);
     let main = &mut main;
-    let watching = app.read_with(main, |app, _| app.stories.live.watching);
+    let watching = app.read_with(main, |app, _| app.stories.live.watching());
     let first = story_player(&app, main).expect("the story plays");
     let (_old, sink) = swap_story_feed(&app, main);
     settle(main);
     app.read_with(main, |app, _| {
         assert!(app.stories.viewer.is_open(), "the viewer stays");
-        assert_eq!(app.stories.live.watching, watching, "still watched");
+        assert_eq!(app.stories.live.watching(), watching, "still watched");
     });
     assert!(main.debug_bounds("live-story-frame").is_some());
     let swapped = story_player(&app, main).expect("the story plays on");
@@ -274,7 +276,7 @@ fn the_story_viewer_survives_a_feed_swap(cx: &mut TestAppContext) {
 fn a_story_pip_follows_a_feed_swap_and_enlarges_with_it(cx: &mut TestAppContext) {
     let (app, mut main) = open_live_story(cx);
     let main = &mut main;
-    let watching = app.read_with(main, |app, _| app.stories.live.watching);
+    let watching = app.read_with(main, |app, _| app.stories.live.watching());
     let first = story_player(&app, main).expect("the story plays");
     app.update_in(main, |app, window, cx| app.open_story_pip(window, cx));
     settle(main);
@@ -292,7 +294,7 @@ fn a_story_pip_follows_a_feed_swap_and_enlarges_with_it(cx: &mut TestAppContext)
         "kept where the viewer takes it back from"
     );
     assert_eq!(
-        app.read_with(main, |app, _| app.stories.live.watching),
+        app.read_with(main, |app, _| app.stories.live.watching()),
         watching,
         "the story stays joined"
     );
@@ -322,7 +324,6 @@ fn set_rejoin_state(app: &Entity<QuillApp>, main: &mut VisualTestContext, rejoin
             .and_then(|s| s.calls.active_group_call.as_mut())
         {
             call.is_joined = false;
-            call.need_rejoin = true;
             call.rejoin = rejoin;
         }
         cx.notify();

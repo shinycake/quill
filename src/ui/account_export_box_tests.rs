@@ -45,11 +45,7 @@ fn the_box_opens_with_tdesktops_defaults_and_edits_its_draft(cx: &mut TestAppCon
         assert_eq!(shell.open_dialog, Some(DialogKind::AccountExport));
     });
     app.read_with(vcx, |app, _| {
-        let draft = app
-            .dialogs
-            .account_export_dialog
-            .as_ref()
-            .expect("box open");
+        let draft = app.dialogs.account_export.draft().expect("box open");
         assert_eq!(draft.settings.format, ExportFormat::Html);
         assert!(draft.settings.is_on(Section::PersonalInfo));
         assert!(draft.settings.only_my(Section::PrivateGroups));
@@ -57,7 +53,7 @@ fn the_box_opens_with_tdesktops_defaults_and_edits_its_draft(cx: &mut TestAppCon
     // Every chat type on (so every "Only my messages" row renders), media
     // off, then nothing at all: each view must render.
     app.update_in(vcx, |app, _, cx| {
-        let draft = app.dialogs.account_export_dialog.as_mut().unwrap();
+        let draft = app.dialogs.account_export.draft_mut().unwrap();
         for section in Section::CHATS {
             draft.settings.set(section, true);
         }
@@ -68,26 +64,26 @@ fn the_box_opens_with_tdesktops_defaults_and_edits_its_draft(cx: &mut TestAppCon
     });
     vcx.run_until_parked();
     app.update_in(vcx, |app, _, cx| {
-        let draft = app.dialogs.account_export_dialog.as_mut().unwrap();
+        let draft = app.dialogs.account_export.draft_mut().unwrap();
         draft.settings.sections = Sections::none();
         cx.notify();
     });
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
-        let settings = &app.dialogs.account_export_dialog.as_ref().unwrap().settings;
+        let settings = &app.dialogs.account_export.draft().unwrap().settings;
         assert!(!settings.can_start());
         assert!(!settings.shows_media());
         assert!(!settings.only_my(Section::PrivateGroups));
     });
     // Starting without a connection keeps the box and says why.
     app.update_in(vcx, |app, _, cx| {
-        let draft = app.dialogs.account_export_dialog.as_mut().unwrap();
+        let draft = app.dialogs.account_export.draft_mut().unwrap();
         draft.settings.set(Section::Sessions, true);
         app.run_account_export(cx);
     });
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
-        assert!(app.dialogs.account_export_dialog.is_some());
+        assert!(app.dialogs.account_export.is_options());
     });
 }
 
@@ -111,7 +107,7 @@ fn a_running_export_shows_its_progress_and_hides(cx: &mut TestAppContext) {
     });
     app.read_with(vcx, |app, _| {
         assert!(
-            app.dialogs.account_export_dialog.is_none(),
+            !app.dialogs.account_export.is_options(),
             "progress, not options"
         );
         let export = app
@@ -124,7 +120,7 @@ fn a_running_export_shows_its_progress_and_hides(cx: &mut TestAppContext) {
         assert!(!export.progress().is_settled());
     });
     app.update_in(vcx, |app, _, cx| {
-        app.dialogs.account_export_progress_hidden = true;
+        app.set_account_export_view(quill::export::ExportView::Hidden);
         cx.notify();
     });
     vcx.run_until_parked();

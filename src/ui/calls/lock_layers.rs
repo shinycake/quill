@@ -23,11 +23,11 @@ impl QuillApp {
         {
             let _ = live.driver.search_add_people("");
         }
+        self.group_call_boxes.close_call_box();
         self.group_call.stream.overlay = None;
-        self.group_call.stream.key_shown = false;
         self.group_call_screen.title_dialog = None;
         self.group_call_screen.settings_open = false;
-        self.screen_share.privacy_for = None;
+        self.screen_share.close_privacy();
         cx.notify();
     }
 }
@@ -129,3 +129,8 @@ impl QuillApp {
         Some(lock_call_card(ids.card, title, caller, decline, answer, cx))
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "lock_layers_tests.rs"]
+mod tests;

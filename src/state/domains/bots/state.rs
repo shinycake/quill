@@ -14,6 +14,92 @@ pub struct CallbackAnswer {
     pub chat: Option<ChatId>,
 }
 
+/// B1: where a login-URL button press stands, one value for the whole
+/// press. `Asking` holds the request that went out and the button's context
+/// (an error degrades to the raw URL from it); only that request's answer
+/// or error ends it. `Answered` waits for the UI to take it on its next
+/// poll, with the context the consent box and the error fallback read.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum LoginUrlStage {
+    #[default]
+    Idle,
+    Asking {
+        request: RequestId,
+        context: LoginUrlRequest,
+    },
+    Answered {
+        info: LoginUrlInfo,
+        context: LoginUrlRequest,
+    },
+}
+
+impl LoginUrlStage {
+    pub fn is_idle(&self) -> bool {
+        *self == Self::Idle
+    }
+
+    /// `getLoginUrlInfo` / `getLoginUrl` went out as `request`.
+    pub fn asking(request: RequestId, context: LoginUrlRequest) -> Self {
+        Self::Asking { request, context }
+    }
+
+    /// The answer of `request`: taken only by the press that waits for it.
+    pub fn answer(&mut self, request: Option<RequestId>, info: LoginUrlInfo) -> bool {
+        match std::mem::take(self) {
+            Self::Asking {
+                request: asked,
+                context,
+            } if Some(asked) == request => {
+                *self = Self::Answered { info, context };
+                true
+            }
+            other => {
+                *self = other;
+                false
+            }
+        }
+    }
+
+    /// `request` was refused: the button degrades to its raw URL.
+    pub fn fail(&mut self, request: Option<RequestId>) -> bool {
+        match std::mem::take(self) {
+            Self::Asking {
+                request: asked,
+                context,
+            } if Some(asked) == request => {
+                let fallback_url = context.raw_url.clone();
+                *self = Self::Answered {
+                    info: LoginUrlInfo::Failed { fallback_url },
+                    context,
+                };
+                true
+            }
+            other => {
+                *self = other;
+                false
+            }
+        }
+    }
+
+    /// What the UI takes on its poll: the answer and the press it belongs
+    /// to. A press still in flight stays.
+    pub fn take_answer(&mut self) -> Option<(LoginUrlInfo, LoginUrlRequest)> {
+        match std::mem::take(self) {
+            Self::Answered { info, context } => Some((info, context)),
+            other => {
+                *self = other;
+                None
+            }
+        }
+    }
+
+    /// The screen was returned to: an answer nobody took is dropped with
+    /// its context; a press in flight keeps its context for its answer.
+    pub fn forget_answer(&mut self) {
+        let _ = self.take_answer();
+    }
+}
+
 /// Which group a `bot_commands` list belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GroupCommandsKey {
@@ -57,31 +143,35 @@ pub struct BotsState {
     /// user id. The `users` ids resolve to names via `Session::users`.
     pub similar_bots: HashMap<i64, SimilarBotsFetch>,
     /// Slice bots-games: high-score panels, keyed by
-    /// `(chat_id, message_id)`. Present = panel open; `None` = request in
-    /// flight (the panel shows a loading row); `Some` = loaded rows.
-    pub game_scores: HashMap<(i64, i64), Option<Vec<GameHighScore>>>,
-    /// Last `callbackQueryAnswer` to an inline keyboard callback-button press
-    /// (Phase 3.2), with the chat of the press. The UI takes it on the next
-    /// poll and shows the answer in the status line (URL answers open in the
-    /// OS browser).
-    pub last_callback_answer: Option<CallbackAnswer>,
+    /// `(chat_id, message_id)`. Present = panel open; the value is its
+    /// fetch: `Loading` shows a loading row, `Ready` the rows. A refused
+    /// request closes the panel (the entry is removed).
+    pub game_scores: HashMap<(i64, i64), crate::state::fetch::Fetch<Vec<GameHighScore>>>,
+    /// The `callbackQueryAnswer`s of inline keyboard callback-button
+    /// presses (Phase 3.2), oldest first, each with the chat of its press.
+    /// The UI takes them on the next poll and shows each answer in the
+    /// status line (URL answers open in the OS browser); two answers that
+    /// land between polls both show.
+    pub callback_answers: std::collections::VecDeque<CallbackAnswer>,
+    /// Inline button presses and the requests they sent
+    /// (`Session::callback_button_waiting`).
+    pub callback_presses: Vec<CallbackPress>,
     /// Mini apps (docs/decisions/codex-miniapp-webview.md): open answers,
     /// consent answers and the attachment menu bots.
     pub web_apps: WebApps,
-    /// B1: last `loginUrlInfo*` / `httpUrl` answer for a login-URL button
-    /// press. The UI takes it on the next poll: `Open` opens the URL in the
-    /// OS browser, `RequestConfirmation` asks for consent, `Failed` opens
-    /// the button's raw URL in the browser.
-    pub last_login_url_info: Option<LoginUrlInfo>,
-    /// B1: the login button's request context, kept while `getLoginUrlInfo`
-    /// (then `getLoginUrl`) is in flight so an error can degrade to a plain
-    /// URL button press.
-    pub login_url_request: Option<LoginUrlRequest>,
-    /// B1: force-reply target set when an incoming message carrying
+    /// B1: the login-URL button press: in flight under its request with its
+    /// context (so an error degrades to a plain URL button press), then the
+    /// answer for the UI to take on the next poll: `Open` opens the URL in
+    /// the OS browser, `RequestConfirmation` asks for consent, `Failed`
+    /// opens the button's raw URL in the browser.
+    pub login_url: LoginUrlStage,
+    /// B1: force-reply targets set when an incoming message carrying
     /// force-reply markup (`replyMarkupForceReply`, or `force_reply` on an
-    /// inline / show-keyboard markup) arrives. The UI drains it on the
-    /// next render: composer gets the reply-to and focus.
-    pub pending_force_reply: Option<ForceReplyTarget>,
+    /// inline / show-keyboard markup) arrives, one per chat (a newer
+    /// message of the chat replaces the older). Each window arms its own
+    /// chat's on a frame: composer gets the reply-to and focus; the other
+    /// chats' wait until a window shows them.
+    pub pending_force_replies: std::collections::HashMap<crate::ids::ChatId, ForceReplyTarget>,
     /// Bot reply keyboards as TDLib reports them, and recent inline bots.
     pub reply_keyboards: ReplyKeyboardState,
     /// Bots slice: the single active `getInlineQueryResults` fetch (the
@@ -115,11 +205,11 @@ impl BotsState {
             asked_bot_users: HashSet::new(),
             similar_bots: HashMap::new(),
             game_scores: HashMap::new(),
-            last_callback_answer: None,
+            callback_answers: Default::default(),
+            callback_presses: Vec::new(),
             web_apps: WebApps::default(),
-            last_login_url_info: None,
-            login_url_request: None,
-            pending_force_reply: None,
+            login_url: LoginUrlStage::Idle,
+            pending_force_replies: std::collections::HashMap::new(),
             reply_keyboards: ReplyKeyboardState::default(),
             inline_query: None,
             inline_bot_resolve: None,

@@ -70,9 +70,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = RequestPurpose::Communities(CommunitiesPurpose::GetJoined);
         let extra = self.session.request(purpose, None);
         let stale = self.session.communities.joined.take_data();
-        self.session.communities.joined = Fetch::Loading { stale };
+        self.session.communities.joined = Fetch::Loading {
+            stale,
+            request: None,
+        };
         match self.send_json_request(extra, &get_joined_communities(extra)) {
-            Ok(extra) => Ok(Some(extra)),
+            Ok(extra) => {
+                self.session.communities.joined.sent(extra);
+                Ok(Some(extra))
+            }
             Err(err) => {
                 let stale = self.session.communities.joined.take_data();
                 self.session.communities.joined = stale.map_or(Fetch::Idle, Fetch::Ready);
@@ -138,9 +144,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = RequestPurpose::Communities(CommunitiesPurpose::GetOwnedBots);
         let extra = self.session.request(purpose, None);
         let stale = self.session.communities.owned_bots.take_data();
-        self.session.communities.owned_bots = Fetch::Loading { stale };
+        self.session.communities.owned_bots = Fetch::Loading {
+            stale,
+            request: None,
+        };
         match self.send_json_request(extra, &get_owned_bots(extra)) {
-            Ok(extra) => Ok(Some(extra)),
+            Ok(extra) => {
+                self.session.communities.owned_bots.sent(extra);
+                Ok(Some(extra))
+            }
             Err(err) => {
                 let stale = self.session.communities.owned_bots.take_data();
                 self.session.communities.owned_bots = stale.map_or(Fetch::Idle, Fetch::Ready);
@@ -235,7 +247,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                 )
             },
         )?;
-        if sent.is_some() {
+        if let Some(request) = sent {
+            // No page is in flight here, so what was handled so far is
+            // behind this page's answer.
+            self.session
+                .communities
+                .handled_add_requests
+                .remove(&community_id);
             let fetch = self
                 .session
                 .communities
@@ -243,7 +261,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .entry(community_id)
                 .or_default();
             let stale = fetch.take_data();
-            *fetch = Fetch::Loading { stale };
+            *fetch = Fetch::Loading {
+                stale,
+                request: Some(request),
+            };
         }
         Ok(sent)
     }
@@ -359,11 +380,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             community_id,
             |extra| get_community_member_chats(extra, community_id, member),
         )?;
-        if sent.is_some() {
-            self.session
-                .communities
-                .member_chats
-                .insert((community_id, member), Fetch::Loading { stale: None });
+        if let Some(request) = sent {
+            self.session.communities.member_chats.insert(
+                (community_id, member),
+                Fetch::Loading {
+                    stale: None,
+                    request: Some(request),
+                },
+            );
         }
         Ok(sent)
     }
@@ -405,7 +429,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .values()
             .filter(|community| community.have_access)
             .map(|community| community.id)
-            .filter(|id| !self.session.groups.community_full_infos.contains_key(id))
+            .filter(|id| self.session.groups.community_full_infos.wants_fetch(*id))
             .collect();
         let mut asked = false;
         for community_id in missing {

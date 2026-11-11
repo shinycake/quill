@@ -49,8 +49,10 @@ impl QuillApp {
                 Some(tr(keys::Q_CHAT_YOUR_ACCOUNT_IS_FROZEN_AND_2).to_string())
             }
             PaneMode::Ready if composer.is_none() => {
-                let open = self.session().and_then(|s| s.open_chat);
-                let in_topic = self.session().is_some_and(|s| s.open_topic.is_some());
+                let open = self.session().and_then(|s| s.open_chat_id());
+                let in_topic = self
+                    .session()
+                    .is_some_and(|s| s.open_forum_topic().is_some());
                 let is_channel = open.is_some_and(|id| {
                     self.session()
                         .and_then(|s| s.chats.get(&id.0).map(|c| c.is_channel()))
@@ -109,11 +111,14 @@ impl QuillApp {
         // B4: `chatPermissions.can_send_polls` (schema 1.8.67 line 1070)
         // gates the Poll composer entry; absent permissions = unknown =
         // allowed.
-        let polls_allowed = self.session().and_then(|s| s.open_chat).is_none_or(|id| {
-            self.session()
-                .and_then(|s| s.chats.get(&id.0))
-                .is_none_or(|c| chat_allows_polls(c.permissions.as_ref()))
-        });
+        let polls_allowed = self
+            .session()
+            .and_then(|s| s.open_chat_id())
+            .is_none_or(|id| {
+                self.session()
+                    .and_then(|s| s.chats.get(&id.0))
+                    .is_none_or(|c| chat_allows_polls(c.permissions.as_ref()))
+            });
         let top = part.top();
         let dust = top.then(|| self.vanish_overlay(cx)).flatten();
         let player_bar = top.then(|| self.player_bar(cx)).flatten();
@@ -209,7 +214,7 @@ impl QuillApp {
                                 // Selecting here: the header carries the buttons.
                                 && !self
                                     .session()
-                                    .and_then(|s| s.open_chat)
+                                    .and_then(|s| s.open_chat_id())
                                     .is_some_and(|chat| self.selecting_in(chat)),
                             |this| {
                                 this.when_some(self.forward_draft(), |this, draft| {
@@ -222,8 +227,7 @@ impl QuillApp {
                         // Gated on the open chat still being one: a pending
                         // alert from a previous chat never renders elsewhere.
                         .when(
-                            self.composer_ui.pending_inline_bot_alert.is_some()
-                                && self.open_chat_is_secret(),
+                            self.chat_ui.bot_alert.is_pending() && self.open_chat_is_secret(),
                             |this| this.child(self.inline_bot_alert_banner(cx)),
                         )
                         .children(self.composer_edit_bar_slot(cx))
@@ -270,13 +274,9 @@ impl QuillApp {
                         // Pickers open directly above the input, next to the
                         // buttons that summon them.
                         // The share box's schedule step shows inside its dialog.
-                        .when(
-                            self.chat_ui.schedule_popup_open
-                                && !self.chat_ui.schedule_picker.as_ref().is_some_and(|picker| {
-                                    picker.target == super::scheduled::ScheduleTarget::Share
-                                }),
-                            |this| this.child(self.schedule_popup(cx)),
-                        )
+                        .when(self.chat_ui.schedule_popup_shown(), |this| {
+                            this.child(self.schedule_popup(cx))
+                        })
                         .when_some(self.paid_messages_notice(cx), |this, row| this.child(row))
                         .when_some(self.composer_options_row(cx), |this, row| this.child(row))
                         // MED4: detected-URL chip (send-time preview
@@ -393,8 +393,9 @@ impl QuillApp {
                                 .when_some(self.scheduled_messages_button(cx), |row, button| {
                                     row.child(button)
                                 })
-                                // Show / hide the bot's reply keyboard.
-                                .when_some(self.keyboard_toggle_button(cx), |row, button| {
+                                // Show / hide the bot's reply keyboard, or
+                                // tdesktop's `/` button.
+                                .when_some(self.composer_bot_button(cx), |row, button| {
                                     row.child(button)
                                 })
                                 .when_some(self.suggest_post_toggle(cx), |row, button| {
@@ -414,7 +415,7 @@ impl QuillApp {
                         )
                         // M2: rich editor block bar + live block preview
                         // under the textarea while the editor is open.
-                        .when(self.chat_ui.rich_editor_open, |this| {
+                        .when(self.chat_ui.rich.editor_open(), |this| {
                             this.child(self.rich_editor_bar(cx))
                         }),
                 )
@@ -454,7 +455,7 @@ impl QuillApp {
     pub(in crate::ui) fn session_history(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         super::video_player::warm_decoder(cx);
         let session = self.session();
-        let open = session.and_then(|s| s.open_chat);
+        let open = session.and_then(|s| s.open_chat_id());
         let title = open
             .and_then(|id| session.and_then(|s| s.chats.get(&id.0).map(|c| c.title.clone())))
             .unwrap_or_else(|| tr(keys::Q_CHAT_NO_CHAT_SELECTED).into());
@@ -465,15 +466,16 @@ impl QuillApp {
             session.and_then(|s| s.chats.get(&id.0).and_then(|c| c.kind.gate_reason()))
         });
         let main_history = open.and_then(|id| session.and_then(|s| s.histories.get(&id.0)));
-        let main_empty = main_history.is_none_or(|h| h.messages.is_empty())
-            || open.is_some_and(|id| session.is_some_and(|s| s.history_loading(id)));
+        let main_empty = (main_history.is_none_or(|h| h.messages.is_empty())
+            || open.is_some_and(|id| session.is_some_and(|s| s.history_loading(id))))
+            && !open.is_some_and(|id| self.vanishing_in_emptied(id));
         // kit Phase 3: owned — `history_message_list` takes `&mut self`,
         // so the chat summary can't borrow the session here.
         let chat: Option<ChatSummary> =
             open.and_then(|id| session.and_then(|s| s.chats.get(&id.0).cloned()));
         let media_roots = self.media_display_roots();
         let sender_name = title.clone();
-        let chat_search_open = session.is_some_and(|s| s.search.chat_search.open);
+        let chat_search_open = session.is_some_and(|s| s.search.chat_search.is_open());
         let highlight_id = session.and_then(|s| match s.search.chat_search.jump {
             ChatSearchJump::Ready { message_id } | ChatSearchJump::Loading { message_id } => {
                 Some(message_id)
@@ -500,7 +502,7 @@ impl QuillApp {
         let tabs_used =
             open.is_some_and(|id| session.is_some_and(|s| s.subsection_tabs_used_for(id)));
         let tabs_left = self.subsection_tabs_column(cx);
-        let open_topic = session.and_then(|s| s.open_topic);
+        let open_topic = session.and_then(|s| s.open_forum_topic());
         let topic_info = open.and_then(|id| session.and_then(|s| s.open_topic_info(id)));
         let topic_history = match (open, open_topic) {
             (Some(id), Some(topic_id)) => {
@@ -538,7 +540,9 @@ impl QuillApp {
                 this.child(self.forum_topic_strip(&info, cx))
             })
             .when_some(
-                topic_info.clone().filter(|_| self.chat_ui.topic_info_open),
+                topic_info
+                    .clone()
+                    .filter(|_| self.chat_ui.info_card.topic()),
                 |this, info| this.child(self.topic_info_card(&info, cx)),
             )
             .children(self.subsection_tabs_strip(SubsectionTabsMode::Top, cx))
@@ -550,7 +554,7 @@ impl QuillApp {
             )
             .children(open.and_then(|chat_id| self.pinned_message_banner(chat_id, cx)))
             .children(
-                open.filter(|_| self.history.pinned_list_open)
+                open.filter(|chat| self.pinned_list_open_for(*chat))
                     .and_then(|chat_id| self.pinned_list_panel(chat_id, cx)),
             )
             .when_some(self.pending_bot_reply(cx), |this, reply| this.child(reply))
@@ -589,11 +593,21 @@ impl QuillApp {
                         cx,
                     );
                     self.history.rows_key = Some(key);
-                    list
+                    let failed = self
+                        .saved_history()
+                        .is_some_and(|(_, history)| history.older == quill::state::OlderEnd::Failed)
+                        .then_some(super::older_retry::OlderRetryFor::Saved);
+                    super::older_retry::with_older_retry(list, failed, cx)
                 } else if thread_pending {
                     self.thread_status_pane(cx)
                 } else if let Some(thread) = thread_open {
                     let (key, rows) = self.thread_rows_input(thread, highlight_id);
+                    let failed = (thread.history.older == quill::state::OlderEnd::Failed)
+                        .then_some(super::older_retry::OlderRetryFor::Thread);
+                    let newer = thread
+                        .history
+                        .newer_failed()
+                        .then_some(super::older_retry::NewerRetryFor::Thread);
                     let list = self.history_message_list(
                         "thread-history",
                         rows,
@@ -604,6 +618,8 @@ impl QuillApp {
                         cx,
                     );
                     self.history.rows_key = Some(key);
+                    let list = super::older_retry::with_older_retry(list, failed, cx);
+                    let list = super::older_retry::with_newer_retry(list, newer, cx);
                     self.thread_history_pane(list, cx)
                 } else if is_forum
                     && open_topic.is_none()
@@ -613,7 +629,7 @@ impl QuillApp {
                     // Phase 5.1: opening a forum supergroup shows its topics;
                     // with the topic column on screen the pane only asks for
                     // a choice.
-                    if self.history.forum_column_shown {
+                    if self.history.forum_column.on_screen() {
                         pane_placeholder(
                             tr(keys::Q_CHAT_CHOOSE_A_TOPIC),
                             tr(keys::Q_CHAT_PICK_A_TOPIC_FROM_THE),
@@ -641,6 +657,12 @@ impl QuillApp {
                     } else {
                         let (key, rows) =
                             self.topic_rows_input(open, open_topic, topic_history, highlight_id);
+                        let failed = topic_history
+                            .is_some_and(|h| h.older == quill::state::OlderEnd::Failed)
+                            .then_some(super::older_retry::OlderRetryFor::Topic);
+                        let newer = topic_history
+                            .is_some_and(|h| h.newer_failed())
+                            .then_some(super::older_retry::NewerRetryFor::Topic);
                         let list = self.history_message_list(
                             "topic-history",
                             rows,
@@ -651,7 +673,8 @@ impl QuillApp {
                             cx,
                         );
                         self.history.rows_key = Some(key);
-                        list
+                        let list = super::older_retry::with_older_retry(list, failed, cx);
+                        super::older_retry::with_newer_retry(list, newer, cx)
                     }
                 } else if main_empty {
                     // Phase S1: an empty secret chat shows TGX's end-to-end
@@ -708,6 +731,12 @@ impl QuillApp {
                 } else {
                     let (key, rows) =
                         self.main_rows_input(open, open_topic, main_history, highlight_id);
+                    let older = main_history
+                        .is_some_and(|h| h.load_failed())
+                        .then_some(super::older_retry::OlderRetryFor::Chat);
+                    let newer = main_history
+                        .is_some_and(|h| h.newer_failed())
+                        .then_some(super::older_retry::NewerRetryFor::Chat);
                     let list = self.history_message_list(
                         "session-history",
                         rows,
@@ -718,14 +747,8 @@ impl QuillApp {
                         cx,
                     );
                     self.history.rows_key = Some(key);
-                    // Channels end with their sponsored message (Telegram API
-                    // terms: clients must show it), but only while the
-                    // history is scrolled to the bottom.
-                    let scrolled_up = self.history.scroller.read(cx).is_scrolled_up();
-                    match self.sponsored_footer(scrolled_up, cx) {
-                        Some(footer) => history_with_sponsored(list, footer),
-                        None => list,
-                    }
+                    let list = super::older_retry::with_older_retry(list, older, cx);
+                    super::older_retry::with_newer_retry(list, newer, cx)
                 },
             ))
     }
@@ -740,7 +763,7 @@ impl QuillApp {
             .min_h_0()
             .min_w_0()
             .children(self.thread_root_bar(cx))
-            .when(self.chat_ui.thread_info_open, |this| {
+            .when(self.chat_ui.info_card.thread(), |this| {
                 this.children(self.thread_info_card(cx))
             })
             .child(list)
@@ -778,20 +801,5 @@ fn history_load_failed(cx: &mut Context<QuillApp>) -> AnyElement {
                     this.retry_history_load(cx);
                 })),
         )
-        .into_any_element()
-}
-
-/// A channel's history with its sponsored message at the end.
-#[inline(never)]
-fn history_with_sponsored(list: AnyElement, footer: AnyElement) -> AnyElement {
-    div()
-        .id("history-with-sponsored")
-        .flex()
-        .flex_col()
-        .flex_1()
-        .min_h_0()
-        .min_w_0()
-        .child(list)
-        .child(footer)
         .into_any_element()
 }

@@ -28,6 +28,7 @@ impl QuillApp {
             .map(|s| s.search.chat_search.media)
             .unwrap_or_default();
         let picker = session.and_then(|s| s.search.chat_search.from_picker.clone());
+        let more_failed = session.is_some_and(|s| s.search.chat_search.more_failed());
         let hits: Vec<(MessageId, String, i32, bool)> = session
             .map(|s| {
                 s.search
@@ -255,6 +256,30 @@ impl QuillApp {
                 }
                 this.child(list)
             })
+            .when(more_failed && !picker_open, |this| {
+                this.child(
+                    div()
+                        .id("chat-search-more-failed")
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(tr(keys::Q_CHAT_COULDN_T_LOAD_MESSAGES)),
+                        )
+                        .child(
+                            Button::new("chat-search-more-retry")
+                                .label(tr(keys::Q_CHAT_RETRY))
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.chat_search_retry_more(cx);
+                                })),
+                        ),
+                )
+            })
     }
 
     pub(in crate::ui) fn sync_search_query(&mut self, query: &str, cx: &mut Context<Self>) {
@@ -279,7 +304,7 @@ impl QuillApp {
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             let trimmed = query.trim();
-            if session.search.search.open
+            if session.search.search.is_open()
                 && session.search.search.query == trimmed
                 && !matches!(session.search.search.status(), SearchStatus::Closed)
             {
@@ -373,18 +398,24 @@ impl QuillApp {
         let (text, reply, now_ms) = self.leaving_draft_parts(cx);
         let open = self.chat_open_at(chat_id, None);
         if let Some(live) = self.live.as_mut() {
+            let opened = live
+                .driver
+                .select_search_chat_open(chat_id, open, text, reply, now_ms);
             self.screen.connection.set_note_for(
                 &self.screen.windows,
-                match live
-                    .driver
-                    .select_search_chat_open(chat_id, open, text, reply, now_ms)
-                {
+                match &opened {
                     Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_CHAT_SELECTED)),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_OPEN_CHAT)),
                 },
             );
+            // The driver refused: the chat is not open, so the chat UI is
+            // not entered and the search field keeps its text.
+            if opened.is_err() {
+                cx.notify();
+                return;
+            }
         } else if let Some(session) = self.demo_session.as_mut() {
-            if let Some(prev) = session.open_chat
+            if let Some(prev) = session.open_chat_id()
                 && prev != chat_id
             {
                 let topic = session.open_draft_topic(prev);
@@ -424,18 +455,22 @@ impl QuillApp {
         // The found message wins over the chat's saved scroll position.
         let _ = self.chat_open_at(chat_id, Some(message_id));
         if let Some(live) = self.live.as_mut() {
+            let opened = live
+                .driver
+                .select_search_message(chat_id, message_id, text, reply, now_ms);
             self.screen.connection.set_note_for(
                 &self.screen.windows,
-                match live
-                    .driver
-                    .select_search_message(chat_id, message_id, text, reply, now_ms)
-                {
+                match &opened {
                     Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_OPENED_CHAT)),
                     Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_OPEN_CHAT)),
                 },
             );
+            if opened.is_err() {
+                cx.notify();
+                return;
+            }
         } else if let Some(session) = self.demo_session.as_mut() {
-            if let Some(prev) = session.open_chat
+            if let Some(prev) = session.open_chat_id()
                 && prev != chat_id
             {
                 let topic = session.open_draft_topic(prev);
@@ -572,7 +607,7 @@ impl QuillApp {
         let filters = session.search.search.filters;
         let tab = SearchTab::of(&filters);
         let query = session.search.search.query.trim().to_string();
-        let has_chat = session.open_chat.is_some();
+        let has_chat = session.open_chat_id().is_some();
         let strip = self.search_tab_strip(tab, cx);
         // The strip and the chips name no chat: the UI driver keeps them
         // inside the results list (`redact::CONTROLS`).
@@ -632,12 +667,10 @@ impl QuillApp {
         confirm: SearchConfirm,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let paid_price = self
-            .session()
-            .and_then(|s| s.search.search.tabs.limits)
-            .map_or(0, |limits| limits.star_count);
         let (text, action): (String, String) = match confirm {
-            SearchConfirm::PaidPostSearch => (
+            SearchConfirm::PaidPostSearch {
+                price: paid_price, ..
+            } => (
                 tr_with(
                     keys::Q_CHAT_SEARCH_PUBLIC_POSTS_FOR_THE,
                     &[("paid_price", &paid_price.to_string())],

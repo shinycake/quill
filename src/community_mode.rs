@@ -9,9 +9,9 @@
 //! extra sync.
 #![deny(clippy::indexing_slicing)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
-use crate::state::ChatSummary;
+use crate::state::{ChatSummary, CommunityFullInfos};
 use crate::telegram::envelope::ParsedCommunityFullInfo;
 
 /// The member chat ids of a community from its cached full-info pack.
@@ -39,7 +39,7 @@ pub fn community_member_ids(full_info: Option<&ParsedCommunityFullInfo>) -> Hash
 pub fn retain_community_chats<C: std::borrow::Borrow<ChatSummary>>(
     chats: &mut Vec<C>,
     community_id: Option<i64>,
-    full_infos: &HashMap<i64, ParsedCommunityFullInfo>,
+    full_infos: &CommunityFullInfos,
 ) {
     let Some(community_id) = community_id else {
         return;

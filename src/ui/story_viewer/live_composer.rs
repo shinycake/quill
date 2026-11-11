@@ -35,11 +35,7 @@ impl QuillApp {
         self.live_story_shown()?;
         let session = self.session()?;
         let live = session.stories.live.as_ref()?;
-        let call = session
-            .calls
-            .story_stream
-            .as_ref()
-            .filter(|call| call.id == live.group_call_id);
+        let call = session.live_call();
         let admin = self.live_story_admin();
         let allowed = call.is_some_and(|call| call.are_messages_allowed && call.can_send_messages);
         let price = if admin {
@@ -136,7 +132,7 @@ impl QuillApp {
                     } else {
                         StarsBoxMode::Reaction
                     };
-                    this.open_live_stars_box(mode, 0, false, cx);
+                    this.open_live_stars_box(mode, 0, super::live_state::AfterStars::Nothing, cx);
                 }),
             )
             .into_any_element()
@@ -209,7 +205,12 @@ impl QuillApp {
                     PopupMenuItem::new(tr(keys::VIDEO_STREAM_EDIT_STARS)).on_click(
                         move |_, _, cx| {
                             let _ = edit.update(cx, |this, cx| {
-                                this.open_live_stars_box(StarsBoxMode::Comment, 0, false, cx);
+                                this.open_live_stars_box(
+                                    StarsBoxMode::Comment,
+                                    0,
+                                    super::live_state::AfterStars::Nothing,
+                                    cx,
+                                );
                             });
                         },
                     ),
@@ -304,7 +305,12 @@ impl QuillApp {
                             )
                             .tooltip(tr(keys::VIDEO_STREAM_EDIT_STARS))
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_live_stars_box(StarsBoxMode::Comment, 0, false, cx);
+                                this.open_live_stars_box(
+                                    StarsBoxMode::Comment,
+                                    0,
+                                    super::live_state::AfterStars::Nothing,
+                                    cx,
+                                );
                             })),
                         ),
                 )
@@ -317,7 +323,13 @@ impl QuillApp {
     /// shows the send-as button for two or more senders); a click opens
     /// "Send message as...".
     fn live_send_as_button(&self, session: &Session, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let senders = session.stories.live.as_ref()?.message_senders.clone()?;
+        let senders = session
+            .stories
+            .live
+            .as_ref()?
+            .message_senders
+            .data()
+            .cloned()?;
         if senders.len() < 2 {
             return None;
         }

@@ -10,6 +10,7 @@ use super::chat_row::{
 };
 use super::notifications::notification_settings_json;
 use super::*;
+use crate::ui::chat_list_state::SidebarTab;
 use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
 use gpui_kit::component::button::*;
@@ -189,7 +190,9 @@ impl QuillApp {
             live.driver.session.view_generation.bump();
         }
         // Choosing a chat from the list ends the peek at it.
-        self.history.forum_chats_peek = false;
+        if self.history.forum_column.peeking() {
+            self.history.forum_column = crate::ui::history_state::ForumColumnUi::Hidden;
+        }
         // A chat opened from anywhere (a link, a notification) shows over
         // Settings' place.
         self.close_settings();
@@ -218,9 +221,9 @@ impl QuillApp {
         let reselect = !thread_switch
             && open_at.is_none()
             && !self.thread_active()
-            && self
-                .session()
-                .is_some_and(|s| s.open_chat == Some(chat_id) && s.open_topic.is_none());
+            && self.session().is_some_and(|s| {
+                s.open_chat_id() == Some(chat_id) && s.open_forum_topic().is_none()
+            });
         let open = self.chat_open_at(chat_id, open_at);
         if let Some(live) = self.live.as_mut() {
             let driver = &mut live.driver;
@@ -291,7 +294,7 @@ impl QuillApp {
         community_id: i64,
         cx: &mut Context<Self>,
     ) {
-        self.chat_list.contacts_tab_open = false;
+        self.chat_list.tab = SidebarTab::Chats;
         self.set_chat_list_view(ChatListFilter::Community(community_id), None);
         if let Some(live) = self.live.as_mut()
             && let Err(err) = live.driver.get_community_full_info(community_id)
@@ -432,8 +435,9 @@ impl QuillApp {
         let chats = self.selected_chat_pin_states();
         let pin_all = chats.iter().any(|(_, pinned)| !pinned);
         for (id, pinned) in chats {
-            if pinned != pin_all {
-                self.toggle_chat_pin(id, cx);
+            if pinned != pin_all && !self.try_toggle_chat_pin(id, cx) {
+                // The limit box is up: the rest would only ask it again.
+                break;
             }
         }
         self.chat_list.selected.clear();
@@ -537,22 +541,21 @@ impl QuillApp {
     /// Slice CL3: bulk delete — confirms first, like the single-chat
     /// row-menu path.
     pub(super) fn delete_selected_chats(&mut self, cx: &mut Context<Self>) {
-        // The dialog needs a chat id; the ids to delete are read from
-        // the live selection at submit time.
-        if let Some(first) = self.selected_chat_ids().first().copied() {
-            self.open_group_confirm(first, GroupConfirmAction::RemoveSelectedChats, cx);
+        // The chats to delete are the ones selected now, carried by the
+        // action.
+        let ids = self.selected_chat_ids();
+        if !ids.is_empty() {
+            self.open_group_confirm(GroupConfirmAction::RemoveSelectedChats { ids }, cx);
         }
     }
 
     pub(super) fn open_chats_tab(&mut self, cx: &mut Context<Self>) {
-        self.chat_list.contacts_tab_open = false;
-        self.chat_list.calls_tab_open = false;
+        self.chat_list.tab = SidebarTab::Chats;
         cx.notify();
     }
 
     pub(super) fn open_contacts_tab(&mut self, cx: &mut Context<Self>) {
-        self.chat_list.contacts_tab_open = true;
-        self.chat_list.calls_tab_open = false;
+        self.chat_list.tab = SidebarTab::Contacts;
         // Slice A6: the sync toggle gates the `getContacts` refresh —
         // with sync off the tab shows the last loaded snapshot.
         let sync_on = self
@@ -578,8 +581,7 @@ impl QuillApp {
     /// server-side call history plus both call privacy settings. Demo
     /// mode injects synthetic data instead (screenshot proof).
     pub(super) fn open_calls_tab(&mut self, cx: &mut Context<Self>) {
-        self.chat_list.contacts_tab_open = false;
-        self.chat_list.calls_tab_open = true;
+        self.chat_list.tab = SidebarTab::Calls;
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.fetch_call_history() {
                 self.screen.connection.set_note_for(
@@ -606,7 +608,7 @@ impl QuillApp {
 
     pub(super) fn open_folder_tab(&mut self, folder: Option<i32>, cx: &mut Context<Self>) {
         self.set_chat_list_view(ChatListFilter::All, folder);
-        self.chat_list.contacts_tab_open = false;
+        self.chat_list.tab = SidebarTab::Chats;
         if let (Some(live), Some(folder_id)) = (self.live.as_mut(), folder)
             && let Err(err) = live.driver.load_folder_chats(folder_id)
         {
@@ -624,10 +626,19 @@ impl QuillApp {
     /// first move starts the reorder, later ones swap rows live.
     pub(super) fn pin_drag_move(&mut self, drag: &PinnedChatDrag, y: f32, cx: &mut Context<Self>) {
         let now = std::time::Instant::now();
-        if let Some(reorder) = self.chat_list.pin_reorder.as_mut()
-            && reorder.dragging() == Some(drag.chat_id.0)
+        // The view moved on under the drag (a folder, the archive): its
+        // pinned list is off screen, so the drag goes, unsaved.
+        if !self.pinned_list_shown(drag.archived) {
+            if self.chat_list.pin.end_drag() {
+                self.notify_sidebar(cx);
+            }
+            return;
+        }
+        if let Some(pin) = self.chat_list.pin.drag_mut()
+            && pin.archived == drag.archived
+            && pin.reorder.dragging() == Some(drag.chat_id.0)
         {
-            reorder.drag_to(y, now);
+            pin.reorder.drag_to(y, now);
         } else {
             let Some(session) = self.session() else {
                 return;
@@ -648,36 +659,59 @@ impl QuillApp {
                     Some((*id, f32::from(height)))
                 })
                 .collect();
-            let press = match self.chat_list.pin_press.take() {
-                Some((id, press)) if id == drag.chat_id.0 => press,
-                _ => y,
-            };
-            self.chat_list.pin_reorder_archived = drag.archived;
-            self.chat_list.pin_reorder =
+            let press = self.chat_list.pin.take_press(drag.chat_id.0).unwrap_or(y);
+            self.chat_list.pin =
                 quill::pin_reorder::PinReorder::begin(ids, heights, drag.chat_id.0, press, now)
-                    .map(|mut reorder| {
+                    .map_or(crate::ui::chat_list_state::PinStage::Idle, |mut reorder| {
                         reorder.drag_to(y, now);
-                        reorder
+                        crate::ui::chat_list_state::PinStage::Dragging(
+                            crate::ui::chat_list_state::PinDrag {
+                                archived: drag.archived,
+                                reorder,
+                                next_press: None,
+                            },
+                        )
                     });
             // A reorder is not a long press: no peek preview over the drag.
-            self.chat_list.preview_press = None;
-            self.chat_list.preview = None;
+            self.chat_list.peek = crate::ui::chat_list_state::PeekPreview::Idle;
         }
         self.notify_sidebar(cx);
+    }
+
+    /// A pinned drag whose release never came (the pointer moves with no
+    /// button down): it ends where it is, and nothing is saved.
+    pub(super) fn cancel_pin_drag(&mut self, cx: &mut Context<Self>) {
+        let dragging = self
+            .chat_list
+            .pin
+            .drag()
+            .is_some_and(|pin| pin.reorder.dragging().is_some());
+        if dragging {
+            self.chat_list.pin.end_drag();
+            self.notify_sidebar(cx);
+        }
     }
 
     /// Pinned drag released (tdesktop `finishReorderOnRelease` +
     /// `savePinnedOrder`): the dragged row slides into its slot and the
     /// full order goes out as `setPinnedChats`.
     pub(super) fn finish_pin_drag(&mut self, cx: &mut Context<Self>) {
-        let archived = self.chat_list.pin_reorder_archived;
-        let Some(reorder) = self.chat_list.pin_reorder.as_mut() else {
+        let Some(pin) = self.chat_list.pin.drag_mut() else {
             return;
         };
-        if reorder.dragging().is_none() {
+        if pin.reorder.dragging().is_none() {
             return;
         }
-        let ids = reorder.release(std::time::Instant::now());
+        let archived = pin.archived;
+        let dragged = pin.reorder.release(std::time::Instant::now());
+        // Another device may have pinned or unpinned chats while the row was
+        // held: what is pinned now keeps its place, the dragged order only
+        // decides the order of the chats both lists have.
+        let now_pinned = match self.session() {
+            Some(session) => session.pinned_chat_ids(archived),
+            None => dragged.clone(),
+        };
+        let ids = quill::pin_reorder::merge_order(&dragged, &now_pinned);
         if let Some(live) = self.live.as_mut() {
             if let Err(err) = live.driver.set_pinned_chat_order(archived, ids) {
                 self.set_note(StatusNote::error(user_error_for(
@@ -802,6 +836,7 @@ mod drop_on_row_tests;
 mod drop_topic;
 mod forward_drop_tests;
 mod media_drag_tests;
+mod pin_drag_tests;
 pub(in crate::ui) use drop_on_row::DropOnRow;
 pub(in crate::ui) use drop_topic::DropTopic;
 mod header_fit;

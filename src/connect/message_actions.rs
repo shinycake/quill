@@ -21,24 +21,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         for (chat_id, message_id) in self.session.reply_fetch_candidates() {
-            let extra = self.session.request(
-                RequestPurpose::GetRepliedMessage {
-                    chat_id,
-                    message_id,
-                },
-                Some(chat_id),
-            );
+            let extra = self.session.begin_reply_fetch(chat_id, message_id);
             if let Err(err) = self
                 .sender
                 .send_json(&get_replied_message(extra, chat_id, message_id))
             {
-                self.session.requests.take(extra);
+                self.session.cancel_reply_fetch(extra);
                 return Err(err);
             }
-            self.session.messages.reply_targets.insert(
-                (chat_id.0, message_id.0),
-                crate::state::ReplyTarget::Loading,
-            );
         }
         // The stories replied to: their picture fills the strip. `get_story`
         // skips cached and in-flight ones and those waiting out a failure,
@@ -48,8 +38,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             if self.get_story(chat_id, story_id)?.is_some() {
                 self.session
                     .stories
-                    .reply_attempted
-                    .insert((chat_id.0, story_id));
+                    .story_fetch
+                    .asked((chat_id.0, story_id));
             }
         }
         Ok(())
@@ -310,8 +300,20 @@ impl<S: JsonSender> ConnectDriver<S> {
             100,
             Some(search_messages_filter_json("searchMessagesFilterPinned")),
         );
+        self.session
+            .messages
+            .pinned_messages
+            .entry(chat_id.0)
+            .or_default()
+            .begin();
         if let Err(err) = self.sender.send_json(&json) {
             self.session.requests.take(extra);
+            self.session
+                .messages
+                .pinned_messages
+                .entry(chat_id.0)
+                .or_default()
+                .fail("could not send the pinned messages request");
             return Err(err);
         }
         Ok(())
@@ -323,7 +325,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `ingest` jumps to it; viewing the row then reads it and TDLib
     /// lowers the chat's counter (`updateChatUnread*Count`).
     pub fn jump_to_unread_marker(&mut self, kind: UnreadJumpKind) -> Result<(), ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         if !self.chats_path_active() {
@@ -356,7 +358,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         kind: UnreadJumpKind,
     ) -> Result<(), ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         self.read_all_chat_unread_markers(chat_id, kind)
@@ -533,6 +535,34 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// A failed `getWebPageInstantView` (TDLib 404: the page has no
+    /// Instant View) as the link the asking window opens in the browser, like
+    /// TGX. Taken before `apply` drops the pending request; `None` for any
+    /// other envelope and for a window that closed since asking.
+    pub(crate) fn take_instant_view_fallback(
+        &mut self,
+        envelope: &crate::telegram::envelope::Envelope,
+    ) -> Option<crate::state::InstantViewFallback> {
+        if !matches!(envelope.payload, crate::telegram::EnvelopePayload::Error(_)) {
+            return None;
+        }
+        let id = envelope.extra?;
+        let pending = self.session.requests.get(id)?;
+        if pending.purpose != RequestPurpose::GetWebPageInstantView {
+            return None;
+        }
+        let window = pending.asked_in.chat();
+        let messages = &mut self.session.messages;
+        let ask = messages.instant_view_requests.remove(&id)?;
+        window
+            .is_none_or(|chat| self.session.window_chats.contains(&chat))
+            .then_some(crate::state::InstantViewFallback {
+                window,
+                url: ask.url,
+                from_agent: ask.from_agent,
+            })
+    }
+
     /// MED4: outcome of an Instant View open attempt (TGX
     /// `TdlibUi.fetchInstantView` + browser fallback).
     pub fn open_instant_view(&mut self, url: &str) -> InstantViewOutcome {
@@ -550,16 +580,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = get_web_page_instant_view(extra, url);
         match self.sender.send_json(&json) {
             Ok(()) => {
-                self.session
-                    .messages
-                    .instant_view_urls
-                    .insert(extra, url.to_string());
-                if crate::agent::ui_driver::guard::injecting() {
-                    self.session
-                        .messages
-                        .instant_view_agent_requests
-                        .insert(extra);
-                }
+                self.session.messages.instant_view_requests.insert(
+                    extra,
+                    crate::state::InstantViewAsk {
+                        url: url.to_string(),
+                        from_agent: crate::agent::ui_driver::guard::injecting(),
+                    },
+                );
                 InstantViewOutcome::Requested
             }
             Err(_) => {

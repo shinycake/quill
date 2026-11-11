@@ -1,5 +1,5 @@
-use super::link::Link;
-use super::{Hop, NO_SUCH_IP_VERSION, Path, Route, Tracker};
+use super::link::{Gateway, Link};
+use super::{Hop, NO_SUCH_IP_VERSION, OFFLINE_LOOK_EVERY, Path, Route, Tracker};
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
@@ -9,8 +9,7 @@ const WIFI: Hop = Hop {
     local: HOME,
     link: Link {
         interface: 2,
-        gateway: Some(ROUTER),
-        gateway_hardware: Some(HOME_ROUTER),
+        gateway: Gateway::Resolved(ROUTER, HOME_ROUTER),
     },
 };
 const HOME_ROUTER: [u8; 6] = [0x02, 0, 0, 0, 0, 0x01];
@@ -18,8 +17,7 @@ const CAFE: Hop = Hop {
     local: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 7)),
     link: Link {
         interface: 2,
-        gateway: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))),
-        gateway_hardware: None,
+        gateway: Gateway::Unresolved(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))),
     },
 };
 
@@ -88,7 +86,7 @@ fn a_new_network_that_gives_the_same_address_moves_the_epoch() {
     let mut tracker = Tracker::new(on(Path::Via(WIFI), Path::NoRoute));
     let other_router = Hop {
         link: Link {
-            gateway: Some(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 254))),
+            gateway: Gateway::Unresolved(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 254))),
             ..WIFI.link
         },
         ..WIFI
@@ -118,20 +116,35 @@ fn an_online_read_does_not_look_and_an_offline_read_does() {
     let wifi = on(Path::Via(WIFI), Path::NoRoute);
     let offline = on(Path::NoRoute, Path::NoRoute);
     let mut tracker = Tracker::new(wifi);
-    let looked = std::cell::Cell::new(false);
-    let state = tracker.state(|| {
-        looked.set(true);
-        wifi
-    });
-    assert!(!looked.get(), "the route is known");
+    let start = std::time::Instant::now();
+    assert!(!tracker.look_due(start), "the route is known");
+    let state = tracker.state(None);
     assert_eq!((state.epoch, state.available), (0, true));
 
     tracker.observe(offline);
-    let state = tracker.state(|| offline);
+    assert!(tracker.look_due(start));
+    let state = tracker.state(Some(offline));
     assert_eq!((state.epoch, state.available), (1, false));
 
-    let state = tracker.state(|| wifi);
+    assert!(tracker.look_due(start + OFFLINE_LOOK_EVERY));
+    let state = tracker.state(Some(wifi));
     assert_eq!((state.epoch, state.available), (2, true));
+}
+
+/// Sweep 04-001: reads while offline do not each probe the routing table.
+#[test]
+fn offline_reads_look_at_most_once_per_interval() {
+    let mut tracker = Tracker::new(on(Path::NoRoute, Path::NoRoute));
+    let start = std::time::Instant::now();
+    assert!(tracker.look_due(start));
+    for millis in [0, 10, 500, 999] {
+        assert!(
+            !tracker.look_due(start + std::time::Duration::from_millis(millis)),
+            "{millis} ms after a look"
+        );
+    }
+    assert!(tracker.look_due(start + OFFLINE_LOOK_EVERY));
+    assert!(!tracker.look_due(start + OFFLINE_LOOK_EVERY));
 }
 
 #[test]
@@ -139,7 +152,7 @@ fn a_router_on_the_same_address_with_another_link_address_moves_the_epoch() {
     let mut tracker = Tracker::new(on(Path::Via(WIFI), Path::NoRoute));
     let with = |gateway_hardware| Hop {
         link: Link {
-            gateway_hardware,
+            gateway: Gateway::new(Some(ROUTER), gateway_hardware),
             ..WIFI.link
         },
         ..WIFI
@@ -172,7 +185,7 @@ fn a_new_router_on_the_same_address_is_looked_up_at_once_and_only_once() {
     let unresolved = on(
         Path::Via(Hop {
             link: Link {
-                gateway_hardware: None,
+                gateway: Gateway::Unresolved(ROUTER),
                 ..WIFI.link
             },
             ..WIFI

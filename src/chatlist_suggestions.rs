@@ -9,6 +9,7 @@
 //! `updateContactCloseBirthdays` (yesterday, today and tomorrow).
 #![deny(clippy::indexing_slicing)]
 
+use crate::ids::RequestId;
 use std::collections::BTreeSet;
 
 pub const ACTION_BIRTHDATE: &str = "suggestedActionSetBirthdate";
@@ -37,13 +38,112 @@ pub enum Suggestion {
     UpgradePremium,
 }
 
+/// The "Is +X still your number?" suggestion (`suggestedActionCheckPhoneNumber`)
+/// with where its prompt stands. The stage is the action itself: when TDLib
+/// removes it the prompt is gone, and when it comes back it asks again.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PhoneSuggestion {
+    /// TDLib does not offer it.
+    #[default]
+    Absent,
+    /// Offered, the question shows.
+    Asking,
+    /// "No" was answered: the note about changing the number shows.
+    NotMine,
+}
+
+/// The birthday suggestion's card. Hiding it is optimistic: it goes at
+/// once and comes back only if the server refuses that very request.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BirthdayCard {
+    #[default]
+    Shown,
+    /// `hideContactCloseBirthdays` is out under this request.
+    Hiding { request: RequestId },
+    /// The server took it; a fresh list from TDLib shows the card again.
+    Hidden,
+}
+
 /// What the account knows right now.
 #[derive(Debug, Clone, Default)]
 pub struct SuggestionFacts {
+    /// The offered actions, except the phone check (see `phone`).
     pub actions: BTreeSet<String>,
+    pub phone: PhoneSuggestion,
     pub close_birthdays: Vec<CloseBirthday>,
     /// The user dismissed the birthday suggestion (`hideContactCloseBirthdays`).
-    pub birthdays_hidden: bool,
+    pub birthday_card: BirthdayCard,
+}
+
+impl SuggestionFacts {
+    /// TDLib offers `name`. A phone suggestion that comes back starts at
+    /// the question, not at an old answer; one already offered keeps it.
+    pub fn add_action(&mut self, name: &str) {
+        if name == ACTION_PHONE {
+            if self.phone == PhoneSuggestion::Absent {
+                self.phone = PhoneSuggestion::Asking;
+            }
+        } else {
+            self.actions.insert(name.to_string());
+        }
+    }
+
+    /// `name` is gone (answered, hidden, or removed by TDLib).
+    pub fn remove_action(&mut self, name: &str) {
+        if name == ACTION_PHONE {
+            self.phone = PhoneSuggestion::Absent;
+        } else {
+            self.actions.remove(name);
+        }
+    }
+
+    /// Whether TDLib offers `name`.
+    pub fn has_action(&self, name: &str) -> bool {
+        if name == ACTION_PHONE {
+            self.phone != PhoneSuggestion::Absent
+        } else {
+            self.actions.contains(name)
+        }
+    }
+
+    /// "No" was pressed on the phone question.
+    pub fn answer_phone_no(&mut self) {
+        if self.phone == PhoneSuggestion::Asking {
+            self.phone = PhoneSuggestion::NotMine;
+        }
+    }
+
+    /// The birthday card was dismissed; `request` hides it on the server.
+    pub fn hide_birthdays(&mut self, request: RequestId) {
+        self.birthday_card = BirthdayCard::Hiding { request };
+    }
+
+    /// The server took `request`.
+    pub fn birthdays_hidden_by(&mut self, request: RequestId) {
+        if self.birthday_card == (BirthdayCard::Hiding { request }) {
+            self.birthday_card = BirthdayCard::Hidden;
+        }
+    }
+
+    /// `request` failed: the card returns, but only for the request that
+    /// hid it.
+    pub fn birthdays_hide_failed(&mut self, request: RequestId) -> bool {
+        let matched = self.birthday_card == (BirthdayCard::Hiding { request });
+        if matched {
+            self.birthday_card = BirthdayCard::Shown;
+        }
+        matched
+    }
+
+    /// A fresh list from TDLib shows the card again.
+    pub fn show_birthdays(&mut self) {
+        self.birthday_card = BirthdayCard::Shown;
+    }
+
+    /// The card is dismissed (or being dismissed).
+    pub fn birthdays_hidden(&self) -> bool {
+        self.birthday_card != BirthdayCard::Shown
+    }
 }
 
 /// Contacts whose birthday falls on `month`/`day`.
@@ -64,14 +164,14 @@ pub fn pick(
     day: u8,
     premium_can_buy: bool,
 ) -> Option<Suggestion> {
-    let has = |name: &str| facts.actions.contains(name);
+    let has = |name: &str| facts.has_action(name);
     if has(ACTION_PHONE) {
         return Some(Suggestion::CheckPhone);
     }
     if has(ACTION_PASSWORD) {
         return Some(Suggestion::CheckPassword);
     }
-    if premium_can_buy && !facts.birthdays_hidden {
+    if premium_can_buy && !facts.birthdays_hidden() {
         let today = today_birthdays(&facts.close_birthdays, month, day);
         if !today.is_empty() {
             return Some(Suggestion::Birthdays(today));
@@ -201,19 +301,46 @@ mod tests {
     use super::*;
 
     fn facts(actions: &[&str], birthdays: &[(i64, u8, u8)], hidden: bool) -> SuggestionFacts {
-        SuggestionFacts {
-            actions: actions.iter().map(|s| s.to_string()).collect(),
-            close_birthdays: birthdays
-                .iter()
-                .map(|&(user_id, month, day)| CloseBirthday {
-                    user_id,
-                    day,
-                    month,
-                    year: None,
-                })
-                .collect(),
-            birthdays_hidden: hidden,
+        let mut f = SuggestionFacts::default();
+        for action in actions {
+            f.add_action(action);
         }
+        f.close_birthdays = birthdays
+            .iter()
+            .map(|&(user_id, month, day)| CloseBirthday {
+                user_id,
+                day,
+                month,
+                year: None,
+            })
+            .collect();
+        f.birthday_card = if hidden {
+            BirthdayCard::Hidden
+        } else {
+            BirthdayCard::Shown
+        };
+        f
+    }
+
+    #[test]
+    fn the_phone_prompt_asks_again_when_its_suggestion_comes_back() {
+        let mut f = SuggestionFacts::default();
+        assert!(!f.has_action(ACTION_PHONE));
+        f.answer_phone_no();
+        assert_eq!(f.phone, PhoneSuggestion::Absent, "nothing to answer");
+        f.add_action(ACTION_PHONE);
+        assert_eq!(f.phone, PhoneSuggestion::Asking);
+        f.answer_phone_no();
+        assert_eq!(f.phone, PhoneSuggestion::NotMine);
+        f.remove_action(ACTION_PHONE);
+        assert!(!f.has_action(ACTION_PHONE));
+        f.add_action(ACTION_PHONE);
+        assert_eq!(f.phone, PhoneSuggestion::Asking);
+        f.answer_phone_no();
+        f.add_action(ACTION_PHONE);
+        assert_eq!(f.phone, PhoneSuggestion::NotMine, "already offered");
+        f.add_action(ACTION_PASSWORD);
+        assert_eq!(f.phone, PhoneSuggestion::NotMine, "other actions leave it");
     }
 
     #[test]

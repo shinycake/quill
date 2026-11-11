@@ -1,7 +1,8 @@
 //! Reducer for the gift market (`crate::gift_market`): resale pages and
 //! purchases, auction states and bids, crafting candidates and results.
 use crate::gift_market::{
-    CraftGift, CraftResult, GiftMarketPayload, GiftMarketPurpose, bid_done_toast, error_note,
+    AuctionFetch, AuctionFollow, CraftGift, CraftResult, CraftRun, GiftMarketPayload,
+    GiftMarketPurpose, PageLoad, bid_done_toast, error_note,
 };
 use crate::marketplace::GiftPurchaseResult;
 use crate::state::*;
@@ -21,9 +22,10 @@ impl Session {
     ) {
         let purpose = market_purpose(pending);
         let request = pending.map_or(0, |p| p.id.0);
+        let asked = pending.map(|p| p.id);
         match payload {
             GiftMarketPayload::ResalePage(page) => {
-                let Some(GiftMarketPurpose::SearchResale { page: index, .. }) = purpose else {
+                let Some(GiftMarketPurpose::SearchResale { .. }) = purpose else {
                     return;
                 };
                 let files: Vec<ParsedFile> = page
@@ -39,23 +41,26 @@ impl Session {
                 }
                 let me = self.my_user_id;
                 let market = &mut self.payments.gift_market;
-                if let Some(search) = market.resale.as_mut().filter(|s| s.request_id == request) {
-                    search.apply(page, me, index > 0);
+                if let Some(search) = market.resale.as_mut().filter(|s| s.load.waits_for(request)) {
+                    let append = search.load.appends(request);
+                    search.apply(page, me, append);
                 } else if let Some(search) = market
                     .craft
                     .as_mut()
                     .map(|craft| &mut craft.market)
-                    .filter(|s| s.request_id == request)
+                    .filter(|s| s.load.waits_for(request))
                 {
-                    search.apply(page, me, index > 0);
+                    let append = search.load.appends(request);
+                    search.apply(page, me, append);
                 }
             }
             GiftMarketPayload::AuctionState(state) => {
                 self.remember_files(&state.gift.files);
                 let market = &mut self.payments.gift_market;
-                if request != 0 && market.auction_request == request {
-                    market.auction_loading = false;
-                    market.auction_ready = Some(state.gift_id());
+                if request != 0 && market.auction == (AuctionFetch::Loading { request }) {
+                    market.auction = AuctionFetch::Ready {
+                        gift_id: state.gift_id(),
+                    };
                 }
                 market.store_auction(*state);
             }
@@ -76,19 +81,30 @@ impl Session {
                 market.active = list;
             }
             GiftMarketPayload::AcquiredGifts(list) => {
-                if let Some(GiftMarketPurpose::AcquiredGifts { gift_id }) = purpose {
-                    self.payments.gift_market.acquired.insert(gift_id, list);
+                if let Some(GiftMarketPurpose::AcquiredGifts { gift_id }) = purpose
+                    && let Some(fetch) = self.payments.gift_market.acquired.get_mut(&gift_id)
+                {
+                    fetch.answered(asked, list);
                 }
             }
             GiftMarketPayload::UpgradePreview(preview) => {
-                if let Some(GiftMarketPurpose::UpgradePreview { gift_id }) = purpose {
+                if let Some(GiftMarketPurpose::UpgradePreview { gift_id }) = purpose
+                    && self
+                        .payments
+                        .gift_market
+                        .previews
+                        .get(&gift_id)
+                        .is_some_and(|fetch| asked.is_some_and(|id| fetch.waits_for(id)))
+                {
                     let files: Vec<ParsedFile> = preview.files().cloned().collect();
                     self.remember_files(&files);
-                    self.payments.gift_market.previews.insert(gift_id, preview);
+                    if let Some(fetch) = self.payments.gift_market.previews.get_mut(&gift_id) {
+                        fetch.answered(asked, preview);
+                    }
                 }
             }
             GiftMarketPayload::CraftCandidates(candidates) => {
-                let Some(GiftMarketPurpose::GiftsForCrafting { page, .. }) = purpose else {
+                let Some(GiftMarketPurpose::GiftsForCrafting { .. }) = purpose else {
                     return;
                 };
                 let files: Vec<ParsedFile> = candidates
@@ -102,12 +118,12 @@ impl Session {
                     .gift_market
                     .craft
                     .as_mut()
-                    .filter(|craft| craft.candidates_request == request)
+                    .filter(|craft| craft.candidates_load.waits_for(request))
                 else {
                     return;
                 };
-                craft.candidates_loading = false;
-                craft.candidates_loaded = true;
+                let append = craft.candidates_load.appends(request);
+                craft.candidates_load = PageLoad::Ready;
                 craft.candidates_total = candidates.total_count;
                 craft.candidates_offset = if candidates.gifts.is_empty() {
                     String::new()
@@ -115,7 +131,7 @@ impl Session {
                     candidates.next_offset
                 };
                 craft.set_probabilities(candidates.probabilities);
-                if page > 0 {
+                if append {
                     craft.candidates.extend(candidates.gifts);
                 } else {
                     craft.candidates = candidates.gifts;
@@ -136,10 +152,9 @@ impl Session {
                     .gift_market
                     .craft
                     .as_mut()
-                    .filter(|craft| request != 0 && craft.craft_request == request)
+                    .filter(|craft| craft.run == (CraftRun::Crafting { request }))
                 {
-                    craft.crafting = false;
-                    craft.result = Some(result);
+                    craft.run = CraftRun::Done(result);
                 }
             }
         }
@@ -153,17 +168,12 @@ impl Session {
     /// The answer to the buy `request`, for the box that sent it only.
     pub(crate) fn apply_gift_market_purchase(&mut self, result: GiftPurchaseResult, request: u64) {
         let market = &mut self.payments.gift_market;
-        let Some(buy) = market
-            .buy
-            .as_mut()
-            .filter(|buy| request != 0 && buy.request == request)
-        else {
+        let Some(buy) = market.buy.as_mut().filter(|buy| buy.waits_for(request)) else {
             return;
         };
-        buy.sending = false;
+        buy.send_failed();
         match result {
             GiftPurchaseResult::Sent(received_gift_id) => {
-                buy.done = Some(received_gift_id.clone());
                 let listing = buy.listing.clone();
                 let recipient = buy.recipient.clone();
                 let for_craft = buy.for_craft;
@@ -199,10 +209,7 @@ impl Session {
                 market.buy = None;
             }
             GiftPurchaseResult::PriceIncreased(price) => {
-                buy.price_changed = price;
-                if let Some(crate::marketplace::GiftPrice::TonCents(_)) = price {
-                    buy.pay_in_grams = true;
-                }
+                buy.price_increased(price);
             }
         }
     }
@@ -215,7 +222,15 @@ impl Session {
                 GiftMarketPurpose::PlaceBid { gift_id }
                 | GiftMarketPurpose::IncreaseBid { gift_id },
             ) => {
-                market.bidding = None;
+                // Only the bid in flight settles it; another request's
+                // answer leaves the button waiting.
+                let id = pending.map(|p| p.id);
+                if market
+                    .bidding
+                    .is_some_and(|(_, request)| Some(request) == id)
+                {
+                    market.bidding = None;
+                }
                 let per_round = market
                     .auctions
                     .get(&gift_id)
@@ -232,9 +247,9 @@ impl Session {
                 if let Some(craft) = market
                     .craft
                     .as_mut()
-                    .filter(|craft| request != 0 && craft.craft_request == request)
+                    .filter(|craft| craft.run == (CraftRun::Crafting { request }))
                 {
-                    craft.crafting = false;
+                    craft.run = CraftRun::Idle;
                 }
             }
             _ => {}
@@ -249,6 +264,7 @@ impl Session {
         purpose: GiftMarketPurpose,
         request: u64,
     ) {
+        let asked = (request != 0).then_some(crate::ids::RequestId(request));
         let market = &mut self.payments.gift_market;
         let note = error_note(purpose, &error_reason(err));
         let low = err.earn_hint == Some(crate::earn::EarnErrorHint::BalanceTooLow);
@@ -259,22 +275,18 @@ impl Session {
                     .iter_mut()
                     .chain(market.craft.as_mut().map(|craft| &mut craft.market))
                 {
-                    if search.loading {
-                        search.loading = false;
-                        search.loaded = true;
-                        search.error = Some(note.clone());
+                    // Only the search that sent this request fails; a newer
+                    // filter's search (or the other box's) keeps loading.
+                    if search.load.waits_for(request) {
+                        search.load = PageLoad::Failed(note.clone());
                     }
                 }
             }
             GiftMarketPurpose::BuyResale => {
-                let Some(buy) = market
-                    .buy
-                    .as_mut()
-                    .filter(|buy| request != 0 && buy.request == request)
-                else {
+                let Some(buy) = market.buy.as_mut().filter(|buy| buy.waits_for(request)) else {
                     return;
                 };
-                buy.sending = false;
+                buy.send_failed();
                 if low {
                     market.balance_low = true;
                 } else {
@@ -282,11 +294,19 @@ impl Session {
                 }
             }
             GiftMarketPurpose::AuctionState { .. } => {
-                market.auction_loading = false;
+                if request == 0 || market.auction != (AuctionFetch::Loading { request }) {
+                    return;
+                }
+                market.auction = AuctionFetch::Idle;
                 market.notes.push(note);
             }
             GiftMarketPurpose::PlaceBid { .. } | GiftMarketPurpose::IncreaseBid { .. } => {
-                market.bidding = None;
+                if market
+                    .bidding
+                    .is_some_and(|(_, waiting)| request != 0 && waiting.0 == request)
+                {
+                    market.bidding = None;
+                }
                 if low {
                     market.balance_low = true;
                 } else {
@@ -294,27 +314,51 @@ impl Session {
                 }
             }
             GiftMarketPurpose::GiftsForCrafting { .. } => {
-                if let Some(craft) = market.craft.as_mut() {
-                    craft.candidates_loading = false;
-                    craft.candidates_loaded = true;
-                }
+                let Some(craft) = market
+                    .craft
+                    .as_mut()
+                    .filter(|craft| craft.candidates_load.waits_for(request))
+                else {
+                    return;
+                };
+                craft.candidates_load = PageLoad::Failed(note.clone());
                 market.notes.push(note);
             }
             GiftMarketPurpose::Craft => {
                 let Some(craft) = market
                     .craft
                     .as_mut()
-                    .filter(|craft| request != 0 && craft.craft_request == request)
+                    .filter(|craft| request != 0 && craft.run == (CraftRun::Crafting { request }))
                 else {
                     return;
                 };
-                craft.crafting = false;
+                craft.run = CraftRun::Idle;
                 market.notes.push(note);
             }
-            GiftMarketPurpose::OpenAuction
-            | GiftMarketPurpose::CloseAuction
-            | GiftMarketPurpose::AcquiredGifts { .. }
-            | GiftMarketPurpose::UpgradePreview { .. } => {}
+            GiftMarketPurpose::AcquiredGifts { gift_id } => {
+                if let Some(fetch) = market.acquired.get_mut(&gift_id) {
+                    fetch.failed(asked, error_reason(err), false);
+                }
+            }
+            GiftMarketPurpose::OpenAuction => {
+                // Only the follow that asked fails; the box shows no error
+                // and does not ask again while it stays open.
+                if let AuctionFollow::Following {
+                    gift_id,
+                    request: asked,
+                } = market.follow
+                    && request != 0
+                    && asked == request
+                {
+                    market.follow = AuctionFollow::Failed(gift_id);
+                }
+            }
+            GiftMarketPurpose::CloseAuction => {}
+            GiftMarketPurpose::UpgradePreview { gift_id } => {
+                if let Some(fetch) = market.previews.get_mut(&gift_id) {
+                    fetch.failed(asked, error_reason(err), false);
+                }
+            }
         }
     }
 

@@ -32,6 +32,7 @@ mod style_tests;
 use super::ai_compose_state::{AiComposeOpen, AiComposeView};
 use super::app::QuillApp;
 use super::status_note::StatusNote;
+use crate::ui::composer_sends::SendOnce;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::button::ButtonCustomVariant;
 use gpui_kit::*;
@@ -102,7 +103,7 @@ impl QuillApp {
     /// `HistoryWidget::showAiComposeBox`): a box over the draft, on the
     /// Style tab, which asks for nothing until a style is picked.
     pub(super) fn open_ai_compose(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.chat_ui.rich_editor_open {
+        if self.chat_ui.rich.editor_open() {
             return;
         }
         let Some(conversation) = self.open_conversation() else {
@@ -238,7 +239,7 @@ impl QuillApp {
             .map(|open| open.conversation.clone());
         self.apply_ai_compose(window, cx);
         if asked.is_some() && self.open_conversation() == asked {
-            self.submit_from_send_button(window, cx);
+            self.submit_from_send_button(SendOnce::default(), window, cx);
         }
     }
 

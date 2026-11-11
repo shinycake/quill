@@ -2,10 +2,11 @@
 //! opener thread runs) and draws or unpacks the frames of the clips it owns.
 #![deny(clippy::indexing_slicing)]
 
+use super::engine::Stage;
 use super::engine::{Job, Shared, State};
 use super::source::{Source, frame_len};
 use super::store::{self, Scratch, StoredFrame};
-use super::{ClipInfo, ClipKey, ClipState, Rendered};
+use super::{ClipInfo, ClipKey, Rendered};
 use crate::locks::lock_or_recover;
 use std::collections::HashMap;
 use std::path::Path;
@@ -103,10 +104,9 @@ fn open(
         // Closed meanwhile.
         return;
     };
-    clip.busy = false;
     match opened {
         Ok(source) => {
-            clip.state = ClipState::Ready(ClipInfo {
+            clip.stage = Stage::Ready(ClipInfo {
                 timeline: source.timeline,
             });
             clip.source_bytes = frame_len(key).unwrap_or(0);
@@ -114,7 +114,7 @@ fn open(
         }
         Err(error) => {
             clip.wanted.clear();
-            clip.state = ClipState::Failed(error);
+            clip.stage = Stage::Failed(error);
         }
     }
 }
@@ -162,8 +162,15 @@ fn frame(
     let Some(clip) = state.clip_mut(&key, id) else {
         return false;
     };
-    clip.busy = false;
-    clip.drawing = None;
+    clip.stage.frame_done();
+    if drawn.is_none() {
+        // Nothing came of the frame (ThorVG could not draw it, or the
+        // frame size is unknown): the clip rests, so views stop asking for
+        // a frame that never comes, and the UI is woken to see it.
+        clip.wanted.clear();
+        clip.stage = Stage::Failed("A frame could not be drawn.".to_string());
+        return true;
+    }
     let first = drawn.is_some() && !std::mem::replace(&mut clip.delivered, true);
     if let Some(draw) = timing.draw {
         clip.note_draw(draw);

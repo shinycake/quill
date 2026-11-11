@@ -24,8 +24,81 @@ use gpui_kit::{
     WindowOptions, WindowingRequest,
 };
 use quill::lang::{keys, tr};
-use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+
+/// How long attaching a new device may take. A platform that never answers
+/// the windowing request would leave the process alive with no window and
+/// nothing to quit it.
+const ATTACH_DEADLINE: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// The first of two futures to finish; the first one wins a tie.
+async fn first_of<T>(
+    first: impl std::future::Future<Output = T>,
+    second: impl std::future::Future<Output = T>,
+) -> T {
+    use std::task::Poll;
+    let mut first = std::pin::pin!(first);
+    let mut second = std::pin::pin!(second);
+    std::future::poll_fn(|cx| {
+        if let Poll::Ready(value) = first.as_mut().poll(cx) {
+            return Poll::Ready(value);
+        }
+        second.as_mut().poll(cx)
+    })
+    .await
+}
+
+/// The windowing `request`, or an error once `deadline` has passed first.
+async fn attach_in_time(
+    request: impl std::future::Future<Output = gpui_kit::Result<()>>,
+    deadline: impl std::future::Future<Output = ()>,
+) -> gpui_kit::Result<()> {
+    first_of(request, async {
+        deadline.await;
+        Err(std::io::Error::other("the platform did not attach a new device in time").into())
+    })
+    .await
+}
+
+/// Whether the device was already recovered once. Quill recovers once;
+/// the device going a second time gives up. Read off [`Watch`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Recovery {
+    Healthy,
+    Recovered,
+}
+
+/// What the watcher holds between closes: the window the platform kept
+/// (it holds the app until used or dropped), under the stage of recovery
+/// it was kept in. Recovering takes the window and moves to `Recovered`
+/// in the one call, so the two cannot disagree.
+enum Watch {
+    Healthy { kept: Option<KeptWindow> },
+    Recovered { kept: Option<KeptWindow> },
+}
+
+impl Watch {
+    fn recovery(&self) -> Recovery {
+        match self {
+            Self::Healthy { .. } => Recovery::Healthy,
+            Self::Recovered { .. } => Recovery::Recovered,
+        }
+    }
+
+    fn kept_mut(&mut self) -> &mut Option<KeptWindow> {
+        match self {
+            Self::Healthy { kept } | Self::Recovered { kept } => kept,
+        }
+    }
+
+    /// Recovering starts: the kept window is handed over, and a later
+    /// loss gives up.
+    fn recover(&mut self) -> Option<KeptWindow> {
+        let kept = self.kept_mut().take();
+        *self = Self::Recovered { kept: None };
+        kept
+    }
+}
 
 /// A window has closed.
 #[derive(Debug, Clone, Copy)]
@@ -34,7 +107,7 @@ struct Closed {
     gpu_gone: bool,
     /// It was the main window, and Quill had not asked to quit.
     main_lost: bool,
-    recovered_before: bool,
+    recovered_before: Recovery,
 }
 
 /// What to do when a window has closed.
@@ -60,11 +133,12 @@ fn after_window_closed(closed: Closed) -> Step {
         main_lost,
         recovered_before,
     } = closed;
+    use Recovery::{Healthy, Recovered};
     match (gpu_gone, windows_left, main_lost, recovered_before) {
         (true, 1.., _, _) => Step::CloseTheRest,
-        (true, 0, _, false) => Step::Recover,
-        (false, _, true, false) => Step::Reopen,
-        (_, _, true, true) | (true, 0, false, true) => Step::GiveUp,
+        (true, 0, _, Healthy) => Step::Recover,
+        (false, _, true, Healthy) => Step::Reopen,
+        (_, _, true, Recovered) | (true, 0, false, Recovered) => Step::GiveUp,
         (false, 0, false, _) => Step::Quit,
         (false, 1.., false, _) => Step::Nothing,
     }
@@ -91,6 +165,11 @@ pub(crate) fn reopen_main_window(
     cx.open_window(options, move |window, cx| {
         window.take_over(kept, cx);
         crate::ui::link_inbox::attach_main_window(window, cx, &app);
+        // The Touch Bar belongs to the window it was installed for.
+        #[cfg(target_os = "macos")]
+        app.update(cx, |_, cx| {
+            crate::ui::touch_bar::install(false, window, cx);
+        });
         if window.focused(cx).is_none() {
             window.focus(&app.focus_handle(cx), cx);
         }
@@ -120,24 +199,23 @@ fn watch_closed_windows(
 ) {
     cx.set_quit_mode(QuitMode::Explicit);
     let reopen = Rc::new(reopen);
-    let recovered = Rc::new(Cell::new(false));
-    let kept = RefCell::new(None);
+    let mut watch = Watch::Healthy { kept: None };
     cx.on_window_closed(move |cx, window_id| {
         // Taken even when it will not be used: until dropped it holds the
         // app, and a quit must drop the app as it always did.
         if let Some(left) = cx.take_kept_window(window_id) {
-            *kept.borrow_mut() = Some(left);
+            *watch.kept_mut() = Some(left);
         }
         let closed = Closed {
             windows_left: cx.windows().len(),
             gpu_gone: gpu_gone(cx),
             main_lost: crate::ui::link_inbox::main_window_id(cx) == Some(window_id)
                 && !super::quit_asked(),
-            recovered_before: recovered.get(),
+            recovered_before: watch.recovery(),
         };
         let step = after_window_closed(closed);
         if !matches!(step, Step::CloseTheRest | Step::Recover | Step::Reopen) {
-            kept.borrow_mut().take();
+            watch.kept_mut().take();
         }
         match step {
             Step::Nothing => {}
@@ -150,8 +228,7 @@ fn watch_closed_windows(
                 }
             }),
             step @ (Step::Recover | Step::Reopen) => {
-                recovered.set(true);
-                let Some(left) = kept.borrow_mut().take() else {
+                let Some(left) = watch.recover() else {
                     give_up(tr(keys::Q_MISC_GPU_STOPPED_WORKING_AGAIN), cx);
                     return;
                 };
@@ -163,7 +240,8 @@ fn watch_closed_windows(
                                 GraphicalEnvironment::detect(),
                             ))
                         });
-                        request.await
+                        let deadline = cx.background_executor().timer(ATTACH_DEADLINE);
+                        attach_in_time(request, deadline).await
                     } else {
                         Ok(())
                     };
@@ -194,14 +272,18 @@ mod reset_tests;
 
 #[cfg(test)]
 mod tests {
-    use super::{Closed, Step, after_window_closed};
+    use super::{Closed, Recovery, Step, after_window_closed};
 
     fn step(windows_left: usize, gpu_gone: bool, main_lost: bool, recovered_before: bool) -> Step {
         after_window_closed(Closed {
             windows_left,
             gpu_gone,
             main_lost,
-            recovered_before,
+            recovered_before: if recovered_before {
+                Recovery::Recovered
+            } else {
+                Recovery::Healthy
+            },
         })
     }
 

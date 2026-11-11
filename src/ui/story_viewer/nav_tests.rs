@@ -6,9 +6,9 @@ use super::open_tests::{frames, open_app};
 use crate::ui::app::QuillApp;
 use crate::ui::media_panel::PanelTab;
 use gpui_kit::{Entity, Modifiers, TestAppContext, VisualTestContext};
-use quill::ids::ChatId;
+use quill::ids::{ChatId, FileId};
 use quill::story_sibling_layout::sibling_layout;
-use quill::story_viewer::{StoryOpenScope, StoryViewerItem};
+use quill::story_viewer::{StoryOpenScope, StoryViewerItem, StoryViewerKind};
 use quill::telegram::envelope::StoryListView;
 
 const LEO: i64 = 105;
@@ -172,7 +172,7 @@ fn a_neighbour_whose_story_is_gone_is_passed_over(cx: &mut TestAppContext) {
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             session.stories.stories.remove(&(NEWS, 1));
-            session.stories.missing.insert((NEWS, 1));
+            session.stories.story_fetch.gone((NEWS, 1));
         }
         cx.notify();
     });
@@ -263,7 +263,7 @@ fn the_reply_media_panel_hides_the_neighbours(cx: &mut TestAppContext) {
     let toggle = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
         app.update(vcx, |app, cx| {
             if let Some(open) = app.stories.viewer_ui_mut() {
-                open.reply_open = true;
+                open.open_reply();
             }
             app.toggle_story_reply_panel(PanelTab::Emoji, cx);
         });
@@ -303,9 +303,78 @@ fn a_poster_waiting_out_a_failed_fetch_is_passed_over(cx: &mut TestAppContext) {
     assert_eq!(shown(&app, vcx), Some((MAYA, 5)), "Next does not close");
     app.update(vcx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.stories.story_retry.clear();
+            session.stories.story_fetch.forget_retries();
         }
     });
     let back = app.read_with(vcx, |app, _| app.story_sibling_key(-1));
     assert_eq!(back, Some((ChatId(NEWS), 1)), "once the wait is over");
+}
+
+/// A story opened over the open viewer (a "Reposted from" label, a card in
+/// a chat window, the live PiP's return) does not inherit the reply typed
+/// for the story it replaced, nor send it to the other poster.
+#[gpui_kit::test]
+fn a_story_opened_over_the_viewer_does_not_inherit_the_reply_draft(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx, "ready-story-viewer");
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.stories
+            .reply_input
+            .update(cx, |input, cx| input.set_value("congrats!", window, cx));
+        app.stories
+            .live
+            .input
+            .update(cx, |input, cx| input.set_value("so cool", window, cx));
+    });
+    app.update(vcx, |app, cx| {
+        let item = StoryViewerItem {
+            chat_id: ChatId(MAYA),
+            story_id: 5,
+            kind: StoryViewerKind::Photo,
+            display_file_ids: Vec::new(),
+            download_file_id: FileId(0),
+            caption: String::new(),
+            caption_entities: Vec::new(),
+            duration_label: None,
+            areas: Vec::new(),
+        };
+        app.begin_story_viewer(vec![item], 0, cx);
+    });
+    frames(vcx);
+    assert_eq!(shown(&app, vcx), Some((MAYA, 5)));
+    let (reply, live) = app.read_with(vcx, |app, cx| {
+        (
+            app.stories.reply_input.read(cx).value().to_string(),
+            app.stories.live.input.read(cx).value().to_string(),
+        )
+    });
+    assert_eq!(reply, "", "the reply draft stayed with the replaced story");
+    assert_eq!(live, "", "so did the live comment");
+}
+
+/// A reply the driver refused keeps its text and its row; one that went
+/// out clears both.
+#[gpui_kit::test]
+fn a_refused_story_reply_keeps_the_text_and_the_row(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx, "ready-story-viewer");
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.toggle_story_reply(cx);
+        app.stories
+            .reply_input
+            .update(cx, |input, cx| input.set_value("congrats!", window, cx));
+        app.finish_story_reply_text(Some(false), window, cx);
+        assert_eq!(
+            app.stories.reply_input.read(cx).value().to_string(),
+            "congrats!",
+            "the typed text survives a refused send"
+        );
+        assert!(app.stories.viewer_ui().reply_open(), "the row stays open");
+        app.finish_story_reply_text(Some(true), window, cx);
+        assert_eq!(app.stories.reply_input.read(cx).value().to_string(), "");
+        assert!(
+            !app.stories.viewer_ui().reply_open(),
+            "a sent reply closes it"
+        );
+    });
 }

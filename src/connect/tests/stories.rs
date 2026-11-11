@@ -5,7 +5,7 @@ use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
 use crate::ids::{AccountKey, ChatId, MessageId};
 use crate::platform::MemorySecretStore;
-use crate::state::{RequestPurpose, Session};
+use crate::state::Session;
 use crate::story_composer::StoryPrivacy;
 use crate::telegram::client::copy_and_parse;
 use serde_json::Value;
@@ -97,7 +97,7 @@ fn driver_story_reaction_set_remove_and_gates() {
         r#""chosen_reaction_type":{"@type":"reactionTypeEmoji","emoji":"👍"},"#,
     );
     let story = driver.session.stories.stories.get(&(7, 5)).unwrap();
-    assert_eq!(story.chosen_reaction_emoji.as_deref(), Some("👍"));
+    assert_eq!(story.chosen_reaction_emoji(), Some("👍"));
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -240,6 +240,7 @@ fn driver_get_story_interactions_gates_and_dedupes() {
         "storyContentPhoto",
         r#""can_get_interactions":true,"#,
     );
+    driver.session.begin_story_viewers(7, 6);
     let extra = driver
         .get_story_interactions(ChatId(7), 6, "")
         .unwrap()
@@ -257,6 +258,15 @@ fn driver_get_story_interactions_gates_and_dedupes() {
     assert_eq!(v["limit"], 50);
     // In-flight fetch dedupes to None (no second request).
     assert_eq!(driver.get_story_interactions(ChatId(7), 6, ""), Ok(None));
+    // The panel is closed and reopened while that request is still out: the
+    // new panel asks for its own first page instead of being held up by it.
+    driver.session.clear_story_viewers();
+    driver.session.begin_story_viewers(7, 6);
+    let fresh = driver
+        .get_story_interactions(ChatId(7), 6, "")
+        .unwrap()
+        .expect("the reopened panel sends");
+    assert_ne!(fresh, extra);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -317,7 +327,6 @@ fn driver_activate_story_stealth_mode_sends_and_dedupes() {
 
     let extra = driver
         .activate_story_stealth_mode()
-        .unwrap()
         .expect("activateStoryStealthMode sends");
     let json = recorder
         .snapshot()
@@ -327,8 +336,10 @@ fn driver_activate_story_stealth_mode_sends_and_dedupes() {
     let v: Value = serde_json::from_str(&json).unwrap();
     assert_eq!(v["@type"], "activateStoryStealthMode");
     assert_eq!(v["@extra"], extra.0.to_string());
-    // A second activation while the first is in flight is a no-op.
-    assert_eq!(driver.activate_story_stealth_mode(), Ok(None));
+    // The box asks once per press; a box opened after a closed one asks
+    // for its own answer, so a second call sends too.
+    let second = driver.activate_story_stealth_mode().expect("sends");
+    assert_ne!(second, extra);
     driver
         .ingest(
             copy_and_parse(
@@ -342,15 +353,19 @@ fn driver_activate_story_stealth_mode_sends_and_dedupes() {
             .unwrap(),
         )
         .unwrap();
-    assert!(
-        !driver
+    // The refusal is kept with the request it answers, for the box that
+    // asked.
+    assert_eq!(
+        driver
             .session
-            .requests
-            .has_purpose(RequestPurpose::ActivateStoryStealthMode)
+            .stories
+            .stealth_refusal
+            .as_ref()
+            .map(|(request, _)| *request),
+        Some(extra)
     );
     let again = driver
         .activate_story_stealth_mode()
-        .unwrap()
         .expect("sends again after the error");
     assert_ne!(again, extra);
     let _ = std::fs::remove_dir_all(&dir);
@@ -404,14 +419,14 @@ fn driver_manage_story_gated_on_cached_flags() {
     assert!(v["content"].is_null());
     assert!(v["areas"].is_null());
     assert_eq!(v["caption"]["text"], "new");
-    assert!(driver.session.stories.manage.pending);
+    assert!(driver.session.stories.manage.is_pending());
 
     let extra = driver.edit_story_cover(ChatId(7), 6, 2.5).unwrap();
     let v: Value = serde_json::from_str(recorder.snapshot().last().unwrap()).unwrap();
     assert_eq!(v["@type"], "editStoryCover");
     assert_eq!(v["@extra"], extra.0.to_string());
     assert_eq!(v["cover_frame_timestamp"], 2.5);
-    assert!(driver.session.stories.manage.pending);
+    assert!(driver.session.stories.manage.is_pending());
 
     let extra = driver
         .set_story_privacy_settings(ChatId(7), 6, StoryPrivacy::Contacts.settings_json(&[]))
@@ -423,7 +438,7 @@ fn driver_manage_story_gated_on_cached_flags() {
         v["privacy_settings"]["@type"],
         "storyPrivacySettingsContacts"
     );
-    assert!(driver.session.stories.manage.pending);
+    assert!(driver.session.stories.manage.is_pending());
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -872,14 +887,19 @@ fn driver_b14_close_friends_hide_profile_and_share() {
     let v: Value = serde_json::from_str(&recorder.snapshot().last().cloned().unwrap()).unwrap();
     assert_eq!(v["@type"], "getCloseFriends");
 
-    // setCloseFriends stages the ids until `ok`.
+    // setCloseFriends carries the ids on the request until `ok`.
     driver.set_close_friends(&[4, 8]).unwrap();
     let v: Value = serde_json::from_str(&recorder.snapshot().last().cloned().unwrap()).unwrap();
     assert_eq!(v["@type"], "setCloseFriends");
     assert_eq!(v["user_ids"], serde_json::json!([4, 8]));
-    assert_eq!(
-        driver.session.stories.close_friends_pending,
-        Some(vec![4, 8])
+    let extra = v["@extra"].as_str().unwrap_or_default();
+    assert!(
+        driver
+            .session
+            .requests
+            .pending
+            .values()
+            .any(|p| p.user_ids == Some(vec![4, 8]) && p.id.0.to_string() == extra)
     );
 
     // Hide / unhide.
@@ -930,4 +950,32 @@ fn driver_b14_close_friends_hide_profile_and_share() {
     assert_eq!(v["input_message_content"]["@type"], "inputMessageStory");
     assert_eq!(v["input_message_content"]["story_id"], 6);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// r2-05 (13-047): a `getStory` send that is refused is a failed ask, so a
+/// story open waiting for it is dropped instead of waiting for good.
+#[test]
+fn a_refused_get_story_send_starts_the_retry_clock() {
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+    recorder.refuse_sends(true);
+    assert!(driver.get_story_now(ChatId(7), 9).is_err());
+    assert!(
+        driver.session.stories.story_fetch.retry((7, 9)).is_some(),
+        "the open sees a failed ask"
+    );
+    recorder.refuse_sends(false);
+    assert_eq!(
+        driver.get_story(ChatId(7), 9),
+        Ok(None),
+        "held back while the clock runs"
+    );
+    assert!(driver.get_story_now(ChatId(7), 9).unwrap().is_some());
 }

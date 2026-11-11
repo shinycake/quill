@@ -35,11 +35,15 @@ impl QuillApp {
         // What TDLib says this message allows (`messageProperties`), as
         // Telegram Desktop gates its menu. Until it arrives (a local call,
         // milliseconds), channel posts offer only what any reader can do.
-        let actions = self
-            .session()
-            .and_then(|s| s.messages.message_menu_actions)
-            .filter(|(c, m, _)| *c == chat_id && *m == message_id)
-            .map(|(_, _, actions)| actions);
+        let actions = self.session().and_then(|s| {
+            let menu = &s.messages.menu_actions;
+            // A failed ask hides every gated row instead of leaving
+            // the permissive local guess.
+            menu.get(chat_id, message_id).or_else(|| {
+                menu.is_failed(chat_id, message_id)
+                    .then(quill::telegram::envelope::MessageActions::default)
+            })
+        });
         let chat_kind = self
             .session()
             .and_then(|s| s.chats.get(&chat_id.0))
@@ -76,7 +80,7 @@ impl QuillApp {
         // Reactions lead the menu (Telegram Desktop): the chat's quick
         // strip in its own pill above the menu, expandable to every
         // reaction it allows.
-        let page = self.message_ui.menu_ui.page;
+        let page = self.message_ui.menu.page();
         let can_react = self.session().is_some_and(|s| s.can_react_to(&message));
         let strip = (can_react && page == MessageMenuPage::Main)
             .then(|| self.reaction_strip(chat_id, message_id, &message, cx))
@@ -117,7 +121,8 @@ impl QuillApp {
         }
         // Over a text selection, Reply quotes it and Copy copies it
         // (Telegram Desktop: "Quote & Reply", "Copy Selected Text").
-        let selection = self.message_ui.menu_selection.clone();
+        let selection = self.message_ui.menu.selection_text();
+        let selection_nth = self.message_ui.menu.selection_nth();
         let content = effective_content(&message.content, message.ephemeral.as_ref());
         // Over a checklist task, Reply becomes "Reply to Task".
         if can_reply && !self.menu_replies_to_task(content) {
@@ -136,19 +141,23 @@ impl QuillApp {
                 cx,
                 {
                     match quote.as_deref() {
-                        Some(quote) => {
-                            this.begin_quote_reply(chat_id, message_id, quote, window, cx)
-                        }
+                        Some(quote) => this.begin_quote_reply(
+                            chat_id,
+                            message_id,
+                            (quote, selection_nth),
+                            window,
+                            cx,
+                        ),
                         None => this.begin_reply_from_message(chat_id, message_id, window, cx),
                     }
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
         }
         // A playing voice message also offers a reply stamped with where the
         // player is (Telegram Desktop `AddTimecodeAction`).
-        let playing_here = self.playback.playing_voice == Some(message_id)
+        let playing_here = self.playback.active.voice() == Some(message_id)
             && self.playback.player.chat.is_none_or(|chat| chat == chat_id);
         if quill::message_menu::timecode_offered(
             effective_content(&message.content, message.ephemeral.as_ref()),
@@ -189,7 +198,7 @@ impl QuillApp {
                     )
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.reply_with_timecode(chat_id, message_id, window, cx);
-                        this.message_ui.menu = None;
+                        this.close_message_menu();
                         cx.notify();
                     }))
                     .into_any_element(),
@@ -207,7 +216,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     this.begin_reply_elsewhere(chat_id, message_id, window, cx);
                 }
             );
@@ -240,7 +249,7 @@ impl QuillApp {
                 cx,
                 {
                     cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -250,8 +259,8 @@ impl QuillApp {
         // only while the chat is not already shown translated).
         if let Some(selected) = self
             .message_ui
-            .menu_selection
-            .clone()
+            .menu
+            .selection_text()
             .filter(|selected| self.translate_menu_offered(chat_id, selected))
         {
             item!(
@@ -263,7 +272,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     this.open_translate_selection(chat_id, selected.clone(), window, cx);
                 }
             );
@@ -293,7 +302,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     this.open_translate_message(chat_id, message_id, window, cx);
                 }
             );
@@ -301,7 +310,7 @@ impl QuillApp {
         // Over a link, the menu leads with what Telegram Desktop adds for it:
         // a copy entry named for the kind of link (`copyToClipboardContextItemText`),
         // and, for web links, Open.
-        if let Some(link) = self.message_ui.menu_link.clone() {
+        if let Some(link) = self.message_ui.menu.link() {
             let msg_key = (chat_id.0, message_id.0 as u64);
             if matches!(link, quill::text::LinkTarget::Url { .. }) {
                 let open = link.clone();
@@ -314,7 +323,7 @@ impl QuillApp {
                     _window,
                     cx,
                     {
-                        this.message_ui.menu = None;
+                        this.close_message_menu();
                         this.queue_link(open.clone(), msg_key, cx);
                     }
                 );
@@ -328,7 +337,7 @@ impl QuillApp {
                     super::super::ton_wallet_ui::explorer_menu_row(
                         "menu-ton-explorer",
                         address,
-                        |this| this.message_ui.menu = None,
+                        |this| this.close_message_menu(),
                         Some((&self.frame.menu.items, row_key(order::TON_EXPLORER))),
                         cx,
                     ),
@@ -341,7 +350,7 @@ impl QuillApp {
                     order::TON_SEND_MONEY,
                     super::super::ton_wallet_ui::send_money_menu_row(
                         "menu-ton-send-money",
-                        |this| this.message_ui.menu = None,
+                        |this| this.close_message_menu(),
                         Some((&self.frame.menu.items, row_key(order::TON_SEND_MONEY))),
                         cx,
                     ),
@@ -360,7 +369,7 @@ impl QuillApp {
                     _window,
                     cx,
                     {
-                        this.message_ui.menu = None;
+                        this.close_message_menu();
                         cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
                         cx.notify();
                     }
@@ -385,7 +394,7 @@ impl QuillApp {
                 cx,
                 {
                     this.begin_forward_one(chat_id, message_id, pending, window, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -403,7 +412,7 @@ impl QuillApp {
                 cx,
                 {
                     this.toggle_forward_select(chat_id, message_id, pending, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -418,7 +427,7 @@ impl QuillApp {
                     cx,
                     {
                         this.select_up_to(chat_id, message_id, cx);
-                        this.message_ui.menu = None;
+                        this.close_message_menu();
                         cx.notify();
                     }
                 );
@@ -436,7 +445,7 @@ impl QuillApp {
                 cx,
                 {
                     this.copy_game_link(chat_id, message_id, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -461,7 +470,7 @@ impl QuillApp {
                 cx,
                 {
                     this.begin_edit(edit.clone(), window, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -484,7 +493,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     this.open_fact_check(chat_id, message_id, existing.clone(), window, cx);
                 }
             );
@@ -499,7 +508,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     this.begin_add_offer(chat_id, message_id, window, cx);
                 }
             );
@@ -525,7 +534,7 @@ impl QuillApp {
                 _window,
                 cx,
                 {
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     this.request_toggle_pin(chat_id, message_id, _window, cx);
                     cx.notify();
                 }
@@ -542,7 +551,7 @@ impl QuillApp {
                 cx,
                 {
                     this.share_message_link(chat_id, message_id, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -570,7 +579,7 @@ impl QuillApp {
                 cx,
                 {
                     this.begin_stop_poll(chat_id, message_id, is_quiz, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -591,7 +600,7 @@ impl QuillApp {
                 cx,
                 {
                     this.retract_poll_vote(chat_id, message_id, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -611,7 +620,7 @@ impl QuillApp {
                 cx,
                 {
                     this.open_poll_stats_dialog(chat_id, message_id, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -628,7 +637,7 @@ impl QuillApp {
                 window,
                 cx,
                 {
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     this.open_message_statistics_panel(chat_id, message_id, window, cx);
                 }
             );
@@ -659,7 +668,7 @@ impl QuillApp {
                 cx,
                 {
                     this.open_thread_view(chat_id, message_id, window, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -675,7 +684,7 @@ impl QuillApp {
                 cx,
                 {
                     this.retry_failed_message(chat_id, message_id, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -704,7 +713,7 @@ impl QuillApp {
                 cx,
                 {
                     this.open_delete_dialog_with(confirm.clone(), moderation.clone(), window, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 }
             );
@@ -727,7 +736,7 @@ impl QuillApp {
                 cx,
                 move |this, _, cx| {
                     this.cancel_message_upload(chat_id, message_id, cx);
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 },
             );
@@ -774,7 +783,8 @@ impl QuillApp {
         let pack_name = match packs[..] {
             [only] => self
                 .session()
-                .and_then(|s| s.stickers.emoji_pack_titles.get(&only).cloned()),
+                .and_then(|s| s.stickers.emoji_pack_titles.get(&only))
+                .and_then(|title| title.known().map(str::to_owned)),
             _ => None,
         };
         if let Some((before, bold, after)) =
@@ -802,7 +812,7 @@ impl QuillApp {
                     .child(div().font_semibold().child(bold))
                     .child(after)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.message_ui.menu = None;
+                        this.close_message_menu();
                         this.view_message_sticker_set(first, cx);
                     }))
                     .into_any_element(),
@@ -849,6 +859,7 @@ impl QuillApp {
                 ));
             }
         }
+        let on_audience = matches!(page, MessageMenuPage::Audience { .. });
         let page_rows: Vec<MenuRow> = match page {
             MessageMenuPage::Main => rows,
             sub => {
@@ -867,7 +878,7 @@ impl QuillApp {
                     &self.frame.menu.items,
                     cx,
                     |this, _, cx| {
-                        this.message_ui.menu_ui.page = MessageMenuPage::Main;
+                        this.message_ui.menu.show_page(MessageMenuPage::Main);
                         cx.notify();
                     },
                 )];
@@ -885,7 +896,7 @@ impl QuillApp {
             }
         };
         let stacked = stack_rows(page_rows);
-        if page == MessageMenuPage::Audience {
+        if on_audience {
             panel = panel.w(px(280.));
             panel = panel.child(
                 div()

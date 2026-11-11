@@ -32,6 +32,7 @@ use quill::settings::MediaPrefs;
 use quill::state::HistoryMessage;
 use quill::state::SharedMediaTab;
 use quill::telegram::envelope::ParsedFile;
+use saved_toast::SavedToastStage;
 use smallvec::SmallVec;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -58,6 +59,7 @@ mod overlay_controls;
 mod pip;
 mod playback;
 mod profile_photos;
+mod saved_toast;
 mod swipe_indicator;
 mod ttl_ui;
 mod video;
@@ -66,6 +68,16 @@ mod video_extras;
 pub(in crate::ui) use cover::ViewerCover;
 pub(in crate::ui) use layer::ViewerVideoLayer;
 pub(in crate::ui) use pip::PipLink;
+
+/// Why a looping clip is paused. `HeldByWindow` is the pause this module
+/// made when the window lost focus, and only that one is undone when it
+/// returns (a pause the user made stays).
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub(in crate::ui) enum LoopPause {
+    #[default]
+    Free,
+    HeldByWindow,
+}
 
 /// Viewer state that is not part of the item list: Shared Media paging,
 /// video full screen, and the inactive-window pause of looping clips.
@@ -77,14 +89,10 @@ pub(super) struct ViewerExtra {
     pub shared_seen: usize,
     /// Video full screen, kept in step with the window (`fullscreen`).
     pub(in crate::ui) video_fullscreen: fullscreen::VideoFullscreen,
-    /// A looping clip paused because the window lost focus.
-    pub inactive_paused: bool,
-    /// B10: whose photos the viewer shows (`ViewerSource::Profile`).
-    pub profile_owner: Option<quill::state::PhotoOwner>,
-    /// The "saved to your Downloads folder" toast and its generation (a
-    /// newer save restarts the hide timer).
-    pub saved_toast: Option<quill::viewer_extras::SavedToast>,
-    pub saved_toast_gen: u64,
+    /// Who paused a looping clip: nobody, or the window losing focus.
+    pub(in crate::ui) loop_pause: LoopPause,
+    /// The "saved to your Downloads folder" toast; it owns its hide timer.
+    pub(in crate::ui) saved_toast: SavedToastStage,
     /// "Share at": the message and second the forward picker was opened at.
     pub share_at: Option<(ChatId, MessageId, i32)>,
     /// Turns of videos rotated in this run, by `(chat, message)`.

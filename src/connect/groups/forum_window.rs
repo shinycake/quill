@@ -10,7 +10,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let (Some(chat_id), Some(topic)) = (self.session.open_chat, self.session.open_topic) else {
+        let (Some(chat_id), Some(topic)) =
+            (self.session.open_chat_id(), self.session.open_forum_topic())
+        else {
             return Ok(None);
         };
         let Some(from) = self
@@ -18,7 +20,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .threads
             .topic_histories
             .get(&(chat_id.0, topic))
-            .filter(|history| history.has_newer && !history.newer_failed)
+            .filter(|history| history.has_newer() && !history.newer_failed())
             .and_then(|history| history.newest_loaded_id())
         else {
             return Ok(None);
@@ -57,7 +59,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// once it lands). `Ok(None)` when the window already ends at the
     /// latest: the UI only scrolls then.
     pub fn topic_jump_to_latest(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        let (Some(chat_id), Some(topic)) = (self.session.open_chat, self.session.open_topic) else {
+        let (Some(chat_id), Some(topic)) =
+            (self.session.open_chat_id(), self.session.open_forum_topic())
+        else {
             return Ok(None);
         };
         let short = self
@@ -65,7 +69,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .threads
             .topic_histories
             .get(&(chat_id.0, topic))
-            .is_some_and(|history| history.has_newer);
+            .is_some_and(|history| history.has_newer());
         if !short || !self.session.reset_topic_window(chat_id, topic) {
             return Ok(None);
         }

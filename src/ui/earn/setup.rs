@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::ui::chat_theme::danger;
+use crate::ui::earn_state::SetupSliders;
 use crate::ui::os_open::open_link_in;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -56,15 +57,21 @@ impl QuillApp {
     /// Create the sliders the first frame the setup page has its values
     /// (`SliderState` subscriptions need the window).
     pub(super) fn ensure_setup_sliders(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.earn.commission.is_some() && self.earn.duration.is_some() {
-            return;
-        }
         let Some(earn) = self.earn_state() else {
             return;
         };
         let Some(setup) = earn.setup.as_ref() else {
             return;
         };
+        if self
+            .earn
+            .sliders
+            .as_ref()
+            .is_some_and(|s| s.bot_user_id == setup.bot_user_id && s.program == setup.program)
+        {
+            return;
+        }
+        let (bot_user_id, program) = (setup.bot_user_id, setup.program);
         let (min, max) = earn.limits.commission_range();
         let commission = commission_stops(min, max, setup.params.commission_per_mille);
         let duration = duration_stops(setup.params.month_count);
@@ -79,8 +86,12 @@ impl QuillApp {
         );
         let duration_slider =
             self.setup_slider(Knob::Duration, duration.len(), duration_at, window, cx);
-        self.earn.commission = Some((commission_slider, commission));
-        self.earn.duration = Some((duration_slider, duration));
+        self.earn.sliders = Some(Box::new(SetupSliders {
+            bot_user_id,
+            program,
+            commission: (commission_slider, commission),
+            duration: (duration_slider, duration),
+        }));
     }
 
     fn setup_slider(
@@ -124,8 +135,8 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let stops = match knob {
-            Knob::Commission => self.earn.commission.as_ref().map(|(_, s)| s.clone()),
-            Knob::Duration => self.earn.duration.as_ref().map(|(_, s)| s.clone()),
+            Knob::Commission => self.earn.sliders.as_ref().map(|s| s.commission.1.clone()),
+            Knob::Duration => self.earn.sliders.as_ref().map(|s| s.duration.1.clone()),
         };
         let Some(stops) = stops else {
             return;
@@ -225,13 +236,26 @@ impl QuillApp {
                 cx,
             ))
             .child(header(tr(keys::Q_MONEY_COMMISSION), cx));
-        if let Some((slider, stops)) = self.earn.commission.as_ref() {
+        let sliders = self
+            .earn
+            .sliders
+            .as_deref()
+            .filter(|s| s.bot_user_id == setup.bot_user_id && s.program == setup.program);
+        if let Some(SetupSliders {
+            commission: (slider, stops),
+            ..
+        }) = sliders
+        {
             page = page.child(self.commission_slider(slider, stops, setup, cx));
         }
         page = page
             .child(about(tr(keys::STAR_REF_COMMISSION_ABOUT)))
             .child(header(tr(keys::Q_MONEY_DURATION), cx));
-        if let Some((slider, stops)) = self.earn.duration.as_ref() {
+        if let Some(SetupSliders {
+            duration: (slider, stops),
+            ..
+        }) = sliders
+        {
             page = page.child(self.duration_slider(slider, stops, setup, cx));
         }
         page = page
@@ -291,7 +315,7 @@ impl QuillApp {
                         .text_color(danger())
                         .on_click(cx.listener(|this, _, _, cx| {
                             if let Some(setup) = this.earn_mut().and_then(|e| e.setup.as_mut()) {
-                                setup.confirm = Some(SetupConfirm::End);
+                                setup.ask_confirm(SetupConfirm::End);
                             }
                             cx.notify();
                         }))
@@ -439,7 +463,7 @@ impl QuillApp {
                 .loading(setup.is_saving())
                 .on_click(cx.listener(|this, _, _, cx| {
                     if let Some(setup) = this.earn_mut().and_then(|e| e.setup.as_mut()) {
-                        setup.confirm = Some(SetupConfirm::Save);
+                        setup.ask_confirm(SetupConfirm::Save);
                     }
                     cx.notify();
                 })),

@@ -10,7 +10,7 @@ use crate::payment_card::{CardDetails, NativeProvider, tokenize};
 use crate::payment_invoice::{InputInvoice, TelegramPaymentPurpose};
 use crate::platform::MemorySecretStore;
 use crate::telegram::client::copy_and_parse;
-use crate::telegram::envelope::PaymentFormTypeData;
+use crate::telegram::envelope::{PaymentFormData, PaymentFormTypeData};
 use crate::telegram::requests::input_credentials_new;
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -70,7 +70,12 @@ fn an_invoice_link_asks_for_its_form_by_name() {
         json!({"@type": "inputInvoiceName", "name": "shop_1"})
     );
     assert_eq!(
-        driver.session.payments.request.as_ref().map(|r| &r.invoice),
+        driver
+            .session
+            .payments
+            .checkout
+            .invoice()
+            .map(|r| &r.invoice),
         Some(&invoice)
     );
 }
@@ -107,7 +112,7 @@ fn a_message_invoice_still_needs_a_real_message() {
         driver.send_payment_form_request(invoice),
         Err(ConnectSendError::InvalidRequest)
     );
-    assert!(driver.session.payments.request.is_none());
+    assert!(driver.session.payments.checkout.invoice().is_none());
     assert!(
         recorder
             .snapshot()
@@ -125,7 +130,13 @@ fn a_stars_form_is_paid_without_credentials_and_only_when_asked() {
     driver
         .ingest(copy_and_parse(&stars_form(&request["@extra"]), &seq, &sink).unwrap())
         .unwrap();
-    let form = driver.session.payments.form.clone().expect("form");
+    let form = driver
+        .session
+        .payments
+        .checkout
+        .form()
+        .cloned()
+        .expect("form");
     // Getting the form pays nothing.
     assert!(
         recorder
@@ -138,6 +149,20 @@ fn a_stars_form_is_paid_without_credentials_and_only_when_asked() {
         .unwrap();
     let pay = sent_request(&recorder, "sendPaymentForm");
     assert_eq!(pay["payment_form_id"], 9);
+    // A second Pay before the answer sends nothing.
+    assert!(
+        driver
+            .submit_payment_form(&invoice, form.id, "", "", Value::Null, 0)
+            .is_err()
+    );
+    assert_eq!(
+        recorder
+            .snapshot()
+            .iter()
+            .filter(|j| j.contains("sendPaymentForm"))
+            .count(),
+        1
+    );
     assert_eq!(pay["credentials"], Value::Null);
     assert_eq!(
         pay["input_invoice"],
@@ -172,13 +197,13 @@ fn a_successful_payment_locks_the_form_and_a_new_form_unlocks_it() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.payments.form_paid);
+    assert!(driver.session.payments.checkout.is_paid());
     driver.send_payment_form_request(invoice).unwrap();
     let request = sent_request(&recorder, "getPaymentForm");
     driver
         .ingest(copy_and_parse(&stars_form(&request["@extra"]), &seq, &sink).unwrap())
         .unwrap();
-    assert!(!driver.session.payments.form_paid);
+    assert!(!driver.session.payments.checkout.is_paid());
 }
 
 struct StripeReplay;
@@ -234,7 +259,13 @@ fn a_new_card_pays_with_the_provider_token_and_may_need_verification() {
     driver
         .ingest(copy_and_parse(&stripe_form(&request["@extra"]), &seq, &sink).unwrap())
         .unwrap();
-    let form = driver.session.payments.form.clone().expect("form");
+    let form = driver
+        .session
+        .payments
+        .checkout
+        .form()
+        .cloned()
+        .expect("form");
     let PaymentFormTypeData::Regular(regular) = &form.form_type else {
         panic!("regular form");
     };
@@ -291,5 +322,84 @@ fn a_new_card_pays_with_the_provider_token_and_may_need_verification() {
             .map(|step| step.url.as_str()),
         Some("https://hooks.stripe.com/3d_secure/x")
     );
-    assert!(!driver.session.payments.form_paid);
+    assert!(!driver.session.payments.checkout.is_paid());
+}
+
+/// Sweep 10-117: a new checkout replaces the whole earlier one in the driver,
+/// the note, shipping choice and order info included: they live in the one
+/// stage, so nothing of the old one can be left behind.
+#[test]
+fn a_new_checkout_replaces_the_earlier_one_whole() {
+    let (mut driver, _recorder, _sink, _seq) = driver_parts();
+    let old = InputInvoice::Name("old".into());
+    let payments = &mut driver.session.payments;
+    payments.checkout = crate::state::CheckoutForm::ready(
+        PaymentFormData {
+            id: 1,
+            form_type: PaymentFormTypeData::Stars { star_count: 5 },
+            seller_bot_user_id: 0,
+            product_title: String::new(),
+            product_description: String::new(),
+        },
+        crate::state::PaymentRequest { invoice: old },
+    );
+    payments.checkout.set_note(Some("old outcome".into()));
+    payments.checkout.choose_shipping("express".into());
+    driver
+        .send_payment_form_request(InputInvoice::Name("shop_1".into()))
+        .unwrap();
+    let checkout = &driver.session.payments.checkout;
+    assert!(checkout.is_loading());
+    assert!(checkout.note().is_none());
+    assert!(checkout.shipping_id().is_none());
+    assert_eq!(
+        checkout.invoice().map(|r| &r.invoice),
+        Some(&InputInvoice::Name("shop_1".into()))
+    );
+}
+
+/// 02-092: a new form is refused while a payment waits for its
+/// verification step, and the refusal leaves the checkout whole.
+#[test]
+fn a_new_form_waits_out_a_verification() {
+    use crate::state::{CheckoutForm, PaymentRequest};
+    let (mut driver, _recorder, _sink, _seq) = driver_parts();
+    let form = PaymentFormData {
+        id: 1,
+        form_type: PaymentFormTypeData::Stars { star_count: 5 },
+        seller_bot_user_id: 0,
+        product_title: String::new(),
+        product_description: String::new(),
+    };
+    let old = PaymentRequest {
+        invoice: InputInvoice::Name("old".into()),
+    };
+    let payments = &mut driver.session.payments;
+    payments.checkout = CheckoutForm::ready(form, old);
+    payments.checkout.mark_verifying();
+    payments
+        .checkout
+        .set_note(Some("the old checkout's note".into()));
+    assert!(
+        driver
+            .send_payment_form_request(InputInvoice::Name("new".into()))
+            .is_err()
+    );
+    // The refused form leaves the checkout whole: its stage, its invoice
+    // and its note (the UI writes none of them before asking).
+    let checkout = &driver.session.payments.checkout;
+    assert!(checkout.is_verifying());
+    assert_eq!(
+        checkout.invoice().map(|r| &r.invoice),
+        Some(&InputInvoice::Name("old".into()))
+    );
+    assert!(checkout.note().is_some());
+    // Once the verification step is over a new form replaces it, note
+    // included.
+    driver.session.payments.checkout.end_verification();
+    driver
+        .send_payment_form_request(InputInvoice::Name("new".into()))
+        .unwrap();
+    assert!(driver.session.payments.checkout.is_loading());
+    assert!(driver.session.payments.checkout.note().is_none());
 }

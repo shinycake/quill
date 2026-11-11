@@ -51,15 +51,14 @@ impl QuillApp {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return true;
         };
-        let (Some(info), false) = (editor.info, editor.busy) else {
+        let Some(info) = editor.info().filter(|_| !editor.busy()) else {
             return false;
         };
         let edits = editor.edits;
         let input = editor.source.to_string_lossy().into_owned();
-        editor.busy = true;
-        editor.note = Some(tr(keys::Q_AV_PREPARING_THE_VIDEO).into());
-        editor.serial += 1;
-        let serial = editor.serial;
+        let Some((_, serial)) = editor.begin_encode() else {
+            return false;
+        };
         // Removed unless the profile photo request takes it, also when the
         // window or screen is gone before the encode ends.
         let output =
@@ -75,7 +74,7 @@ impl QuillApp {
                     .send_box
                     .video_editor
                     .as_ref()
-                    .is_some_and(|editor| editor.serial == serial);
+                    .is_some_and(|editor| editor.is_encoding(serial));
                 if !current {
                     return;
                 }
@@ -104,11 +103,7 @@ impl QuillApp {
                     Err(note) => {
                         drop(output);
                         if let Some(editor) = this.composer_ui.send_box.video_editor.as_mut() {
-                            editor.busy = false;
-                            editor.note = Some(note);
-                            // A still cut dropped by the serial bump frees
-                            // the cutter again.
-                            editor.still_busy = false;
+                            editor.encode_failed(note);
                         }
                     }
                 }

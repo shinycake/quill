@@ -5,6 +5,7 @@
 
 use super::app::QuillApp;
 use super::search_ui::search_result_row;
+use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
@@ -54,10 +55,18 @@ impl QuillApp {
             .collect()
     }
 
+    /// Retry of the failed Apps list.
+    fn retry_grossing_apps(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.fetch_grossing_web_app_bots();
+        }
+        cx.notify();
+    }
+
     /// The tab's body.
     pub(super) fn apps_tab_block(&self, query: &str, cx: &mut Context<Self>) -> AnyElement {
         let muted = cx.theme().muted_foreground;
-        let (used, grossing, loading) = self
+        let (used, grossing) = self
             .session()
             .map(|session| {
                 let used: Vec<i64> = session
@@ -68,16 +77,12 @@ impl QuillApp {
                     .filter(|bot| bot.is_added)
                     .map(|bot| bot.bot_user_id)
                     .collect();
-                (
-                    used,
-                    session.bots.web_apps.grossing_bots.clone(),
-                    session.bots.web_apps.grossing_loading,
-                )
+                (used, session.bots.web_apps.grossing.clone())
             })
-            .unwrap_or((Vec::new(), None, false));
+            .unwrap_or((Vec::new(), Default::default()));
         let used_rows = self.rows_matching(&used, query);
         let grossing_rows = grossing
-            .as_deref()
+            .data()
             .map(|ids| self.rows_matching(ids, query))
             .unwrap_or_default();
         let mut block = div().id("search-apps").flex().flex_col().gap_2();
@@ -130,7 +135,9 @@ impl QuillApp {
                 cx,
             ));
         } else {
-            let note = if loading || grossing.is_none() {
+            let note = if grossing.error().is_some() {
+                tr(keys::Q_MEDIA_COULD_NOT_LOAD_APPS).to_string()
+            } else if grossing.data().is_none() || grossing.is_loading() {
                 tr(keys::Q_MEDIA_LOADING_APPS).to_string()
             } else if query.trim().is_empty() {
                 tr(keys::Q_MEDIA_NO_APPS_TO_SHOW_RIGHT).to_string()
@@ -138,6 +145,15 @@ impl QuillApp {
                 tr_with(keys::Q_MEDIA_NO_APPS_MATCH, &[("trim", (query.trim()))])
             };
             block = block.child(div().text_xs().text_color(muted).child(note));
+            if grossing.error().is_some() {
+                block = block.child(
+                    Button::new("search-apps-retry")
+                        .label(tr(keys::Q_MEDIA_RETRY))
+                        .ghost()
+                        .small()
+                        .on_click(cx.listener(|this, _, _, cx| this.retry_grossing_apps(cx))),
+                );
+            }
         }
         block
             .child(

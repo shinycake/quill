@@ -138,7 +138,7 @@ fn resale_page_parses_and_sorts_counts() {
     assert_eq!(page.attributes.models[0].item.name, "B");
     assert_eq!(page.attributes.backdrops[0].item.name, "Onyx");
     let mut search = ResaleSearch::new(55, ResaleFilter::default(), true);
-    search.loading = true;
+    search.load.begin(1, false);
     search.apply(page.clone(), Some(42), false);
     // Craft mode drops the user's own listings (owner 42 here).
     assert!(search.listings.is_empty());
@@ -147,6 +147,22 @@ fn resale_page_parses_and_sorts_counts() {
     search.apply(page.clone(), Some(42), false);
     search.apply(page, Some(42), true);
     assert_eq!(search.listings.len(), 4);
+}
+
+#[test]
+fn a_failed_second_page_still_offers_show_more() {
+    let mut search = ResaleSearch::new(55, ResaleFilter::default(), false);
+    // A failed first page has no offset to ask from.
+    search.load = PageLoad::Failed("error 500".into());
+    assert!(!search.has_more());
+    search.load = PageLoad::Idle;
+    search.next_offset = "50".into();
+    search.load.begin(1, false);
+    assert!(!search.has_more(), "a page in flight is not asked again");
+    search.load = PageLoad::Ready;
+    assert!(search.has_more(), "page 1 landed");
+    search.load = PageLoad::Failed("error 500".into());
+    assert!(search.has_more(), "page 2 failed: Show more retries it");
 }
 
 fn auction(levels: Value, my: Value, top: Value) -> AuctionState {
@@ -626,4 +642,51 @@ fn error_notes_name_the_action() {
         error_note(GiftMarketPurpose::PlaceBid { gift_id: 1 }, "error 400"),
         "Couldn't place the bid: error 400."
     );
+}
+
+/// 03-C016: the purchase of a listing is one stage: a refusal with a new
+/// price shows it, a failure goes back to Confirm, and only the box that
+/// sent the purchase takes its answer.
+#[test]
+fn the_buy_box_is_one_stage_from_view_to_the_purchase_and_back() {
+    use crate::gift_manage::GiftRecipient;
+    use crate::marketplace::GiftPrice;
+    use crate::telegram::envelope::MessageSender;
+    let value = json!({"@type": "giftsForResale", "total_count": 1,
+        "gifts": [{"@type": "giftForResale", "gift": collectible(1, 3, 70, 0), "received_gift_id": ""}]});
+    let Some(GiftMarketPayload::ResalePage(page)) = parse_payload("giftsForResale", &value) else {
+        panic!("not parsed");
+    };
+    let listing = page.listings[0].clone();
+    let recipient = GiftRecipient {
+        sender: MessageSender::User { user_id: 7 },
+        name: "A".into(),
+        is_self: false,
+        is_channel: false,
+    };
+    let mut buy = ResaleBuy::new(listing, recipient, false);
+    assert_eq!(buy.step(), BuyStep::View);
+    buy.go(BuyStep::Send);
+    buy.go(BuyStep::Confirm);
+    assert_eq!(buy.stage, BuyStage::Confirm);
+    buy.begin_send(5);
+    assert!(buy.sending() && buy.waits_for(5) && !buy.waits_for(6));
+    assert_eq!(buy.step(), BuyStep::Confirm);
+    // Back during the purchase leaves it out; its answer still lands.
+    buy.go(BuyStep::Send);
+    assert!(buy.waits_for(5));
+    // A refusal with a new price shows it and moves to Grams for TON.
+    buy.price_increased(Some(GiftPrice::TonCents(250)));
+    assert_eq!(buy.price_changed(), Some(GiftPrice::TonCents(250)));
+    assert!(buy.pay_in_grams && !buy.sending());
+    assert_eq!(buy.price(), Some(GiftPrice::TonCents(250)));
+    // The Confirm step keeps the changed price; choosing a currency drops it.
+    buy.go(BuyStep::Confirm);
+    assert!(buy.price_changed().is_some());
+    buy.choose_grams(false);
+    assert_eq!(buy.stage, BuyStage::Confirm);
+    // A purchase that never left or failed is back at Confirm.
+    buy.begin_send(8);
+    buy.send_failed();
+    assert_eq!(buy.stage, BuyStage::Confirm);
 }

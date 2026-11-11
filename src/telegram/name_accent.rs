@@ -5,9 +5,11 @@
 //! list is the one tdesktop paints names with. Ids 0..=6 are the built-in
 //! colors and are not always listed, ids 7+ only exist in the update.
 //!
-//! The palette is the same for every account, so the last update is kept
-//! in a process-wide table (`set_palette`) the renderer reads by id,
-//! instead of threading the session through every name-color call site.
+//! The palette is the server's, so each account keeps its own table
+//! (`set_palette`, by account) and the renderer reads the table of the
+//! account on screen (`set_active_account`) by id, instead of threading the
+//! session through every name-color call site. A background account's
+//! update fills its own table and paints nothing on the account on screen.
 
 use crate::locks::RwLockExt;
 use serde_json::Value;
@@ -75,21 +77,46 @@ pub fn parse_name_accent_color(value: &Value) -> Option<NameAccentColor> {
     })
 }
 
-static PALETTE: LazyLock<RwLock<HashMap<i32, NameAccentColor>>> =
+type Palette = HashMap<i32, NameAccentColor>;
+
+static PALETTES: LazyLock<RwLock<HashMap<String, Palette>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
-/// Replace the process-wide palette (the update is the full server table).
-pub fn set_palette(colors: &[NameAccentColor]) {
-    if let Ok(mut palette) = PALETTE.write() {
-        *palette = colors.iter().map(|c| (c.id, c.clone())).collect();
+/// The account whose palette the renderer reads (the one on screen).
+static ACTIVE: LazyLock<RwLock<Option<String>>> = LazyLock::new(|| RwLock::new(None));
+
+/// Replace `account`'s palette (the update is the full server table).
+pub fn set_palette(account: &crate::ids::AccountKey, colors: &[NameAccentColor]) {
+    if let Ok(mut palettes) = PALETTES.write() {
+        palettes.insert(
+            account.0.clone(),
+            colors.iter().map(|c| (c.id, c.clone())).collect(),
+        );
     }
+}
+
+/// `account` takes the screen: its palette is the one names are painted
+/// with from the next frame.
+pub fn set_active_account(account: &crate::ids::AccountKey) {
+    *ACTIVE.write_or_recover() = Some(account.0.clone());
 }
 
 /// The name color for `id` as `0xRRGGBB`, from the server palette when it
 /// lists the id, else the built-in (the entry's `built_in_id`, or `id`
 /// folded onto the seven built-ins).
 pub fn name_color_rgb(id: i32, dark: bool) -> u32 {
-    let entry = PALETTE.read_or_recover().get(&id).cloned();
+    let account = ACTIVE
+        .read_or_recover()
+        .clone()
+        .unwrap_or_else(|| crate::ids::AccountKey::primary().0);
+    name_color_rgb_of(&account, id, dark)
+}
+
+fn name_color_rgb_of(account: &str, id: i32, dark: bool) -> u32 {
+    let entry = PALETTES
+        .read_or_recover()
+        .get(account)
+        .and_then(|palette| palette.get(&id).cloned());
     resolve(id, entry.as_ref(), dark)
 }
 
@@ -187,5 +214,23 @@ mod tests {
         assert_eq!(resolve(9, Some(&e), false), BUILT_IN_LIGHT[2]);
         // Unknown id: folds onto the built-ins.
         assert_eq!(resolve(15, None, true), BUILT_IN_DARK[1]);
+    }
+
+    /// 06-064: two accounts keep their own tables; names are painted with
+    /// the one asked for.
+    #[test]
+    fn each_account_paints_with_its_own_palette() {
+        use crate::ids::AccountKey;
+        let a = AccountKey::new("palette-a").unwrap();
+        let b = AccountKey::new("palette-b").unwrap();
+        super::set_palette(&a, &[entry(9001, -1, &[0x111111], &[0x222222])]);
+        super::set_palette(&b, &[entry(9001, -1, &[0x333333], &[0x444444])]);
+        assert_eq!(super::name_color_rgb_of(&a.0, 9001, false), 0x111111);
+        assert_eq!(super::name_color_rgb_of(&b.0, 9001, false), 0x333333);
+        assert_eq!(super::name_color_rgb_of(&b.0, 9001, true), 0x444444);
+        // An account with no table falls back to the built-ins.
+        let unknown = super::name_color_rgb_of("palette-none", 9001, false);
+        assert_ne!(unknown, 0x111111);
+        assert_ne!(unknown, 0x333333);
     }
 }

@@ -62,6 +62,9 @@ struct Active {
     pressed_at: Option<Instant>,
     last_tick: Instant,
     pull: Pull,
+    /// The loop that scrolls: it ends with the mode, so a quick new press
+    /// never runs beside the old loop.
+    _scroller: Task<()>,
 }
 
 impl QuillApp {
@@ -76,19 +79,12 @@ impl QuillApp {
             self.autoscroll_stop(cx);
             return;
         }
-        let Some(chat) = self.session().and_then(|s| s.open_chat) else {
+        let Some(chat) = self.session().and_then(|s| s.open_chat_id()) else {
             return;
         };
         let now = Instant::now();
-        self.history.autoscroll.active = Some(Active {
-            anchor: position,
-            chat: chat.0,
-            pressed_at: Some(now),
-            last_tick: now,
-            pull: Pull::Neutral,
-        });
         let handle = window.window_handle();
-        self.spawn_scoped_in(window, cx, async move |this, cx| {
+        let scroller = self.spawn_scoped_in(window, cx, async move |this, cx| {
             loop {
                 cx.background_executor().timer(TICK).await;
                 let Ok((pointer, window_active)) =
@@ -111,8 +107,15 @@ impl QuillApp {
                     });
                 }
             }
-        })
-        .detach();
+        });
+        self.history.autoscroll.active = Some(Active {
+            anchor: position,
+            chat: chat.0,
+            pressed_at: Some(now),
+            last_tick: now,
+            pull: Pull::Neutral,
+            _scroller: scroller,
+        });
         cx.notify();
     }
 
@@ -147,7 +150,7 @@ impl QuillApp {
         window_active: bool,
         cx: &mut Context<Self>,
     ) -> Option<(Point<Pixels>, f32)> {
-        let open = self.session().and_then(|s| s.open_chat).map(|id| id.0);
+        let open = self.session().and_then(|s| s.open_chat_id()).map(|id| id.0);
         let active = self.history.autoscroll.active.as_mut()?;
         if !window_active || open != Some(active.chat) {
             self.history.autoscroll.active = None;

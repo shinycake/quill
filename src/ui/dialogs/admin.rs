@@ -17,6 +17,8 @@ use quill::telegram::envelope::ChatAdminRights;
 pub struct AdminDialog {
     pub(crate) chat_id: ChatId,
     pub(crate) kind: AdminDialogKind,
+    /// The last Submit: the box closes on its answer, stays on its error.
+    pub(crate) submit: quill::state::Submit,
 }
 
 pub enum AdminDialogKind {
@@ -53,6 +55,7 @@ impl AdminDialog {
         });
         Self {
             chat_id,
+            submit: Default::default(),
             kind: AdminDialogKind::Promote {
                 search_input,
                 rights: ChatAdminRights::all(),
@@ -70,6 +73,7 @@ impl AdminDialog {
     ) -> Self {
         Self {
             chat_id,
+            submit: Default::default(),
             kind: AdminDialogKind::EditRights { user_id, rights },
         }
     }
@@ -77,6 +81,7 @@ impl AdminDialog {
     pub(crate) fn demote_confirm(chat_id: ChatId, user_id: i64) -> Self {
         Self {
             chat_id,
+            submit: Default::default(),
             kind: AdminDialogKind::DemoteConfirm { user_id },
         }
     }

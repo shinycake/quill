@@ -27,13 +27,15 @@ impl QuillApp {
                     Err(_) => break false,
                 }
             };
-            if ok {
-                global_unlock().set(master);
-            }
+            // The master key goes with the answer, unless a log-out from the
+            // lock screen cancelled the job meanwhile.
+            let master = std::rc::Rc::new(std::cell::RefCell::new(Some(master)));
+            let held = master.clone();
             // The window that asked finishes, with its own state in place.
-            let ran = this.update_in(cx, |this, window, cx| {
-                this.account.passcode.job = PasscodeJob::Idle;
-                if ok {
+            let ran = this.update_in(cx, move |this, window, cx| {
+                let counts = this.take_system_unlock_job() && ok;
+                if let Some(master) = held.borrow_mut().take().filter(|_| counts) {
+                    global_unlock().set(master);
                     this.in_window_of(window, cx, |this, window, cx| this.unlock_done(window, cx));
                 }
                 cx.notify();
@@ -41,8 +43,9 @@ impl QuillApp {
             // It closed meanwhile: the answer still counts, in the main window.
             if ran.is_err() {
                 let _ = this.update(cx, |this, cx| {
-                    this.account.passcode.job = PasscodeJob::Idle;
-                    if ok {
+                    let counts = this.take_system_unlock_job() && ok;
+                    if let Some(master) = master.borrow_mut().take().filter(|_| counts) {
+                        global_unlock().set(master);
                         this.unlock_in_main_window(cx);
                     }
                     cx.notify();
@@ -50,6 +53,12 @@ impl QuillApp {
             }
         })
         .detach();
+    }
+
+    /// The job ends. Whether its answer still counts: a log-out from the
+    /// lock screen cancelled it.
+    fn take_system_unlock_job(&mut self) -> bool {
+        std::mem::take(&mut self.account.passcode.job) != PasscodeJob::Cancelled
     }
 
     fn unlock_in_main_window(&mut self, cx: &mut Context<Self>) {

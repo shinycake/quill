@@ -12,14 +12,13 @@ impl Session {
         _seq: u64,
     ) {
         match pending.map(|p| p.purpose) {
-            // A refused appearance change shows in the Appearance box.
+            // A refused appearance change shows in the Appearance box that
+            // sent it, by the request.
             Some(
                 RequestPurpose::SetChatAccentColor
                 | RequestPurpose::SetChatProfileAccentColor
                 | RequestPurpose::SetChatEmojiStatus,
-            ) => {
-                self.chats_state.appearance_error = Some(error_reason(err));
-            }
+            ) => self.file_appearance_answer(pending, Err(error_reason(err))),
             // Only the search the link preview waits for: an earlier
             // link's failure never shows under a later one.
             Some(RequestPurpose::SearchBackground) => {
@@ -32,39 +31,76 @@ impl Session {
                     self.chats_state.background_error = Some(error_reason(err));
                 }
             }
+            Some(RequestPurpose::Chats(ChatsPurpose::GetInstalledBackgrounds {
+                for_dark_theme,
+            })) => {
+                let reason = error_reason(err);
+                // Only the fetch that waits for this request fails; the page
+                // line stays for the pages.
+                let waiting = self
+                    .chats_state
+                    .installed_backgrounds
+                    .theme_mut(for_dark_theme)
+                    .failed(_extra, reason.clone(), false);
+                if waiting {
+                    self.chats_state.background_error = Some(reason);
+                }
+            }
+            // The preview that asked reads its own answer, matched by the
+            // request; the page-level line stays for the pages.
+            Some(RequestPurpose::Chats(
+                ChatsPurpose::SetDefaultBackground { .. }
+                | ChatsPurpose::SetDefaultBackgroundLocal { .. }
+                | ChatsPurpose::GetBackgroundUrl,
+            )) => {
+                let reason = error_reason(err);
+                if let Some(id) = pending.map(|p| p.id) {
+                    self.chats_state
+                        .background_answers
+                        .push(id, Err(reason.clone()));
+                }
+                self.chats_state.background_error = Some(reason);
+            }
+            // A refused delete changed nothing locally: the wallpaper
+            // stays where the server kept it (removals apply on `ok`).
             Some(
-                RequestPurpose::GetInstalledBackgrounds
-                | RequestPurpose::SetDefaultBackground
-                | RequestPurpose::DeleteDefaultBackground
-                | RequestPurpose::RemoveInstalledBackground
-                | RequestPurpose::SetDefaultBackgroundLocal
-                | RequestPurpose::SetChatBackground
-                | RequestPurpose::DeleteChatBackground
-                | RequestPurpose::SetChatTheme
-                | RequestPurpose::GetBackgroundUrl,
+                RequestPurpose::Chats(ChatsPurpose::DeleteDefaultBackground { .. })
+                | RequestPurpose::Chats(ChatsPurpose::RemoveInstalledBackground { .. }),
             ) => {
                 self.chats_state.background_error = Some(error_reason(err));
             }
+            // The chat look dialog settles each of its requests on its own
+            // answer (`Session::acks`); the error is not the Appearance
+            // page's.
+            Some(
+                RequestPurpose::SetChatBackground
+                | RequestPurpose::DeleteChatBackground
+                | RequestPurpose::SetChatTheme,
+            ) => {}
             // Slice CL3: refused report / block surfaces in the
             // status note — never shown as success.
             Some(RequestPurpose::ReportChat) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not report the chat (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not report the chat (error {})", err.code));
             }
             Some(RequestPurpose::RemoveChatActionBar) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not hide the bar (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not hide the bar (error {})", err.code));
             }
             Some(RequestPurpose::ToggleBusinessBotPaused) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not change the bot (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not change the bot (error {})", err.code));
             }
             Some(RequestPurpose::RemoveBusinessBotFromChat) => {
-                self.chats_state.chat_action_error =
-                    Some(format!("could not remove the bot (error {})", err.code));
+                self.chats_state
+                    .chat_action_error
+                    .push(format!("could not remove the bot (error {})", err.code));
             }
             Some(RequestPurpose::CreatePrivateChat) => {
-                self.chats_state.chat_action_error = Some(format!(
+                self.chats_state.chat_action_error.push(format!(
                     "could not open Saved Messages (error {})",
                     err.code
                 ));
@@ -80,18 +116,14 @@ impl Session {
                 | RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { generation })
                 | RequestPurpose::Chats(ChatsPurpose::DeepLinkCheckInvite { generation }),
             ) => {
-                let stale = !matches!(
-                    &self.chats_state.deep_link,
-                    Some(
-                        DeepLinkState::ResolvingInfo {
-                            generation: slot
-                        }
-                        | DeepLinkState::ResolvingChat {
-                            generation: slot,
-                            ..
-                        }
-                    ) if *slot == generation
-                );
+                // The flow this request belongs to is the one in whatever
+                // stage carries its generation (a preview or an info that
+                // the user already acted on is still that flow).
+                let stale = self
+                    .chats_state
+                    .deep_link_stage()
+                    .and_then(DeepLinkState::generation)
+                    != Some(generation);
                 // `joinChatByInviteLink` over the community limit opens the
                 // limit box (tdesktop `ChannelsLimitBox`) instead of a dialog.
                 // A stale answer (the flow ended, as an account switch
@@ -112,22 +144,30 @@ impl Session {
                         Some(RequestPurpose::Chats(
                             ChatsPurpose::DeepLinkInternalType { .. }
                         ))
-                    ) && crate::text::openable_http_url(&self.chats_state.deep_link_original);
-                // The Premium bot's `/start` was for the link that failed:
-                // a later link to the bot must not send it unasked.
-                if !stale {
+                    ) && crate::text::openable_http_url(self.chats_state.deep_link_original());
+                // The Premium bot's `/start` was for the link that failed
+                // (stale or not): a later link to the bot must not send it
+                // unasked. Another flow's failure leaves it alone.
+                if self
+                    .payments
+                    .hub
+                    .auto_start
+                    .as_ref()
+                    .is_some_and(|auto| auto.generation == generation)
+                {
                     self.payments.hub.auto_start = None;
                 }
                 if limit_box {
                     self.chats_state.deep_link = None;
                 } else if !stale && web_fallback {
-                    let url = std::mem::take(&mut self.chats_state.deep_link_original);
-                    self.chats_state.deep_link = Some(DeepLinkState::Ui(
+                    let url = self.chats_state.deep_link_original().to_string();
+                    self.chats_state.enter_deep_link_stage(DeepLinkState::Ui(
                         crate::deep_link_types::DeepLinkUi::Browser { url },
                     ));
                 } else if !stale {
-                    let text = deep_link_error_text(self.chats_state.deep_link.as_ref(), err.code);
-                    self.chats_state.deep_link = Some(DeepLinkState::ShowText(text));
+                    let text = deep_link_error_text(self.chats_state.deep_link_stage(), err.code);
+                    self.chats_state
+                        .enter_deep_link_stage(DeepLinkState::ShowText(text));
                 }
             }
             _ => {}

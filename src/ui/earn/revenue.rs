@@ -5,6 +5,7 @@
 use super::chart::EarnChartKind;
 use super::*;
 use crate::ui::chat_theme::{danger, success};
+use crate::ui::earn_state::TxBox;
 use crate::ui::premium_ui::star_tx_row;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
@@ -362,6 +363,10 @@ impl QuillApp {
                     .primary()
                     .w_full()
                     .disabled(!enabled)
+                    .loading(
+                        self.earn_state()
+                            .is_some_and(|e| e.is_checking_withdrawal()),
+                    )
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.earn_withdraw(WithdrawTarget::Ton { chat_id }, cx);
                     })),
@@ -508,7 +513,8 @@ impl QuillApp {
                     ))
                     .tab_index(0)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.earn.ton_tx = Some(row_tx.clone());
+                        // box-host: opens EarnTonTx just below; the Stars kind stays shut.
+                        this.earn.tx_box = TxBox::Ton(row_tx.clone());
                         this.open_box(crate::ui::shell::DialogKind::EarnTonTx);
                         cx.notify();
                     }))
@@ -568,7 +574,8 @@ impl QuillApp {
                 ("earn-star-tx", ix + filter as usize * 100_000),
                 tx,
                 move |this, cx| {
-                    this.earn.star_tx = Some(row_tx.clone());
+                    // box-host: opens EarnStarTx just below; the TON kind stays shut.
+                    this.earn.tx_box = TxBox::Star(row_tx.clone());
                     this.open_box(crate::ui::shell::DialogKind::EarnStarTx);
                     cx.notify();
                 },

@@ -23,21 +23,46 @@ pub enum ToneProblem {
     Unreadable,
 }
 
+/// The picker an "Upload Sound" was started from: the new sound is
+/// selected there. It travels with the upload in the session, so an account
+/// switch cannot part the two.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToneTarget {
+    Chat(crate::ids::ChatId),
+    /// The chat's story sound (`story_sound_id`), apart from its message
+    /// sound.
+    ChatStory(crate::ids::ChatId),
+    Scope(crate::telegram::envelope::NotificationSettingsScope),
+    /// `reactionNotificationSettings`.
+    Reaction,
+}
+
 /// The upload as the session knows it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum ToneUpload {
     #[default]
     Idle,
+    /// The file went up as `request`: only its answer or error ends it.
     Uploading {
         name: String,
+        target: ToneTarget,
+        request: crate::ids::RequestId,
     },
+    /// The sound landed; `target` is where it was asked for (`None` when
+    /// the upload is no longer known to the session).
     Added {
         sound_id: i64,
+        target: Option<ToneTarget>,
     },
     Failed(ToneProblem),
 }
 
 impl ToneUpload {
+    /// The upload waits for the answer of `request`.
+    pub fn waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(self, Self::Uploading { request: asked, .. } if Some(*asked) == request)
+    }
+
     /// The upload ended and the screen has not reacted to it yet.
     pub fn is_settled(&self) -> bool {
         matches!(self, Self::Added { .. } | Self::Failed(_))

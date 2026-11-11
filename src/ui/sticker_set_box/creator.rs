@@ -85,7 +85,7 @@ impl QuillApp {
         self.sticker_box
             .rename_input
             .update(cx, |input, cx| input.set_value(&title, window, cx));
-        self.sticker_box.rename_open = true;
+        self.sticker_box.confirm = crate::ui::sticker_set_box::state::SetConfirm::Rename;
         cx.notify();
     }
 
@@ -105,20 +105,21 @@ impl QuillApp {
         {
             *current = title;
         }
-        self.sticker_box.rename_open = false;
+        self.sticker_box.confirm.close_rename();
         cx.notify();
         true
     }
 
     /// A cell's "Delete sticker": the confirmation box.
     pub(super) fn ask_delete_sticker(&mut self, item: StickerItem, cx: &mut Context<Self>) {
-        self.sticker_box.delete_sticker = Some(item);
+        self.sticker_box.confirm =
+            crate::ui::sticker_set_box::state::SetConfirm::DeleteSticker(item);
         cx.notify();
     }
 
     /// "Delete" in that box.
     pub(super) fn confirm_delete_sticker(&mut self, set_id: i64, cx: &mut Context<Self>) {
-        let Some(item) = self.sticker_box.delete_sticker.take() else {
+        let Some(item) = self.sticker_box.confirm.close_delete_sticker() else {
             return;
         };
         if let Some(live) = self.live.as_mut() {
@@ -142,7 +143,7 @@ impl QuillApp {
 
     /// "Remove" in "Delete for Everyone": the set is gone for good.
     pub(super) fn confirm_delete_set_everyone(&mut self, set_id: i64, cx: &mut Context<Self>) {
-        self.sticker_box.delete_set_open = false;
+        self.sticker_box.confirm.close_delete_set();
         if let Some(live) = self.live.as_mut() {
             if live.driver.delete_owned_sticker_set(set_id).is_err() {
                 self.set_note(StatusNote::error(tr(keys::Q_MEDIA_COULDNT_DELETE_THE_SET)));
@@ -155,7 +156,7 @@ impl QuillApp {
 
     /// "Remove" in "Delete for Myself": the set is uninstalled.
     pub(super) fn confirm_remove_set(&mut self, set_id: i64, cx: &mut Context<Self>) {
-        self.sticker_box.remove_set_open = false;
+        self.sticker_box.confirm.close_remove_set();
         self.toggle_viewed_sticker_set(set_id, false, cx);
     }
 
@@ -228,7 +229,7 @@ impl QuillApp {
             // another set now (`claim_sticker_set_box`), whose "New
             // Sticker" this editor's Done would fill.
             Some(_) if !self.sticker_box_shows(set_id) => {}
-            Some(editor) => self.viewer.photo_editor = Some(editor),
+            Some(editor) => self.viewer.photo_editor.open(editor),
             None => self.set_note(StatusNote::error(OPEN_FAILED_NOTE)),
         }
         cx.notify();
@@ -301,19 +302,25 @@ impl QuillApp {
             return false;
         };
         if create.emojis.is_empty() {
-            self.set_note(StatusNote::silent(EMOJI_REQUIRED_NOTE));
+            self.set_note(StatusNote::info(EMOJI_REQUIRED_NOTE));
             cx.notify();
             return false;
         }
         if let Some(job) = create.video.clone() {
             return self.encode_created_video(create, job, window, cx);
         }
-        self.upload_created_sticker(create, cx);
-        true
+        self.upload_created_sticker(create, cx)
     }
 
-    /// Hand the finished file to TDLib and leave the box.
-    pub(super) fn upload_created_sticker(&mut self, create: CreateSticker, cx: &mut Context<Self>) {
+    /// Hand the finished file to TDLib and leave the box. When the request
+    /// cannot go out the box stays on its naming stage, with the user's
+    /// edited image and chosen emoji, so Done can be pressed again; returns
+    /// whether the box was left.
+    pub(super) fn upload_created_sticker(
+        &mut self,
+        create: CreateSticker,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let emojis = joined_emojis(&create.emojis);
         if let Some(live) = self.live.as_mut() {
             let path = create.path.to_string_lossy().into_owned();
@@ -325,6 +332,8 @@ impl QuillApp {
                 self.set_note(StatusNote::error(
                     quill::sticker_set_box::UPLOAD_FAILED_NOTE,
                 ));
+                cx.notify();
+                return false;
             }
         } else {
             self.set_note(StatusNote::silent(tr(
@@ -332,9 +341,10 @@ impl QuillApp {
             )));
         }
         self.sticker_box.create = None;
-        self.sticker_box.encoding = None;
+        self.sticker_box.encoding = super::state::Encoding::Idle;
         create.uploaded();
         cx.notify();
+        true
     }
 
     /// "Add an Existing Sticker" / "Adapt from a Sticker": the chooser.
@@ -361,7 +371,7 @@ impl QuillApp {
         };
         let mut seen = std::collections::HashSet::new();
         let mut out = Vec::new();
-        let library = &session.media.media_library.set_stickers;
+        let library = &session.media.media_library;
         let sources: Vec<&StickerItem> = session
             .stickers
             .stickers
@@ -400,8 +410,7 @@ impl QuillApp {
             return;
         };
         // This pick replaces any earlier one still decoding or downloading.
-        self.sticker_box.pending_still = None;
-        self.sticker_box.pending_video = None;
+        self.sticker_box.pending = crate::ui::sticker_set_box::state::PickWait::None;
         if !pick.adapt {
             self.sticker_box.pick = None;
             self.add_existing_to_owned_set(pick.set_id, pick.kind, item, cx);
@@ -422,23 +431,50 @@ impl QuillApp {
             StickerFormat::Webp | StickerFormat::Unknown => {
                 self.sticker_box.pick = None;
                 let file_id = item.file_id;
-                self.sticker_box.pending_still = Some((pick, file_id));
-                let path = self.local_media_path(file_id);
-                let format = item.format;
-                self.run_off_ui_scoped_then(
-                    move || {
-                        path.and_then(|path| {
-                            super::super::editor_art::sticker_pixels(
-                                std::path::Path::new(&path),
-                                format,
-                            )
-                        })
-                    },
-                    move |this, pixels, cx| this.land_still_pick(pick, file_id, pixels, cx),
-                    cx,
-                );
+                // A sticker not downloaded yet is fetched, and decoded
+                // when it arrives (`sticker_box_window_upkeep`).
+                if self.local_media_path(file_id).is_none() {
+                    if !self.ask_pick_file(file_id, cx) {
+                        return;
+                    }
+                    self.sticker_box.pending =
+                        crate::ui::sticker_set_box::state::PickWait::Downloading(
+                            super::state::PendingVideo {
+                                pick,
+                                file_id,
+                                file: super::state::PickedFile::Still(item.format),
+                                emoji: None,
+                                window: self.windows.scope,
+                            },
+                        );
+                    cx.notify();
+                    return;
+                }
+                self.decode_still_pick(pick, file_id, item.format, cx);
             }
         }
+    }
+
+    /// Decode the downloaded still sticker `file_id` off the UI thread; the
+    /// editor opens on it when it is done (`land_still_pick`).
+    pub(super) fn decode_still_pick(
+        &mut self,
+        pick: PickExisting,
+        file_id: FileId,
+        format: StickerFormat,
+        cx: &mut Context<Self>,
+    ) {
+        self.sticker_box.pending = super::state::PickWait::Decoding(pick, file_id);
+        let path = self.local_media_path(file_id);
+        self.run_off_ui_scoped_then(
+            move || {
+                path.and_then(|path| {
+                    super::super::editor_art::sticker_pixels(std::path::Path::new(&path), format)
+                })
+            },
+            move |this, pixels, cx| this.land_still_pick(pick, file_id, pixels, cx),
+            cx,
+        );
     }
 
     /// A picked still sticker is decoded: open the editor on it, unless the
@@ -450,10 +486,9 @@ impl QuillApp {
         pixels: Option<image::RgbaImage>,
         cx: &mut Context<Self>,
     ) {
-        if self.sticker_box.pending_still != Some((pick, file_id)) {
+        if !self.sticker_box.pending.finish_decoding(pick, file_id) {
             return;
         }
-        self.sticker_box.pending_still = None;
         self.edit_pixels_for_set(pick.set_id, pick.kind, pixels, cx);
     }
 
@@ -474,7 +509,7 @@ impl QuillApp {
             .and_then(|s| s.owned_sticker_set_count(set_id))
             .unwrap_or(0);
         if count >= kind.owned_limit() {
-            self.set_note(StatusNote::silent(full_note(kind)));
+            self.set_note(StatusNote::info(full_note(kind)));
             cx.notify();
             return;
         }
@@ -482,14 +517,14 @@ impl QuillApp {
             Some((viewed_id, _, _, stickers)) if viewed_id == set_id => Some(stickers),
             _ => self
                 .session()
-                .and_then(|s| s.media.media_library.set_stickers.get(&set_id).cloned()),
+                .and_then(|s| s.media.media_library.get(&set_id).cloned()),
         };
         if known.is_some_and(|stickers| {
             stickers
                 .iter()
                 .any(|s| s.file_id == item.file_id || (item.id != 0 && s.id == item.id))
         }) {
-            self.set_note(StatusNote::silent(already_note(kind)));
+            self.set_note(StatusNote::info(already_note(kind)));
             cx.notify();
             return;
         }
@@ -509,7 +544,7 @@ impl QuillApp {
                 keys::Q_MEDIA_DEMO_STICKERS_ARE_ADDED_WITH,
             )));
         }
-        self.message_ui.menu = None;
+        self.close_message_menu();
         cx.notify();
     }
 
@@ -526,16 +561,70 @@ impl QuillApp {
                 .set_note_for(&self.screen.windows, StatusNote::info(note));
             changed = true;
         }
+        // A saved change of the manager box that was lost on the way (the
+        // box is closed by then).
+        if live
+            .driver
+            .session
+            .stickers
+            .manager
+            .failure
+            .take()
+            .is_some()
+        {
+            self.screen.connection.set_note_for(
+                &self.screen.windows,
+                StatusNote::error(tr(keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN)),
+            );
+            changed = true;
+        }
+        let Some(live) = self.live.as_mut() else {
+            return changed;
+        };
         let deleted = live
             .driver
             .session
             .stickers
             .sticker_set_view
             .as_ref()
-            .is_some_and(|view| view.edits.deleted);
+            .is_some_and(|view| view.edits.deleted());
         if deleted {
             // tdesktop just closes the box once the set is gone.
             self.close_sticker_set_dialog(cx);
+            return true;
+        }
+        // The box's Add / Remove / Archive was answered: a done one closes
+        // the box (every window that shows the set) with its note, a
+        // refused one says so and leaves the box as it was.
+        let stage = live
+            .driver
+            .session
+            .stickers
+            .sticker_set_view
+            .as_ref()
+            .map(|view| view.change);
+        if let Some(stage @ (SetChangeStage::Done(_) | SetChangeStage::Failed(_))) = stage {
+            live.driver.session.settle_set_change();
+            let note = match stage {
+                SetChangeStage::Done(SetChange::Install) => {
+                    StatusNote::silent(tr(keys::Q_MEDIA_STICKER_SET_ADDED))
+                }
+                SetChangeStage::Done(SetChange::Remove) => {
+                    StatusNote::silent(tr(keys::Q_MEDIA_STICKER_SET_REMOVED))
+                }
+                SetChangeStage::Done(SetChange::Archive) => StatusNote::info(ARCHIVED_NOTE),
+                SetChangeStage::Failed(SetChange::Archive) => {
+                    StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_ARCHIVE_THE_STICKER))
+                }
+                SetChangeStage::Failed(_) | SetChangeStage::Idle | SetChangeStage::Working(_) => {
+                    StatusNote::error(tr(keys::Q_MEDIA_COULD_NOT_CHANGE_THE_STICKER))
+                }
+            };
+            self.set_note(note);
+            if matches!(stage, SetChangeStage::Done(_)) {
+                self.close_sticker_set_dialog(cx);
+            }
+            cx.notify();
             return true;
         }
         if let Ok(Some(_)) = live.driver.sync_sticker_set_view() {

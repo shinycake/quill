@@ -9,8 +9,10 @@
 //! behind an explicit confirmation in the UI.
 #![deny(clippy::indexing_slicing)]
 
+use crate::state::fetch::Fetch;
 use crate::telegram::envelope::{MessageSender, StickerContent, parse_sticker_value};
 pub use feature::{BusinessFeature, PremiumFeature};
+pub use lists::{ReceivedGifts, StarsHistory, StarsView};
 use serde_json::Value;
 
 fn int(value: Option<&Value>) -> i64 {
@@ -91,7 +93,8 @@ impl StarAmount {
 
     /// `1,234` or `12.5`; fractional part only when there are nanostars.
     pub fn label(&self) -> String {
-        let whole = group_digits(self.stars.abs());
+        let grouped = group_digits(self.stars);
+        let whole = grouped.trim_start_matches('-');
         let sign = if self.is_negative() { "-" } else { "" };
         if self.nanos == 0 {
             return format!("{sign}{whole}");
@@ -488,8 +491,7 @@ fn sticker_content(
         thumb_width: item.thumb_width,
         thumb_height: item.thumb_height,
         is_premium: false,
-        requires_premium: false,
-        premium_animation: None,
+        premium: None,
         set_id: item.set_id,
     });
     (sticker, files)
@@ -668,6 +670,11 @@ fn limit_title(constructor: &str) -> Option<&'static str> {
 pub mod feature;
 pub mod fragment;
 pub mod gift_value;
+pub mod gift_view;
+pub mod limit_notice;
+pub mod lists;
+pub mod page_stage;
+pub mod premium_box;
 pub mod promo;
 
 /// A Premium preview the session asks the UI to open, and the chat whose
@@ -742,81 +749,59 @@ pub fn parse_premium_state(value: &Value) -> PremiumStateInfo {
     }
 }
 
+/// The `/start` the Premium subscribe button queued for the bot's chat.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PremiumAutoStart {
+    /// Lowercase username of the bot.
+    pub username: String,
+    pub start_ref: String,
+    /// The deep-link flow (`ChatsState::deep_link_seq`) resolving the bot.
+    pub generation: u64,
+}
+
 /// Per-surface state of the hub dialogs. Lives in `Session` so the poll loop
 /// and reducer own every transition (the Subscriptions-dialog pattern).
 #[derive(Debug, Clone, Default)]
 pub struct PremiumHub {
     // Stars.
-    pub stars_open: bool,
     pub balance: Option<StarAmount>,
-    pub filter: TxFilter,
-    pub transactions: Vec<StarTx>,
-    pub tx_offset: String,
-    pub tx_loaded: bool,
-    pub tx_loading: bool,
-    pub tx_error: Option<String>,
-    /// `@extra` of the newest transactions request; older answers (a
-    /// filter switched mid-flight) are dropped.
-    pub tx_request: u64,
-    /// Transaction whose details box is showing.
-    pub tx_selected: Option<String>,
+    /// The Stars box and the history of its filter ([`lists::StarsHistory`]).
+    pub stars: lists::StarsHistory,
     // Gifts.
-    pub gifts_open: bool,
-    pub gifts_owner: Option<MessageSender>,
-    pub gifts: Vec<ReceivedGift>,
-    pub gifts_total: i32,
-    pub gifts_offset: String,
-    pub gifts_loaded: bool,
-    pub gifts_loading: bool,
-    pub gifts_error: Option<String>,
-    /// `@extra` of the newest gifts request (stale answers are dropped).
-    pub gifts_request: u64,
-    pub gift_selected: Option<String>,
-    /// `sellGift` awaiting confirmation for this gift id.
-    pub gift_convert_confirm: Option<String>,
-    pub gift_mutating: bool,
-    pub gifts_stale: bool,
+    /// The received gifts box and the list of its owner
+    /// ([`lists::ReceivedGifts`]).
+    pub received: lists::ReceivedGifts,
     // Premium.
-    pub premium_open: bool,
+    /// The Premium dialog, while it is open.
+    pub premium_box: Option<premium_box::PremiumBox>,
     /// `premium_bot_username` / `premium_invoice_slug` from the app config.
     pub purchase: purchase::PremiumPurchase,
     /// Where Quill links out to Fragment (`fragment_prefixes`, `whitelisted_domains`).
     pub fragment: fragment::FragmentConfig,
     /// The collectible username or phone number whose box is open.
     pub collectible: Option<crate::collectible_info::CollectibleLookup>,
-    /// The ref the Premium dialog was opened with (tdesktop `ShowPremium`).
-    pub premium_ref: String,
-    /// Lowercase username of the Premium bot the subscribe button opened,
-    /// and the ref; opening that chat sends `/start <ref>` by itself.
-    pub auto_start: Option<(String, String)>,
-    pub premium: Option<PremiumInfo>,
-    pub premium_state: Option<PremiumStateInfo>,
-    pub premium_loading: bool,
-    pub premium_error: Option<String>,
+    /// The Premium bot the subscribe button opened; opening that chat sends
+    /// `/start <ref>` by itself. Tied to the link's resolve (`generation`):
+    /// that resolve failing drops it.
+    pub auto_start: Option<PremiumAutoStart>,
+    /// `getPremiumFeatures`: asked again after a failure, not while it is
+    /// out or answered.
+    pub premium: Fetch<PremiumInfo>,
+    /// `getPremiumState`: the state text, the plans and the clips; asked
+    /// again after a failure, and only its own request's answer counts.
+    pub premium_state: Fetch<PremiumStateInfo>,
     /// `getPremiumStickerExamples`: the stickers the stickers feature
-    /// preview shows, and whether the request is in flight or done.
-    pub premium_stickers: Vec<crate::telegram::envelope::StickerItem>,
-    pub premium_stickers_loading: bool,
-    pub premium_stickers_asked: bool,
-    /// The locked sticker whose click opened the stickers preview; it leads
-    /// the preview (tdesktop `Descriptor::requestedSticker`).
-    pub premium_requested: Option<crate::telegram::envelope::StickerItem>,
-    /// The page of the Premium dialog: the overview, "Doubled limits" or a
-    /// feature preview.
-    pub promo_page: promo::PromoPage,
+    /// preview shows; asked again after a failure.
+    pub premium_stickers: Fetch<Vec<crate::telegram::envelope::StickerItem>>,
     /// A preview a reducer asked the UI to open (tdesktop opens the No Ads
     /// preview when a sponsored report needs Premium).
     pub promo_request: Option<PromoRequest>,
     /// `getBusinessFeatures`: the Business screen's rows in the server's
-    /// order; `None` until it answers.
-    pub business_features: Option<Vec<BusinessFeature>>,
-    pub business_features_loading: bool,
-    /// The limit box that is open (pins, caption, GIFs, ...), with how far
-    /// over the limit the action went when that is known (caption).
-    pub limit_box: Option<(crate::premium_limits::PremiumLimitKind, i64)>,
-    /// The limit toast waiting for the next frame (saved GIFs, favorite
-    /// stickers, similar channels, owned bots).
-    pub limit_toast: Option<crate::premium_limits::PremiumLimitKind>,
+    /// order; asked again after a failure.
+    pub business_features: Fetch<Vec<BusinessFeature>>,
+    /// The limit box that is open or the limit toast waiting for the next
+    /// frame.
+    pub limit_notice: Option<limit_notice::LimitNotice>,
     pub limits: crate::premium_limits::LimitStore,
     /// Settings → My Grams (`ton`).
     pub grams: ton::GramsHub,
@@ -826,54 +811,127 @@ pub struct PremiumHub {
 
 impl PremiumHub {
     pub fn apply_transactions(&mut self, page: StarTxPage, append: bool) {
-        self.tx_loading = false;
-        self.tx_error = None;
-        self.tx_loaded = true;
+        self.stars.page = page_stage::PageStage::Ready;
         self.balance = Some(page.balance);
-        self.tx_offset = page.next_offset;
+        self.stars.offset = page.next_offset;
         if append {
-            self.transactions.extend(page.transactions);
+            self.stars.rows.extend(page.transactions);
         } else {
-            self.transactions = page.transactions;
+            self.stars.rows = page.transactions;
         }
     }
 
     pub fn apply_gifts(&mut self, page: GiftsPage, append: bool) {
-        self.gifts_loading = false;
-        self.gifts_error = None;
-        self.gifts_loaded = true;
-        self.gifts_stale = false;
-        self.gifts_total = page.total_count;
-        self.gifts_offset = page.next_offset;
+        let list = &mut self.received;
+        list.page = page_stage::PageStage::Ready;
+        list.notice = None;
+        // Only a first page answers a refetch; an appended page of the old
+        // list leaves the list stale.
+        if !append {
+            list.op.refetched();
+        }
+        list.total = page.total_count;
+        list.offset = page.next_offset;
         if append {
-            self.gifts.extend(page.gifts);
+            list.rows.extend(page.gifts);
         } else {
-            self.gifts = page.gifts;
+            list.rows = page.gifts;
+        }
+    }
+
+    /// Whether the Premium dialog is open.
+    pub fn premium_open(&self) -> bool {
+        self.premium_box.is_some()
+    }
+
+    /// The page of the Premium dialog (the overview while it is closed).
+    pub fn promo_page(&self) -> promo::PromoPage {
+        self.premium_box
+            .as_ref()
+            .map(|open| open.page)
+            .unwrap_or_default()
+    }
+
+    /// The ref the Premium dialog was opened with.
+    pub fn premium_ref(&self) -> &str {
+        self.premium_box
+            .as_ref()
+            .map_or("", |open| open.start_ref.as_str())
+    }
+
+    /// The sticker whose click opened the stickers preview.
+    pub fn premium_requested(&self) -> Option<&crate::telegram::envelope::StickerItem> {
+        self.premium_box.as_ref()?.requested.as_ref()
+    }
+
+    /// Open the Premium dialog on `page` with the ref it was opened with.
+    pub fn open_premium_box(&mut self, page: promo::PromoPage, start_ref: &str) {
+        self.premium_box = Some(premium_box::PremiumBox {
+            page,
+            start_ref: start_ref.to_string(),
+            requested: None,
+        });
+    }
+
+    pub fn close_premium_box(&mut self) {
+        self.premium_box = None;
+    }
+
+    /// Move the open dialog to `page`.
+    pub fn set_promo_page(&mut self, page: promo::PromoPage) {
+        if let Some(open) = self.premium_box.as_mut() {
+            open.page = page;
+        }
+    }
+
+    /// The open limit box and how far over the limit the action went.
+    pub fn limit_box(&self) -> Option<(crate::premium_limits::PremiumLimitKind, i64)> {
+        self.limit_notice.and_then(|notice| notice.open_box())
+    }
+
+    /// The limit toast waiting to be shown.
+    pub fn limit_toast(&self) -> Option<crate::premium_limits::PremiumLimitKind> {
+        self.limit_notice.and_then(|notice| notice.toast())
+    }
+
+    /// The limit toast to show now; the window takes it once. An open box
+    /// stays.
+    pub fn take_limit_toast(&mut self) -> Option<crate::premium_limits::PremiumLimitKind> {
+        let notice = self.limit_notice?;
+        let kind = notice.toast()?;
+        self.limit_notice = notice.without_toast();
+        Some(kind)
+    }
+
+    /// Close the limit box (a toast waiting stays).
+    pub fn close_limit_box(&mut self) {
+        if let Some(limit_notice::LimitNotice::Box { toast, .. }) = self.limit_notice {
+            self.limit_notice = toast.map(limit_notice::LimitNotice::Toast);
         }
     }
 
     pub fn selected_tx(&self) -> Option<&StarTx> {
-        let id = self.tx_selected.as_deref()?;
-        self.transactions.iter().find(|tx| tx.id == id)
+        let id = self.stars.selected()?;
+        self.stars.rows.iter().find(|tx| tx.id == id)
     }
 
     pub fn selected_gift(&self) -> Option<&ReceivedGift> {
-        let id = self.gift_selected.as_deref()?;
-        self.gifts.iter().find(|g| g.id == id)
+        let id = self.received.view.selected()?;
+        self.received.rows.iter().find(|g| g.id == id)
     }
 
     /// Whether the open gifts list belongs to the signed-in user (the only
     /// case where visibility toggles and conversion are offered).
     pub fn gifts_are_mine(&self, my_user_id: Option<i64>) -> bool {
         matches!(
-            (self.gifts_owner, my_user_id),
+            (self.received.owner, my_user_id),
             (Some(MessageSender::User { user_id }), Some(me)) if user_id == me
         )
     }
 
     /// Flip `is_saved` after the server confirmed `toggleGiftIsSaved`.
     pub fn set_gift_saved(&mut self, id: &str, saved: bool) {
-        if let Some(gift) = self.gifts.iter_mut().find(|g| g.id == id) {
+        if let Some(gift) = self.received.rows.iter_mut().find(|g| g.id == id) {
             gift.is_saved = saved;
         }
     }

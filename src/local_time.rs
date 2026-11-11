@@ -71,7 +71,11 @@ pub fn utc_offset_at(unix: i64) -> i32 {
     thread_local! {
         static BY_HOUR: std::cell::RefCell<HourOffset> = const { std::cell::RefCell::new(HourOffset::EMPTY) };
     }
-    BY_HOUR.with(|cell| cell.borrow_mut().offset_at(unix, os_utc_offset_at))
+    BY_HOUR.with(|cell| match cell.try_borrow_mut() {
+        Ok(mut by_hour) => by_hour.offset_at(unix, os_utc_offset_at),
+        // A lookup that came back into this one: ask the OS directly.
+        Err(_) => os_utc_offset_at(unix),
+    })
 }
 
 /// The offset of one UTC hour in which the zone does not change.

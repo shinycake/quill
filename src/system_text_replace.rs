@@ -23,6 +23,10 @@ pub struct Check {
     /// The field's text up to the typed character (byte offset
     /// `prefix.len()`); the answer applies only while it is unchanged.
     pub prefix: String,
+    /// The chat and topic whose composer was asked about; the answer
+    /// applies only while that composer is the one shown. `None` where the
+    /// caller has no chat to name.
+    pub owner: Option<(i64, Option<i32>)>,
 }
 
 /// A replacement the system found: the match is the last `match_utf16`
@@ -57,6 +61,7 @@ pub fn check_for(prev: &str, new: &str, caret: usize) -> Option<Check> {
     (!text.is_empty()).then(|| Check {
         text: text.to_string(),
         prefix: prefix.to_string(),
+        owner: None,
     })
 }
 
@@ -103,6 +108,7 @@ mod tests {
             Some(Check {
                 text: "say omw".into(),
                 prefix: "say omw".into(),
+                owner: None,
             })
         );
     }

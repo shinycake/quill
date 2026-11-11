@@ -106,8 +106,12 @@ fn open_boxes(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
             crate::ui::dialogs::group_call::GroupCallTitleDialog::new(window, cx, "x"),
         );
         app.group_call_screen.settings_open = true;
-        app.screen_share.group_call = Some(77);
-        app.screen_share.privacy_for = Some(ScreenFor::Group);
+        app.screen_share.chooser = crate::ui::screen_share_state::Chooser::PrivacyBox(
+            crate::ui::screen_share_state::ChooserTarget {
+                for_call: ScreenFor::Group,
+                group_call: Some(77),
+            },
+        );
         cx.notify();
     });
 }
@@ -115,7 +119,7 @@ fn open_boxes(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
 fn boxes(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> (bool, bool, bool) {
     app.read_with(vcx, |app, _| {
         (
-            app.screen_share.privacy_for.is_some(),
+            app.screen_share.chooser.privacy_for().is_some(),
             app.group_call_screen.settings_open,
             app.group_call_screen.title_dialog.is_some(),
         )
@@ -127,7 +131,7 @@ fn esc_in_the_video_chat_window_closes_its_boxes_topmost_first(cx: &mut TestAppC
     let (app, mut vcx) = new_app(cx);
     open_boxes(&app, &mut vcx);
     vcx.run_until_parked();
-    let Some(handle) = app.read_with(&vcx, |app, _| app.group_call.window) else {
+    let Some(handle) = app.read_with(&vcx, |app, _| app.group_call.window.handle()) else {
         panic!("the video chat window opened");
     };
     let mut call = VisualTestContext::from_window(handle, cx);
@@ -156,4 +160,30 @@ fn closing_the_video_chat_window_closes_its_boxes(cx: &mut TestAppContext) {
         app.sync_group_call_boxes();
     });
     assert_eq!(boxes(&app, &mut vcx), (false, false, false));
+}
+
+#[gpui_kit::test]
+fn esc_in_the_video_chat_window_closes_the_invite_and_share_boxes(cx: &mut TestAppContext) {
+    use crate::ui::group_call_state::CallBox;
+    let (app, mut vcx) = new_app(cx);
+    open_boxes(&app, &mut vcx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        app.screen_share.chooser = Default::default();
+        app.group_call_screen.settings_open = false;
+        app.group_call_screen.title_dialog = None;
+        app.group_call_boxes.call_box = CallBox::Share {
+            call: Some(77),
+            speaker: false,
+            copied: false,
+        };
+        assert!(app.group_call_window_escape(cx), "Esc closes the share box");
+        assert!(matches!(app.group_call_boxes.call_box, CallBox::None));
+        app.group_call_boxes.call_box = CallBox::Invite { call: Some(77) };
+        assert!(
+            app.group_call_window_escape(cx),
+            "Esc closes the invite box"
+        );
+        assert!(matches!(app.group_call_boxes.call_box, CallBox::None));
+        assert!(!app.group_call_window_escape(cx), "nothing left to close");
+    });
 }

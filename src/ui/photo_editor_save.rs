@@ -8,6 +8,7 @@ use super::photo_editor::{EditorPurpose, PhotoEditor};
 use super::send_box_media_check::check_photo;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
+use quill::composer::EditRender;
 use quill::lang::{keys, tr};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -16,6 +17,24 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static NEXT_RENDER: AtomicU64 = AtomicU64::new(1);
 
 impl QuillApp {
+    /// The editor's Masks strip is wanted while some window's editor is in
+    /// Stickers mode: whatever closes that editor (Done, Cancel, a window
+    /// or account leaving) releases it, not only the mode button.
+    pub(super) fn sync_editor_masks(&mut self) {
+        let wanted = self
+            .viewer
+            .photo_editor
+            .as_ref()
+            .is_some_and(|editor| editor.mode == super::photo_editor::EditorMode::Stickers)
+            || self.windows.slot_edits_stickers();
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        if !wanted && live.driver.session.stickers.masks.strip_wanted() {
+            live.driver.release_editor_masks();
+        }
+    }
+
     /// Render the edit at full resolution into a new PNG and send that
     /// instead of the original. The render and the encode run off the UI
     /// thread; the editor closes at once.
@@ -29,8 +48,15 @@ impl QuillApp {
                 self.render_attachment_edit(item, editor, window, cx)
             }
             EditorPurpose::Profile(target) => self.finish_profile_crop(editor, target, cx),
-            EditorPurpose::MessageEdit => {
-                let edit_of = self.edited_message();
+            EditorPurpose::MessageEdit { chat, message } => {
+                let edit_of = (chat, message);
+                if self.edited_message() != Some(edit_of) {
+                    return;
+                }
+                let number = NEXT_RENDER.fetch_add(1, Ordering::Relaxed);
+                if let Some(edit) = self.chat_ui.pending_edit_mut() {
+                    edit.media_edit.render = EditRender::Rendering(number);
+                }
                 let job = editor.into_render_job();
                 let render = cx.background_spawn(async move {
                     super::edit_media_tools::write_edited_png(&job.render())
@@ -39,7 +65,14 @@ impl QuillApp {
                     let saved = render.await;
                     let kept = saved.clone();
                     let landed = app.update(cx, |this, cx| {
-                        if edit_of.is_some() && this.edited_message() == edit_of {
+                        if this.edited_message() == Some(edit_of)
+                            && this.chat_ui.pending_edit().is_some_and(|edit| {
+                                edit.media_edit.render == EditRender::Rendering(number)
+                            })
+                        {
+                            if let Some(edit) = this.chat_ui.pending_edit_mut() {
+                                edit.media_edit.render = EditRender::Idle;
+                            }
                             this.finish_edit_image(saved, cx);
                         } else if let Some(saved) = saved {
                             let _ = std::fs::remove_file(saved);
@@ -53,10 +86,10 @@ impl QuillApp {
                 })
                 .detach();
             }
-            EditorPurpose::Set { set_id, kind } => {
+            EditorPurpose::Set { set_id, kind, edit } => {
                 // The turn, the canvas render and the fit run off the UI
                 // thread.
-                let corners = editor.corners;
+                let corners = edit.corners;
                 let job = editor.into_set_render_job();
                 self.finish_set_image(set_id, kind, job, corners, cx);
             }
@@ -74,7 +107,7 @@ impl QuillApp {
     ) {
         let render = NEXT_RENDER.fetch_add(1, Ordering::Relaxed);
         let marked = self.composer_sends.update_item(&item, |attachment| {
-            attachment.extras.photo_render = Some(render);
+            attachment.extras.begin_render(render);
         });
         if marked.is_none() {
             return;
@@ -96,14 +129,14 @@ impl QuillApp {
                     .unwrap_or_default();
                 let opens = this
                     .viewer
-                    .photo_editor_after
-                    .take_if(|open| open.render == render)
+                    .photo_editor
+                    .take_deferred_for(render)
                     .is_some_and(|open| open.view == view);
                 match landed.held {
                     // The tray goes now, so no editor opens on it.
                     Some((text, once)) if here => {
-                        this.viewer.photo_editor_after = None;
-                        this.with_send_once(once, |this| this.submit_composer(text, window, cx));
+                        this.viewer.photo_editor.clear_deferred();
+                        this.submit_composer(text, once, window, cx);
                     }
                     Some(_) => this.note_held_send_dropped(),
                     None => {
@@ -116,15 +149,15 @@ impl QuillApp {
                     }
                 }
             });
-            // The window closed: the tray outlives it, so the edit still
-            // lands there or its file goes.
+            // The window closed or another account is on screen: the tray
+            // outlives both (it sits under its account), so the edit still
+            // lands there, whatever screen is current, or its file goes.
+            // Without this the card would render forever.
             if landed.is_err()
                 && app
-                    .main()
+                    .app()
                     .update(cx, |this, cx| {
-                        this.viewer
-                            .photo_editor_after
-                            .take_if(|open| open.render == render);
+                        this.viewer.photo_editor.take_deferred_for(render);
                         let landed =
                             this.land_attachment_edit(&item.slot, render, kept.clone(), cx);
                         if landed.held.is_some() {
@@ -149,7 +182,7 @@ impl QuillApp {
     }
 
     /// The message whose media is being edited, if any.
-    fn edited_message(&self) -> Option<(quill::ids::ChatId, quill::ids::MessageId)> {
+    pub(super) fn edited_message(&self) -> Option<(quill::ids::ChatId, quill::ids::MessageId)> {
         let edit = self.chat_ui.pending_edit()?;
         Some((edit.chat_id, edit.message_id))
     }
@@ -165,45 +198,15 @@ impl QuillApp {
         render: u64,
         saved: Option<PathBuf>,
         cx: &mut Context<Self>,
-    ) -> Landed {
+    ) -> super::composer_sends::Landed {
         cx.notify();
-        let found = self.composer_sends.update(slot, |send| {
-            let attachment = send
-                .attachments
-                .iter_mut()
-                .find(|attachment| attachment.extras.photo_render == Some(render))?;
-            attachment.extras.photo_render = None;
-            let Some(saved) = &saved else {
-                // The held Send would carry the unedited photo.
-                send.held_send = None;
-                return Some(Landed {
-                    held: None,
-                    path: Some(attachment.path.clone()),
-                });
-            };
-            let stem = attachment
-                .path
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .unwrap_or("photo")
-                .to_string();
-            attachment.path = saved.clone();
-            attachment.extras.photo_jpeg = None;
-            attachment.extras.file_only = false;
-            attachment.file_name = format!("{stem}.png");
-            attachment.kind = quill::composer::AttachmentKind::Photo;
-            let held = (!send.renders_an_edit())
-                .then(|| send.held_send.take())
-                .flatten();
-            Some(Landed {
-                held,
-                path: Some(saved.clone()),
-            })
-        });
+        let found = self
+            .composer_sends
+            .update(slot, |send| send.end_render(render, saved.as_deref()));
         match (found, saved) {
             (None, Some(saved)) => {
                 let _ = std::fs::remove_file(saved);
-                Landed::default()
+                super::composer_sends::Landed::default()
             }
             (found, None) => {
                 if found.is_some() {
@@ -216,19 +219,9 @@ impl QuillApp {
             (found, Some(saved)) => {
                 // A PNG: only its header is read, and a held Send goes now.
                 let check = check_photo(&saved);
-                self.composer_ui.send_box.media_checked.insert(saved, check);
+                self.composer_sends.reads.media.set_done(saved, check);
                 found.unwrap_or_default()
             }
         }
     }
-}
-
-/// What a finished render left in its tray.
-#[derive(Default)]
-struct Landed {
-    /// The held Send and its one-time options, once nothing in that tray
-    /// renders.
-    held: Option<(String, super::composer_sends::SendOnce)>,
-    /// The photo's file now, while it is still in the tray.
-    path: Option<PathBuf>,
 }

@@ -83,17 +83,83 @@ pub enum FreeMenuItem {
     RestoreFee,
 }
 
+/// What the free-code pill is doing: nothing, its menu open, or a request
+/// out. A request closes the menu by construction; the answer, a dropped
+/// request (`FreeState::drop_request`) and the box closing each leave it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum FreeUi {
+    #[default]
+    Idle,
+    MenuOpen,
+    /// The `getUserLink` out as the ticket with this `serial`; only its
+    /// answer applies.
+    Requesting {
+        request: FreeRequest,
+        serial: u64,
+    },
+}
+
 /// The free-code part of the box.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FreeState {
     pub mode: FreeMode,
-    pub requesting: Option<FreeRequest>,
-    /// Bumped by every request and every dropped one.
-    pub serial: u64,
-    pub menu_open: bool,
+    pub ui: FreeUi,
+    /// The serial of the last request sent; every request takes the next
+    /// (an id generator: the stage holds the serial that is current).
+    pub last_serial: u64,
 }
 
 impl FreeState {
+    /// The request out, if one is.
+    pub fn requesting(&self) -> Option<FreeRequest> {
+        match self.ui {
+            FreeUi::Requesting { request, .. } => Some(request),
+            _ => None,
+        }
+    }
+
+    /// A request goes out: the stage is `Requesting` it, closing the menu,
+    /// and the ticket's serial is the new one.
+    pub fn begin_request(&mut self, request: FreeRequest) -> u64 {
+        self.last_serial += 1;
+        self.ui = FreeUi::Requesting {
+            request,
+            serial: self.last_serial,
+        };
+        self.last_serial
+    }
+
+    /// The answer of `ticket`'s request: `true` (and the stage is `Idle`)
+    /// only while it is the request out.
+    pub fn settle_request(&mut self, ticket: &FreeTicket) -> bool {
+        let current = FreeUi::Requesting {
+            request: ticket.request,
+            serial: ticket.serial,
+        };
+        if self.ui != current {
+            return false;
+        }
+        self.ui = FreeUi::Idle;
+        true
+    }
+
+    /// The request out, or the menu, is dropped (tdesktop `dropPending`).
+    pub fn drop_request(&mut self) {
+        self.ui = FreeUi::Idle;
+    }
+
+    /// The pill's menu is open.
+    pub fn menu_open(&self) -> bool {
+        self.ui == FreeUi::MenuOpen
+    }
+
+    /// Closes the menu; a request out stays.
+    pub fn close_menu(&mut self) {
+        if self.menu_open() {
+            self.ui = FreeUi::Idle;
+        }
+    }
+
     /// Permanent codes are offered unless the server said they are not,
     /// or the account's own link is itself temporary.
     pub fn permanent_allowed(&self, temporary_only: bool) -> bool {

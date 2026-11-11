@@ -18,7 +18,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::lang::prefs::{self, LanguageChoice};
 use quill::lang::{keys, tr};
-use quill::state::LanguageReady;
+use quill::state::{LanguageEvent, LanguageReady};
 use quill::telegram::envelope::LanguagePackInfoData;
 
 /// One row of the box.
@@ -138,9 +138,12 @@ impl QuillApp {
         self.ensure_language_box(window, cx);
     }
 
-    /// The page's search field and pack request, made once per visit.
+    /// The page's search field, made once per visit, and the pack request
+    /// of the account on screen: asked whenever its list was never asked
+    /// for (a switch of account leaves the box and asks the new session).
     pub(crate) fn ensure_language_box(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.language.open.is_some() {
+            self.ask_language_packs();
             return;
         }
         let search = cx.new(|cx| {
@@ -163,26 +166,64 @@ impl QuillApp {
             _search_subscription: subscription,
             removed: Vec::new(),
         });
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.request_language_packs();
-        }
+        self.ask_language_packs();
         cx.notify();
     }
 
-    /// Leaving the page: drop the search field and forget the recent
-    /// languages removed while it was open.
-    pub(crate) fn leave_language_settings(&mut self) {
-        if let Some(open) = self.language.open.take() {
-            self.language
-                .recent
-                .retain(|choice| !open.removed.contains(&choice.pack_id));
+    /// `getLocalizationTargetInfo`, when this session was never asked. A
+    /// failure is `Failed` (drawn with Retry), so this never repeats.
+    fn ask_language_packs(&mut self) {
+        if let Some(live) = self.live.as_mut()
+            && live.driver.session.settings.language.packs.is_idle()
+        {
+            let _ = live.driver.request_language_packs();
         }
+    }
+
+    /// The Retry of a list that failed to load.
+    fn retry_language_packs(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.settings.language.packs.clear_error();
+        }
+        self.ask_language_packs();
+        cx.notify();
+    }
+
+    /// Leaving the page: drop the search field. Removed recent packs are
+    /// already out of the list.
+    pub(crate) fn leave_language_settings(&mut self) {
+        self.language.open = None;
+    }
+
+    /// The recent packs the box shows: the kept ones, and the ones removed
+    /// here back in their places (dimmed, with Restore).
+    pub(super) fn shown_recent_languages(&self) -> Vec<LanguageChoice> {
+        let mut shown = self.language.recent.clone();
+        if let Some(open) = self.language.open.as_ref() {
+            let mut removed: Vec<&(usize, LanguageChoice)> = open.removed.iter().collect();
+            removed.sort_by_key(|(index, _)| *index);
+            for (index, choice) in removed {
+                // Picked again since it was removed: it is in the list.
+                if shown.iter().all(|c| c.pack_id != choice.pack_id) {
+                    shown.insert((*index).min(shown.len()), choice.clone());
+                }
+            }
+        }
+        shown
     }
 
     /// The official packs: TDLib's list, or the demo fixture.
     fn official_language_packs(&self) -> Vec<LanguagePackInfoData> {
         match self.live.as_ref() {
-            Some(live) => live.driver.session.settings.language.packs.clone(),
+            Some(live) => live
+                .driver
+                .session
+                .settings
+                .language
+                .packs
+                .data()
+                .cloned()
+                .unwrap_or_default(),
             None => super::language_demo::demo_packs(),
         }
     }
@@ -197,8 +238,7 @@ impl QuillApp {
                 .session
                 .settings
                 .language
-                .switching
-                .as_ref()
+                .switching()
                 .map(|switch| switch.info.id.clone())
         });
         let target = in_flight.unwrap_or_else(current_id);
@@ -232,39 +272,40 @@ impl QuillApp {
         else {
             return false;
         };
-        let ready = state.ready.take();
-        let patch = std::mem::take(&mut state.patch);
-        let reload = std::mem::replace(&mut state.reload, false);
-        let error = state.error.take();
+        let events = std::mem::take(&mut state.events);
         let current = state.current.clone();
-        let progressed = ready.is_some() || !patch.is_empty() || reload || error.is_some();
-        if let Some(ready) = ready {
-            self.install_language(ready, cx);
-        }
-        if !patch.is_empty()
-            && let Some(snapshot) = quill::lang::current()
-            && current
-                .as_ref()
-                .is_some_and(|info| info.id == snapshot.pack_id())
-        {
-            let next = snapshot.patched(patch.iter().map(|(k, v)| (k.as_str(), v)));
-            self.save_language_cache(&next, cx);
-            install_pack(Some(next));
-            cx.refresh_windows();
-        }
-        // A switch the person started wins over a reload of the old pack:
-        // its strings are newer anyway.
-        if reload
-            && let (Some(info), Some(live)) = (current, self.live.as_mut())
-            && live.driver.session.settings.language.switching.is_none()
-        {
-            let _ = live.driver.switch_language(info);
-        }
-        if let Some(error) = error {
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.restore_language_option();
+        let progressed = !events.is_empty();
+        for event in events {
+            match event {
+                LanguageEvent::Install(ready) => self.install_language(ready, cx),
+                LanguageEvent::Patch(patch) => {
+                    if let Some(snapshot) = quill::lang::current()
+                        && current
+                            .as_ref()
+                            .is_some_and(|info| info.id == snapshot.pack_id())
+                    {
+                        let next = snapshot.patched(patch.iter().map(|(k, v)| (k.as_str(), v)));
+                        self.save_language_cache(&next, cx);
+                        install_pack(Some(next));
+                        cx.refresh_windows();
+                    }
+                }
+                // A switch the person started wins over a reload of the old
+                // pack: its strings are newer anyway.
+                LanguageEvent::Reload => {
+                    if let (Some(info), Some(live)) = (current.clone(), self.live.as_mut())
+                        && live.driver.session.settings.language.switching().is_none()
+                    {
+                        let _ = live.driver.switch_language(info);
+                    }
+                }
+                LanguageEvent::SwitchFailed(error) => {
+                    if let Some(live) = self.live.as_mut() {
+                        let _ = live.driver.restore_language_option();
+                    }
+                    self.set_note(StatusNote::error(error));
+                }
             }
-            self.set_note(StatusNote::error(error));
         }
         progressed
     }
@@ -355,24 +396,29 @@ impl QuillApp {
         quill::settings::safe_app_root()
     }
 
-    fn remove_recent_language(&mut self, id: &str, restore: bool, cx: &mut Context<Self>) {
+    /// Delete a recent pack at once (the list on disk loses it), or put
+    /// back one deleted here.
+    pub(super) fn remove_recent_language(
+        &mut self,
+        id: &str,
+        restore: bool,
+        cx: &mut Context<Self>,
+    ) {
         let Some(open) = self.language.open.as_mut() else {
             return;
         };
         if restore {
-            open.removed.retain(|r| r != id);
-        } else if !open.removed.iter().any(|r| r == id) {
-            open.removed.push(id.to_string());
+            if let Some(at) = open.removed.iter().position(|(_, c)| c.pack_id == id) {
+                let (index, choice) = open.removed.remove(at);
+                let at = index.min(self.language.recent.len());
+                self.language.recent.insert(at, choice);
+            }
+        } else if let Some(index) = self.language.recent.iter().position(|c| c.pack_id == id) {
+            let choice = self.language.recent.remove(index);
+            open.removed.push((index, choice));
         }
-        let removed = open.removed.clone();
-        let kept: Vec<LanguageChoice> = self
-            .language
-            .recent
-            .iter()
-            .filter(|c| !removed.contains(&c.pack_id))
-            .cloned()
-            .collect();
         if let Some(root) = self.language_root() {
+            let kept = self.language.recent.clone();
             self.language
                 .writes
                 .spawn(LanguageFile::Recent, cx, move || {
@@ -389,7 +435,7 @@ impl QuillApp {
             .language
             .open
             .as_ref()
-            .is_some_and(|open| open.removed.contains(&id));
+            .is_some_and(|open| open.removed.iter().any(|(_, c)| c.pack_id == id));
         let theme = cx.theme();
         let (hover, muted) = (theme.accent, theme.muted_foreground);
         let name = if row.info.name.is_empty() {
@@ -496,15 +542,17 @@ impl QuillApp {
         let query = search.read(cx).value().to_string();
         let current = current_id();
         let official = self.official_language_packs();
-        let (recent, official) = language_rows(&official, &self.language.recent, &current, &query);
-        let loading = official.is_empty()
-            && self
-                .live
-                .as_ref()
-                .is_some_and(|l| l.driver.session.settings.language.packs_loading);
+        let shown_recent = self.shown_recent_languages();
+        let (recent, official) = language_rows(&official, &shown_recent, &current, &query);
+        let packs = self
+            .live
+            .as_ref()
+            .map(|l| &l.driver.session.settings.language.packs);
+        let loading = official.is_empty() && packs.is_some_and(|p| p.is_loading());
+        let failed = official.is_empty() && packs.is_some_and(|p| p.error().is_some());
         let border = cx.theme().border;
         let muted = cx.theme().muted_foreground;
-        let empty = recent.is_empty() && official.is_empty() && !loading;
+        let empty = recent.is_empty() && official.is_empty() && !loading && !failed;
         let recent_rows: Vec<AnyElement> = recent
             .into_iter()
             .map(|row| self.language_row(row, &current, cx))
@@ -539,6 +587,31 @@ impl QuillApp {
                         .children(official_rows)
                         .when(loading, |col| {
                             col.child(gpui_kit::component::spinner::Spinner::new().small())
+                        })
+                        .when(failed, |col| {
+                            col.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_3()
+                                    .px_3()
+                                    .py_2()
+                                    .child(
+                                        div()
+                                            .id("language-load-error")
+                                            .flex_1()
+                                            .text_sm()
+                                            .text_color(super::danger())
+                                            .child(tr(keys::Q_PREFS_COULDNT_LOAD)),
+                                    )
+                                    .child(
+                                        Button::new("language-retry")
+                                            .label(tr(keys::Q_CHAT_RETRY))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.retry_language_packs(cx)
+                                            })),
+                                    ),
+                            )
                         })
                         .when(empty, |col| {
                             col.child(

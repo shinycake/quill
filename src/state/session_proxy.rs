@@ -3,11 +3,7 @@
 //! `Session::proxy`. Mutations never touch the list optimistically: the
 //! answer marks it stale and the driver refetches `getProxies`.
 use super::*;
-use crate::proxy::PingStatus;
-
-/// Ping slot used by the "enable this proxy?" link box, whose proxy is
-/// not in the list (TDLib ids are non-negative).
-pub const LINK_PING_ID: i32 = -1;
+use crate::proxy::{LinkCheck, PingStatus};
 
 impl Session {
     /// `getProxies` answer: replaces the list; pings of proxies that no
@@ -17,27 +13,25 @@ impl Session {
         pending: Option<&PendingRequest>,
         proxies: Vec<crate::proxy::ProxyEntry>,
     ) {
-        if pending.map(|p| p.purpose) != Some(RequestPurpose::GetProxies) {
+        let Some(pending) = pending.filter(|p| p.purpose == RequestPurpose::GetProxies) else {
+            return;
+        };
+        let proxy = &mut self.settings.proxy;
+        // An older fetch (sent before a change, or replaced) says nothing
+        // about the list as it is now.
+        if !proxy.ops.fetch_answered(pending.id) {
             return;
         }
-        let proxy = &mut self.settings.proxy;
         proxy
             .pings
-            .retain(|id, _| *id == LINK_PING_ID || proxies.iter().any(|p| p.id == *id));
+            .retain(|id, _| proxies.iter().any(|p| p.id == *id));
         // The system proxy's entries stay out of the list (never listed,
         // shared or rotated).
         let (system, list) = proxies
             .into_iter()
             .partition(crate::system_proxy::is_system_entry);
         proxy.system = system;
-        let enabled = list.iter().find(|p| p.is_enabled).map(|p| p.id);
-        if proxy.carrier_failed != enabled {
-            proxy.carrier_failed = None;
-        }
         proxy.list = Some(list);
-        proxy.loading = false;
-        proxy.stale = false;
-        proxy.error = None;
     }
 
     /// `updateWebProxyCarrierOpened`: host it, or refuse it when this
@@ -48,17 +42,9 @@ impl Session {
         &mut self,
         carrier: crate::proxy_carrier::CarrierRequest,
     ) {
-        use crate::proxy_carrier::OpenVerdict;
-        let proxy = &mut self.settings.proxy;
-        match proxy.carriers.opened(carrier) {
-            OpenVerdict::Hosting { proxy_id } => {
-                if proxy.carrier_failed == Some(proxy_id) {
-                    proxy.carrier_failed = None;
-                }
-            }
-            OpenVerdict::Refused { proxy_id } => proxy.carrier_failed = Some(proxy_id),
-            OpenVerdict::Temporary => {}
-        }
+        // A refused carrier (no host) shows through `can_enable`, a failed
+        // one through `Carriers::failed_for`: the row has no copy to keep.
+        let _ = self.settings.proxy.carriers.opened(carrier);
     }
 
     /// `updateWebProxyCarrierClosed`.
@@ -74,10 +60,7 @@ impl Session {
         carrier_id: i32,
         error: crate::proxy_carrier::CarrierError,
     ) {
-        let proxy = &mut self.settings.proxy;
-        if let Some(proxy_id) = proxy.carriers.failed(carrier_id, error) {
-            proxy.carrier_failed = Some(proxy_id);
-        }
+        let _ = self.settings.proxy.carriers.failed(carrier_id, error);
     }
 
     /// Whether this client can host carriers, as the host now says (a
@@ -94,41 +77,60 @@ impl Session {
     /// `addProxy` / `editProxy` answer.
     pub(crate) fn apply_added_proxy(&mut self, pending: Option<&PendingRequest>) {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::MutateProxy) {
-            self.proxy_mutation_succeeded();
+            self.proxy_mutation_succeeded(pending);
         }
     }
 
-    fn proxy_mutation_succeeded(&mut self) {
-        self.settings.proxy.mutating = false;
-        self.settings.proxy.stale = true;
-        self.settings.proxy.error = None;
+    fn proxy_mutation_succeeded(&mut self, pending: Option<&PendingRequest>) {
+        let proxy = &mut self.settings.proxy;
+        let system = pending.is_some_and(|p| proxy.system_step.answered(p.id, false));
+        // Only the change in flight unlocks the list (an answer of an older
+        // one leaves the lock to its own), and a list fetch still out may
+        // predate it: its answer is not the one to wait for any more, and
+        // the refetch asks again.
+        proxy.ops.change_succeeded(pending.map(|p| p.id));
+        // The box's error line is the user's: the system step's success
+        // does not wipe the error of the user's own failed change.
+        if !system {
+            proxy.error = None;
+        }
     }
 
-    /// Whether `pending` is the ping its slot waits for: the latest one
-    /// sent for the slot, which still shows Checking (a slot cleared since,
-    /// for a new link or an edit, waits for nothing). Settles the slot's
-    /// request either way when it is the latest.
+    /// Whether `pending` is the ping its slot waits for: the slot shows
+    /// `Checking` under this very request (a slot cleared since, for an edit
+    /// or a newer ping, waits for nothing).
     fn take_awaited_ping(&mut self, pending: Option<&PendingRequest>) -> Option<i32> {
         let pending = pending?;
         let RequestPurpose::Settings(SettingsPurpose::PingProxy { proxy_id }) = pending.purpose
         else {
             return None;
         };
-        if self.settings.proxy_ping_requests.get(&proxy_id) != Some(&pending.id) {
-            return None;
+        (self.settings.proxy.pings.get(&proxy_id) == Some(&PingStatus::Checking(pending.id)))
+            .then_some(proxy_id)
+    }
+
+    /// The link box's check answered: only the request its `Checking`
+    /// stage carries settles it.
+    fn settle_link_check(&mut self, pending: Option<&PendingRequest>, status: PingStatus) {
+        let Some(pending) = pending else { return };
+        if self.settings.proxy.link_check == LinkCheck::Checking(pending.id) {
+            self.settings.proxy.link_check = match status {
+                PingStatus::Available(ms) => LinkCheck::Available(ms),
+                PingStatus::Checking(_) | PingStatus::Unavailable => LinkCheck::Unavailable,
+            };
         }
-        self.settings.proxy_ping_requests.remove(&proxy_id);
-        matches!(
-            self.settings.proxy.pings.get(&proxy_id),
-            Some(PingStatus::Checking)
-        )
-        .then_some(proxy_id)
     }
 
     /// `pingProxy` answer, in seconds.
     pub(crate) fn apply_proxy_ping(&mut self, pending: Option<&PendingRequest>, seconds: f64) {
+        let ms = (seconds * 1000.0).round().clamp(0.0, f64::from(u32::MAX)) as u32;
+        if pending
+            .is_some_and(|p| p.purpose == RequestPurpose::Settings(SettingsPurpose::PingLinkProxy))
+        {
+            self.settle_link_check(pending, PingStatus::Available(ms));
+            return;
+        }
         if let Some(proxy_id) = self.take_awaited_ping(pending) {
-            let ms = (seconds * 1000.0).round().clamp(0.0, f64::from(u32::MAX)) as u32;
             self.settings
                 .proxy
                 .pings
@@ -139,7 +141,7 @@ impl Session {
     /// `ok` for the proxy purposes.
     pub(crate) fn apply_proxy_ok(&mut self, pending: Option<&PendingRequest>) {
         match pending.map(|p| p.purpose) {
-            Some(RequestPurpose::MutateProxy) => self.proxy_mutation_succeeded(),
+            Some(RequestPurpose::MutateProxy) => self.proxy_mutation_succeeded(pending),
             Some(RequestPurpose::Settings(SettingsPurpose::SetPreferIpv6 { on })) => {
                 self.settings.proxy.prefer_ipv6 = on
             }
@@ -156,15 +158,25 @@ impl Session {
     ) {
         match purpose {
             RequestPurpose::GetProxies => {
-                self.settings.proxy.loading = false;
-                self.settings.proxy.stale = false;
-                self.settings.proxy.error = Some(sessions_error_line("load the proxy list", err));
+                if pending.is_some_and(|p| self.settings.proxy.ops.fetch_failed(p.id)) {
+                    self.settings.proxy.error =
+                        Some(sessions_error_line("load the proxy list", err));
+                }
             }
             RequestPurpose::MutateProxy => {
-                self.settings.proxy.mutating = false;
-                self.settings.proxy.error = Some(sessions_error_line("change the proxy", err));
+                self.settings.proxy.ops.change_failed(pending.map(|p| p.id));
+                // TDLib refusing the system step is not the user's error:
+                // the box does not show it, and the tick reads it here.
+                let system =
+                    pending.is_some_and(|p| self.settings.proxy.system_step.answered(p.id, true));
+                if !system {
+                    self.settings.proxy.error = Some(sessions_error_line("change the proxy", err));
+                }
             }
             // A failed ping is the answer: the proxy is not available.
+            RequestPurpose::Settings(SettingsPurpose::PingLinkProxy) => {
+                self.settle_link_check(pending, PingStatus::Unavailable);
+            }
             RequestPurpose::Settings(SettingsPurpose::PingProxy { .. }) => {
                 if let Some(proxy_id) = self.take_awaited_ping(pending) {
                     self.settings

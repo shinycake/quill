@@ -69,7 +69,7 @@ fn a_linked_story_the_server_no_longer_has_shows_the_broken_link_toast(cx: &mut 
     );
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.stories.missing.insert((POSTER, 99));
+            session.stories.story_fetch.gone((POSTER, 99));
         }
         cx.notify();
     });
@@ -92,7 +92,7 @@ fn a_linked_story_known_to_be_gone_toasts_on_the_next_frame(cx: &mut TestAppCont
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.stories.missing.insert((POSTER, 98));
+            session.stories.story_fetch.gone((POSTER, 98));
         }
         app.open_story_viewer(ChatId(POSTER), 98, StoryOpenScope::Link, cx);
     });
@@ -112,7 +112,7 @@ fn a_gone_story_opened_from_a_card_or_the_tray_drops_the_open_quietly(cx: &mut T
             app.set_note(crate::ui::status_note::StatusNote::silent(""));
             app.open_story_viewer(ChatId(POSTER), 97, scope, cx);
             if let Some(session) = app.demo_session.as_mut() {
-                session.stories.missing.insert((POSTER, 97));
+                session.stories.story_fetch.gone((POSTER, 97));
             }
             cx.notify();
         });
@@ -238,7 +238,7 @@ fn opening_a_story_again_after_a_failure_waits_for_the_new_answer(cx: &mut TestA
         );
         let waiting = app
             .session()
-            .is_some_and(|s| s.stories.story_retry.contains_key(&(POSTER, 92)));
+            .is_some_and(|s| s.stories.story_fetch.retry((POSTER, 92)).is_some());
         assert!(!waiting, "the open cleared the retry clock");
     });
 }
@@ -253,20 +253,21 @@ fn a_release_drops_what_the_viewer_had_open(cx: &mut TestAppContext) {
     app.update(vcx, |app, cx| {
         assert!(app.stories.viewer.is_open());
         app.stories.with_viewer_ui(|open| {
-            open.privacy_edit = Some(crate::ui::story_albums::StoryPrivacyEdit {
-                chat_id: MAYA,
-                story_id: 5,
-                privacy: quill::story_composer::StoryPrivacy::Everyone,
-                selected_user_ids: Vec::new(),
-            });
-            open.share_open = true;
+            open.show(crate::ui::stories_state::ViewerPanel::Privacy(
+                crate::ui::story_albums::StoryPrivacyEdit {
+                    chat_id: MAYA,
+                    story_id: 5,
+                    privacy: quill::story_composer::StoryPrivacy::Everyone,
+                    selected_user_ids: Vec::new(),
+                },
+            ));
             open.notice = Some("saved".into());
         });
-        assert!(app.stories.viewer_ui().privacy_edit.is_some());
+        assert!(app.stories.viewer_ui().privacy_edit().is_some());
         app.release_story_viewer(cx);
         // Nothing opens over a closed viewer.
-        app.stories.with_viewer_ui(|open| open.reply_open = true);
-        assert!(!app.stories.viewer_ui().reply_open);
+        app.stories.with_viewer_ui(|open| open.open_reply());
+        assert!(!app.stories.viewer_ui().reply_open());
     });
     app.update(vcx, |app, cx| {
         app.open_story_viewer(ChatId(MAYA), 5, StoryOpenScope::Tray, cx);
@@ -275,8 +276,8 @@ fn a_release_drops_what_the_viewer_had_open(cx: &mut TestAppContext) {
     app.read_with(vcx, |app, _| {
         assert!(app.stories.viewer.is_open());
         let open = app.stories.viewer_ui();
-        assert!(open.privacy_edit.is_none(), "the old story's editor");
-        assert!(!open.share_open);
+        assert!(open.privacy_edit().is_none(), "the old story's editor");
+        assert!(!open.has_panel());
         assert!(open.notice.is_none());
     });
 }

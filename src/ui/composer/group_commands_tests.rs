@@ -153,7 +153,10 @@ fn enter_sends_the_command_alone_and_keeps_the_rest_of_the_field(cx: &mut TestAp
     assert_eq!(sent.last().map(String::as_str), Some("/start@weatherbot"));
     app.read_with(vcx, |app, _| {
         assert_eq!(app.pending_attachments().len(), 1, "the tray is untouched");
-        assert!(app.composer_ui.clear_draft_on_success.is_none());
+        assert!(
+            app.send_slot()
+                .is_some_and(|slot| !app.composer_sends.has_draft_clear(&slot))
+        );
     });
     // What followed the caret stays, the caret at its end, and it is saved
     // as the chat's draft.
@@ -163,7 +166,7 @@ fn enter_sends_the_command_alone_and_keeps_the_rest_of_the_field(cx: &mut TestAp
         let topic = app.open_draft_topic(chat);
         app.session()?
             .draft_for(chat, topic)
-            .map(|d| d.text.clone())
+            .map(|d| d.text().to_string())
     });
     assert_eq!(draft.as_deref(), Some(" and more"));
     assert!(menu_commands(&app, vcx).is_empty());
@@ -174,7 +177,7 @@ fn sent_texts(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Vec<String>
         let Some(session) = app.session() else {
             return Vec::new();
         };
-        let Some(chat) = session.open_chat else {
+        let Some(chat) = session.open_chat_id() else {
             return Vec::new();
         };
         session

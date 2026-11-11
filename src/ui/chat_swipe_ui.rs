@@ -30,10 +30,26 @@ use std::time::{Duration, Instant};
 
 /// Swipe state owned by the app.
 pub(super) struct ChatSwipeState {
-    machine: SwipeMachine<i64>,
+    machine: SwipeMachine<i64, SwipeLabel>,
     epoch: Instant,
-    /// Runs while a gesture or a spring-back is active.
-    poll: Option<Task<()>>,
+    poll: SwipePoll,
+}
+
+/// The active-swipe timer: it runs while a gesture or a spring-back is
+/// active, and its task is dropped with the stage.
+enum SwipePoll {
+    Idle,
+    /// The task is held, not read: dropping the stage cancels it.
+    Running {
+        _task: Task<()>,
+    },
+}
+
+impl ChatSwipeState {
+    /// Forget the gesture and every spring-back: nothing is due after it.
+    pub(super) fn drop_gestures(&mut self) {
+        self.machine = SwipeMachine::new();
+    }
 }
 
 impl Default for ChatSwipeState {
@@ -41,7 +57,7 @@ impl Default for ChatSwipeState {
         Self {
             machine: SwipeMachine::new(),
             epoch: Instant::now(),
-            poll: None,
+            poll: SwipePoll::Idle,
         }
     }
 }
@@ -123,7 +139,7 @@ impl QuillApp {
         div()
             .w_full()
             .on_scroll(cx.listener(move |this, event: &ScrollEvent, _, cx| {
-                this.chat_swipe_wheel(id, event, cx);
+                this.chat_swipe_wheel(id, label, event, cx);
             }))
             .child(inner)
             .into_any_element()
@@ -218,7 +234,13 @@ impl QuillApp {
     /// One wheel event over a swipeable row. Trackpad scrolls only:
     /// without precise deltas there is no gesture to follow, and a
     /// platform that sends no phases never starts one.
-    fn chat_swipe_wheel(&mut self, id: ChatId, event: &ScrollEvent, cx: &mut Context<Self>) {
+    fn chat_swipe_wheel(
+        &mut self,
+        id: ChatId,
+        label: SwipeLabel,
+        event: &ScrollEvent,
+        cx: &mut Context<Self>,
+    ) {
         let ScrollDelta::Pixels(delta) = event.delta else {
             return;
         };
@@ -233,7 +255,7 @@ impl QuillApp {
             phase,
             f32::from(delta.x),
             f32::from(delta.y),
-            Some(id.0),
+            Some((id.0, label)),
             now,
         );
         if feed.consumed {
@@ -250,34 +272,41 @@ impl QuillApp {
 
     /// Start the active-swipe timer unless it runs.
     fn schedule_swipe_poll(&mut self, cx: &mut Context<Self>) {
-        if self.chat_list.swipe.poll.is_some() {
+        if matches!(self.chat_list.swipe.poll, SwipePoll::Running { .. }) {
             return;
         }
-        self.chat_list.swipe.poll = Some(self.spawn_screen(cx, async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(POLL_MS))
-                    .await;
-                // The chat list is the main window's: so is what a swipe opens.
-                let Ok(more) = this.update(cx, |this, cx| {
-                    this.as_asked_by(None, |this| this.poll_swipe(cx))
-                }) else {
-                    return;
-                };
-                if !more {
-                    break;
+        self.chat_list.swipe.poll = SwipePoll::Running {
+            _task: self.spawn_screen(cx, async move |this, cx| {
+                loop {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(POLL_MS))
+                        .await;
+                    // The chat list is the main window's: so is what a swipe opens.
+                    let Ok(more) = this.update(cx, |this, cx| {
+                        this.as_asked_by(None, |this| this.poll_swipe(cx))
+                    }) else {
+                        return;
+                    };
+                    if !more {
+                        break;
+                    }
                 }
-            }
-            let _ = this.update(cx, |this, _| this.chat_list.swipe.poll = None);
-        }));
+                let _ = this.update(cx, |this, _| this.chat_list.swipe.poll = SwipePoll::Idle);
+            }),
+        };
     }
 
     /// Run a due action and abandon a gesture that lost its end event.
     /// Returns whether the timer must keep running.
     fn poll_swipe(&mut self, cx: &mut Context<Self>) -> bool {
         let now = self.swipe_now_ms();
-        if let Some(chat) = self.chat_list.swipe.machine.poll(now) {
-            self.perform_swipe_action(ChatId(chat), cx);
+        if let Some((chat, label)) = self.chat_list.swipe.machine.poll(now) {
+            // The action the panel showed when the finger lifted, not one
+            // re-resolved from facts that may have changed since. A locked
+            // Quill runs nothing.
+            if !self.refused_while_locked() {
+                self.run_swipe_action(ChatId(chat), label, cx);
+            }
         }
         // The last spring-back frame must paint the settled row.
         self.notify_sidebar(cx);
@@ -295,6 +324,14 @@ impl QuillApp {
         else {
             return;
         };
+        self.run_swipe_action(id, label, cx);
+    }
+
+    /// Run `label` on a chat that still exists.
+    fn run_swipe_action(&mut self, id: ChatId, label: SwipeLabel, cx: &mut Context<Self>) {
+        if !self.session().is_some_and(|s| s.chats.contains_key(&id.0)) {
+            return;
+        }
         match label {
             SwipeLabel::Disabled => return,
             SwipeLabel::Mute => self.apply_chat_mute(id, MUTE_FOREVER, cx),
@@ -304,7 +341,7 @@ impl QuillApp {
             SwipeLabel::Archive | SwipeLabel::Unarchive => self.toggle_archive(id, cx),
             SwipeLabel::Delete => {
                 // Never deletes by itself: the usual confirm dialog.
-                self.open_group_confirm(id, GroupConfirmAction::RemoveFromList, cx);
+                self.open_group_confirm(GroupConfirmAction::RemoveFromList { chat_id: id }, cx);
             }
         }
         // tdesktop's toast; Pin keeps its own note, which may be the
@@ -317,5 +354,24 @@ impl QuillApp {
             self.set_note(StatusNote::info(label.toast()));
         }
         cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ChatSwipeState;
+    use quill::chat_swipe::{Phase, SLIDE_MS, SwipeLabel};
+
+    #[test]
+    fn locking_drops_a_released_swipe_before_it_fires() {
+        let mut state = ChatSwipeState::default();
+        let key = Some((7, SwipeLabel::Mute));
+        let machine = &mut state.machine;
+        machine.feed(Phase::Started, 0.0, 0.0, key, 0);
+        machine.feed(Phase::Moved, -10.0, 0.0, key, 8);
+        machine.feed(Phase::Moved, -1000.0, 0.0, key, 24);
+        machine.feed(Phase::Ended, 0.0, 0.0, key, 400);
+        state.drop_gestures();
+        assert_eq!(state.machine.poll(400 + SLIDE_MS), None);
     }
 }

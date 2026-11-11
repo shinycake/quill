@@ -232,10 +232,14 @@ pub(crate) fn parse_chats_payload(
             .map(|value| EnvelopePayload::Chats(ChatsPayload::Background(value)))
             .ok_or(ParseError::MissingField),
         "updateDefaultBackground" => {
-            let background = value
-                .get("background")
-                .and_then(parse_background)
-                .ok_or(ParseError::MissingField)?;
+            // A null (or absent) background is a removed default: only a
+            // background that is there and unreadable is malformed.
+            let background = match value.get("background") {
+                None | Some(Value::Null) => None,
+                Some(background) => {
+                    Some(parse_background(background).ok_or(ParseError::MissingField)?)
+                }
+            };
             Ok(EnvelopePayload::Chats(
                 ChatsPayload::UpdateDefaultBackground {
                     for_dark_theme: value

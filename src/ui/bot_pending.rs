@@ -7,8 +7,8 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
-use quill::state::BotsPurpose;
-use quill::state::{RequestPurpose, unix_ms_now};
+use quill::state::BotStopStage;
+use quill::state::unix_ms_now;
 
 impl QuillApp {
     pub(super) fn pending_bot_reply(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -23,19 +23,16 @@ impl QuillApp {
     #[inline(never)]
     fn pending_bot_reply_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         let (topic_id, draft) = super::bot_stream::open_chat_draft(session)?;
         if draft.expires_at_ms <= unix_ms_now() {
             return None;
         }
         let draft_id = draft.draft_id;
         let can_stop = draft.can_stop;
-        let failed = draft.stop_failed;
-        let stopped = draft.stopped;
-        let stopping = session.requests.has_purpose_for_chat(
-            RequestPurpose::Bots(BotsPurpose::StopPendingMessage { topic_id, draft_id }),
-            chat_id,
-        );
+        let failed = draft.stop == BotStopStage::Failed;
+        let stopped = draft.stop == BotStopStage::Stopped;
+        let stopping = matches!(draft.stop, BotStopStage::Stopping(_));
         // The reply itself renders in the history as the bot's next
         // message (`bot_stream`); this bar only offers Stop.
         if !can_stop && !failed {

@@ -51,7 +51,7 @@ fn sent_count(recorder: &RecordingSender, type_name: &str) -> usize {
 
 #[test]
 fn a_tap_is_held_then_committed_after_the_window() {
-    let (mut driver, recorder, _sink, _seq) = driver_parts();
+    let (mut driver, recorder, sink, seq) = driver_parts();
     driver
         .add_paid_reaction(ChatId(-100), MessageId(7), 1, None, 1_000)
         .unwrap();
@@ -71,6 +71,15 @@ fn a_tap_is_held_then_committed_after_the_window() {
     let commit = sent_request(&recorder, "commitPendingPaidMessageReactions");
     assert_eq!(commit["message_id"], 7);
     assert!(!driver.session.payments.paid.has_pending());
+    // Still reserved until TDLib answers.
+    assert_eq!(driver.session.payments.paid.total_pending(), 1);
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &serde_json::json!({"@type": "ok", "@extra": commit["@extra"]}).to_string(),
+    );
+    assert_eq!(driver.session.payments.paid.total_pending(), 0);
     // Only once.
     assert!(!driver.paid_reaction_tick(u64::MAX));
 }
@@ -123,6 +132,84 @@ fn undo_removes_the_pending_stars_and_nothing_commits() {
 }
 
 #[test]
+fn a_refused_commit_releases_the_stars_and_the_next_tap_starts_fresh() {
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    driver
+        .add_paid_reaction(ChatId(-100), MessageId(7), 4, None, 0)
+        .unwrap();
+    assert!(driver.paid_reaction_tick(ACCUMULATE_MS));
+    let commit = sent_request(&recorder, "commitPendingPaidMessageReactions");
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &serde_json::json!({
+            "@type": "error", "@extra": commit["@extra"], "code": 400, "message": "NO_STARS"
+        })
+        .to_string(),
+    );
+    // A refused commit is not tried again on its own: TDLib gave the Stars
+    // back with the error, so they are let go and the user is told why.
+    let paid = &driver.session.payments.paid;
+    assert_eq!(paid.pending_stars(-100, 7), 0);
+    assert_eq!(paid.total_pending(), 0);
+    assert!(
+        driver
+            .session
+            .payments
+            .notices
+            .iter()
+            .any(|notice| notice.text.starts_with("Stars were not sent"))
+    );
+    assert!(!driver.paid_reaction_tick(2 * ACCUMULATE_MS));
+    assert_eq!(
+        sent_count(&recorder, "commitPendingPaidMessageReactions"),
+        1
+    );
+    driver
+        .add_paid_reaction(ChatId(-100), MessageId(7), 1, None, ACCUMULATE_MS + 10)
+        .unwrap();
+    assert_eq!(driver.session.payments.paid.pending_stars(-100, 7), 1);
+}
+
+#[test]
+fn a_refused_undo_is_not_committed_later() {
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    driver
+        .add_paid_reaction(ChatId(-100), MessageId(7), 2, None, 0)
+        .unwrap();
+    driver
+        .undo_paid_reaction(ChatId(-100), MessageId(7))
+        .unwrap();
+    let undo = sent_request(&recorder, "removePendingPaidMessageReactions");
+    assert!(!driver.session.payments.paid.has_pending());
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &serde_json::json!({
+            "@type": "error", "@extra": undo["@extra"], "code": 500, "message": "FLOOD"
+        })
+        .to_string(),
+    );
+    assert_eq!(driver.session.payments.paid.pending_stars(-100, 7), 0);
+    assert_eq!(driver.session.payments.paid.total_pending(), 2);
+    assert!(
+        driver
+            .session
+            .payments
+            .notices
+            .iter()
+            .any(|notice| notice.text.starts_with("Couldn't undo the Stars"))
+    );
+    assert!(!driver.paid_reaction_tick(2 * ACCUMULATE_MS));
+    assert_eq!(
+        sent_count(&recorder, "commitPendingPaidMessageReactions"),
+        0
+    );
+}
+
+#[test]
 fn a_balance_too_small_refuses_before_any_request() {
     let (mut driver, recorder, _sink, _seq) = driver_parts();
     driver.session.payments.hub.balance = Some(StarAmount { stars: 4, nanos: 0 });
@@ -132,13 +219,18 @@ fn a_balance_too_small_refuses_before_any_request() {
             .is_err()
     );
     assert_eq!(sent_count(&recorder, "addPendingPaidMessageReaction"), 0);
-    assert!(driver.session.payments.paid.note.is_some());
+    assert_eq!(
+        driver.add_paid_reaction(ChatId(-100), MessageId(7), 5, None, 0),
+        Err(PaidAddError::Refused(
+            crate::paid_reaction::Refusal::NotEnough
+        ))
+    );
     assert!(
         driver
             .add_paid_reaction(ChatId(-100), MessageId(7), 4, None, 0)
             .is_ok()
     );
-    assert!(driver.session.payments.paid.note.is_none());
+
     // The 4 waiting Stars are reserved.
     assert!(
         driver
@@ -168,10 +260,9 @@ fn a_refused_tap_is_rolled_back() {
         driver
             .session
             .payments
-            .paid
-            .note
-            .as_deref()
-            .is_some_and(|note| note.contains("Couldn't send Stars"))
+            .notices
+            .iter()
+            .any(|notice| notice.text.contains("Couldn't send Stars"))
     );
 }
 
@@ -193,8 +284,11 @@ fn star_packs_load_once_and_land_in_the_state() {
         .to_string(),
     );
     let packs = &driver.session.payments.star_packs;
-    assert!(packs.loaded && !packs.loading);
-    assert_eq!(packs.options[0].star_count, 100);
+    assert!(matches!(
+        packs.options,
+        crate::state::fetch::Fetch::Ready(_)
+    ));
+    assert_eq!(packs.options.items()[0].star_count, 100);
     assert!(driver.maybe_fetch_star_packs().unwrap().is_none());
 }
 
@@ -287,4 +381,24 @@ fn star_reactions_are_enabled_only_when_listed() {
     assert!(driver.session.paid_reactions_enabled(ChatId(-100)));
     assert!(!driver.session.paid_reactions_enabled(ChatId(-101)));
     assert!(!driver.session.paid_reactions_enabled(ChatId(-102)));
+}
+
+#[test]
+fn a_failed_star_pack_request_is_a_way_out_asked_again_at_the_next_open() {
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    assert!(driver.maybe_fetch_star_packs().unwrap().is_some());
+    assert!(driver.session.payments.star_packs.options.is_loading());
+    let request = sent_request(&recorder, "getStarPaymentOptions");
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &serde_json::json!({
+            "@type": "error", "@extra": request["@extra"], "code": 500, "message": "boom"
+        })
+        .to_string(),
+    );
+    assert!(!driver.session.payments.star_packs.options.is_loading());
+    assert!(driver.session.payments.star_packs.options.error().is_some());
+    assert!(driver.maybe_fetch_star_packs().unwrap().is_some());
 }

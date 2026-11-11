@@ -145,24 +145,24 @@ impl QuillApp {
             )
     }
 
-    /// Phase 3.2: show a `callbackQueryAnswer` in the status line (the
-    /// transient feedback surface this app has). A URL answer opens in the
-    /// OS browser, like message-text links; `show_alert` has no modal yet,
-    /// so its text lands in the status line too.
+    /// Show a `callbackQueryAnswer` as tdesktop does: a URL opens like a
+    /// clicked link, `show_alert` text opens a box, other text is a toast,
+    /// and an empty answer shows nothing (the button's spinner already
+    /// stopped).
     pub(super) fn present_callback_answer(
         &mut self,
         answer: CallbackQueryAnswer,
         cx: &mut Context<Self>,
     ) {
-        if answer.url.is_empty() {
-            self.set_note(if answer.text.is_empty() {
-                StatusNote::silent(tr(keys::Q_MEDIA_BOT_ANSWERED))
-            } else {
-                StatusNote::info(answer.text)
-            });
-            cx.notify();
-        } else {
+        if !answer.url.is_empty() {
             self.open_link(&answer.url, cx);
+        } else if answer.text.is_empty() {
+            cx.notify();
+        } else if answer.show_alert {
+            self.open_bot_alert(answer.text, cx);
+        } else {
+            self.set_note(StatusNote::info(answer.text));
+            cx.notify();
         }
     }
 
@@ -283,6 +283,8 @@ impl QuillApp {
                 cx,
             );
         }
+        // The button spins until the answer.
+        cx.notify();
     }
 
     /// B1: user button (`inlineKeyboardButtonTypeUser`, schema 1.8.67 line
@@ -488,7 +490,7 @@ impl QuillApp {
     /// line 11640). Returns `None` for non-bot chats.
     pub(super) fn bot_info_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        session.bot_user_id_for_chat(session.open_chat?)?;
+        session.bot_user_id_for_chat(session.open_chat_id()?)?;
         self.bot_info_panel_body(cx)
     }
 
@@ -499,7 +501,7 @@ impl QuillApp {
     #[inline(never)]
     fn bot_info_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let open = session.open_chat?;
+        let open = session.open_chat_id()?;
         let bot_id = session.bot_user_id_for_chat(open)?;
         let info: BotInfo = session.bot_info_for_chat(open)?.clone();
         let start_param = session.bots.bot_start_params.get(&open.0).cloned();
@@ -511,6 +513,12 @@ impl QuillApp {
             .get(&open.0)
             .is_none_or(|history| history.messages.is_empty());
         if !empty && start_param.is_none() {
+            return None;
+        }
+        // The empty chat's intro card already shows the description, and
+        // Telegram Desktop shows nothing else there: block, restart and
+        // the rest live in the profile and the chat menu.
+        if empty && start_param.is_none() && super::bot_about::bot_about_text(&info).is_some() {
             return None;
         }
         let blocked = session.chats.get(&open.0).is_some_and(|chat| chat.blocked);
@@ -612,7 +620,7 @@ impl QuillApp {
             "bot-restart",
             tr(keys::Q_MEDIA_RESTART_BOT),
             cx.listener(move |this, _, _, cx| {
-                this.open_group_confirm(open, GroupConfirmAction::RestartBot, cx);
+                this.open_group_confirm(GroupConfirmAction::RestartBot { chat_id: open }, cx);
             }),
         ));
         if !username.is_empty() {
@@ -635,8 +643,10 @@ impl QuillApp {
             },
             cx.listener(move |this, _, _, cx| {
                 this.open_group_confirm(
-                    open,
-                    GroupConfirmAction::BlockUser { block: !blocked },
+                    GroupConfirmAction::BlockUser {
+                        chat_id: open,
+                        block: !blocked,
+                    },
                     cx,
                 );
             }),
@@ -702,7 +712,16 @@ impl QuillApp {
                 }
                 panel = panel.child(row);
             }
-            _ => {
+            Some(SimilarBotsFetch::Loading) => {
+                panel = panel.child(
+                    div()
+                        .id("bot-similar-loading")
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(tr(keys::Q_MEDIA_LOADING_SIMILAR_BOTS)),
+                );
+            }
+            None => {
                 panel = panel.child(ghost_text_button(
                     "bot-similar-fetch",
                     tr(keys::SIMILAR_BOTS_TITLE),
@@ -717,7 +736,8 @@ impl QuillApp {
 
     /// Slice B2: START press — `sendBotStartMessage` with the deep-link
     /// parameter (schema 1.8.67, line 12216); the button clears like
-    /// Telegram X's `hideActionButton` after the send.
+    /// Telegram X's `hideActionButton` once TDLib answers (the reducer drops
+    /// the parameter then, so a refusal keeps it).
     pub(super) fn press_bot_start(
         &mut self,
         chat_id: ChatId,
@@ -730,10 +750,7 @@ impl QuillApp {
                 .driver
                 .send_bot_start_message(chat_id, bot_id, &parameter)
             {
-                Ok(Some(_)) => {
-                    live.driver.session.bots.bot_start_params.remove(&chat_id.0);
-                    StatusNote::silent(tr(keys::Q_MEDIA_STARTING_BOT))
-                }
+                Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_STARTING_BOT)),
                 Ok(None) => StatusNote::silent(tr(keys::Q_MEDIA_REQUEST_ALREADY_IN_FLIGHT)),
                 Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
             }
@@ -753,15 +770,7 @@ impl QuillApp {
             .live
             .as_mut()
             .map(|live| match live.driver.fetch_similar_bots(bot_id) {
-                Ok(Some(_)) => {
-                    live.driver
-                        .session
-                        .bots
-                        .similar_bots
-                        .entry(bot_id)
-                        .or_insert(SimilarBotsFetch::Loading);
-                    StatusNote::silent(tr(keys::Q_MEDIA_LOADING_SIMILAR_BOTS))
-                }
+                Ok(Some(_)) => StatusNote::silent(tr(keys::Q_MEDIA_LOADING_SIMILAR_BOTS)),
                 Ok(None) => StatusNote::silent(tr(keys::Q_MEDIA_ALREADY_LOADING)),
                 Err(_) => StatusNote::error(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
             });
@@ -773,14 +782,13 @@ impl QuillApp {
         );
     }
 
-    /// Phase 3.1: insert a tapped bot command into the composer. Empty
-    /// composer → the bare command; otherwise appended after a space (3.3
-    /// owns the full `/` menu).
     /// Telegram Desktop's bot "Menu" button left of the composer: the bot's
-    /// web menu when it has one, else the `/` command list.
+    /// web menu when it has one, else the list of its commands above the
+    /// composer. The list opens without writing to the field
+    /// (`HistoryWidget::updateCmdStartShown`); a second press hides it.
     pub(super) fn bot_menu_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let open = session.open_chat?;
+        let open = session.open_chat_id()?;
         let info = session.bot_info_for_chat(open)?;
         let url = info
             .menu_button
@@ -795,9 +803,20 @@ impl QuillApp {
             .map(|(text, _)| text.clone())
             .filter(|text| !text.is_empty())
             .unwrap_or_else(|| tr(keys::Q_MEDIA_MENU).to_string());
+        let list_open = url.is_none()
+            && matches!(
+                self.chat_ui.command_menu,
+                crate::ui::composer::CommandMenu::Button { .. }
+            );
+        // A kit Button never takes focus on press, so the composer keeps
+        // it and its blur does not close the list before this click.
         Some(
             Button::new("bot-menu")
-                .icon(IconName::Menu)
+                .icon(if list_open {
+                    IconName::Close
+                } else {
+                    IconName::Menu
+                })
                 .label(label)
                 .small()
                 .primary()
@@ -805,19 +824,14 @@ impl QuillApp {
                 .tooltip(tr(keys::Q_MEDIA_BOT_MENU))
                 .on_click(cx.listener(move |this, _, window, cx| match &url {
                     Some((_, url)) => this.open_bot_menu_web_app(url, cx),
-                    None => {
-                        this.composer.update(cx, |input, cx| {
-                            input.set_value("/", window, cx);
-                            input.focus(window, cx);
-                            input.set_selected_range(1..1, cx);
-                        });
-                        this.sync_command_menu(cx);
-                    }
+                    None => this.toggle_button_command_menu(window, cx),
                 }))
                 .into_any_element(),
         )
     }
 
+    /// Put a bot command in front of the composer text (the bot card's
+    /// command buttons, Tab on the Menu button's list).
     pub(super) fn insert_bot_command(
         &mut self,
         command: &str,

@@ -1,7 +1,7 @@
 //! UI integration tests for the Telegram Business dialog against the demo
 //! `QuillApp` (gpui-kit's test support needs the `demo-capture` feature).
 //! Nothing here reaches a live account: demo mode refuses every save.
-use super::{MessageKind, Recipients, ScheduleChoice, View};
+use super::{BotNotice, MessageKind, Recipients, ScheduleChoice, View};
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -80,7 +80,7 @@ fn act(
 
 fn view(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> View {
     app.read_with(cx, |app, _| {
-        app.dialogs.business_dialog.as_ref().unwrap().view
+        app.dialogs.business_dialog.as_ref().unwrap().view()
     })
 }
 
@@ -90,14 +90,19 @@ fn error(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Option<String> {
             .business_dialog
             .as_ref()
             .unwrap()
-            .local_error
-            .clone()
+            .local_error()
+            .map(str::to_string)
     })
 }
 
 fn note(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Option<String> {
     app.read_with(cx, |app, _| {
-        app.dialogs.business_dialog.as_ref().unwrap().note.clone()
+        app.dialogs
+            .business_dialog
+            .as_ref()
+            .unwrap()
+            .note()
+            .map(str::to_string)
     })
 }
 
@@ -144,8 +149,8 @@ fn premium_page(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<P
     app.read_with(vcx, |app, _| {
         app.session()
             .map(|s| &s.payments.hub)
-            .filter(|hub| hub.premium_open)
-            .map(|hub| hub.promo_page)
+            .filter(|hub| hub.premium_open())
+            .map(|hub| hub.promo_page())
     })
 }
 
@@ -201,8 +206,8 @@ fn greeting_messages_open_quick_replies_above_the_hub(cx: &mut TestAppContext) {
             .business_dialog
             .as_ref()
             .unwrap()
-            .greeting
-            .as_ref()
+            .screen
+            .greeting()
             .unwrap()
             .enabled
     });
@@ -229,8 +234,8 @@ fn the_limit_keeps_away_messages_off(cx: &mut TestAppContext) {
             .business_dialog
             .as_ref()
             .unwrap()
-            .away
-            .as_ref()
+            .screen
+            .away()
             .unwrap()
             .enabled
     });
@@ -268,7 +273,7 @@ fn picking_chats_selects_only_those(cx: &mut TestAppContext) {
     let offered = app.read_with(vcx, |app, _| app.business_picker_chats());
     assert!(offered.iter().any(|(id, _)| *id == chat));
     act(&app, vcx, |app, _, cx| {
-        if let Some(p) = app.business_mut().and_then(|d| d.picker.as_mut()) {
+        if let Some(p) = app.business_mut().and_then(|d| d.screen.picker_mut()) {
             assert!(p.chats.toggle_chat(chat));
         }
         cx.notify();
@@ -282,8 +287,8 @@ fn picking_chats_selects_only_those(cx: &mut TestAppContext) {
             .business_dialog
             .as_ref()
             .unwrap()
-            .greeting
-            .as_ref()
+            .screen
+            .greeting()
             .unwrap()
             .recipients
             .clone()
@@ -299,8 +304,8 @@ fn picking_chats_selects_only_those(cx: &mut TestAppContext) {
             .business_dialog
             .as_ref()
             .unwrap()
-            .greeting
-            .as_ref()
+            .screen
+            .greeting()
             .unwrap()
             .recipients
             .all_but_excluded
@@ -328,8 +333,8 @@ fn a_day_gets_a_set_of_hours(cx: &mut TestAppContext) {
             .business_dialog
             .as_ref()
             .unwrap()
-            .hours
-            .as_ref()
+            .screen
+            .hours()
             .unwrap()
             .week
             .clone()
@@ -454,18 +459,18 @@ fn a_screen_waits_for_the_full_info_before_it_can_be_changed(cx: &mut TestAppCon
             let d = app.dialogs.business_dialog.as_ref().expect("dialog");
             match screen {
                 View::Greeting => d
-                    .greeting
-                    .as_ref()
+                    .screen
+                    .greeting()
                     .is_some_and(|g| g.enabled && g.days == 7),
-                View::Away => d.away.as_ref().is_some_and(|a| a.enabled && a.offline_only),
-                View::Hours => d.hours.as_ref().is_some_and(|h| h.enabled),
+                View::Away => d.screen.away().is_some_and(|a| a.enabled && a.offline_only),
+                View::Hours => d.screen.hours().is_some_and(|h| h.enabled),
                 View::Location => d
-                    .location
-                    .as_ref()
+                    .screen
+                    .location()
                     .is_some_and(|l| l.address.read(cx).value() == "1 Main St"),
                 View::StartPage => d
-                    .start_page
-                    .as_ref()
+                    .screen
+                    .start_page()
                     .is_some_and(|p| p.title.read(cx).value() == "Welcome"),
                 _ => false,
             }
@@ -514,7 +519,7 @@ fn an_away_message_needs_messages_and_a_valid_range(cx: &mut TestAppContext) {
     });
     // A custom range that ends before it starts keeps the screen open.
     act(&app, vcx, |app, window, cx| {
-        let away = app.business_mut().unwrap().away.as_mut().unwrap();
+        let away = app.business_mut().unwrap().screen.away_mut().unwrap();
         away.schedule = ScheduleChoice::Custom;
         let (start, end) = (away.start.clone(), away.end.clone());
         let value =
@@ -551,8 +556,7 @@ fn the_start_page_takes_a_sticker_from_the_panel(cx: &mut TestAppContext) {
         thumb_file_id: None,
         thumb_width: 0,
         thumb_height: 0,
-        requires_premium: false,
-        premium_animation: None,
+        premium: None,
     };
     app.update(vcx, |app, _| {
         let panel = &mut app.demo_session.as_mut().unwrap().stickers.stickers;
@@ -576,8 +580,8 @@ fn the_start_page_takes_a_sticker_from_the_panel(cx: &mut TestAppContext) {
             .business_dialog
             .as_ref()
             .unwrap()
-            .start_page
-            .as_ref()
+            .screen
+            .start_page()
             .unwrap()
             .sticker
             .clone()
@@ -588,8 +592,8 @@ fn the_start_page_takes_a_sticker_from_the_panel(cx: &mut TestAppContext) {
         let title = app
             .business_mut()
             .unwrap()
-            .start_page
-            .as_ref()
+            .screen
+            .start_page()
             .unwrap()
             .title
             .clone();
@@ -603,8 +607,8 @@ fn the_start_page_takes_a_sticker_from_the_panel(cx: &mut TestAppContext) {
             .business_dialog
             .as_ref()
             .unwrap()
-            .start_page
-            .as_ref()
+            .screen
+            .start_page()
             .unwrap();
         page.title.read(cx).value().chars().count()
     });
@@ -670,7 +674,7 @@ fn a_link_opens_in_its_editor(cx: &mut TestAppContext) {
             .unwrap()
             .settings
             .business_extra
-            .chat_links = Some(vec![link.clone()]);
+            .chat_links = quill::state::fetch::Fetch::Ready(vec![link.clone()]);
     });
     open(&app, vcx);
     go(&app, vcx, View::ChatLinks);
@@ -684,8 +688,8 @@ fn a_link_opens_in_its_editor(cx: &mut TestAppContext) {
             .business_dialog
             .as_ref()
             .unwrap()
-            .link_edit
-            .as_ref()
+            .screen
+            .link_edit()
             .unwrap();
         (
             edit.text.read(cx).value().to_string(),
@@ -694,9 +698,7 @@ fn a_link_opens_in_its_editor(cx: &mut TestAppContext) {
     });
     assert_eq!(text, "**Hi** there");
     assert_eq!(name, "Promo");
-    act(&app, vcx, |app, window, cx| {
-        app.save_business_link(window, cx)
-    });
+    act(&app, vcx, |app, _, cx| app.save_business_link(cx));
     assert_eq!(error(&app, vcx).as_deref(), Some(QuillApp::DEMO_LINE));
 }
 
@@ -722,9 +724,9 @@ fn a_found_bot_is_added_and_asked_about_on_leave(cx: &mut TestAppContext) {
         session.settings.business_extra.lookup = quill::state::BotLookup {
             generation: 1,
             query: "shop_bot".into(),
-            exact: Some(Some(bot)),
-            mine: Some(Vec::new()),
-            global: Some(Vec::new()),
+            exact: quill::state::fetch::Fetch::Ready(Some(bot)),
+            mine: quill::state::fetch::Fetch::Ready(Vec::new()),
+            global: quill::state::fetch::Fetch::Ready(Vec::new()),
         };
     });
     open(&app, vcx);
@@ -733,8 +735,8 @@ fn a_found_bot_is_added_and_asked_about_on_leave(cx: &mut TestAppContext) {
         let input = app
             .business_mut()
             .unwrap()
-            .chatbot
-            .as_ref()
+            .screen
+            .chatbot()
             .unwrap()
             .username
             .clone();
@@ -748,10 +750,11 @@ fn a_found_bot_is_added_and_asked_about_on_leave(cx: &mut TestAppContext) {
             .business_dialog
             .as_ref()
             .unwrap()
-            .chatbot
-            .as_ref()
+            .screen
+            .chatbot()
             .unwrap()
-            .confirm_leave
+            .notice
+            == BotNotice::ConfirmLeave
     });
     assert!(asked);
     act(&app, vcx, |app, _, cx| app.add_business_bot(bot, cx));
@@ -767,19 +770,19 @@ fn a_found_bot_is_added_and_asked_about_on_leave(cx: &mut TestAppContext) {
             .business_dialog
             .as_ref()
             .unwrap()
-            .chatbot
-            .as_ref()
+            .screen
+            .chatbot()
             .unwrap()
-            .warning
+            .notice
             .clone()
     });
     assert_eq!(
-        warning.as_deref(),
-        Some("The bot Shop will be able to transfer your stars.")
+        warning,
+        BotNotice::Warning("The bot Shop will be able to transfer your stars.".into())
     );
     // A bot's exclusions in "Only Selected Chats" are chats only.
     act(&app, vcx, |app, _, cx| {
-        let bot = app.business_mut().unwrap().chatbot.as_mut().unwrap();
+        let bot = app.business_mut().unwrap().screen.chatbot_mut().unwrap();
         bot.recipients.included.chat_ids = vec![1];
         bot.recipients.all_but_excluded = false;
         cx.notify();
@@ -845,4 +848,139 @@ fn leaving_the_sticker_pick_closes_the_sticker_panel(cx: &mut TestAppContext) {
             .is_some_and(|session| session.stickers.stickers.open)
     });
     assert!(!open, "the pick's panel closed with it");
+}
+
+fn status_note(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> String {
+    app.read_with(cx, |app, _| app.connection.note().text().to_string())
+}
+
+#[gpui_kit::test]
+fn closing_from_a_sub_screen_saves_its_parent_and_tells_what_it_could_not_send(
+    cx: &mut TestAppContext,
+) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx, true);
+    open(&app, vcx);
+    go(&app, vcx, View::Greeting);
+    act(&app, vcx, |app, _, cx| {
+        if let Some(draft) = app.business_mut().and_then(|d| d.screen.greeting_mut()) {
+            draft.enabled = true;
+        }
+        cx.notify();
+    });
+    act(&app, vcx, |app, window, cx| {
+        app.open_business_picker(Recipients::Greeting, true, window, cx)
+    });
+    assert_eq!(view(&app, vcx), View::Picker);
+    // Esc / Close from the picker: the greeting it hangs from is saved
+    // (demo mode refuses the send, and says so in the status line).
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| app.close_business_saving(false, window, cx));
+    });
+    frames(vcx);
+    assert!(app.read_with(vcx, |app, _| app.dialogs.business_dialog.is_none()));
+    assert_eq!(status_note(&app, vcx), QuillApp::DEMO_LINE);
+}
+
+#[gpui_kit::test]
+fn a_save_refused_after_the_box_closed_goes_to_the_status_line(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx, true);
+    open(&app, vcx);
+    act(&app, vcx, |app, window, cx| {
+        app.close_business_saving(false, window, cx);
+    });
+    assert!(app.read_with(vcx, |app, _| app.dialogs.business_dialog.is_none()));
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.settings.business.error = Some("Couldn't save the greeting".into());
+        }
+        app.business_closed_error_upkeep();
+    });
+    assert_eq!(status_note(&app, vcx), "Couldn't save the greeting");
+    // Said once.
+    let left = app.read_with(vcx, |app, _| {
+        app.demo_session
+            .as_ref()
+            .and_then(|s| s.settings.business.error.clone())
+    });
+    assert_eq!(left, None);
+}
+
+#[gpui_kit::test]
+fn a_refused_link_save_keeps_the_box_and_its_draft(cx: &mut TestAppContext) {
+    use quill::state::ChatLinkSave;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx, true);
+    open(&app, vcx);
+    go(&app, vcx, View::ChatLinks);
+    act(&app, vcx, |app, window, cx| {
+        app.open_business_link_edit(None, window, cx)
+    });
+    assert_eq!(view(&app, vcx), View::LinkEdit);
+    // TDLib answered: the box goes back to the list with its note.
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session.settings.business_extra.chat_link_save = ChatLinkSave::Saved;
+        }
+    });
+    act(&app, vcx, |app, window, cx| {
+        app.business_link_save_upkeep(window, cx)
+    });
+    assert_eq!(view(&app, vcx), View::ChatLinks);
+    assert_eq!(
+        note(&app, vcx).as_deref(),
+        Some(quill::lang::tr(quill::lang::keys::CHAT_LINK_SAVED))
+    );
+    // Idle (a refusal) leaves the edit box where it is.
+    act(&app, vcx, |app, window, cx| {
+        app.open_business_link_edit(None, window, cx)
+    });
+    act(&app, vcx, |app, window, cx| {
+        app.business_link_save_upkeep(window, cx)
+    });
+    assert_eq!(view(&app, vcx), View::LinkEdit);
+}
+
+#[gpui_kit::test]
+fn a_failed_links_load_shows_its_error_with_a_retry(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx, true);
+    open(&app, vcx);
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session
+                .settings
+                .business_extra
+                .chat_links
+                .fail("Couldn't load the links: offline");
+        }
+    });
+    go(&app, vcx, View::ChatLinks);
+    frames(vcx);
+    let drawn = app.read_with(vcx, |app, _| app.business_chat_links_error());
+    assert_eq!(drawn.as_deref(), Some("Couldn't load the links: offline"));
+}
+
+#[gpui_kit::test]
+fn a_failed_chatbot_load_shows_its_error_with_a_retry(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    seed(&app, vcx, true);
+    open(&app, vcx);
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            session
+                .settings
+                .business_extra
+                .connected_bot
+                .fail("Couldn't load the chatbot: offline");
+        }
+    });
+    let shown = app.read_with(vcx, |app, _| app.business_bot_error());
+    assert_eq!(shown.as_deref(), Some("Couldn't load the chatbot: offline"));
 }

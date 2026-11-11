@@ -90,7 +90,7 @@ impl QuillApp {
                                     PopupMenuItem::new(tr(keys::Q_MEDIA_DELETE_FOR_EVERYONE))
                                         .on_click(move |_, _, cx| {
                                             let _ = everyone.update(cx, |this, cx| {
-                                                this.sticker_box.delete_set_open = true;
+                                                this.sticker_box.confirm = crate::ui::sticker_set_box::state::SetConfirm::DeleteSet;
                                                 cx.notify();
                                             });
                                         }),
@@ -99,7 +99,7 @@ impl QuillApp {
                                     PopupMenuItem::new(tr(keys::Q_MEDIA_DELETE_FOR_MYSELF))
                                         .on_click(move |_, _, cx| {
                                             let _ = myself.update(cx, |this, cx| {
-                                                this.sticker_box.remove_set_open = true;
+                                                this.sticker_box.confirm = crate::ui::sticker_set_box::state::SetConfirm::RemoveSet;
                                                 cx.notify();
                                             });
                                         }),

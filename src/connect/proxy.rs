@@ -3,11 +3,13 @@
 //! the gate is "not shutting down", not "auth Ready".
 use super::*;
 use crate::ids::RequestId;
-use crate::proxy::{PingStatus, ProxyDraft, ProxyEntry, RotationAction};
+use crate::proxy::{
+    LinkCheck, PingStatus, ProxyDraft, ProxyEntry, RotationAction, SystemStepState,
+};
 use crate::proxy_sync::{ProxySyncStep, plan_proxy_sync};
 use crate::settings::save_proxy_prefs;
 use crate::state::SettingsPurpose;
-use crate::state::{LINK_PING_ID, RequestPurpose, ShutdownPhase};
+use crate::state::{RequestPurpose, ShutdownPhase};
 use crate::system_proxy::{Detected, SYSTEM_PROXY_COMMENT, SystemProxyStep, plan_system_proxy};
 use crate::telegram::envelope::ConnectionState;
 use crate::telegram::requests::{
@@ -28,32 +30,39 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let proxy = &self.session.settings.proxy;
-        let wanted = (proxy.list.is_none() && !proxy.fetch_attempted) || proxy.stale;
-        if !wanted
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetProxies)
-        {
+        if !proxy.ops.wanted() {
             return Ok(None);
         }
-        self.fetch_proxies().map(Some)
+        // Background refetch: the box's error line is the user's, and a
+        // list refresh the driver asked for does not wipe it.
+        self.send_get_proxies().map(Some)
     }
 
     /// Explicit refresh (the dialog's open / Refresh).
     pub fn fetch_proxies(&mut self) -> Result<RequestId, ConnectSendError> {
+        self.session.settings.proxy.error = None;
+        // A fetch already out is the one to wait for, not a second one.
+        if let Some(out) = self.session.settings.proxy.ops.fetch_out() {
+            return Ok(out);
+        }
+        self.send_get_proxies()
+    }
+
+    fn send_get_proxies(&mut self) -> Result<RequestId, ConnectSendError> {
         if !self.proxy_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(RequestPurpose::GetProxies, None);
-        self.session.settings.proxy.loading = true;
-        self.session.settings.proxy.fetch_attempted = true;
-        self.session.settings.proxy.error = None;
         match self.sender.send_json(&get_proxies(extra)) {
-            Ok(()) => Ok(extra),
+            Ok(()) => {
+                self.session.settings.proxy.ops.fetch_sent(extra);
+                Ok(extra)
+            }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.proxy.loading = false;
+                // Not retried by the tick, owed or not: the dialog's
+                // open / Refresh asks again.
+                self.session.settings.proxy.ops.fetch_unsent();
                 Err(err)
             }
         }
@@ -64,27 +73,44 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn refresh_proxies_if_stale(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         // `parity:data-proxy-web`: carriers TDLib opened or closed.
         self.run_carrier_work();
-        if !self.session.settings.proxy.stale {
+        if !self.session.settings.proxy.ops.stale() {
             return Ok(None);
         }
         self.maybe_fetch_proxies()
     }
 
+    /// `by` is the system step this mutation carries out; `None` is the
+    /// user's own change (the proxy box, a rotation, a mirror of the
+    /// account on screen). A system step's stage is the session's
+    /// `system_step`; a user change leaves it and the other side's error
+    /// alone.
     fn send_proxy_mutation(
         &mut self,
+        by: Option<&SystemProxyStep>,
         build: impl FnOnce(RequestId) -> String,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.proxy_path_active() || self.session.settings.proxy.mutating {
+        if !self.proxy_path_active() || self.session.settings.proxy.ops.changing() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self.session.request(RequestPurpose::MutateProxy, None);
-        self.session.settings.proxy.mutating = true;
-        self.session.settings.proxy.error = None;
         match self.sender.send_json(&build(extra)) {
-            Ok(()) => Ok(extra),
+            Ok(()) => {
+                let proxy = &mut self.session.settings.proxy;
+                proxy.ops.change_sent(extra);
+                match by {
+                    None => proxy.error = None,
+                    Some(step) => {
+                        proxy.system_step = SystemStepState::InFlight {
+                            step: step.clone(),
+                            at: std::time::Instant::now(),
+                            request: extra,
+                        }
+                    }
+                }
+                Ok(extra)
+            }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.proxy.mutating = false;
                 Err(err)
             }
         }
@@ -98,15 +124,36 @@ impl<S: JsonSender> ConnectDriver<S> {
         enable: bool,
         comment: &str,
     ) -> Result<RequestId, ConnectSendError> {
+        self.add_proxy_by(None, draft, enable, comment)
+    }
+
+    fn add_proxy_by(
+        &mut self,
+        by: Option<&SystemProxyStep>,
+        draft: &ProxyDraft,
+        enable: bool,
+        comment: &str,
+    ) -> Result<RequestId, ConnectSendError> {
         // Without a carrier host a web proxy is saved, never switched to:
         // switching would cut the connection (`crate::proxy_carrier`).
         let enable = enable && self.session.settings.proxy.can_enable(draft.kind);
-        self.send_proxy_mutation(|extra| add_proxy(extra, draft, enable, comment))
+        self.send_proxy_mutation(by, |extra| add_proxy(extra, draft, enable, comment))
     }
 
     /// `editProxy` of an existing entry.
     pub fn edit_proxy(
         &mut self,
+        proxy_id: i32,
+        draft: &ProxyDraft,
+        enable: bool,
+        comment: &str,
+    ) -> Result<RequestId, ConnectSendError> {
+        self.edit_proxy_by(None, proxy_id, draft, enable, comment)
+    }
+
+    fn edit_proxy_by(
+        &mut self,
+        by: Option<&SystemProxyStep>,
         proxy_id: i32,
         draft: &ProxyDraft,
         enable: bool,
@@ -124,12 +171,26 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let enable = enable && proxy.can_enable(draft.kind);
-        self.session.settings.proxy.pings.remove(&proxy_id);
-        self.send_proxy_mutation(|extra| edit_proxy(extra, proxy_id, draft, enable, comment))
+        let sent = self.send_proxy_mutation(by, |extra| {
+            edit_proxy(extra, proxy_id, draft, enable, comment)
+        });
+        // The old result is dropped only once the edit is on its way.
+        if sent.is_ok() {
+            self.session.settings.proxy.pings.remove(&proxy_id);
+        }
+        sent
     }
 
     /// `enableProxy` (TDLib keeps one enabled at a time).
     pub fn enable_proxy(&mut self, proxy_id: i32) -> Result<RequestId, ConnectSendError> {
+        self.enable_proxy_by(None, proxy_id)
+    }
+
+    fn enable_proxy_by(
+        &mut self,
+        by: Option<&SystemProxyStep>,
+        proxy_id: i32,
+    ) -> Result<RequestId, ConnectSendError> {
         let proxy = &self.session.settings.proxy;
         let enableable = proxy
             .find(proxy_id)
@@ -137,20 +198,31 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !enableable {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.send_proxy_mutation(|extra| enable_proxy(extra, proxy_id))
+        self.send_proxy_mutation(by, |extra| enable_proxy(extra, proxy_id))
     }
 
     /// `disableProxy` — back to a direct connection.
     pub fn disable_proxy(&mut self) -> Result<RequestId, ConnectSendError> {
-        self.send_proxy_mutation(disable_proxy)
+        self.send_proxy_mutation(None, disable_proxy)
     }
 
     pub fn remove_proxy(&mut self, proxy_id: i32) -> Result<RequestId, ConnectSendError> {
+        self.remove_proxy_by(None, proxy_id)
+    }
+
+    fn remove_proxy_by(
+        &mut self,
+        by: Option<&SystemProxyStep>,
+        proxy_id: i32,
+    ) -> Result<RequestId, ConnectSendError> {
         if self.session.settings.proxy.find(proxy_id).is_none() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.proxy.pings.remove(&proxy_id);
-        self.send_proxy_mutation(|extra| remove_proxy(extra, proxy_id))
+        let sent = self.send_proxy_mutation(by, |extra| remove_proxy(extra, proxy_id));
+        if sent.is_ok() {
+            self.session.settings.proxy.pings.remove(&proxy_id);
+        }
+        sent
     }
 
     /// `pingProxy` for a list entry.
@@ -166,9 +238,25 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// `pingProxy` for the link-confirmation box's proxy (not in the
-    /// list; result kept under [`LINK_PING_ID`]).
+    /// list); the box's stage becomes `Checking` with this request.
     pub fn ping_link_proxy(&mut self, draft: &ProxyDraft) -> Result<RequestId, ConnectSendError> {
-        self.ping_draft(LINK_PING_ID, draft)
+        if !self.proxy_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        let extra = self.session.request(
+            RequestPurpose::Settings(SettingsPurpose::PingLinkProxy),
+            None,
+        );
+        match self.sender.send_json(&ping_proxy(extra, draft)) {
+            Ok(()) => {
+                self.session.settings.proxy.link_check = LinkCheck::Checking(extra);
+                Ok(extra)
+            }
+            Err(err) => {
+                self.session.requests.take(extra);
+                Err(err)
+            }
+        }
     }
 
     fn ping_draft(&mut self, slot: i32, draft: &ProxyDraft) -> Result<RequestId, ConnectSendError> {
@@ -179,22 +267,20 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Settings(SettingsPurpose::PingProxy { proxy_id: slot }),
             None,
         );
-        self.session
-            .settings
-            .proxy
-            .pings
-            .insert(slot, PingStatus::Checking);
         match self.sender.send_json(&ping_proxy(extra, draft)) {
             Ok(()) => {
+                // Only this request's answer settles the slot: a newer ping
+                // or an edit that replaces it leaves this one's answer
+                // matching nothing.
                 self.session
                     .settings
-                    .proxy_ping_requests
-                    .insert(slot, extra);
+                    .proxy
+                    .pings
+                    .insert(slot, PingStatus::Checking(extra));
                 Ok(extra)
             }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.proxy.pings.remove(&slot);
                 Err(err)
             }
         }
@@ -244,14 +330,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return true;
         }
         let proxy = &self.session.settings.proxy;
-        if proxy.mutating
-            || proxy.stale
-            || proxy.loading
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetProxies)
-        {
+        if proxy.busy() {
             return false;
         }
         let Some(current) = proxy.all_entries() else {
@@ -287,15 +366,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return false;
         }
         let proxy = &self.session.settings.proxy;
-        if proxy.list.is_none()
-            || proxy.mutating
-            || proxy.stale
-            || proxy.loading
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetProxies)
-        {
+        if proxy.list.is_none() || proxy.busy() {
             return false;
         }
         let step = plan_system_proxy(
@@ -304,45 +375,36 @@ impl<S: JsonSender> ConnectDriver<S> {
             detected,
             &proxy.system,
         );
-        // The last step finished (nothing is mutating): an error means
-        // TDLib refused it. The user never asked for it, so the proxy box
-        // doesn't show that error, and the step waits `RETRY` before it is
-        // sent again.
-        if let Some(sent) = self.system_proxy_sent.as_mut()
-            && !sent.settled
-        {
-            sent.settled = true;
-            sent.refused = self.session.settings.proxy.error.take().is_some();
-        }
+        // The last step finished (nothing is mutating); its own answer,
+        // matched by request id, moved `system_step` to Accepted or
+        // Refused. A refused step waits `RETRY` before it is sent again.
         let Some(step) = step else {
-            self.system_proxy_sent = None;
+            self.session.settings.proxy.system_step = SystemStepState::Idle;
             return false;
         };
         let now = std::time::Instant::now();
-        if let Some(sent) = &self.system_proxy_sent
-            && sent.refused
-            && sent.step == step
-            && now.saturating_duration_since(sent.at) < crate::system_proxy::RETRY
+        if let SystemStepState::Refused { step: last, at } =
+            &self.session.settings.proxy.system_step
+            && *last == step
+            && now.saturating_duration_since(*at) < crate::system_proxy::RETRY
         {
             return false;
         }
-        self.session.settings.proxy.error = None;
-        self.system_proxy_sent = Some(crate::system_proxy::SentStep {
-            step: step.clone(),
-            at: now,
-            refused: false,
-            settled: false,
-        });
-        match step {
-            SystemProxyStep::Add(draft) => {
-                self.add_proxy(&draft, true, SYSTEM_PROXY_COMMENT).is_ok()
+        let by = Some(&step);
+        let sent = match &step {
+            SystemProxyStep::Add(draft) => self.add_proxy_by(by, draft, true, SYSTEM_PROXY_COMMENT),
+            SystemProxyStep::Edit { id, proxy } => {
+                self.edit_proxy_by(by, *id, proxy, true, SYSTEM_PROXY_COMMENT)
             }
-            SystemProxyStep::Edit { id, proxy } => self
-                .edit_proxy(id, &proxy, true, SYSTEM_PROXY_COMMENT)
-                .is_ok(),
-            SystemProxyStep::Enable { id } => self.enable_proxy(id).is_ok(),
-            SystemProxyStep::Remove { id } => self.remove_proxy(id).is_ok(),
+            SystemProxyStep::Enable { id } => self.enable_proxy_by(by, *id),
+            SystemProxyStep::Remove { id } => self.remove_proxy_by(by, *id),
+        };
+        // A step that never left is as good as a refused one: it waits
+        // `RETRY` instead of going out again on every tick.
+        if sent.is_err() {
+            self.session.settings.proxy.system_step = SystemStepState::Refused { step, at: now };
         }
+        sent.is_ok()
     }
 
     /// Pick a proxy mode in the proxy box. "Disable proxy" and "Use system
@@ -376,7 +438,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         match self.session.settings.proxy.rotation_step(now_ms, connected) {
             RotationAction::None => {}
             RotationAction::Ping(id) => {
-                changed |= self.ping_listed_proxy(id).is_ok();
+                if self.ping_listed_proxy(id).is_ok() {
+                    changed = true;
+                } else {
+                    // The probe never left: it counts as failed, so the
+                    // rotation moves on instead of asking again every tick.
+                    self.session
+                        .settings
+                        .proxy
+                        .pings
+                        .insert(id, PingStatus::Unavailable);
+                }
             }
             RotationAction::Switch(id) => {
                 changed |= self.enable_proxy(id).is_ok();

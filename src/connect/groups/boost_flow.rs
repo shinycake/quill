@@ -28,6 +28,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return Ok(false);
         };
+        // The old chat's pending boost and its slots go with its box.
         self.session.groups.boost_box = Some(BoostBoxState::new(chat_id.0, !is_channel));
         self.session.groups.chat_boost_status.remove(&chat_id.0);
         self.session.groups.chat_boost_details.remove(&chat_id.0);
@@ -42,8 +43,6 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// ignores its box.
     pub fn close_boost_box(&mut self) {
         self.session.groups.boost_box = None;
-        self.session.groups.boost_intent = None;
-        self.session.groups.boost_slots_by_chat.clear();
     }
 
     /// Back from the reassign list to the counters.
@@ -51,7 +50,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(state) = self.session.groups.boost_box.as_mut()
             && matches!(state.phase, BoostPhase::Reassign { .. })
         {
-            state.phase = BoostPhase::Main;
+            state.phase = BoostPhase::main();
         }
     }
 
@@ -81,12 +80,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             groups,
             channels,
         };
-        if let Some(state) = self.boost_box_for(chat) {
-            state.phase = BoostPhase::Working;
-            state.note = None;
-            state.reassigning = Some(summary);
-        }
-        self.send_boost_chat(chat, &picked)?;
+        // A click that never left leaves the list as it is, so the user can
+        // pick again or go back; only a sent request makes the box work.
+        self.send_boost_chat(chat, &picked, Some(summary))?;
         Ok(true)
     }
 }

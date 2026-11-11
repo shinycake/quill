@@ -44,6 +44,31 @@ impl Fixture {
         f
     }
 
+    /// Forum 16 in a chat window of its own while the main window shows
+    /// chat 7.
+    fn forum_in_window() -> Self {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let seq = AtomicU64::new(0);
+        let driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+        let mut f = Self {
+            driver,
+            recorder,
+            dyn_sink,
+            seq,
+            dir,
+        };
+        f.ingest(r#"{"@type":"updateNewChat","chat":{"id":16,"title":"Forum","type":{"@type":"chatTypeSupergroup","supergroup_id":16,"is_channel":false},"unread_count":0}}"#);
+        f.ingest(r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":16,"is_forum":true,"status":{"@type":"chatMemberStatusMember"}}}"#);
+        f.ingest(r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#);
+        f.driver.select_chat(ChatId(7)).unwrap();
+        f.driver.open_chat_window(ChatId(16)).unwrap();
+        f
+    }
+
     fn ingest(&mut self, json: &str) {
         self.driver
             .ingest(copy_and_parse(json, &self.seq, &self.dyn_sink).unwrap())
@@ -97,7 +122,7 @@ fn a_topic_at_its_latest_asks_for_no_newer_page() {
 #[test]
 fn a_topic_short_of_its_latest_pages_newer_from_its_newest_row() {
     let mut f = Fixture::topic_open();
-    f.topic().has_newer = true;
+    f.topic().newer_exists(true);
     f.topic().latest_seen = 300;
     assert!(f.driver.fetch_topic_history_newer().unwrap().is_some());
     let request = f.last_search();
@@ -112,10 +137,10 @@ fn a_topic_short_of_its_latest_pages_newer_from_its_newest_row() {
     );
     f.answer_page(&(150..=199).rev().collect::<Vec<_>>(), 0);
     assert_eq!(f.topic().newest_loaded_id(), Some(MessageId(199)));
-    assert!(f.topic().has_newer, "300 is still ahead");
+    assert!(f.topic().has_newer(), "300 is still ahead");
     assert!(f.driver.fetch_topic_history_newer().unwrap().is_some());
     f.answer_page(&[199], 0);
-    assert!(!f.topic().has_newer, "nothing newer: at the latest");
+    assert!(!f.topic().has_newer(), "nothing newer: at the latest");
     assert_eq!(
         f.topic().messages.keys().next(),
         Some(&101),
@@ -131,11 +156,58 @@ fn jumping_to_the_latest_replaces_a_short_window_with_the_latest_page() {
         None,
         "already there"
     );
-    f.topic().has_newer = true;
+    f.topic().newer_exists(true);
     assert!(f.driver.topic_jump_to_latest().unwrap().is_some());
     assert_eq!(f.last_search()["from_message_id"], 0);
     assert!(f.topic().messages.is_empty());
     f.answer_page(&(951..=1000).rev().collect::<Vec<_>>(), 951);
     assert_eq!(f.topic().newest_loaded_id(), Some(MessageId(1000)));
-    assert!(!f.topic().has_newer);
+    assert!(!f.topic().has_newer());
+}
+
+#[test]
+fn retry_after_a_failed_jump_asks_for_the_first_page_again() {
+    let mut f = Fixture::topic_open();
+    f.topic().newer_exists(true);
+    assert!(f.driver.topic_jump_to_latest().unwrap().is_some());
+    let extra = f.last_search()["@extra"].as_str().unwrap().to_owned();
+    f.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{extra}","code":500,"message":"Timeout"}}"#
+    ));
+    assert!(f.driver.session.topic_history_load_failed(ChatId(16), 3));
+    assert_eq!(
+        f.driver.fetch_topic_history().unwrap(),
+        None,
+        "a failed page waits for Retry"
+    );
+    let sent = f.recorder.snapshot().len();
+    assert!(f.driver.retry_topic_history().unwrap().is_some());
+    assert_eq!(f.recorder.snapshot().len(), sent + 1);
+    assert!(!f.driver.session.topic_history_load_failed(ChatId(16), 3));
+    assert!(f.driver.session.topic_history_loading(ChatId(16), 3));
+    f.answer_page(&(951..=1000).rev().collect::<Vec<_>>(), 951);
+    assert_eq!(f.topic().newest_loaded_id(), Some(MessageId(1000)));
+}
+
+/// A topic opened in a chat window pages that window's chat and topic: the
+/// session's open chat and topic are the view in place, which is the
+/// window's while its work runs (`with_window_chat`), never the main
+/// window's.
+#[test]
+fn a_topic_in_a_chat_window_pages_that_windows_chat() {
+    let mut f = Fixture::forum_in_window();
+    let selected = f
+        .driver
+        .with_window_chat(ChatId(16), |driver| driver.select_topic(3));
+    assert!(selected.unwrap().is_some());
+    let request = f.last_search();
+    assert_eq!(request["chat_id"], 16);
+    assert_eq!(request["topic_id"]["forum_topic_id"], 3);
+    // The main window's view is untouched.
+    assert_eq!(f.driver.session.open_chat_id(), Some(ChatId(7)));
+    assert_eq!(f.driver.session.open_forum_topic(), None);
+    let older = f
+        .driver
+        .with_window_chat(ChatId(16), |driver| driver.fetch_topic_history());
+    assert!(older.is_ok());
 }

@@ -26,7 +26,7 @@ pub mod worker;
 #[cfg(test)]
 mod tests;
 
-pub use handle::{RichHtmlExport, RichHtmlOutcome, RichHtmlRequest};
+pub use handle::{RichHtmlExport, RichHtmlOutcome, RichHtmlRequest, RichHtmlStage};
 pub use page::{PageLabels, page_html, title_from_page};
 
 use crate::ids::{ChatId, MessageId};
@@ -63,9 +63,8 @@ pub fn selection_target(
     // the message itself, so a selection made without the menu is safe too.
     let saveable = session
         .messages
-        .message_menu_actions
-        .as_ref()
-        .filter(|(chat, message, _)| *chat == chat_id && message == message_id)
-        .is_none_or(|(_, _, actions)| actions.can_be_saved);
+        .menu_actions
+        .get(chat_id, *message_id)
+        .is_none_or(|actions| actions.can_be_saved);
     (sent && rich && saveable && message.self_destruct.is_none()).then_some(*message_id)
 }

@@ -8,7 +8,7 @@
 //! The popup is the web view helper's native one, so it shows over the app.
 
 use super::*;
-use quill::ids::ChatId;
+use quill::ids::{ChatId, RequestId};
 use quill::telegram::requests::ContactShare;
 use std::time::Instant;
 
@@ -24,10 +24,12 @@ pub(super) enum PhoneFlow {
     Idle,
     /// The confirmation popup is up.
     Asking,
-    /// "Share" was pressed and the bot is being unblocked.
-    Unblocking(Instant),
-    /// The contact card is on its way.
-    Sending(Instant),
+    /// "Share" was pressed and the bot is being unblocked by `request`; its
+    /// answer moves the flow on, its error ends it.
+    Unblocking { since: Instant, request: RequestId },
+    /// The contact card is on its way; only the answer to `request`
+    /// finishes it.
+    Sending { since: Instant, request: RequestId },
 }
 
 /// What the flow does next, given what the session shows.
@@ -39,21 +41,36 @@ pub(super) enum PhoneStep {
 }
 
 impl PhoneFlow {
-    /// One poll step. `blocked` is whether the bot is still blocked and
-    /// `sent` the card's outcome once TDLib answered.
-    pub(super) fn step(self, now: Instant, blocked: bool, sent: Option<bool>) -> PhoneStep {
+    /// The request the flow waits on, if any.
+    pub(super) fn waiting_on(self) -> Option<RequestId> {
+        match self {
+            PhoneFlow::Unblocking { request, .. } | PhoneFlow::Sending { request, .. } => {
+                Some(request)
+            }
+            PhoneFlow::Idle | PhoneFlow::Asking => None,
+        }
+    }
+
+    /// One poll step. `unblocked` is how the unblock ended once TDLib
+    /// answered it (`true`: ok, `false`: refused) and `sent` the card's
+    /// outcome once TDLib answered.
+    pub(super) fn step(
+        self,
+        now: Instant,
+        unblocked: Option<bool>,
+        sent: Option<bool>,
+    ) -> PhoneStep {
         match self {
             PhoneFlow::Idle | PhoneFlow::Asking => PhoneStep::Wait,
-            PhoneFlow::Unblocking(since) => {
-                if !blocked {
-                    PhoneStep::Send
-                } else if now.saturating_duration_since(since) >= UNBLOCK_TIMEOUT {
+            PhoneFlow::Unblocking { since, .. } => match unblocked {
+                Some(true) => PhoneStep::Send,
+                Some(false) => PhoneStep::Finish(false),
+                None if now.saturating_duration_since(since) >= UNBLOCK_TIMEOUT => {
                     PhoneStep::Finish(false)
-                } else {
-                    PhoneStep::Wait
                 }
-            }
-            PhoneFlow::Sending(since) => match sent {
+                None => PhoneStep::Wait,
+            },
+            PhoneFlow::Sending { since, .. } => match sent {
                 Some(done) => PhoneStep::Finish(done),
                 None if now.saturating_duration_since(since) >= SEND_TIMEOUT => {
                     PhoneStep::Finish(false)
@@ -115,8 +132,16 @@ impl QuillApp {
             .live
             .as_mut()
             .map(|live| live.driver.set_chat_user_blocked(ChatId(bot_id), false));
-        if matches!(sent, Some(Ok(Some(_)))) {
-            self.with_window(|window| window.phone = PhoneFlow::Unblocking(Instant::now()));
+        if let Some(Ok(Some(request))) = sent {
+            if let Some(live) = self.live.as_mut() {
+                live.driver.session.acks.expect(request);
+            }
+            self.with_window(|window| {
+                window.phone = PhoneFlow::Unblocking {
+                    since: Instant::now(),
+                    request,
+                }
+            });
         } else {
             self.finish_phone(false, cx);
         }
@@ -144,14 +169,31 @@ impl QuillApp {
                 .as_mut()
                 .map(|live| live.driver.share_phone_with_bot(bot_id, &contact))
         });
-        if matches!(sent, Some(Ok(_))) {
-            self.with_window(|window| window.phone = PhoneFlow::Sending(Instant::now()));
+        if let Some(Ok(request)) = sent {
+            self.with_window(|window| {
+                window.phone = PhoneFlow::Sending {
+                    since: Instant::now(),
+                    request,
+                }
+            });
         } else {
             self.finish_phone(false, cx);
         }
     }
 
     fn finish_phone(&mut self, shared: bool, cx: &mut Context<Self>) {
+        let waiting = self
+            .mini_apps
+            .window
+            .as_ref()
+            .and_then(|window| window.phone.waiting_on());
+        // An answer that comes after this (a timed-out send) is nobody's.
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.bots.web_apps.phone_share = None;
+            if let Some(request) = waiting {
+                live.driver.session.acks.forget(request);
+            }
+        }
         self.with_window(|window| {
             window.phone = PhoneFlow::Idle;
             window.emit(BridgeReply::phone_requested(shared));
@@ -172,18 +214,28 @@ impl QuillApp {
         if matches!(flow, PhoneFlow::Idle | PhoneFlow::Asking) {
             return;
         }
-        let blocked = self.bot_chat_blocked(bot_id);
+        let unblocked = match (flow, self.live.as_mut()) {
+            (PhoneFlow::Unblocking { request, .. }, Some(live)) => live
+                .driver
+                .session
+                .acks
+                .take(request)
+                .map(|answer| matches!(answer, quill::state::Answer::Done)),
+            _ => None,
+        };
         let sent = self.live.as_mut().and_then(|live| {
             let share = &mut live.driver.session.bots.web_apps.phone_share;
-            match *share {
-                Some((id, done)) if id == bot_id => {
+            match (*share, flow) {
+                (Some(answer), PhoneFlow::Sending { request, .. })
+                    if answer.request() == request =>
+                {
                     *share = None;
-                    Some(done)
+                    Some(answer.is_sent())
                 }
                 _ => None,
             }
         });
-        match flow.step(Instant::now(), blocked, sent) {
+        match flow.step(Instant::now(), unblocked, sent) {
             PhoneStep::Wait => {}
             PhoneStep::Send => self.send_phone_contact(bot_id, cx),
             PhoneStep::Finish(done) => self.finish_phone(done, cx),
@@ -195,22 +247,42 @@ impl QuillApp {
 mod tests {
     // No `super::*`: the kit's glob brings its own `test` attribute.
     use super::{PhoneFlow, PhoneStep, SEND_TIMEOUT, UNBLOCK_TIMEOUT};
+    use quill::ids::RequestId;
     use std::time::Instant;
 
     #[test]
-    fn unblocking_sends_once_the_bot_is_unblocked() {
+    fn unblocking_sends_once_the_unblock_is_answered() {
         let start = Instant::now();
-        let flow = PhoneFlow::Unblocking(start);
-        assert_eq!(flow.step(start, true, None), PhoneStep::Wait);
-        assert_eq!(flow.step(start, false, None), PhoneStep::Send);
+        let flow = PhoneFlow::Unblocking {
+            since: start,
+            request: RequestId(4),
+        };
+        assert_eq!(flow.step(start, None, None), PhoneStep::Wait);
+        assert_eq!(flow.step(start, Some(true), None), PhoneStep::Send);
+    }
+
+    #[test]
+    fn a_refused_unblock_ends_the_flow_at_once() {
+        let start = Instant::now();
+        let flow = PhoneFlow::Unblocking {
+            since: start,
+            request: RequestId(4),
+        };
+        assert_eq!(
+            flow.step(start, Some(false), None),
+            PhoneStep::Finish(false)
+        );
     }
 
     #[test]
     fn unblocking_gives_up_after_the_timeout() {
         let start = Instant::now();
-        let flow = PhoneFlow::Unblocking(start);
+        let flow = PhoneFlow::Unblocking {
+            since: start,
+            request: RequestId(4),
+        };
         assert_eq!(
-            flow.step(start + UNBLOCK_TIMEOUT, true, None),
+            flow.step(start + UNBLOCK_TIMEOUT, None, None),
             PhoneStep::Finish(false)
         );
     }
@@ -218,15 +290,18 @@ mod tests {
     #[test]
     fn sending_reports_the_outcome_or_times_out() {
         let start = Instant::now();
-        let flow = PhoneFlow::Sending(start);
-        assert_eq!(flow.step(start, false, None), PhoneStep::Wait);
-        assert_eq!(flow.step(start, false, Some(true)), PhoneStep::Finish(true));
+        let flow = PhoneFlow::Sending {
+            since: start,
+            request: RequestId(5),
+        };
+        assert_eq!(flow.step(start, None, None), PhoneStep::Wait);
+        assert_eq!(flow.step(start, None, Some(true)), PhoneStep::Finish(true));
         assert_eq!(
-            flow.step(start, false, Some(false)),
+            flow.step(start, None, Some(false)),
             PhoneStep::Finish(false)
         );
         assert_eq!(
-            flow.step(start + SEND_TIMEOUT, false, None),
+            flow.step(start + SEND_TIMEOUT, None, None),
             PhoneStep::Finish(false)
         );
     }
@@ -235,9 +310,12 @@ mod tests {
     fn an_unanswered_prompt_waits() {
         let start = Instant::now();
         assert_eq!(
-            PhoneFlow::Asking.step(start, false, Some(true)),
+            PhoneFlow::Asking.step(start, None, Some(true)),
             PhoneStep::Wait
         );
-        assert_eq!(PhoneFlow::Idle.step(start, true, None), PhoneStep::Wait);
+        assert_eq!(
+            PhoneFlow::Idle.step(start, Some(true), None),
+            PhoneStep::Wait
+        );
     }
 }

@@ -22,6 +22,7 @@
 
 use super::image_budget;
 use super::wallpaper::Wallpaper;
+use super::wallpaper_board::{Board, Job};
 use super::wallpaper_source::{Rendered, Sources};
 use gpui_kit::*;
 use quill::locks::LockExt;
@@ -34,10 +35,11 @@ use std::time::{Duration, Instant};
 
 /// How long a resized area's size must hold before it re-renders.
 const SETTLE: Duration = Duration::from_millis(150);
+/// How long a fill shown alone (its pattern could not be read) is kept
+/// before the pattern is read again.
+const RETRY_AFTER: Duration = Duration::from_secs(5);
 /// Rendered images kept (a 1200 x 900 area at 2x is about 17 MB).
 const BUDGET_BYTES: usize = 64 << 20;
-/// Finished results nobody picked up are dropped past this many.
-const DONE_CAP: usize = 48;
 /// A turned freeform gradient crossfades in (tdesktop
 /// `kBackgroundFadeDuration`).
 const FADE: Duration = Duration::from_millis(200);
@@ -48,7 +50,7 @@ pub(super) enum Slot {
     /// The history of one window (the canvas adds the window id). The
     /// entity re-renders when a crossfade starts.
     History(EntityId),
-    /// The wallpaper preview in a dialog.
+    /// The wallpaper preview in a dialog (the canvas adds the window id).
     Preview,
     /// A gallery thumbnail: fixed size, never replaced or delayed.
     Thumb,
@@ -61,89 +63,6 @@ pub(super) fn image_key(wallpaper: &Wallpaper, width: u32, height: u32) -> u64 {
     width.hash(&mut hasher);
     height.hash(&mut hasher);
     hasher.finish()
-}
-
-struct Job {
-    key: u64,
-    slot: u64,
-    wallpaper: Wallpaper,
-    width: u32,
-    height: u32,
-    /// Not before this instant (a resize settling).
-    not_before: Instant,
-}
-
-/// Requests and results shared with the worker thread.
-#[derive(Default)]
-struct Board {
-    queue: Vec<Job>,
-    /// Keys still wanted (queued or rendering); a result for a key that
-    /// is no longer wanted is dropped.
-    wanted: HashSet<u64>,
-    running: Option<(u64, u64)>,
-    /// Finished results by key, with their slot, until a lookup takes
-    /// them.
-    done: HashMap<u64, (u64, Option<Rendered>)>,
-}
-
-impl Board {
-    /// Queue `job`, replacing the slot's older request and any result for
-    /// it nobody took: a size the window was at for one frame when its
-    /// render finished (a full history picture) would otherwise wait in
-    /// `done` until `DONE_CAP` clears it.
-    fn request(&mut self, job: Job, replaces: bool) {
-        if self.wanted.contains(&job.key) || self.done.contains_key(&job.key) {
-            return;
-        }
-        if replaces {
-            let slot = job.slot;
-            let mut dropped = Vec::new();
-            self.queue.retain(|j| {
-                let keep = j.slot != slot;
-                if !keep {
-                    dropped.push(j.key);
-                }
-                keep
-            });
-            if let Some((running_slot, running_key)) = self.running
-                && running_slot == slot
-            {
-                dropped.push(running_key);
-            }
-            for key in dropped {
-                self.wanted.remove(&key);
-            }
-            self.done.retain(|_, (done_slot, _)| *done_slot != slot);
-        }
-        self.wanted.insert(job.key);
-        self.queue.push(job);
-    }
-
-    /// The next job that may start now, or how long until one may.
-    fn next(&mut self, now: Instant) -> Result<Job, Option<Duration>> {
-        match self.queue.iter().position(|j| j.not_before <= now) {
-            Some(at) => {
-                let job = self.queue.remove(at);
-                self.running = Some((job.slot, job.key));
-                Ok(job)
-            }
-            None => Err(self
-                .queue
-                .iter()
-                .map(|j| j.not_before.saturating_duration_since(now))
-                .min()),
-        }
-    }
-
-    fn finish(&mut self, slot: u64, key: u64, result: Option<Rendered>) {
-        self.running = None;
-        if self.wanted.remove(&key) {
-            if self.done.len() >= DONE_CAP {
-                self.done.clear();
-            }
-            self.done.insert(key, (slot, result));
-        }
-    }
 }
 
 struct Shared {
@@ -171,6 +90,12 @@ thread_local! {
     static INLINE_SOURCES: RefCell<Sources> = RefCell::new(Sources::default());
 }
 
+/// One render where a panic is a wallpaper that cannot be drawn (`None`),
+/// on the worker and on the inline fallback alike.
+fn render_guarded(render: impl FnOnce() -> Option<Rendered>) -> Option<Rendered> {
+    quill::thread_guard::ffi_boundary(None, render)
+}
+
 fn worker() {
     let shared = shared();
     let mut sources = Sources::default();
@@ -193,7 +118,11 @@ fn worker() {
                 }
             }
         };
-        let result = sources.render(&job.wallpaper, job.width, job.height);
+        // A render that panics (a malformed photo or pattern) is a wallpaper
+        // that cannot be drawn: the job still finishes, and the worker
+        // goes on with the next one. A dead worker would leave every
+        // wallpaper pending, asking for a frame forever.
+        let result = render_guarded(|| sources.render(&job.wallpaper, job.width, job.height));
         shared
             .board
             .lock_or_recover()
@@ -233,6 +162,8 @@ struct Entry {
     key: u64,
     composite: Option<Composite>,
     bytes: usize,
+    /// For a picture made without its pattern: when to make it again.
+    retry_at: Option<Instant>,
     /// When and where it was last asked for to paint.
     painted: image_budget::PaintStamp,
     /// The windows it was painted in (`painted` counts the main window's
@@ -279,8 +210,19 @@ struct Fade {
 impl Cache {
     /// The image for `key`, to paint now in `window`.
     fn get(&mut self, key: u64, window: WindowId) -> Option<Option<Composite>> {
+        self.get_at(key, window, Instant::now())
+    }
+
+    /// [`Self::get`] at `now`: a picture whose retry time has come is gone,
+    /// so it is made again.
+    fn get_at(&mut self, key: u64, window: WindowId, now: Instant) -> Option<Option<Composite>> {
         let at = self.entries.iter().position(|e| e.key == key)?;
         let mut entry = self.entries.remove(at)?;
+        if entry.retry_at.is_some_and(|retry| now >= retry) {
+            self.bytes -= entry.bytes;
+            image_budget::retire_all(entry.composite.map(|c| c.image));
+            return None;
+        }
         entry.paint_in(window);
         let value = entry.composite.clone();
         self.entries.push_back(entry);
@@ -295,7 +237,18 @@ impl Cache {
         entry.composite.clone()
     }
 
+    #[cfg(test)]
     fn insert(&mut self, key: u64, composite: Option<Composite>, window: WindowId) {
+        self.insert_until(key, composite, window, None);
+    }
+
+    fn insert_until(
+        &mut self,
+        key: u64,
+        composite: Option<Composite>,
+        window: WindowId,
+        retry_at: Option<Instant>,
+    ) {
         let bytes = composite
             .as_ref()
             .map_or(0, |c| c.size.0 as usize * c.size.1 as usize * 4);
@@ -303,6 +256,7 @@ impl Cache {
             key,
             composite,
             bytes,
+            retry_at,
             painted: image_budget::paint_stamp(),
             windows: SmallVec::from_buf([window]),
         });
@@ -514,16 +468,20 @@ fn lookup(
         }
         let shared = shared();
         if !shared.threaded {
-            let rendered = INLINE_SOURCES.with(|s| s.borrow_mut().render(wallpaper, width, height));
+            let rendered = render_guarded(|| {
+                INLINE_SOURCES.with(|s| s.borrow_mut().render(wallpaper, width, height))
+            });
+            let retry_at = retry_time(wallpaper, rendered.as_ref(), Instant::now());
             let composite = rendered.and_then(|r| to_composite(r, width, height));
-            cache.insert(key, composite.clone(), window);
+            cache.insert_until(key, composite.clone(), window, retry_at);
             return ready(&mut cache, composite, true);
         }
         let mut board = shared.board.lock_or_recover();
-        if let Some((_, result)) = board.done.remove(&key) {
+        if let Some(result) = board.take_done(key) {
             drop(board);
+            let retry_at = retry_time(wallpaper, result.as_ref(), Instant::now());
             let composite = result.and_then(|r| to_composite(r, width, height));
-            cache.insert(key, composite.clone(), window);
+            cache.insert_until(key, composite.clone(), window, retry_at);
             return ready(&mut cache, composite, true);
         }
         // Thumbnails share a slot and never resize: no stale picture.
@@ -559,8 +517,23 @@ fn lookup(
     })
 }
 
+/// When a picture that is not whole is made again: a fill shown without its
+/// pattern, or nothing at all for a wallpaper that reads a file (a photo
+/// TDLib was rewriting, a pattern that did not rasterise). A wallpaper of
+/// colours alone has no file to wait for.
+fn retry_time(wallpaper: &Wallpaper, rendered: Option<&Rendered>, now: Instant) -> Option<Instant> {
+    let incomplete = match rendered {
+        Some(r) => !r.complete,
+        None => matches!(
+            wallpaper,
+            Wallpaper::Pattern { .. } | Wallpaper::Image { .. }
+        ),
+    };
+    incomplete.then(|| now + RETRY_AFTER)
+}
+
 fn to_composite(rendered: Rendered, width: u32, height: u32) -> Option<Composite> {
-    let Rendered { raster, x, y } = rendered;
+    let Rendered { raster, x, y, .. } = rendered;
     let size = (raster.width, raster.height);
     let buffer = image::RgbaImage::from_raw(raster.width, raster.height, raster.bgra)?;
     Some(Composite {
@@ -579,12 +552,12 @@ fn to_composite(rendered: Rendered, width: u32, height: u32) -> Option<Composite
 pub(super) fn wallpaper_layer(
     wallpaper: Wallpaper,
     slot: Slot,
-    on_area: Option<fn(Bounds<Pixels>)>,
+    on_area: Option<fn(Bounds<Pixels>, &Window)>,
 ) -> impl IntoElement {
     canvas(
         move |bounds, window, cx| {
             if let Some(on_area) = on_area {
-                on_area(bounds);
+                on_area(bounds, window);
             }
             let scale = window.scale_factor();
             let width = (f32::from(bounds.size.width) * scale).round().max(0.0) as u32;
@@ -594,7 +567,9 @@ pub(super) fn wallpaper_layer(
             }
             let mut hasher = std::hash::DefaultHasher::new();
             slot.hash(&mut hasher);
-            if let Slot::History(_) = slot {
+            // A history and a preview are one per window: the same slot in
+            // two windows must not replace each other's job.
+            if let Slot::History(_) | Slot::Preview = slot {
                 window
                     .window_handle()
                     .window_id()
@@ -642,9 +617,10 @@ pub(super) fn wallpaper_layer(
 
 #[cfg(test)]
 mod tests {
-    use super::{Board, Cache, Composite, Job, Shown, image_key};
+    use super::{Cache, Composite, RETRY_AFTER, Shown, image_key, render_guarded, retry_time};
     use crate::ui::image_budget::begin_frame;
     use crate::ui::wallpaper::Wallpaper;
+    use crate::ui::wallpaper_board::{Board, Job};
     use gpui_kit::{RenderImage, WindowId};
     use std::sync::Arc;
     use std::time::{Duration, Instant};
@@ -688,6 +664,42 @@ mod tests {
             window: window(in_window),
         };
         cache.shown.insert(slot, shown);
+    }
+
+    #[test]
+    fn a_picture_made_without_its_pattern_is_made_again_after_the_wait() {
+        let mut cache = Cache::default();
+        let start = Instant::now();
+        let retry = Some(start + RETRY_AFTER);
+        cache.insert_until(1, Some(composite(1)), window(MAIN), retry);
+        assert!(cache.get_at(1, window(MAIN), start).is_some());
+        assert!(cache.get_at(1, window(MAIN), start + RETRY_AFTER).is_none());
+        assert!(cache.entries.is_empty() && cache.bytes == 0);
+        // A complete picture has no deadline.
+        cache.insert(2, Some(composite(2)), window(MAIN));
+        assert!(
+            cache
+                .get_at(2, window(MAIN), start + RETRY_AFTER * 100)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn a_wallpaper_whose_file_gave_nothing_is_tried_again_after_the_wait() {
+        let now = Instant::now();
+        let photo = Wallpaper::Image {
+            path: "/nonexistent/quill-photo.jpg".into(),
+            blurred: false,
+            tiled: false,
+        };
+        assert_eq!(retry_time(&photo, None, now), Some(now + RETRY_AFTER));
+        // The same photo, once drawn, is whole for good, and a wallpaper of
+        // colours alone has no file to wait for.
+        assert_eq!(retry_time(&Wallpaper::Solid(0x336699), None, now), None);
+        let mut cache = Cache::default();
+        cache.insert_until(1, None, window(MAIN), retry_time(&photo, None, now));
+        assert!(cache.get_at(1, window(MAIN), now).is_some());
+        assert!(cache.get_at(1, window(MAIN), now + RETRY_AFTER).is_none());
     }
 
     #[test]
@@ -792,15 +804,15 @@ mod tests {
         board.request(job(1, 7, 0), true);
         board.request(job(2, 7, 0), true);
         board.request(job(3, 8, 0), true);
-        assert_eq!(board.queue.len(), 2);
-        assert!(!board.wanted.contains(&1));
+        assert_eq!(board.queued(), 2);
+        assert!(!board.wants(1));
         // Thumbnails do not replace each other.
         board.request(job(4, 9, 0), false);
         board.request(job(5, 9, 0), false);
-        assert_eq!(board.queue.len(), 4);
+        assert_eq!(board.queued(), 4);
         // The same key twice is one job.
         board.request(job(5, 9, 0), false);
-        assert_eq!(board.queue.len(), 4);
+        assert_eq!(board.queued(), 4);
     }
 
     #[test]
@@ -812,7 +824,7 @@ mod tests {
         // The window keeps resizing while key 1 renders.
         board.request(job(2, 7, 10_000), true);
         board.finish(7, 1, None);
-        assert!(!board.done.contains_key(&1), "nobody wants it any more");
+        assert!(!board.has_done(&1), "nobody wants it any more");
         match board.next(Instant::now()) {
             Err(Some(wait)) => assert!(wait > Duration::from_secs(5)),
             _ => panic!("the resize has not settled"),
@@ -820,7 +832,7 @@ mod tests {
         board.request(job(3, 8, 0), true);
         assert_eq!(board.next(Instant::now()).ok().unwrap().key, 3);
         board.finish(8, 3, None);
-        assert!(board.done.contains_key(&3));
+        assert!(board.has_done(&3));
     }
 
     #[test]
@@ -832,12 +844,39 @@ mod tests {
             let running = board.next(Instant::now()).ok().unwrap();
             board.finish(running.slot, running.key, None);
         }
-        assert!(board.done.contains_key(&1));
+        assert!(board.has_done(&1));
         // The window is at a new size before a frame took key 1.
         board.request(job(3, 7, 0), true);
-        assert!(!board.done.contains_key(&1), "nobody will ask for it");
+        assert!(!board.has_done(&1), "nobody will ask for it");
         // Thumbnails share a slot and never replace each other.
         board.request(job(4, 9, 0), false);
-        assert!(board.done.contains_key(&2));
+        assert!(board.has_done(&2));
+    }
+
+    /// A render that panics finishes its job as a wallpaper that cannot be
+    /// drawn: the answer is there, so nothing waits (and asks for a frame)
+    /// for it, and the worker is still alive for the next job.
+    #[test]
+    fn a_panicking_render_finishes_the_job_as_undrawable() {
+        let now = Instant::now();
+        let mut board = Board::default();
+        board.request(
+            Job {
+                key: 7,
+                slot: 1,
+                wallpaper: Wallpaper::Solid(0x112233),
+                width: 4,
+                height: 4,
+                not_before: now,
+            },
+            true,
+        );
+        let Ok(job) = board.next(now) else {
+            panic!("the job is due");
+        };
+        let result = render_guarded(|| panic!("a malformed pattern"));
+        assert!(result.is_none());
+        board.finish(job.slot, job.key, result);
+        assert!(board.done_slot(7) == Some(1));
     }
 }

@@ -7,6 +7,7 @@
 //! via Blockchain" row and the people the picker lists. Nothing here sends
 //! a request; the driver is `connect::gift_manage`.
 
+use super::GiftTransferred;
 use crate::premium_hub::ReceivedGift;
 
 /// Seconds in an hour, and the half hour tdesktop rounds by.
@@ -86,6 +87,27 @@ pub enum ExportError {
     Other(String),
 }
 
+/// The password box's request: only the answer or error of the request it
+/// holds acts on the box (the first, `createTemporaryPassword`, hands over
+/// to the URL request), so a late answer of an export the user left does
+/// not open Fragment or close another picker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExportSend {
+    Idle,
+    Out(crate::ids::RequestId),
+    /// The temporary password arrived: the driver asks for the URL next
+    /// (`ConnectDriver::continue_gift_export`) and moves to `Out`, or back
+    /// to `Idle` when that cannot go out.
+    Unlocked,
+}
+
+impl ExportSend {
+    /// A request of the export is out (the buttons wait).
+    pub fn is_out(self) -> bool {
+        matches!(self, Self::Out(_) | Self::Unlocked)
+    }
+}
+
 /// Where the picker is. The picker is one dialog; each later step replaces
 /// its content, and Cancel on a step goes back to `Pick`, the way
 /// tdesktop's boxes stack over the contacts list.
@@ -94,7 +116,20 @@ pub enum TransferStage {
     /// "Transfer {name}": the search, "Send via Blockchain" and contacts.
     Pick,
     /// "Do you want to transfer ownership of {name} to {recipient}?"
-    ConfirmPeer { user_id: i64, name: String },
+    /// `error` is why the last "Transfer" failed, shown in this dialog.
+    ConfirmPeer {
+        user_id: i64,
+        name: String,
+        error: Option<String>,
+    },
+    /// "Transfer" was pressed: `transferGift` is out. Cancel and Esc wait
+    /// for the answer to `request`, which brings the toast and the
+    /// recipient's chat; its failure returns to the confirmation.
+    Transferring {
+        user_id: i64,
+        name: String,
+        request: crate::ids::RequestId,
+    },
     /// "Unlocking in progress".
     Locked { hours: i64 },
     /// "Manage with Fragment" with "Open Fragment".
@@ -104,13 +139,14 @@ pub enum TransferStage {
     /// sends `inputCheckPasswordEmpty` first). It only tells whether a
     /// password exists and is old enough; a URL it might return is dropped.
     /// Since TDLib 1.8.69 the probe stops in TDLib unless a temporary
-    /// password exists, so a too fresh password shows up on Submit.
-    Probing,
-    /// "Two-step verification": the password box. `sending` while
+    /// password exists, so a too fresh password shows up on Submit. Only
+    /// the answer or error of this request moves the picker.
+    Probing(crate::ids::RequestId),
+    /// "Two-step verification": the password box. `send` is `Out` while
     /// `createTemporaryPassword` or the URL request after it is out; the
     /// password itself is never kept here.
     Password {
-        sending: bool,
+        send: ExportSend,
         error: Option<ExportError>,
     },
     /// "Security check" (tdesktop `TransferPasswordError`): no password
@@ -163,12 +199,92 @@ impl TransferPicker {
     /// Whether the export request with the password is out (the buttons
     /// wait).
     pub fn exporting(&self) -> bool {
-        matches!(self.stage, TransferStage::Password { sending: true, .. })
+        matches!(
+            self.stage,
+            TransferStage::Password {
+                send: ExportSend::Out(_) | ExportSend::Unlocked,
+                ..
+            }
+        )
+    }
+
+    /// The temporary password arrived and the URL is still to be asked.
+    pub fn export_unlocked(&self) -> bool {
+        matches!(
+            self.stage,
+            TransferStage::Password {
+                send: ExportSend::Unlocked,
+                ..
+            }
+        )
+    }
+
+    /// Whether `request` is the export request this picker waits for.
+    pub fn export_waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(
+            self.stage,
+            TransferStage::Password { send: ExportSend::Out(waiting), .. } if Some(waiting) == request
+        )
     }
 
     /// Whether either export request (the probe or the real one) is out.
     pub fn export_busy(&self) -> bool {
-        self.exporting() || self.stage == TransferStage::Probing
+        self.exporting() || matches!(self.stage, TransferStage::Probing(_))
+    }
+
+    /// Whether `transferGift` is out.
+    pub fn transferring(&self) -> bool {
+        matches!(self.stage, TransferStage::Transferring { .. })
+    }
+
+    /// `transferGift` (`request`) went out for the contact the confirmation
+    /// names.
+    pub fn begin_transfer(&mut self, request: crate::ids::RequestId) {
+        if let TransferStage::ConfirmPeer { user_id, name, .. } = &self.stage {
+            self.stage = TransferStage::Transferring {
+                user_id: *user_id,
+                name: name.clone(),
+                request,
+            };
+        }
+    }
+
+    /// The finished transfer when `request` is the one this picker waits
+    /// for: the toast and the recipient's chat.
+    pub fn transferred_by(&self, request: crate::ids::RequestId) -> Option<GiftTransferred> {
+        match &self.stage {
+            TransferStage::Transferring {
+                user_id,
+                name,
+                request: asked,
+            } if *asked == request => Some(GiftTransferred {
+                gift_name: self.gift_name.clone(),
+                recipient: name.clone(),
+                user_id: *user_id,
+            }),
+            _ => None,
+        }
+    }
+
+    /// `transferGift` (`request`) failed: the confirmation is back with the
+    /// reason, to retry or cancel. Another request's failure changes
+    /// nothing.
+    pub fn transfer_failed(&mut self, request: crate::ids::RequestId, reason: String) {
+        if let TransferStage::Transferring {
+            user_id,
+            name,
+            request: asked,
+        } = &self.stage
+        {
+            if *asked != request {
+                return;
+            }
+            self.stage = TransferStage::ConfirmPeer {
+                user_id: *user_id,
+                name: name.clone(),
+                error: Some(reason),
+            };
+        }
     }
 
     /// A contact was picked: ask before giving the gift away.
@@ -177,6 +293,7 @@ impl TransferPicker {
             self.stage = TransferStage::ConfirmPeer {
                 user_id,
                 name: name.into(),
+                error: None,
             };
         }
     }
@@ -195,11 +312,16 @@ impl TransferPicker {
     }
 
     /// "Open Fragment" in the confirmation: the password-less probe goes
-    /// out.
-    pub fn open_fragment(&mut self) {
+    /// out as `request`.
+    pub fn open_fragment(&mut self, request: crate::ids::RequestId) {
         if self.stage == TransferStage::ConfirmExport {
-            self.stage = TransferStage::Probing;
+            self.stage = TransferStage::Probing(request);
         }
+    }
+
+    /// `request` is the probe this picker waits for.
+    fn probing_for(&self, request: Option<crate::ids::RequestId>) -> bool {
+        matches!(self.stage, TransferStage::Probing(waiting) if Some(waiting) == request)
     }
 
     /// The probe failed. tdesktop `PrePasswordErrorBox`: no password or a
@@ -208,8 +330,13 @@ impl TransferPicker {
     /// box. `has_password` is the password state when
     /// it is known and fresh: `Some(false)` also means the security check,
     /// since TDLib never lets the probe reach the server.
-    pub fn probe_failed(&mut self, outcome: ProbeOutcome, has_password: Option<bool>) {
-        if self.stage != TransferStage::Probing {
+    pub fn probe_failed(
+        &mut self,
+        request: Option<crate::ids::RequestId>,
+        outcome: ProbeOutcome,
+        has_password: Option<bool>,
+    ) {
+        if !self.probing_for(request) {
             return;
         }
         self.stage = match (outcome, has_password) {
@@ -218,7 +345,7 @@ impl TransferPicker {
             }
             (ProbeOutcome::TooFresh, _) => TransferStage::SecurityCheck { later: true },
             (ProbeOutcome::Other, _) => TransferStage::Password {
-                sending: false,
+                send: ExportSend::Idle,
                 error: None,
             },
         };
@@ -226,10 +353,10 @@ impl TransferPicker {
 
     /// The probe returned a URL (it should not without a password): the
     /// URL is dropped and the password box opens, as after any answer.
-    pub fn probe_answered(&mut self) {
-        if self.stage == TransferStage::Probing {
+    pub fn probe_answered(&mut self, request: Option<crate::ids::RequestId>) {
+        if self.probing_for(request) {
             self.stage = TransferStage::Password {
-                sending: false,
+                send: ExportSend::Idle,
                 error: None,
             };
         }
@@ -238,15 +365,23 @@ impl TransferPicker {
     /// A fresh password state arrived: with no password set, the idle
     /// password box becomes the security check.
     pub fn password_state_known(&mut self, has_password: bool) {
-        if !has_password && matches!(self.stage, TransferStage::Password { sending: false, .. }) {
+        if !has_password
+            && matches!(
+                self.stage,
+                TransferStage::Password {
+                    send: ExportSend::Idle,
+                    ..
+                }
+            )
+        {
             self.stage = TransferStage::SecurityCheck { later: false };
         }
     }
 
     /// Cancel or OK on a step: back to the list. Not while an export
-    /// request is out.
+    /// request or the transfer is out.
     pub fn back(&mut self) {
-        if !self.export_busy() {
+        if !self.export_busy() && !self.transferring() {
             self.stage = TransferStage::Pick;
         }
     }

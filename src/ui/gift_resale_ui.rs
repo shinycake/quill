@@ -93,7 +93,7 @@ impl QuillApp {
                 self.gift_market.recipient = self
                     .session()
                     .map(|s| &s.payments.gifts_manage.send)
-                    .filter(|send| send.open)
+                    .filter(|send| send.is_open())
                     .and_then(|send| send.recipient.clone());
             }
             self.gift_market.push(MarketBox::Resale);
@@ -148,10 +148,18 @@ impl QuillApp {
         // The send box's recipient, or none for yourself.
         let recipient = self.gift_market.recipient.clone();
         let started = match self.live.as_mut() {
-            Some(live) => live
-                .driver
-                .start_gift_resale_buy(&name, recipient, false)
-                .is_ok(),
+            Some(live) => {
+                let started = live
+                    .driver
+                    .start_gift_resale_buy(&name, recipient, false)
+                    .is_ok();
+                if !started {
+                    self.set_note(StatusNote::error(tr(
+                        keys::Q_MONEY_COULDNT_START_THE_PURCHASE,
+                    )));
+                }
+                started
+            }
             None => {
                 let me = self.session().and_then(|s| s.my_user_id).unwrap_or(0);
                 self.gift_market_mut().is_some_and(|market| {
@@ -176,7 +184,9 @@ impl QuillApp {
             }
         };
         if started {
-            self.payments.gift_hide_name = false;
+            // The buy step starts with clean choices; the send box's
+            // message stays for Back.
+            self.reset_gift_choices(false);
             self.gift_market.push(MarketBox::Buy);
             self.open_box(crate::ui::shell::DialogKind::GiftMarket);
         }
@@ -203,15 +213,15 @@ impl QuillApp {
                 .child(resale_count_label(search.total_count)),
         );
         body = body.child(self.resale_pills(session, &filter, &roots, cx));
-        if let Some(error) = search.error.as_ref() {
+        if let Some(error) = search.load.error() {
             body = body.child(
                 div()
                     .text_sm()
                     .text_color(cx.theme().danger)
-                    .child(error.clone()),
+                    .child(error.to_string()),
             );
         }
-        if search.loaded && search.listings.is_empty() && !search.loading {
+        if search.load.answered() && search.listings.is_empty() && !search.load.is_loading() {
             body = body.child(
                 div()
                     .py_6()
@@ -259,7 +269,7 @@ impl QuillApp {
             );
         }
         body = body.child(grid);
-        if search.loading {
+        if search.load.is_loading() {
             body = body.child(
                 div()
                     .text_sm()

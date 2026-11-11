@@ -60,10 +60,10 @@ fn the_folder_box_keeps_its_chat_when_another_opens(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, window, cx| {
         app.select_listed_chat(first, window, cx);
         if let Some(session) = app.demo_session.as_mut() {
-            session
-                .chat_list
-                .chat_lists_for_add
-                .insert(first.0, vec![ChatList::Main]);
+            session.chat_list.chat_lists_for_add.insert(
+                first.0,
+                quill::state::fetch::Fetch::Ready(vec![ChatList::Main]),
+            );
             session.chat_list.chat_lists_for_add.remove(&second.0);
         }
         app.open_folder_menu(first, cx);
@@ -75,7 +75,7 @@ fn the_folder_box_keeps_its_chat_when_another_opens(cx: &mut TestAppContext) {
     });
     frames(vcx);
     assert_eq!(
-        app.read_with(vcx, |app, _| app.session().and_then(|s| s.open_chat)),
+        app.read_with(vcx, |app, _| app.session().and_then(|s| s.open_chat_id())),
         Some(second)
     );
     assert!(

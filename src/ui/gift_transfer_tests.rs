@@ -12,7 +12,7 @@ use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
-use quill::gift_manage::{ExportError, TransferStage};
+use quill::gift_manage::{ExportError, ExportSend, TransferStage};
 
 fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, Entity<QuillShell>, VisualTestContext) {
     quill::gift_market::set_gift_market_persistence(false);
@@ -71,7 +71,8 @@ fn the_picker_opens_over_the_gift_and_walks_its_steps(cx: &mut TestAppContext) {
             stage(app),
             Some(TransferStage::ConfirmPeer {
                 user_id: 502,
-                name: "Maya Chen".into()
+                name: "Maya Chen".into(),
+                error: None,
             })
         );
         assert!(stage_view(app, cx).is_some_and(|v| v.title.is_none()));
@@ -93,7 +94,7 @@ fn the_picker_opens_over_the_gift_and_walks_its_steps(cx: &mut TestAppContext) {
     app.read_with(vcx, |app, _| {
         let hub = app.session().map(|s| &s.payments.hub);
         assert_eq!(
-            hub.and_then(|h| h.gift_selected.as_deref()),
+            hub.and_then(|h| h.received.view.selected()),
             Some(DEMO_GIFT)
         );
         assert!(stage(app).is_none());
@@ -125,7 +126,7 @@ fn open_password_box(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     app.update_in(vcx, |app, _, cx| {
         if let Some(picker) = app.gift_manage_mut().and_then(|m| m.transfer_mut()) {
             picker.stage = TransferStage::Password {
-                sending: false,
+                send: ExportSend::Idle,
                 error: None,
             };
         }
@@ -169,7 +170,7 @@ fn a_generic_export_error_shows_under_the_field(cx: &mut TestAppContext) {
         let error = ExportError::Other("not found".into());
         if let Some(picker) = app.gift_manage_mut().and_then(|m| m.transfer_mut()) {
             picker.stage = TransferStage::Password {
-                sending: false,
+                send: ExportSend::Idle,
                 error: Some(error.clone()),
             };
         }
@@ -193,7 +194,7 @@ fn the_password_box_never_keeps_the_password(cx: &mut TestAppContext) {
         // Straight to the password box, as after "Open Fragment".
         if let Some(picker) = app.gift_manage_mut().and_then(|m| m.transfer_mut()) {
             picker.stage = TransferStage::Password {
-                sending: false,
+                send: ExportSend::Idle,
                 error: None,
             };
         }

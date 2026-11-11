@@ -88,9 +88,21 @@ impl<S: JsonSender> ConnectDriver<S> {
             ))
         {
             self.session.requests.take(extra);
-            self.session.settings.notification_exceptions.remove(&scope);
+            // The list says so with its Retry; nothing asks again by itself.
+            self.session
+                .settings
+                .notification_exceptions
+                .entry(scope)
+                .or_default()
+                .fail("could not send the request");
             return Err(err);
         }
+        self.session
+            .settings
+            .notification_exceptions
+            .entry(scope)
+            .or_default()
+            .sent(extra);
         Ok(())
     }
 
@@ -249,7 +261,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.settings.saved_sounds_loaded
+        // Asked when never asked, or owed again; a failed fetch waits for
+        // the next change of the list.
+        let saved = &self.session.settings.saved_sounds;
+        if !saved.wants_fetch()
             || self
                 .session
                 .requests
@@ -260,10 +275,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetSavedNotificationSounds, None);
+        self.session.settings.saved_sounds.begin();
         match self.sender.send_json(&get_saved_notification_sounds(extra)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
+                self.session
+                    .settings
+                    .saved_sounds
+                    .fail("The saved sounds request was not sent.");
                 Err(err)
             }
         }
@@ -274,10 +294,10 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn refresh_notification_sounds_if_stale(
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.session.settings.saved_sounds_stale {
+        // Owed again: stale, with no request out.
+        if !self.session.saved_sounds_owed() {
             return Ok(None);
         }
-        self.session.settings.saved_sounds_loaded = false;
         self.maybe_fetch_notification_sounds()
     }
 
@@ -339,7 +359,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .sender
             .send_json(&set_scope_notification_settings(extra, scope, settings))
         {
-            Ok(()) => Ok(extra),
+            Ok(()) => {
+                self.session.show_scope_save(scope, extra, settings);
+                Ok(extra)
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)
@@ -364,7 +387,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .sender
             .send_json(&set_reaction_notification_settings(extra, settings))
         {
-            Ok(()) => Ok(extra),
+            Ok(()) => {
+                self.session.show_reaction_save(extra, settings);
+                Ok(extra)
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)
@@ -409,7 +435,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(entry) = self
             .session
             .settings
-            .saved_notification_sounds
+            .saved_notification_sounds()
             .iter()
             .find(|s| s.id == sound_id)
         else {
@@ -432,7 +458,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A play request is explicit: retry even if an earlier attempt
         // stalled (the stall mark only stops per-ingest auto retries).
         self.session.media.downloads.clear_stalled(file_id.0);
-        let _ = self.download_file(file_id, USER_DOWNLOAD_PRIORITY);
+        if self.download_file(file_id, USER_DOWNLOAD_PRIORITY).is_err() {
+            // Nothing will complete this file: a later unrelated
+            // completion must not play the sound.
+            self.session.settings.sound_file_ids.remove(&file_id.0);
+            self.session
+                .settings
+                .pending_sound_downloads
+                .remove(&sound_id);
+        }
         R::Pending
     }
 }

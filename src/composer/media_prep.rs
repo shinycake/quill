@@ -12,6 +12,7 @@
 
 use super::{
     AttachmentKind, ComposerAttachment, ComposerSnapshot, MediaSendOptions, PhotoScaleTimedOut,
+    SendContent,
 };
 use crate::video::{VideoNoteProbe, VideoNoteThumbnail, VideoProbe};
 use std::collections::HashMap;
@@ -105,9 +106,9 @@ impl PreparedMedia {
     /// the UI thread. `started` is when the send's preparing began, shared
     /// by all its snapshots: [`PREP_BUDGET`] counts from it.
     pub fn prepare(snapshot: &ComposerSnapshot, started: Instant) -> Result<Self, PrepareError> {
-        let alone = snapshot.album.is_empty();
+        let alone = !matches!(snapshot.content, SendContent::Album(_));
         let mut files = HashMap::new();
-        for attachment in snapshot.attachment.iter().chain(snapshot.album.iter()) {
+        for attachment in snapshot.content.attachments() {
             if started.elapsed() > PREP_BUDGET {
                 return Err(PrepareError::TimedOut);
             }
@@ -143,7 +144,7 @@ fn prepare_file(
             file.send_path =
                 Some(send_path_scaled(attachment, media)?.ok_or(PrepareError::Unreadable)?);
         }
-        AttachmentKind::Video if alone && attachment.extras.gif => {
+        AttachmentKind::Video if alone && attachment.extras.is_gif() => {
             file.animation = Some(
                 crate::video::probe_with_ffprobe(&attachment.path, false)
                     .map(|probe| AnimationSize {
@@ -176,15 +177,12 @@ fn prepare_file(
 impl ComposerSnapshot {
     /// Some file needs ffprobe or ffmpeg before it can be sent.
     pub fn needs_media_prep(&self) -> bool {
-        self.attachment
-            .iter()
-            .chain(self.album.iter())
-            .any(|attachment| {
-                matches!(
-                    attachment.kind,
-                    AttachmentKind::Photo | AttachmentKind::Video | AttachmentKind::VideoNote
-                )
-            })
+        self.content.attachments().iter().any(|attachment| {
+            matches!(
+                attachment.kind,
+                AttachmentKind::Photo | AttachmentKind::Video | AttachmentKind::VideoNote
+            )
+        })
     }
 
     /// Attach the files read in the background.

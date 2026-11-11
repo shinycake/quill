@@ -46,7 +46,9 @@ register_demos![
     // A HEIC dragged over the chat: the drop zones it offers.
     DemoSpec::chat_list("ready-drop-heic").setup(|app, _, _| {
         let heic = quill::drop_modes::DragEntry::probe(std::path::Path::new("ridge.heic"));
-        app.composer_ui.drop_preview = quill::drop_modes::classify(&[heic]);
+        if let Some(state) = quill::drop_modes::classify(&[heic]) {
+            app.composer_ui.file_drag = crate::ui::drop_zones::FileDrag::Preview(state);
+        }
     }),
     // Ready chat draft with typos underlined (red wavy).
     DemoSpec::chat_list("ready-spellcheck").setup(|app, window, cx| app.demo_spellcheck(
@@ -111,11 +113,13 @@ impl QuillApp {
             self.pickers.media_panel.tab = crate::ui::media_panel::PanelTab::Emoji;
         }
         if demo_history_extra("menu") {
-            self.message_ui.menu = Some(crate::ui::menu_states::MessageMenuState {
-                chat_id: ChatId(11),
-                message_id: sticker,
-                position: point(px(340.), px(380.)),
-            });
+            self.message_ui
+                .menu
+                .open_at(crate::ui::menu_states::MessageMenuState {
+                    chat_id: ChatId(11),
+                    message_id: sticker,
+                    position: point(px(340.), px(380.)),
+                });
         }
         if demo_history_extra("select") {
             self.toggle_forward_select(ChatId(11), sticker, false, cx);
@@ -134,7 +138,7 @@ impl QuillApp {
             .and_then(|bytes| bytes.parse().ok())
             .unwrap_or(0);
         let markup = rich_editor_markup(bytes);
-        self.chat_ui.rich_editor_open = true;
+        self.chat_ui.rich.set_editor(true);
         self.set_composer_markup(&markup, window, cx);
         self.composer
             .update(cx, |input, cx| input.focus(window, cx));
@@ -377,6 +381,7 @@ fn apply_composer_bars(
         51,
         quill::paid_messages::CanSend::HasPaidMessages { stars: 25 },
         1,
+        false,
     );
 }
 

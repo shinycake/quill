@@ -169,6 +169,7 @@ impl State {
     ) -> HashMap<Key, Slot> {
         let number = self.pass(window, list).saturating_add(1);
         self.passes.insert((window, list), number);
+        self.expire_demands(window, list, number);
         let pass = Pass {
             window,
             list,
@@ -180,6 +181,7 @@ impl State {
 
     /// The slots of `list` (`None`: of every list) leave `window`.
     fn leave(&mut self, window: Option<ChatId>, list: Option<List>) -> HashMap<Key, Slot> {
+        self.expire_waiting_demands(window, list);
         self.retire(|key, windows| {
             if list.is_none_or(|list| list == List::of(key)) {
                 windows.remove(&window);
@@ -293,14 +295,7 @@ impl InlineVideos {
     /// A viewer covers `window`'s chat: every clip leaves it, and so do
     /// the clicks to play asked for there that no player carries out yet.
     pub(in crate::ui) fn leave_window(&self, window: Option<ChatId>) {
-        let dropped = self.with(|state| {
-            let dropped = state.leave(window, None);
-            let players = &state.players;
-            state
-                .on_demand
-                .retain(|key, asked| asked.window != window || players.contains_key(key));
-            dropped
-        });
+        let dropped = self.with(|state| state.leave(window, None));
         drop(dropped);
     }
 

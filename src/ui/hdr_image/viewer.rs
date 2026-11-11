@@ -32,16 +32,43 @@ pub(crate) enum HdrBadge {
     StandardRange,
 }
 
+/// What the background decode is working on: the path, the rounded long
+/// edge and "the screen can show HDR".
+type DecodeKey = (PathBuf, u32, bool);
+
+/// The HDR frame on screen, with the headroom last attached to it.
+struct Shown {
+    pixels: HdrPixels,
+    /// 0.0 until the first draw attaches one.
+    headroom: f32,
+    /// Re-reads the display headroom while the frame shows; it goes with
+    /// the frame (a step, a close or a newer picture drops it).
+    _poll: Task<()>,
+}
+
+/// The viewer's decode of the current picture file, one value. It leaves
+/// `Decoding` when the matching answer arrives or `reset` runs; the task
+/// (which owns the background job) goes with the stage, so a replaced
+/// decode stops instead of running to the end.
 #[derive(Default)]
-enum Slot {
+enum Decode {
     #[default]
     Idle,
-    Decoding,
+    /// A decode is running for `key`. A bigger re-decode keeps showing the
+    /// current frame meanwhile.
+    Decoding {
+        key: DecodeKey,
+        showing: Option<Shown>,
+        _task: Task<()>,
+    },
     /// No HDR data in the file.
-    Sdr,
+    Sdr(DecodeKey),
     /// HDR data that this display (or platform) does not show.
-    StandardRange,
-    Hdr(HdrPixels),
+    StandardRange(DecodeKey),
+    Hdr {
+        key: DecodeKey,
+        shown: Shown,
+    },
 }
 
 /// What the background job found for one key.
@@ -51,42 +78,90 @@ enum Outcome {
     Hdr(HdrPixels),
 }
 
+/// The window's layer against the viewer. `Lost`: the renderer could not
+/// draw in extended range and left it, so frames aim at standard range
+/// until the viewer shows no HDR frame (on Windows the check runs again
+/// after that; on macOS the loss is for good).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Edr {
+    #[default]
+    Off,
+    On,
+    /// Lost, with the window's layer still in extended-range mode.
+    Lost,
+    /// Lost for good (not Windows), with the layer back in standard range.
+    LostOff,
+}
+
+impl Edr {
+    fn is_lost(self) -> bool {
+        matches!(self, Self::Lost | Self::LostOff)
+    }
+
+    /// The state once the window's layer is back in standard range.
+    fn layer_off(self) -> Self {
+        if self.is_lost() && !cfg!(windows) {
+            Self::LostOff
+        } else {
+            Self::Off
+        }
+    }
+
+    fn window_on(self) -> bool {
+        matches!(self, Self::On | Self::Lost)
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct HdrViewer {
-    /// Path, rounded long edge and "the screen can show HDR" of the
-    /// current (or last) decode.
-    key: Option<(PathBuf, u32, bool)>,
-    /// Bumped by `reset` and every new decode; a result for an older token
-    /// is dropped.
-    token: u64,
-    slot: Slot,
-    /// The window's layer is in extended-range mode.
-    edr_on: bool,
-    /// The renderer could not draw in extended range and left it. For good
-    /// on macOS; on Windows the failure goes when HDR output is released.
-    edr_lost: bool,
-    /// The headroom last attached to the frame.
-    headroom: f32,
-    polling: bool,
-    /// A decode is running for `key`.
-    in_flight: bool,
+    decode: Decode,
+    edr: Edr,
+}
+
+impl Decode {
+    fn key(&self) -> Option<&DecodeKey> {
+        match self {
+            Self::Idle => None,
+            Self::Decoding { key, .. }
+            | Self::Sdr(key)
+            | Self::StandardRange(key)
+            | Self::Hdr { key, .. } => Some(key),
+        }
+    }
+
+    fn frame(&self) -> Option<&Shown> {
+        match self {
+            Self::Hdr { shown, .. } => Some(shown),
+            Self::Decoding { showing, .. } => showing.as_ref(),
+            _ => None,
+        }
+    }
+
+    fn frame_mut(&mut self) -> Option<&mut Shown> {
+        match self {
+            Self::Hdr { shown, .. } => Some(shown),
+            Self::Decoding { showing, .. } => showing.as_mut(),
+            _ => None,
+        }
+    }
+
+    fn is_decoding(&self) -> bool {
+        matches!(self, Self::Decoding { .. })
+    }
 }
 
 impl HdrViewer {
     /// Forget the current picture (viewer step, close, item deleted).
     pub(crate) fn reset(&mut self) {
-        self.key = None;
-        self.in_flight = false;
-        self.token = self.token.wrapping_add(1);
-        self.slot = Slot::Idle;
+        self.decode = Decode::Idle;
     }
 
     pub(crate) fn badge(&self) -> Option<HdrBadge> {
-        match self.slot {
-            Slot::Hdr(_) if self.edr_lost => Some(HdrBadge::StandardRange),
-            Slot::Hdr(_) => Some(HdrBadge::Shown),
-            Slot::StandardRange => Some(HdrBadge::StandardRange),
-            Slot::Idle | Slot::Decoding | Slot::Sdr => None,
+        match &self.decode {
+            Decode::Hdr { .. } if self.edr.is_lost() => Some(HdrBadge::StandardRange),
+            Decode::Hdr { .. } => Some(HdrBadge::Shown),
+            Decode::StandardRange(_) => Some(HdrBadge::StandardRange),
+            Decode::Idle | Decode::Decoding { .. } | Decode::Sdr(_) => None,
         }
     }
 
@@ -94,22 +169,33 @@ impl HdrViewer {
     /// was asked (`edge`), not cut down to the picture's own size or the
     /// pixel cap.
     fn can_grow(&self, edge: u32) -> bool {
-        match &self.slot {
-            Slot::Hdr(pixels) => pixels.size.0.max(pixels.size.1) >= edge,
-            _ => false,
-        }
+        self.decode
+            .frame()
+            .is_some_and(|shown| shown.pixels.size.0.max(shown.pixels.size.1) >= edge)
     }
 
     fn has_frame(&self) -> bool {
-        matches!(self.slot, Slot::Hdr(_))
+        self.decode.frame().is_some()
+    }
+
+    /// The headroom the frame is drawn for on a display reporting
+    /// `headroom`: back in 8-bit (`Edr::Lost`) it aims at standard range,
+    /// whatever the display says. The draw and the headroom poll both read
+    /// it, so they agree on when it changed.
+    fn display_headroom(&self, headroom: super::Headroom) -> f32 {
+        if self.edr.is_lost() {
+            super::Headroom::SDR.effective()
+        } else {
+            headroom.effective()
+        }
     }
 
     /// Tests: the headroom the shown frame is tone-mapped into.
     #[cfg(test)]
     #[cfg(all(target_os = "macos", feature = "demo-capture"))]
     pub(crate) fn frame_headroom(&self) -> Option<f32> {
-        match &self.slot {
-            Slot::Hdr(pixels) => Some(pixels.frame.headroom()),
+        match &self.decode {
+            Decode::Hdr { shown, .. } => Some(shown.pixels.frame.headroom()),
             _ => None,
         }
     }
@@ -118,7 +204,30 @@ impl HdrViewer {
     #[cfg(test)]
     #[cfg(all(target_os = "macos", feature = "demo-capture"))]
     pub(crate) fn edr_on(&self) -> bool {
-        self.edr_on
+        self.edr.window_on()
+    }
+
+    /// Tests: a bigger decode of the shown frame is running, as a zoom
+    /// starts it. Returns whether a frame was showing.
+    #[cfg(test)]
+    #[cfg(all(target_os = "macos", feature = "demo-capture"))]
+    pub(crate) fn regrow_for_test(&mut self) -> bool {
+        let Decode::Hdr { key, shown } = std::mem::take(&mut self.decode) else {
+            return false;
+        };
+        self.decode = Decode::Decoding {
+            key,
+            showing: Some(shown),
+            _task: Task::ready(()),
+        };
+        true
+    }
+
+    /// Tests: a frame shows (a running decode keeps the old one up).
+    #[cfg(test)]
+    #[cfg(all(target_os = "macos", feature = "demo-capture"))]
+    pub(crate) fn shows_frame(&self) -> bool {
+        self.decode.frame().is_some()
     }
 }
 
@@ -158,35 +267,30 @@ impl QuillApp {
         let long_edge = bucket(fit.0.max(fit.1) * window.scale_factor());
         let can_show = headroom.can_show_hdr();
         let hdr = &mut self.viewer.hdr;
-        let stale = match hdr.key.as_ref() {
+        let stale = match hdr.decode.key() {
             None => true,
             Some((old, _, show)) if old != path || *show != can_show => true,
             // A larger decode waits for the one in flight, so a zoom
             // gesture runs one decode at a time.
-            Some((_, edge, _)) => !hdr.in_flight && *edge < long_edge && hdr.can_grow(*edge),
+            Some((_, edge, _)) => {
+                !hdr.decode.is_decoding() && *edge < long_edge && hdr.can_grow(*edge)
+            }
         };
         if stale {
-            self.start_hdr_decode(path, long_edge, can_show, cx);
+            self.start_hdr_decode(path, long_edge, can_show, window, cx);
         }
         let hdr = &mut self.viewer.hdr;
-        let Slot::Hdr(pixels) = &hdr.slot else {
-            return None;
-        };
+        let display = hdr.display_headroom(headroom);
+        // A bigger re-decode keeps drawing the frame it replaces.
+        let shown = hdr.decode.frame_mut()?;
         // Back in 8-bit, the frame is tone-mapped into standard range
         // instead of clipping its highlights.
-        let display = if hdr.edr_lost {
-            super::Headroom::SDR.effective()
-        } else {
-            headroom.effective()
-        };
-        if hdr.headroom != display {
-            let param = super::tone_map::shader_headroom(display, pixels.peak);
-            pixels.frame.set_headroom(param);
-            hdr.headroom = display;
+        if shown.headroom != display {
+            let param = super::tone_map::shader_headroom(display, shown.pixels.peak);
+            shown.pixels.frame.set_headroom(param);
+            shown.headroom = display;
         }
-        let element = frame_element(&pixels.frame, fit);
-        self.poll_viewer_headroom(window, cx);
-        element
+        frame_element(&shown.pixels.frame, fit)
     }
 
     /// The toolbar badge for the current picture. A rotated or flipped
@@ -205,47 +309,57 @@ impl QuillApp {
         path: &Path,
         long_edge: u32,
         can_show: bool,
+        window: &Window,
         cx: &mut Context<Self>,
     ) {
-        let hdr = &mut self.viewer.hdr;
-        hdr.token = hdr.token.wrapping_add(1);
-        hdr.key = Some((path.to_path_buf(), long_edge, can_show));
-        hdr.in_flight = true;
-        // A bigger re-decode keeps showing the current frame meanwhile.
-        if !hdr.has_frame() {
-            hdr.slot = Slot::Decoding;
-        }
-        let token = hdr.token;
+        let key = (path.to_path_buf(), long_edge, can_show);
+        let showing = match std::mem::take(&mut self.viewer.hdr.decode) {
+            Decode::Hdr { shown, .. } => Some(shown),
+            Decode::Decoding { showing, .. } => showing,
+            _ => None,
+        };
         let path = path.to_path_buf();
         let job = cx.background_spawn(async move { run(&path, long_edge, can_show) });
-        self.spawn_scoped(cx, async move |this, cx| {
+        let answer_key = key.clone();
+        let task = self.spawn_scoped_in(window, cx, async move |this, cx| {
             let outcome = job.await;
-            let _ = this.update(cx, |app, cx| {
-                let hdr = &mut app.viewer.hdr;
-                if hdr.token != token {
+            let _ = this.update_in(cx, |app, window, cx| {
+                let key = answer_key;
+                // An answer for a key that is no longer the one decoding
+                // is dropped (the stage owns this task, so a replaced
+                // decode normally never gets here).
+                if !matches!(&app.viewer.hdr.decode, Decode::Decoding { key: now, .. } if *now == key)
+                {
                     return;
                 }
-                hdr.in_flight = false;
-                hdr.headroom = 0.0;
-                hdr.slot = match outcome {
-                    Outcome::Sdr => Slot::Sdr,
-                    Outcome::StandardRange => Slot::StandardRange,
-                    Outcome::Hdr(pixels) => Slot::Hdr(pixels),
+                let decode = match outcome {
+                    Outcome::Sdr => Decode::Sdr(key),
+                    Outcome::StandardRange => Decode::StandardRange(key),
+                    Outcome::Hdr(pixels) => Decode::Hdr {
+                        key,
+                        shown: Shown {
+                            pixels,
+                            headroom: 0.0,
+                            _poll: Self::poll_viewer_headroom(app, window, cx),
+                        },
+                    },
                 };
+                app.viewer.hdr.decode = decode;
                 cx.notify();
             });
-        })
-        .detach();
+        });
+        self.viewer.hdr.decode = Decode::Decoding {
+            key,
+            showing,
+            _task: task,
+        };
     }
 
     /// While an HDR frame shows, re-read the display headroom (ten times a
     /// second at first, while the screen ramps into EDR, then once a
-    /// second) and repaint only when it changed.
-    fn poll_viewer_headroom(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.viewer.hdr.polling {
-            return;
-        }
-        self.viewer.hdr.polling = true;
+    /// second) and repaint only when it changed. The task belongs to the
+    /// frame; it also ends by itself once no frame or picture shows.
+    fn poll_viewer_headroom(&self, window: &Window, cx: &mut Context<Self>) -> Task<()> {
         self.spawn_scoped_in(window, cx, async move |this, cx| {
             let mut ticks = 0_u32;
             loop {
@@ -259,13 +373,15 @@ impl QuillApp {
                 let keep = this.update_in(cx, |app, window, cx| {
                     let hdr = &mut app.screen.viewer.hdr;
                     if !hdr.has_frame() || app.screen.viewer.state.current().is_none() {
-                        hdr.polling = false;
                         return false;
                     }
-                    let left_edr = hdr.edr_on && !hdr.edr_lost && super::renderer_left_edr(window);
+                    let left_edr = hdr.edr == Edr::On && super::renderer_left_edr(window);
+                    // The same value the draw aims at, so a screen that lost
+                    // EDR (drawn at SDR) does not read as changed forever.
+                    let drawn = hdr.decode.frame().map_or(0.0, |shown| shown.headroom);
                     if left_edr
                         || app.screen.viewer.orientation.is_identity()
-                            && super::headroom(window).effective() != hdr.headroom
+                            && hdr.display_headroom(super::headroom(window)) != drawn
                     {
                         cx.notify();
                     }
@@ -276,7 +392,18 @@ impl QuillApp {
                 }
             }
         })
-        .detach();
+    }
+
+    /// The account on screen leaves: its viewer (and the record of the
+    /// window's extended-range mode with it) goes, so the mode is switched
+    /// off here, or the next screen's `want = false` would equal the new
+    /// record and leave the layer in extended range.
+    pub(crate) fn leave_viewer_edr(&mut self, window: &Window) {
+        let hdr = &mut self.viewer.hdr;
+        if hdr.edr.window_on() {
+            super::set_window_edr(window, false);
+        }
+        hdr.edr = hdr.edr.layer_off();
     }
 
     /// Called every render: the window is in extended-range mode exactly
@@ -287,15 +414,23 @@ impl QuillApp {
             && self.viewer.orientation.is_identity()
             && self.viewer.hdr.has_frame();
         let hdr = &mut self.viewer.hdr;
-        if hdr.edr_on && super::renderer_left_edr(window) {
-            hdr.edr_lost = true;
+        if hdr.edr == Edr::On && super::renderer_left_edr(window) {
+            hdr.edr = Edr::Lost;
         }
-        if want != hdr.edr_on {
-            super::set_window_edr(window, want);
-            hdr.edr_on = want;
-            if !want && cfg!(windows) {
-                hdr.edr_lost = false;
+        match (want, hdr.edr) {
+            (true, Edr::Off) => {
+                super::set_window_edr(window, true);
+                hdr.edr = Edr::On;
             }
+            (true, Edr::LostOff) => {
+                super::set_window_edr(window, true);
+                hdr.edr = Edr::Lost;
+            }
+            (false, Edr::On | Edr::Lost) => {
+                super::set_window_edr(window, false);
+                hdr.edr = hdr.edr.layer_off();
+            }
+            _ => {}
         }
     }
 }
@@ -359,7 +494,19 @@ fn frame_element(frame: &super::Frame, _fit: (f32, f32)) -> Option<AnyElement> {
 
 #[cfg(test)]
 mod tests {
-    use super::bucket;
+    use super::{Edr, bucket};
+
+    #[test]
+    fn a_lost_layer_stays_lost_off_windows_once_switched_off() {
+        let off = Edr::Lost.layer_off();
+        if cfg!(windows) {
+            assert_eq!(off, Edr::Off);
+        } else {
+            assert_eq!(off, Edr::LostOff);
+            assert!(off.is_lost() && !off.window_on());
+        }
+        assert_eq!(Edr::On.layer_off(), Edr::Off);
+    }
 
     #[test]
     fn long_edges_round_up_to_the_step() {

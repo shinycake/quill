@@ -10,7 +10,7 @@ use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::boost_box::BoostBoxState;
 use quill::calls::rtmp_start::RtmpStart;
-use quill::collectible_info::CollectibleLookup;
+use quill::collectible_info::{LookupSpec, LookupStage};
 use quill::ids::{AccountKey, ChatId};
 use quill::state::LanguageLinkLookup;
 
@@ -47,18 +47,19 @@ fn a_switch_closes_the_boxes_whose_flag_is_the_sessions(cx: &mut TestAppContext)
     app.update_in(vcx, |app, _, cx| {
         if let Some(session) = app.demo_session.as_mut() {
             session.open_chat(CHAT);
-            session.stickers.masks.open = true;
+            session.stickers.masks.set_dialog_open(true);
             session.stickers.emoji.open = true;
             session.chat_list.archive_settings_open = true;
-            session.calls.rtmp_start = Some(RtmpStart::new(CHAT));
+            session.calls.rtmp_start = Some(RtmpStart::new(CHAT, quill::ids::RequestId(1)));
             session.groups.boost_box = Some(BoostBoxState::new(CHAT.0, false));
-            session.settings.language_link = Some(LanguageLinkLookup::new("de".into()));
-            session.payments.hub.collectible = Some(CollectibleLookup::new(
-                "durov",
-                "Pavel",
-                None,
-                String::new(),
+            session.settings.language_link = Some(LanguageLinkLookup::looking_up(
+                "de".into(),
+                quill::ids::RequestId(1),
             ));
+            session.payments.hub.collectible = Some(
+                LookupSpec::new("durov", "Pavel", None, String::new())
+                    .into_lookup(LookupStage::Loading(quill::ids::RequestId(1))),
+            );
         }
         app.open_location_picker(cx);
     });
@@ -72,7 +73,7 @@ fn a_switch_closes_the_boxes_whose_flag_is_the_sessions(cx: &mut TestAppContext)
     app.read_with(vcx, |app, _| {
         assert!(!app.location_picker_open(), "Send Location");
         let session = app.session().expect("the demo session");
-        assert!(!session.stickers.masks.open, "Manage masks");
+        assert!(!session.stickers.masks.dialog_open(), "Manage masks");
         assert!(!session.stickers.emoji.open, "Emoji sets");
         assert!(!session.chat_list.archive_settings_open, "Archive settings");
         assert!(session.calls.rtmp_start.is_none(), "RTMP start");
@@ -96,7 +97,7 @@ fn a_switch_closes_the_earn_layer(cx: &mut TestAppContext) {
         // Opened from Settings (My Stars), with no chat whose leave would
         // take the column.
         if let Some(session) = app.demo_session.as_mut() {
-            session.open_chat = None;
+            session.open = quill::state::OpenView::of(None);
         }
         let panel = EarnPanel::Revenue {
             peer: EarnPeer::User(11),

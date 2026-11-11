@@ -15,6 +15,13 @@ Background: `docs/decisions/message-widgets.md`.
   middle of the widget, as Telegram Desktop does, and the renderer's badge
   would sit under the message time in the bottom corner.
 
+- `sandbox/packages/desktop/sandbox/include/twidget/widget_host.h`: the
+  diagnostics lock is declared before the host thread. The validator and the
+  renderer report diagnostics while they are built, and the host thread ran
+  those reports before the lock existed, so a widget whose bundles were
+  refused (CRLF bundles on Windows, #1425) aborted the app instead of
+  stopping.
+
 ## Added by the script
 
 - `twidget/generated/tw_ua_stylesheet.h`: the profile's UA layer from

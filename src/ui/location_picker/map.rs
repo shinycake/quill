@@ -208,9 +208,14 @@ impl QuillApp {
                 {
                     let app = app.clone();
                     window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
-                        if phase != DispatchPhase::Capture
-                            || event.pressed_button != Some(MouseButton::Left)
-                        {
+                        if phase != DispatchPhase::Capture {
+                            return;
+                        }
+                        if event.pressed_button != Some(MouseButton::Left) {
+                            // A release lost outside the window (the app
+                            // was deactivated) ends the drag at the next
+                            // move without the button.
+                            let _ = app.update(cx, |this, cx| this.location_map_released(cx));
                             return;
                         }
                         let position = event.position;

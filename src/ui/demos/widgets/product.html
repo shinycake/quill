@@ -1,0 +1,42 @@
+<style>
+body { margin: 0; padding: 10px 10px max(12px, env(safe-area-inset-bottom)); }
+.hero { position: relative; height: 158px; border-radius: 14px; background: linear-gradient(160deg, #f3f5f9, #dde2ea); display: flex; align-items: center; justify-content: center; }
+.chip { position: absolute; top: 10px; background: #fff; color: #1f2937; border-radius: 999px; padding: 2px 9px; font-size: 12px; }
+.stock { left: 10px; }
+.rating { right: 10px; }
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #34c759; margin-right: 5px; }
+.info { padding: 0 2px; }
+h3 { margin: 10px 0 0; font-size: 17px; }
+.row { display: flex; justify-content: space-between; align-items: center; }
+.meta { color: var(--tg-theme-hint-color); font-size: 13px; }
+.sw { display: inline-block; width: 14px; height: 14px; border-radius: 50%; margin-left: 6px; border: 2px solid var(--tg-theme-bg-color); }
+.sw.on { border-color: var(--tg-theme-text-color); }
+button { width: 100%; margin-top: 10px; }
+</style>
+<div class="hero">
+  <span class="chip stock"><span class="dot"></span>In stock</span>
+  <span class="chip rating">★ 4.9</span>
+  <svg width="132" height="112" viewBox="0 0 132 112">
+    <path d="M22 72 V56 a44 44 0 0 1 88 0 V72" fill="none" stroke="#9aa1ad" stroke-width="9" stroke-linecap="round"/>
+    <path d="M22 60 a44 44 0 0 1 88 0" fill="none" stroke="#c8cdd5" stroke-width="3"/>
+    <rect x="9" y="60" width="28" height="44" rx="13" fill="#4f5664"/>
+    <rect x="95" y="60" width="28" height="44" rx="13" fill="#4f5664"/>
+    <circle cx="23" cy="82" r="4.5" fill="#d7dbe2"/>
+    <circle cx="109" cy="82" r="4.5" fill="#d7dbe2"/>
+  </svg>
+</div>
+<div class="info">
+  <div class="row"><h3>Aurora Headphones</h3><span class="meta" id="sold">2,314 sold</span></div>
+  <div class="row"><span class="meta">Wireless · ANC · 40 h battery</span>
+    <span><span class="sw on" style="background:#2b2f38"></span><span class="sw" style="background:#b7b2e8"></span><span class="sw" style="background:#e8d3b0"></span></span></div>
+</div>
+<button id="buy">Buy for $129</button>
+<script>
+document.querySelectorAll('.sw').forEach(function (s) {
+  s.addEventListener('click', function () {
+    document.querySelectorAll('.sw').forEach(function (o) { o.className = 'sw'; });
+    s.className = 'sw on';
+  });
+});
+document.getElementById('buy').addEventListener('click', function () { this.textContent = 'Added to cart ✓'; });
+</script>

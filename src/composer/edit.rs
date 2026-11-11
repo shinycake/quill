@@ -77,6 +77,53 @@ pub enum EditMediaKind {
     Audio,
 }
 
+/// One probe of a replacement video. An answer settles the stage only when
+/// it carries the job the stage holds, so the answer of an earlier probe of
+/// the same path (the file staged, cleared and staged again, or re-cut to
+/// the same output) never settles a newer one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProbeJob(u64);
+
+impl ProbeJob {
+    pub fn next() -> Self {
+        static JOBS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        Self(JOBS.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    }
+}
+
+/// What `ffprobe` said about a replacement video. The probe runs in the
+/// background when the file is staged (`probe_edit_replacement`), and Save
+/// waits for it: `Probing` leaves when the answer of its job arrives
+/// (`Ready`) or the probe fails (the replacement is dropped with the
+/// reason), and the edit ending drops it with the replacement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplacementProbe {
+    NotNeeded,
+    Probing { job: ProbeJob },
+    Ready(crate::video::VideoProbe),
+}
+
+impl ReplacementProbe {
+    /// The stage of a file of `kind` that was just staged or replaced.
+    pub fn for_kind(kind: EditMediaKind) -> Self {
+        if kind == EditMediaKind::Video {
+            Self::Probing {
+                job: ProbeJob::next(),
+            }
+        } else {
+            Self::NotNeeded
+        }
+    }
+
+    /// The job of the probe still to answer.
+    pub fn probing(self) -> Option<ProbeJob> {
+        match self {
+            Self::Probing { job } => Some(job),
+            Self::NotNeeded | Self::Ready(_) => None,
+        }
+    }
+}
+
 /// `editMessageMedia` payload source: a picked or pasted file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditMediaReplacement {
@@ -84,6 +131,15 @@ pub struct EditMediaReplacement {
     pub file_name: String,
     pub kind: EditMediaKind,
     pub spoiler: bool,
+    /// A cover picked with "Edit Cover" for this replacement video. It goes
+    /// with the replacement: a different file or a cleared replacement
+    /// starts without it.
+    pub cover: Option<PathBuf>,
+    /// What the video editor did to this replacement video: the file it
+    /// started from, the edits and the cover frame (`start_timestamp`).
+    pub video_extras: AttachmentExtras,
+    /// The video's probe, for a replacement of kind `Video`.
+    pub probe: ReplacementProbe,
 }
 
 impl EditMediaReplacement {
@@ -96,9 +152,23 @@ impl EditMediaReplacement {
     }
 }
 
+/// Where the photo editor's Done for this message edit stands. The render
+/// that lands is applied only while the edit still waits for its number; a
+/// cancelled edit takes the stage with it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum EditRender {
+    #[default]
+    Idle,
+    /// The render numbered so goes off the UI thread; a later Done replaces
+    /// the number, so only the latest render lands.
+    Rendering(u64),
+}
+
 /// B5: per-message media-edit state.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MediaEdit {
+    /// The photo editor's render of this edit's image, until it lands.
+    pub render: EditRender,
     pub media: Option<EditableMedia>,
     /// The message belongs to an album (`media_album_id != 0`); the
     /// replacement must then fit that album's type.
@@ -107,11 +177,10 @@ pub struct MediaEdit {
     /// The video already on the message, for "Edit Cover" without
     /// replacing the video (`edit_media_tools.rs`).
     pub video: Option<super::edit_media_tools::ExistingVideo>,
-    /// A cover picked with "Edit Cover", applied when the edit is saved.
+    /// A cover picked with "Edit Cover" for the video already on the
+    /// message, applied when the edit is saved. A staged replacement keeps
+    /// its own ([`EditMediaReplacement::cover`]).
     pub cover: Option<PathBuf>,
-    /// What the video editor did to the staged replacement video: the
-    /// file it started from, the edits and the cover frame (`start_timestamp`).
-    pub video_extras: AttachmentExtras,
     /// The photo or video on the message is under a spoiler; an edited
     /// image keeps it (tdesktop `MediaEditManager::_spoilered`).
     pub had_spoiler: bool,
@@ -229,7 +298,10 @@ impl ComposerEdit {
             path,
             file_name,
             kind,
+            probe: ReplacementProbe::for_kind(kind),
             spoiler: false,
+            cover: None,
+            video_extras: AttachmentExtras::default(),
         })
     }
 
@@ -325,6 +397,7 @@ impl ComposerEdit {
             kind,
             scheduled: false,
             media_edit: MediaEdit {
+                render: EditRender::Idle,
                 media: match content {
                     MessageContent::Photo(_) => Some(EditableMedia::Photo),
                     MessageContent::Video(_) => Some(EditableMedia::Video),
@@ -342,7 +415,6 @@ impl ComposerEdit {
                     _ => None,
                 },
                 cover: None,
-                video_extras: AttachmentExtras::default(),
                 had_spoiler: match content {
                     MessageContent::Photo(photo) => photo.has_spoiler,
                     MessageContent::Video(video) => video.has_spoiler,
@@ -646,5 +718,17 @@ mod tests {
         let (restored, reply_back) = cancel_edit_keeping_reply(saved, stashed);
         assert_eq!(restored, "keep this draft");
         assert_eq!(reply_back, Some(reply));
+    }
+
+    #[test]
+    fn each_probe_of_a_replacement_has_its_own_job() {
+        let first = ReplacementProbe::for_kind(EditMediaKind::Video);
+        let second = ReplacementProbe::for_kind(EditMediaKind::Video);
+        assert!(first.probing().is_some());
+        assert_ne!(first.probing(), second.probing(), "an old answer is stale");
+        assert_eq!(
+            ReplacementProbe::for_kind(EditMediaKind::Photo).probing(),
+            None
+        );
     }
 }

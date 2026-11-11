@@ -31,6 +31,7 @@ use quill::lang::{keys, tr, tr_with, trn_decimal};
 use quill::local_time::now_unix;
 use quill::premium_hub::group_digits;
 use quill::state::Session;
+use quill::state::fetch::Fetch;
 use quill::telegram::envelope::MessageSender;
 
 /// The gift's collection title, for headings.
@@ -52,7 +53,12 @@ fn auction_cover(
     roots: &[std::path::PathBuf],
     cx: &App,
 ) -> Div {
-    let preview = session.payments.gift_market.previews.get(&state.gift_id());
+    let preview = session
+        .payments
+        .gift_market
+        .previews
+        .get(&state.gift_id())
+        .and_then(Fetch::data);
     // tdesktop cycles random model / backdrop / symbol sets every second.
     let cover = preview.and_then(|preview| preview.cover(now_unix().max(0) as u64));
     let backdrop = match cover {
@@ -120,11 +126,38 @@ impl QuillApp {
         self.market_push(MarketBox::AuctionBought { gift_id }, cx);
     }
 
+    /// "Couldn't load this list." with a Retry button.
+    fn retry_line(
+        &self,
+        id: &'static str,
+        retry: impl Fn(&mut Self, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr(keys::Q_MONEY_COULD_NOT_LOAD_THIS_LIST)),
+            )
+            .child(
+                Button::new(id)
+                    .label(tr(keys::Q_CHAT_RETRY))
+                    .ghost()
+                    .small()
+                    .on_click(cx.listener(move |this, _, _, cx| retry(this, cx))),
+            )
+    }
+
     /// "Understood": remembered, then the box the auction opens with.
     pub(super) fn understood_auction(&mut self, gift_id: i64, cx: &mut Context<Self>) {
         set_auction_about_shown(true);
         let below = self.gift_market.stack.len() > 1;
-        self.gift_market.stack.pop();
+        self.gift_market.pop();
         if !below {
             self.show_auction_box(gift_id, cx);
         }
@@ -207,10 +240,6 @@ impl QuillApp {
     }
 
     pub(super) fn auction_info_box(&mut self, gift_id: i64, cx: &mut Context<Self>) -> BoxView {
-        if let Some(live) = self.live.as_mut() {
-            // The cover's variants; sent once per gift.
-            let _ = live.driver.fetch_gift_upgrade_preview(gift_id);
-        }
         let roots = self.media_display_roots();
         let Some(session) = self.session() else {
             return BoxView::new(tr(keys::AUCTION_ABOUT_TITLE), div());
@@ -262,7 +291,12 @@ impl QuillApp {
                     })),
             );
         } else if !started
-            && let Some(preview) = session.payments.gift_market.previews.get(&gift_id)
+            && let Some(preview) = session
+                .payments
+                .gift_market
+                .previews
+                .get(&gift_id)
+                .and_then(Fetch::data)
             && !preview.models.is_empty()
         {
             body = body.child(
@@ -373,7 +407,7 @@ impl QuillApp {
                     this.market_back(cx);
                     this.close_kit_dialog_if_done(DialogKind::GiftMarket, window, cx);
                 } else {
-                    this.market_push(MarketBox::AuctionBid { gift_id }, cx);
+                    this.market_push(MarketBox::bid(gift_id), cx);
                 }
             },
         ));
@@ -410,7 +444,7 @@ impl QuillApp {
             .auction_state(gift_id)
             .and_then(|state| state.my())
             .and_then(|my| name_of(my.owner));
-        let to = name_of(self.auction_recipient());
+        let to = name_of(self.auction_recipient(gift_id));
         let text = change_recipient_text(from.as_deref(), to.as_deref());
         BoxView::new(tr(keys::AUCTION_CHANGE_TITLE), div().text_sm().child(text)).footer(
             div()
@@ -446,7 +480,20 @@ impl QuillApp {
         let muted = cx.theme().muted_foreground;
         let mut body = div().flex().flex_col().gap_3();
         match market.acquired.get(&gift_id) {
-            None => {
+            Some(Fetch::Failed { .. }) => {
+                body = body.child(self.retry_line(
+                    "auction-bought-retry",
+                    move |this, cx| {
+                        if let Some(live) = this.live.as_mut() {
+                            let _ = live.driver.fetch_gift_auction_acquired(gift_id);
+                        }
+                        cx.notify();
+                    },
+                    cx,
+                ));
+            }
+            None
+            | Some(Fetch::Idle | Fetch::Outdated(None) | Fetch::Loading { stale: None, .. }) => {
                 body = body.child(
                     div()
                         .text_sm()
@@ -454,7 +501,13 @@ impl QuillApp {
                         .child(tr(keys::Q_MONEY_LOADING)),
                 );
             }
-            Some(list) => {
+            Some(
+                Fetch::Ready(list)
+                | Fetch::Outdated(Some(list))
+                | Fetch::Loading {
+                    stale: Some(list), ..
+                },
+            ) => {
                 for gift in list {
                     let heading = if gift.number > 0 {
                         format!("{title} #{}", group_digits(i64::from(gift.number)))
@@ -508,7 +561,20 @@ impl QuillApp {
         };
         let muted = cx.theme().muted_foreground;
         let mut body = div().flex().flex_col().gap_3();
-        if let Some(preview) = session.payments.gift_market.previews.get(&gift_id) {
+        let previews = session.payments.gift_market.previews.get(&gift_id);
+        if previews.is_some_and(|fetch| fetch.error().is_some()) {
+            body = body.child(self.retry_line(
+                "variants-retry",
+                move |this, cx| {
+                    if let Some(live) = this.live.as_mut() {
+                        let _ = live.driver.fetch_gift_upgrade_preview(gift_id);
+                    }
+                    cx.notify();
+                },
+                cx,
+            ));
+        }
+        if let Some(preview) = previews.and_then(Fetch::data) {
             let count = preview.models.len();
             body = body.child(div().text_sm().text_color(muted).child(trn_decimal(
                 keys::Q_LEFTOVERS_COLLECTIBLE_MODELS,
@@ -579,10 +645,24 @@ impl QuillApp {
                     })
                 })
             }
-            MessageSender::Chat { .. } => None,
+            // A bid placed for a channel is raised for that channel, never
+            // for the user.
+            MessageSender::Chat { chat_id } => {
+                let session = self.session()?;
+                session
+                    .gift_recipient(quill::ids::ChatId(chat_id))
+                    .or_else(|| {
+                        Some(quill::gift_manage::GiftRecipient {
+                            sender,
+                            name: session.sender_label(sender),
+                            is_self: false,
+                            is_channel: true,
+                        })
+                    })
+            }
         });
         self.gift_market.recipient = recipient;
-        self.market_push(MarketBox::AuctionBid { gift_id }, cx);
+        self.market_push(MarketBox::bid(gift_id), cx);
     }
 
     pub(super) fn active_auctions_box(&mut self, cx: &mut Context<Self>) -> BoxView {

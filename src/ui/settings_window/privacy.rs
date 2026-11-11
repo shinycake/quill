@@ -9,9 +9,27 @@ use crate::ui::navigation::NavigationAction as Nav;
 use crate::ui::privacy::{PrivacyEditorTarget, new_chat_privacy_value, privacy_key_value};
 use gpui_kit::*;
 use quill::lang::{keys, tr};
+use quill::settings_catalog::Page;
 use quill::telegram::requests_privacy::PrivacySettingKey;
 
 impl QuillApp {
+    /// A password typed in the Privacy page's check card stays only while
+    /// that page is on screen: leaving the page or closing Settings empties
+    /// the field, as the 2FA box empties its own on close (`close_twofa`).
+    pub(in crate::ui) fn sync_check_password(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.settings.open && self.settings.page == Some(Page::Privacy) {
+            return;
+        }
+        let field = self.twofa.check_password.clone();
+        if !field.read(cx).value().is_empty() {
+            field.update(cx, |input, cx| input.set_value("", window, cx));
+        }
+    }
+
     pub(super) fn privacy_page(&mut self, cx: &mut Context<Self>) -> Div {
         let password_check = self
             .session()
@@ -116,8 +134,10 @@ impl QuillApp {
             key.label(),
             Some(value.into()),
             cx.listener(move |this, _, _, cx| {
-                this.privacy.editor = Some(PrivacyEditorTarget::Rule(key));
-                this.privacy.exception_picker_open = false;
+                this.privacy
+                    .layer
+                    .open_editor(PrivacyEditorTarget::Rule(key));
+                this.privacy.layer.close_exception_picker();
                 cx.notify();
             }),
             cx,

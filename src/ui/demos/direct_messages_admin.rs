@@ -162,7 +162,11 @@ impl QuillApp {
             )
         }));
         if let Some(session) = self.demo_session.as_mut() {
-            session.histories.entry(DIRECT).or_default().loaded_complete = true;
+            session
+                .histories
+                .entry(DIRECT)
+                .or_default()
+                .set_loaded_complete(true);
             if let Some(topic) = session.open_direct_topic(chat_id) {
                 let count = MESSAGES.iter().filter(|m| m.topic == topic).count();
                 session

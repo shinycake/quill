@@ -693,3 +693,81 @@ fn a_refused_create_reports_and_sets_no_photo() {
             .any(|json| json.contains("setCommunityPhoto"))
     );
 }
+
+/// A second Create while one is out is that one (the box tells the two
+/// apart from a chat that left the model, which it does tell in a note).
+#[test]
+fn a_second_create_while_one_is_out_is_told_apart_from_a_lost_chat() {
+    let mut rig = Rig::new();
+    rig.ingest(
+        r#"{"@type":"updateNewChat","chat":{"id":-1007,"title":"Field Notes","type":{"@type":"chatTypeSupergroup","supergroup_id":7,"is_channel":true},"unread_count":0}}"#,
+    );
+    let chat = crate::ids::ChatId(-1007);
+    assert!(!rig.driver.community_create_out(chat));
+    let first = rig
+        .driver
+        .create_community_with_photo(chat, "Notes", false, None)
+        .unwrap();
+    assert!(first.is_some());
+    assert!(rig.driver.community_create_out(chat));
+    let second = rig
+        .driver
+        .create_community_with_photo(chat, "Notes", false, None)
+        .unwrap();
+    assert_eq!(second, None, "nothing more is sent");
+    // A chat that is gone is not "out".
+    let gone = crate::ids::ChatId(-1);
+    assert!(!rig.driver.community_create_out(gone));
+}
+
+/// 05-073: a request approved while a page is in flight is not brought
+/// back by that page's answer.
+#[test]
+fn a_page_in_flight_does_not_bring_back_a_request_handled_meanwhile() {
+    let mut rig = Rig::new();
+    let first = rig
+        .driver
+        .fetch_community_add_chat_requests(OWNED, true)
+        .unwrap()
+        .unwrap();
+    rig.ingest(&format!(
+        r#"{{"@type":"communityAddChatRequests","@extra":"{}","total_count":2,"requests":[{{"@type":"communityAddChatRequest","chat_id":7,"is_hidden":false,"sender_user_id":5,"date":10}}],"next_offset":"p2"}}"#,
+        first.0
+    ));
+    let second = rig
+        .driver
+        .fetch_community_add_chat_requests(OWNED, false)
+        .unwrap()
+        .unwrap();
+    // 05-072: no refresh goes out beside the page in flight.
+    let sent = rig.sent_count();
+    assert!(
+        rig.driver
+            .fetch_community_add_chat_requests(OWNED, true)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(rig.sent_count(), sent);
+    let approve = rig
+        .driver
+        .process_community_add_chat_request(OWNED, 7, true)
+        .unwrap()
+        .unwrap();
+    rig.ok(approve);
+    rig.ingest(&format!(
+        r#"{{"@type":"communityAddChatRequests","@extra":"{}","total_count":2,"requests":[{{"@type":"communityAddChatRequest","chat_id":7,"is_hidden":false,"sender_user_id":5,"date":10}},{{"@type":"communityAddChatRequest","chat_id":9,"is_hidden":false,"sender_user_id":5,"date":12}}],"next_offset":""}}"#,
+        second.0
+    ));
+    let ids: Vec<i64> = rig
+        .driver
+        .session
+        .communities
+        .add_chat_requests(OWNED)
+        .data()
+        .unwrap()
+        .requests
+        .iter()
+        .map(|r| r.chat_id)
+        .collect();
+    assert_eq!(ids, vec![9]);
+}

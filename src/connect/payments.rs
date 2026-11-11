@@ -2,8 +2,8 @@
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::payment_invoice::InputInvoice;
-use crate::state::BankCardLookup;
 use crate::state::PaymentsPurpose;
+use crate::state::{BankCardLookup, BankCardStage};
 use crate::state::{PaymentRequest, RequestPurpose};
 use crate::telegram::envelope::OrderInfoData;
 use crate::telegram::requests::{
@@ -37,11 +37,23 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         invoice: InputInvoice,
     ) -> Result<RequestId, ConnectSendError> {
+        // A payment that asked for a verification step is not abandoned by
+        // a new form: that checkout stays until its answer arrives.
+        if self.session.payments.checkout.is_verifying() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let extra = self.payment_extra(&invoice, RequestPurpose::GetPaymentForm)?;
         let json = get_payment_form(extra, &invoice);
-        self.session.payments.request = Some(PaymentRequest { invoice });
-        self.session.payments.form_request = Some(extra);
-        self.send_json_request(extra, &json)
+        let sent = self.send_json_request(extra, &json)?;
+        // The checkout waits on the form only once the request is out. The
+        // new value replaces the one before it whole (its request, form,
+        // order info, shipping choice and note), here and nowhere in the
+        // UI; a refused send leaves the checkout on screen as it was.
+        self.session.payments.checkout = crate::state::CheckoutForm::Loading {
+            request: extra,
+            invoice: PaymentRequest { invoice },
+        };
+        Ok(sent)
     }
 
     /// Slice P1: `validateOrderInfo` (schema 1.8.67, line 15268) — validate
@@ -53,12 +65,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         allow_save: bool,
     ) -> Result<RequestId, ConnectSendError> {
         let extra = self.payment_extra(invoice, RequestPurpose::ValidateOrderInfo)?;
-        self.session.payments.request = Some(PaymentRequest {
-            invoice: invoice.clone(),
-        });
-        self.session.payments.validate_request = Some(extra);
         let json = validate_order_info_request(extra, invoice, order, allow_save);
-        self.send_json_request(extra, &json)
+        let sent = self.send_json_request(extra, &json)?;
+        // Stored only once the send went out; the earlier order id and
+        // shipping choice are for other fields.
+        if self.session.payments.shows(invoice) {
+            self.session
+                .payments
+                .checkout
+                .begin_validating(extra, order.clone());
+        }
+        Ok(sent)
     }
 
     /// Slice P1: `sendPaymentForm` (schema 1.8.67, line 15277) — submit the
@@ -74,10 +91,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         credentials: serde_json::Value,
         tip_amount: i64,
     ) -> Result<RequestId, ConnectSendError> {
+        // A second Pay before the answer must not pay twice.
+        if self.session.payments.is_paying(invoice) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let extra = self.payment_extra(invoice, RequestPurpose::SendPaymentForm)?;
-        self.session.payments.request = Some(PaymentRequest {
-            invoice: invoice.clone(),
-        });
         let json = send_payment_form_request(
             extra,
             invoice,
@@ -88,7 +106,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             tip_amount,
         );
         let sent = self.send_json_request(extra, &json)?;
-        self.session.payment_sent(extra);
+        self.session.payment_sent(extra, invoice);
         Ok(sent)
     }
 
@@ -105,10 +123,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetPaymentReceipt, Some(chat_id));
-        // A receipt is no checkout: `payments.request` stays the open
-        // checkout's invoice, which `shows` and `checkout_sending` read.
+        // A receipt is no checkout: the open checkout's stage stays as it
+        // is (`shows` and `checkout_sending` read its invoice).
         let json = get_payment_receipt(extra, chat_id, message_id);
-        self.send_json_request(extra, &json)
+        let sent = self.send_json_request(extra, &json)?;
+        self.session.payments.receipt = crate::state::ReceiptStage::Loading(extra);
+        Ok(sent)
     }
 
     /// Slice payments: clear the saved order info (`deleteSavedOrderInfo`,
@@ -144,13 +164,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self.session.request(RequestPurpose::GetBankCardInfo, None);
         self.session.payments.bank_card = Some(BankCardLookup {
             number: number.to_string(),
-            info: None,
-            loading: true,
+            stage: BankCardStage::Loading { request: extra },
         });
         let json = crate::telegram::requests::get_bank_card_info(extra, number);
         if let Err(err) = self.send_json_request(extra, &json) {
             if let Some(lookup) = self.session.payments.bank_card.as_mut() {
-                lookup.loading = false;
+                lookup.stage = BankCardStage::Failed;
             }
             return Err(err);
         }
@@ -167,10 +186,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if (self.session.payments.star_subscriptions.is_some()
-            && !self.session.payments.star_subscriptions_stale)
-            || self.session.payments.star_subscriptions_loading
-        {
+        let list = &self.session.payments.star_subscriptions;
+        if (list.data().is_some() && !list.is_stale()) || list.is_loading() {
             return Ok(None);
         }
         self.fetch_star_subscriptions_page(false).map(Some)
@@ -183,9 +200,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.payments.star_subscriptions_offset.is_empty()
-            || self.session.payments.star_subscriptions_loading
-        {
+        let list = &self.session.payments.star_subscriptions;
+        if list.offset().is_empty() || list.is_loading() {
             return Ok(None);
         }
         self.fetch_star_subscriptions_page(true).map(Some)
@@ -196,7 +212,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         append: bool,
     ) -> Result<RequestId, ConnectSendError> {
         let offset = if append {
-            self.session.payments.star_subscriptions_offset.clone()
+            self.session
+                .payments
+                .star_subscriptions
+                .offset()
+                .to_string()
         } else {
             String::new()
         };
@@ -204,13 +224,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append }),
             None,
         );
-        self.session.payments.star_subscriptions_loading = true;
-        self.session.payments.star_subscriptions_error = None;
         let json = get_star_subscriptions(extra, false, &offset);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.payments.star_subscriptions_loading = false;
+            // A page that never left shows its error; it is not asked again
+            // by itself.
+            self.session.payments.star_subscriptions.load_not_sent(
+                crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_THE_SUBSCRIPTIONS).into(),
+            );
             return Err(err);
         }
+        self.session.payments.star_subscriptions.begin_load(extra);
         Ok(extra)
     }
 
@@ -221,11 +244,16 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn refresh_star_subscriptions_if_stale(
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.session.payments.star_subscriptions_stale {
+        // A page in flight settles first: the list stays stale until a first
+        // page answers (or fails), so a refetch never races an appended one.
+        if !self.session.payments.star_subscriptions.is_stale() {
             return Ok(None);
         }
-        self.session.payments.star_subscriptions_stale = false;
-        self.fetch_star_subscriptions_page(false).map(Some)
+        let sent = self.fetch_star_subscriptions_page(false);
+        if sent.is_err() {
+            self.session.payments.star_subscriptions.stale_dropped();
+        }
+        sent.map(Some)
     }
 
     /// Slice `parity:bots-payment-recurring`: `editStarSubscription`
@@ -237,17 +265,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         subscription_id: &str,
         is_canceled: bool,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.payments.star_subscriptions_mutating {
+        if !self.chats_path_active() || self.session.payments.star_subscriptions.is_editing() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
             .request(RequestPurpose::EditStarSubscription, None);
-        self.session.payments.star_subscriptions_mutating = true;
-        self.session.payments.star_subscriptions_error = None;
+        self.session.payments.star_subscriptions.begin_edit(extra);
         let json = edit_star_subscription(extra, subscription_id, is_canceled);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.payments.star_subscriptions_mutating = false;
+            self.session.payments.star_subscriptions.edit_not_sent();
             return Err(err);
         }
         Ok(extra)
@@ -261,17 +288,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         subscription_id: &str,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.payments.star_subscriptions_mutating {
+        if !self.chats_path_active() || self.session.payments.star_subscriptions.is_editing() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
             .request(RequestPurpose::ReuseStarSubscription, None);
-        self.session.payments.star_subscriptions_mutating = true;
-        self.session.payments.star_subscriptions_error = None;
+        self.session.payments.star_subscriptions.begin_edit(extra);
         let json = reuse_star_subscription(extra, subscription_id);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.payments.star_subscriptions_mutating = false;
+            self.session.payments.star_subscriptions.edit_not_sent();
             return Err(err);
         }
         Ok(extra)
@@ -280,11 +306,11 @@ impl<S: JsonSender> ConnectDriver<S> {
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Look up a tapped collectible username or phone number
-    /// (`getCollectibleItemInfo`). The same item is not asked twice while
-    /// its lookup is running (tdesktop `resolveCollectible`).
+    /// (`getCollectibleItemInfo`). A tap on a lookup still out asks again:
+    /// the newest request is the one answered.
     pub fn request_collectible_info(
         &mut self,
-        lookup: crate::collectible_info::CollectibleLookup,
+        spec: crate::collectible_info::LookupSpec,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -295,15 +321,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             .hub
             .collectible
             .as_ref()
-            .is_some_and(|open| open.loading && open.entity == lookup.entity);
+            .is_some_and(|open| open.is_loading() && open.entity == spec.entity);
         if running {
             return Ok(None);
         }
-        let (kind, entity) = (lookup.kind, lookup.entity.clone());
+        let (kind, entity) = (spec.kind, spec.entity.clone());
         let extra = self
             .session
             .request(RequestPurpose::GetCollectibleInfo, None);
-        self.session.payments.hub.collectible = Some(lookup);
+        self.session.payments.hub.collectible =
+            Some(spec.into_lookup(crate::collectible_info::LookupStage::Loading(extra)));
         let json = crate::telegram::requests::get_collectible_item_info(extra, kind, &entity);
         if let Err(err) = self.send_json_request(extra, &json) {
             self.session.payments.hub.collectible = None;

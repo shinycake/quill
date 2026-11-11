@@ -232,7 +232,12 @@ fn contacts_fetched_once_for_tab() {
         )
         .unwrap();
     assert_eq!(
-        driver.session.users_state.contacts.as_deref(),
+        driver
+            .session
+            .users_state
+            .contacts
+            .data()
+            .map(Vec::as_slice),
         Some([31].as_slice())
     );
     assert_eq!(driver.fetch_contacts().unwrap(), None);
@@ -288,6 +293,39 @@ fn user_full_info_fetched_once_per_user() {
     // A different user still fetches.
     assert!(driver.fetch_user_full_info(32).unwrap().is_some());
 
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_failed_user_full_info_is_asked_again_only_by_the_explicit_retry() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+    let extra = driver
+        .ensure_user_full_info(31)
+        .unwrap()
+        .expect("getUserFullInfo sent");
+    driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"error","@extra":"{}","code":400,"message":"X"}}"#,
+                    extra.0
+                ),
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    // A render asks again: nothing goes.
+    assert_eq!(driver.ensure_user_full_info(31).unwrap(), None);
+    // The explicit retry asks once more.
+    assert!(driver.fetch_user_full_info(31).unwrap().is_some());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -349,7 +387,7 @@ fn add_contact_sends_imported_contact() {
     let recorder = Arc::new(RecordingSender::new());
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
-    driver.session.users_state.contacts = Some(Vec::new());
+    driver.session.users_state.contacts = crate::state::fetch::Fetch::Ready(Vec::new());
     let extra = driver
         .add_contact(31, "+15550131", "Ada", "Lovelace")
         .unwrap()
@@ -374,7 +412,7 @@ fn add_contact_sends_imported_contact() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.users_state.contacts.is_none());
+    assert!(driver.session.users_state.contacts.data().is_none());
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -391,7 +429,7 @@ fn a6_remove_contact_sends_and_invalidates() {
     let recorder = Arc::new(RecordingSender::new());
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
-    driver.session.users_state.contacts = Some(vec![31]);
+    driver.session.users_state.contacts = crate::state::fetch::Fetch::Ready(vec![31]);
     let extra = driver
         .remove_contact(31)
         .unwrap()
@@ -412,7 +450,7 @@ fn a6_remove_contact_sends_and_invalidates() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.users_state.contacts.is_none());
+    assert!(driver.session.users_state.contacts.data().is_none());
     assert_eq!(
         driver.session.users_state.contacts_notice.as_deref(),
         Some("Contact deleted.")
@@ -433,7 +471,7 @@ fn a6_delete_synced_contacts_clears_then_removes() {
     let recorder = Arc::new(RecordingSender::new());
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
-    driver.session.users_state.contacts = Some(vec![31, 32]);
+    driver.session.users_state.contacts = crate::state::fetch::Fetch::Ready(vec![31, 32]);
     let sent_count = driver.delete_synced_contacts().unwrap();
     assert_eq!(sent_count, 2);
     let sent = recorder.snapshot();
@@ -699,6 +737,58 @@ fn callback_query_sent_for_button_press() {
             .requests
             .pending_extra_for(RequestPurpose::GetCallbackQueryAnswer, Some(ChatId(21)))
             .is_some()
+    );
+    // The pressed button waits for the bot; its neighbours do not.
+    let pressed = crate::state::CallbackButtonKey::Data(vec![1, 2, 3]);
+    let other = crate::state::CallbackButtonKey::Data(vec![9]);
+    assert!(
+        driver
+            .session
+            .callback_button_waiting(ChatId(21), MessageId(301), &pressed)
+    );
+    assert!(
+        !driver
+            .session
+            .callback_button_waiting(ChatId(21), MessageId(301), &other)
+    );
+    // The bot's answer ends the wait.
+    let answer = format!(
+        r#"{{"@type":"callbackQueryAnswer","@extra":"{}","text":"","show_alert":false,"url":""}}"#,
+        extra.0
+    );
+    driver
+        .ingest(copy_and_parse(&answer, &seq, &dyn_sink).unwrap())
+        .unwrap();
+    assert!(
+        !driver
+            .session
+            .callback_button_waiting(ChatId(21), MessageId(301), &pressed)
+    );
+    // So does an error (TDLib 502 when the bot misses its deadline).
+    let again = driver
+        .send_callback_query(ChatId(21), MessageId(301), &[1, 2, 3])
+        .expect("a second press sends");
+    assert!(
+        driver
+            .session
+            .callback_button_waiting(ChatId(21), MessageId(301), &pressed)
+    );
+    let error = format!(
+        r#"{{"@type":"error","@extra":"{}","code":502,"message":"BOT_RESPONSE_TIMEOUT"}}"#,
+        again.0
+    );
+    driver
+        .ingest(copy_and_parse(&error, &seq, &dyn_sink).unwrap())
+        .unwrap();
+    assert!(
+        !driver
+            .session
+            .callback_button_waiting(ChatId(21), MessageId(301), &pressed)
+    );
+    assert_eq!(
+        driver.session.bots.callback_presses.len(),
+        1,
+        "only the last press is kept"
     );
     // Pending (unsent, negative id) messages cannot be answered.
     assert!(

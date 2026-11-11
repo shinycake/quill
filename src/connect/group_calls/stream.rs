@@ -7,7 +7,7 @@ use super::*;
 use crate::calls::engine::{
     BroadcastPartAnswer, BroadcastPartStatus, BroadcastRequestId, CallEngine, EngineEvent,
     GroupCallMode, ReplyOutcome, SegmentFetch, StreamFeeder, StreamFetchError, StreamPort,
-    StreamQualityTracker, StreamReply, StreamState,
+    StreamQuality, StreamReply, StreamState,
 };
 use crate::calls::speaker_levels::LevelGate;
 use crate::calls::stream_audio::gain::clamp_volume;
@@ -39,12 +39,11 @@ pub(crate) struct GroupCallStreams {
     events_tx: Sender<EngineEvent>,
     events_rx: Mutex<Receiver<EngineEvent>>,
     feeders: HashMap<i64, StreamFeeder>,
-    quality: HashMap<i64, StreamQualityTracker>,
     sound_watch: HashMap<i32, PlaybackWatch>,
     volume: f32,
-    /// A call whose instance was made in no known chat, waiting for its
+    /// Calls whose instance was made in no known chat, waiting for their
     /// chat to load.
-    no_chat: Option<i32>,
+    no_chat: Vec<i32>,
     /// The server's clock minus this machine's, in ms, from TDLib's
     /// `unix_time` option (0 until it comes).
     server_offset_ms: i64,
@@ -57,10 +56,9 @@ impl Default for GroupCallStreams {
             events_tx,
             events_rx: Mutex::new(events_rx),
             feeders: HashMap::new(),
-            quality: HashMap::new(),
             sound_watch: HashMap::new(),
             volume: 1.0,
-            no_chat: None,
+            no_chat: Vec::new(),
             server_offset_ms: 0,
         }
     }
@@ -249,6 +247,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             eprintln!("quill: warning: {line}");
             crate::advanced::debug_mode::debug_log(&line);
             if let Err(err) = engine.reopen_stream_sound(group_call_id) {
+                watch.reopen_failed(now);
                 eprintln!(
                     "quill: reopening the stream sound output for group call {group_call_id} failed: {err}"
                 );
@@ -272,48 +271,47 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     /// The stream tile's width in logical pixels. The quality bucket goes
-    /// to the engine only when it changes; tgcalls uses it for the RTMP
-    /// stream's video, as tdesktop does, and segment requests keep the
-    /// quality the engine asked for.
+    /// to the engine only when it differs from the one the engine holds
+    /// (the engine is the one record: with no engine or no call there yet,
+    /// nothing is marked reported and the next width tries again); tgcalls
+    /// uses it for the RTMP stream's video, as tdesktop does, and segment
+    /// requests keep the quality the engine asked for.
     pub fn report_stream_tile_width(&mut self, chat_id: i64, width: f32) {
-        let Some(quality) = self
-            .group_call_streams
-            .quality
-            .entry(chat_id)
-            .or_default()
-            .observe(width)
-        else {
-            return;
-        };
-        if let Some(engine) = self.call_engine.as_deref_mut() {
+        let quality = StreamQuality::for_tile_width(width);
+        if let Some(engine) = self.call_engine.as_deref_mut()
+            && engine.stream_quality(chat_id) != Some(quality)
+        {
             engine.set_stream_quality(chat_id, quality);
         }
     }
 
     pub(super) fn note_group_call_without_chat(&mut self, group_call_id: i32) {
-        self.group_call_streams.no_chat = Some(group_call_id);
+        if !self.group_call_streams.no_chat.contains(&group_call_id) {
+            self.group_call_streams.no_chat.push(group_call_id);
+        }
     }
 
-    /// A call made before its chat loaded moves to that chat's key once it
-    /// has, with the feeder its connect could not start.
+    /// Calls made before their chat loaded move to that chat's key once it
+    /// has, with the feeder their connect could not start.
     pub(crate) fn key_group_call_by_chat(&mut self) {
-        let Some(group_call_id) = self.group_call_streams.no_chat else {
-            return;
-        };
-        if self.session.calls.group_call(group_call_id).is_none() {
-            self.group_call_streams.no_chat = None;
-            return;
-        }
-        let Some(chat_id) = self.group_call_chat_id(group_call_id) else {
-            return;
-        };
-        let Some(engine) = self.call_engine.as_deref_mut() else {
-            return;
-        };
-        if engine.move_group_call_to_chat(group_call_id, chat_id) {
-            self.group_call_streams.no_chat = None;
-            if engine.group_call_mode(chat_id).is_some() {
-                self.start_stream_feeder(group_call_id);
+        for group_call_id in std::mem::take(&mut self.group_call_streams.no_chat) {
+            if self.session.calls.group_call(group_call_id).is_none() {
+                continue;
+            }
+            let Some(chat_id) = self.group_call_chat_id(group_call_id) else {
+                self.group_call_streams.no_chat.push(group_call_id);
+                continue;
+            };
+            let Some(engine) = self.call_engine.as_deref_mut() else {
+                self.group_call_streams.no_chat.push(group_call_id);
+                continue;
+            };
+            if engine.move_group_call_to_chat(group_call_id, chat_id) {
+                if engine.group_call_mode(chat_id).is_some() {
+                    self.start_stream_feeder(group_call_id);
+                }
+            } else {
+                self.group_call_streams.no_chat.push(group_call_id);
             }
         }
     }
@@ -364,7 +362,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 server_offset_ms: self.group_call_streams.server_offset_ms,
             };
             feeder.drain(&mut port);
-            self.group_call_streams.quality.remove(&chat_id);
             self.group_call_streams.sound_watch.remove(&group_call_id);
             self.close_stream_feed(chat_id);
         }
@@ -557,8 +554,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             // until TDLib's `updateGroupCall` says otherwise.
             self.teardown_group_call_transport(group_call_id);
             if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
-                call.transport_ready = false;
-                call.join_payload.clear();
+                // The call is gone for good (`GROUPCALL_INVALID`), so no
+                // rejoin is started; the failed join is what the UI shows
+                // (its Join button is the manual retry).
+                call.transport
+                    .connect_failed(crate::lang::tr(crate::lang::keys::Q_OPS_THE_CALL_HAS_ENDED));
             }
         }
         if outcome == ReplyOutcome::Rejoin

@@ -147,7 +147,7 @@ fn cl2_set_pinned_chat_order_sends_full_list_and_rolls_back() {
     assert_eq!(driver.session.chats.get(&7).expect("chat").order, 300);
     assert_eq!(driver.session.chats.get(&9).expect("chat").order, 200);
     assert_eq!(
-        driver.session.chats_state.chat_action_error.as_deref(),
+        driver.session.chats_state.chat_action_error.last(),
         Some("could not reorder pinned chats (error 400)")
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -265,7 +265,7 @@ fn cl2_clear_recently_found_chats_optimistic_clear() {
     let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
     let seq = AtomicU64::new(0);
     ready_private_chat(&mut driver, &seq, &dyn_sink);
-    driver.session.search.search.recents = true;
+    driver.session.search.search.surface = crate::state::SearchSurface::Recents;
     driver.session.search.search.chat_ids = vec![ChatId(7)];
 
     let sent = driver.clear_recently_found_chats().expect("send");
@@ -293,7 +293,7 @@ fn cl2_clear_recently_found_chats_optimistic_clear() {
         )
         .unwrap();
     assert_eq!(
-        driver.session.chats_state.chat_action_error.as_deref(),
+        driver.session.chats_state.chat_action_error.last(),
         Some("could not clear recent searches (error 500)")
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -340,15 +340,15 @@ fn cl2_archive_chat_list_settings_fetch_and_set() {
         driver
             .session
             .chat_list
-            .archive_chat_list_settings
+            .archive_chat_list_settings()
             .is_some()
     );
-    assert!(!driver.session.chat_list.archive_settings_loading);
+    assert!(!driver.session.chat_list.archive_settings_loading());
 
     let mut next = driver
         .session
         .chat_list
-        .archive_chat_list_settings
+        .archive_chat_list_settings()
         .expect("fetched");
     next.keep_unmuted_chats_archived = true;
     let sent = driver.set_archive_chat_list_settings(next).expect("send");
@@ -364,7 +364,7 @@ fn cl2_archive_chat_list_settings_fetch_and_set() {
         driver
             .session
             .chat_list
-            .archive_chat_list_settings
+            .archive_chat_list_settings()
             .expect("cached")
             .keep_unmuted_chats_archived,
         "optimistic flip applied"
@@ -386,13 +386,13 @@ fn cl2_archive_chat_list_settings_fetch_and_set() {
         !driver
             .session
             .chat_list
-            .archive_chat_list_settings
+            .archive_chat_list_settings()
             .expect("cached")
             .keep_unmuted_chats_archived,
         "refusal restored the old settings"
     );
     assert_eq!(
-        driver.session.chats_state.chat_action_error.as_deref(),
+        driver.session.chats_state.chat_action_error.last(),
         Some("could not save archive settings (error 400)")
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -439,7 +439,7 @@ fn cl2_create_private_chat_answer_opens_through_select_chat() {
                 .unwrap(),
             )
             .unwrap();
-    assert_eq!(driver.session.open_chat, Some(ChatId(777001)));
+    assert_eq!(driver.session.open_chat_id(), Some(ChatId(777001)));
     assert!(
         driver.session.chats.contains_key(&777001),
         "created chat inserted into the model"
@@ -495,9 +495,13 @@ fn cl2_create_private_chat_refusal_opens_nothing() {
                 .unwrap(),
             )
             .unwrap();
-    assert_eq!(driver.session.open_chat, None, "nothing opened on refusal");
     assert_eq!(
-        driver.session.chats_state.chat_action_error.as_deref(),
+        driver.session.open_chat_id(),
+        None,
+        "nothing opened on refusal"
+    );
+    assert_eq!(
+        driver.session.chats_state.chat_action_error.last(),
         Some("could not open Saved Messages (error 400)")
     );
     assert!(
@@ -728,5 +732,44 @@ fn the_reply_bar_fetches_a_target_that_left_memory() {
             .is_some_and(|history| history.messages.contains_key(&5)),
         "a lone old row never enters the contiguous window"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_pin_counts_for_the_next_chats_limit_check_as_soon_as_it_is_sent() {
+    // The UI's pin-limit pre-check counts pinned chats in the session; a
+    // bulk Pin sends one request per chat, so each must see the ones
+    // before it without waiting for their answers (sweep 08-073).
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = ViewCtlSender::new();
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    ready_private_chat(&mut driver, &seq, &dyn_sink);
+    driver
+        .ingest(
+            copy_and_parse(
+                r#"{"@type":"updateNewChat","chat":{"id":8,"title":"Bob","type":{"@type":"chatTypePrivate","user_id":8},"unread_count":0}}"#,
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let pinned = |driver: &ConnectDriver<Arc<ViewCtlSender>>| {
+        driver
+            .session
+            .chats
+            .values()
+            .filter(|chat| chat.is_pinned)
+            .count()
+    };
+    driver.toggle_chat_pin(ChatId(7), true).unwrap();
+    assert_eq!(pinned(&driver), 1);
+    driver.toggle_chat_pin(ChatId(8), true).unwrap();
+    assert_eq!(pinned(&driver), 2, "both count before any answer");
     let _ = std::fs::remove_dir_all(&dir);
 }

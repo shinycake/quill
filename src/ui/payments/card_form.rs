@@ -7,7 +7,7 @@
 
 use crate::ui::app::QuillApp;
 use crate::ui::country_box::{CountryBox, CountryHost};
-use crate::ui::dialogs::{NewCard, PaymentCredentialChoice};
+use crate::ui::dialogs::{NewCard, PaymentPage};
 use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::*;
 use quill::country_select::CountryMode;
@@ -32,15 +32,35 @@ pub(crate) struct CardInput {
     pub(crate) state: Entity<InputState>,
     /// Shown as an error until the next edit says otherwise.
     pub(crate) invalid: bool,
-    /// The text just before a Backspace or Delete (see `field_edit`).
-    before_delete: Option<EditSnapshot>,
+    /// A Backspace or Delete whose edit has not landed yet (`field_edit`).
+    delete: DeleteEdit,
+    /// Counts the field's Backspace and Delete presses, so a press clears
+    /// only its own snapshot.
+    presses: u64,
+}
+
+/// The text just before a Backspace or Delete, until the edit it belongs
+/// to has been read or the effect cycle it was taken in is over.
+pub(crate) enum DeleteEdit {
+    None,
+    Pending { press: u64, before: EditSnapshot },
+}
+
+impl DeleteEdit {
+    /// The snapshot, leaving none behind.
+    fn take(&mut self) -> Option<EditSnapshot> {
+        match std::mem::replace(self, Self::None) {
+            Self::Pending { before, .. } => Some(before),
+            Self::None => None,
+        }
+    }
 }
 
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 impl CardInput {
     pub(crate) fn has_delete_snapshot(&self) -> bool {
-        self.before_delete.is_some()
+        matches!(self.delete, DeleteEdit::Pending { .. })
     }
 }
 
@@ -168,7 +188,10 @@ impl QuillApp {
     /// "New Card..." on a Stripe or Smart Glocal checkout: the card form,
     /// focused on the number (tdesktop's `showEditCard`).
     pub(in crate::ui) fn open_card_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(form) = self.session().and_then(|s| s.payments.form.clone()) else {
+        let Some(form) = self
+            .session()
+            .and_then(|s| s.payments.checkout.form().cloned())
+        else {
             return;
         };
         let PaymentFormTypeData::Regular(regular) = &form.form_type else {
@@ -207,7 +230,8 @@ impl QuillApp {
                 field,
                 state,
                 invalid: false,
-                before_delete: None,
+                delete: DeleteEdit::None,
+                presses: 0,
             });
         }
         let card_form = CardForm {
@@ -223,7 +247,7 @@ impl QuillApp {
             notice: None,
         };
         if let Some(dialog) = self.payments.dialog.as_mut() {
-            dialog.card_form = Some(card_form);
+            dialog.page = PaymentPage::CardForm(Box::new(card_form));
         }
         self.focus_card_field(CardField::Number, window, cx);
         cx.notify();
@@ -240,7 +264,12 @@ impl QuillApp {
             .and_then(|id| session.users.get(&id))
             .map(|me| quill::phone::digits_only(&me.phone_number))
             .unwrap_or_default();
-        let countries = session.auth_state.countries.clone().unwrap_or_default();
+        let countries = session
+            .auth_state
+            .countries
+            .data()
+            .cloned()
+            .unwrap_or_default();
         quill::phone::country_for_digits(&phone, &countries)
             .map(|country| country.iso.clone())
             .unwrap_or_default()
@@ -249,22 +278,19 @@ impl QuillApp {
     /// Cancel: back to the checkout, unless the card is being sent.
     pub(in crate::ui) fn close_card_form(&mut self, cx: &mut Context<Self>) {
         if let Some(dialog) = self.payments.dialog.as_mut()
-            && dialog
-                .card_form
-                .as_ref()
-                .is_none_or(|form| !form.is_tokenizing())
+            && dialog.card_form().is_some_and(|form| !form.is_tokenizing())
         {
-            dialog.card_form = None;
+            dialog.page = PaymentPage::Checkout;
         }
         cx.notify();
     }
 
     pub(in crate::ui) fn card_form(&self) -> Option<&CardForm> {
-        self.payments.dialog.as_ref()?.card_form.as_ref()
+        self.payments.dialog.as_ref()?.card_form()
     }
 
     fn card_form_mut(&mut self) -> Option<&mut CardForm> {
-        self.payments.dialog.as_mut()?.card_form.as_mut()
+        self.payments.dialog.as_mut()?.card_form_mut()
     }
 
     /// Focus `field` (tdesktop's `Field::setFocus`): the country field
@@ -348,8 +374,14 @@ impl QuillApp {
         let anchor = char_index(&value, anchor_byte);
         let at_front = backspace && cursor == 0 && anchor == 0;
         let snapshot = EditSnapshot::new(value, cursor, anchor);
+        let mut press = 0;
         if let Some(input) = self.card_form_mut().and_then(|form| form.input_mut(field)) {
-            input.before_delete = Some(snapshot);
+            input.presses += 1;
+            press = input.presses;
+            input.delete = DeleteEdit::Pending {
+                press,
+                before: snapshot,
+            };
         }
         // The input handles the key after this capture handler and emits
         // its Change in this same effect cycle. A defer queued from a defer
@@ -357,8 +389,10 @@ impl QuillApp {
         // start or end of the text) leaves no snapshot for later typing.
         self.defer_screen_in(window, cx, move |this, window, cx| {
             this.defer_screen_in(window, cx, move |this, _, _| {
-                if let Some(input) = this.card_form_mut().and_then(|form| form.input_mut(field)) {
-                    input.before_delete = None;
+                if let Some(input) = this.card_form_mut().and_then(|form| form.input_mut(field))
+                    && matches!(input.delete, DeleteEdit::Pending { press: held, .. } if held == press)
+                {
+                    input.delete = DeleteEdit::None;
                 }
             });
         });
@@ -383,7 +417,7 @@ impl QuillApp {
             return;
         };
         let now = field_text(input.state.read(cx));
-        let was = input.before_delete.take();
+        let was = input.delete.take();
         let result: FieldResult = match field {
             CardField::Number => edit_card_number(was.as_ref(), &now),
             CardField::Expiry => edit_expiry(was.as_ref(), &now, today()),
@@ -593,14 +627,13 @@ impl QuillApp {
             return;
         };
         let save = dialog
-            .card_form
-            .as_ref()
+            .card_form()
             .and_then(|form| form.save)
             .unwrap_or(false);
-        dialog.new_card = Some(NewCard { credentials, save });
-        dialog.credential_choice = PaymentCredentialChoice::NewCard;
-        dialog.card_form = None;
-        dialog.password_prompt = save && ask_password;
+        dialog
+            .method
+            .use_card(NewCard { credentials, save }, ask_password);
+        dialog.page = PaymentPage::Checkout;
         cx.notify();
     }
 
@@ -612,7 +645,7 @@ impl QuillApp {
             return false;
         };
         let Some(PaymentFormTypeData::Regular(regular)) =
-            session.payments.form.as_ref().map(|form| &form.form_type)
+            session.payments.checkout.form().map(|form| &form.form_type)
         else {
             return false;
         };
@@ -629,7 +662,7 @@ impl QuillApp {
     pub(in crate::ui) fn needs_password_to_save(&self) -> bool {
         let need_password = self
             .session()
-            .and_then(|s| s.payments.form.as_ref())
+            .and_then(|s| s.payments.checkout.form())
             .is_some_and(|form| match &form.form_type {
                 PaymentFormTypeData::Regular(regular) => regular.need_password,
                 _ => false,

@@ -18,29 +18,39 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Download the first sticker of every listed set, once each.
     fn ensure_manager_covers(&mut self) -> Result<(), ConnectSendError> {
         let stickers = &self.session.stickers;
-        let mut asked = Vec::new();
-        let mut files = Vec::new();
+        let mut asked: Vec<i64> = Vec::new();
+        let mut wanted: Vec<(i64, Vec<crate::ids::FileId>)> = Vec::new();
         for set in stickers
             .stickers
             .sets
             .iter()
             .chain(&stickers.stickers.trending)
             .chain(&stickers.stickers.archived)
-            .chain(&stickers.masks.installed)
-            .chain(&stickers.masks.archived)
+            .chain(stickers.masks.installed.items())
+            .chain(stickers.masks.archived.items())
         {
             if stickers.manager.covers_requested.contains(&set.id) || asked.contains(&set.id) {
                 continue;
             }
             asked.push(set.id);
-            files.extend(
-                set.covers
-                    .iter()
-                    .filter_map(|cover| cover.display_file_id()),
-            );
+            let files = set
+                .covers
+                .iter()
+                .filter_map(|cover| cover.display_file_id())
+                .collect();
+            wanted.push((set.id, files));
         }
-        self.session.stickers.manager.covers_requested.extend(asked);
-        self.ensure_media_files(&files)
+        // A set counts as asked once its downloads went out; a refused send
+        // is tried again after the next answer.
+        for (set_id, files) in wanted {
+            self.ensure_media_files(&files)?;
+            self.session
+                .stickers
+                .manager
+                .covers_requested
+                .insert(set_id);
+        }
+        Ok(())
     }
 
     /// The trending sets on screen were seen: tell TDLib, and drop their
@@ -51,19 +61,25 @@ impl<S: JsonSender> ConnectDriver<S> {
             .stickers
             .stickers
             .trending
-            .iter_mut()
+            .iter()
             .filter(|set| !set.is_viewed)
-            .map(|set| {
-                set.is_viewed = true;
-                set.id
-            })
+            .map(|set| set.id)
             .collect();
         if ids.is_empty() {
             return Ok(None);
         }
-        self.sticker_request(RequestPurpose::ViewTrendingStickerSets, |id| {
+        let sent = self.sticker_request(RequestPurpose::ViewTrendingStickerSets, |id| {
             crate::telegram::requests::view_trending_sticker_sets(id, &ids)
-        })
+        })?;
+        // The dots go once TDLib has been told; a refused send keeps them.
+        if sent.is_some() {
+            for set in &mut self.session.stickers.stickers.trending {
+                if ids.contains(&set.id) {
+                    set.is_viewed = true;
+                }
+            }
+        }
+        Ok(sent)
     }
 
     /// Queue what a closed box changed: the sets to remove and the order of
@@ -85,11 +101,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .stickers
             .manager
             .commits
-            .push_back(ManagerCommit {
+            .push_back(ManagerCommit::new(
                 masks,
-                removals: removed.into_iter().filter(|id| *id > 0).collect(),
+                removed.into_iter().filter(|id| *id > 0),
                 order,
-            });
+            ));
         self.advance_manager_commit()
     }
 
@@ -141,12 +157,21 @@ impl<S: JsonSender> ConnectDriver<S> {
                     }),
             };
             return match sent {
-                Ok(Some(_)) => Ok(()),
+                Ok(Some(id)) => {
+                    if let Some(front) = self.session.stickers.manager.commits.front_mut() {
+                        front.sent = Some(id);
+                    }
+                    Ok(())
+                }
                 // Nothing went out (the same change was already pending):
                 // go on with the next step.
                 Ok(None) => continue,
+                // Only the step that did not go out is lost (`next_step` took
+                // it off its commit), as with a refused answer; the saved
+                // changes behind it stay queued and go out with the next
+                // answer. The failure is reported once (`manager.failure`).
                 Err(err) => {
-                    self.session.stickers.manager.commits.clear();
+                    self.session.stickers.manager.note_send_failure();
                     Err(err)
                 }
             };
@@ -155,7 +180,9 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Called after every answer: thumbnails and the saved changes.
     pub(crate) fn pump_sticker_manager(&mut self) {
-        let _ = self.advance_manager_commit();
+        if self.advance_manager_commit().is_err() {
+            self.session.stickers.manager.note_send_failure();
+        }
         if self.session.stickers.manager.open {
             let _ = self.ensure_manager_covers();
         }

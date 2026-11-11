@@ -30,7 +30,9 @@ pub fn load_video_pip_position() -> Option<SavedPipPosition> {
 
 pub fn load_video_pip_position_from(path: &Path) -> Option<SavedPipPosition> {
     let bytes = std::fs::read(path).ok()?;
-    serde_json::from_slice(&bytes).ok()
+    let mut saved: SavedPipPosition = serde_json::from_slice(&bytes).ok()?;
+    saved.position = saved.position.bounded();
+    Some(saved)
 }
 
 pub fn save_video_pip_position(saved: &SavedPipPosition) -> std::io::Result<()> {
@@ -45,6 +47,30 @@ mod tests {
     use super::{SavedPipPosition, load_video_pip_position_from};
     use crate::media_viewer::pip::panel::{PipPosition, PipRect, Sides};
     use crate::settings::write_json_atomic;
+
+    #[test]
+    fn a_position_with_huge_numbers_is_bounded_on_load() {
+        let dir = std::env::temp_dir().join(format!("quill-video-pip-big-{}", std::process::id()));
+        let file = dir.join("video_pip.json");
+        let saved = SavedPipPosition {
+            position: PipPosition {
+                attached: Sides::NONE,
+                snapped: Sides::NONE,
+                geometry: PipRect::new(i32::MAX, i32::MIN, i32::MAX, -5),
+                screen: PipRect::new(0, 0, i32::MAX, i32::MAX),
+            },
+            screen_id: None,
+        };
+        write_json_atomic(&file, &saved).expect("write");
+        let loaded = load_video_pip_position_from(&file).expect("loads");
+        let limit = crate::media_viewer::pip::panel::SAVED_LIMIT;
+        assert_eq!(
+            loaded.position.geometry,
+            PipRect::new(limit, -limit, limit, 0)
+        );
+        assert_eq!(loaded.position.screen, PipRect::new(0, 0, limit, limit));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn a_saved_position_reads_back_and_a_broken_file_is_none() {

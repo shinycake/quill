@@ -97,16 +97,8 @@ fn spread(seed: u64) -> u64 {
     x ^ (x >> 31)
 }
 
-/// Where the pack's request stands.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-enum Load {
-    #[default]
-    Never,
-    /// Asked at this time (ms).
-    Loading { since_ms: u64 },
-    /// Answered, or failed, for the request made at this time (ms).
-    Done { asked_ms: u64 },
-}
+/// The pack's effects by emoji, then by index.
+type Effects = HashMap<String, BTreeMap<u8, StickerItem>>;
 
 /// A lone emoji read before the pack first arrived: its effect plays when
 /// the pack comes, if the chat is still on screen.
@@ -117,25 +109,58 @@ pub struct Waiting {
     pub emoji: String,
 }
 
+/// Where the pack stands. The effects of the last set stay while it is
+/// fetched again or the fetch failed; messages read before the first set
+/// wait only in the stages that still expect it.
+#[derive(Debug)]
+enum Pack {
+    /// Never asked for.
+    Never { waiting: VecDeque<Waiting> },
+    /// Asked at `since_ms`. The answer makes it `Ready`, the error `Failed`
+    /// (which drops `waiting`).
+    Loading {
+        since_ms: u64,
+        waiting: VecDeque<Waiting>,
+        shown: Option<Effects>,
+    },
+    /// A set arrived. `asked_ms` is the request it answered; none when the
+    /// set came without one.
+    Ready {
+        asked_ms: Option<u64>,
+        effects: Effects,
+    },
+    /// The request made at `asked_ms` failed; asked again after the
+    /// refresh time.
+    Failed {
+        asked_ms: u64,
+        shown: Option<Effects>,
+    },
+}
+
+impl Default for Pack {
+    fn default() -> Self {
+        Self::Never {
+            waiting: VecDeque::new(),
+        }
+    }
+}
+
 /// The pack's effects by emoji and index, its load state, and the messages
 /// whose effect played this session (tdesktop's per-message
 /// `EmojiInteractionWatched` flag).
 #[derive(Debug, Default)]
 pub struct EmojiAnimations {
-    by_emoji: HashMap<String, BTreeMap<u8, StickerItem>>,
-    /// A set has arrived at least once.
-    ready: bool,
-    load: Load,
+    pack: Pack,
     watched: HashSet<(i64, i64)>,
-    waiting: VecDeque<Waiting>,
 }
 
 impl EmojiAnimations {
     /// The pack built from a `stickerSet`: `emojis` lists each sticker's
     /// emoticons in the order of `stickers` (tdesktop `applyAnimationsSet`
-    /// with `collectAnimationsIndices`).
-    pub fn apply_set(&mut self, stickers: &[StickerItem], emojis: &[Vec<String>]) {
-        self.by_emoji.clear();
+    /// with `collectAnimationsIndices`). Returns the messages that waited
+    /// for it.
+    pub fn apply_set(&mut self, stickers: &[StickerItem], emojis: &[Vec<String>]) -> Vec<Waiting> {
+        let mut by_emoji: Effects = HashMap::new();
         for (sticker, emoticons) in stickers.iter().zip(emojis) {
             if sticker.file_id.0 == 0 {
                 continue;
@@ -157,46 +182,96 @@ impl EmojiAnimations {
             keys.sort();
             keys.dedup();
             for key in keys {
-                let list = self.by_emoji.entry(key).or_default();
+                let list = by_emoji.entry(key).or_default();
                 for index in &indices {
                     list.entry(*index).or_insert_with(|| sticker.clone());
                 }
             }
         }
-        self.ready = true;
-        if let Load::Loading { since_ms } = self.load {
-            self.load = Load::Done { asked_ms: since_ms };
-        }
+        let (asked_ms, waiting) = match std::mem::take(&mut self.pack) {
+            Pack::Never { waiting } => (None, waiting),
+            Pack::Loading {
+                since_ms, waiting, ..
+            } => (Some(since_ms), waiting),
+            Pack::Ready { asked_ms, .. } => (asked_ms, VecDeque::new()),
+            Pack::Failed { asked_ms, .. } => (Some(asked_ms), VecDeque::new()),
+        };
+        self.pack = Pack::Ready {
+            asked_ms,
+            effects: by_emoji,
+        };
+        waiting.into_iter().collect()
     }
 
     /// The request failed: try again after the refresh time, and drop the
-    /// messages that waited for it.
+    /// messages that waited for it (they are unwatched again).
     pub fn failed(&mut self) {
-        if let Load::Loading { since_ms } = self.load {
-            self.load = Load::Done { asked_ms: since_ms };
+        let (asked_ms, shown, waiting) = match std::mem::take(&mut self.pack) {
+            Pack::Loading {
+                since_ms,
+                waiting,
+                shown,
+            } => (Some(since_ms), shown, waiting),
+            Pack::Never { waiting } => (None, None, waiting),
+            other => {
+                self.pack = other;
+                return;
+            }
+        };
+        self.pack = match asked_ms {
+            Some(asked_ms) => Pack::Failed { asked_ms, shown },
+            None => Pack::default(),
+        };
+        self.unwatch(waiting);
+    }
+
+    /// Let `waiting` messages count as unwatched again, so a later read
+    /// plays their effect once the pack has arrived.
+    fn unwatch(&mut self, waiting: impl IntoIterator<Item = Waiting>) {
+        for waiting in waiting {
+            self.watched
+                .remove(&(waiting.chat_id.0, waiting.message_id.0));
         }
-        self.waiting.clear();
     }
 
     /// Whether the pack should be asked for at `now_ms`: never asked, or
     /// two hours after the last answer (a lost request counts as one).
     pub fn load_due(&self, now_ms: u64) -> bool {
-        match self.load {
-            Load::Never => true,
-            Load::Loading { since_ms: at } | Load::Done { asked_ms: at } => {
-                now_ms.saturating_sub(at) >= REFRESH_MS
-            }
+        let elapsed = |at: u64| now_ms.saturating_sub(at) >= REFRESH_MS;
+        match &self.pack {
+            Pack::Never { .. } => true,
+            Pack::Loading { since_ms: at, .. } | Pack::Failed { asked_ms: at, .. } => elapsed(*at),
+            Pack::Ready { asked_ms, .. } => asked_ms.is_none_or(elapsed),
         }
     }
 
     /// The request went out at `now_ms`.
     pub fn loading(&mut self, now_ms: u64) {
-        self.load = Load::Loading { since_ms: now_ms };
+        let (waiting, shown) = match std::mem::take(&mut self.pack) {
+            Pack::Never { waiting } => (waiting, None),
+            Pack::Loading { waiting, shown, .. } => (waiting, shown),
+            Pack::Ready { effects, .. } => (VecDeque::new(), Some(effects)),
+            Pack::Failed { shown, .. } => (VecDeque::new(), shown),
+        };
+        self.pack = Pack::Loading {
+            since_ms: now_ms,
+            waiting,
+            shown,
+        };
+    }
+
+    /// The effects of the last set that arrived.
+    fn effects(&self) -> Option<&Effects> {
+        match &self.pack {
+            Pack::Never { .. } => None,
+            Pack::Ready { effects, .. } => Some(effects),
+            Pack::Loading { shown, .. } | Pack::Failed { shown, .. } => shown.as_ref(),
+        }
     }
 
     /// A set has arrived at least once.
     pub fn is_ready(&self) -> bool {
-        self.ready
+        self.effects().is_some()
     }
 
     /// tdesktop `chooseInteractionEmoji` + `animationsForEmoji`: the
@@ -204,7 +279,8 @@ impl EmojiAnimations {
     /// heart's for another heart.
     pub fn animations_for(&self, emoji: &str) -> Option<&BTreeMap<u8, StickerItem>> {
         let key = emoji_key(emoji);
-        let found = |key: &str| self.by_emoji.get(key).filter(|list| !list.is_empty());
+        let effects = self.effects()?;
+        let found = |key: &str| effects.get(key).filter(|list| !list.is_empty());
         if let Some(list) = found(&key) {
             return Some(list);
         }
@@ -242,17 +318,23 @@ impl EmojiAnimations {
         true
     }
 
-    /// Keep a message read before the pack first arrived.
+    /// Keep a message read before the pack first arrived. Where no set is
+    /// expected (it failed and is not asked again yet) the message counts as
+    /// unwatched again instead.
     pub fn wait(&mut self, waiting: Waiting) {
-        if self.waiting.len() >= MAX_WAITING {
-            self.waiting.pop_front();
-        }
-        self.waiting.push_back(waiting);
-    }
-
-    /// The messages that waited for the pack.
-    pub fn take_waiting(&mut self) -> Vec<Waiting> {
-        self.waiting.drain(..).collect()
+        let (Pack::Never { waiting: queue } | Pack::Loading { waiting: queue, .. }) =
+            &mut self.pack
+        else {
+            self.unwatch([waiting]);
+            return;
+        };
+        let dropped = if queue.len() >= MAX_WAITING {
+            queue.pop_front()
+        } else {
+            None
+        };
+        queue.push_back(waiting);
+        self.unwatch(dropped);
     }
 }
 

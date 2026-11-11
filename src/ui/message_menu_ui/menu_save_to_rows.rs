@@ -65,7 +65,7 @@ impl QuillApp {
                                 keys::Q_CHAT_DEMO_SAVING_TO_THE_PROFILE,
                             )));
                         }
-                        this.message_ui.menu = None;
+                        this.close_message_menu();
                         cx.notify();
                     }
                 },
@@ -89,22 +89,35 @@ impl QuillApp {
                         message_id,
                         false,
                     );
-                    if let (Some(live), Some(me), Some(draft)) = (this.live.as_mut(), me, draft) {
-                        this.screen.connection.set_note_for(
-                            &this.screen.windows,
-                            match live.driver.forward_messages(ChatId(me), &draft) {
-                                Ok(_) => StatusNote::info(tr(keys::Q_CHAT_SAVED_TO_SAVED_MESSAGES)),
-                                Err(_) => {
-                                    StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SAVE_TO_SAVED))
-                                }
-                            },
-                        );
-                    } else {
-                        this.set_note(StatusNote::info(tr(
-                            keys::Q_CHAT_DEMO_SAVED_MESSAGES_NEEDS_LIVE,
-                        )));
+                    match (this.live.as_mut(), me, draft) {
+                        (Some(live), Some(me), Some(draft)) => {
+                            this.screen.connection.set_note_for(
+                                &this.screen.windows,
+                                match live.driver.forward_messages(ChatId(me), &draft) {
+                                    Ok(_) => {
+                                        StatusNote::info(tr(keys::Q_CHAT_SAVED_TO_SAVED_MESSAGES))
+                                    }
+                                    Err(_) => {
+                                        StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SAVE_TO_SAVED))
+                                    }
+                                },
+                            );
+                        }
+                        // Connected, but the account's own id is not known
+                        // yet or the message cannot be forwarded: an error,
+                        // not the demo's note.
+                        (Some(_), _, _) => {
+                            this.set_note(StatusNote::error(tr(
+                                keys::Q_CHAT_COULD_NOT_SAVE_TO_SAVED,
+                            )));
+                        }
+                        (None, _, _) => {
+                            this.set_note(StatusNote::info(tr(
+                                keys::Q_CHAT_DEMO_SAVED_MESSAGES_NEEDS_LIVE,
+                            )));
+                        }
                     }
-                    this.message_ui.menu = None;
+                    this.close_message_menu();
                     cx.notify();
                 },
             ));
@@ -119,7 +132,7 @@ impl QuillApp {
             cx,
             move |this, _, cx| {
                 this.save_message_media_as(chat_id, message_id, cx);
-                this.message_ui.menu = None;
+                this.close_message_menu();
                 cx.notify();
             },
         ));
@@ -281,8 +294,9 @@ impl QuillApp {
                             }),
                         ))
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.message_ui.menu_ui.page = MessageMenuPage::Audience;
-                            this.message_ui.menu_ui.audience_tab = None;
+                            this.message_ui
+                                .menu
+                                .show_page(MessageMenuPage::Audience { tab: None });
                             cx.notify();
                         }))
                         .into_any_element(),
@@ -330,8 +344,9 @@ impl QuillApp {
             .and_then(|s| s.histories.get(&menu.chat_id.0))
             .and_then(|h| h.messages.get(&menu.message_id.0))
             .is_some_and(|m| m.reaction_chips().len() > 1);
-        self.message_ui.menu_ui.page = MessageMenuPage::Audience;
-        self.message_ui.menu_ui.audience_tab = several.then(|| reaction.clone());
+        self.message_ui.menu.show_page(MessageMenuPage::Audience {
+            tab: several.then(|| reaction.clone()),
+        });
         if several && let Some(live) = self.live.as_mut() {
             live.driver.session.messages.wanted_reactor_tab =
                 Some((menu.chat_id, menu.message_id, reaction));
@@ -352,302 +367,10 @@ impl QuillApp {
                 .driver
                 .fetch_reactors_tab(chat_id, message_id, tab.as_ref(), false);
         }
-        self.message_ui.menu_ui.audience_tab = tab;
+        self.message_ui
+            .menu
+            .show_page(MessageMenuPage::Audience { tab });
         cx.notify();
-    }
-
-    /// The page behind the "N Seen" row: reactors with their reaction and
-    /// time, then viewers with theirs.
-    pub(in crate::ui) fn menu_audience_page(
-        &self,
-        chat_id: ChatId,
-        message: &quill::state::HistoryMessage,
-        cx: &mut Context<Self>,
-    ) -> Vec<MenuRow> {
-        let Some(session) = self.session() else {
-            return Vec::new();
-        };
-        let message_id = message.id;
-        let kind = seen_kind(quill::telegram::envelope::effective_content(
-            &message.content,
-            message.ephemeral.as_ref(),
-        ));
-        let now = quill::local_time::civil_local(quill::local_time::now_unix());
-        let roots = self.media_display_roots();
-        let Some(audience) = session
-            .messages
-            .message_audience
-            .as_ref()
-            .filter(|a| a.chat_id == chat_id && a.message_id == message_id)
-        else {
-            return Vec::new();
-        };
-        // An admin may drop one member's reaction when TDLib says this
-        // message allows it (`messageProperties.can_delete_reactions`).
-        let can_delete_reactions = session
-            .messages
-            .message_menu_actions
-            .is_some_and(|(c, m, a)| c == chat_id && m == message_id && a.can_delete_reactions);
-        let items = &self.frame.menu.items;
-        let person = |ix: u64,
-                      sender: MessageSender,
-                      detail: Option<String>,
-                      when: i32,
-                      deletable: bool,
-                      cx: &mut Context<Self>|
-         -> MenuRow {
-            let (name, photo) =
-                super::super::history::reactor_avatar(&sender, Some(session), &roots);
-            let name = if name.is_empty() {
-                tr(keys::Q_CHAT_UNKNOWN).to_string()
-            } else {
-                name
-            };
-            let when_label = (when > 0)
-                .then(|| read_date_label(&quill::local_time::civil_local(i64::from(when)), &now));
-            let row_hover = cx.theme().accent;
-            (
-                10,
-                div()
-                    .id(("menu-audience-person", ix))
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .px_3()
-                    .py_1()
-                    .rounded_md()
-                    .cursor_pointer()
-                    .hover(|style| style.bg(row_hover))
-                    .menu_key_target(row_key(10), items, cx)
-                    .role(gpui_kit::Role::MenuItem)
-                    .aria_label(name.clone())
-                    .child(super::super::message_text::kit_avatar_element(
-                        &name,
-                        photo.as_deref(),
-                        px(28.),
-                    ))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(text_menu())
-                                    .truncate()
-                                    .child(name),
-                            )
-                            .when_some(when_label, |this, label| {
-                                this.child(div().text_xs().text_color(text_muted()).child(label))
-                            }),
-                    )
-                    .when_some(detail, |this, detail| {
-                        this.child(div().ml_auto().pl_3().text_base().child(detail))
-                    })
-                    .when(deletable, |this| {
-                        this.child(
-                            div()
-                                .id(("menu-audience-delete-reaction", ix))
-                                .ml_2()
-                                .px_2()
-                                .py_0p5()
-                                .rounded_md()
-                                .text_xs()
-                                .text_color(danger_bright())
-                                .hover(|style| style.bg(row_hover))
-                                .role(gpui_kit::Role::Button)
-                                .aria_label(tr(keys::Q_CHAT_DELETE_REACTION))
-                                .child(tr(keys::MAC_MENU_DELETE))
-                                // Keep the row's own click (open profile) out of it.
-                                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.delete_member_reaction(chat_id, message_id, sender, cx);
-                                })),
-                        )
-                    })
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.message_ui.menu = None;
-                        this.open_avatar_profile(sender, window, cx);
-                    }))
-                    .into_any_element(),
-            )
-        };
-        let heading = |text: String, id: u64| -> MenuRow {
-            (
-                10,
-                div()
-                    .id(("menu-audience-heading", id))
-                    .px_3()
-                    .pt_2()
-                    .pb_1()
-                    .text_xs()
-                    .font_semibold()
-                    .text_color(text_muted())
-                    .child(text)
-                    .into_any_element(),
-            )
-        };
-        let mut rows = Vec::new();
-        let mut ix = 0u64;
-        // Tabs per reaction (tdesktop `Ui::ReactionsList` / the "All" tab
-        // and one tab per reaction when there is more than one).
-        let tab = self.message_ui.menu_ui.audience_tab.clone();
-        let chips: Vec<(ReactionType, i32)> = message
-            .reaction_chips()
-            .into_iter()
-            .map(|chip| (chip.reaction_type.clone(), chip.total_count))
-            .collect();
-        if chips.len() > 1 && audience.reactions.ready().is_some() {
-            let total: i32 = chips.iter().map(|(_, count)| *count).sum();
-            let mut tabs = div()
-                .id("menu-audience-tabs")
-                .flex()
-                .flex_wrap()
-                .gap_1()
-                .px_2()
-                .py_1();
-            let all_selected = tab.is_none();
-            let mut entries: Vec<(Option<ReactionType>, String)> = vec![(
-                None,
-                tr_with(keys::Q_CHAT_ALL, &[("total", &total.to_string())]),
-            )];
-            for (reaction, count) in &chips {
-                let glyph = match reaction {
-                    ReactionType::Emoji { emoji } => {
-                        super::super::reactions::emoji_presentation(emoji)
-                    }
-                    ReactionType::Paid => "⭐".to_string(),
-                    _ => "✦".to_string(),
-                };
-                entries.push((Some(reaction.clone()), format!("{glyph} {count}")));
-            }
-            for (tab_ix, (reaction, label)) in entries.into_iter().enumerate() {
-                let selected = if tab_ix == 0 {
-                    all_selected
-                } else {
-                    tab == reaction
-                };
-                let accent_bg = cx.theme().accent;
-                tabs = tabs.child(
-                    div()
-                        .id(("menu-audience-tab", tab_ix as u64))
-                        .px_2()
-                        .py_0p5()
-                        .rounded_full()
-                        .text_xs()
-                        .cursor_pointer()
-                        .text_color(text_menu())
-                        .when(selected, |this| this.bg(accent_bg).font_semibold())
-                        .hover(|style| style.bg(accent_bg))
-                        .role(gpui_kit::Role::Button)
-                        .aria_label(label.clone())
-                        .child(label)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.select_audience_tab(chat_id, message_id, reaction.clone(), cx);
-                        })),
-                );
-            }
-            rows.push((10, tabs.into_any_element()));
-        }
-        let tab_state = match &tab {
-            None => Some(&audience.reactions),
-            Some(reaction) => audience
-                .filtered
-                .get(&quill::state::reaction_filter_key(reaction)),
-        };
-        let tab_filter = tab.as_ref().map_or(0, quill::state::reaction_filter_key);
-        if let Some(page) = tab_state.and_then(|state| state.ready())
-            && !page.reactions.is_empty()
-        {
-            rows.push(heading(reacted_label(page.total_count.max(0) as usize), 0));
-            for reaction in &page.reactions {
-                ix += 1;
-                let glyph = match &reaction.reaction_type {
-                    ReactionType::Emoji { emoji } => emoji.clone(),
-                    ReactionType::Paid => "⭐".to_string(),
-                    _ => "✦".to_string(),
-                };
-                rows.push(person(
-                    ix,
-                    reaction.sender,
-                    Some(glyph),
-                    reaction.date,
-                    can_delete_reactions,
-                    cx,
-                ));
-            }
-            if !page.next_offset.is_empty() {
-                let loading = audience.more_loading.contains(&tab_filter);
-                let more_tab = tab.clone();
-                let hover = cx.theme().accent;
-                rows.push((
-                    10,
-                    div()
-                        .id("menu-audience-more")
-                        .px_3()
-                        .py_1p5()
-                        .rounded_md()
-                        .text_sm()
-                        .text_color(text_muted())
-                        .when(!loading, |this| {
-                            this.cursor_pointer().hover(|style| style.bg(hover))
-                        })
-                        .role(gpui_kit::Role::Button)
-                        .child(if loading {
-                            tr(keys::Q_CHAT_LOADING)
-                        } else {
-                            tr(keys::Q_CHAT_SHOW_MORE)
-                        })
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if let Some(live) = this.live.as_mut() {
-                                let _ = live.driver.fetch_reactors_tab(
-                                    chat_id,
-                                    message_id,
-                                    more_tab.as_ref(),
-                                    true,
-                                );
-                            }
-                            cx.notify();
-                        }))
-                        .into_any_element(),
-                ));
-            }
-        } else if tab_state.is_some_and(|state| state.is_loading()) {
-            rows.push(info_row(
-                10,
-                "menu-audience-tab-loading",
-                None,
-                tr(keys::Q_CHAT_LOADING),
-            ));
-        }
-        if let Some(viewers) = audience.viewers.ready()
-            && !viewers.is_empty()
-        {
-            rows.push(heading(seen_label(kind, viewers.len()), 1));
-            for viewer in viewers {
-                ix += 1;
-                rows.push(person(
-                    ix,
-                    MessageSender::User {
-                        user_id: viewer.user_id,
-                    },
-                    None,
-                    viewer.view_date,
-                    false,
-                    cx,
-                ));
-            }
-        }
-        if rows.is_empty() {
-            let text = if audience.viewers.is_loading() || audience.reactions.is_loading() {
-                tr(keys::Q_CHAT_LOADING).to_string()
-            } else {
-                seen_label(SeenKind::Seen, 0)
-            };
-            rows.push(info_row(10, "menu-audience-empty", None, text));
-        }
-        rows
     }
 
     /// Start reporting messages (the menu's "Report", or the selection
@@ -658,27 +381,38 @@ impl QuillApp {
         message_ids: Vec<MessageId>,
         cx: &mut Context<Self>,
     ) {
-        self.message_ui.menu = None;
-        self.message_ui.menu_ui.report_open = true;
+        self.close_message_menu();
+        // The flow is the session's: one report at a time, so it replaces
+        // the one another window showed. The box shows in this window.
+        self.open_box(DialogKind::MessageReport);
         if let Some(live) = self.live.as_mut() {
             if live
                 .driver
                 .report_messages(chat_id, &message_ids, "", "", None)
                 .is_err()
             {
-                self.message_ui.menu_ui.report_open = false;
                 self.set_note(StatusNote::error(tr(
                     keys::Q_CHAT_COULD_NOT_START_THE_REPORT,
                 )));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.begin_message_report(chat_id, message_ids);
+            let request =
+                session.request(quill::state::RequestPurpose::ReportMessages, Some(chat_id));
+            session.begin_message_report(chat_id, message_ids, request);
         }
         cx.notify();
     }
 
-    pub(in crate::ui) fn close_message_report(&mut self, cx: &mut Context<Self>) {
-        self.message_ui.menu_ui.report_open = false;
+    pub(in crate::ui) fn close_message_report(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // The details text belongs to the flow that ends here.
+        self.message_ui
+            .menu_ui
+            .report_text
+            .update(cx, |input, cx| input.set_value("", window, cx));
         if let Some(live) = self.live.as_mut() {
             live.driver.session.clear_message_report();
         } else if let Some(session) = self.demo_session.as_mut() {
@@ -790,8 +524,8 @@ impl QuillApp {
         cx: &mut App,
     ) -> Dialog {
         let on_close =
-            QuillShell::on_close_kind(app, shell, DialogKind::MessageReport, |this, _, cx| {
-                this.close_message_report(cx);
+            QuillShell::on_close_kind(app, shell, DialogKind::MessageReport, |this, window, cx| {
+                this.close_message_report(window, cx);
             });
         app.update(cx, |this, cx| {
             let dialog = dialog.overlay(true);
@@ -811,11 +545,11 @@ impl QuillApp {
                     .label(label)
                     .ghost()
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.close_message_report(cx);
+                        this.close_message_report(window, cx);
                         this.close_kit_dialog_if_done(DialogKind::MessageReport, window, cx);
                     }))
             };
-            let back_button = (!flow.trail.is_empty()).then(|| {
+            let back_button = (!flow.steps.is_empty()).then(|| {
                 Button::new("message-report-back")
                     .label(tr(keys::Q_CHAT_BACK))
                     .ghost()
@@ -824,7 +558,7 @@ impl QuillApp {
             let mut body = div().flex().flex_col().gap_2().w(px(360.));
             let mut footer = div().flex().justify_end().gap_2();
             match &flow.stage {
-                MessageReportStage::Checking | MessageReportStage::Sending => {
+                MessageReportStage::Checking(_) | MessageReportStage::Sending(_) => {
                     body = body.child(
                         div()
                             .text_sm()
@@ -881,7 +615,7 @@ impl QuillApp {
                 }
                 MessageReportStage::TextRequired { is_optional, .. } => {
                     let is_optional = *is_optional;
-                    if let Some(reason) = flow.trail.last() {
+                    if let Some(reason) = flow.steps.last().map(|step| &step.chosen) {
                         body = body.child(
                             div()
                                 .text_sm()

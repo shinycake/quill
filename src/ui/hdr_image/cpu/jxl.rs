@@ -20,9 +20,15 @@ const SDR_INTENSITY_TARGET: f32 = 255.0;
 /// The most memory jxl-oxide may use for one picture (as for SDR decodes).
 const MEMORY_LIMIT: usize = 1024 * 1024 * 1024;
 
-/// The largest HDR JPEG XL decoded: jxl-oxide renders at full size, and
-/// each full-size float copy is 16 bytes a pixel. Larger ones show in SDR.
-const MAX_PIXELS: u64 = 2 * super::super::HDR_MAX_PIXELS;
+/// The largest HDR JPEG XL decoded: jxl-oxide renders at full size, and the
+/// converted pixels are a second full-size float copy; each is 16 bytes a
+/// pixel, so this many pixels hold about 1 GB at once. Larger ones show in
+/// SDR.
+const MAX_PIXELS: u64 = 32_000_000;
+
+/// Samples converted at a time, so no full-size sample buffer exists next
+/// to the pixels.
+const ROW_CHUNK_PIXELS: usize = 4096;
 
 fn failed(err: impl std::fmt::Display) -> DecodeError {
     DecodeError::Failed(err.to_string())
@@ -71,19 +77,29 @@ pub(super) fn decode(bytes: &[u8], long_edge: u32) -> Result<Option<LinearImage>
     // The stream applies the file's orientation.
     let mut stream = render.stream();
     let (width, height, channels) = (stream.width(), stream.height(), stream.channels());
-    let channels = channels as usize;
-    let len = (width as usize)
+    let channels = (channels as usize).max(1);
+    let total = (width as usize)
         .checked_mul(height as usize)
-        .and_then(|pixels| pixels.checked_mul(channels))
         .ok_or(DecodeError::TooLarge)?;
-    let mut samples = vec![0.0_f32; len];
-    stream.write_to_buffer(&mut samples);
-    drop(stream);
-    drop(render);
+    total.checked_mul(channels).ok_or(DecodeError::TooLarge)?;
     let to_linear = |value: f32| pq_to_nits(value) / SDR_WHITE_NITS;
-    let pixels: Vec<[f32; 4]> = std::mem::take(&mut samples)
-        .chunks_exact(channels.max(1))
-        .map(|pixel| match *pixel {
+    // Converted a chunk of pixels at a time straight from the stream into
+    // the final buffer: no full-size sample copy next to it.
+    let mut pixels: Vec<[f32; 4]> = Vec::with_capacity(total);
+    let mut chunk = vec![0.0_f32; ROW_CHUNK_PIXELS * channels];
+    while pixels.len() < total {
+        let want = (total - pixels.len()).min(ROW_CHUNK_PIXELS) * channels;
+        let Some(window) = chunk.get_mut(..want) else {
+            break;
+        };
+        let written = stream.write_to_buffer(window);
+        let Some(filled) = chunk.get(..written.min(want)) else {
+            break;
+        };
+        if filled.is_empty() {
+            break;
+        }
+        pixels.extend(filled.chunks_exact(channels).map(|pixel| match *pixel {
             [gray] => [to_linear(gray), to_linear(gray), to_linear(gray), 1.0],
             [gray, alpha] => [to_linear(gray), to_linear(gray), to_linear(gray), alpha],
             [red, green, blue] => [to_linear(red), to_linear(green), to_linear(blue), 1.0],
@@ -91,8 +107,13 @@ pub(super) fn decode(bytes: &[u8], long_edge: u32) -> Result<Option<LinearImage>
                 [to_linear(red), to_linear(green), to_linear(blue), alpha]
             }
             [] => [0.0; 4],
-        })
-        .collect();
+        }));
+    }
+    drop(stream);
+    drop(render);
+    if pixels.len() < total {
+        return Err(failed("the JPEG XL stream ended early"));
+    }
     let linear = LinearImage {
         width,
         height,

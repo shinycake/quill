@@ -74,7 +74,12 @@ impl PickerRequest {
 enum VenueBot {
     #[default]
     Unknown,
-    Resolving,
+    /// The lookup is out. `request` is its id once the driver sent it
+    /// (`None` while it is being sent); only that request's answer or
+    /// error settles it, and a new picker or username drops it.
+    Resolving {
+        request: Option<crate::ids::RequestId>,
+    },
     Found(i64),
     Missing,
     /// The lookup failed (FLOOD_WAIT, a server error): no venues in this
@@ -96,6 +101,10 @@ pub struct LocationSharing {
     /// tdesktop `LastExactLocation`: the last fix, where the next picker starts.
     last_exact: Option<GeoPoint>,
     picker: Option<LocationPicker>,
+    /// Where the next picker numbers its venue queries from: the last
+    /// picker's count, never reset, so an answer for a closed picker's
+    /// query cannot match a later picker's.
+    venue_generation: u64,
     icons: HashMap<String, IconState>,
 }
 
@@ -121,18 +130,33 @@ impl LocationSharing {
     /// Open the picker for `chat_id`; `country` is the system country's
     /// centre, where the map starts without a previous fix.
     pub fn open(&mut self, chat_id: ChatId, country: Option<GeoPoint>) {
-        if self.venue_bot == VenueBot::Failed {
+        // Only a found bot is kept. A lookup still out (its request may
+        // have been dropped), failed, or answered with a bot not yet
+        // cached is asked again by this picker.
+        if self.venue_bot != VenueBot::Unknown && !matches!(self.venue_bot, VenueBot::Found(_)) {
             self.venue_bot = VenueBot::Unknown;
         }
+        // Icons that failed, or whose answer was dropped, are asked again
+        // by this picker.
+        self.icons
+            .retain(|_, state| matches!(state, IconState::Ready(_)));
+        self.retire_picker();
         self.picker = Some(LocationPicker::open(
             chat_id,
             self.last_exact,
             country.unwrap_or(GeoPoint::ORIGIN),
+            self.venue_generation,
         ));
     }
 
     pub fn close(&mut self) {
-        self.picker = None;
+        self.retire_picker();
+    }
+
+    fn retire_picker(&mut self) {
+        if let Some(picker) = self.picker.take() {
+            self.venue_generation = self.venue_generation.max(picker.generation());
+        }
     }
 
     pub fn geolocated(&mut self, outcome: GeoOutcome) {
@@ -170,12 +194,12 @@ impl LocationSharing {
                     });
                 }
                 VenueBot::Unknown if !self.venue_bot_username.is_empty() => {
-                    self.venue_bot = VenueBot::Resolving;
+                    self.venue_bot = VenueBot::Resolving { request: None };
                     out.push(PickerRequest::ResolveVenueBot {
                         username: self.venue_bot_username.clone(),
                     });
                 }
-                VenueBot::Resolving => {}
+                VenueBot::Resolving { .. } => {}
                 VenueBot::Unknown | VenueBot::Missing | VenueBot::Failed => {
                     picker.venues_failed(generation)
                 }
@@ -212,7 +236,12 @@ impl LocationSharing {
                 self.icons
                     .insert(venue_type.clone(), IconState::Requested(extra));
             }
-            PickerRequest::ResolveVenueBot { .. } | PickerRequest::Venues { .. } => {}
+            PickerRequest::ResolveVenueBot { .. } => {
+                if let VenueBot::Resolving { request } = &mut self.venue_bot {
+                    *request = Some(crate::ids::RequestId(extra));
+                }
+            }
+            PickerRequest::Venues { .. } => {}
         }
     }
 
@@ -246,8 +275,20 @@ impl LocationSharing {
         }
     }
 
-    /// `searchPublicChat` answered: `bot_user_id` when the chat is a bot.
-    pub fn venue_bot_resolved(&mut self, bot_user_id: Option<i64>) {
+    /// Whether the lookup out is `request`.
+    fn resolving(&self, request: u64) -> bool {
+        self.venue_bot
+            == (VenueBot::Resolving {
+                request: Some(crate::ids::RequestId(request)),
+            })
+    }
+
+    /// `searchPublicChat` answered `request`: `bot_user_id` when the chat is
+    /// a bot. An answer to a lookup that was dropped changes nothing.
+    pub fn venue_bot_resolved(&mut self, request: u64, bot_user_id: Option<i64>) {
+        if !self.resolving(request) {
+            return;
+        }
         self.venue_bot = bot_user_id.map_or(VenueBot::Missing, VenueBot::Found);
         if self.venue_bot == VenueBot::Missing {
             self.fail_current_venues();
@@ -256,7 +297,10 @@ impl LocationSharing {
 
     /// The lookup failed: not a missing bot, so the next picker asks
     /// again instead of showing no venues for the session.
-    pub fn venue_bot_failed(&mut self) {
+    pub fn venue_bot_failed(&mut self, request: u64) {
+        if !self.resolving(request) {
+            return;
+        }
         self.venue_bot = VenueBot::Failed;
         self.fail_current_venues();
     }

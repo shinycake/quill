@@ -85,7 +85,7 @@ fn holding_past_the_threshold_gets_ready_after_the_dwell() {
     // Letting go asks the UI to jump.
     let release = machine.wheel(Phase::Ended, 0., true, true, now + 200);
     assert!(release.release_ready);
-    machine.begin_jump();
+    machine.begin_jump(now + 200);
     assert!(machine.jumping());
     // The card finishes expanding, then holds while the jump happens.
     machine.frame(true, now + 600);

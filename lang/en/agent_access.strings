@@ -132,3 +132,4 @@
 "qll_agent_takeover_effect_auto_hint" = "A light sweeps round the glow while an agent drives. It holds still with reduced motion, Power Saving or the system's low-power mode.";
 "qll_agent_takeover_effect_sweep_hint" = "A light always sweeps round the glow while an agent drives. With reduced motion it still holds still.";
 "qll_agent_takeover_effect_still_hint" = "The glow around the window holds still while an agent drives.";
+"qll_agent_grants_save_failed" = "Couldn't save which chats agents may use: {err}";

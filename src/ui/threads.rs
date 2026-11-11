@@ -9,6 +9,7 @@ use super::history_state::ScrollGoal;
 use super::message_text::kit_avatar_element;
 use super::nested_click::SwallowPress;
 use super::*;
+use crate::ui::history_state::ScrollAim;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
@@ -63,6 +64,7 @@ pub(super) fn reply_bar(
     let unread = info.has_unread();
     div()
         .id(("reply-bar", message_id.0 as u64))
+        .debug_selector(move || format!("reply-bar-{}", message_id.0))
         .flex()
         .items_center()
         .gap_2()
@@ -124,13 +126,23 @@ impl QuillApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The info card belongs to the thread that showed it.
+        self.chat_ui.info_card.close_thread();
         // The composer still belongs to the chat (or topic) the thread is
         // opened from: save it there before TDLib resolves the thread.
         self.flush_leaving_draft(cx);
-        if let Some(live) = self.live.as_mut()
-            && live.driver.open_thread(chat_id, message_id).is_err()
-        {
-            self.set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_OPEN_COMMENTS)));
+        let opened = self
+            .live
+            .as_mut()
+            .map(|live| live.driver.open_thread(chat_id, message_id).is_ok());
+        match opened {
+            // The session resolves it for this window.
+            Some(true) => self.windows.thread_asker = ThreadAsker::of(self.windows.scope),
+            Some(false) => {
+                self.windows.thread_asker = ThreadAsker::Nobody;
+                self.set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_OPEN_COMMENTS)));
+            }
+            None => {}
         }
         cx.notify();
     }
@@ -143,8 +155,11 @@ impl QuillApp {
 
     /// Whether the open chat shows a loaded thread.
     pub(super) fn thread_active(&self) -> bool {
-        self.session()
-            .is_some_and(|s| s.open_chat.and_then(|c| s.thread_for_chat(c)).is_some())
+        self.session().is_some_and(|s| {
+            s.open_chat_id()
+                .and_then(|c| s.thread_for_chat(c))
+                .is_some()
+        })
     }
 
     /// Per-frame thread bookkeeping, run from `render` (it needs the
@@ -152,16 +167,24 @@ impl QuillApp {
     /// the first page, and keep paging while "jump to root" is pending.
     pub(super) fn advance_thread(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let in_chat_window = self.windows.scope.is_some();
+        let scope = self.windows.scope;
+        let asker = self.windows.thread_asker;
+        let asker_is_here = thread_asker_is_here(asker, scope, |chat| self.windows.has(chat));
         let Some(live) = self.live.as_mut() else {
             return;
         };
         if live.driver.thread_needs_start() {
+            // Another window asked for this thread: its own frame takes it.
+            if !asker_is_here {
+                return;
+            }
+            self.screen.windows.thread_asker = ThreadAsker::Nobody;
             // An opened thread lands at its first unread reply or its
             // latest, never where it was left last time.
             if let Some(thread) = live.driver.session.threads.thread.as_ref() {
-                let topic = match thread.needs_chat_switch {
+                let topic = match thread.status.needs_chat_switch() {
                     true => None,
-                    false => live.driver.session.open_topic,
+                    false => live.driver.session.open_forum_topic(),
                 };
                 self.screen.history.scroll_memory.forget((
                     thread.chat_id.0,
@@ -175,7 +198,7 @@ impl QuillApp {
                 .threads
                 .thread
                 .as_ref()
-                .filter(|thread| thread.needs_chat_switch)
+                .filter(|thread| thread.status.needs_chat_switch())
                 .map(|thread| thread.chat_id);
             match switch_to {
                 // A chat window keeps its own chat: the thread moves to the
@@ -199,20 +222,22 @@ impl QuillApp {
         // The reducer replaced the window (an own send while newer replies
         // were unloaded, or a jump that waited for a stale page): request
         // the newest page.
-        if live.driver.thread_needs_reload() && live.driver.fetch_thread_history().is_ok() {
+        if live.driver.thread_needs_reload()
+            && matches!(live.driver.fetch_thread_history(), Ok(Some(_)))
+        {
             cx.notify();
         }
         // "Jump to root" pages older replies until the root is in; the
         // history list scrolls there (`ScrollGoal::ThreadRoot`).
-        if self.screen.history.scroll_goal == Some(ScrollGoal::ThreadRoot) {
+        if self.screen.history.aim.goal() == Some(ScrollGoal::ThreadRoot) {
             let complete = live
                 .driver
                 .session
                 .threads
                 .thread
                 .as_ref()
-                .is_none_or(|thread| thread.history.loaded_complete);
-            if !complete && live.driver.fetch_thread_history().is_ok() {
+                .is_none_or(|thread| thread.history.loaded_complete());
+            if !complete && matches!(live.driver.fetch_thread_history(), Ok(Some(_))) {
                 cx.notify();
             }
         }
@@ -220,6 +245,7 @@ impl QuillApp {
 
     /// Back to where the thread was opened from.
     pub(super) fn leave_thread_view(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.chat_ui.info_card.close_thread();
         let Some(live) = self.live.as_mut() else {
             if let Some(session) = self.demo_session.as_mut() {
                 session.close_thread();
@@ -240,7 +266,7 @@ impl QuillApp {
             return;
         };
         let back = live.driver.close_thread();
-        self.history.scroll_goal = None;
+        self.history.aim.take_goal();
         match back {
             // Another chat: the post the thread was opened from rides with
             // the open, to the window that shows that chat.
@@ -283,7 +309,7 @@ impl QuillApp {
             .map(|thread| MessageId(thread.thread_id));
         live.driver.session.close_thread();
         self.request_draft_restore();
-        self.history.scroll_goal = None;
+        self.history.aim.take_goal();
         if let Some(root) = root {
             self.jump_to_replied_message(root, cx);
         }
@@ -293,7 +319,7 @@ impl QuillApp {
     /// Scroll to the thread's root post, loading older replies first when
     /// they are not all loaded yet.
     pub(super) fn jump_to_thread_root(&mut self, cx: &mut Context<Self>) {
-        self.history.scroll_goal = Some(ScrollGoal::ThreadRoot);
+        self.history.aim = ScrollAim::Goal(ScrollGoal::ThreadRoot);
         cx.notify();
     }
 
@@ -313,7 +339,7 @@ impl QuillApp {
     /// scrolls to it.
     pub(super) fn thread_root_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let thread = session.thread_for_chat(session.open_chat?)?;
+        let thread = session.thread_for_chat(session.open_chat_id()?)?;
         let root = thread.root_message()?;
         let title = if thread.is_comments() {
             tr(keys::Q_OPS_ORIGINAL_POST)
@@ -366,7 +392,7 @@ impl QuillApp {
                         // Keep the root bar's own click (jump to the original) out of it.
                         .swallow_press()
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.chat_ui.thread_info_open = !this.chat_ui.thread_info_open;
+                            this.chat_ui.info_card.toggle_thread();
                             cx.notify();
                         })),
                 )
@@ -420,8 +446,14 @@ impl QuillApp {
                             Button::new("thread-pane-retry")
                                 .label(tr(keys::Q_OPS_RETRY))
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    if let Some(live) = this.live.as_mut() {
-                                        let _ = live.driver.retry_thread();
+                                    let sent = this
+                                        .live
+                                        .as_mut()
+                                        .map(|live| live.driver.retry_thread().is_ok());
+                                    if sent == Some(false) {
+                                        this.set_note(StatusNote::error(tr(
+                                            keys::Q_OPS_COULD_NOT_OPEN_COMMENTS,
+                                        )));
                                     }
                                     cx.notify();
                                 })),
@@ -468,4 +500,80 @@ pub(super) fn replier_avatars(
             )
         })
         .collect()
+}
+
+/// The window that asked for the thread the session is opening.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ThreadAsker {
+    /// Nobody asked (a link): the first frame takes the thread.
+    Nobody,
+    /// The main window.
+    Main,
+    /// The window of this chat.
+    ChatWindow(ChatId),
+}
+
+impl ThreadAsker {
+    /// The asker for the window `scope` (`None`: the main one).
+    pub(super) fn of(scope: Option<ChatId>) -> Self {
+        scope.map_or(Self::Main, Self::ChatWindow)
+    }
+}
+
+/// Whether the frame of the window `scope` takes on the thread the session
+/// resolved: the window that asked for it does, and any window does when
+/// nobody asked (a link) or the window that asked has closed.
+fn thread_asker_is_here(
+    asker: ThreadAsker,
+    scope: Option<ChatId>,
+    window_open: impl Fn(ChatId) -> bool,
+) -> bool {
+    match asker {
+        ThreadAsker::Nobody => true,
+        ThreadAsker::Main => scope.is_none(),
+        ThreadAsker::ChatWindow(chat) => scope == Some(chat) || !window_open(chat),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ThreadAsker, thread_asker_is_here};
+    use quill::ids::ChatId;
+
+    const WINDOW: ChatId = ChatId(7);
+
+    #[test]
+    fn only_the_window_that_asked_takes_the_thread() {
+        let open = |_: ChatId| true;
+        // Asked in a chat window: the main window's frame leaves it be.
+        assert!(!thread_asker_is_here(
+            ThreadAsker::ChatWindow(WINDOW),
+            None,
+            open
+        ));
+        assert!(thread_asker_is_here(
+            ThreadAsker::ChatWindow(WINDOW),
+            Some(WINDOW),
+            open
+        ));
+        // Asked in the main window: a chat window's frame leaves it be.
+        assert!(!thread_asker_is_here(ThreadAsker::Main, Some(WINDOW), open));
+        assert!(thread_asker_is_here(ThreadAsker::Main, None, open));
+    }
+
+    #[test]
+    fn a_thread_nobody_asked_for_or_whose_window_closed_is_taken_by_the_first() {
+        assert!(thread_asker_is_here(ThreadAsker::Nobody, None, |_| true));
+        assert!(thread_asker_is_here(
+            ThreadAsker::Nobody,
+            Some(WINDOW),
+            |_| true
+        ));
+        // The window that asked closed meanwhile.
+        assert!(thread_asker_is_here(
+            ThreadAsker::ChatWindow(WINDOW),
+            None,
+            |_| false
+        ));
+    }
 }

@@ -69,11 +69,4 @@ impl QuillApp {
             self.delivery.notification_sounds.play_at(sound, volume);
         }
     }
-
-    /// Play a custom sound whose download a background account finished.
-    pub(in crate::ui) fn play_sound_file(&mut self, path: PathBuf) {
-        self.delivery
-            .notification_sounds
-            .play(NotificationSound::File(path));
-    }
 }

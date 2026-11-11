@@ -17,15 +17,16 @@
 
 use crate::locks::LockExt;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 
 /// Requests that create messages, and where their messages are counted.
-const SENDING: [&str; 4] = [
+const SENDING: [&str; 5] = [
     "sendMessage",
     "sendMessageAlbum",
     "forwardMessages",
     "sendInlineQueryResultMessage",
+    "resendMessages",
 ];
 
 /// A request waiting for the user to confirm paying.
@@ -40,7 +41,7 @@ pub struct HeldSend {
 
 impl HeldSend {
     pub fn total(&self) -> i64 {
-        self.per_message * self.messages
+        self.per_message.saturating_mul(self.messages)
     }
 
     /// The request that goes out after the user paid: the total in
@@ -69,7 +70,7 @@ struct State {
     prices: HashMap<i64, i64>,
     /// Prices the user agreed to for good, by chat id (`>=` price passes).
     trusted: HashMap<i64, i64>,
-    held: Vec<HeldSend>,
+    held: VecDeque<HeldSend>,
 }
 
 /// Shared between the driver (which feeds prices and trust) and the sender
@@ -79,10 +80,23 @@ pub struct PaidGuard {
     state: Mutex<State>,
 }
 
+/// Writes the agreed total into the request's `options`. Most media,
+/// album, voice/video-note, checklist and plain forward builders send
+/// `"options": null`; a full `messageSendOptions` object is made then.
 fn set_paid(request: &mut Value, total: i64) {
-    if let Some(options) = request.get_mut("options").filter(|o| o.is_object()) {
-        options["paid_message_star_count"] = total.into();
+    let Some(map) = request.as_object_mut() else {
+        return;
+    };
+    // `resendMessages` carries the price at the top, not in `options`.
+    if map.get("@type").and_then(Value::as_str) == Some("resendMessages") {
+        map.insert("paid_message_star_count".into(), total.into());
+        return;
     }
+    let options = map.entry("options").or_insert(Value::Null);
+    if !options.is_object() {
+        *options = serde_json::json!({"@type": "messageSendOptions"});
+    }
+    options["paid_message_star_count"] = total.into();
 }
 
 /// The chat and the number of messages a sending request creates; `None`
@@ -95,19 +109,18 @@ fn sending(request: &Value) -> Option<(i64, i64)> {
     let chat_id = request.get("chat_id")?.as_i64()?;
     let count = match kind {
         "sendMessageAlbum" => request.get("input_message_contents")?.as_array()?.len(),
-        "forwardMessages" => request.get("message_ids")?.as_array()?.len(),
+        "forwardMessages" | "resendMessages" => request.get("message_ids")?.as_array()?.len(),
         _ => 1,
     };
-    Some((chat_id, count.max(1) as i64))
+    Some((chat_id, i64::try_from(count.max(1)).unwrap_or(i64::MAX)))
 }
 
 impl PaidGuard {
     /// Replaces the known prices and trusted prices.
     pub fn set_state(&self, prices: HashMap<i64, i64>, trusted: HashMap<i64, i64>) {
-        if let Ok(mut state) = self.state.lock() {
-            state.prices = prices;
-            state.trusted = trusted;
-        }
+        let mut state = self.state.lock_or_recover();
+        state.prices = prices;
+        state.trusted = trusted;
     }
 
     /// What goes to TDLib for `request`: the request itself (maybe with the
@@ -115,7 +128,10 @@ impl PaidGuard {
     /// confirmation.
     pub fn screen(&self, request: &str) -> Option<String> {
         // Cheap test first: most requests are not sends.
-        if !request.contains("\"@type\":\"send") && !request.contains("\"@type\":\"forwardM") {
+        if !request.contains("\"@type\":\"send")
+            && !request.contains("\"@type\":\"forwardM")
+            && !request.contains("\"@type\":\"resendM")
+        {
             return Some(request.to_string());
         }
         let Ok(mut value) = serde_json::from_str::<Value>(request) else {
@@ -124,24 +140,27 @@ impl PaidGuard {
         let Some((chat_id, messages)) = sending(&value) else {
             return Some(request.to_string());
         };
-        let Ok(mut state) = self.state.lock() else {
-            return Some(request.to_string());
-        };
+        // A poisoned lock still screens: the state is plain maps, and an
+        // unscreened send could go out with a price the user never agreed to.
+        let mut state = self.state.lock_or_recover();
         let price = state.prices.get(&chat_id).copied().unwrap_or(0);
         if price <= 0 {
             return Some(request.to_string());
         }
-        let total = price * messages;
-        let carried = value
-            .get("options")
-            .and_then(|o| o.get("paid_message_star_count"))
-            .and_then(Value::as_i64)
-            .unwrap_or(0);
+        let total = price.saturating_mul(messages);
+        let carried = match value.get("@type").and_then(Value::as_str) {
+            Some("resendMessages") => value.get("paid_message_star_count"),
+            _ => value
+                .get("options")
+                .and_then(|o| o.get("paid_message_star_count")),
+        }
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
         if carried == total || state.trusted.get(&chat_id).is_some_and(|t| *t >= price) {
             set_paid(&mut value, total);
             return Some(value.to_string());
         }
-        state.held.push(HeldSend {
+        state.held.push_back(HeldSend {
             chat_id,
             per_message: price,
             messages,
@@ -152,13 +171,12 @@ impl PaidGuard {
 
     /// The oldest held request.
     pub fn held(&self) -> Option<HeldSend> {
-        self.state.lock_or_recover().held.first().cloned()
+        self.state.lock_or_recover().held.front().cloned()
     }
 
     /// Takes the oldest held request out.
     pub fn take_held(&self) -> Option<HeldSend> {
-        let mut state = self.state.lock_or_recover();
-        (!state.held.is_empty()).then(|| state.held.remove(0))
+        self.state.lock_or_recover().held.pop_front()
     }
 }
 
@@ -188,6 +206,55 @@ mod tests {
             "options":{"@type":"messageSendOptions","paid_message_star_count":0},
             "input_message_contents": vec![json!({}); n]})
         .to_string()
+    }
+
+    /// Media, voice, checklist and plain forward builders send
+    /// `"options": null`; the price still reaches TDLib.
+    #[test]
+    fn null_options_get_the_agreed_total() {
+        let g = guard(25, Some(25));
+        for request in [
+            json!({"@type":"sendMessage","chat_id":7,"options":null,
+                "input_message_content":{"@type":"inputMessagePhoto"}}),
+            json!({"@type":"forwardMessages","chat_id":7,"message_ids":[1,2],"options":null}),
+            json!({"@type":"sendMessageAlbum","chat_id":7,"input_message_contents":[{},{}]}),
+        ] {
+            let sent = g.screen(&request.to_string()).expect("trusted passes");
+            let v: Value = serde_json::from_str(&sent).unwrap();
+            let want = if v["@type"] == "sendMessage" { 25 } else { 50 };
+            assert_eq!(v["options"]["@type"], "messageSendOptions");
+            assert_eq!(v["options"]["paid_message_star_count"], want);
+        }
+        let g = guard(25, None);
+        let photo = json!({"@type":"sendMessage","chat_id":7,"options":null}).to_string();
+        assert!(g.screen(&photo).is_none());
+        let held = g.take_held().expect("held");
+        let v: Value = serde_json::from_str(&held.with_price()).unwrap();
+        assert_eq!(v["options"]["paid_message_star_count"], 25);
+    }
+
+    /// A retry of a failed send in a paid chat is priced like the send:
+    /// held until the user agrees, and the total rides at the top of the
+    /// request.
+    #[test]
+    fn a_resend_goes_through_the_paid_guard() {
+        let resend = |chat: i64| {
+            json!({"@type":"resendMessages","@extra":"6","chat_id":chat,
+                "message_ids":[4,5],"quote":null,"paid_message_star_count":0})
+            .to_string()
+        };
+        let g = guard(10, None);
+        assert_eq!(g.screen(&resend(7)), None, "held for confirmation");
+        let held = g.take_held().expect("held");
+        assert_eq!((held.per_message, held.messages), (10, 2));
+        let sent: Value = serde_json::from_str(&held.with_price()).unwrap();
+        assert_eq!(sent["paid_message_star_count"], 20);
+        let g = guard(10, Some(10));
+        let sent: Value = serde_json::from_str(&g.screen(&resend(7)).unwrap()).unwrap();
+        assert_eq!(sent["paid_message_star_count"], 20);
+        // A free chat is untouched.
+        let free = resend(8);
+        assert_eq!(g.screen(&free), Some(free));
     }
 
     #[test]
@@ -240,6 +307,26 @@ mod tests {
             g.screen(&text(7, 5)).is_none(),
             "an old price is not agreement"
         );
+    }
+
+    #[test]
+    fn a_poisoned_guard_still_screens_and_totals_saturate() {
+        let g = std::sync::Arc::new(guard(25, None));
+        let poisoner = g.clone();
+        let _ = std::thread::spawn(move || {
+            let _held = poisoner.state.lock();
+            panic!("poison the guard");
+        })
+        .join();
+        assert!(g.state.is_poisoned());
+        assert_eq!(g.screen(&text(7, 0)), None, "still held for confirmation");
+        let held = g.take_held().expect("held");
+        let huge = HeldSend {
+            per_message: i64::MAX,
+            messages: 2,
+            ..held
+        };
+        assert_eq!(huge.total(), i64::MAX);
     }
 
     #[test]

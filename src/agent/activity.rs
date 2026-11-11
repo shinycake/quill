@@ -104,12 +104,37 @@ impl Stored {
 }
 
 static LOG: Mutex<Option<Stored>> = Mutex::new(None);
-static CONNECTED: Mutex<Vec<Connected>> = Mutex::new(Vec::new());
-/// Connections the user ended with Revoke that have not closed yet.
-static REVOKED: Mutex<Vec<u64>> = Mutex::new(Vec::new());
-/// Agents the user disconnected: refused at `auth` until the user allows
-/// them again, turns Agent access off, or restarts Quill.
-static REFUSED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Where one connection is: open, or ended by the user's Revoke and not
+/// closed yet.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Stage {
+    Live,
+    Revoked,
+}
+
+struct Connection {
+    shown: Connected,
+    stage: Stage,
+}
+
+/// Who is connected and who is refused, under one lock so a connection and
+/// its agent's refusal change together.
+struct Roster {
+    connections: Vec<Connection>,
+    /// Agents the user disconnected: refused at `auth` until the user
+    /// allows them again, turns Agent access off, or restarts Quill.
+    refused: Vec<String>,
+}
+
+static ROSTER: Mutex<Roster> = Mutex::new(Roster {
+    connections: Vec::new(),
+    refused: Vec::new(),
+});
+
+fn roster() -> std::sync::MutexGuard<'static, Roster> {
+    crate::locks::lock_or_recover(&ROSTER)
+}
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
 fn now() -> i64 {
@@ -233,8 +258,8 @@ impl Presence {
 
 impl Drop for Presence {
     fn drop(&mut self) {
-        crate::locks::lock_or_recover(&CONNECTED).retain(|c| c.id != self.0);
-        crate::locks::lock_or_recover(&REVOKED).retain(|id| *id != self.0);
+        roster().connections.retain(|c| c.shown.id != self.0);
+        super::prompts::withdraw_connection(self.0);
         crate::wake::AGENT.poke();
     }
 }
@@ -242,11 +267,14 @@ impl Drop for Presence {
 /// Mark `agent` as connected; it stays listed while the guard lives.
 pub fn connect(agent: &str) -> Presence {
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
-    crate::locks::lock_or_recover(&CONNECTED).push(Connected {
-        id,
-        agent: agent.to_string(),
-        since: now(),
-        tools: Vec::new(),
+    roster().connections.push(Connection {
+        shown: Connected {
+            id,
+            agent: agent.to_string(),
+            since: now(),
+            tools: Vec::new(),
+        },
+        stage: Stage::Live,
     });
     crate::wake::AGENT.poke();
     Presence(id)
@@ -254,20 +282,29 @@ pub fn connect(agent: &str) -> Presence {
 
 /// The agents connected now, oldest first.
 pub fn connected() -> Vec<Connected> {
-    crate::locks::lock_or_recover(&CONNECTED).clone()
+    roster()
+        .connections
+        .iter()
+        .map(|c| c.shown.clone())
+        .collect()
+}
+
+/// Whether connection `id` is still connected.
+pub fn is_connected(id: u64) -> bool {
+    roster().connections.iter().any(|c| c.shown.id == id)
 }
 
 /// Connection `id` called `tool`.
 pub fn note_tool(id: u64, tool: &str) {
-    let mut connected = crate::locks::lock_or_recover(&CONNECTED);
-    let Some(connection) = connected.iter_mut().find(|c| c.id == id) else {
+    let mut roster = roster();
+    let Some(connection) = roster.connections.iter_mut().find(|c| c.shown.id == id) else {
         return;
     };
-    if connection.tools.iter().any(|known| known == tool) {
+    if connection.shown.tools.iter().any(|known| known == tool) {
         return;
     }
-    connection.tools.push(tool.to_string());
-    drop(connected);
+    connection.shown.tools.push(tool.to_string());
+    drop(roster);
     crate::wake::AGENT.poke();
 }
 
@@ -277,37 +314,35 @@ pub fn revoke(id: u64) {
     if super::ui_driver::guard::refuse_if_injecting("disconnect an agent") {
         return;
     }
-    let agent = connected()
-        .into_iter()
-        .find(|c| c.id == id)
-        .map(|c| c.agent);
-    let Some(agent) = agent else {
+    let mut roster = roster();
+    let Some(connection) = roster.connections.iter_mut().find(|c| c.shown.id == id) else {
         return;
     };
-    crate::locks::lock_or_recover(&REVOKED).push(id);
-    let mut refused = crate::locks::lock_or_recover(&REFUSED);
-    if !refused.contains(&agent) {
-        refused.push(agent);
+    connection.stage = Stage::Revoked;
+    let agent = connection.shown.agent.clone();
+    if !roster.refused.contains(&agent) {
+        roster.refused.push(agent);
     }
-    drop(refused);
+    drop(roster);
     crate::wake::AGENT.poke();
 }
 
 /// Whether the user revoked connection `id`.
 pub fn is_revoked(id: u64) -> bool {
-    crate::locks::lock_or_recover(&REVOKED).contains(&id)
+    roster()
+        .connections
+        .iter()
+        .any(|c| c.shown.id == id && c.stage == Stage::Revoked)
 }
 
 /// Whether `agent` was disconnected by the user and may not connect.
 pub fn refused(agent: &str) -> bool {
-    crate::locks::lock_or_recover(&REFUSED)
-        .iter()
-        .any(|name| name == agent)
+    roster().refused.iter().any(|name| name == agent)
 }
 
 /// The agents the user disconnected, in the order they were.
 pub fn refused_agents() -> Vec<String> {
-    crate::locks::lock_or_recover(&REFUSED).clone()
+    roster().refused.clone()
 }
 
 /// "Allow again" for one disconnected agent.
@@ -315,13 +350,13 @@ pub fn allow_again(agent: &str) {
     if super::ui_driver::guard::refuse_if_injecting("allow an agent again") {
         return;
     }
-    crate::locks::lock_or_recover(&REFUSED).retain(|name| name != agent);
+    roster().refused.retain(|name| name != agent);
     crate::wake::AGENT.poke();
 }
 
 /// Agent access went off: every agent may connect when it comes back.
 pub(crate) fn allow_all_again() {
-    crate::locks::lock_or_recover(&REFUSED).clear();
+    roster().refused.clear();
 }
 
 #[cfg(test)]

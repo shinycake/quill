@@ -101,14 +101,25 @@ pub struct GiftValueLookup {
     /// The regular gift, for the Telegram listings.
     pub regular_gift_id: i64,
     pub sticker: Option<StickerContent>,
-    /// `@extra` of the request in flight; any other answer is stale.
-    pub request: u64,
-    pub loading: bool,
-    pub info: Option<GiftValueInfo>,
+    pub stage: GiftValueStage,
+}
+
+/// Where the lookup of one gift's value stands.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum GiftValueStage {
+    /// Nothing asked yet.
+    #[default]
+    Idle,
+    /// The request with this `@extra` is in flight; any other answer is
+    /// stale.
+    Loading(u64),
     /// Why the last request failed, shown under the Value row.
-    pub error: Option<String>,
-    /// The value box is showing.
-    pub open: bool,
+    Failed(String),
+    /// The value is known; its box is closed.
+    Known(GiftValueInfo),
+    /// The value is known and its box is showing (the dialog host reads
+    /// this stage to show the box).
+    Open(GiftValueInfo),
 }
 
 impl GiftValueLookup {
@@ -123,26 +134,80 @@ impl GiftValueLookup {
         }
     }
 
+    /// A request is in flight.
+    pub fn is_loading(&self) -> bool {
+        matches!(self.stage, GiftValueStage::Loading(_))
+    }
+
+    /// Why the last request failed.
+    pub fn error(&self) -> Option<&str> {
+        match &self.stage {
+            GiftValueStage::Failed(reason) => Some(reason),
+            _ => None,
+        }
+    }
+
+    /// The value, once known.
+    pub fn info(&self) -> Option<&GiftValueInfo> {
+        match &self.stage {
+            GiftValueStage::Known(info) | GiftValueStage::Open(info) => Some(info),
+            _ => None,
+        }
+    }
+
+    /// The value box is showing.
+    pub fn is_open(&self) -> bool {
+        matches!(self.stage, GiftValueStage::Open(_))
+    }
+
+    /// Nothing is known and the box is not showing: a request out, a failed
+    /// one or none yet. Such a lookup belongs to the gift box that asked,
+    /// and goes with it.
+    pub fn is_pending(&self) -> bool {
+        !matches!(
+            self.stage,
+            GiftValueStage::Known(_) | GiftValueStage::Open(_)
+        )
+    }
+
+    /// Show the box of a known value; `false` when nothing is known yet.
+    pub fn reopen(&mut self) -> bool {
+        match std::mem::take(&mut self.stage) {
+            GiftValueStage::Known(info) | GiftValueStage::Open(info) => {
+                self.stage = GiftValueStage::Open(info);
+                true
+            }
+            other => {
+                self.stage = other;
+                false
+            }
+        }
+    }
+
+    /// Hide the box; the value stays known for the next "learn more".
+    pub fn close(&mut self) {
+        self.stage = match std::mem::take(&mut self.stage) {
+            GiftValueStage::Open(info) => GiftValueStage::Known(info),
+            other => other,
+        };
+    }
+
     /// An answer for request `id` arrived; `false` when it is stale (the
     /// user asked about another gift meanwhile) and was dropped.
     pub fn land(&mut self, id: u64, info: GiftValueInfo) -> bool {
-        if !self.loading || id != self.request {
+        if self.stage != GiftValueStage::Loading(id) {
             return false;
         }
-        self.loading = false;
-        self.error = None;
-        self.info = Some(info);
-        self.open = true;
+        self.stage = GiftValueStage::Open(info);
         true
     }
 
     /// Request `id` failed; stale failures are dropped like answers.
     pub fn fail(&mut self, id: u64, reason: String) -> bool {
-        if !self.loading || id != self.request {
+        if self.stage != GiftValueStage::Loading(id) {
             return false;
         }
-        self.loading = false;
-        self.error = Some(reason);
+        self.stage = GiftValueStage::Failed(reason);
         true
     }
 }

@@ -74,7 +74,7 @@ fn add_poll_option_error_surfaces_a_note() {
         ),
     );
     assert_eq!(
-        driver.session.messages.message_action_note.as_deref(),
+        driver.session.messages.message_action_note.last(),
         Some("Could not add the option. Please try again.")
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -83,6 +83,7 @@ fn add_poll_option_error_surfaces_a_note() {
 #[test]
 fn poll_creation_flags_reach_the_wire() {
     let (dir, mut driver, recorder, _sink, _dyn_sink, _seq) = poll_driver();
+    let close = crate::local_time::now_unix() + 7200;
     let draft = PollDraft {
         question: "Lunch?".into(),
         options: vec!["Sushi".into(), "Pizza".into()],
@@ -91,7 +92,7 @@ fn poll_creation_flags_reach_the_wire() {
         allow_adding_options: true,
         hide_results_until_closes: true,
         members_only: true,
-        close_date: crate::local_time::now_unix() + 7200,
+        deadline: Some(crate::poll::PollClose::Date(close)),
         ..Default::default()
     };
     assert_eq!(draft.validate(), None);
@@ -102,11 +103,17 @@ fn poll_creation_flags_reach_the_wire() {
     assert_eq!(content["hide_results_until_closes"], true);
     assert_eq!(content["members_only"], true);
     assert_eq!(content["open_period"], 0);
-    assert_eq!(content["close_date"], draft.close_date);
+    assert_eq!(content["close_date"], close);
     // Quizzes never carry "allow adding options".
     let quiz = PollDraft {
         is_quiz: true,
-        quiz_correct: vec![0],
+        options: vec![
+            crate::poll::DraftOption {
+                correct: true,
+                ..crate::poll::DraftOption::new("Sushi")
+            },
+            "Pizza".into(),
+        ],
         ..draft.clone()
     };
     driver.send_poll_draft(ChatId(7), &quiz, None).unwrap();
@@ -216,7 +223,7 @@ fn unread_poll_votes_badge_jump_and_read_all() {
         5
     );
 
-    driver.session.open_chat = Some(ChatId(7));
+    driver.session.open = crate::state::OpenView::of(Some(ChatId(7)));
     driver
         .jump_to_unread_marker(UnreadJumpKind::PollVote)
         .unwrap();
@@ -311,7 +318,7 @@ fn checklist_mutation_errors_surface_a_note() {
         ),
     );
     assert_eq!(
-        driver.session.messages.message_action_note.as_deref(),
+        driver.session.messages.message_action_note.last(),
         Some("Could not update the checklist (error 400)")
     );
     let _ = std::fs::remove_dir_all(&dir);

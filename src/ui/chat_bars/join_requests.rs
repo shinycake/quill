@@ -96,14 +96,29 @@ impl QuillApp {
             _search_subscription: subscription,
         });
         self.open_box(DialogKind::JoinRequests);
+        self.ask_join_requests(chat_id, "", true);
+        cx.notify();
+    }
+
+    /// Ask for the list: see `ConnectDriver::ask_join_requests`.
+    pub(in crate::ui) fn ask_join_requests(&mut self, chat_id: ChatId, query: &str, refresh: bool) {
         if let Some(live) = self.live.as_mut() {
-            live.driver
-                .session
-                .groups
-                .join_request_queries
-                .remove(&chat_id.0);
-            let _ = live.driver.refresh_chat_join_requests(chat_id);
+            live.driver.ask_join_requests(chat_id, query, refresh);
         }
+    }
+
+    /// Retry from the box's error line: the query the field holds now.
+    fn retry_join_requests(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        let query = self
+            .admin
+            .join_requests_dialog
+            .as_ref()
+            .map(|dialog| dialog.search.read(cx).value().trim().to_string())
+            .unwrap_or_default();
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.groups.join_requests.remove(&chat_id.0);
+        }
+        self.ask_join_requests(chat_id, &query, true);
         cx.notify();
     }
 
@@ -122,14 +137,14 @@ impl QuillApp {
             .driver
             .session
             .groups
-            .join_request_queries
+            .join_requests
             .get(&chat_id.0)
-            .map(String::as_str)
+            .map(JoinRequestFetch::query)
             .unwrap_or("");
         if current == query {
             return;
         }
-        let _ = live.driver.search_chat_join_requests(chat_id, query);
+        self.ask_join_requests(chat_id, query, false);
         cx.notify();
     }
 
@@ -165,6 +180,9 @@ impl QuillApp {
             )
         };
         let app = cx.entity().downgrade();
+        // The box is the account's: pressing OK after a switch does nothing
+        // (the chat id is the old account's).
+        let screen = self.screen_epoch();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let app = app.clone();
             alert
@@ -175,7 +193,9 @@ impl QuillApp {
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
                     let _ = app.update(cx, |this, cx| {
-                        this.process_all_join_requests(chat_id, approve, cx);
+                        this.in_screen_scope(screen, cx, |this, cx| {
+                            this.process_all_join_requests(chat_id, approve, cx);
+                        });
                     });
                     true
                 })
@@ -204,8 +224,13 @@ impl QuillApp {
 
     /// B8: next page of the join-request list.
     pub(super) fn load_more_join_requests(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
-        if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.load_more_chat_join_requests(chat_id);
+        if let Some(live) = self.live.as_mut()
+            && live.driver.load_more_chat_join_requests(chat_id).is_err()
+        {
+            self.set_status_note(
+                StatusNote::error(tr(keys::Q_MEDIA_COULDNT_REACH_TELEGRAM_TRY_AGAIN)),
+                cx,
+            );
         }
         cx.notify();
     }
@@ -253,12 +278,12 @@ impl QuillApp {
                 .session()
                 .and_then(|s| s.groups.join_requests.get(&chat_id.0))
                 .cloned();
+            // A next page is on its way while the list holds its request id.
+            let loading_more =
+                matches!(&fetch, Some(JoinRequestFetch::Loaded(list)) if list.more.is_some());
             let mut title = tr(keys::Q_CHAT_JOIN_REQUESTS_2).to_string();
             let mut body = div().flex().flex_col().gap_2();
-            let searching = this
-                .session()
-                .and_then(|s| s.groups.join_request_queries.get(&chat_id.0))
-                .is_some_and(|q| !q.is_empty());
+            let searching = fetch.as_ref().is_some_and(|f| !f.query().is_empty());
             body = body.child(
                 Textarea::new(&search)
                     .aria_label(tr(keys::Q_CHAT_SEARCH_JOIN_REQUESTS))
@@ -297,7 +322,7 @@ impl QuillApp {
                 );
             }
             match fetch {
-                None | Some(JoinRequestFetch::Loading) => {
+                None | Some(JoinRequestFetch::Loading { .. }) => {
                     body = body.child(
                         div()
                             .flex()
@@ -310,12 +335,21 @@ impl QuillApp {
                     );
                 }
                 Some(JoinRequestFetch::Failed(message)) => {
-                    body = body.child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(message),
-                    );
+                    body = body
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(message),
+                        )
+                        .child(
+                            Button::new("join-requests-retry")
+                                .label(tr(keys::Q_MEDIA_RETRY))
+                                .small()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.retry_join_requests(chat_id, cx);
+                                })),
+                        );
                 }
                 Some(JoinRequestFetch::Loaded(list)) => {
                     if list.requests.is_empty() {
@@ -387,6 +421,7 @@ impl QuillApp {
                                 .label(tr(keys::Q_CHAT_SHOW_MORE))
                                 .ghost()
                                 .small()
+                                .disabled(loading_more)
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.load_more_join_requests(chat_id, cx);
                                 })),

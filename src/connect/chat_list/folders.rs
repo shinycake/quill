@@ -138,7 +138,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        let previous = self.session.chat_list.folder_order();
         self.session.chat_list.apply_folder_order(order);
+        if let Some(pending) = self.session.requests.pending_mut(extra) {
+            pending.rollback = Some(RequestRollback::FolderOrder {
+                previous,
+                shown: self.session.chat_list.folder_order(),
+            });
+        }
         Ok(extra)
     }
 
@@ -162,7 +169,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        let previous = self.session.chat_list.are_folder_tags_enabled;
         self.session.chat_list.are_folder_tags_enabled = enabled;
+        if let Some(pending) = self.session.requests.pending_mut(extra) {
+            pending.rollback = Some(RequestRollback::FolderTags {
+                previous,
+                shown: enabled,
+            });
+        }
         Ok(extra)
     }
 
@@ -175,6 +189,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         folder_id: i32,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            self.session
+                .chat_list
+                .folder_specs
+                .fail(folder_id, ConnectSendError::InvalidRequest.stage_line());
             return Err(ConnectSendError::InvalidRequest);
         }
         if self
@@ -189,8 +207,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .request_for_folder(RequestPurpose::GetChatFolder, folder_id);
         if let Err(err) = self.sender.send_json(&get_chat_folder(extra, folder_id)) {
             self.session.requests.take(extra);
+            // The box waiting on this spec ends in the error with a Retry.
+            self.session
+                .chat_list
+                .folder_specs
+                .fail(folder_id, err.stage_line());
             return Err(err);
         }
+        self.session.chat_list.folder_specs.clear_error(folder_id);
         Ok(Some(extra))
     }
 
@@ -202,6 +226,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         folder_id: i32,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            self.session
+                .chat_list
+                .folder_chats_to_leave
+                .entry(folder_id)
+                .or_default()
+                .fail(ConnectSendError::InvalidRequest.stage_line());
             return Err(ConnectSendError::InvalidRequest);
         }
         if self
@@ -214,6 +244,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request_for_folder(RequestPurpose::GetChatFolderChatsToLeave, folder_id);
+        self.session
+            .chat_list
+            .folder_chats_to_leave
+            .entry(folder_id)
+            .or_default()
+            .begin();
         if let Err(err) = self.sender.send_json(&{
             serde_json::json!({
                 "@type": "getChatFolderChatsToLeave",
@@ -223,6 +259,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             .to_string()
         }) {
             self.session.requests.take(extra);
+            // The box ends in the error with a Retry, not in "Loading".
+            self.session
+                .chat_list
+                .folder_chats_to_leave
+                .entry(folder_id)
+                .or_default()
+                .fail(err.stage_line());
             return Err(err);
         }
         Ok(Some(extra))
@@ -237,6 +280,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
+            self.session
+                .chat_list
+                .chat_lists_for_add
+                .entry(chat_id.0)
+                .or_default()
+                .fail(ConnectSendError::InvalidRequest.stage_line());
             return Err(ConnectSendError::InvalidRequest);
         }
         if self
@@ -249,11 +298,24 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetChatListsToAddChat, Some(chat_id));
+        self.session
+            .chat_list
+            .chat_lists_for_add
+            .entry(chat_id.0)
+            .or_default()
+            .begin();
         if let Err(err) = self
             .sender
             .send_json(&get_chat_lists_to_add_chat(extra, chat_id))
         {
             self.session.requests.take(extra);
+            // The box ends in the error with a Retry, not in "Loading".
+            self.session
+                .chat_list
+                .chat_lists_for_add
+                .entry(chat_id.0)
+                .or_default()
+                .fail(err.stage_line());
             return Err(err);
         }
         Ok(Some(extra))
@@ -372,10 +434,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         folder_id: i32,
         chats: &[ChatId],
     ) -> Result<bool, ConnectSendError> {
-        if self
-            .session
-            .requests
-            .has_purpose_for_folder(RequestPurpose::EditChatFolder, folder_id)
+        let requests = &self.session.requests;
+        if requests.has_purpose_for_folder(RequestPurpose::EditChatFolder, folder_id)
+            || requests.has_purpose_for_folder(RequestPurpose::RemoveChatFromFolder, folder_id)
         {
             return Ok(false);
         }
@@ -397,7 +458,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let extra = self
             .session
-            .request_for_folder(RequestPurpose::EditChatFolder, folder_id);
+            .request_for_folder(RequestPurpose::RemoveChatFromFolder, folder_id);
         if let Err(err) = self
             .sender
             .send_json(&edit_chat_folder(extra, folder_id, &edited))

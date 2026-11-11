@@ -92,7 +92,6 @@ impl QuillApp {
     pub(super) fn close_settings(&mut self) {
         self.leave_settings_page(self.shown_settings_page());
         self.settings.search.close();
-        self.settings.arrival = None;
         self.settings.page_scroll.set_offset(point(px(0.), px(0.)));
         self.preferences.app_theme.editor_read = None;
         self.settings.open = false;
@@ -113,9 +112,14 @@ impl QuillApp {
             return;
         }
         self.leave_settings_page(self.shown_settings_page());
-        self.settings.arrival = None;
         self.settings.page_scroll.set_offset(point(px(0.), px(0.)));
         self.settings.page = Some(page);
+        self.arrive_settings_page(page);
+    }
+
+    /// What a page asks for each time it is entered. A search result for the
+    /// page already shown runs this too, after the page let go of its drafts.
+    pub(super) fn arrive_settings_page(&mut self, page: Page) {
         match page {
             Page::Notifications => self.fetch_notification_settings(),
             // tdesktop asks for the passkeys whenever the screen opens.
@@ -132,6 +136,7 @@ impl QuillApp {
             Page::Language => self.leave_language_settings(),
             Page::System => quill::link_handler::read_now(),
             Page::Calls => self.fetch_call_settings(),
+            Page::Appearance => self.retry_failed_wallpapers(),
             _ => {}
         }
     }
@@ -156,8 +161,13 @@ impl QuillApp {
 
     /// What a page opened over Settings goes when the page does.
     pub(super) fn leave_settings_page(&mut self, page: Page) {
+        // The place a search result sent to goes with the page it was on: no
+        // wash or animation tick is left waiting for a row that is gone.
+        self.settings.arrival = None;
         match page {
-            Page::Account => self.settings.log_out_confirm = false,
+            Page::Account => self
+                .settings
+                .set_box(crate::ui::settings_state::SettingsBox::LogOut, false),
             Page::Privacy => self.close_privacy_layers(),
             Page::Notifications => self.leave_notification_settings(),
             Page::Language => self.leave_language_settings(),
@@ -178,6 +188,7 @@ impl QuillApp {
     pub(super) fn show_settings_sub(&mut self, sub: SubPage, cx: &mut Context<Self>) {
         self.settings.page = Some(sub.parent());
         self.settings.sub = Some(sub);
+        self.preferences.advanced.forget_import_offer();
         self.settings.sub_scroll.set_offset(point(px(0.), px(0.)));
         cx.notify();
     }
@@ -255,7 +266,7 @@ impl QuillApp {
             // Escape and Find are app-wide bindings: answered here first,
             // so they act on Settings rather than on the chats behind it.
             .on_action(cx.listener(|this, _: &CancelSearch, window, cx| {
-                if this.preferences.keybinding_capture.is_some() {
+                if this.preferences.keybinding.capture.waiting().is_some() {
                     return;
                 }
                 if this.search_field_focused(window, cx) {
@@ -410,7 +421,8 @@ crate::ui::screenshot_demo::register_demos![
         |app, _, cx| {
             app.demo_settings(Page::Account, cx);
             // box-host: demo
-            app.settings.log_out_confirm = true;
+            app.settings
+                .set_box(crate::ui::settings_state::SettingsBox::LogOut, true);
         }
     ),
     crate::ui::screenshot_demo::DemoSpec::chat_list("ready-settings-search").setup(
@@ -445,7 +457,10 @@ impl QuillApp {
             }
             ids.push(id);
         }
-        session.settings.blocked_senders = Fetch::Loading { stale: Some(ids) };
+        session.settings.blocked_senders = Fetch::Loading {
+            stale: Some(ids),
+            request: None,
+        };
         session.settings.blocked_total = 120;
         self.demo_ui.seq.store(
             seq.load(std::sync::atomic::Ordering::SeqCst),

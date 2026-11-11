@@ -13,7 +13,7 @@ use gpui_kit::{
     AppContext, Bounds, Entity, Modifiers, Pixels, TestAppContext, VisualTestContext, point, px,
     size,
 };
-use quill::earn::{LinkBox, RevokeBox, SetupConfirm};
+use quill::earn::{BoxSend, LinkBox, RevokeBox, SetupConfirm};
 
 const DEMO_NOTE: &str = "Demo mode: this needs a live session.";
 
@@ -160,7 +160,7 @@ fn leaving_asks_to_revoke_and_cancel_keeps_the_program(cx: &mut TestAppContext) 
             earn.revoke = Some(RevokeBox {
                 program,
                 recipient,
-                sending: false,
+                send: BoxSend::Idle,
             });
         }
         cx.notify();
@@ -201,9 +201,9 @@ fn setup_builds_its_sliders_and_save_asks_to_confirm(cx: &mut TestAppContext) {
     let (app, shell, mut vcx) = open_demo(cx, "ready-earn-affiliate-setup");
     let vcx = &mut vcx;
     app.read_with(vcx, |app, _| {
-        let commission = app.earn.commission.as_ref().map(|(_, stops)| stops.len());
+        let commission = app.earn.sliders.as_ref().map(|s| s.commission.1.len());
         assert!(commission.is_some_and(|n| n > 1), "commission stops");
-        let duration = app.earn.duration.as_ref().map(|(_, stops)| stops.len());
+        let duration = app.earn.sliders.as_ref().map(|s| s.duration.1.len());
         assert_eq!(duration, Some(7), "1m, 3m, 6m, 1y, 2y, 3y and forever");
     });
     click(vcx, "earn-setup-save");
@@ -211,7 +211,7 @@ fn setup_builds_its_sliders_and_save_asks_to_confirm(cx: &mut TestAppContext) {
         let confirm = app
             .earn_state()
             .and_then(|e| e.setup.as_ref())
-            .and_then(|s| s.confirm);
+            .and_then(|s| s.confirm());
         assert_eq!(confirm, Some(SetupConfirm::Save));
     });
     assert_eq!(open_dialog(&shell, vcx), Some(DialogKind::EarnSetupConfirm));
@@ -220,7 +220,7 @@ fn setup_builds_its_sliders_and_save_asks_to_confirm(cx: &mut TestAppContext) {
         let confirm = app
             .earn_state()
             .and_then(|e| e.setup.as_ref())
-            .and_then(|s| s.confirm);
+            .and_then(|s| s.confirm());
         assert_eq!(confirm, None);
     });
     assert_ne!(open_dialog(&shell, vcx), Some(DialogKind::EarnSetupConfirm));
@@ -280,4 +280,94 @@ fn the_setup_button_stays_pinned_under_the_page(cx: &mut TestAppContext) {
     let save = bounds(vcx, "earn-setup-save");
     // tdesktop `setupBottom`: below the scrolling part, not inside it.
     assert!(save.origin.y >= page.bottom());
+}
+
+fn park_a_join_box(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
+    app.update(vcx, |app, _| {
+        let Some(session) = app.demo_session.as_mut() else {
+            return;
+        };
+        session.payments.earn.recipients = quill::earn::Recipients::Loading {
+            waiting: Vec::new(),
+            found: Vec::new(),
+            join: Some(quill::earn::JoinBox {
+                bot_user_id: 5,
+                info: Default::default(),
+                recipient: quill::earn::EarnPeer::User(1),
+                choose_recipient: true,
+                stage: quill::earn::JoinStage::Open,
+            }),
+        };
+    });
+}
+
+fn parked_join_box(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
+    app.read_with(vcx, |app, _| {
+        app.demo_session
+            .as_ref()
+            .is_some_and(|s| s.payments.earn.recipients.parked().is_some())
+    })
+}
+
+#[gpui_kit::test]
+fn leaving_the_layer_drops_a_join_box_parked_for_the_recipients(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = open_demo(cx, "ready-earn-monetization");
+    let vcx = &mut vcx;
+    park_a_join_box(&app, vcx);
+    click(vcx, "earn-layer-close");
+    frames(vcx);
+    assert!(
+        !parked_join_box(&app, vcx),
+        "it does not open later, unasked"
+    );
+}
+
+#[gpui_kit::test]
+fn the_switch_farewell_drops_a_join_box_parked_for_the_recipients(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = open_demo(cx, "ready-earn-monetization");
+    let vcx = &mut vcx;
+    park_a_join_box(&app, vcx);
+    assert!(parked_join_box(&app, vcx));
+    app.update_in(vcx, |app, window, cx| app.close_earn_boxes(window, cx));
+    assert!(!parked_join_box(&app, vcx));
+}
+
+#[gpui_kit::test]
+fn a_withdrawal_larger_than_the_balance_is_brought_down_to_it(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = open_demo(cx, "ready-earn-bot-stars");
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.earn.scroll.set_offset(point(px(0.), px(-100_000.)));
+        app.earn
+            .amount
+            .update(cx, |input, cx| input.set_value("999999999", window, cx));
+        cx.notify();
+    });
+    frames(vcx);
+    click(vcx, "earn-withdraw");
+    let (typed, available) = app.read_with(vcx, |app, cx| {
+        let available = app
+            .earn_state()
+            .and_then(|earn| Some(earn.page.as_ref()?.stars.ready()?.status.available.stars));
+        (app.earn.amount.read(cx).value().to_string(), available)
+    });
+    assert_eq!(Some(typed.parse::<i64>().unwrap_or(-1)), available);
+}
+
+#[gpui_kit::test]
+fn a_reopened_link_box_plays_its_icon_from_the_start(cx: &mut TestAppContext) {
+    use quill::earn::LinkIcon;
+    let mut link = LinkBox::new(
+        super::fixture::joined_program(),
+        quill::earn::EarnPeer::User(1),
+    );
+    assert_eq!(link.icon, LinkIcon::Unseen);
+    let first = std::time::Instant::now();
+    link.note_drawn(first);
+    link.note_drawn(first + std::time::Duration::from_secs(1));
+    assert_eq!(link.icon, LinkIcon::Playing { since: first });
+    // The same link opened again is a new box: it has not played.
+    let again = LinkBox::new(link.program.clone(), link.recipient);
+    assert_eq!(again.icon, LinkIcon::Unseen);
+    let _ = cx;
 }

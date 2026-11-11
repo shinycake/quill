@@ -17,33 +17,37 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         query: &str,
     ) -> Result<RequestId, ConnectSendError> {
-        let generation = self
-            .session
+        self.session
             .payments
             .giveaway
             .award_members
             .restart(chat_id.0, query.trim());
-        self.send_award_page(generation)
+        self.send_award_page()
     }
 
     /// Ask for the next page. `Ok(None)` = nothing more to load or a page
     /// already on its way.
     pub fn load_more_award_members(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        let members = &mut self.session.payments.giveaway.award_members;
+        let members = &self.session.payments.giveaway.award_members;
         if !members.can_load_more() {
             return Ok(None);
         }
-        let generation = members.begin_page();
-        self.send_award_page(generation).map(Some)
+        self.send_award_page().map(Some)
     }
 
-    fn send_award_page(&mut self, generation: u64) -> Result<RequestId, ConnectSendError> {
+    fn send_award_page(&mut self) -> Result<RequestId, ConnectSendError> {
         let (chat_id, query, offset) = {
             let m = &self.session.payments.giveaway.award_members;
             (m.chat_id, m.query.clone(), m.offset)
         };
-        let fail = |this: &mut Self, err| {
-            this.session.payments.giveaway.award_members.loading = false;
+        let fail = |this: &mut Self, request: Option<RequestId>, err| {
+            let members = &mut this.session.payments.giveaway.award_members;
+            let reason =
+                crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_MEMBERS).to_string();
+            match request {
+                Some(request) => members.fail(request, reason),
+                None => members.fail_unsent(reason),
+            }
             Err(err)
         };
         let supergroup_id = match self.session.chats.get(&chat_id).map(|c| &c.kind) {
@@ -52,12 +56,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             {
                 *supergroup_id
             }
-            _ => return fail(self, ConnectSendError::InvalidRequest),
+            _ => return fail(self, None, ConnectSendError::InvalidRequest),
         };
         let extra = self.session.request(
-            RequestPurpose::Payments(PaymentsPurpose::GetAwardMembers { generation }),
+            RequestPurpose::Payments(PaymentsPurpose::GetAwardMembers),
             Some(ChatId(chat_id)),
         );
+        self.session
+            .payments
+            .giveaway
+            .award_members
+            .begin_page(extra);
         let filter = if query.is_empty() {
             supergroup_members_filter_recent_json()
         } else {
@@ -66,7 +75,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let json = get_supergroup_members(extra, supergroup_id, &filter, offset, MEMBERS_PAGE);
         match self.send_json_request(extra, &json) {
             Ok(id) => Ok(id),
-            Err(err) => fail(self, err),
+            Err(err) => fail(self, Some(extra), err),
         }
     }
 }

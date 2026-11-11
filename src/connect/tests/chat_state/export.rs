@@ -56,6 +56,32 @@ fn an_account_off_screen_still_forwards_its_exports_requests() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Sweep 03-046: a request of an export that is lost (a flood-retry
+/// re-send that failed, a sweep) frees the export's link.
+#[test]
+fn a_lost_export_request_frees_the_link() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let mut driver = ready_driver(&recorder, &sink, prepared, &[]);
+    let (chat, worker) = crate::export::ChatExport::scripted();
+    driver.session.settings.chat_export = Some(chat);
+    worker
+        .send(serde_json::json!({"@type": "getChatHistory"}))
+        .unwrap();
+    driver.pump_chat_export();
+    let link = &driver.session.settings.chat_export.as_ref().unwrap().link;
+    let pending = link.pending().expect("the request is out");
+    assert!(!link.idle_or_cancelled());
+
+    let lost = driver.session.requests.take(pending).expect("registered");
+    driver.session.settle_lost_request(lost);
+    let link = &driver.session.settings.chat_export.as_ref().unwrap().link;
+    assert!(link.idle_or_cancelled(), "no further request is held back");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_cancelled_exports_last_request_passes_the_download_it_stops() {
     let store = MemorySecretStore::new();
@@ -284,7 +310,7 @@ fn clear_call_history_empties_the_list_only_on_ok() {
         .expect("deleteAllCallMessages sent");
     assert!(request.contains("\"revoke\":true"));
     assert_eq!(driver.session.calls.recent_calls.len(), 1, "kept until ok");
-    assert!(driver.session.calls.recent_calls_clearing);
+    assert!(driver.session.calls.recent_calls_clearing());
     assert!(
         driver.clear_call_history(true).expect("again").is_none(),
         "one clear in flight at a time"
@@ -298,9 +324,9 @@ fn clear_call_history_empties_the_list_only_on_ok() {
         ),
     );
     assert_eq!(driver.session.calls.recent_calls.len(), 1);
-    assert!(!driver.session.calls.recent_calls_clearing);
+    assert!(!driver.session.calls.recent_calls_clearing());
     assert_eq!(
-        driver.session.chats_state.chat_action_error.as_deref(),
+        driver.session.chats_state.chat_action_error.last(),
         Some("could not clear the call history (error 500)")
     );
 
@@ -310,7 +336,7 @@ fn clear_call_history_empties_the_list_only_on_ok() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, sent.0),
     );
     assert!(driver.session.calls.recent_calls.is_empty());
-    assert!(!driver.session.calls.recent_calls_clearing);
+    assert!(!driver.session.calls.recent_calls_clearing());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -402,7 +428,7 @@ fn open_chat_shows_a_file_the_export_holds(arrives: PageArrives, photo: &str) ->
     }
 
     let link = &mut driver.session.settings.chat_export.as_mut().unwrap().link;
-    let download = link.pending.expect("the export's download went out");
+    let download = link.pending().expect("the export's download went out");
     link.reply(download, serde_json::json!({"@type": "ok"}));
     worker
         .send(serde_json::json!({"@type": "deleteFile", "file_id": 1, "chat_id": 7}))

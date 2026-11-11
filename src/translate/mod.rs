@@ -13,6 +13,7 @@
 //! guess when the text is short or ambiguous.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ids::AccountKey;
 use crate::telegram::envelope::MessageContent;
 use crate::text::TextEntity;
 use serde::{Deserialize, Serialize};
@@ -628,9 +629,14 @@ pub struct TranslatePrefs {
     /// The "Do Not Translate" languages; empty means just the app language.
     #[serde(default)]
     pub skip_languages: Vec<String>,
-    /// Chats whose translate bar the user hid.
+    /// Chats whose translate bar the user hid: the primary account's (the
+    /// only list before accounts were told apart).
     #[serde(default)]
     pub hidden_chats: Vec<i64>,
+    /// Other accounts' hidden chats, by account key: a chat id means
+    /// another chat in another account.
+    #[serde(default)]
+    pub hidden_other: Vec<(String, i64)>,
 }
 
 fn default_true() -> bool {
@@ -645,6 +651,7 @@ impl Default for TranslatePrefs {
             translate_to: String::new(),
             skip_languages: Vec::new(),
             hidden_chats: Vec::new(),
+            hidden_other: Vec::new(),
         }
     }
 }
@@ -702,14 +709,28 @@ impl TranslatePrefs {
         self.skip_languages = list.into_iter().map(str::to_string).collect();
     }
 
-    pub fn bar_hidden(&self, chat_id: i64) -> bool {
-        self.hidden_chats.contains(&chat_id)
+    pub fn bar_hidden(&self, account: &AccountKey, chat_id: i64) -> bool {
+        if *account == AccountKey::primary() {
+            self.hidden_chats.contains(&chat_id)
+        } else {
+            self.hidden_other
+                .iter()
+                .any(|(key, id)| key == account.0.as_str() && *id == chat_id)
+        }
     }
 
-    pub fn set_bar_hidden(&mut self, chat_id: i64, hidden: bool) {
-        self.hidden_chats.retain(|id| *id != chat_id);
+    pub fn set_bar_hidden(&mut self, account: &AccountKey, chat_id: i64, hidden: bool) {
+        if *account == AccountKey::primary() {
+            self.hidden_chats.retain(|id| *id != chat_id);
+            if hidden {
+                self.hidden_chats.push(chat_id);
+            }
+            return;
+        }
+        self.hidden_other
+            .retain(|(key, id)| !(key == account.0.as_str() && *id == chat_id));
         if hidden {
-            self.hidden_chats.push(chat_id);
+            self.hidden_other.push((account.0.clone(), chat_id));
         }
     }
 }

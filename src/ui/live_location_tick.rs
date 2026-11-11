@@ -20,16 +20,22 @@ fn wait_for(refresh_in: u32) -> Duration {
 impl QuillApp {
     /// Start the refresh task for the open chat when it shows a running
     /// live location (at most one task, guarded by
-    /// `live_location_tick_chat`). Called from `render`, like the other
+    /// `live_location_tick`). Called from `render`, like the other
     /// countdown ticks.
     pub(super) fn ensure_live_location_tick(&mut self, cx: &mut Context<Self>) {
         let now = quill::local_time::now_unix();
-        let Some(chat_id) = self.session().and_then(|session| session.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|session| session.open_chat_id()) else {
             return;
         };
         // A running tick keeps itself alive: no need to scan the history
         // again every frame.
-        if self.history.live_location_tick_chat == Some(chat_id) {
+        if self
+            .history
+            .live_location_tick
+            .as_ref()
+            .map(|(chat, _)| *chat)
+            == Some(chat_id)
+        {
             return;
         }
         if self
@@ -39,8 +45,7 @@ impl QuillApp {
         {
             return;
         }
-        self.history.live_location_tick_chat = Some(chat_id);
-        self.spawn_scoped(cx, async move |this, cx| {
+        let task = self.spawn_scoped(cx, async move |this, cx| {
             loop {
                 let wait = this
                     .update(cx, |this, _| this.live_location_wait(chat_id))
@@ -68,21 +73,27 @@ impl QuillApp {
                 }
             }
             let _ = this.update(cx, |this, cx| {
-                if this.history.live_location_tick_chat == Some(chat_id) {
-                    this.history.live_location_tick_chat = None;
+                if this
+                    .history
+                    .live_location_tick
+                    .as_ref()
+                    .map(|(chat, _)| *chat)
+                    == Some(chat_id)
+                {
+                    this.history.live_location_tick = None;
                 }
                 // The last share ended: draw its "ended" state.
                 cx.notify();
             });
-        })
-        .detach();
+        });
+        self.history.live_location_tick = Some((chat_id, task));
     }
 
     /// How long to wait before `chat_id`'s next refresh, or `None` when
     /// it is no longer the open chat or shows no running live location.
     fn live_location_wait(&self, chat_id: ChatId) -> Option<Duration> {
         let session = self.session()?;
-        if session.open_chat != Some(chat_id) {
+        if session.open_chat_id() != Some(chat_id) {
             return None;
         }
         session

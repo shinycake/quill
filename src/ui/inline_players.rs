@@ -35,6 +35,8 @@
 #![deny(clippy::indexing_slicing)]
 
 mod demand;
+mod revive;
+mod stage;
 mod windows;
 
 use super::inline_video::{InlineFrame, InlineTile};
@@ -42,6 +44,7 @@ use super::video_player::{PlayState, Purpose, VideoPlayer};
 pub(super) use demand::Demand;
 use gpui_kit::*;
 use quill::ids::ChatId;
+use stage::{Audio, Presence};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -241,22 +244,13 @@ struct Slot {
     /// Decoded picture memory it may hold (0 for AVPlayer, whose buffers
     /// aren't ours, and for a sleeping slot).
     bytes: usize,
-    /// Off screen for [`RELEASE_AFTER`]: the player has no backend, only
-    /// its last picture (`VideoPlayer::hibernate_on_last_picture`), until
-    /// a sweep sees it painted in view.
-    asleep: bool,
+    presence: Presence,
     /// The windows its row renders in, each with the pass it last
     /// rendered in there (the history's, or its panel's for a [`Panel`]
     /// key), the paint count when that pass began, and whether that
     /// window's last sweep found it in view.
     windows: Windows,
-    /// Off screen since then: paused, released after [`RELEASE_AFTER`].
-    hidden_since: Option<Instant>,
-    sound: bool,
-    /// Paused by a click while playing with sound.
-    paused: bool,
-    /// Dragging along the seek ring: whether it was playing before.
-    seeking: Option<bool>,
+    audio: Audio,
     seek_shown: Toggle,
     seek_grabbed: Toggle,
 }
@@ -264,15 +258,15 @@ struct Slot {
 impl Slot {
     /// Whether the player should be running now.
     fn wants_play(&self, inactive: bool) -> bool {
-        !(self.paused
-            || self.seeking.is_some()
+        let sound = self.audio.has_sound();
+        !(self.audio.is_held()
             // A clip playing with sound keeps going off screen, as in
             // tdesktop (it hands it to the floating player); only muted
             // loops hold still there.
-            || (self.hidden_since.is_some() && !self.sound)
+            || (self.presence.off_screen_since().is_some() && !sound)
             // Behind another app muted loops hold still (tdesktop pauses
             // GIFs and round loops there).
-            || (inactive && !self.sound))
+            || (inactive && !sound))
     }
 
     /// What it takes to bring the player in line with the slot, given its
@@ -280,9 +274,8 @@ impl Slot {
     /// an opening player records too: it starts by itself once open).
     fn settle(&mut self, state: PlayState, running: bool, inactive: bool) -> Option<Command> {
         // Played once with sound and done: back to the muted loop.
-        if self.sound && state == PlayState::Ended {
-            self.sound = false;
-            self.paused = false;
+        if self.audio.has_sound() && state == PlayState::Ended {
+            self.audio = Audio::Muted;
             return Some(Command::BackToLoop {
                 play: self.wants_play(inactive),
             });
@@ -298,10 +291,14 @@ impl Slot {
     }
 
     fn frame(&mut self, held_ring: bool) -> InlineFrame {
-        self.seek_shown
-            .set(self.sound && held_ring, SEEK_SHOW, SEEK_HIDE, true);
+        self.seek_shown.set(
+            self.audio.has_sound() && held_ring,
+            SEEK_SHOW,
+            SEEK_HIDE,
+            true,
+        );
         self.seek_grabbed
-            .set(self.seeking.is_some(), SEEK_GRAB, SEEK_GRAB, false);
+            .set(self.audio.is_seeking(), SEEK_GRAB, SEEK_GRAB, false);
         let transport = self.player.transport();
         let remaining_secs = transport
             .duration
@@ -313,7 +310,7 @@ impl Slot {
         InlineFrame {
             player: self.player.clone(),
             remaining_secs,
-            sound: self.sound,
+            sound: self.audio.has_sound(),
             backdrop: gpui_kit::black(),
             progress,
             seek_shown: self.seek_shown.value(SEEK_SHOW, SEEK_HIDE, true),
@@ -501,7 +498,10 @@ impl InlineVideos {
                     continue;
                 };
                 let visible = note_sweep(&mut slot.windows, sweep, count, &unseen);
-                if slot.asleep {
+                if slot.presence == Presence::Stuck {
+                    continue;
+                }
+                if slot.presence == Presence::Asleep {
                     // Behind another app only its window's own pass wakes
                     // it: a recheck as every window is hidden (Cmd-H)
                     // would open decoders for clips nobody sees.
@@ -510,16 +510,15 @@ impl InlineVideos {
                     }
                     continue;
                 }
-                match off_screen_step(visible, slot.hidden_since, now) {
-                    OffScreenStep::Show => slot.hidden_since = None,
-                    OffScreenStep::Hide => slot.hidden_since = Some(now),
+                match off_screen_step(visible, slot.presence.off_screen_since(), now) {
+                    OffScreenStep::Show => slot.presence = Presence::InView,
+                    OffScreenStep::Hide => slot.presence = Presence::OffScreen { since: now },
                     OffScreenStep::Stay => {}
                     // Never cut a clip short while it is heard.
-                    OffScreenStep::Release if slot.sound => {}
+                    OffScreenStep::Release if slot.audio.has_sound() => {}
                     OffScreenStep::Release => {
-                        slot.asleep = true;
+                        slot.presence = Presence::Asleep;
                         slot.bytes = 0;
-                        slot.hidden_since = None;
                         sleepers.push(slot.player.clone());
                         continue;
                     }
@@ -531,7 +530,7 @@ impl InlineVideos {
             let hidden = state
                 .players
                 .values()
-                .any(|slot| slot.hidden_since.is_some());
+                .any(|slot| slot.presence.off_screen_since().is_some());
             (commands, sleepers, revive, hidden)
         }) else {
             return;
@@ -545,68 +544,6 @@ impl InlineVideos {
         }
         if hidden {
             self.arm_release(cx);
-        }
-    }
-
-    /// A sleeping slot was painted in view: open a new player for it (if
-    /// the budget admits one), showing the sleeping one's last picture
-    /// until its own, and redraw the histories showing it, whose tiles
-    /// still hold the sleeping one.
-    fn revive(&self, key: Key, source: Source, cx: &mut App) {
-        let Some((held, inactive, views, sleeping)) = self
-            .with(|state| {
-                let slot = state.players.get(&key)?;
-                let views: Vec<EntityId> = slot
-                    .windows
-                    .keys()
-                    .filter_map(|window| state.views.get(window).copied())
-                    .collect();
-                Some((
-                    state.players.values().map(|slot| slot.bytes).sum::<usize>(),
-                    state.inactive,
-                    views,
-                    slot.player.clone(),
-                ))
-            })
-            .flatten()
-        else {
-            return;
-        };
-        if !admits(held, source.bytes) {
-            return;
-        }
-        let Ok(player) = VideoPlayer::open(
-            &source.path,
-            Purpose::Inline {
-                max_edge: source.max_edge,
-            },
-            source.duration,
-            cx,
-        ) else {
-            return;
-        };
-        player.take_picture_from(&sleeping);
-        drop(sleeping);
-        player.set_volume(0.0);
-        player.set_looping(true);
-        // It is in view: play, unless the window is behind another app.
-        if !inactive {
-            player.play();
-        }
-        let mark = player.shown_count();
-        let replaced = self.with(|state| {
-            let slot = state.players.get_mut(&key)?;
-            slot.asleep = false;
-            slot.bytes = source.bytes;
-            for seen in slot.windows.values_mut() {
-                seen.mark = mark;
-            }
-            slot.hidden_since = None;
-            Some(std::mem::replace(&mut slot.player, player))
-        });
-        drop(replaced);
-        for view in views {
-            cx.notify(view);
         }
     }
 
@@ -692,28 +629,31 @@ impl InlineVideos {
         let key = (chat_id, message_id);
         let Some(commands) = self.with(|state| {
             let slot = state.players.get_mut(&key)?;
-            if slot.sound {
-                slot.paused = !slot.paused;
-                let command = if slot.paused {
-                    Command::Pause
-                } else {
-                    Command::Play
-                };
-                return Some(vec![(slot.player.clone(), command)]);
+            match slot.audio {
+                Audio::Sounding { paused } => {
+                    slot.audio = Audio::Sounding { paused: !paused };
+                    let command = if paused {
+                        Command::Play
+                    } else {
+                        Command::Pause
+                    };
+                    return Some(vec![(slot.player.clone(), command)]);
+                }
+                // A drag along the seek ring holds the clip; a click waits.
+                Audio::Seeking { .. } => return Some(Vec::new()),
+                Audio::Muted => {}
             }
             let mut commands = Vec::new();
             let inactive = state.inactive;
             for (other, slot) in &mut state.players {
-                if *other != key && slot.sound {
-                    slot.sound = false;
-                    slot.paused = false;
+                if *other != key && slot.audio.has_sound() {
+                    slot.audio = Audio::Muted;
                     let play = slot.wants_play(inactive);
                     commands.push((slot.player.clone(), Command::BackToLoop { play }));
                 }
             }
             if let Some(slot) = state.players.get_mut(&key) {
-                slot.sound = true;
-                slot.paused = false;
+                slot.audio = Audio::Sounding { paused: false };
                 commands.push((slot.player.clone(), Command::PlayWithSound));
             }
             Some(commands)
@@ -733,13 +673,16 @@ impl InlineVideos {
     pub(super) fn seek_to(&self, chat_id: i64, message_id: i64, fraction: f32) -> bool {
         let commands = self.with(|state| {
             let slot = state.players.get_mut(&(chat_id, message_id))?;
-            if !slot.sound {
-                return None;
-            }
             let mut commands = Vec::new();
-            if slot.seeking.is_none() {
-                slot.seeking = Some(!slot.paused);
-                commands.push((slot.player.clone(), Command::Pause));
+            match slot.audio {
+                Audio::Muted => return None,
+                Audio::Sounding { paused } => {
+                    slot.audio = Audio::Seeking {
+                        was_playing: !paused,
+                    };
+                    commands.push((slot.player.clone(), Command::Pause));
+                }
+                Audio::Seeking { .. } => {}
             }
             Some((slot.player.clone(), commands))
         });
@@ -759,8 +702,12 @@ impl InlineVideos {
     pub(super) fn end_seek(&self, chat_id: i64, message_id: i64) {
         let command = self.with(|state| {
             let slot = state.players.get_mut(&(chat_id, message_id))?;
-            let was_playing = slot.seeking.take()?;
-            slot.paused = !was_playing;
+            let Audio::Seeking { was_playing } = slot.audio else {
+                return None;
+            };
+            slot.audio = Audio::Sounding {
+                paused: !was_playing,
+            };
             was_playing.then(|| (slot.player.clone(), Command::Play))
         });
         if let Some(command) = command.flatten() {
@@ -773,7 +720,7 @@ impl InlineVideos {
             state
                 .players
                 .get(&(chat_id, message_id))
-                .is_some_and(|slot| slot.seeking.is_some())
+                .is_some_and(|slot| slot.audio.is_seeking())
         })
         .unwrap_or(false)
     }
@@ -852,11 +799,13 @@ impl InlineVideos {
             let slot = videos.players.get_mut(&key)?;
             // A sleeping slot's tile paints its last picture and counts
             // being painted; the sweep gives it a player.
-            let command = (!slot.asleep)
+            let command = slot
+                .presence
+                .is_awake()
                 .then(|| slot.settle(state, running, inactive))
                 .flatten()
                 .map(|command| (slot.player.clone(), command));
-            let held = slot.paused || slot.seeking.is_some();
+            let held = slot.audio.is_held();
             Some((command, slot.frame(held)))
         })??;
         run(command.into_iter().collect());
@@ -905,7 +854,13 @@ impl InlineVideos {
         if !inactive && !in_history {
             player.play();
         }
-        let hidden_since = in_history.then(|| cx.background_executor().now());
+        let presence = if in_history {
+            Presence::OffScreen {
+                since: cx.background_executor().now(),
+            }
+        } else {
+            Presence::InView
+        };
         let mark = player.shown_count();
         let replaced = self.with(|state| {
             state.players.insert(
@@ -919,7 +874,7 @@ impl InlineVideos {
                         duration,
                     },
                     bytes,
-                    asleep: false,
+                    presence,
                     windows: HashMap::from([(
                         window,
                         Seen {
@@ -928,10 +883,7 @@ impl InlineVideos {
                             mark,
                         },
                     )]),
-                    hidden_since,
-                    sound: false,
-                    paused: false,
-                    seeking: None,
+                    audio: Audio::Muted,
                     seek_shown: Toggle::new(),
                     seek_grabbed: Toggle::new(),
                 },
@@ -948,20 +900,15 @@ impl InlineVideos {
             state
                 .players
                 .get(&key)
-                .is_some_and(|slot| slot.sound && !slot.paused)
+                .is_some_and(|slot| slot.audio.is_heard())
         })
         .unwrap_or(false)
     }
 
     /// Whether any clip plays with sound now.
     pub(super) fn any_sounding(&self) -> bool {
-        self.with(|state| {
-            state
-                .players
-                .values()
-                .any(|slot| slot.sound && !slot.paused)
-        })
-        .unwrap_or(false)
+        self.with(|state| state.players.values().any(|slot| slot.audio.is_heard()))
+            .unwrap_or(false)
     }
 
     /// The slot's player, for tests.
@@ -980,7 +927,7 @@ impl InlineVideos {
             state
                 .players
                 .get(&key)
-                .is_some_and(|slot| slot.hidden_since.is_some() || slot.asleep)
+                .is_some_and(|slot| !matches!(slot.presence, Presence::InView))
         })
         .unwrap_or(false)
     }
@@ -989,8 +936,13 @@ impl InlineVideos {
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
     pub(super) fn is_asleep(&self, key: Key) -> bool {
-        self.with(|state| state.players.get(&key).is_some_and(|slot| slot.asleep))
-            .unwrap_or(false)
+        self.with(|state| {
+            state
+                .players
+                .get(&key)
+                .is_some_and(|slot| !slot.presence.is_awake())
+        })
+        .unwrap_or(false)
     }
 }
 

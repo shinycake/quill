@@ -230,25 +230,22 @@ impl QuillApp {
     }
 
     pub(super) fn reload_account_keybindings(&mut self, cx: &mut Context<Self>) {
-        super::keybindings::invalidate_account_keybindings(
-            &mut self.preferences.keybindings_applied,
-            &mut self.preferences.keybinding_capture,
-            &mut self.preferences.keybinding_error,
-        );
+        self.preferences.keybinding.invalidate_account();
         self.apply_pending_keybindings(cx);
     }
 
     fn apply_pending_keybindings(&mut self, cx: &mut Context<Self>) {
-        if self.preferences.keybindings_applied {
-            return;
-        }
         let Some(live) = self.live.as_ref() else {
             return;
         };
+        let account = live.driver.session.account.clone();
+        if self.preferences.keybinding.keymap.carries(&account) {
+            return;
+        }
         let customs = live.driver.load_custom_keybindings();
         // Empty prefs rebuild defaults too, replacing the previous account's chords.
         super::keybindings::apply_custom_bindings(cx, &customs);
-        self.preferences.keybindings_applied = true;
+        self.preferences.keybinding.keymap = super::keybindings::Keymap::Applied(account);
     }
 
     /// Redraw for what the TDLib poll applied, as urgently as it needs
@@ -277,7 +274,7 @@ impl QuillApp {
             // progress of the download it waits for; the message menu draws
             // there too and shows the reply count.
             PolledAction::Conversation
-                if self.viewer.state.is_open() || self.message_ui.menu.is_some() =>
+                if self.viewer.state.is_open() || self.message_ui.menu.is_open() =>
             {
                 cx.notify()
             }
@@ -348,11 +345,11 @@ impl QuillApp {
         // A locked Quill is not looked at, whichever window has the focus:
         // its open chat notifies and sounds as tdesktop's does under the
         // lock (`markingAsRead` needs the main widget shown).
-        let main_active = !self.refused_while_locked()
-            && self
-                .main_window
+        let main_active = self.looked_at(
+            self.main_window
                 .handle
-                .is_some_and(|main| cx.active_window() == Some(main));
+                .is_some_and(|main| cx.active_window() == Some(main)),
+        );
         let Some(live) = self.live.as_mut() else {
             self.clear_device_qr();
             return false;
@@ -446,7 +443,7 @@ impl QuillApp {
         }
         // A forced reply arms the composer at the next render
         // (`flush_notifications`): draw it now, whatever the updates were.
-        let deliver = live.driver.session.bots.pending_force_reply.is_some();
+        let deliver = live.driver.session.force_reply_ready();
         // Parity slice: the selected folder tab may have been deleted or
         // removed remotely (`updateChatFolders`); fall back to Main.
         if let Some(folder_id) = self.screen.folders.tab
@@ -464,20 +461,13 @@ impl QuillApp {
         }
         let err = live.driver.session.auth_state.last_auth_error;
         let new_auth = live.driver.session.auth.clone();
-        if !matches!(&new_auth, AuthorizationState::WaitRegistration { terms: Some(terms) } if self.auth_ui.accepted_registration_terms.as_ref() == Some(terms))
-        {
-            self.auth_ui.accepted_registration_terms = None;
-        }
+        self.auth_ui.follow_auth(&new_auth);
         // Slice auth-logout-warning: the `logOut` flow ends in Closed —
         // restart the live connection at the end of this poll so the user
         // lands back on the login screen instead of the dead "Closed"
         // view. The quit path (`close`) also ends in Closed but never
         // passes through LoggingOut, so it never restarts.
         let logged_out = logout_restart_trigger(saw_logging_out, &new_auth);
-        // Slice A10: recovery-code entry only makes sense in WaitPassword.
-        if !matches!(new_auth, AuthorizationState::WaitPassword { .. }) {
-            self.auth_ui.recovery_mode = false;
-        }
         if send_failed {
             self.set_note(StatusNote::error(tr(
                 keys::Q_PREFS_FAILED_TO_SEND_TDLIB_REQUEST,
@@ -555,14 +545,16 @@ impl QuillApp {
     /// restart fails the status line says so and the poll loop (which
     /// breaks on `live.is_none()`) stops.
     pub(super) fn restart_live_connection(&mut self, cx: &mut Context<Self>) {
-        self.payments.marketplace_open = false;
-        self.payments.marketplace_error = None;
-        self.payments.marketplace_private = true;
+        self.payments.marketplace.forget();
+        let account = self.session().map(|session| session.account.clone());
         self.close_screen_client(cx);
         // D2 fix-up: the warning promises "Downloaded media will be
         // erased from this device" — TDLib destroyed its own data, but
-        // Quill's decrypted media scratch is only swept at startup.
-        quill::local_path::sweep_media_caches();
+        // Quill's decrypted media scratch is only swept at startup. Only
+        // this account's: another signed-in account may be using its own.
+        if let Some(account) = &account {
+            quill::local_path::sweep_account_media_cache(account);
+        }
         avatar_icon::forget_cached_icons();
         self.start_connection(cx);
     }
@@ -588,22 +580,8 @@ impl QuillApp {
         // main-only: an account switch is the app's.
         self.flush_background_accounts(window, cx);
         self.answer_call_picks(window, cx);
-        // B1: force-reply — an incoming message demanded a reply; drain
-        // from the live or demo session and arm the composer.
-        let force_target = self
-            .live
-            .as_mut()
-            .and_then(|live| live.driver.session.bots.pending_force_reply.take())
-            .or_else(|| {
-                self.demo_session
-                    .as_mut()
-                    .and_then(|session| session.bots.pending_force_reply.take())
-            });
-        // main-only: a forced reply arms the main window's composer; one for
-        // a chat window's chat is not routed there yet.
-        if let Some(target) = force_target {
-            self.drain_force_reply(target, window, cx);
-        }
+        // B1: a forced reply arms the composer of the window showing its
+        // chat, on that window's own frame (`arm_force_reply_here`).
         // main-only: notifications are the app's.
         self.deliver_notifications(Some(window), cx);
     }

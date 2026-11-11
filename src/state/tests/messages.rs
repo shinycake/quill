@@ -15,8 +15,6 @@ fn effective_preview_prefers_ephemeral_content() {
         date: 0,
         is_outgoing: false,
         is_pinned: false,
-        topic_id: None,
-        thread_id: None,
         ephemeral: Some(EphemeralMessageContent {
             content: Box::new(MessageContent::Text("secret flow".into())),
             reply_markup: None,
@@ -24,7 +22,6 @@ fn effective_preview_prefers_ephemeral_content() {
         media_album_id: 0,
         author_signature: None,
         scheduling_state: None,
-        can_retry: false,
         send_state: Default::default(),
         content: MessageContent::Text("public".into()),
         files: Vec::new(),
@@ -78,8 +75,6 @@ fn update_message_content_refreshes_scheduled_entry() {
         date: 0,
         is_outgoing: true,
         is_pinned: false,
-        topic_id: None,
-        thread_id: None,
         ephemeral: None,
         media_album_id: 0,
         author_signature: None,
@@ -87,7 +82,6 @@ fn update_message_content_refreshes_scheduled_entry() {
             send_date: 999,
             repeat_period: 0,
         }),
-        can_retry: false,
         send_state: Default::default(),
         content: MessageContent::Text("old caption".into()),
         files: Vec::new(),
@@ -164,6 +158,8 @@ fn resend_error_surfaces_instead_of_silence() {
     let err = session
         .messages
         .resend_error
+        .take_all()
+        .pop()
         .expect("resend error surfaced");
     assert!(err.contains("Could not retry the send"), "{err}");
 }
@@ -185,6 +181,8 @@ fn message_link_error_surfaces_instead_of_silence() {
     let err = session
         .messages
         .message_link_error
+        .take_all()
+        .pop()
         .expect("message link error surfaced");
     assert!(err.contains("Could not get message link"), "{err}");
 }
@@ -206,6 +204,8 @@ fn recognize_speech_error_surfaces_instead_of_silence() {
     let err = session
         .messages
         .recognize_speech_error
+        .take_all()
+        .pop()
         .expect("recognize speech error surfaced");
     assert!(err.contains("Could not transcribe this message"), "{err}");
 }
@@ -261,7 +261,7 @@ fn self_destructing_photo_disappears_via_delete_update() {
     assert!(session.open_chat_has_live_self_destruct(unix_ms_now()));
     // The badge label comes from the latest `self_destruct_in`.
     let label = row
-        .self_destruct_badge(sd.fetched_at_ms)
+        .self_destruct_badge(sd.fetched_at_ms())
         .expect("badge for timer row");
     assert_eq!(label, "⏱ 43s left");
     // Timer fires server-side: the row leaves via `updateDeleteMessages`.
@@ -294,7 +294,7 @@ fn opening_a_timed_photo_starts_its_countdown() {
         r#"{"@type":"updateNewMessage","message":{"id":902,"chat_id":43,"is_outgoing":false,"content":{"@type":"messagePhoto","photo":{"@type":"photo","has_stickers":false,"sizes":[]},"caption":{"@type":"formattedText","text":"","entities":[]},"show_caption_above_media":false,"has_spoiler":false,"is_secret":true},"self_destruct_type":{"@type":"messageSelfDestructTypeTimer","self_destruct_time":10},"self_destruct_in":0}}"#,
     );
     let sd = session.histories[&43].messages[&902].self_destruct.unwrap();
-    assert_eq!(sd.expires_in_ms, 0);
+    assert_eq!(sd.expires_in_ms(), 0);
     let before = unix_ms_now();
     apply_json(
         &mut session,
@@ -303,9 +303,9 @@ fn opening_a_timed_photo_starts_its_countdown() {
         r#"{"@type":"updateMessageContentOpened","chat_id":43,"message_id":902}"#,
     );
     let sd = session.histories[&43].messages[&902].self_destruct.unwrap();
-    assert_eq!(sd.expires_in_ms, 10_000);
-    assert!(sd.fetched_at_ms >= before);
-    let ttl = crate::media_viewer::viewer_ttl(&sd, sd.fetched_at_ms + 2_500).unwrap();
+    assert_eq!(sd.expires_in_ms(), 10_000);
+    assert!(sd.fetched_at_ms() >= before);
+    let ttl = crate::media_viewer::viewer_ttl(&sd, sd.fetched_at_ms() + 2_500).unwrap();
     assert_eq!(ttl.seconds_left(), Some(8));
     // A second open does not restart a running timer.
     apply_json(
@@ -315,7 +315,7 @@ fn opening_a_timed_photo_starts_its_countdown() {
         r#"{"@type":"updateMessageContentOpened","chat_id":43,"message_id":902}"#,
     );
     let again = session.histories[&43].messages[&902].self_destruct.unwrap();
-    assert_eq!(again.fetched_at_ms, sd.fetched_at_ms);
+    assert_eq!(again.fetched_at_ms(), sd.fetched_at_ms());
 }
 
 #[test]
@@ -540,7 +540,7 @@ fn view_messages_tdlib_error_releases_in_flight_ids() {
         r#"{"@type":"updateNewMessage","message":{"id":5,"chat_id":1,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hi","entities":[]}}}}"#,
     );
     let extra = session.request(RequestPurpose::ViewMessages, Some(ChatId(1)));
-    session.begin_viewing(ChatId(1), &[MessageId(5)]);
+    session.begin_viewing(ChatId(1), extra, &[MessageId(5)]);
     assert!(session.message_ids_to_view(ChatId(1)).is_empty());
     assert!(
         session
@@ -558,12 +558,12 @@ fn view_messages_tdlib_error_releases_in_flight_ids() {
     );
     assert!(!session.requests.has_purpose(RequestPurpose::ViewMessages));
     assert_eq!(session.message_ids_to_view(ChatId(1)), vec![MessageId(5)]);
-    assert!(session.histories.get(&1).unwrap().viewing.is_empty());
-    assert!(!session.histories.get(&1).unwrap().viewed.contains(&5));
+    assert!(!session.histories.get(&1).unwrap().is_viewing(5));
+    assert!(!session.histories.get(&1).unwrap().views.is_viewed(5));
     assert!(!sink.rendered().contains("CANARY_VIEW_FAIL"));
 
     let extra = session.request(RequestPurpose::ViewMessages, Some(ChatId(1)));
-    session.begin_viewing(ChatId(1), &[MessageId(5)]);
+    session.begin_viewing(ChatId(1), extra, &[MessageId(5)]);
     apply_json(
         &mut session,
         &seq,
@@ -571,8 +571,8 @@ fn view_messages_tdlib_error_releases_in_flight_ids() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
     assert!(session.message_ids_to_view(ChatId(1)).is_empty());
-    assert!(session.histories.get(&1).unwrap().viewed.contains(&5));
-    assert!(session.histories.get(&1).unwrap().viewing.is_empty());
+    assert!(session.histories.get(&1).unwrap().views.is_viewed(5));
+    assert!(!session.histories.get(&1).unwrap().is_viewing(5));
 }
 
 #[test]
@@ -595,7 +595,7 @@ fn reported_visible_messages_survive_a_view_error() {
     assert!(session.report_visible_messages(ChatId(1), &[MessageId(4)]));
     assert_eq!(session.message_ids_to_view(ChatId(1)), vec![MessageId(4)]);
     let extra = session.request(RequestPurpose::ViewMessages, Some(ChatId(1)));
-    session.begin_viewing(ChatId(1), &[MessageId(4)]);
+    session.begin_viewing(ChatId(1), extra, &[MessageId(4)]);
     assert!(session.message_ids_to_view(ChatId(1)).is_empty());
     apply_json(
         &mut session,
@@ -692,7 +692,7 @@ fn reply_to_message_preview_and_jump() {
         .get(&104)
         .unwrap();
     assert_eq!(
-        reply.reply_to.as_ref().map(|r| r.message_id),
+        reply.reply_to.as_ref().map(|r| r.message_id()),
         Some(MessageId(101))
     );
     assert_eq!(
@@ -700,7 +700,7 @@ fn reply_to_message_preview_and_jump() {
         Some("Hello from injected JSON.")
     );
     assert_eq!(
-        session.begin_chat_search_jump(reply.reply_to.as_ref().unwrap().message_id),
+        session.begin_chat_search_jump(reply.reply_to.as_ref().unwrap().message_id()),
         ChatSearchJumpNeed::AlreadyReady
     );
     assert_eq!(
@@ -822,4 +822,84 @@ fn a_failed_send_loaded_again_still_shows_failed() {
     assert!(row.failed(), "the row keeps its failed state");
     assert!(row.can_retry());
     assert!(row.pending(), "a failed send is not a delivered message");
+}
+
+/// Two `viewMessages` in flight at once: the answer to one settles its own
+/// ids only. The first ok does not mark the second request's ids viewed, so
+/// when the second fails they are due again (sweep 05-178).
+#[test]
+fn a_view_answer_settles_only_its_own_request() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.open_chat(ChatId(1));
+    for id in [4, 5] {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"updateNewMessage","message":{{"id":{id},"chat_id":1,"is_outgoing":false,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"m","entities":[]}}}}}}}}"#
+            ),
+        );
+    }
+    assert!(session.report_visible_messages(ChatId(1), &[MessageId(4), MessageId(5)]));
+    let first = session.request(RequestPurpose::ViewMessages, Some(ChatId(1)));
+    session.begin_viewing(ChatId(1), first, &[MessageId(4)]);
+    let second = session.request(RequestPurpose::ViewMessages, Some(ChatId(1)));
+    session.begin_viewing(ChatId(1), second, &[MessageId(5)]);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, first.0),
+    );
+    let history = session.histories.get(&1).unwrap();
+    assert!(history.views.is_viewed(4));
+    assert!(!history.views.is_viewed(5), "the second is still out");
+    assert!(history.is_viewing(5));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","code":400,"message":"x","@extra":"{}"}}"#,
+            second.0
+        ),
+    );
+    let history = session.histories.get(&1).unwrap();
+    assert!(!history.views.is_viewed(5));
+    assert_eq!(
+        session.message_ids_to_view(ChatId(1)),
+        vec![MessageId(5)],
+        "its failure puts its own ids due again"
+    );
+}
+
+/// An answer from before the chat was re-opened settles nothing: the new
+/// open generation starts with none in flight.
+#[test]
+fn a_view_answer_from_before_a_reopen_settles_nothing() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.open_chat(ChatId(1));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateNewMessage","message":{"id":5,"chat_id":1,"is_outgoing":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"m","entities":[]}}}}"#,
+    );
+    let old = session.request(RequestPurpose::ViewMessages, Some(ChatId(1)));
+    session.begin_viewing(ChatId(1), old, &[MessageId(5)]);
+    session.prepare_history_view(ChatId(1));
+    let fresh = session.request(RequestPurpose::ViewMessages, Some(ChatId(1)));
+    session.begin_viewing(ChatId(1), fresh, &[MessageId(5)]);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, old.0),
+    );
+    let history = session.histories.get(&1).unwrap();
+    assert!(!history.views.is_viewed(5), "the old answer is not ours");
+    assert!(history.is_viewing(5));
 }

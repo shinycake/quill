@@ -23,6 +23,7 @@ mod layout;
 #[cfg(target_os = "macos")]
 mod macos;
 mod manifest;
+mod parent;
 mod staged;
 mod swap;
 
@@ -39,6 +40,10 @@ use layout::{
 #[cfg(test)]
 #[cfg(unix)]
 use layout::{trusted_dir_as, trusted_file_as};
+#[cfg(test)]
+#[cfg(unix)]
+use parent::{open_failure_means_gone, unix_process_alive};
+use parent::{wait_for_launch, wait_for_parent};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{self, OpenOptions};
@@ -78,10 +83,35 @@ const PACKAGE_SENTINEL: &str = if cfg!(windows) {
     "lib/libtdjson.so"
 };
 
-#[derive(Serialize, Deserialize)]
+/// How the install ended, as the receipt says.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum Outcome {
+    Installed,
+    Failed,
+}
+
+#[derive(Serialize)]
 struct InstallResult {
     release: ReleaseInfo,
-    failed: bool,
+    outcome: Outcome,
+}
+
+impl InstallResult {
+    /// A receipt as written: `outcome`, or the `failed` flag older
+    /// versions wrote.
+    pub(super) fn parse(bytes: &[u8]) -> Option<Self> {
+        let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+        let release = serde_json::from_value(value.get("release")?.clone()).ok()?;
+        let outcome = match value.get("outcome").and_then(serde_json::Value::as_str) {
+            Some("installed") => Outcome::Installed,
+            Some("failed") => Outcome::Failed,
+            Some(_) => return None,
+            None if value.get("failed")?.as_bool()? => Outcome::Failed,
+            None => Outcome::Installed,
+        };
+        Some(Self { release, outcome })
+    }
 }
 
 /// Why this copy cannot replace itself. Each reason has its own line in the
@@ -176,11 +206,13 @@ pub fn startup_state() -> UpdateState {
     finish_previous_update();
     let result = result_path().and_then(|p| take_receipt(&p));
     match result {
-        Some(r) if r.failed => UpdateState::InstallFailed(
+        Some(r) if r.outcome == Outcome::Failed => UpdateState::InstallFailed(
             r.release,
             "Update installation failed. Your previous version was restored. Retry the update.",
         ),
-        Some(r) if r.release.version == crate::version::APP => UpdateState::Installed(r.release),
+        Some(r) if r.release.version == crate::version::APP => {
+            UpdateState::Installed(r.release, Default::default())
+        }
         _ => UpdateState::Idle,
     }
 }
@@ -191,7 +223,7 @@ fn take_receipt(path: &Path) -> Option<InstallResult> {
     }
     let bytes = fs::read(path).ok();
     let _ = fs::remove_file(path);
-    bytes.and_then(|b| serde_json::from_slice(&b).ok())
+    bytes.and_then(|b| InstallResult::parse(&b))
 }
 
 pub fn acknowledge_changelog() -> std::io::Result<()> {
@@ -223,13 +255,13 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     create_private(path, bytes).map(drop)
 }
 
-fn write_result(path: PathBuf, release: &ReleaseInfo, failed: bool) -> std::io::Result<()> {
+fn write_result(path: PathBuf, release: &ReleaseInfo, outcome: Outcome) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     let bytes = serde_json::to_vec(&InstallResult {
         release: release.clone(),
-        failed,
+        outcome,
     })?;
     let temp = path.with_extension(format!("{}.tmp", std::process::id()));
     let written = write_private(&temp, &bytes)
@@ -488,12 +520,34 @@ impl From<Refusal> for std::io::Error {
 }
 
 /// Verification, then (macOS) the quarantine mark goes: only a bundle that
-/// passed every check loses it, so a refused one stays quarantined.
+/// passed every check loses it, so a refused one stays quarantined. Last,
+/// the system checks each of its code files once and saves the verdicts
+/// (`first_load::settle_package`), which it only does while the folder is
+/// not a bundle to it: see [`staged_dir_name`].
 fn accept_staged(layout: &Layout, staged: &Path, release: &ReleaseInfo) -> Result<(), Refusal> {
     verify_staged(layout, staged, release)?;
     #[cfg(target_os = "macos")]
-    macos::remove_quarantine(staged).map_err(|_| Refusal::Invalid)?;
+    {
+        macos::remove_quarantine(staged).map_err(|_| Refusal::Invalid)?;
+        if let Ok(files) = swap::list_files(staged) {
+            crate::first_load::settle_package(staged, files);
+        }
+    }
     Ok(())
+}
+
+const STAGED_SUFFIX: &str = "-new";
+/// How plans written before 2026-11-10 named their folder.
+const OLD_STAGED_SUFFIX: &str = ".new";
+
+/// The name of the folder a package is unpacked into and installed from.
+/// It has no dot after the first character. macOS takes a folder for an app
+/// bundle when its name has an extension and it holds `Contents/MacOS`, and
+/// a code file it first meets inside a notarized bundle is checked again on
+/// every cold start. Met in a plain folder, the file is checked once and the
+/// verdict is saved (docs/decisions/launch-first-load-check.md).
+fn staged_dir_name(pid: u32, nanos: u128) -> String {
+    format!("{}{pid}-{nanos}{STAGED_SUFFIX}", swap::TEMP_PREFIX)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -582,17 +636,19 @@ pub fn download_and_stage(
         |_| "Could not create the update folder beside Quill. Check folder permissions.",
     )?;
     clear_interrupted_update(&target, &layout);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
     let stamp = format!(
-        "{}{}-{}-{}",
+        "{}{}-{}-{nanos}",
         swap::TEMP_PREFIX,
         std::process::id(),
         release.version,
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
     );
-    let staged = layout.stage_root.join(format!("{stamp}.new"));
+    let staged = layout
+        .stage_root
+        .join(staged_dir_name(std::process::id(), nanos));
     let archive = fetch::partial_path(&layout.stage_root, &asset.sha256);
     fetch::clear_other_partials(&layout.stage_root, &archive);
     let plan_path = layout.plans.join(format!("{stamp}.json"));
@@ -676,91 +732,6 @@ fn launch_helper(plan: &Path) -> std::io::Result<()> {
     helper.spawn().map(|_| ())
 }
 
-/// `ERROR_INVALID_PARAMETER`: OpenProcess says no process has that id, so
-/// the parent is gone. Any other failure (access denied, an elevated or
-/// other-session parent) leaves the parent running.
-#[cfg(any(windows, test))]
-fn open_failure_means_gone(code: u32) -> bool {
-    code == 87
-}
-
-/// Whether process `pid` still exists. `EPERM` means it exists but belongs
-/// to someone else.
-#[cfg(unix)]
-fn unix_process_alive(pid: u32) -> bool {
-    let Ok(pid) = i32::try_from(pid) else {
-        return false;
-    };
-    // SAFETY: signal 0 only checks that the process exists and can be
-    // signalled; no signal is delivered.
-    let result = unsafe { libc::kill(pid, 0) };
-    result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-}
-
-/// Blocks until process `pid` has exited (30 s at most).
-fn wait_for_parent(pid: u32) -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        let deadline = Instant::now() + Duration::from_secs(30);
-        while unix_process_alive(pid) {
-            if Instant::now() >= deadline {
-                return Err(std::io::Error::other(
-                    "App did not exit; update was not installed",
-                ));
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
-        Ok(())
-    }
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, WAIT_OBJECT_0};
-        use windows_sys::Win32::System::Threading::{
-            OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
-        };
-        let deadline = Instant::now() + Duration::from_secs(30);
-        let handle = loop {
-            // SAFETY: OpenProcess takes plain integers and returns an owned
-            // handle, or null with the failure in the thread's last error.
-            let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
-            if !handle.is_null() {
-                break handle;
-            }
-            // SAFETY: reads the calling thread's last-error value.
-            let code = unsafe { GetLastError() };
-            if open_failure_means_gone(code) {
-                return Ok(());
-            }
-            if Instant::now() >= deadline {
-                return Err(std::io::Error::other(
-                    "App did not exit; update was not installed",
-                ));
-            }
-            std::thread::sleep(Duration::from_millis(200));
-        };
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        let millis = u32::try_from(remaining.as_millis()).unwrap_or(30_000);
-        // SAFETY: `handle` is a valid process handle with SYNCHRONIZE access.
-        let status = unsafe { WaitForSingleObject(handle, millis) };
-        // SAFETY: closes the handle opened above, once.
-        unsafe { CloseHandle(handle) };
-        if status == WAIT_OBJECT_0 {
-            Ok(())
-        } else {
-            Err(std::io::Error::other(
-                "App did not exit; update was not installed",
-            ))
-        }
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = pid;
-        Err(std::io::Error::other(
-            "Updates are unavailable on this platform",
-        ))
-    }
-}
-
 /// How the helper starts Quill again: the executable at `target` with
 /// `args`.
 type Starter = fn(&Path, &[String]) -> std::io::Result<()>;
@@ -798,7 +769,7 @@ fn install_bundle(
         .to_string_lossy();
     if plan.staged.parent() != Some(layout.stage_root.as_path())
         || !name.starts_with(swap::TEMP_PREFIX)
-        || !name.ends_with(".new")
+        || !(name.ends_with(STAGED_SUFFIX) || name.ends_with(OLD_STAGED_SUFFIX))
         || !fs::symlink_metadata(&plan.staged)?.file_type().is_dir()
     {
         return Err(std::io::Error::other("Invalid update handoff"));
@@ -806,17 +777,17 @@ fn install_bundle(
     manifest::verify(&plan.staged, &plan.files)?;
     verify_staged(layout, &plan.staged, &plan.release)?;
     if cfg!(windows) {
-        write_result(receipt_for(target), &plan.release, false)?;
+        write_result(receipt_for(target), &plan.release, Outcome::Installed)?;
         return swap::swap_files(&layout.install, &plan.staged, launch);
     }
     if cfg!(target_os = "macos") {
         // Beside the bundle, like the plan: the swap carries nothing extra.
-        write_result(receipt_for(target), &plan.release, false)?;
+        write_result(receipt_for(target), &plan.release, Outcome::Installed)?;
     } else {
         write_result(
             receipt_for(&package_exe(&plan.staged)),
             &plan.release,
-            false,
+            Outcome::Installed,
         )?;
     }
     let backup = layout
@@ -878,7 +849,7 @@ fn apply_claimed(
                 plan
             });
             if let Some(plan) = &plan {
-                let _ = write_result(receipt_for(&target), &plan.release, true);
+                let _ = write_result(receipt_for(&target), &plan.release, Outcome::Failed);
             }
             let _ = start(
                 &target,
@@ -901,12 +872,15 @@ fn is_temp_entry(path: &Path) -> bool {
 
 /// [`apply_update`] for the executable at `target` (the helper itself).
 fn apply_plan(
-    claim: claim::Claim,
+    mut claim: claim::Claim,
     plan: InstallPlan,
     target: PathBuf,
     start: Starter,
 ) -> std::io::Result<()> {
     let claim_dir = claim.path().parent().map(Path::to_path_buf);
+    // The app may be slow to quit (several accounts closing, a slow disk):
+    // the helper waits as long as the launch holds its lock.
+    let parent_gone = wait_for_launch(&mut claim);
     let mut claim = Some(claim);
     // The claim goes right before Quill starts, so that Quill never finds it.
     let mut relaunch = || {
@@ -915,10 +889,16 @@ fn apply_plan(
         }
         start(&target, &plan.args)
     };
-    let result = install(&plan, &target, claim_dir.as_deref(), &mut relaunch);
+    let result = install(
+        &plan,
+        &target,
+        claim_dir.as_deref(),
+        parent_gone,
+        &mut relaunch,
+    );
     if result.is_err() {
         // Written first: the restarted version reads it at once.
-        let _ = write_result(receipt_for(&target), &plan.release, true);
+        let _ = write_result(receipt_for(&target), &plan.release, Outcome::Failed);
         let _ = relaunch();
         if staged_for(&plan.staged, &target) {
             let _ = swap::remove_any(&plan.staged);
@@ -935,6 +915,7 @@ fn install(
     plan: &InstallPlan,
     target: &Path,
     claim_dir: Option<&Path>,
+    parent_gone: bool,
     launch: impl FnOnce() -> std::io::Result<()>,
 ) -> std::io::Result<()> {
     let layout =
@@ -949,7 +930,9 @@ fn install(
     {
         return Err(std::io::Error::other("Invalid update handoff"));
     }
-    wait_for_parent(plan.parent)?;
+    if !parent_gone {
+        wait_for_parent(plan.parent)?;
+    }
     if !valid_release(&plan.release) {
         return Err(std::io::Error::other("Invalid update release"));
     }

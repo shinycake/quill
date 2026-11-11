@@ -14,6 +14,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::super::app::QuillApp;
+use super::super::group_call_state::VideoChatCreate;
 use super::super::group_call_stream_layout::StreamJoinIntent;
 use super::super::scheduled::{TimePicker, new_date_time_picker, picked_unix};
 use super::super::shell::{DialogKind, QuillShell};
@@ -65,8 +66,9 @@ pub(crate) enum CreateStep {
 
 pub(crate) struct ScheduleStep {
     pub(crate) picker: TimePicker,
-    /// The picked time is outside the allowed range.
-    pub(crate) error: Option<&'static str>,
+    /// The time Schedule refused, with why (outside the allowed range).
+    /// Shown while that time is the picked one: another pick clears it.
+    pub(crate) error: Option<(Option<i64>, &'static str)>,
     /// Re-renders the countdown every ten seconds while the box shows.
     _refresh: Task<()>,
 }
@@ -89,7 +91,7 @@ impl QuillApp {
             .chats
             .get(&chat_id.0)
             .is_some_and(|chat| chat.kind.is_channel());
-        let current = session.current_call_for_create(self.group_call_screen.stream_joining);
+        let current = session.current_call_for_create(self.group_call_screen.joining_call());
         match before_create(current, chat_id, to_channel) {
             BeforeCreate::Proceed => self.continue_group_call_create(chat_id, kind, window, cx),
             BeforeCreate::ShowCurrent => {
@@ -231,7 +233,8 @@ impl QuillApp {
         let clock = WallClock::of(cx);
         let now = clock.now();
         let max = schedule_max(now, &|unix| clock.offset_at(unix));
-        let picked = picked_unix(&step.picker, SCHEDULE_MIN_AHEAD_SECS, cx)
+        let raw = picked_unix(&step.picker, SCHEDULE_MIN_AHEAD_SECS, cx);
+        let picked = raw
             .ok_or(quill::schedule::ScheduleError::Invalid)
             .and_then(|date| check_schedule(date, now, max));
         match picked {
@@ -242,7 +245,7 @@ impl QuillApp {
                     ..
                 }) = self.group_call_boxes.start_dialog.as_mut()
                 {
-                    step.error = Some(err.message());
+                    step.error = Some((raw, err.message()));
                 }
                 cx.notify();
             }
@@ -331,26 +334,43 @@ impl QuillApp {
         let Some(session) = session else {
             return;
         };
+        // The list belongs to the box waiting for it: a box that closed or
+        // was replaced drops it, and a box whose request is no longer the
+        // session's closes (nothing will answer it).
+        let held = session.calls.create_join_as.as_ref().map(|j| j.request());
+        let orphaned = held.is_some() && held != waiting;
+        let abandoned = waiting.is_some() && held != waiting;
         let answer = match (waiting, session.calls.create_join_as.as_ref()) {
-            (Some(request), Some(join_as)) if join_as.request == request => join_as.answer.clone(),
+            (Some(request), Some(join_as)) if join_as.request() == request => join_as.answer(),
             _ => None,
         };
-        if answer.is_some() {
+        if answer.is_some() || orphaned {
             session.calls.create_join_as = None;
         }
+
         let failed = std::mem::take(&mut session.calls.failed_creates);
+        let answered = std::mem::take(&mut session.calls.answered_creates);
+        if abandoned {
+            self.group_call_boxes.start_dialog = None;
+            cx.notify();
+        }
         if let Some(answer) = answer {
             self.accept_create_join_as(answer, window, cx);
         }
-        if let Some(request) = self.group_call_boxes.create_request
+        if let VideoChatCreate::Sent(request) = self.group_call_boxes.create
+            && answered.contains(&request)
+        {
+            self.group_call_boxes.create = VideoChatCreate::Idle;
+        }
+        if let VideoChatCreate::Sent(request) = self.group_call_boxes.create
             && failed.contains(&request)
         {
-            self.group_call_boxes.create_request = None;
+            self.group_call_boxes.create = VideoChatCreate::Idle;
             if matches!(
-                self.group_call_screen.stream_join,
+                self.group_call_screen.stream_wish(),
                 Some((StreamJoinIntent::Created { .. }, _))
             ) {
-                self.group_call_screen.stream_join = None;
+                self.group_call_screen.clear_stream_wish();
             }
             server_error_toast(window, cx);
             cx.notify();
@@ -370,6 +390,16 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.group_call_boxes.start_dialog = None;
+        // The call you are in ends only for a request the driver will take.
+        if let Some(live) = self.live.as_ref()
+            && live
+                .driver
+                .check_create_video_chat(chat_id.0, String::new(), start_date)
+                .is_err()
+        {
+            self.created_video_chat(chat_id, None, start_date == 0, join_as, window, cx);
+            return;
+        }
         self.end_current_call_for_create(cx);
         let sent = match self.live.as_mut() {
             Some(live) => live
@@ -393,7 +423,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.group_call_boxes.create_request = sent;
+        self.group_call_boxes.create = sent.map_or(VideoChatCreate::Idle, VideoChatCreate::Sent);
         match sent {
             None => server_error_toast(window, cx),
             Some(_) if join => self.note_stream_join_intent(StreamJoinIntent::Created {
@@ -413,7 +443,7 @@ impl QuillApp {
     /// nothing, and TDLib would refuse the leave with an error that lands
     /// on the new call.
     pub(in crate::ui) fn end_current_call_for_create(&mut self, cx: &mut Context<Self>) {
-        let joining = self.group_call_screen.stream_joining;
+        let joining = self.group_call_screen.joining_call();
         let Some(session) = self.session() else {
             return;
         };
@@ -435,7 +465,7 @@ impl QuillApp {
         } else {
             self.leave_active_group_call(cx);
         }
-        self.group_call_screen.stream_joining = None;
+        self.group_call_screen.clear_stream_joining();
     }
 
     /// The registered dialog: the step on screen.
@@ -733,6 +763,11 @@ fn notified_line(step: &ScheduleStep, channel: bool, cx: &App) -> Option<String>
 /// The date and time picker and the live "will start in …" line.
 fn schedule_body(step: &ScheduleStep, channel: bool, cx: &mut Context<QuillApp>) -> AnyElement {
     let notified = notified_line(step, channel, cx);
+    let picked = picked_unix(&step.picker, SCHEDULE_MIN_AHEAD_SECS, cx);
+    let shown_error = step
+        .error
+        .filter(|(refused, _)| *refused == picked)
+        .map(|(_, error)| error);
     div()
         .flex()
         .flex_col()
@@ -742,7 +777,7 @@ fn schedule_body(step: &ScheduleStep, channel: bool, cx: &mut Context<QuillApp>)
                 .debug_selector(|| "group-call-schedule-picker".into())
                 .child(DatePicker::new(&step.picker.state).small()),
         )
-        .when_some(step.error, |this, error| {
+        .when_some(shown_error, |this, error| {
             this.child(
                 div()
                     .id("group-call-schedule-error")

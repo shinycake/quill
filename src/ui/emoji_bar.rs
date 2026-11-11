@@ -42,8 +42,6 @@ pub(super) struct EmojiBarUi {
     pub expanded: bool,
     pub strip: ScrollHandle,
     pub grid: ScrollHandle,
-    /// The installed emoji set list was asked for (once per session).
-    pub sets_asked: bool,
 }
 
 impl EmojiBarUi {
@@ -175,7 +173,7 @@ impl QuillApp {
         if items.is_empty() || !session.my_is_premium() {
             return items;
         }
-        let library = &session.media.media_library.set_stickers;
+        let library = &session.media.media_library;
         let sets: Vec<&[StickerItem]> = session
             .stickers
             .emoji
@@ -187,11 +185,8 @@ impl QuillApp {
         let missing = sets.len() < session.stickers.emoji.installed_sets.len()
             || session.stickers.emoji.installed_sets.is_empty();
         items.extend(custom);
-        if missing {
-            let list = !std::mem::replace(&mut self.composer_ui.suggest.bar.sets_asked, true);
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.ensure_suggestion_emoji_sets(list);
-            }
+        if missing && let Some(live) = self.live.as_mut() {
+            let _ = live.driver.ensure_suggestion_emoji_sets();
         }
         items
     }
@@ -200,7 +195,7 @@ impl QuillApp {
     /// rebuilt when this moves.
     pub(super) fn custom_sets_loaded(&self) -> usize {
         self.session().map_or(0, |session| {
-            let library = &session.media.media_library.set_stickers;
+            let library = &session.media.media_library;
             session
                 .stickers
                 .emoji
@@ -466,7 +461,7 @@ impl QuillApp {
             },
             Some(_) => return None,
             None => {
-                let (_, items) = self.composer_ui.emoji_words.hovered.as_ref()?;
+                let (_, items) = self.composer_ui.emoji_words.hovered()?;
                 BarSpec {
                     id: "word-emoji",
                     items,
@@ -545,8 +540,7 @@ mod tests {
             thumb_file_id: None,
             thumb_width: 0,
             thumb_height: 0,
-            requires_premium: true,
-            premium_animation: None,
+            premium: Some(quill::telegram::envelope::PremiumSticker { animation: None }),
         }
     }
 

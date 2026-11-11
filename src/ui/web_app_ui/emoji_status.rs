@@ -37,8 +37,11 @@ enum AccessStage {
     Idle,
     /// The access prompt is up.
     Asking,
-    /// "Allow" was pressed and `toggleBotCanManageEmojiStatus` is in flight.
-    Granting,
+    /// "Allow" was pressed and `toggleBotCanManageEmojiStatus` is in flight
+    /// as this request. Its answer or error ends it, and so does the
+    /// request leaving flight with neither (dropped by the stale sweep or a
+    /// reconnect).
+    Granting(quill::ids::RequestId),
 }
 
 impl EmojiStatusFlow {
@@ -57,8 +60,11 @@ struct SetRequest {
 }
 
 enum SetStage {
-    /// Looking the emoji up; `sent` once `getCustomEmojiStickers` is on its way.
-    Resolving { sent: bool },
+    /// Looking the emoji up; `request` is this lookup's `getCustomEmojiStickers`
+    /// once it is on its way (`None` while the shared lookup is busy).
+    Resolving {
+        request: Option<quill::ids::RequestId>,
+    },
     /// The prompt is up, with the emoji's character.
     Confirming { alt: String },
 }
@@ -161,18 +167,18 @@ impl QuillApp {
             });
             return;
         }
-        self.with_window(|window| {
-            window.emoji.access = AccessStage::Granting;
-        });
         let sent = self
             .live
             .as_mut()
             .map(|live| live.driver.set_bot_emoji_status_access(bot_id, true));
-        if !matches!(sent, Some(Ok(_))) {
-            self.with_window(|window| {
+        match sent {
+            Some(Ok(request)) => self.with_window(|window| {
+                window.emoji.access = AccessStage::Granting(request);
+            }),
+            _ => self.with_window(|window| {
                 window.emoji.access = AccessStage::Idle;
                 window.emit(BridgeReply::emoji_status_access_requested(false));
-            });
+            }),
         }
     }
 
@@ -199,7 +205,7 @@ impl QuillApp {
                 custom_emoji_id,
                 duration_secs,
                 since: Instant::now(),
-                stage: SetStage::Resolving { sent: false },
+                stage: SetStage::Resolving { request: None },
             });
         });
         self.poll_emoji_status(cx);
@@ -265,7 +271,8 @@ impl QuillApp {
             .and_then(|live| live.driver.session.bots.web_apps.emoji_access.take());
         if let Some((bot_id, done)) = access {
             let waiting = self.mini_apps.window.as_ref().is_some_and(|window| {
-                window.launch.bot_user_id == bot_id && window.emoji.access == AccessStage::Granting
+                window.launch.bot_user_id == bot_id
+                    && matches!(window.emoji.access, AccessStage::Granting(_))
             });
             if waiting {
                 self.with_window(|window| {
@@ -274,15 +281,29 @@ impl QuillApp {
                 });
             }
         }
+        // A grant whose request left flight with no answer was dropped:
+        // the app hears "no", and later requests are not turned away as busy.
+        let dropped = match self.mini_apps.window.as_ref().map(|w| w.emoji.access) {
+            Some(AccessStage::Granting(request)) => self
+                .session()
+                .is_some_and(|session| session.requests.get(request).is_none()),
+            _ => false,
+        };
+        if dropped {
+            self.with_window(|window| {
+                window.emoji.access = AccessStage::Idle;
+                window.emit(BridgeReply::emoji_status_access_requested(false));
+            });
+        }
         self.resolve_suggested_emoji(cx);
     }
 
     fn resolve_suggested_emoji(&mut self, cx: &mut Context<Self>) {
-        let Some((id, sent, since)) = self.mini_apps.window.as_ref().and_then(|window| {
+        let Some((id, asked, since)) = self.mini_apps.window.as_ref().and_then(|window| {
             let request = window.emoji.set.as_ref()?;
             match request.stage {
-                SetStage::Resolving { sent } => {
-                    Some((request.custom_emoji_id, sent, request.since))
+                SetStage::Resolving { request: asked } => {
+                    Some((request.custom_emoji_id, asked, request.since))
                 }
                 SetStage::Confirming { .. } => None,
             }
@@ -315,13 +336,13 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        let in_flight = self.session().is_some_and(|session| {
-            session
-                .requests
-                .has_purpose(quill::state::RequestPurpose::GetCustomEmojiStickers)
+        // This request's own lookup, not any other batch's.
+        let in_flight = asked.is_some_and(|request| {
+            self.session()
+                .is_some_and(|session| session.requests.get(request).is_some())
         });
         let mut failed = since.elapsed() > RESOLVE_TIMEOUT;
-        if !failed && !sent {
+        if !failed && asked.is_none() {
             // The shared lookup may be busy with another batch: try again
             // on the next tick.
             match self
@@ -329,15 +350,17 @@ impl QuillApp {
                 .as_mut()
                 .map(|live| live.driver.resolve_custom_emoji(id))
             {
-                Some(Ok(Some(_))) => self.with_window(|window| {
+                Some(Ok(Some(lookup))) => self.with_window(|window| {
                     if let Some(request) = window.emoji.set.as_mut() {
-                        request.stage = SetStage::Resolving { sent: true };
+                        request.stage = SetStage::Resolving {
+                            request: Some(lookup),
+                        };
                     }
                 }),
                 Some(Ok(None)) => {}
                 _ => failed = true,
             }
-        } else if !failed && sent && !in_flight {
+        } else if !failed && asked.is_some() && !in_flight {
             // Answered, and the emoji is not an emoji-set sticker (or does
             // not exist): tdesktop's `SUGGESTED_EMOJI_INVALID`.
             failed = true;

@@ -74,12 +74,15 @@ impl QuillApp {
         };
         let stickers = &mut session.stickers;
         stickers.stickers.open = false;
-        stickers.masks.installed = stickers.stickers.sets.iter().take(3).cloned().collect();
-        stickers.masks.installed_loaded = true;
-        stickers.masks.archived = stickers.stickers.archived.iter().take(1).cloned().collect();
-        stickers.masks.archived_loaded = true;
-        stickers.masks.open = true;
-        self.settings.sticker_settings_open = false;
+        stickers.masks.installed = quill::state::fetch::Fetch::Ready(
+            stickers.stickers.sets.iter().take(3).cloned().collect(),
+        );
+        stickers.masks.archived = quill::state::fetch::Fetch::Ready(
+            stickers.stickers.archived.iter().take(1).cloned().collect(),
+        );
+        stickers.masks.set_dialog_open(true);
+        self.settings
+            .set_box(crate::ui::settings_state::SettingsBox::Stickers, false);
     }
 
     fn demo_stickers_manager(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -120,7 +123,7 @@ impl QuillApp {
         ];
         let stickers = &mut session.stickers.stickers;
         stickers.sets = installed;
-        stickers.installed_loaded = true;
+        stickers.lists.installed.succeed(());
         stickers.trending_total = trending.len();
         stickers.trending_next_offset = trending.len();
         stickers.trending = trending;
@@ -128,7 +131,8 @@ impl QuillApp {
         stickers.open = true;
         stickers.tab = StickerTab::Installed;
         session.stickers.manager.open = true;
-        self.settings.sticker_settings_open = true;
+        self.settings
+            .set_box(crate::ui::settings_state::SettingsBox::Stickers, true);
         self.set_note(StatusNote::silent("screenshot demo — stickers manager"));
     }
 }

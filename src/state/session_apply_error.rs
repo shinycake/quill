@@ -1,4 +1,5 @@
 //! Error routing: maps TDLib errors onto per-purpose handlers.
+use super::request_kind::RequestKind;
 use super::*;
 
 impl Session {
@@ -10,8 +11,31 @@ impl Session {
         extra: Option<RequestId>,
         seq: u64,
     ) {
+        if let Some(pending) = pending {
+            self.requests.record_failure(pending.id, error_reason(&err));
+        }
         self.settle_own_reaction(extra, true);
         self.fail_own_full_info(&err, pending);
+        if let Some(id) = extra {
+            self.users_state.saves.failed(id, error_reason(&err));
+        }
+        if let Some(slot) = extra.and_then(|id| self.groups.new_chats.type_saves.get_mut(&id)) {
+            // A link problem is worded as the Edit box words it.
+            let problem = (pending.map(|p| p.purpose)
+                == Some(RequestPurpose::SetSupergroupUsername))
+            .then(|| crate::group_type::username_save_problem(err.server_type.as_deref()))
+            .flatten();
+            *slot = TypeSave::Failed(match problem {
+                Some(problem) => crate::lang::tr(problem.text()).to_string(),
+                None => super::request_errors::error_reason(&err),
+            });
+        }
+        if let Some(pending) = pending
+            && pending.purpose == RequestPurpose::GetPaidReactionSenders
+            && let Some(chat) = pending.chat_id
+        {
+            self.payments.paid.senders_failed(chat.0);
+        }
         if matches!(
             pending.map(|p| p.purpose),
             Some(
@@ -23,15 +47,15 @@ impl Session {
             )
         ) && let Some(notice) = err.send_permission_notice()
         {
-            self.messages.send_permission_error = Some(notice.into());
+            self.messages.send_permission_error.push(notice.into());
         }
         // Q1: a rate-limited user action says so (tdesktop's
         // `lng_flood_error`); background lookups were already retried by
         // the driver and stay quiet.
         if let Some(notice) = err.flood_notice()
-            && pending.is_some_and(|p| is_user_action(p.purpose))
+            && pending.is_some_and(|p| p.purpose.kind() == RequestKind::UserAction)
         {
-            self.messages.flood_notice = Some(notice);
+            self.messages.flood_notice.push(notice);
         }
         // Slice G1: roll back optimistic mutations the server
         // rejected — the pre-request value rides on
@@ -40,131 +64,20 @@ impl Session {
             Some(RequestRollback::ChatPermissions {
                 previous,
                 previous_can_send,
+                ..
             }) => {
+                // A save still out after this one decides what the box
+                // shows (its rollback holds the same values, or this
+                // chain's last confirmed ones).
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                    && self
+                        .requests
+                        .pending_extra_for(RequestPurpose::SetChatPermissions, Some(chat_id))
+                        .is_none()
                     && let Some(chat) = self.chats.get_mut(&chat_id.0)
                 {
                     chat.permissions = previous;
                     chat.can_send_basic_messages = previous_can_send;
-                }
-            }
-            Some(RequestRollback::JoinByRequest {
-                supergroup_id,
-                previous,
-            }) => match previous {
-                Some(flag) => {
-                    self.groups
-                        .supergroup_join_by_request
-                        .insert(supergroup_id, flag);
-                }
-                None => {
-                    self.groups
-                        .supergroup_join_by_request
-                        .remove(&supergroup_id);
-                }
-            },
-            Some(RequestRollback::SupergroupUsername {
-                supergroup_id,
-                previous,
-            }) => match previous {
-                Some(username) => {
-                    self.groups
-                        .supergroup_usernames
-                        .insert(supergroup_id, username);
-                }
-                None => {
-                    self.groups.supergroup_usernames.remove(&supergroup_id);
-                }
-            },
-            // Slice G2: restore the pre-toggle sign/show flags.
-            Some(RequestRollback::SignMessages {
-                supergroup_id,
-                previous_sign,
-                previous_show,
-            }) => {
-                match previous_sign {
-                    Some(flag) => {
-                        self.groups
-                            .supergroup_sign_messages
-                            .insert(supergroup_id, flag);
-                    }
-                    None => {
-                        self.groups.supergroup_sign_messages.remove(&supergroup_id);
-                    }
-                }
-                match previous_show {
-                    Some(flag) => {
-                        self.groups
-                            .supergroup_show_message_sender
-                            .insert(supergroup_id, flag);
-                    }
-                    None => {
-                        self.groups
-                            .supergroup_show_message_sender
-                            .remove(&supergroup_id);
-                    }
-                }
-            }
-            Some(RequestRollback::ChatIsTranslatable { chat_id, previous }) => {
-                self.set_chat_translatable(chat_id, previous);
-            }
-            Some(RequestRollback::AutoTranslate {
-                supergroup_id,
-                previous,
-            }) => self.set_supergroup_auto_translate(supergroup_id, previous),
-            // Slice G2: restore the pre-toggle anti-spam flag.
-            Some(RequestRollback::AntiSpam {
-                supergroup_id,
-                previous,
-            }) => match previous {
-                Some(flag) => {
-                    self.groups
-                        .supergroup_anti_spam_enabled
-                        .insert(supergroup_id, flag);
-                }
-                None => {
-                    self.groups
-                        .supergroup_anti_spam_enabled
-                        .remove(&supergroup_id);
-                }
-            },
-            // B7: restore the group admin toggles the server refused.
-            Some(RequestRollback::GroupToggle {
-                supergroup_id,
-                toggle,
-                previous,
-            }) => self.restore_group_toggle(supergroup_id, toggle, previous),
-            Some(RequestRollback::ProtectedContent { chat_id, previous }) => {
-                self.set_chat_protected(chat_id, previous);
-            }
-            Some(RequestRollback::AvailableReactions { chat_id, previous }) => match previous {
-                Some(setting) => {
-                    self.chats_state
-                        .chat_available_reactions
-                        .insert(chat_id, setting);
-                }
-                None => {
-                    self.chats_state.chat_available_reactions.remove(&chat_id);
-                }
-            },
-            // Slice CL1: restore the pre-toggle pinned /
-            // marked-as-unread flags the server refused.
-            Some(RequestRollback::ChatPin { previous, archived }) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && let Some(chat) = self.chats.get_mut(&chat_id.0)
-                {
-                    if archived {
-                        chat.archive_is_pinned = previous;
-                    } else {
-                        chat.is_pinned = previous;
-                    }
-                }
-            }
-            Some(RequestRollback::ChatMarkedAsUnread { previous }) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && let Some(chat) = self.chats.get_mut(&chat_id.0)
-                {
-                    chat.is_marked_as_unread = previous;
                 }
             }
             // Slice CL2: restore the pre-reorder `order` values
@@ -184,11 +97,30 @@ impl Session {
             // Slice CL2: drop the refused archive-settings flip;
             // the panel re-fetches the truth on next open.
             Some(RequestRollback::ArchiveChatListSettings { previous }) => {
-                self.chat_list.archive_chat_list_settings = previous;
+                self.chat_list.edit_archive_settings(previous);
             }
             Some(
-                rollback @ (RequestRollback::ForumTopicMute { .. }
-                | RequestRollback::PollVote { .. }),
+                rollback @ (RequestRollback::JoinByRequest { .. }
+                | RequestRollback::SupergroupUsername { .. }
+                | RequestRollback::DefaultReaction { .. }
+                | RequestRollback::AvailableReactions { .. }
+                | RequestRollback::SignMessages { .. }
+                | RequestRollback::ChatIsTranslatable { .. }
+                | RequestRollback::AutoTranslate { .. }
+                | RequestRollback::AntiSpam { .. }
+                | RequestRollback::GroupToggle { .. }
+                | RequestRollback::ProtectedContent { .. }
+                | RequestRollback::ChatPin { .. }
+                | RequestRollback::ChatMarkedAsUnread { .. }
+                | RequestRollback::ForumTopicMute { .. }
+                | RequestRollback::PollVote { .. }
+                | RequestRollback::BusinessBotBar { .. }
+                | RequestRollback::ChatLinkDelete { .. }
+                | RequestRollback::FolderOrder { .. }
+                | RequestRollback::FolderTags { .. }
+                | RequestRollback::RecentSearchRemoved { .. }
+                | RequestRollback::TopChatRemoved { .. }
+                | RequestRollback::TopChatsDisabled { .. }),
             ) => self.restore_optimistic(rollback),
             None => {}
         }
@@ -259,28 +191,13 @@ impl Session {
                 class: err.class,
                 flood_wait_secs: err.flood_wait_secs,
             });
+            if pending.purpose == RequestPurpose::RequestAuthenticationPasswordRecovery
+                && extra.is_some_and(|extra| {
+                    self.auth_state.password_recovery == PasswordRecovery::Requested(extra)
+                })
+            {
+                self.auth_state.password_recovery = PasswordRecovery::Idle;
+            }
         }
     }
-}
-
-/// Q1: whether a request is something the user did on purpose (send,
-/// edit, join, ...), as opposed to a background lookup, a view/online
-/// ping or a login submit (which has its own error line).
-pub(crate) fn is_user_action(purpose: RequestPurpose) -> bool {
-    if is_auth_submit(purpose) || purpose.is_sweepable() {
-        return false;
-    }
-    let debug = format!("{purpose:?}");
-    ![
-        "Get",
-        "Load",
-        "Search",
-        "Download",
-        "View",
-        "Open",
-        "Close",
-        "SetOnline",
-    ]
-    .iter()
-    .any(|prefix| debug.starts_with(prefix))
 }

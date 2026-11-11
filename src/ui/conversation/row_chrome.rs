@@ -235,7 +235,7 @@ impl QuillApp {
             None => (0..len).collect(),
         };
         if let Ok(mut drawn) = self.history.chrome_due.try_borrow_mut() {
-            due.append(&mut drawn);
+            due.append(&mut drawn.take());
         }
         due.sort_unstable();
         due.dedup();
@@ -253,14 +253,10 @@ impl QuillApp {
         let Ok(mut due) = self.history.chrome_due.try_borrow_mut() else {
             return;
         };
-        if due.contains(&ix) {
-            return;
-        }
-        // Keyed on its own flag: a render that skips the kept-rows branch
-        // (the chat is hidden) leaves `due` filled, and the next row must
-        // still get its notify.
-        let first = !self.history.chrome_notify_pending.replace(true);
-        due.push(ix);
+        // A render that skips the kept-rows branch (the chat is hidden)
+        // leaves the rows undrained, and the next row must still get its
+        // notify: `note` says when one is due.
+        let first = due.note(ix);
         drop(due);
         if first {
             let app = cx.weak_entity();
@@ -287,7 +283,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let scoped = self.in_window_scope(scope, cx, |this, cx| {
-            this.history.chrome_notify_pending.set(false);
+            this.history.chrome_notify_done();
             cx.notify();
         });
         if scoped.is_some() {

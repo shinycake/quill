@@ -33,7 +33,7 @@ impl Session {
                         .settings
                         .rich_html_exports
                         .iter_mut()
-                        .find(|export| export.link.pending == Some(pending.id))
+                        .find(|export| export.link.pending() == Some(pending.id))
                 {
                     export.link.reply(pending.id, value);
                 }
@@ -82,10 +82,16 @@ impl Session {
                     self.settings.proxy.prefer_ipv6 = *on;
                 }
                 if name == "is_premium" {
+                    let was = self.my_is_premium();
                     self.payments.premium_option = match &value {
                         OptionValue::Boolean(on) => Some(*on),
                         _ => Some(false),
                     };
+                    // The plans and the state text are for the status they
+                    // were asked under: the next opening asks again.
+                    if self.my_is_premium() != was {
+                        self.payments.hub.premium_state.outdate();
+                    }
                 }
                 if name == "is_premium_available"
                     && let OptionValue::Boolean(on) = &value
@@ -213,10 +219,10 @@ impl Session {
                 // Back online: stories that failed while offline are asked
                 // for again at once.
                 if state == ConnectionState::Ready && self.connection != ConnectionState::Ready {
-                    self.stories.story_retry.clear();
-                    self.threads.saved.retry_when_online = false;
+                    self.stories.story_fetch.forget_retries();
+                    self.threads.saved.retry_after_reconnect();
                     // So do sticker and emoji sets whose load failed.
-                    self.media.media_library.failed.clear();
+                    self.media.media_library.forget_failures();
                 }
                 self.connection = state;
             }
@@ -251,10 +257,10 @@ impl Session {
                 }
                 Some(RequestPurpose::Settings(SettingsPurpose::Passkeys(
                     crate::passkeys::PasskeysPurpose::Parameters,
-                ))) => self.apply_passkey_parameters(&text),
+                ))) => self.apply_passkey_parameters(pending.map(|p| p.id), &text),
                 Some(RequestPurpose::Settings(SettingsPurpose::Passkeys(
                     crate::passkeys::PasskeysPurpose::LoginParameters,
-                ))) => self.apply_passkey_login_parameters(&text),
+                ))) => self.apply_passkey_login_parameters(pending.map(|p| p.id), &text),
                 Some(RequestPurpose::Bots(purpose @ BotsPurpose::GetBotEditText { .. })) => {
                     self.apply_owned_bot_text(purpose, text, pending);
                 }
@@ -277,7 +283,7 @@ impl Session {
                     == Some(RequestPurpose::Payments(PaymentsPurpose::GiftExportUrl))
                 {
                     // "Send via Blockchain": Fragment's export page.
-                    self.apply_gift_export_url(url);
+                    self.apply_gift_export_url(url, pending.map(|p| p.id));
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::Payments(PaymentsPurpose::Grams(
                         crate::premium_hub::ton::GramsPurpose::WithdrawalUrl,
@@ -290,19 +296,26 @@ impl Session {
                 {
                     // The password-less probe: the URL is dropped unread.
                     drop(url);
-                    self.apply_gift_export_probe_answer();
-                } else if let Some(RequestPurpose::Calls(CallsPurpose::GetVideoChatInviteLink {
-                    group_call_id,
-                    can_self_unmute,
-                })) = pending.map(|p| p.purpose)
+                    self.apply_gift_export_probe_answer(pending.map(|p| p.id));
+                } else if let Some(pending) = pending
+                    && let RequestPurpose::Calls(CallsPurpose::GetVideoChatInviteLink {
+                        group_call_id,
+                        ..
+                    }) = pending.purpose
                 {
-                    self.set_group_call_invite_link(group_call_id, can_self_unmute, url);
+                    self.set_group_call_invite_link(group_call_id, pending.id, url);
                 // B1: `getLoginUrl` returns `httpUrl` too (schema 1.8.67,
                 // line 7458) — the authorized URL after consent.
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetLoginUrl) {
-                    self.bots.last_login_url_info = Some(LoginUrlInfo::Open { url });
-                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBackgroundUrl) {
-                    self.chats_state.background_url = Some(url);
+                    self.bots
+                        .login_url
+                        .answer(pending.map(|p| p.id), LoginUrlInfo::Open { url });
+                } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBackgroundUrl)
+                    && let Some(id) = pending.map(|p| p.id)
+                {
+                    self.chats_state
+                        .background_answers
+                        .push(id, Ok(BackgroundOutcome::Link(url)));
                 }
             }
             CommonPayload::FormattedText { text, entities }

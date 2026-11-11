@@ -2,6 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::group_call_state::CallBox;
 use super::group_call_stream_layout::StreamJoinIntent;
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -33,13 +34,18 @@ impl QuillApp {
             // A live stream joins in its window once it is tracked.
             self.note_stream_join_intent(StreamJoinIntent::Call(group_call_id));
             if let Some(live) = self.live.as_mut() {
-                self.screen.connection.set_note_for(
-                    &self.screen.windows,
-                    match live.driver.fetch_group_call(group_call_id) {
-                        Ok(_) => StatusNote::silent(tr(keys::Q_AV_JOINING_VOICE_CHAT)),
-                        Err(_) => StatusNote::error(tr(keys::Q_AV_COULDNT_REACH_THE_VOICE_CHAT)),
-                    },
-                );
+                let note = match live.driver.fetch_group_call(group_call_id) {
+                    Ok(_) => StatusNote::silent(tr(keys::Q_AV_JOINING_VOICE_CHAT)),
+                    Err(_) => {
+                        // Nothing was asked for, so nothing will track the
+                        // call: the wish must not join it later.
+                        self.group_call_screen.clear_stream_wish();
+                        StatusNote::error(tr(keys::Q_AV_COULDNT_REACH_THE_VOICE_CHAT))
+                    }
+                };
+                self.screen
+                    .connection
+                    .set_note_for(&self.screen.windows, note);
             } else if let Some(session) = self.demo_session.as_mut() {
                 // Screenshot demo: no live TDLib — the fixture already
                 // tracks the call; just surface the overlay.
@@ -102,7 +108,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             // As the driver's join: it starts without the last error.
             if let Some(call) = session.calls.active_group_call.as_mut() {
-                call.transport_error = None;
+                call.transport.clear_error();
                 call.is_joined = true;
             }
             self.set_note(StatusNote::silent(tr(
@@ -273,7 +279,7 @@ impl QuillApp {
         let sharing = self
             .session()
             .and_then(|session| session.calls.active_group_call.as_ref())
-            .is_some_and(|call| call.screen_sharing || call.screen_share_pending);
+            .is_some_and(|call| call.screen_share.is_on());
         if !sharing && self.open_screen_chooser(super::screen_share_state::ScreenFor::Group, cx) {
             return;
         }
@@ -362,11 +368,25 @@ impl QuillApp {
     /// Phase C2f: open the invite picker; fetch contacts first when
     /// the cache is empty.
     pub(super) fn open_group_call_invite(&mut self, cx: &mut Context<Self>) {
-        self.group_call_needs_unlock(cx);
-        self.group_call_boxes.invite_open = true;
+        if self.group_call_needs_unlock(cx) {
+            return;
+        }
+        let call = self
+            .session()
+            .and_then(|s| s.calls.active_group_call.as_ref())
+            .map(|call| call.id);
+        self.group_call_boxes.call_box = CallBox::Invite { call };
         if let Some(live) = self.live.as_mut()
-            && live.driver.session.users_state.contacts.is_none()
+            && live.driver.session.users_state.contacts.data().is_none()
         {
+            let _ = live.driver.fetch_contacts();
+        }
+        cx.notify();
+    }
+
+    /// Retry on the invite picker's failed contacts line.
+    pub(super) fn retry_group_call_contacts(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_contacts();
         }
         cx.notify();
@@ -484,6 +504,13 @@ impl QuillApp {
         message_id: MessageId,
         cx: &mut Context<Self>,
     ) {
+        // A join already on its way: the press is a repeat, not a new ask.
+        if self
+            .session()
+            .is_some_and(|s| s.calls.pending_conference.is_some())
+        {
+            return;
+        }
         if let Some(live) = self.live.as_mut() {
             self.screen.connection.set_note_for(
                 &self.screen.windows,
@@ -628,22 +655,24 @@ impl QuillApp {
     }
 
     pub(super) fn save_group_call_title(&mut self, cx: &mut Context<Self>) {
-        let title = self
-            .group_call_screen
-            .title_dialog
-            .as_ref()
-            .map(|d| d.title_input.read(cx).value().to_string())
-            .unwrap_or_default();
-        self.group_call_screen.title_dialog = None;
+        let Some(dialog) = self.group_call_screen.title_dialog.take() else {
+            return;
+        };
+        let title = dialog.title_input.read(cx).value().to_string();
         if let Some(live) = self.live.as_mut() {
-            self.screen.connection.set_note_for(
-                &self.screen.windows,
-                match live.driver.set_video_chat_title(title) {
-                    Ok(_) => StatusNote::silent(tr(keys::Q_AV_RENAMING_VOICE_CHAT)),
-                    Err(_) => StatusNote::error(tr(keys::Q_AV_COULDNT_RENAME_THE_VOICE_CHAT)),
-                },
-            );
+            let note = match live.driver.set_video_chat_title(title) {
+                Ok(_) => StatusNote::silent(tr(keys::Q_AV_RENAMING_VOICE_CHAT)),
+                Err(_) => {
+                    // Not sent: the box stays with the typed title.
+                    self.group_call_screen.title_dialog = Some(dialog);
+                    StatusNote::error(tr(keys::Q_AV_COULDNT_RENAME_THE_VOICE_CHAT))
+                }
+            };
+            self.screen
+                .connection
+                .set_note_for(&self.screen.windows, note);
         } else {
+            self.group_call_screen.title_dialog = Some(dialog);
             self.set_note(StatusNote::info(tr(
                 keys::Q_AV_RENAMING_NEEDS_A_LIVE_CONNECTION,
             )));
@@ -795,6 +824,24 @@ impl QuillApp {
             &[("label", label)],
         )));
         cx.notify();
+    }
+
+    /// The composer's unsent text belongs to the call it was typed in: a
+    /// change of call empties it, so Send never posts it to the next call.
+    pub(super) fn sync_group_call_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let id = self
+            .session()
+            .and_then(|session| session.calls.active_group_call.as_ref())
+            .map(|call| call.id);
+        if self.group_call_screen.composer_call == id {
+            return;
+        }
+        if self.group_call_screen.composer_call.is_some() {
+            self.group_call_screen.composer.update(cx, |input, cx| {
+                input.set_value("", window, cx);
+            });
+        }
+        self.group_call_screen.composer_call = id;
     }
 
     /// Phase C2h: send the in-call chat composer

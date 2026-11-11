@@ -129,7 +129,7 @@ impl QuillApp {
         }
         match action {
             NavigationAction::ChatMute => {
-                if let Some(chat) = self.session().and_then(|s| s.open_chat)
+                if let Some(chat) = self.session().and_then(|s| s.open_chat_id())
                     && self
                         .session()
                         .and_then(|s| s.chats.get(&chat.0))
@@ -141,36 +141,36 @@ impl QuillApp {
                 }
             }
             NavigationAction::ChatArchive => {
-                if let Some(chat) = self.session().and_then(|s| s.open_chat) {
+                if let Some(chat) = self.session().and_then(|s| s.open_chat_id()) {
                     self.toggle_archive(chat, cx);
                 }
             }
             NavigationAction::NewWindow => {
-                if let Some(chat) = self.session().and_then(|s| s.open_chat) {
+                if let Some(chat) = self.session().and_then(|s| s.open_chat_id()) {
                     self.open_chat_in_new_window(chat, window, cx);
                 }
             }
             NavigationAction::ChatFolders => {
-                if let Some(chat) = self.session().and_then(|s| s.open_chat) {
+                if let Some(chat) = self.session().and_then(|s| s.open_chat_id()) {
                     self.open_folder_menu(chat, cx);
                 }
             }
             NavigationAction::SharedMedia => self.open_shared_media_ui(cx),
             NavigationAction::ViewAsTopics => {
                 if let Some((chat_id, topics)) = self.session().and_then(|s| {
-                    let id = s.open_chat?;
+                    let id = s.open_chat_id()?;
                     Some((id, s.chat_views_as_topics(id)))
                 }) {
                     self.set_chat_view_as_topics_ui(chat_id, !topics, cx);
                 }
             }
             NavigationAction::NewTopic => {
-                if let Some(chat) = self.session().and_then(|s| s.open_chat) {
+                if let Some(chat) = self.session().and_then(|s| s.open_chat_id()) {
                     self.open_forum_topic_editor(chat, None, window, cx);
                 }
             }
             NavigationAction::ExportChat => {
-                if let Some(chat) = self.session().and_then(|s| s.open_chat) {
+                if let Some(chat) = self.session().and_then(|s| s.open_chat_id()) {
                     self.start_chat_export(chat, cx);
                 }
             }
@@ -196,12 +196,7 @@ impl QuillApp {
                 });
             }
             NavigationAction::Downloads => {
-                if let Some(live) = self.live.as_mut() {
-                    let open = &mut live.driver.session.media.downloads_panel_open;
-                    *open = !*open;
-                } else if let Some(session) = self.demo_session.as_mut() {
-                    session.media.downloads_panel_open = !session.media.downloads_panel_open;
-                }
+                self.chat_list.downloads_panel_open = !self.chat_list.downloads_panel_open;
                 cx.notify();
             }
             NavigationAction::Group => {
@@ -228,7 +223,7 @@ impl QuillApp {
             NavigationAction::MyGifts => self.open_my_gifts(cx),
             NavigationAction::ChatGifts => {
                 let owner = self.session().and_then(|s| {
-                    let chat = s.chats.get(&s.open_chat?.0)?;
+                    let chat = s.chats.get(&s.open_chat_id()?.0)?;
                     match chat.kind {
                         ChatKind::Private { user_id } if user_id.0 > 0 => {
                             Some(quill::telegram::envelope::MessageSender::User {
@@ -368,21 +363,28 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.stage_window_state(window);
-        if self.frame.window_state_save_pending {
+        if matches!(
+            self.frame.window_state_save,
+            super::frame_state::StateSaveTimer::Scheduled { .. }
+        ) {
             return;
         }
-        self.frame.window_state_save_pending = true;
-        cx.spawn_in(window, async move |this, cx| {
+        let timer = cx.spawn_in(window, async move |this, cx| {
             cx.background_executor()
                 .timer(std::time::Duration::from_millis(600))
                 .await;
             let _ = this.update_in(cx, |this, window, _| {
-                this.frame.window_state_save_pending = false;
                 this.stage_window_state(window);
                 quill::settings::save_staged_window_state();
             });
-        })
-        .detach();
+            // Idle whether or not the window was still there, so the next
+            // move can schedule again.
+            let _ = this.update(cx, |this, _| {
+                this.frame.window_state_save = super::frame_state::StateSaveTimer::Idle;
+            });
+        });
+        self.frame.window_state_save =
+            super::frame_state::StateSaveTimer::Scheduled { _timer: timer };
     }
 
     fn stage_window_state(&self, window: &Window) {

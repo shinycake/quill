@@ -171,7 +171,9 @@ pub(super) fn pump(app: &mut QuillApp) {
             let sharing = &mut session.location;
             sharing.request_sent(&request, extra);
             match request {
-                PickerRequest::ResolveVenueBot { .. } => sharing.venue_bot_resolved(Some(DEMO_BOT)),
+                PickerRequest::ResolveVenueBot { .. } => {
+                    sharing.venue_bot_resolved(extra, Some(DEMO_BOT))
+                }
                 PickerRequest::Venues {
                     generation,
                     point,
@@ -193,7 +195,7 @@ impl QuillApp {
         self.open_location_picker(cx);
         if let Ok(text) = std::env::var("QUILL_DEMO_LOCATION_SEARCH") {
             self.location_search_open(window, cx);
-            if let Some(input) = self.location_ui.search.clone() {
+            if let Some(input) = self.location_ui.search.input().cloned() {
                 input.update(cx, |input, cx| input.set_value(text.clone(), window, cx));
             }
             self.location_search_changed(Some(text), cx);

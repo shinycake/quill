@@ -20,7 +20,7 @@ impl QuillApp {
         let current = settings
             .and_then(|settings| settings.sessions.data().map(Vec::as_slice))
             .and_then(current_session_accepts_calls);
-        let mutating = settings.is_some_and(|settings| settings.sessions_mutating);
+        let mutating = settings.is_some_and(|settings| settings.sessions_op.is_mutating());
         // The list arrives once; ask for it when this section first shows.
         let needs_fetch =
             self.live.is_some() && settings.is_some_and(|settings| settings.sessions.is_idle());
@@ -29,8 +29,12 @@ impl QuillApp {
             // queues this twice sends one request.
             self.spawn_screen(cx, async move |this, cx| {
                 let _ = this.update(cx, |this, cx| {
-                    if let Some(live) = this.live.as_mut() {
-                        let _ = live.driver.maybe_fetch_active_sessions();
+                    // Redraw only when a request went out (the list is
+                    // loading now): a fetch that cannot start changes
+                    // nothing, and a redraw would queue this again.
+                    if let Some(live) = this.live.as_mut()
+                        && let Ok(Some(_)) = live.driver.maybe_fetch_active_sessions()
+                    {
                         cx.notify();
                     }
                 });

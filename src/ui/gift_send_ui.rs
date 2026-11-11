@@ -9,6 +9,7 @@
 use super::app::QuillApp;
 use super::chat_theme::fill_muted;
 use super::gift_manage_ui::{hint, panel, stars};
+use super::payments_state::SendGiftInputs;
 use super::premium_ui::sticker_tile;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
@@ -32,7 +33,7 @@ const TILE_W: f32 = 132.0;
 impl QuillApp {
     /// Open the dialog for the open chat's user or channel.
     pub(super) fn open_send_gift_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let chat = self.session().and_then(|s| s.open_chat);
+        let chat = self.session().and_then(|s| s.open_chat_id());
         self.open_send_gift_in(chat, window, cx);
     }
 
@@ -58,13 +59,20 @@ impl QuillApp {
         ) {
             return;
         }
+        let sending = self.gift_send_out();
         let opened = chat.and_then(|chat| {
             self.live
                 .as_mut()
                 .map(|live| live.driver.open_send_gift(chat))
         });
         if matches!(opened, Some(Ok(()))) {
-            self.reset_send_gift_inputs(window, cx);
+            // Reopening for the send that is out keeps what was typed.
+            if !sending {
+                self.reset_gift_inputs(false, window, cx);
+            }
+            self.open_box(DialogKind::SendGift);
+        } else if sending && chat.is_some() {
+            self.set_note(StatusNote::silent(tr(keys::Q_MONEY_GIFT_IS_BEING_SENT)));
         } else {
             self.set_note(StatusNote::silent(tr(keys::Q_MONEY_OPEN_A_CHAT_WITH_A)));
         }
@@ -79,6 +87,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let sending = self.gift_send_out();
         let opened = match self.live.as_mut() {
             Some(live) => live.driver.open_send_gift_to_user(user_id).is_ok(),
             None => self.demo_session.as_mut().is_some_and(|session| {
@@ -86,7 +95,7 @@ impl QuillApp {
                     return false;
                 };
                 session.payments.gifts_manage.send = quill::gift_manage::SendGiftState {
-                    open: true,
+                    stage: quill::gift_manage::SendStage::Idle,
                     recipient: Some(recipient),
                     ..Default::default()
                 };
@@ -94,26 +103,53 @@ impl QuillApp {
             }),
         };
         if opened {
-            self.reset_send_gift_inputs(window, cx);
+            if !sending {
+                self.reset_gift_inputs(false, window, cx);
+            }
+            self.open_box(DialogKind::SendGift);
+        } else if sending {
+            self.set_note(StatusNote::silent(tr(keys::Q_MONEY_GIFT_IS_BEING_SENT)));
         } else {
             self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_OPEN_THE_GIFTS)));
         }
         cx.notify();
     }
 
-    fn reset_send_gift_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// A `sendGift` of the open dialog is out.
+    fn gift_send_out(&self) -> bool {
+        self.session()
+            .is_some_and(|s| s.payments.gifts_manage.send.sending())
+    }
+
+    /// A send or buy step begins: the message is emptied and the choices
+    /// beside it are replaced whole (`hide_name` preset for a gift to
+    /// oneself).
+    pub(super) fn reset_gift_inputs(
+        &mut self,
+        hide_name: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.payments
             .gift_message_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.payments.gift_hide_name = false;
-        self.payments.gift_pay_upgrade = false;
+        self.reset_gift_choices(hide_name);
+    }
+
+    /// The choices beside the message are replaced whole; the typed message
+    /// stays (a buy step began from the send box and Back returns to it).
+    pub(super) fn reset_gift_choices(&mut self, hide_name: bool) {
+        self.payments.gift_inputs = SendGiftInputs {
+            hide_name,
+            ..SendGiftInputs::default()
+        };
     }
 
     pub(super) fn close_send_gift_dialog(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.driver.close_send_gift();
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.payments.gifts_manage.send.open = false;
+            session.payments.gifts_manage.send.close();
         }
         cx.notify();
     }
@@ -126,11 +162,7 @@ impl QuillApp {
             .session()
             .and_then(|s| s.payments.gifts_manage.send.recipient.as_ref())
             .is_some_and(|r| r.is_self);
-        self.payments
-            .gift_message_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.payments.gift_hide_name = is_self;
-        self.payments.gift_pay_upgrade = false;
+        self.reset_gift_inputs(is_self, window, cx);
         cx.notify();
     }
 
@@ -141,7 +173,10 @@ impl QuillApp {
             .read(cx)
             .value()
             .to_string();
-        let (hide, upgrade) = (self.payments.gift_hide_name, self.payments.gift_pay_upgrade);
+        let (hide, upgrade) = (
+            self.payments.gift_inputs.hide_name,
+            self.payments.gift_inputs.pay_upgrade,
+        );
         let sent = self
             .live
             .as_mut()
@@ -181,20 +216,20 @@ impl QuillApp {
                 .title(crate::ui::shell::dialog_title(title));
             let muted = cx.theme().muted_foreground;
             let mut body = div().flex().flex_col().gap_3();
-            if let Some(done) = send.done.as_ref() {
+            if let Some(done) = send.done_line() {
                 body = body.child(
                     div()
                         .text_sm()
                         .text_color(super::chat_theme::success())
-                        .child(done.clone()),
+                        .child(done.to_string()),
                 );
             }
-            if let Some(error) = send.error.as_ref() {
+            if let Some(error) = send.error_line() {
                 body = body.child(
                     div()
                         .text_sm()
                         .text_color(cx.theme().danger)
-                        .child(error.clone()),
+                        .child(error.to_string()),
                 );
             }
             if let Some(selected) = send.selected_gift() {
@@ -215,14 +250,16 @@ impl QuillApp {
                         &[("stars", &(stars(balance.stars)).to_string())],
                     )));
                 }
-                if send.gifts_loading {
+                if send.gifts_fetch.is_loading() {
                     body = body.child(
                         div()
                             .text_sm()
                             .text_color(muted)
                             .child(tr(keys::Q_MONEY_LOADING_GIFTS)),
                     );
-                } else if send.gifts.is_empty() && send.gifts_loaded {
+                } else if send.gifts.is_empty()
+                    && send.gifts_fetch == quill::gift_manage::GiftListFetch::Answered
+                {
                     body = body.child(
                         div()
                             .text_sm()
@@ -430,7 +467,7 @@ fn selected_gift_panel(
     let Some(recipient) = send.recipient.as_ref() else {
         return div().into_any_element();
     };
-    let pay_upgrade = this.payments.gift_pay_upgrade && gift.upgrade_star_count > 0;
+    let pay_upgrade = this.payments.gift_inputs.pay_upgrade && gift.upgrade_star_count > 0;
     let total = gift.total_cost(pay_upgrade);
     let balance = session.payments.hub.balance;
     let too_poor = balance.is_some_and(|b| b.stars < total);
@@ -484,9 +521,9 @@ fn selected_gift_panel(
     col = col.child(
         Checkbox::new("send-gift-hide-name")
             .label(tr(keys::Q_MONEY_HIDE_MY_NAME_AND_MESSAGE))
-            .checked(this.payments.gift_hide_name)
+            .checked(this.payments.gift_inputs.hide_name)
             .on_click(cx.listener(|this, &on, _, cx| {
-                this.payments.gift_hide_name = on;
+                this.payments.gift_inputs.hide_name = on;
                 cx.notify();
             })),
     );
@@ -500,7 +537,7 @@ fn selected_gift_panel(
                     ))
                     .checked(pay_upgrade)
                     .on_click(cx.listener(|this, &on, _, cx| {
-                        this.payments.gift_pay_upgrade = on;
+                        this.payments.gift_inputs.pay_upgrade = on;
                         cx.notify();
                     })),
             )
@@ -537,7 +574,7 @@ fn selected_gift_panel(
     col.child(
         footer.child(
             Button::new("send-gift-confirm")
-                .label(if send.sending {
+                .label(if send.sending() {
                     tr(keys::Q_MONEY_SENDING).to_string()
                 } else if recipient.is_self {
                     tr_with(
@@ -550,7 +587,7 @@ fn selected_gift_panel(
                         &[("stars", &(stars(total)).to_string())],
                     )
                 })
-                .disabled(send.sending || too_poor)
+                .disabled(send.sending() || too_poor)
                 .on_click(cx.listener(move |this, _, _, cx| this.submit_send_gift(id, cx))),
         ),
     )
@@ -584,14 +621,14 @@ fn premium_section(this: &QuillApp, session: &Session, cx: &mut Context<QuillApp
             ));
     }
     let stars_offered = can_pay && send.premium_options.iter().any(|o| o.star_count > 0);
-    let by_stars = stars_offered && this.payments.gift_premium_by_stars;
+    let by_stars = stars_offered && this.payments.gift_inputs.by_stars;
     if stars_offered {
         col = col.child(
             Checkbox::new("premium-gift-by-stars")
                 .label(tr(keys::Q_MONEY_PAY_WITH_STARS_INSTEAD))
                 .checked(by_stars)
                 .on_click(cx.listener(|this, &on, _, cx| {
-                    this.payments.gift_premium_by_stars = on;
+                    this.payments.gift_inputs.by_stars = on;
                     cx.notify();
                 })),
         );
@@ -665,7 +702,7 @@ fn premium_section(this: &QuillApp, session: &Session, cx: &mut Context<QuillApp
 crate::ui::shell::register_dialogs! {
     SendGift => DialogSpec::new(
         3950,
-        |app| app.session().is_some_and(|s| s.payments.gifts_manage.send.open),
+        |app| app.session().is_some_and(|s| s.payments.gifts_manage.send.is_open()),
         QuillApp::build_send_gift_dialog,
     )
     .close(|app, _, cx| app.close_send_gift_dialog(cx)),

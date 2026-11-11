@@ -24,13 +24,16 @@ pub(super) fn apply_ready_forward(session: &mut Session, sink: &Arc<MemorySink>,
         session.apply(owned);
     }
     let extra = session.request(RequestPurpose::ForwardMessages, Some(ChatId(12)));
-    session.messages.in_flight_forward = Some(quill::state::ForwardFlight {
-        extra,
-        dest_chat_id: ChatId(12),
-        from_chat_id: ChatId(11),
-        from_topic: Default::default(),
-        requested: 2,
-    });
+    session
+        .messages
+        .forwards
+        .begin(quill::state::ForwardFlight {
+            extra,
+            dest_chat_id: ChatId(12),
+            from_chat_id: ChatId(11),
+            from_topic: Default::default(),
+            requested: 2,
+        });
     let json = format!(
         r#"{{"@type":"messages","@extra":"{}","total_count":2,"messages":[{{"id":80,"chat_id":12,"is_outgoing":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}}}},"forward_info":{{"@type":"messageForwardInfo","origin":{{"@type":"messageOriginUser","sender_user_id":11}},"date":1}}}},{{"id":81,"chat_id":12,"is_outgoing":true,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"Reply from the session reducer.","entities":[]}}}},"forward_info":{{"@type":"messageForwardInfo","origin":{{"@type":"messageOriginUser","sender_user_id":11}},"date":1}}}}]}}"#,
         extra.0
@@ -114,7 +117,7 @@ impl QuillApp {
                 draft.toggle(chat_id, topic, message_id, pending);
                 if draft.is_empty() {
                     self.share.forward = ForwardStage::None;
-                    self.chat_ui.selection_focus = None;
+                    self.chat_ui.focus.clear_row();
                 }
             }
             None => {
@@ -145,7 +148,6 @@ impl QuillApp {
         if !self.selection_forwardable(draft.from_chat_id) || !self.share.forward.open_picker() {
             return;
         }
-        self.share.focus_search = true;
         self.share.selection.clear();
         self.share
             .comment_input
@@ -176,15 +178,23 @@ impl QuillApp {
         cx.notify();
     }
 
-    pub(super) fn clear_forward(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Leave selection mode (or drop the draft) with nothing said: the
+    /// selection ended by Cancel, Escape, or by being used (Report, Save
+    /// as HTML), as tdesktop's `clearSelected`.
+    pub(super) fn end_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let _ = cancel_forward_draft(self.share.forward.take_draft());
-        self.chat_ui.selection_focus = None;
+        self.chat_ui.focus.clear_row();
         self.share.selection.clear();
         self.share
             .search_input
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.set_note(StatusNote::silent(tr(keys::Q_MISC_FORWARD_CANCELLED)));
         cx.notify();
+    }
+
+    /// A forward that was waiting for a chat is cancelled: said so.
+    pub(super) fn clear_forward(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.end_selection(window, cx);
+        self.set_note(StatusNote::silent(tr(keys::Q_MISC_FORWARD_CANCELLED)));
     }
 
     /// Chat or conversation switch: a forward draft stays only for the
@@ -208,7 +218,7 @@ impl QuillApp {
                 .is_some_and(|draft| !draft.is_from(chat_id, topic))
         {
             self.share.forward = ForwardStage::None;
-            self.chat_ui.selection_focus = None;
+            self.chat_ui.focus.clear_row();
         }
     }
 
@@ -225,9 +235,10 @@ impl QuillApp {
         self.in_window_scope(window, cx, |app, cx| app.present_forward_result(result, cx));
     }
 
-    /// Show `result` in the window in place. What that window was
-    /// building for this forward (its selection, bar and picker) goes;
-    /// another forward being built there stays.
+    /// Show `result` in the window in place. The forward it answers ended
+    /// when it was sent (the share box and the bar's Send end the stage),
+    /// so whatever the window builds now is a newer forward, even from the
+    /// same chat and topic: the answer leaves it alone (round 18 B #5).
     pub(super) fn present_forward_result(&mut self, result: ForwardResult, cx: &mut Context<Self>) {
         let label = result.success_label();
         let host = self.windows.scope;
@@ -241,16 +252,6 @@ impl QuillApp {
                 StatusNote::info(label)
             },
         );
-        // A newer selection made in another conversation of the same chat
-        // (another forum topic) is not this forward's.
-        let this_forward = self
-            .share
-            .forward
-            .draft()
-            .is_none_or(|draft| draft.is_from(result.from_chat_id, result.from_topic));
-        if this_forward {
-            self.share.forward = ForwardStage::None;
-        }
         self.share.forward_result = Some(result);
         cx.notify();
     }

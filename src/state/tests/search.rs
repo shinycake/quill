@@ -6,12 +6,6 @@ use super::*;
 fn inline_query_first_page_loads_slot() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.bots.inline_query = Some(InlineQuerySlot {
-        chat_id: ChatId(1),
-        bot_user_id: 77,
-        query: "@gif cats".to_string(),
-        fetch: InlineQueryFetch::Loading,
-    });
     let extra = session.request(
         RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
             chat_id: ChatId(1),
@@ -20,6 +14,12 @@ fn inline_query_first_page_loads_slot() {
         }),
         Some(ChatId(1)),
     );
+    session.bots.inline_query = Some(InlineQuerySlot {
+        chat_id: ChatId(1),
+        bot_user_id: 77,
+        query: "@gif cats".to_string(),
+        fetch: InlineQueryFetch::Loading { request: extra },
+    });
     apply_json(
         &mut session,
         &seq,
@@ -36,6 +36,7 @@ fn inline_query_first_page_loads_slot() {
                 button,
                 results,
                 next_offset,
+                ..
             } => {
                 assert_eq!(*inline_query_id, 9001);
                 assert_eq!(*button, None);
@@ -56,6 +57,14 @@ fn inline_query_first_page_loads_slot() {
 fn inline_query_pagination_appends() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
+    let extra = session.request(
+        RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
+            chat_id: ChatId(1),
+            bot_user_id: 77,
+            first_page: false,
+        }),
+        Some(ChatId(1)),
+    );
     session.bots.inline_query = Some(InlineQuerySlot {
         chat_id: ChatId(1),
         bot_user_id: 77,
@@ -71,16 +80,9 @@ fn inline_query_pagination_appends() {
                 ..Default::default()
             }],
             next_offset: "25".to_string(),
+            more: InlineMore::Asking { request: extra },
         },
     });
-    let extra = session.request(
-        RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
-            chat_id: ChatId(1),
-            bot_user_id: 77,
-            first_page: false,
-        }),
-        Some(ChatId(1)),
-    );
     apply_json(
         &mut session,
         &seq,
@@ -114,12 +116,6 @@ fn inline_query_pagination_appends() {
 fn inline_query_first_page_error_fails_slot() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.bots.inline_query = Some(InlineQuerySlot {
-        chat_id: ChatId(1),
-        bot_user_id: 77,
-        query: "@gif cats".to_string(),
-        fetch: InlineQueryFetch::Loading,
-    });
     let extra = session.request(
         RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
             chat_id: ChatId(1),
@@ -128,6 +124,12 @@ fn inline_query_first_page_error_fails_slot() {
         }),
         Some(ChatId(1)),
     );
+    session.bots.inline_query = Some(InlineQuerySlot {
+        chat_id: ChatId(1),
+        bot_user_id: 77,
+        query: "@gif cats".to_string(),
+        fetch: InlineQueryFetch::Loading { request: extra },
+    });
     apply_json(
         &mut session,
         &seq,
@@ -152,6 +154,14 @@ fn inline_query_first_page_error_fails_slot() {
 fn inline_query_pagination_error_keeps_loaded_page() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
+    let extra = session.request(
+        RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
+            chat_id: ChatId(1),
+            bot_user_id: 77,
+            first_page: false,
+        }),
+        Some(ChatId(1)),
+    );
     session.bots.inline_query = Some(InlineQuerySlot {
         chat_id: ChatId(1),
         bot_user_id: 77,
@@ -167,16 +177,9 @@ fn inline_query_pagination_error_keeps_loaded_page() {
                 ..Default::default()
             }],
             next_offset: "25".to_string(),
+            more: InlineMore::Asking { request: extra },
         },
     });
-    let extra = session.request(
-        RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
-            chat_id: ChatId(1),
-            bot_user_id: 77,
-            first_page: false,
-        }),
-        Some(ChatId(1)),
-    );
     apply_json(
         &mut session,
         &seq,
@@ -390,7 +393,7 @@ fn search_recently_found_chats_empty_query() {
         r#"{"@type":"updateChatPosition","chat_id":11,"position":{"@type":"chatPosition","list":{"@type":"chatListMain"},"order":"4","is_pinned":false}}"#,
     );
     let search_gen = session.search.search.begin_recents();
-    assert!(session.search.search.recents);
+    assert!(session.search.search.is_recents());
     let extra = session.request_search(RequestPurpose::SearchRecentlyFoundChats, search_gen);
     apply_json(
         &mut session,
@@ -416,7 +419,7 @@ fn search_recently_found_chats_empty_query() {
         ),
     );
     assert_eq!(session.search.search.status(), SearchStatus::Idle);
-    assert!(session.search.search.recents);
+    assert!(session.search.search.is_recents());
 }
 
 #[test]
@@ -794,6 +797,7 @@ fn loaded_inline_slot(session: &mut Session, results: Vec<InlineQueryResultSumma
             }),
             results,
             next_offset: "25".to_string(),
+            more: InlineMore::Idle,
         },
     });
 }
@@ -808,6 +812,13 @@ fn inline_next_page(session: &mut Session, sink: &Arc<MemorySink>, json_results:
         }),
         Some(ChatId(1)),
     );
+    if let Some(InlineQuerySlot {
+        fetch: InlineQueryFetch::Loaded { more, .. },
+        ..
+    }) = session.bots.inline_query.as_mut()
+    {
+        *more = InlineMore::Asking { request: extra };
+    }
     apply_json(
         session,
         &seq,
@@ -912,6 +923,7 @@ fn inline_result_images_are_queued_for_download() {
                 },
             ],
             next_offset: String::new(),
+            more: InlineMore::Idle,
         },
     });
     assert_eq!(

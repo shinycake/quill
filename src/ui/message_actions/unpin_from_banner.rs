@@ -97,6 +97,30 @@ impl QuillApp {
         ))
     }
 
+    /// Whether `chat_id`'s pinned list shows: opened for this chat and
+    /// account, with several pins (a lone pin has no list, tdesktop's bar
+    /// shows its close button instead).
+    pub(in crate::ui) fn pinned_list_open_for(&self, chat_id: ChatId) -> bool {
+        let Some(key) = self.pinned_key(chat_id) else {
+            return false;
+        };
+        self.history.pinned_list_open.as_ref() == Some(&key)
+            && self
+                .session()
+                .is_some_and(|session| session.pinned_list(chat_id).len() > 1)
+    }
+
+    /// Open or close `chat_id`'s pinned list. Closing it for a chat that
+    /// is not the one open leaves the other's alone.
+    pub(in crate::ui) fn set_pinned_list_open(&mut self, chat_id: ChatId, open: bool) {
+        let key = self.pinned_key(chat_id);
+        if open {
+            self.history.pinned_list_open = key;
+        } else if self.history.pinned_list_open == key {
+            self.history.pinned_list_open = None;
+        }
+    }
+
     /// The pinned bar's memory key for `chat_id` in the account on screen
     /// (`None` with no session).
     pub(in crate::ui) fn pinned_key(&self, chat_id: ChatId) -> Option<AccountChat> {
@@ -188,7 +212,7 @@ impl QuillApp {
         let right = if count == 1 {
             pinned_bar_close_button(can_pin, chat_id, message_id, newest, cx)
         } else {
-            pinned_bar_list_button(self.history.pinned_list_open, cx)
+            pinned_bar_list_button(self.pinned_list_open_for(chat_id), chat_id, cx)
         };
         // Stepping to another pinned message swaps the text the way
         // tdesktop's `MessageBar` does: the old lines slide out towards the
@@ -326,7 +350,7 @@ impl QuillApp {
                     if let Some(key) = this.pinned_key(chat_id) {
                         this.history.pinned_cursor.insert(key, index);
                     }
-                    this.history.pinned_list_open = false;
+                    this.set_pinned_list_open(chat_id, false);
                     cx.notify();
                 }));
             // Telegram Desktop's "Go To Message" on a pinned row.
@@ -349,7 +373,7 @@ impl QuillApp {
                                 if let Some(key) = this.pinned_key(chat_id) {
                                     this.history.pinned_cursor.insert(key, index);
                                 }
-                                this.history.pinned_list_open = false;
+                                this.set_pinned_list_open(chat_id, false);
                                 cx.notify();
                             });
                         }),
@@ -362,8 +386,8 @@ impl QuillApp {
             ghost_text_button(
                 "pinned-list-unpin-all",
                 trn(keys::PINNED_UNPIN_ALL, count),
-                cx.listener(move |_, _, window, cx| {
-                    let app = cx.entity().downgrade();
+                cx.listener(move |this, _, window, cx| {
+                    let app = this.scoped_app(cx);
                     confirm(
                         window,
                         cx,
@@ -371,7 +395,7 @@ impl QuillApp {
                         tr(keys::CONTEXT_UNPIN_FROM_TOP),
                         move |cx| {
                             let _ = app.update(cx, |this, cx| {
-                                this.history.pinned_list_open = false;
+                                this.set_pinned_list_open(chat_id, false);
                                 this.unpin_all_messages(chat_id, cx);
                             });
                         },
@@ -382,8 +406,8 @@ impl QuillApp {
             ghost_text_button(
                 "pinned-list-hide",
                 tr(keys::PINNED_HIDE_ALL),
-                cx.listener(move |_, _, window, cx| {
-                    let app = cx.entity().downgrade();
+                cx.listener(move |this, _, window, cx| {
+                    let app = this.scoped_app(cx);
                     confirm_hide_pinned(window, cx, app, chat_id, newest);
                 }),
             )
@@ -467,8 +491,8 @@ fn pinned_bar_close_button(
         } else {
             tr(keys::Q_CHAT_HIDE_PINNED_MESSAGE)
         })
-        .on_click(cx.listener(move |_, _, window, cx| {
-            let app = cx.entity().downgrade();
+        .on_click(cx.listener(move |this, _, window, cx| {
+            let app = this.scoped_app(cx);
             if can_pin {
                 confirm(
                     window,
@@ -489,7 +513,7 @@ fn pinned_bar_close_button(
 }
 
 /// The pinned bar's list toggle when several messages are pinned.
-fn pinned_bar_list_button(open: bool, cx: &mut Context<QuillApp>) -> AnyElement {
+fn pinned_bar_list_button(open: bool, chat_id: ChatId, cx: &mut Context<QuillApp>) -> AnyElement {
     Button::new("pinned-bar-list")
         .icon(gpui_kit::assets::IconName::List)
         .ghost()
@@ -497,8 +521,9 @@ fn pinned_bar_list_button(open: bool, cx: &mut Context<QuillApp>) -> AnyElement 
         .selected(open)
         .tooltip(tr(keys::Q_CHAT_PINNED_MESSAGES))
         .accessibility_label(tr(keys::Q_CHAT_PINNED_MESSAGES))
-        .on_click(cx.listener(|this, _, _, cx| {
-            this.history.pinned_list_open = !this.history.pinned_list_open;
+        .on_click(cx.listener(move |this, _, _, cx| {
+            let open = this.pinned_list_open_for(chat_id);
+            this.set_pinned_list_open(chat_id, !open);
             cx.notify();
         }))
         .into_any_element()

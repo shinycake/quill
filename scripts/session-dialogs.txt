@@ -14,11 +14,10 @@ AccountNotice | - | terms, service notices and the frozen notice are the account
 ArchiveSettings | set_archive_settings_open | `chat_list.archive_settings_open`
 BlockFromReplies | close_replies_block | `users_state.replies_block`
 BoostBox | close_boost_box_state | `groups.boost_box`
-CallLinkLeave | cancel_call_link_leave | `calls.call_link_confirm`
+CallLinkLeave | cancel_call_link_leave | `calls.call_link_stage`
 CallSwap | - | a second call prompts only during a call, and a switch closes a client that is in a call (retire_live_to_background)
 ChatExport | - | the box's flag is `dialogs.chat_export_dialog` (screen); the progress box shows an export the account is still running, which comes back with it
 CollectibleInfo | close_collectible_info | `payments.hub.collectible`
-CreateChat | - | the box is `admin.create_chat_dialog` (screen); the session holds only the creation step
 DropTopic | - | the chooser is `chat_list.drop_topic` (screen)
 EarnJoin | close_earn_boxes | `payments.earn.join_box`
 EarnLink | close_earn_boxes | `payments.earn.link_box`
@@ -42,12 +41,14 @@ GroupTypeBox | - | inside `admin.group_edit_box` (screen)
 LanguageLink | close_language_box | `settings.language_link`
 LocationPicker | close_location_picker | `location.picker`
 MaskSets | close_mask_sets | `stickers.masks.open`
+MessageReport | close_message_report | `messages.message_report`
 Money | close_money | `ton_wallet.money.open`
 PaidSendConfirm | cancel_paid_confirm | `paid_messages.confirm` (screen) or the driver's held paid send
 PaymentForm | close_payment_dialog | `payments.dialog` (screen) over the session's form
-PaymentReceipt | close_payment_receipt | `payments.receipt_open`
+PaymentReceipt | close_payment_receipt | `payments.receipt` (`ReceiptStage::Open`)
 PremiumFeatures | close_premium | `payments.hub.premium_open`
 PremiumLimit | dismiss_premium_limit | `payments.hub.limit_box`
+ProxyList | - | the open flag is `proxy.list_box` (screen, dropped with it); the predicate reads the session only to draw it while the sign-in pane shows
 ReceivedGifts | close_gifts | `payments.hub.gifts_open`
 RtmpStart | close_rtmp_start | `calls.rtmp_start`
 SendGift | close_send_gift_dialog | `payments.gifts_manage.send.open`

@@ -93,7 +93,10 @@ fn only_the_newest_check_counts() {
     assert_eq!(sent.len(), 2);
     assert_eq!(sent[0]["chat_id"], 13);
     rig.answer(old, "checkChatUsernameResultOk");
-    assert_eq!(rig.driver.session.groups.group_type.check, None);
+    assert!(!matches!(
+        rig.driver.session.groups.group_type.check,
+        crate::state::UsernameCheck::Verdict(_)
+    ));
     rig.answer(new, "checkChatUsernameResultUsernameOccupied");
     assert_eq!(
         rig.driver
@@ -127,7 +130,10 @@ fn a_failed_check_is_recorded_until_the_next_one() {
     let session = &rig.driver.session;
     assert!(session.group_username_check_failed(ChatId(13), "quillchat"));
     assert!(!session.group_username_check_failed(ChatId(13), "quillchats"));
-    assert_eq!(session.groups.group_type.check_pending, None);
+    assert!(matches!(
+        session.groups.group_type.check,
+        crate::state::UsernameCheck::Failed { .. }
+    ));
     rig.driver
         .check_group_username(ChatId(13), "quillchat")
         .unwrap();
@@ -159,7 +165,7 @@ fn too_many_public_chats_opens_the_limit_box() {
     let state = &rig.driver.session.groups.group_type;
     assert_eq!(state.public_limit_reached, Some(true));
     assert_eq!(
-        rig.driver.session.payments.hub.limit_box,
+        rig.driver.session.payments.hub.limit_box(),
         Some((PremiumLimitKind::PublicLinks, 0))
     );
 }
@@ -168,7 +174,12 @@ fn too_many_public_chats_opens_the_limit_box() {
 fn revoking_a_link_frees_the_limit() {
     let mut rig = Rig::new();
     rig.driver.session.groups.group_type.public_limit_reached = Some(true);
-    rig.driver.session.payments.hub.limit_box = Some((PremiumLimitKind::PublicLinks, 0));
+    rig.driver.session.payments.hub.limit_notice =
+        Some(crate::premium_hub::limit_notice::LimitNotice::Box {
+            kind: PremiumLimitKind::PublicLinks,
+            extra: 0,
+            toast: None,
+        });
     rig.driver.revoke_public_link(ChatId(13)).unwrap().unwrap();
     let clear = rig.sent("setSupergroupUsername");
     let disable = rig.sent("disableAllSupergroupUsernames");
@@ -180,16 +191,17 @@ fn revoking_a_link_frees_the_limit() {
         .groups
         .group_type
         .revoke
-        .clone()
+        .revoking()
+        .cloned()
         .unwrap()
         .requests;
     for id in requests {
         rig.answer(id, "ok");
     }
     let state = &rig.driver.session.groups.group_type;
-    assert_eq!(state.revoke, None);
+    assert_eq!(state.revoke, crate::state::PublicLinkStage::Freed);
     assert_eq!(state.public_limit_reached, Some(false));
-    assert_eq!(rig.driver.session.payments.hub.limit_box, None);
+    assert_eq!(rig.driver.session.payments.hub.limit_box(), None);
 }
 
 #[test]
@@ -265,7 +277,8 @@ fn a_failed_revoke_ends_so_the_box_can_revoke_again() {
         .groups
         .group_type
         .revoke
-        .clone()
+        .revoking()
+        .cloned()
         .unwrap()
         .requests;
     rig.answer(requests[0], "ok");
@@ -274,13 +287,169 @@ fn a_failed_revoke_ends_so_the_box_can_revoke_again() {
         requests[1].0
     ));
     let state = &rig.driver.session.groups.group_type;
-    assert_eq!(state.revoke, None, "the row stops spinning");
+    assert_eq!(
+        state.revoke,
+        crate::state::PublicLinkStage::Idle,
+        "the row stops spinning"
+    );
     assert_eq!(state.public_limit_reached, Some(true));
     assert!(
-        rig.driver.session.chats_state.chat_action_error.is_some(),
+        !rig.driver.session.chats_state.chat_action_error.is_empty(),
         "the failure is said"
     );
     // The box is usable again: a second Revoke goes out.
     assert!(rig.driver.revoke_public_link(ChatId(13)).unwrap().is_some());
     assert_eq!(rig.sent("setSupergroupUsername").len(), 2);
+}
+
+/// Round 12, 016: the second send of a revoke failing leaves the first out
+/// with a revoke recorded, so its answer settles it with the note and a
+/// fresh list instead of leaving a cleared link nobody reports.
+#[test]
+fn a_half_sent_revoke_is_recorded_and_settles() {
+    let mut rig = Rig::new();
+    rig.driver.session.groups.group_type.public_limit_reached = Some(true);
+    rig.recorder.refuse(Some("disableAllSupergroupUsernames"));
+    assert!(rig.driver.revoke_public_link(ChatId(13)).is_err());
+    rig.recorder.refuse(None);
+    let revoke = rig
+        .driver
+        .session
+        .groups
+        .group_type
+        .revoke
+        .revoking()
+        .cloned()
+        .unwrap();
+    assert_eq!(revoke.requests.len(), 1);
+    rig.answer(revoke.requests[0], "ok");
+    let state = &rig.driver.session.groups.group_type;
+    assert_eq!(state.revoke, crate::state::PublicLinkStage::Idle);
+    assert!(!rig.driver.session.chats_state.chat_action_error.is_empty());
+    assert_eq!(state.public_chats, crate::state::PublicChatsFetch::None);
+}
+
+/// Sweep s4-payments-2, 12-017: a revoke that settles, however late, leaves
+/// one "freed" signal for the Type box to check its link again; it is taken
+/// once.
+#[test]
+fn a_settled_revoke_signals_the_type_box_once() {
+    let mut rig = Rig::new();
+    rig.driver.session.groups.group_type.public_limit_reached = Some(true);
+    rig.driver.revoke_public_link(ChatId(13)).unwrap().unwrap();
+    assert!(!rig.driver.session.take_public_link_freed(), "still out");
+    let requests = rig
+        .driver
+        .session
+        .groups
+        .group_type
+        .revoke
+        .revoking()
+        .cloned()
+        .unwrap()
+        .requests;
+    for id in requests {
+        rig.answer(id, "ok");
+    }
+    assert!(rig.driver.session.take_public_link_freed());
+    assert!(!rig.driver.session.take_public_link_freed(), "taken once");
+}
+
+/// Round 2, 120: a check that could not be sent is not "Checking...".
+#[test]
+fn a_check_that_could_not_be_sent_is_not_in_flight() {
+    let mut rig = Rig::new();
+    rig.recorder.refuse(Some("checkChatUsername"));
+    assert!(
+        rig.driver
+            .check_group_username(ChatId(13), "quillchat")
+            .is_err()
+    );
+    // Not in flight, and not silent: the box says the check failed.
+    assert_eq!(
+        rig.driver.session.groups.group_type.check,
+        crate::state::UsernameCheck::Failed {
+            chat_id: ChatId(13),
+            username: "quillchat".into()
+        }
+    );
+}
+
+/// Round 2, 121: queued edits that find no upgraded chat are reported, not
+/// dropped.
+#[test]
+fn queued_edits_without_an_upgraded_chat_are_reported() {
+    let mut rig = Rig::new();
+    let edit = crate::state::EditAfterUpgrade {
+        old: ChatId(30),
+        info: Vec::new(),
+        kind: Vec::new(),
+    };
+    rig.driver.run_edit_after_upgrade(edit, true);
+    assert!(!rig.driver.session.chats_state.chat_action_error.is_empty());
+}
+
+/// r2-05 (10-066): a check whose send is refused is a failed check of its
+/// text, not a "Checking..." nobody answers.
+#[test]
+fn a_refused_check_send_is_recorded_as_failed() {
+    let mut rig = Rig::new();
+    rig.recorder.refuse_sends(true);
+    assert!(
+        rig.driver
+            .check_group_username(ChatId(13), "quillchat")
+            .is_err()
+    );
+    assert!(
+        rig.driver
+            .session
+            .group_username_check_failed(ChatId(13), "quillchat")
+    );
+    rig.recorder.refuse_sends(false);
+    assert!(
+        rig.driver
+            .check_group_username(ChatId(13), "quillchat")
+            .unwrap()
+            .is_some(),
+        "Save asks again"
+    );
+}
+
+/// r2-05 (10-068): a link count that could not be asked for is `Failed`,
+/// not a count that is still on its way: Save does not wait for it, and
+/// the next open of the box asks again.
+#[test]
+fn a_refused_link_count_send_is_a_failed_count() {
+    let mut rig = Rig::new();
+    rig.recorder.refuse_sends(true);
+    assert!(
+        rig.driver
+            .fetch_chat_invite_link_counts(ChatId(13))
+            .is_err()
+    );
+    assert!(matches!(
+        rig.driver.session.groups.invite_link_counts.get(&13),
+        Some(crate::state::InviteLinkCountsFetch::Failed(_))
+    ));
+    assert!(
+        !rig.driver
+            .session
+            .chat_invite_link_count_loading(ChatId(13))
+    );
+    assert_eq!(
+        rig.driver.session.chat_active_invite_link_count(ChatId(13)),
+        0
+    );
+    rig.recorder.refuse_sends(false);
+    assert!(
+        rig.driver
+            .fetch_chat_invite_link_counts(ChatId(13))
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        rig.driver
+            .session
+            .chat_invite_link_count_loading(ChatId(13))
+    );
 }

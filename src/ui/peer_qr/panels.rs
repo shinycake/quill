@@ -74,6 +74,7 @@ pub(super) fn toast_text(toast: &QrToast) -> String {
         QrToast::Expiring { free_code: true } => tr(keys::NO_PAID_TOKEN_TOAST_EXPIRING).into(),
         QrToast::Expiring { free_code: false } => tr(keys::PEER_QR_LINK_EXPIRING).into(),
         QrToast::Unavailable => tr(keys::PEER_QR_LINK_UNAVAILABLE).into(),
+        QrToast::Changed => tr(keys::Q_QR_BOX_CHANGED_TRY_AGAIN).into(),
         QrToast::Failed(reason) => reason.clone(),
         QrToast::Copied => tr(keys::GROUP_INVITE_QR_COPIED).into(),
         QrToast::LinkCopied => tr(keys::USERNAME_COPIED).into(),
@@ -136,8 +137,8 @@ impl QuillApp {
             .peer_qr
             .open
             .as_ref()
-            .filter(|open| open.state.gift.is_none())
-            .map(|open| open.state.color);
+            .filter(|open| open.state.gift().is_none())
+            .map(|open| open.state.color());
         let ring = |inset: f64, width: f64, color: Hsla| {
             div()
                 .absolute()
@@ -218,7 +219,7 @@ impl QuillApp {
             .peer_qr
             .open
             .as_ref()
-            .map(|open| super::plain_picks(&open.state.emoji))
+            .map(|open| super::plain_picks(open.state.emoji()))
             .unwrap_or_default();
         let highlight = rgba(view.colors.control);
         v_virtual_list(
@@ -318,7 +319,7 @@ impl QuillApp {
                 vec![label(tr(keys::NO_PAID_TOKEN_PILL_PERMANENT).to_string())]
             }
         };
-        let busy = open.state.free.requesting.is_some();
+        let busy = open.state.free.requesting().is_some();
         let control = rgba(view.colors.control);
         let pill = Button::new("peer-qr-pill")
             .rounded_full()
@@ -373,7 +374,7 @@ impl QuillApp {
             .peer_qr
             .open
             .as_ref()
-            .filter(|open| open.state.free.menu_open)
+            .filter(|open| open.state.free.menu_open())
         else {
             return Vec::new();
         };

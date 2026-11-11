@@ -10,7 +10,7 @@ use gpui_kit::component::button::*;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::chatlist_suggestions::{Suggestion, copy, pick};
+use quill::chatlist_suggestions::{BirthdayCard, Suggestion, copy, pick};
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -42,9 +42,9 @@ impl QuillApp {
                 if let Some(demo) = self.demo_session.as_mut() {
                     match quill::chatlist_suggestions::dismiss_action(suggestion) {
                         Some(action) => {
-                            demo.chat_list.suggestions.actions.remove(action);
+                            demo.chat_list.suggestions.remove_action(action);
                         }
-                        None => demo.chat_list.suggestions.birthdays_hidden = true,
+                        None => demo.chat_list.suggestions.birthday_card = BirthdayCard::Hidden,
                     }
                 }
             }

@@ -18,13 +18,28 @@ use quill::settings_catalog::{self, Hit, Platforms, RecentSearches, SearchContex
 pub(in crate::ui) struct SettingsSearch {
     /// Created with the window the settings window first renders in.
     input: Option<Entity<InputState>>,
-    /// The field's text, mirrored on every edit.
-    pub(super) query: String,
-    /// The highlighted result (or recent pick).
-    selected: usize,
     recent: Option<RecentSearches>,
-    /// A result just opened: clear the field on the next render.
-    pending_clear: bool,
+    /// Where the search stands; the query is the field's own text.
+    stage: Stage,
+}
+
+/// The search, as one value: the highlighted row lives with the search it
+/// belongs to, so ending a search drops it with the text.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Stage {
+    /// The field holds the user's text (maybe none); `selected` is the
+    /// highlighted result (or recent pick).
+    Live { selected: usize },
+    /// A result opened or Settings closed: the field still holds the text
+    /// of a search that is over, and the next render clears it (that needs
+    /// the window), back to `Live`.
+    Finished,
+}
+
+impl Default for Stage {
+    fn default() -> Self {
+        Self::Live { selected: 0 }
+    }
 }
 
 /// What the results area lists.
@@ -36,13 +51,23 @@ enum Listing {
 impl SettingsSearch {
     /// Settings closed: the next open starts with an empty field.
     pub(super) fn close(&mut self) {
-        self.pending_clear = true;
+        self.stage = Stage::Finished;
     }
 
-    #[cfg(test)]
-    #[cfg(feature = "demo-capture")]
+    /// The highlighted row.
     pub(super) fn selected(&self) -> usize {
-        self.selected
+        match self.stage {
+            Stage::Live { selected } => selected,
+            Stage::Finished => 0,
+        }
+    }
+
+    /// The field's text (empty before the field exists).
+    pub(super) fn query(&self, cx: &App) -> String {
+        self.input
+            .as_ref()
+            .map(|input| input.read(cx).value().to_string())
+            .unwrap_or_default()
     }
 
     #[cfg(test)]
@@ -75,13 +100,12 @@ impl QuillApp {
         cx.subscribe_in(
             &input,
             window,
-            |this, state, event: &InputEvent, _, cx| match event {
+            |this, _, event: &InputEvent, window, cx| match event {
                 InputEvent::Change => {
-                    this.settings.search.query = state.read(cx).value().to_string();
-                    this.settings.search.selected = 0;
+                    this.settings.search.stage = Stage::Live { selected: 0 };
                     cx.notify();
                 }
-                InputEvent::PressEnter { .. } => this.open_selected_search(cx),
+                InputEvent::PressEnter { .. } => this.open_selected_search(window, cx),
                 InputEvent::Focus | InputEvent::Blur => cx.notify(),
             },
         )
@@ -92,7 +116,7 @@ impl QuillApp {
 
     /// Whether the results area replaces the page.
     pub(super) fn settings_searching(&self, window: &Window, cx: &App) -> bool {
-        !self.settings.search.query.trim().is_empty() || self.search_field_focused(window, cx)
+        !self.settings.search.query(cx).trim().is_empty() || self.search_field_focused(window, cx)
     }
 
     pub(super) fn search_field_focused(&self, window: &Window, cx: &App) -> bool {
@@ -103,8 +127,8 @@ impl QuillApp {
             .is_some_and(|input| input.read(cx).focus_handle(cx).is_focused(window))
     }
 
-    fn search_listing(&mut self) -> Listing {
-        let query = self.settings.search.query.clone();
+    fn search_listing(&mut self, cx: &App) -> Listing {
+        let query = self.settings.search.query(cx);
         let recent: Vec<String> = self.search_recent().as_slice().to_vec();
         let agent_access = quill::agent::access::enabled();
         if query.trim().is_empty() {
@@ -129,15 +153,15 @@ impl QuillApp {
     /// The ids the results or recent picks list now.
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
-    pub(super) fn settings_search_ids(&mut self) -> Vec<&'static str> {
-        match self.search_listing() {
+    pub(super) fn settings_search_ids(&mut self, cx: &App) -> Vec<&'static str> {
+        match self.search_listing(cx) {
             Listing::Results(hits) => hits.iter().map(|hit| hit.target.id()).collect(),
             Listing::Recent(targets) => targets.iter().map(|target| target.id()).collect(),
         }
     }
 
-    fn listing_len(&mut self) -> usize {
-        match self.search_listing() {
+    fn listing_len(&mut self, cx: &App) -> usize {
+        match self.search_listing(cx) {
             Listing::Results(hits) => hits.len(),
             Listing::Recent(targets) => targets.len(),
         }
@@ -145,40 +169,50 @@ impl QuillApp {
 
     /// ↑ / ↓ in the field.
     pub(super) fn move_search_selection(&mut self, down: bool, cx: &mut Context<Self>) {
-        let len = self.listing_len();
+        let len = self.listing_len(cx);
         if len == 0 {
             return;
         }
-        let selected = self.settings.search.selected.min(len - 1);
-        self.settings.search.selected = if down {
-            (selected + 1) % len
-        } else {
-            (selected + len - 1) % len
+        let selected = self.settings.search.selected().min(len - 1);
+        self.settings.search.stage = Stage::Live {
+            selected: if down {
+                (selected + 1) % len
+            } else {
+                (selected + len - 1) % len
+            },
         };
         cx.notify();
     }
 
-    fn open_selected_search(&mut self, cx: &mut Context<Self>) {
-        let selected = self.settings.search.selected;
-        let target = match self.search_listing() {
+    fn open_selected_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let selected = self.settings.search.selected();
+        let target = match self.search_listing(cx) {
             Listing::Results(hits) => hits.get(selected).map(|hit| hit.target),
             Listing::Recent(targets) => targets.get(selected).copied(),
         };
         if let Some(target) = target {
-            self.open_search_target(target, cx);
+            self.open_search_target(target, window, cx);
         }
     }
 
     /// Open what a result points at, remember it, and leave search.
-    pub(super) fn open_search_target(&mut self, target: Target, cx: &mut Context<Self>) {
+    pub(super) fn open_search_target(
+        &mut self,
+        target: Target,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let recent = self.search_recent();
         recent.record(target.id());
         let recent = recent.clone();
         quill::settings::save_settings_search_recent(&QuillApp::appearance_paths(), &recent);
-        self.settings.search.pending_clear = true;
+        self.clear_settings_search(window, cx);
         // A screen of the page may be covering the row.
+        // Leaving and arriving are one reset: the page's drafts go and its
+        // visit asks again, though the page itself does not change.
         if self.settings.page == Some(target.page()) {
             self.leave_settings_page(target.page());
+            self.arrive_settings_page(target.page());
         }
         self.show_settings_page(target.page(), cx);
         if let Target::Entry(entry) = target {
@@ -196,8 +230,7 @@ impl QuillApp {
         if let Some(input) = self.settings.search.input.clone() {
             input.update(cx, |input, cx| input.set_value("", window, cx));
         }
-        self.settings.search.query.clear();
-        self.settings.search.selected = 0;
+        self.settings.search.stage = Stage::default();
         window.focus(&self.settings.focus, cx);
         cx.notify();
     }
@@ -211,10 +244,9 @@ impl QuillApp {
     ) {
         let input = self.settings_search_input(window, cx);
         if let Some(text) = typed {
-            let value = format!("{}{text}", self.settings.search.query);
-            input.update(cx, |input, cx| input.set_value(value.clone(), window, cx));
-            self.settings.search.query = value;
-            self.settings.search.selected = 0;
+            let value = format!("{}{text}", self.settings.search.query(cx));
+            input.update(cx, |input, cx| input.set_value(value, window, cx));
+            self.settings.search.stage = Stage::default();
         }
         input.update(cx, |input, cx| input.focus(window, cx));
         cx.notify();
@@ -222,7 +254,7 @@ impl QuillApp {
 
     /// Clears the field after a result opened (needs the window).
     pub(super) fn settle_settings_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if std::mem::take(&mut self.settings.search.pending_clear) {
+        if self.settings.search.stage == Stage::Finished {
             self.clear_settings_search(window, cx);
         }
     }
@@ -254,7 +286,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> bool {
         if window.has_active_dialog(cx)
-            || self.preferences.keybinding_capture.is_some()
+            || self.preferences.keybinding.capture.waiting().is_some()
             || self.topmost_esc_layer().is_some()
         {
             return false;
@@ -297,9 +329,9 @@ impl QuillApp {
 
     /// The results (or recent picks) in place of the page.
     pub(super) fn settings_search_view(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let listing = self.search_listing();
-        let selected = self.settings.search.selected;
-        let query = self.settings.search.query.trim().to_string();
+        let listing = self.search_listing(cx);
+        let selected = self.settings.search.selected();
+        let query = self.settings.search.query(cx).trim().to_string();
         let (heading, rows): (Option<String>, Vec<AnyElement>) = match listing {
             Listing::Results(hits) => (
                 hits.is_empty()
@@ -407,9 +439,9 @@ impl QuillApp {
                                     .child(path),
                             ),
                     )
-                    .on_click(
-                        cx.listener(move |this, _, _, cx| this.open_search_target(target, cx)),
-                    ),
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_search_target(target, window, cx)
+                    })),
             )
             .when(removable, |this| {
                 this.child(

@@ -24,6 +24,18 @@ impl PrivateSharingState {
         self.disabled_at_unix.insert(chat_id.0, now);
     }
 
+    pub(crate) fn disabled_at(&self, chat_id: ChatId) -> Option<i64> {
+        self.disabled_at_unix.get(&chat_id.0).copied()
+    }
+
+    /// Put back the record a refused request replaced.
+    pub(crate) fn restore_disabled(&mut self, chat_id: ChatId, at: Option<i64>) {
+        match at {
+            Some(at) => self.record_disabled(chat_id, at),
+            None => self.forget_disabled(chat_id),
+        }
+    }
+
     pub(crate) fn forget_disabled(&mut self, chat_id: ChatId) {
         self.disabled_at_unix.remove(&chat_id.0);
     }

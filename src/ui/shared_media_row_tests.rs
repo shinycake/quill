@@ -114,7 +114,7 @@ fn a_music_row_plays_in_place_and_a_second_press_cancels(cx: &mut TestAppContext
     app.read_with(vcx, |app, _| {
         assert!(app.playback.intent.is_none(), "the second press cancels");
         let session = app.session().expect("the demo session");
-        let file = app.playback.playing_audio;
+        let file = app.playback.active.audio();
         assert_eq!(file, None);
         assert!(
             session.media.downloads.user_count() == 0,

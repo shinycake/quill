@@ -182,7 +182,7 @@ impl QuillApp {
             );
             // A Save went out and every request answered.
             if let Some(edit) = self.group_edit_box_mut() {
-                edit.saving = Some(Vec::new());
+                edit.saving = super::SaveStage::Saving(Vec::new());
             }
         }
     }

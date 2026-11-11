@@ -87,7 +87,12 @@ fn driver_set_chat_member_tag_gates_and_shape() {
     );
     // Owner → sends `setChatMemberTag`.
     driver.session.my_user_id = Some(7);
-    driver.session.chats.get_mut(&9).unwrap().my_member_status = Some(ChannelMemberStatus::Creator);
+    driver
+        .session
+        .chats
+        .get_mut(&9)
+        .unwrap()
+        .assume_member_status(Some(ChannelMemberStatus::Creator));
     let extra = driver
         .set_chat_member_tag(ChatId(9), 42, "boss")
         .unwrap()
@@ -168,7 +173,12 @@ fn driver_group_info_edit_gates_and_shape() {
     // A basic group member needs the default `can_change_info`
     // permission (tdesktop `ChatData::canEditInformation`).
     assert!(driver.set_chat_photo(ChatId(9), None).unwrap().is_none());
-    driver.session.chats.get_mut(&9).unwrap().my_member_status = Some(ChannelMemberStatus::Member);
+    driver
+        .session
+        .chats
+        .get_mut(&9)
+        .unwrap()
+        .assume_member_status(Some(ChannelMemberStatus::Member));
     let extra = driver
         .set_chat_photo(ChatId(9), None)
         .unwrap()
@@ -189,7 +199,12 @@ fn driver_group_info_edit_gates_and_shape() {
     assert_eq!(recorder.snapshot().len(), sent_before);
     // Supergroup plain member WITH the default
     // `permissions.can_change_info` → sends.
-    driver.session.chats.get_mut(&10).unwrap().my_member_status = Some(ChannelMemberStatus::Member);
+    driver
+        .session
+        .chats
+        .get_mut(&10)
+        .unwrap()
+        .assume_member_status(Some(ChannelMemberStatus::Member));
     driver
         .session
         .chats
@@ -214,7 +229,12 @@ fn driver_group_info_edit_gates_and_shape() {
         .take_purpose(RequestPurpose::SetChatPhoto);
     // Creator → sends `setChatTitle`.
     driver.session.my_user_id = Some(7);
-    driver.session.chats.get_mut(&9).unwrap().my_member_status = Some(ChannelMemberStatus::Creator);
+    driver
+        .session
+        .chats
+        .get_mut(&9)
+        .unwrap()
+        .assume_member_status(Some(ChannelMemberStatus::Creator));
     let extra = driver
         .set_group_title(ChatId(9), "New name")
         .unwrap()
@@ -429,7 +449,7 @@ fn driver_group_sticker_set_gates_and_shape() {
             .session
             .chats_state
             .chat_action_error
-            .as_deref()
+            .last()
             .is_some_and(|e| e.contains("Could not change") && !e.contains("private body"))
     );
     assert_eq!(
@@ -601,7 +621,14 @@ fn driver_community_create_rename_refetch_chain() {
             .unwrap(),
         )
         .unwrap();
-    assert!(!driver.session.groups.community_full_infos.contains_key(&42));
+    assert!(
+        driver
+            .session
+            .groups
+            .community_full_infos
+            .fetch(42)
+            .is_some_and(|fetch| fetch.is_loading())
+    );
     let sent = recorder.snapshot().last().cloned().expect("request");
     let v: Value = serde_json::from_str(&sent).unwrap();
     assert_eq!(v["@type"], "getCommunityFullInfo");
@@ -720,5 +747,57 @@ fn driver_community_management_rights_and_delete() {
     assert!(!driver.session.groups.communities.contains_key(&42));
     assert!(!driver.session.groups.community_full_infos.contains_key(&42));
     assert!(driver.session.groups.communities.contains_key(&43));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Sweep 10-057: a member page the driver refuses to send is a failed list
+/// (drawn with Retry), not an entry removed so the panel reads "Loading".
+#[test]
+fn a_refused_member_fetch_is_a_failed_list() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink);
+    let mut driver = ConnectDriver::new(session, recorder, test_credentials(), prepared);
+    assert!(driver.fetch_basic_group_members(ChatId(9)).is_err());
+    assert!(matches!(
+        driver.session.groups.basic_group_members.get(&9),
+        Some(crate::state::SupergroupMembersFetch::NotSent(_))
+    ));
+    assert!(
+        driver
+            .refresh_supergroup_members(ChatId(13), crate::state::MemberListFilter::Recent, "")
+            .is_err()
+    );
+    assert!(matches!(
+        driver
+            .session
+            .groups
+            .supergroup_members
+            .get(&(13, crate::state::MemberListFilter::Recent)),
+        Some(crate::state::SupergroupMembersFetch::NotSent(_))
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A contacts fetch that cannot be asked at all (the chats path is down)
+/// ends in the failed stage the invite picker draws with Retry, never in a
+/// "Loading contacts..." nothing ends (sweep r2-01).
+#[test]
+fn a_contacts_fetch_while_the_path_is_down_is_a_failed_list() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink);
+    let mut driver = ConnectDriver::new(session, recorder, test_credentials(), prepared);
+    assert!(driver.fetch_contacts().is_err());
+    let contacts = &driver.session.users_state.contacts;
+    assert!(contacts.data().is_none());
+    assert!(contacts.error().is_some());
+    assert!(contacts.can_ask(), "Retry may ask again");
     let _ = std::fs::remove_dir_all(&dir);
 }

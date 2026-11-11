@@ -21,10 +21,9 @@ use gpui_kit::*;
 use quill::calls::proxy::ProxyKind;
 use quill::lang::{keys, tr, tr_with};
 use quill::proxy::{
-    AUTO_SWITCH_TIMEOUTS, PingStatus, ProxyDraft, ProxyEntry, ProxyIssue, ProxyMode, kind_label,
-    parse_proxy_link, proxy_link_from_text,
+    AUTO_SWITCH_TIMEOUTS, LinkCheck, PingStatus, ProxyDraft, ProxyEntry, ProxyIssue, ProxyMode,
+    kind_label, parse_proxy_link, proxy_link_from_text,
 };
-use quill::state::LINK_PING_ID;
 use quill::telegram::envelope::ConnectionState;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -36,7 +35,10 @@ pub(crate) struct ProxyUi {
     pub(crate) link: Option<ProxyLinkBox>,
     /// One-line result of the last list action ("Proxy List copied…").
     pub(crate) notice: Option<String>,
-    /// The "this exposes your IP" warning was confirmed for this run.
+    /// The "this exposes your IP" warning was confirmed for this run on
+    /// this account: the field lives in the account's `SettingsUi`, so
+    /// another account asks again (the warning is about the proxy this
+    /// account's connection would use).
     pub(crate) ip_warning_acked: bool,
     /// The proxy list as a box of its own (tdesktop's `ProxiesBox`), for
     /// the sign-in screen, which has no Settings window to hold it.
@@ -59,13 +61,21 @@ pub(crate) struct ProxyEditor {
     password: Entity<InputState>,
     secret: Entity<InputState>,
     error: Option<String>,
+    save: ProxySave,
+}
+
+/// Where the editor's Save stands: being edited, or sent and waiting for
+/// TDLib's answer. The box closes on that request's answer; a refusal (or
+/// an answer that never comes) puts it back to `Editing` with its error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProxySave {
+    Editing,
+    Saving(quill::ids::RequestId),
 }
 
 /// The "Proxy Server — Connect Proxy" confirmation for a proxy link.
 pub(crate) struct ProxyLinkBox {
     draft: ProxyDraft,
-    /// Showing the one-time "this exposes your IP" warning.
-    warn: bool,
 }
 
 /// Editor validation message (tdesktop highlights the bad field; Quill
@@ -109,6 +119,21 @@ impl QuillApp {
         }
         self.fetch_proxy_list();
         cx.notify();
+    }
+
+    /// The box is the sign-in screen's: it is drawn only while that
+    /// screen is, so a box left open when the account reaches Ready never
+    /// lands over the chat list.
+    pub(super) fn proxy_list_box_shown(&self) -> bool {
+        self.settings.proxy.list_box && self.pane_mode() == super::app::PaneMode::Connecting
+    }
+
+    /// Forget the box once its owner (the sign-in screen) is gone, so it
+    /// does not come back if the pane connects again.
+    pub(super) fn sync_proxy_list_box(&mut self) {
+        if self.settings.proxy.list_box && !self.proxy_list_box_shown() {
+            self.settings.proxy.list_box = false;
+        }
     }
 
     pub(crate) fn fetch_proxy_list(&mut self) {
@@ -193,6 +218,7 @@ impl QuillApp {
             ),
             secret: input(window, cx, tr(keys::PROXY_BOX_SECRET), &draft.secret, false),
             error: None,
+            save: ProxySave::Editing,
         });
         if let Some(editor) = &self.settings.proxy.editor {
             let first = if kind == ProxyKind::Web {
@@ -206,8 +232,65 @@ impl QuillApp {
     }
 
     fn close_proxy_editor(&mut self, cx: &mut Context<Self>) {
+        self.forget_proxy_saving();
         self.settings.proxy.editor = None;
         cx.notify();
+    }
+
+    /// The editor stops waiting for its request.
+    fn forget_proxy_saving(&mut self) {
+        let Some(ProxySave::Saving(request)) = self
+            .settings
+            .proxy
+            .editor
+            .as_ref()
+            .map(|editor| editor.save)
+        else {
+            return;
+        };
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.users_state.saves.forget(request);
+        }
+    }
+
+    /// Each frame of the window that hosts the editor: take the answer of
+    /// the saving request. Saved closes the box; a refusal puts it back
+    /// with its error.
+    pub(in crate::ui) fn proxy_saving_upkeep(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ProxySave::Saving(request)) = self
+            .settings
+            .proxy
+            .editor
+            .as_ref()
+            .map(|editor| editor.save)
+        else {
+            return;
+        };
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        let session = &mut live.driver.session;
+        let in_flight = session.requests.get(request).is_some();
+        let outcome = session.users_state.saves.take_outcome(request, in_flight);
+        match outcome {
+            quill::state::SaveOutcome::Saving => {}
+            quill::state::SaveOutcome::Saved => {
+                self.settings.proxy.editor = None;
+                self.close_kit_dialog_if_done(DialogKind::ProxyEdit, window, cx);
+                cx.notify();
+            }
+            quill::state::SaveOutcome::Failed(_) | quill::state::SaveOutcome::Unknown => {
+                if let Some(editor) = self.settings.proxy.editor.as_mut() {
+                    editor.save = ProxySave::Editing;
+                    editor.error = Some(tr(keys::Q_PREFS_COULDNT_SAVE_THE_PROXY_TRY).into());
+                }
+                cx.notify();
+            }
+        }
     }
 
     /// Validate the editor and send `addProxy` / `editProxy`.
@@ -215,6 +298,9 @@ impl QuillApp {
         let Some(editor) = self.settings.proxy.editor.as_ref() else {
             return;
         };
+        if editor.save != ProxySave::Editing {
+            return;
+        }
         let mut draft = if editor.kind == ProxyKind::Web {
             ProxyDraft::web(
                 editor.web_host.read(cx).value().as_ref(),
@@ -286,7 +372,16 @@ impl QuillApp {
             None => driver.add_proxy(&draft, enable_on_save, &comment),
         });
         match sent {
-            Some(Ok(_)) | None => self.settings.proxy.editor = None,
+            Some(Ok(request)) => {
+                if let Some(live) = self.live.as_mut() {
+                    live.driver.session.users_state.saves.watch(request);
+                }
+                if let Some(editor) = self.settings.proxy.editor.as_mut() {
+                    editor.error = None;
+                    editor.save = ProxySave::Saving(request);
+                }
+            }
+            None => self.settings.proxy.editor = None,
             Some(Err(_)) => fail(self, tr(keys::Q_PREFS_COULDNT_SAVE_THE_PROXY_TRY).into()),
         }
         cx.notify();
@@ -438,7 +533,7 @@ impl QuillApp {
                 prefs.auto_switch_secs = secs;
             }
             // The clock restarts with the new settings.
-            driver.session.settings.proxy.disconnected_since_ms = None;
+            driver.session.settings.proxy.rotation = quill::proxy::Rotation::Watching;
             driver.save_proxy_prefs()
         });
         cx.notify();
@@ -453,15 +548,10 @@ impl QuillApp {
         };
         match parsed {
             Ok(draft) => {
-                self.settings.proxy.link = Some(ProxyLinkBox { draft, warn: false });
+                self.settings.proxy.link = Some(ProxyLinkBox { draft });
                 self.open_box(crate::ui::shell::DialogKind::ProxyLink);
                 if let Some(live) = self.live.as_mut() {
-                    live.driver
-                        .session
-                        .settings
-                        .proxy
-                        .pings
-                        .remove(&LINK_PING_ID);
+                    live.driver.session.settings.proxy.link_check = LinkCheck::Review;
                     let _ = live.driver.maybe_fetch_proxies();
                 }
             }
@@ -476,7 +566,16 @@ impl QuillApp {
 
     fn close_proxy_link(&mut self, cx: &mut Context<Self>) {
         self.settings.proxy.link = None;
+        self.reset_link_check();
         cx.notify();
+    }
+
+    /// The link box's stage goes back to `Review`: a check still in flight
+    /// no longer matches and is ignored.
+    fn reset_link_check(&mut self) {
+        if let Some(live) = self.live.as_mut() {
+            live.driver.session.settings.proxy.link_check = LinkCheck::Review;
+        }
     }
 
     /// "Connect Proxy": enable the listed proxy, or add and enable it.
@@ -484,6 +583,7 @@ impl QuillApp {
         let Some(link) = self.settings.proxy.link.take() else {
             return;
         };
+        self.reset_link_check();
         let existing = self.session().and_then(|s| {
             s.settings
                 .proxy
@@ -511,14 +611,18 @@ impl QuillApp {
 
     fn check_link_proxy(&mut self, cx: &mut Context<Self>) {
         let acked = self.settings.proxy.ip_warning_acked;
-        let Some(link) = self.settings.proxy.link.as_mut() else {
+        let Some(link) = self.settings.proxy.link.as_ref() else {
             return;
         };
-        link.warn = !acked;
         let draft = link.draft.clone();
-        if acked {
-            let _ = self.proxy_driver(|driver| driver.ping_link_proxy(&draft));
-        }
+        let _ = self.proxy_driver(|driver| {
+            if acked {
+                driver.session.settings.proxy.link_check = LinkCheck::Review;
+                let _ = driver.ping_link_proxy(&draft);
+            } else {
+                driver.session.settings.proxy.link_check = LinkCheck::Warn;
+            }
+        });
         cx.notify();
     }
 
@@ -751,21 +855,20 @@ impl QuillApp {
             &["connection.proxy_list", "connection.auto_switch"]
         };
         if state.entries().is_empty() {
-            body = body.child(
-                this.setting_spot(
-                    list_ids,
-                    div()
-                        .py_3()
-                        .text_sm()
-                        .text_color(text_muted())
-                        .child(if state.loading {
-                            tr(keys::Q_PREFS_LOADING)
-                        } else {
-                            tr(keys::PROXY_DESCRIPTION)
-                        }),
-                    cx,
-                ),
-            );
+            body =
+                body.child(
+                    this.setting_spot(
+                        list_ids,
+                        div().py_3().text_sm().text_color(text_muted()).child(
+                            if state.ops.loading() {
+                                tr(keys::Q_PREFS_LOADING)
+                            } else {
+                                tr(keys::PROXY_DESCRIPTION)
+                            },
+                        ),
+                        cx,
+                    ),
+                );
         } else {
             let mut rows = div().flex().flex_col().gap_1();
             let connected = this.session().is_some_and(|s| {
@@ -780,8 +883,7 @@ impl QuillApp {
                     quill::proxy_web::WebRowState::for_entry(
                         entry.is_enabled,
                         connected,
-                        state.carrier_failed == Some(entry.id)
-                            || !state.can_enable(entry.proxy.kind),
+                        state.carriers.failed_for(entry.id) || !state.can_enable(entry.proxy.kind),
                     )
                 });
                 rows = rows.child(this.proxy_row(entry, ping, web, cx));
@@ -869,7 +971,7 @@ crate::ui::shell::register_dialogs! {
     /// boxes it opens.
     ProxyList => DialogSpec::new(
         3200,
-        |app| app.settings.proxy.list_box,
+        |app| app.proxy_list_box_shown(),
         QuillApp::build_proxy_list_dialog,
     )
     .close(|app, _, cx| app.close_proxy_list_box(cx)),
@@ -922,7 +1024,11 @@ mod tests {
             "MTPROTO · available (ping: 42 ms)"
         );
         assert_eq!(
-            row_subtitle(&e, Some(PingStatus::Checking), None),
+            row_subtitle(
+                &e,
+                Some(PingStatus::Checking(quill::ids::RequestId(1))),
+                None
+            ),
             "MTPROTO · checking…"
         );
         assert_eq!(

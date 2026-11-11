@@ -13,6 +13,7 @@
 "lng_passkey_pin_placeholder" = "PIN";
 "lng_passkey_pin_blocked" = "The security key PIN is blocked. Reconnect the key or reset it.";
 "lng_passkey_confirm" = "Confirm";
+"qll_passkey_error_access_denied" = "Quill is not allowed to use your security key. Add the udev rule for security keys, unplug the key and plug it in again.";
 "lng_passkey_error_no_device" = "No security key found. Insert one and try again.";
 "lng_passkey_error_register" = "Couldn't add a passkey with the security key.";
 "lng_passkey_cable_error_title" = "Something went wrong";

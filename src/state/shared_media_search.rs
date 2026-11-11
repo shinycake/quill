@@ -30,7 +30,7 @@ impl SharedMediaState {
     /// not search or already answers that query; otherwise the caller
     /// sends the first page, which replaces the items.
     pub fn begin_search(&mut self, tab: SharedMediaTab, query: &str) -> bool {
-        if !tab.searchable() || !self.open {
+        if !tab.searchable() || !self.open() {
             return false;
         }
         let state = self.tab_state(tab);
@@ -144,7 +144,7 @@ mod tests {
         assert!(gallery.select_tab_dropping_search(SharedMediaTab::Links));
         assert_eq!(gallery.active_tab, SharedMediaTab::Links);
         assert_eq!(files_state(&gallery).query, "");
-        assert_eq!(files_state(&gallery).status, SharedMediaTabStatus::Idle);
+        assert!(files_state(&gallery).status.is_idle());
         gallery.accept(
             ChatId(5),
             SharedMediaTab::Files,
@@ -153,7 +153,7 @@ mod tests {
             0,
             MessageId(0),
         );
-        assert_eq!(files_state(&gallery).status, SharedMediaTabStatus::Idle);
+        assert!(files_state(&gallery).status.is_idle());
         // Coming back asks for the plain list again.
         assert!(gallery.select_tab_dropping_search(SharedMediaTab::Files));
     }

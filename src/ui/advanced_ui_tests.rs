@@ -2,6 +2,7 @@
 //! the Experimental settings page and the update channel switch (needs the
 //! `demo-capture` feature for gpui-kit's test support). Nothing leaves the
 //! app: no connection, and the app data root is a temp directory.
+use crate::ui::advanced_state::DebugConfirm;
 use crate::ui::app::QuillApp;
 use crate::ui::keybindings::bind_keys;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -10,7 +11,8 @@ use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::component::Root;
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
-    AppContext, Entity, Keystroke, Modifiers, TestAppContext, VisualTestContext, px, size,
+    AppContext, Entity, Focusable, Keystroke, Modifiers, TestAppContext, VisualTestContext, px,
+    size,
 };
 use quill::advanced::experimental::{self, Imported, Values};
 use quill::settings_catalog::Page;
@@ -78,7 +80,9 @@ fn debugmode_typed_in_settings_asks_before_turning_the_logs_on(cx: &mut TestAppC
     app.read_with(vcx, |app, _| {
         assert_eq!(
             app.preferences.advanced.debug_confirm,
-            Some(quill::advanced::debug_mode::enabled())
+            DebugConfirm::Asking {
+                logs_on: quill::advanced::debug_mode::enabled()
+            }
         );
     });
     shell.read_with(vcx, |shell, _| {
@@ -87,7 +91,7 @@ fn debugmode_typed_in_settings_asks_before_turning_the_logs_on(cx: &mut TestAppC
     // Cancel keeps the mode as it was and clears the question.
     let was = quill::advanced::debug_mode::enabled();
     app.update_in(vcx, |app, _, cx| {
-        app.preferences.advanced.debug_confirm = None;
+        app.preferences.advanced.debug_confirm.close();
         cx.notify();
     });
     vcx.run_until_parked();
@@ -106,7 +110,7 @@ fn codes_do_nothing_where_no_screen_takes_them(cx: &mut TestAppContext) {
     });
     type_into(&app, vcx, "debugmode");
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.preferences.advanced.debug_confirm, None);
+        assert_eq!(app.preferences.advanced.debug_confirm, DebugConfirm::Closed);
     });
     // A Settings subpage does not read them either (tdesktop reads them on
     // the settings pages, not on boxes and subpages opened from them).
@@ -117,7 +121,7 @@ fn codes_do_nothing_where_no_screen_takes_them(cx: &mut TestAppContext) {
     });
     type_into(&app, vcx, "debugmode");
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.preferences.advanced.debug_confirm, None);
+        assert_eq!(app.preferences.advanced.debug_confirm, DebugConfirm::Closed);
     });
     // Ctrl-chords are not typed text.
     app.update_in(vcx, |app, _, _| app.settings.sub = None);
@@ -136,7 +140,7 @@ fn codes_do_nothing_where_no_screen_takes_them(cx: &mut TestAppContext) {
     }
     type_into(&app, vcx, "ebugmod");
     app.read_with(vcx, |app, _| {
-        assert_eq!(app.preferences.advanced.debug_confirm, None);
+        assert_eq!(app.preferences.advanced.debug_confirm, DebugConfirm::Closed);
     });
 }
 
@@ -258,14 +262,20 @@ fn the_hardware_video_switch_on_the_advanced_page_flips_the_setting(cx: &mut Tes
 /// A signed-out screen with no connection: the screenshot demo of the
 /// phone step.
 fn sign_in_screen(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
+    sign_in_screen_on(cx, "wait-phone")
+}
+
+fn sign_in_screen_on(
+    cx: &mut TestAppContext,
+    demo: &'static str,
+) -> (Entity<QuillApp>, VisualTestContext) {
     cx.update(gpui_kit::init);
     cx.update(bind_keys);
     let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
     let slot_in = slot.clone();
     let handle = cx.open_window(size(px(1100.), px(800.)), move |window, cx| {
-        let view = cx.new(|cx| {
-            QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named("wait-phone")))
-        });
+        let view = cx
+            .new(|cx| QuillApp::new_with_demo(window, cx, None, Some(ScreenshotDemo::named(demo))));
         *slot_in.borrow_mut() = Some(view.clone());
         let shell = cx.new(|_| QuillShell::new(view));
         Root::new(shell, window, cx)
@@ -310,6 +320,28 @@ fn testmode_typed_on_the_sign_in_screen_shows_the_test_mode_label(cx: &mut TestA
     });
 }
 
+/// A cloud password that holds a code word is typed into its field, not run.
+#[gpui_kit::test]
+fn a_password_holding_testmode_does_not_switch_environments(cx: &mut TestAppContext) {
+    let (app, mut vcx) = sign_in_screen_on(cx, "wait-password");
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        let focus = app.auth_ui.password_input.focus_handle(cx);
+        window.focus(&focus, cx);
+    });
+    vcx.update(|window, cx| window.render_frame(cx));
+    vcx.simulate_keystrokes("t e s t");
+    assert!(
+        vcx.update(|window, _| window.focused_text_input()),
+        "the password field has the focus"
+    );
+    vcx.simulate_keystrokes("m o d e");
+    assert!(!test_mode_label_shown(vcx), "typing a password switched");
+    app.read_with(vcx, |app, _| {
+        assert!(!app.preferences.advanced.test_environment());
+    });
+}
+
 /// The self-update answer is process-wide; the tests that force it take
 /// this lock.
 static AUTO_UPDATE_STATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -351,7 +383,7 @@ fn a_release_the_check_finds_downloads_on_its_own(cx: &mut TestAppContext) {
         app.preferences.update_state = UpdateState::Idle;
         app.apply_check_result(UpdateState::Available(release.clone()), cx);
         assert!(
-            matches!(&app.preferences.update_state, UpdateState::Downloading(r, _) if r.version == "999.0.0"),
+            matches!(&app.preferences.update_state, UpdateState::Downloading(r, ..) if r.version == "999.0.0"),
             "the release downloads without a click"
         );
     });
@@ -398,7 +430,7 @@ fn a_low_disk_holds_the_update_download_until_it_is_healthy(cx: &mut TestAppCont
         );
         app.apply_disk_reading(Some(FLOORS.warn_clear), cx);
         assert!(
-            matches!(&app.preferences.update_state, UpdateState::Downloading(r, _) if r.version == "999.0.0"),
+            matches!(&app.preferences.update_state, UpdateState::Downloading(r, ..) if r.version == "999.0.0"),
             "a healthy disk starts it"
         );
     });
@@ -468,4 +500,26 @@ fn update_quill_in_the_title_bar_downloads_the_release(cx: &mut TestAppContext) 
     });
     assert!(shown(vcx, "title-bar-update"));
     quill::update_install::force_self_update_available(None);
+}
+
+/// Sweep 07-023: the page reads the clipboard once, not on every render,
+/// and again after the window is activated or Export wrote to it.
+#[gpui_kit::test]
+fn the_import_offer_reads_the_clipboard_once_until_it_may_have_changed(cx: &mut TestAppContext) {
+    let (app, _shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    let reads = std::cell::Cell::new(0);
+    app.read_with(vcx, |app, _| {
+        let advanced = &app.preferences.advanced;
+        let read = |offered: bool| {
+            reads.set(reads.get() + 1);
+            offered
+        };
+        assert!(advanced.import_offered(|| read(true)));
+        assert!(advanced.import_offered(|| read(false)), "kept, not read");
+        assert_eq!(reads.get(), 1);
+        advanced.forget_import_offer();
+        assert!(!advanced.import_offered(|| read(false)));
+        assert_eq!(reads.get(), 2);
+    });
 }

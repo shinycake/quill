@@ -46,12 +46,12 @@ impl QuillApp {
         tab: SearchTab,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let label = if filters.archived && filters.chat_type == SearchChatType::All {
+        let label = if filters.archived && filters.chat_type() == SearchChatType::All {
             tr(keys::SEARCH_FILTER_FROM_ARCHIVE)
         } else {
-            filters.chat_type.label()
+            filters.chat_type().label()
         };
-        let narrowed = filters.archived || filters.chat_type != SearchChatType::All;
+        let narrowed = filters.archived || filters.chat_type() != SearchChatType::All;
         let owner = cx.entity().downgrade();
         Self::filter_menu_button("search-filter-type", label.into(), narrowed).dropdown_menu(
             move |mut menu: PopupMenu, _, _| {
@@ -70,9 +70,9 @@ impl QuillApp {
                     {
                         menu = menu.item(
                             PopupMenuItem::new(kind.label())
-                                .checked(filters.chat_type == kind)
+                                .checked(filters.chat_type() == kind)
                                 .on_click(Self::edit_search_filters(&owner, move |f| {
-                                    f.chat_type = kind
+                                    *f = f.with_chat_type(kind)
                                 })),
                         );
                     }

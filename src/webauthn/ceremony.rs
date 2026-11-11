@@ -28,6 +28,12 @@ pub const DEVICE_POLL: Duration = Duration::from_millis(500);
 /// Where the worker finds security keys.
 pub trait DeviceSource: Send {
     fn open_all(&mut self) -> Vec<Box<dyn HidDevice>>;
+
+    /// [`Self::open_all`], saying when a key is there that may not be
+    /// opened.
+    fn find(&mut self) -> super::ctap2::hid::Found {
+        super::ctap2::hid::Found::Keys(self.open_all())
+    }
 }
 
 /// The USB keys of this computer (`ctap2::hid`).
@@ -36,6 +42,10 @@ pub struct UsbKeys;
 impl DeviceSource for UsbKeys {
     fn open_all(&mut self) -> Vec<Box<dyn HidDevice>> {
         super::ctap2::hid::open_all()
+    }
+
+    fn find(&mut self) -> super::ctap2::hid::Found {
+        super::ctap2::hid::find()
     }
 }
 
@@ -92,16 +102,43 @@ pub(super) type OnCancel = Arc<dyn Fn() + Send + Sync>;
 
 /// The dialog's handle on a running ceremony. Dropping it cancels.
 pub struct Ceremony {
-    events: Receiver<CeremonyEvent>,
+    state: CeremonyState,
     pins: Sender<Zeroizing<String>>,
     commands: Sender<CeremonyCommand>,
     cancel: Arc<AtomicBool>,
     on_cancel: Option<OnCancel>,
-    finished: bool,
+}
+
+/// The ceremony runs and its events are read, or it has said its last
+/// word and the channel is never read again.
+enum CeremonyState {
+    Running(Receiver<CeremonyEvent>),
+    Finished,
+}
+
+/// What the worker asks of time: now, and a pause before the next look
+/// for a key.
+pub(super) trait Pace {
+    fn now(&self) -> Instant;
+    fn pause(&self, span: Duration);
+}
+
+struct SystemPace;
+
+impl Pace for SystemPace {
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+
+    fn pause(&self, span: Duration) {
+        std::thread::sleep(span);
+    }
 }
 
 /// The worker's side of the channels.
 pub(super) struct Link {
+    /// The clock the worker reads and waits on (a manual one in tests).
+    pace: Box<dyn Pace + Send>,
     pub(super) events: Sender<CeremonyEvent>,
     pins: Receiver<Zeroizing<String>>,
     pub(super) commands: Receiver<CeremonyCommand>,
@@ -133,6 +170,7 @@ impl Ceremony {
         let (commands, command_rx) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let link = Link {
+            pace: Box::new(SystemPace),
             events: event_tx.clone(),
             pins: pin_rx,
             commands: command_rx,
@@ -148,12 +186,11 @@ impl Ceremony {
             )));
         }
         Self {
-            events,
+            state: CeremonyState::Running(events),
             pins,
             commands,
             cancel,
             on_cancel,
-            finished: false,
         }
     }
 
@@ -186,16 +223,25 @@ impl Ceremony {
     /// last word (a caught panic) reads as a failure, once.
     pub fn poll(&mut self) -> Vec<CeremonyEvent> {
         let mut out = Vec::new();
+        let CeremonyState::Running(events) = &self.state else {
+            return out;
+        };
+        let mut finished = false;
         loop {
-            match self.events.try_recv() {
+            match events.try_recv() {
                 Ok(event) => {
-                    self.note(&event);
+                    finished |= matches!(
+                        event,
+                        CeremonyEvent::Registered(_)
+                            | CeremonyEvent::SignedIn(_)
+                            | CeremonyEvent::Failed(_)
+                    );
                     out.push(event);
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
-                    if !self.finished {
-                        self.finished = true;
+                    if !finished {
+                        finished = true;
                         out.push(CeremonyEvent::Failed(CeremonyError::Other(
                             "the worker stopped".into(),
                         )));
@@ -204,6 +250,9 @@ impl Ceremony {
                 }
             }
         }
+        if finished {
+            self.state = CeremonyState::Finished;
+        }
         out
     }
 
@@ -211,23 +260,26 @@ impl Ceremony {
     /// For tests: no polling and no clock, the worker's channel wakes it.
     #[cfg(test)]
     pub(crate) fn wait(&mut self) -> Vec<CeremonyEvent> {
-        match self.events.recv() {
+        let CeremonyState::Running(events) = &self.state else {
+            return Vec::new();
+        };
+        match events.recv() {
             Ok(event) => {
-                self.note(&event);
+                let finished = matches!(
+                    event,
+                    CeremonyEvent::Registered(_)
+                        | CeremonyEvent::SignedIn(_)
+                        | CeremonyEvent::Failed(_)
+                );
                 let mut out = vec![event];
-                out.extend(self.poll());
+                if finished {
+                    self.state = CeremonyState::Finished;
+                } else {
+                    out.extend(self.poll());
+                }
                 out
             }
             Err(_) => self.poll(),
-        }
-    }
-
-    fn note(&mut self, event: &CeremonyEvent) {
-        if matches!(
-            event,
-            CeremonyEvent::Registered(_) | CeremonyEvent::SignedIn(_) | CeremonyEvent::Failed(_)
-        ) {
-            self.finished = true;
         }
     }
 
@@ -294,15 +346,23 @@ impl Link {
             if self.cancelled() {
                 return Err(CeremonyError::Cancelled);
             }
-            let devices = source.open_all();
-            if !devices.is_empty() {
-                return Ok(devices);
+            match source.find() {
+                super::ctap2::hid::Found::Keys(devices) if !devices.is_empty() => {
+                    return Ok(devices);
+                }
+                super::ctap2::hid::Found::Keys(_) => {}
+                // A key is plugged in that Quill may not open: waiting out
+                // the timeout would end as "no key found".
+                super::ctap2::hid::Found::Denied(path) => {
+                    super::log(&format!("no access to {path}"));
+                    return Err(CeremonyError::AccessDenied);
+                }
             }
-            let left = deadline.saturating_duration_since(Instant::now());
+            let left = deadline.saturating_duration_since(self.pace.now());
             if left.is_zero() {
                 return Err(CeremonyError::NoDevice);
             }
-            std::thread::sleep(left.min(DEVICE_POLL));
+            self.pace.pause(left.min(DEVICE_POLL));
         }
     }
 
@@ -372,7 +432,7 @@ pub(super) fn run_register(
     let hash = sha256(client_data_json.as_bytes());
     let timeout = Duration::from_millis(u64::from(options.timeout_ms));
     link.run(|pin| {
-        let deadline = Instant::now() + timeout;
+        let deadline = link.pace.now() + timeout;
         let devices = match link.devices(source, deadline) {
             Ok(devices) => devices,
             Err(error) => return Attempt::Failed(error),
@@ -421,6 +481,13 @@ pub(super) fn run_register(
     })
 }
 
+/// The PIN a login attempt gives the key at `index`: only the key that
+/// asked for it takes it, so another key's retry counter does not drop for
+/// a PIN that is not its own.
+fn pin_for(asked: Option<usize>, index: usize, pin: Option<&str>) -> Option<&str> {
+    pin.filter(|_| asked == Some(index))
+}
+
 /// tdesktop `RunLoginCeremony`: every key in turn until one signs; a PIN
 /// question or a blocked PIN ends the round at once.
 pub(super) fn run_login(
@@ -431,14 +498,17 @@ pub(super) fn run_login(
     let client_data_json = options.client_data_json();
     let hash = sha256(client_data_json.as_bytes());
     let timeout = Duration::from_millis(u64::from(options.timeout_ms));
+    // The key (by its place in the list) that asked for the PIN.
+    let asked = std::cell::Cell::new(None);
     link.run(|pin| {
-        let deadline = Instant::now() + timeout;
+        let deadline = link.pace.now() + timeout;
         let devices = match link.devices(source, deadline) {
             Ok(devices) => devices,
             Err(error) => return Attempt::Failed(error),
         };
         let mut last = Attempt::Failed(CeremonyError::Other("no key opened".into()));
-        for device in devices {
+        for (index, device) in devices.into_iter().enumerate() {
+            let pin = pin_for(asked.get(), index, pin);
             let mut ignore = |_: u8| {};
             let mut control = Control {
                 cancel: &link.cancel,
@@ -468,8 +538,14 @@ pub(super) fn run_login(
                 Err(error) => {
                     super::log(&format!("assertion failed: {error}"));
                     match map_error(error) {
-                        Attempt::NeedPin => return Attempt::NeedPin,
-                        Attempt::PinInvalid => return Attempt::PinInvalid,
+                        Attempt::NeedPin => {
+                            asked.set(Some(index));
+                            return Attempt::NeedPin;
+                        }
+                        Attempt::PinInvalid => {
+                            asked.set(Some(index));
+                            return Attempt::PinInvalid;
+                        }
                         Attempt::Failed(CeremonyError::PinBlocked) => {
                             return Attempt::Failed(CeremonyError::PinBlocked);
                         }

@@ -64,8 +64,10 @@ fn add_photo(
         });
         message.self_destruct = Some(MessageSelfDestruct {
             kind,
-            expires_in_ms,
-            fetched_at_ms: quill::state::unix_ms_now(),
+            clock: quill::telegram::envelope::SelfDestructClock::from_ms(
+                expires_in_ms,
+                quill::state::unix_ms_now(),
+            ),
         });
         history.messages.insert(id, message);
         cx.notify();

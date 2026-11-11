@@ -69,7 +69,8 @@ fn group_sharing(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
             .active_group_call
             .as_ref()
             .unwrap()
-            .screen_sharing
+            .screen_share
+            .is_sharing()
     })
 }
 
@@ -116,12 +117,14 @@ fn share_screen_opens_the_chooser_and_shares_the_pick(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
         assert!(
-            app.screen_share.window.is_some(),
+            app.screen_share.window().is_some(),
             "the chooser window opened"
         );
         let labels: Vec<&str> = app
             .screen_share
-            .sources
+            .chooser
+            .open()
+            .map_or(&[][..], |open| open.sources.as_slice())
             .iter()
             .map(|entry| entry.label.as_str())
             .collect();
@@ -131,13 +134,13 @@ fn share_screen_opens_the_chooser_and_shares_the_pick(cx: &mut TestAppContext) {
         );
         assert!(
             app.screen_share
-                .sources
-                .iter()
-                .all(|e| e.thumbnail.is_some()),
+                .chooser
+                .open()
+                .is_some_and(|open| open.sources.iter().all(|e| e.thumbnail.is_some())),
             "every source got its one picture"
         );
         assert_eq!(
-            app.screen_share.selected,
+            app.screen_share.selected(),
             Some(SourceId("display:1".into()))
         );
     });
@@ -149,7 +152,10 @@ fn share_screen_opens_the_chooser_and_shares_the_pick(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     assert!(group_sharing(&app, vcx));
     app.read_with(vcx, |app, _| {
-        assert!(app.screen_share.window.is_none(), "Share Screen closes it");
+        assert!(
+            app.screen_share.window().is_none(),
+            "Share Screen closes it"
+        );
         assert_eq!(
             app.screen_share.demo_active,
             Some(SourceId("window:42".into()))
@@ -159,7 +165,7 @@ fn share_screen_opens_the_chooser_and_shares_the_pick(cx: &mut TestAppContext) {
     // chooser.
     app.update_in(vcx, |app, _, cx| app.toggle_group_call_screen_share(cx));
     vcx.run_until_parked();
-    app.read_with(vcx, |app, _| assert!(app.screen_share.window.is_none()));
+    app.read_with(vcx, |app, _| assert!(app.screen_share.window().is_none()));
 }
 
 #[gpui_kit::test]
@@ -175,13 +181,14 @@ fn the_chooser_stops_the_shared_source_and_cancel_keeps_it(cx: &mut TestAppConte
             .active_group_call
             .as_mut()
             .unwrap()
-            .screen_sharing = true;
+            .screen_share
+            .connected();
         assert!(app.open_screen_chooser(ScreenFor::Group, cx));
     });
     vcx.run_until_parked();
     app.update_in(vcx, |app, _, cx| {
         assert_eq!(
-            app.screen_share.selected,
+            app.screen_share.selected(),
             Some(SourceId("window:42".into()))
         );
         app.close_screen_chooser(cx);
@@ -196,7 +203,7 @@ fn the_chooser_stops_the_shared_source_and_cancel_keeps_it(cx: &mut TestAppConte
     vcx.run_until_parked();
     assert!(!group_sharing(&app, vcx));
     app.read_with(vcx, |app, _| {
-        assert!(app.screen_share.window.is_none());
+        assert!(app.screen_share.window().is_none());
         assert!(app.screen_share.demo_active.is_none());
     });
 }
@@ -207,7 +214,10 @@ fn without_access_the_privacy_box_shows_and_its_windows_escape_closes_it(cx: &mu
     let vcx = &mut vcx;
     app.update_in(vcx, |app, _, cx| {
         app.toggle_group_call_screen_share(cx);
-        assert_eq!(app.screen_share.privacy_for, Some(ScreenFor::Group));
+        assert_eq!(
+            app.screen_share.chooser.privacy_for().map(|t| t.for_call),
+            Some(ScreenFor::Group)
+        );
         assert!(app.screen_privacy_overlay(true, cx).is_some());
         assert!(
             app.screen_privacy_overlay(false, cx).is_none(),
@@ -217,7 +227,7 @@ fn without_access_the_privacy_box_shows_and_its_windows_escape_closes_it(cx: &mu
     vcx.run_until_parked();
     app.update_in(vcx, |app, window, cx| {
         assert!(
-            app.screen_share.window.is_none(),
+            app.screen_share.window().is_none(),
             "no chooser without access"
         );
         assert!(
@@ -232,7 +242,7 @@ fn without_access_the_privacy_box_shows_and_its_windows_escape_closes_it(cx: &mu
             app.escape_screen_privacy(true, cx),
             "Escape in the voice chat window closes the box"
         );
-        assert!(app.screen_share.privacy_for.is_none());
+        assert!(app.screen_share.chooser.privacy_for().is_none());
     });
     assert!(!group_sharing(&app, vcx));
 }
@@ -258,7 +268,7 @@ fn without_a_backend_sharing_stays_direct(cx: &mut TestAppContext) {
         app.screen_share.backend = None;
         assert!(!app.uses_screen_chooser(), "the demo has no live driver");
         assert!(!app.open_screen_chooser(ScreenFor::Group, cx));
-        assert!(app.screen_share.privacy_for.is_none());
+        assert!(app.screen_share.chooser.privacy_for().is_none());
     });
 }
 
@@ -270,13 +280,12 @@ fn the_system_audio_box_starts_as_the_share_and_changes_it(cx: &mut TestAppConte
     // never asks for audio.
     app.update_in(vcx, |app, _, cx| {
         assert!(!app.offers_system_audio());
-        app.screen_share.with_audio = true;
         assert!(app.open_screen_chooser(ScreenFor::Group, cx));
     });
     vcx.run_until_parked();
     app.update_in(vcx, |app, _, cx| {
-        assert!(!app.screen_share.with_audio, "reset on open");
-        app.screen_share.with_audio = true;
+        assert!(!app.screen_share.with_audio(), "starts off");
+        app.set_screen_audio(true, cx);
         app.accept_screen_source(cx);
         assert!(!app.screen_share.demo_active_audio);
         app.stop_screen_source(cx);
@@ -290,7 +299,7 @@ fn the_system_audio_box_starts_as_the_share_and_changes_it(cx: &mut TestAppConte
     });
     vcx.run_until_parked();
     app.update_in(vcx, |app, _, cx| {
-        assert!(!app.screen_share.with_audio, "not sharing: off");
+        assert!(!app.screen_share.with_audio(), "not sharing: off");
         app.set_screen_audio(true, cx);
         app.accept_screen_source(cx);
         assert_eq!(
@@ -306,7 +315,7 @@ fn the_system_audio_box_starts_as_the_share_and_changes_it(cx: &mut TestAppConte
     });
     vcx.run_until_parked();
     app.update_in(vcx, |app, _, cx| {
-        assert!(app.screen_share.with_audio, "the share has audio");
+        assert!(app.screen_share.with_audio(), "the share has audio");
         // Clearing it on the shared screen shares again without audio
         // instead of stopping.
         app.set_screen_audio(false, cx);
@@ -331,7 +340,7 @@ fn a_system_picker_shares_and_stops_without_the_chooser(cx: &mut TestAppContext)
     vcx.run_until_parked();
     assert!(group_sharing(&app, vcx), "the button shares at once");
     app.read_with(vcx, |app, _| {
-        assert!(app.screen_share.window.is_none(), "no chooser");
+        assert!(app.screen_share.window().is_none(), "no chooser");
         assert_eq!(
             app.screen_share.demo_active,
             Some(SourceId(SYSTEM_PICKER_SOURCE.into()))
@@ -342,7 +351,7 @@ fn a_system_picker_shares_and_stops_without_the_chooser(cx: &mut TestAppContext)
     });
     vcx.run_until_parked();
     assert!(!group_sharing(&app, vcx), "pressing it again stops");
-    app.read_with(vcx, |app, _| assert!(app.screen_share.window.is_none()));
+    app.read_with(vcx, |app, _| assert!(app.screen_share.window().is_none()));
 }
 
 #[test]
@@ -365,26 +374,48 @@ fn the_chooser_goes_with_its_video_chat(cx: &mut TestAppContext) {
     app.update_in(vcx, |app, _, cx| app.toggle_group_call_screen_share(cx));
     vcx.run_until_parked();
     app.update_in(vcx, |app, _, cx| {
-        assert!(app.screen_share.window.is_some(), "the chooser opened");
-        assert_eq!(app.screen_share.group_call, Some(7), "for call 7");
-        app.screen_share.group_call = Some(6);
+        assert!(app.screen_share.window().is_some(), "the chooser opened");
+        assert_eq!(app.screen_share.group_call(), Some(7), "for call 7");
+        app.screen_share.retarget_group_call(6);
         app.accept_screen_source(cx);
     });
     vcx.run_until_parked();
     assert!(!group_sharing(&app, vcx), "call 7 shares nothing");
-    app.read_with(vcx, |app, _| assert!(app.screen_share.window.is_none()));
+    app.read_with(vcx, |app, _| assert!(app.screen_share.window().is_none()));
 
     app.update_in(vcx, |app, _, cx| app.toggle_group_call_screen_share(cx));
     vcx.run_until_parked();
     app.update_in(vcx, |app, _, cx| {
-        assert!(app.screen_share.window.is_some(), "open again");
+        assert!(app.screen_share.window().is_some(), "open again");
         app.sync_screen_share_call(cx);
-        assert!(app.screen_share.window.is_some(), "its call is on screen");
-        app.screen_share.group_call = Some(6);
+        assert!(app.screen_share.window().is_some(), "its call is on screen");
+        app.screen_share.retarget_group_call(6);
         app.sync_screen_share_call(cx);
     });
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {
-        assert!(app.screen_share.window.is_none(), "its call went")
+        assert!(app.screen_share.window().is_none(), "its call went")
+    });
+}
+
+/// A listing that fails opens no chooser, so the call it was for is
+/// forgotten like it is for an empty list: nothing later acts on it.
+#[gpui_kit::test]
+fn a_failed_listing_forgets_the_call_it_was_for(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, ScreenAccess::Granted);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let generation = app.screen_share.generation;
+        app.screen_share.chooser = crate::ui::screen_share_state::Chooser::Listing {
+            target: crate::ui::screen_share_state::ChooserTarget {
+                for_call: ScreenFor::Group,
+                group_call: None,
+            },
+            epoch: app.screen_epoch(),
+            generation,
+        };
+        let err = quill::calls::capture::CaptureError::Device("gone".into());
+        assert!(!app.screen_chooser_listed(generation, Err(err), cx));
+        assert!(app.screen_share.chooser.sharing_into().is_none());
+        assert!(app.screen_share.window().is_none());
     });
 }

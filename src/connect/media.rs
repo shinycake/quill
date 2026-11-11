@@ -35,7 +35,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 extras.push(extra);
             }
         }
-        if let Some(chat_id) = self.session.open_chat {
+        if let Some(chat_id) = self.session.open_chat_id() {
             self.download_chat_look_files(chat_id.0, false);
         }
         let ids = self.session.thumb_file_ids_to_download();
@@ -82,6 +82,9 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// answered file then downloads like a photo thumbnail.
     fn maybe_request_map_thumbs(&mut self) -> Result<Vec<RequestId>, ConnectSendError> {
         let mut extras = Vec::new();
+        if let Some(open) = self.session.open_chat_id() {
+            self.session.media.map_thumbs.retry_failed_outside(open);
+        }
         for (key, chat_id) in self.session.map_thumbs_to_request() {
             let extra = self
                 .session
@@ -117,19 +120,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(Vec::new());
         }
+        let Some(chat_id) = self.session.open_chat_id() else {
+            return Ok(Vec::new());
+        };
         let ids = self.session.auto_download_media_file_ids();
-        let session = &mut self.session;
-        session
-            .media
-            .open_chat_media_downloads
-            .retain(|id| session.media.downloads.is_requested(*id));
         let mut extras = Vec::new();
         for file_id in ids {
             if let Some(extra) = self.download_file(file_id, AUTO_MEDIA_DOWNLOAD_PRIORITY)? {
                 self.session
                     .media
-                    .open_chat_media_downloads
-                    .insert(file_id.0);
+                    .downloads
+                    .note_open_chat(file_id.0, chat_id);
                 extras.push(extra);
             }
         }
@@ -161,7 +162,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     // Not sent: keep this and the rest due for the next ingest.
                     self.session
                         .media
-                        .avatar_downloads_due
+                        .avatar_due
                         .extend(ids.get(index..).unwrap_or_default().iter().map(|id| id.0));
                     return Err(err);
                 }
@@ -411,20 +412,33 @@ impl<S: JsonSender> ConnectDriver<S> {
             DiskState::Full => Some(0),
         };
         let media = &mut self.session.media;
-        media.disk_holds_auto_downloads = state != DiskState::Healthy;
-        media.disk_room = room;
+        media.disk = match state {
+            DiskState::Healthy => crate::state::DiskPressure::Healthy,
+            DiskState::Low => crate::state::DiskPressure::Low { room },
+            DiskState::Full => crate::state::DiskPressure::Full,
+        };
         if !self.chats_path_active() {
             return Ok(0);
         }
         if state == DiskState::Healthy {
-            let paused: Vec<i32> = self.session.media.disk_paused.drain().collect();
+            let paused: Vec<i32> = self.session.media.disk_paused.iter().copied().collect();
+            let mut failed = None;
             for id in paused {
-                self.forget_disk_pause(id);
-                if self.session.media.downloads.is_paused(id) {
-                    self.toggle_download_paused(FileId(id), false)?;
+                if self.session.media.downloads.is_paused(id)
+                    && let Err(err) = self.toggle_download_paused(FileId(id), false)
+                {
+                    // This one and the rest stay in the set for the next
+                    // healthy reading.
+                    failed = Some(err);
+                    break;
                 }
+                self.session.media.disk_paused.remove(&id);
+                self.forget_disk_pause(id);
             }
-            let searched = self.search_disk_paused_elsewhere();
+            let searched = match failed {
+                Some(err) => Err(err),
+                None => self.search_disk_paused_elsewhere(),
+            };
             self.save_disk_pauses_if_changed();
             searched?;
             return Ok(0);
@@ -445,22 +459,29 @@ impl<S: JsonSender> ConnectDriver<S> {
             })
             .collect();
         let mut repaused = 0;
+        let mut failed = None;
         for id in over {
+            if let Err(err) = self.toggle_download_paused(FileId(id), true) {
+                failed = Some(err);
+                break;
+            }
             if !self.session.media.disk_paused.insert(id) {
                 repaused += 1;
             }
             self.save_disk_pause(id);
-            self.toggle_download_paused(FileId(id), true)?;
         }
         self.save_disk_pauses_if_changed();
-        Ok(repaused)
+        match failed {
+            Some(err) => Err(err),
+            None => Ok(repaused),
+        }
     }
 
     /// Whether `file_id` has room to finish above the close floor while the
     /// disk is low. Always true otherwise.
     pub fn download_fits_disk(&self, file_id: FileId) -> bool {
         let media = &self.session.media;
-        let Some(room) = media.disk_room else {
+        let Some(room) = media.disk.room() else {
             return true;
         };
         media
@@ -533,7 +554,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .files
                 .get(&file_id.0)
                 .is_some_and(|file| {
-                    file.local.is_downloading_active && !file.local.is_downloading_completed
+                    file.local.is_downloading_active() && !file.local.is_downloading_completed()
                 });
         if file_id.0 == 0 || !(requested || untracked) {
             return Ok(false);

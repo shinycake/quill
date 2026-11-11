@@ -1,6 +1,7 @@
 //! Methods moved out of `composer.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::chat_ui_state::EditStage;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
@@ -32,11 +33,18 @@ impl QuillApp {
             multiple: false,
             prompt: Some(tr(keys::Q_CHAT_CHOOSE_FILE).into()),
         });
+        // The file is for the edit that asked; once it is cancelled or
+        // another one started, the answer is dropped.
+        let asked_edit = self.chat_ui.edit_id();
         self.spawn_scoped(cx, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = picker.await
                 && let Some(path) = paths.first().cloned()
             {
-                let _ = this.update(cx, |this, cx| this.set_edit_replacement(&path, cx));
+                let _ = this.update(cx, |this, cx| {
+                    if asked_edit.is_some() && this.chat_ui.edit_id() == asked_edit {
+                        this.set_edit_replacement(&path, cx);
+                    }
+                });
             }
         })
         .detach();
@@ -48,7 +56,7 @@ impl QuillApp {
         path: &std::path::Path,
         cx: &mut Context<Self>,
     ) {
-        let as_file = self.composer_ui.edit_replace_as_file;
+        let as_file = self.chat_ui.edit_replace_as_file();
         let Some(edit) = self.screen.chat_ui.pending_edit_mut() else {
             return;
         };
@@ -61,18 +69,81 @@ impl QuillApp {
                         &[("file_name", &replacement.file_name.to_string())],
                     )),
                 );
-                // A different file starts without the video editor's edits.
-                if edit
+                // The same file (the "as a document" box) keeps what was done
+                // to it; a different one starts without the video editor's
+                // edits and the cover.
+                let mut replacement = replacement;
+                if let Some(old) = edit
                     .media_edit
                     .replacement
                     .as_ref()
-                    .is_none_or(|old| old.path != replacement.path)
+                    .filter(|old| old.path == replacement.path)
                 {
-                    edit.media_edit.video_extras = Default::default();
+                    replacement.cover = old.cover.clone();
+                    replacement.video_extras = old.video_extras.clone();
+                    if old.kind == replacement.kind {
+                        replacement.probe = old.probe;
+                    }
                 }
                 edit.media_edit.replacement = Some(replacement);
+                self.probe_edit_replacement(cx);
             }
             Err(note) => self.set_note(StatusNote::error(note)),
+        }
+        cx.notify();
+    }
+
+    /// Probe the staged replacement video in the background when it is
+    /// `Probing`. The answer is applied only to the same file still
+    /// staged; a failed probe drops the replacement with the reason, so
+    /// Save never waits for good.
+    pub(in crate::ui) fn probe_edit_replacement(&mut self, cx: &mut Context<Self>) {
+        let Some((path, job)) = self
+            .chat_ui
+            .pending_edit()
+            .and_then(|edit| edit.media_edit.replacement.as_ref())
+            .and_then(|rep| Some((rep.path.clone(), rep.probe.probing()?)))
+        else {
+            return;
+        };
+        let probe = cx.background_executor().spawn({
+            let path = path.clone();
+            async move { quill::video::probe_local_video(&path) }
+        });
+        self.spawn_scoped(cx, async move |this, cx| {
+            let result = probe.await;
+            let _ = this.update(cx, |this, cx| {
+                this.finish_edit_replacement_probe(&path, job, result, cx)
+            });
+        })
+        .detach();
+    }
+
+    pub(in crate::ui) fn finish_edit_replacement_probe(
+        &mut self,
+        path: &std::path::Path,
+        job: quill::composer::ProbeJob,
+        result: Result<quill::video::VideoProbe, String>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(edit) = self.chat_ui.pending_edit_mut() else {
+            return;
+        };
+        let Some(replacement) = edit
+            .media_edit
+            .replacement
+            .as_mut()
+            .filter(|rep| rep.path == path && rep.probe.probing() == Some(job))
+        else {
+            return;
+        };
+        match result {
+            Ok(probe) => replacement.probe = quill::composer::ReplacementProbe::Ready(probe),
+            Err(reason) => {
+                edit.media_edit.replacement = None;
+                self.chat_ui.set_edit_replace_as_file(false);
+                self.set_note(StatusNote::error(reason));
+            }
         }
         cx.notify();
     }
@@ -82,14 +153,15 @@ impl QuillApp {
         if let Some(edit) = self.chat_ui.pending_edit_mut() {
             edit.media_edit.replacement = None;
         }
-        self.composer_ui.edit_replace_as_file = false;
+        self.chat_ui.set_edit_replace_as_file(false);
         self.set_note(StatusNote::silent(tr(keys::Q_CHAT_REPLACEMENT_CLEARED)));
         cx.notify();
     }
 
     /// B5: tdesktop's "Send as a document" checkbox on the replacement.
     pub(in crate::ui) fn toggle_edit_replace_as_file(&mut self, cx: &mut Context<Self>) {
-        self.composer_ui.edit_replace_as_file = !self.composer_ui.edit_replace_as_file;
+        let next = !self.chat_ui.edit_replace_as_file();
+        self.chat_ui.set_edit_replace_as_file(next);
         let path = self
             .chat_ui
             .pending_edit()
@@ -140,14 +212,14 @@ impl QuillApp {
             // tdesktop: `_replyTo` keeps Up for scrolling.
             || self.chat_ui.has_reply()
             || !self.pending_attachments().is_empty()
-            || self.chat_ui.command_menu_open
+            || self.chat_ui.command_menu.is_open()
             || !self.mention_menu_items(cx).is_empty()
         {
             return false;
         }
         // tdesktop `canWriteMessage()`.
         let Some(edit) = self.session().and_then(|s| {
-            let chat = s.open_chat?;
+            let chat = s.open_chat_id()?;
             s.chats.get(&chat.0)?.can_post().then_some(())?;
             s.last_editable_message(chat)
         }) else {
@@ -173,8 +245,21 @@ impl QuillApp {
             self.set_status_note(StatusNote::error(tr(keys::EDIT_ERROR)), cx);
             return;
         };
-        self.clear_pending_attachments();
-        self.composer_ui.edit_replace_as_file = false;
+        // A tray the user built is not thrown away: tdesktop has no tray to
+        // lose (its files wait in a box of their own), so the edit waits
+        // until the files are sent or removed.
+        if !self.pending_attachments().is_empty() {
+            self.set_status_note(
+                StatusNote::info(tr(keys::Q_CHAT_SEND_OR_REMOVE_THE_ATTACHMENTS_BEFORE)),
+                cx,
+            );
+            return;
+        }
+        // Switching from one edit to another: the first edit's text is not the
+        // draft, so put the real draft and reply back before they are stashed.
+        if self.chat_ui.is_editing() {
+            self.finish_edit_restore_draft(window, cx);
+        }
         let current = self.composer_markup(cx);
         // Flush while the reply is still set so a reply-only draft is not wiped.
         self.note_open_draft(false, cx);
@@ -198,7 +283,14 @@ impl QuillApp {
     /// Leave edit mode, returning the edit and the stashed draft and reply.
     fn leave_edit_mode(&mut self) -> (Option<ComposerEdit>, String, Option<ComposerReplyTo>) {
         match self.chat_ui.leave_edit() {
-            Some(mode) => (Some(mode.edit), mode.stashed_draft, mode.stashed_reply),
+            Some(mode) => {
+                if let EditStage::Sending(request) = mode.stage
+                    && let Some(live) = self.live.as_mut()
+                {
+                    live.driver.session.acks.forget(request);
+                }
+                (Some(mode.edit), mode.stashed_draft, mode.stashed_reply)
+            }
             None => (None, String::new(), None),
         }
     }
@@ -236,11 +328,27 @@ impl QuillApp {
         let Some(edit) = self.chat_ui.pending_edit().cloned() else {
             return;
         };
+        // Sent already: the answer decides, a second Enter sends nothing.
+        if self.chat_ui.edit_sending().is_some() {
+            return;
+        }
         if self
             .session()
             .is_some_and(|session| session.edit_target_gone(&edit))
         {
             self.clear_edit(window, cx);
+            return;
+        }
+        // The replacement video is still being probed: Save goes when the
+        // probe answers (or the replacement is dropped).
+        if edit
+            .media_edit
+            .replacement
+            .as_ref()
+            .is_some_and(|rep| rep.probe.probing().is_some())
+        {
+            self.set_note(StatusNote::silent(tr(keys::Q_CHAT_PREPARING_THE_VIDEO)));
+            cx.notify();
             return;
         }
         // A media message still being sent keeps the new caption until
@@ -254,13 +362,22 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut() {
             let driver = &mut live.driver;
             let result = if pending {
-                driver.edit_pending_caption(&edit, &text)
+                driver.edit_pending_caption(&edit, &text).map(|()| None)
             } else {
-                driver.edit_snapshot(&edit, &text).map(|_| ())
+                driver.edit_snapshot(&edit, &text).map(Some)
             };
             match result {
-                Ok(_) => {
-                    self.finish_edit_restore_draft(window, cx);
+                Ok(request) => {
+                    match request {
+                        // The edit stays open until TDLib answers: a later
+                        // error (an old message, one deleted by the other
+                        // side) must not lose the edited text.
+                        Some(request) => {
+                            driver.session.acks.expect(request);
+                            self.chat_ui.mark_edit_sending(request);
+                        }
+                        None => self.finish_edit_restore_draft(window, cx),
+                    }
                     self.set_note(
                         self.send_started_note(
                             ComposerScheduling::None,
@@ -294,6 +411,40 @@ impl QuillApp {
         }
     }
 
+    /// Frame upkeep: an edit that was sent leaves edit mode on TDLib's
+    /// answer (the draft comes back), or returns to editing when the answer
+    /// is an error (its note already shows). Runs for each window with its
+    /// own `ChatUi` in place.
+    pub(in crate::ui) fn settle_edit_send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(request) = self.chat_ui.edit_sending() else {
+            return;
+        };
+        let Some(live) = self.live.as_mut() else {
+            return;
+        };
+        if let Some(answer) = live.driver.session.acks.take(request) {
+            self.apply_edit_answer(&answer, window, cx);
+        }
+    }
+
+    /// TDLib answered the edit that was sent: leave edit mode and bring the
+    /// draft back, or go on editing after an error.
+    pub(in crate::ui) fn apply_edit_answer(
+        &mut self,
+        answer: &quill::state::Answer,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.chat_ui.edit_sending().is_none() {
+            return;
+        }
+        match answer {
+            quill::state::Answer::Done => self.finish_edit_restore_draft(window, cx),
+            quill::state::Answer::Failed(_) => self.chat_ui.back_to_editing(),
+        }
+        cx.notify();
+    }
+
     /// R8: the runtime `message_text_length_max` (TDLib's compiled default
     /// before the first `updateOption`, and in demo mode).
     pub(in crate::ui) fn text_length_limit(&self) -> i32 {
@@ -303,18 +454,26 @@ impl QuillApp {
             .unwrap_or(4096)
     }
 
-    pub(in crate::ui) fn confirm_delete(&mut self, cx: &mut Context<Self>) {
-        let Some(confirm) = self.chat_ui.pending_delete.take() else {
-            return;
-        };
-        self.begin_vanish(confirm.chat_id, &[confirm.message_id]);
+    /// The delete the user confirmed in the box: `confirm` is what the box
+    /// showed, not whatever is selected now.
+    pub(in crate::ui) fn confirm_delete(
+        &mut self,
+        confirm: quill::composer::DeleteConfirm,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(live) = self.live.as_mut() {
             let result = live.driver.delete_confirmed(&confirm);
+            // The message dissolves only once the delete went out: a refused
+            // send leaves it on screen.
+            if result.is_ok() {
+                self.begin_vanish(confirm.chat_id, &[confirm.message_id]);
+            }
             self.set_note(match result {
                 Ok(_) => StatusNote::silent(tr(keys::Q_CHAT_DELETING)),
                 Err(_) => StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_DELETE_MESSAGE)),
             });
         } else if self.demo_session.is_some() {
+            self.begin_vanish(confirm.chat_id, &[confirm.message_id]);
             self.apply_demo_delete(confirm.chat_id, confirm.message_id);
             self.set_note(StatusNote::silent(tr(
                 keys::Q_CHAT_DEMO_DELETE_APPLIED_LOCALLY_NO,
@@ -327,7 +486,7 @@ impl QuillApp {
         // tdesktop FieldHeader Escape / replyCancelled: header only — keep typed text.
         let kept = cancel_reply_draft(self.chat_ui.take_reply(), String::new()).0;
         self.chat_ui.set_reply(kept);
-        self.share.reply_elsewhere_open = false;
+        self.share.forward.close_reply_chooser();
         self.note_open_draft(true, cx);
         self.set_note(StatusNote::silent(tr(keys::Q_CHAT_REPLY_CANCELLED)));
         cx.notify();

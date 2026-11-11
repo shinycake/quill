@@ -9,22 +9,26 @@ use crate::telegram::requests::{get_premium_stickers, get_sticker_categories, se
 const CATEGORY_LIMIT: i32 = 100;
 
 impl<S: JsonSender> ConnectDriver<S> {
-    /// Ask for the category strip, once per session.
+    /// Ask for the category strip while nothing was asked yet. A failed
+    /// ask stays `Failed` until the panel opens again (`reopen_sticker_categories`),
+    /// so a render never re-asks.
     pub fn fetch_sticker_categories(&mut self) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.stickers.emoji.sticker_categories_asked {
+        if !self.session.stickers.emoji.sticker_categories.is_idle() {
             return Ok(());
         }
-        self.session.stickers.emoji.sticker_categories_asked = true;
         let sent = self.sticker_request(RequestPurpose::GetStickerCategories, |id| {
             get_sticker_categories(id)
         });
-        if sent.is_err() {
-            self.session.stickers.emoji.sticker_categories_asked = false;
+        match sent {
+            Ok(_) => {
+                self.session.stickers.emoji.sticker_categories.begin();
+                Ok(())
+            }
+            Err(err) => Err(err),
         }
-        sent.map(|_| ())
     }
 
     /// Show the stickers of a category as the panel's found stickers:

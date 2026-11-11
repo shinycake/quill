@@ -86,7 +86,8 @@ fn demo_screenshot(app: &mut QuillApp, window: &mut Window, cx: &mut Context<Qui
         app.chat_list.menu = Some(ChatMenuState::at(chat_id, anchor));
     }
     if let Some(chat_id) = env_chat("QUILL_DEMO_SHOT_PEEK") {
-        app.chat_list.preview = Some(ChatPreviewState { chat_id, anchor });
+        app.chat_list.peek =
+            crate::ui::chat_list_state::PeekPreview::Open(ChatPreviewState { chat_id, anchor });
     }
     quill::fast_buttons::set_persistence(false);
     access::set_enabled(true);
@@ -96,7 +97,7 @@ fn demo_screenshot(app: &mut QuillApp, window: &mut Window, cx: &mut Context<Qui
     let everything =
         std::env::var("QUILL_DEMO_SHOT_SCOPE").is_ok_and(|scope| scope == "everything");
     let keys = demo_keys();
-    grants::update(&account, |g| {
+    let _ = grants::update(&account, |g| {
         if everything {
             g.all_chats = Some(Scope::Read);
         }

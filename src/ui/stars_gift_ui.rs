@@ -87,8 +87,8 @@ impl QuillApp {
     fn buy_gifted_stars(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let invoice = self.session().and_then(|s| {
             let gift = &s.payments.stars_gift;
-            let pack = gift.options.get(index)?;
-            quill::payment_invoice::gifted_stars_invoice(pack, gift.target.as_ref()?.user_id)
+            let pack = gift.options().get(index)?;
+            quill::payment_invoice::gifted_stars_invoice(pack, gift.target()?.user_id)
         });
         match invoice {
             Some(invoice) => self.start_invoice_checkout(invoice, window, cx),
@@ -116,7 +116,7 @@ impl QuillApp {
             };
             let gift = &session.payments.stars_gift;
             let mut body = div().flex().flex_col().gap_2();
-            if let Some(target) = gift.target.as_ref() {
+            if let Some(target) = gift.target() {
                 body = body
                     .child(
                         Button::new("stars-gift-back")
@@ -129,16 +129,16 @@ impl QuillApp {
                         keys::Q_MONEY_CHOOSE_HOW_MANY_STARS_GETS,
                         &[("name", &target.name.to_string())],
                     )));
-                if gift.loading {
+                if gift.is_loading() {
                     body = body.child(
                         div()
                             .text_sm()
                             .text_color(muted)
                             .child(tr(keys::Q_MONEY_LOADING_OPTIONS)),
                     );
-                } else if let Some(error) = gift.error.as_ref() {
-                    body = body.child(div().text_sm().child(error.clone()));
-                } else if gift.options.is_empty() {
+                } else if let Some(error) = gift.error() {
+                    body = body.child(div().text_sm().child(error.to_string()));
+                } else if gift.options().is_empty() {
                     body = body.child(
                         div()
                             .text_sm()
@@ -146,7 +146,7 @@ impl QuillApp {
                             .child(tr(keys::Q_MONEY_NO_OPTIONS_AVAILABLE)),
                     );
                 }
-                for (ix, pack) in gift.options.iter().enumerate() {
+                for (ix, pack) in gift.options().iter().enumerate() {
                     body = body.child(
                         div()
                             .id(("stars-gift-pack", ix as u64))
@@ -233,7 +233,8 @@ impl QuillApp {
                 let mut people: Vec<(i64, String)> = session
                     .users_state
                     .contacts
-                    .iter()
+                    .data()
+                    .into_iter()
                     .flatten()
                     .filter_map(|id| eligible(*id))
                     .filter(|(id, name)| {
@@ -305,7 +306,7 @@ crate::ui::shell::register_dialogs! {
     /// "Gift Stars": pick a contact, then a pack for them.
     StarsGift => DialogSpec::new(
         3750,
-        |app| app.session().is_some_and(|s| s.payments.stars_gift.open),
+        |app| app.session().is_some_and(|s| s.payments.stars_gift.is_open()),
         QuillApp::build_stars_gift_dialog,
     )
     .close(|app, _, cx| app.close_stars_gift_dialog(cx)),

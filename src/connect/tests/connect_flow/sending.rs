@@ -32,7 +32,7 @@ fn less_data_for_calls_pushes_all_networks_and_refuses_unseeded() {
             .all(|json| !json.contains(r#""@type":"setAutoDownloadSettings""#))
     );
 
-    driver.session.settings.data_storage.seeded = true;
+    driver.session.settings.data_storage.seeded = crate::data_settings::PresetsSeed::Seeded;
     driver.set_less_data_for_calls(true).unwrap();
     let sent: Vec<Value> = recorder
         .snapshot()
@@ -220,7 +220,7 @@ fn driver_loads_chats_after_ready_then_send_text() {
     )
     .unwrap();
     driver.ingest(err404).unwrap();
-    assert!(driver.session.chat_list.chats_exhausted);
+    assert!(driver.session.chat_list.main_paging.is_exhausted());
     // The main list's 404 starts archive paging (one page in flight);
     // the main list itself pages no further.
     let main_loads = |recorder: &RecordingSender| {

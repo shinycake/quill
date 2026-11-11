@@ -138,17 +138,17 @@ fn a_chat_muted_by_the_scope_default_offers_a_direct_unmute(cx: &mut TestAppCont
 fn select_tone_opens_the_panel_for_the_row_chat_without_navigating(cx: &mut TestAppContext) {
     let (app, mut vcx, chat_id) = open(cx);
     let vcx = &mut vcx;
-    let open_before = app.update(vcx, |app, _| app.session().and_then(|s| s.open_chat));
+    let open_before = app.update(vcx, |app, _| app.session().and_then(|s| s.open_chat_id()));
     assert_ne!(open_before, Some(chat_id));
     show_menu(&app, vcx, chat_id);
     click(vcx, "chat-menu-mute");
     click(vcx, "chat-mute-tone");
     let (open_after, target, panel, picker) = app.update(vcx, |app, _| {
         (
-            app.session().and_then(|s| s.open_chat),
-            app.notify.mute_chat,
-            app.notify.mute_menu_open,
-            app.notify.notif_sound_picker_open,
+            app.session().and_then(|s| s.open_chat_id()),
+            app.notify.mute_chat(),
+            app.notify.mute_box.is_some(),
+            app.notify.mute_section() == crate::ui::notify_state::MuteSection::SoundPicker,
         )
     });
     assert_eq!(open_after, open_before);
@@ -177,7 +177,7 @@ fn a_basic_group_offers_delete_and_leave(cx: &mut TestAppContext) {
         app.admin
             .group_confirm_dialog
             .as_ref()
-            .map(|dialog| matches!(dialog.action, GroupConfirmAction::RemoveFromList))
+            .map(|dialog| matches!(dialog.action, GroupConfirmAction::RemoveFromList { .. }))
     });
     assert_eq!(action, Some(true));
 }
@@ -254,7 +254,7 @@ fn exit_entry_follows_the_chat_kind(cx: &mut TestAppContext) {
         app.admin
             .group_confirm_dialog
             .as_ref()
-            .map(|dialog| matches!(dialog.action, GroupConfirmAction::LeaveChat))
+            .map(|dialog| matches!(dialog.action, GroupConfirmAction::LeaveChat { .. }))
     });
     assert_eq!(action, Some(true));
 }
@@ -277,7 +277,7 @@ fn a_promotion_shapes_the_menu_like_use_top_promotion(cx: &mut TestAppContext) {
                         supergroup_id: 55,
                         is_channel: true,
                     };
-                    chat.my_member_status = Some(status);
+                    chat.assume_member_status(Some(status));
                 }
                 match p {
                     Some(p) => session.chat_list.promoted_chats.insert(chat_id.0, p),
@@ -381,4 +381,45 @@ fn clear_history_is_hidden_when_the_server_allows_none(cx: &mut TestAppContext) 
     set_clear_flags(&app, vcx, chat_id, false, false);
     show_menu(&app, vcx, chat_id);
     assert!(!present(vcx, "chat-menu-clear"));
+}
+
+/// The Mute submenu's panel and its parent menu's, opened at `x`.
+fn menu_and_submenu_at(
+    x: f32,
+    cx: &mut TestAppContext,
+) -> (
+    gpui_kit::Bounds<gpui_kit::Pixels>,
+    gpui_kit::Bounds<gpui_kit::Pixels>,
+) {
+    let (app, mut vcx, chat_id) = open(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.chat_list.menu = Some(ChatMenuState::at(chat_id, point(px(x), px(200.))));
+        cx.notify();
+    });
+    frames(vcx);
+    click(vcx, "chat-menu-mute");
+    frames(vcx);
+    let drawn = |vcx: &mut VisualTestContext, selector: &'static str| {
+        vcx.debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} is drawn"))
+    };
+    (
+        drawn(vcx, "chat-menu-panel"),
+        drawn(vcx, "chat-menu-submenu"),
+    )
+}
+
+#[gpui_kit::test]
+fn the_mute_submenu_opens_right_of_the_menu_where_it_fits(cx: &mut TestAppContext) {
+    let (menu, submenu) = menu_and_submenu_at(120., cx);
+    assert_eq!(submenu.left(), menu.right(), "{submenu:?} beside {menu:?}");
+}
+
+#[gpui_kit::test]
+fn the_mute_submenu_moves_left_of_the_menu_near_the_right_edge(cx: &mut TestAppContext) {
+    // tdesktop PopupMenu::prepareGeometryFor: no room on the right puts the
+    // child menu on the parent's left.
+    let (menu, submenu) = menu_and_submenu_at(1000., cx);
+    assert_eq!(submenu.right(), menu.left(), "{submenu:?} beside {menu:?}");
 }

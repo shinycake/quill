@@ -99,9 +99,10 @@ fn seed_event_log_session(sink: Arc<MemorySink>) -> Session {
     // The log only takes the page it waits for, as the driver records it.
     session
         .groups
-        .event_log_waits
+        .event_logs
         .entry(CHANNEL.0)
         .or_default()
+        .wait
         .page = Some(extra);
     let json = format!(
         r#"{{"@type":"chatEvents","@extra":"{}","events":[{}]}}"#,
@@ -116,7 +117,7 @@ fn seed_event_log_session(sink: Arc<MemorySink>) -> Session {
 
 impl QuillApp {
     fn demo_event_log(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.ensure_event_log_search(window, cx);
+        self.ensure_event_log_search(CHANNEL, window, cx);
         self.open_group_settings_view(CHANNEL, GroupSettingsView::RecentActions, cx);
     }
 }

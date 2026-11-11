@@ -47,44 +47,152 @@ impl StickerCreatorPurpose {
     }
 }
 
-/// What the open set box knows about its edits in flight.
+/// What the open set box knows about its edits: one stage.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct StickerSetEdits {
-    /// Creator requests TDLib has not answered yet.
-    pub pending: u32,
-    /// An edit was confirmed: the view asks `getStickerSet` again (without
-    /// going back to the loading stage) so the box shows the server's set.
-    pub refresh_needed: bool,
+pub enum StickerSetEdits {
+    /// No edit out and the box shows the server's set.
+    #[default]
+    Idle,
+    /// Creator requests TDLib has not answered yet, each answer matched by
+    /// its request: an answer of an edit made under an earlier box never
+    /// ends one of this box's.
+    InFlight(Vec<RequestId>),
+    /// An edit was confirmed (or never reached the server): the view asks
+    /// `getStickerSet` again (without going back to the loading stage) so
+    /// the box shows the server's set. `out` are the edits still being
+    /// answered; the ask waits for them.
+    NeedsRefresh { out: Vec<RequestId> },
     /// `deleteStickerSet` was confirmed: the box closes.
-    pub deleted: bool,
+    Deleted,
 }
 
 impl StickerSetEdits {
     /// An edit is still being answered.
     pub fn busy(&self) -> bool {
-        self.pending > 0
+        match self {
+            Self::InFlight(out) | Self::NeedsRefresh { out } => !out.is_empty(),
+            Self::Idle | Self::Deleted => false,
+        }
+    }
+
+    /// The edits still being answered.
+    pub fn in_flight(&self) -> &[RequestId] {
+        match self {
+            Self::InFlight(out) | Self::NeedsRefresh { out } => out,
+            Self::Idle | Self::Deleted => &[],
+        }
+    }
+
+    /// The box owes a `getStickerSet`.
+    pub fn refresh_needed(&self) -> bool {
+        matches!(self, Self::NeedsRefresh { .. })
+    }
+
+    /// The set was deleted: the box closes.
+    pub fn deleted(&self) -> bool {
+        matches!(self, Self::Deleted)
+    }
+
+    /// A creator request went out.
+    pub fn begin(&mut self, request: RequestId) {
+        match self {
+            Self::Idle => *self = Self::InFlight(vec![request]),
+            Self::InFlight(out) | Self::NeedsRefresh { out } => out.push(request),
+            Self::Deleted => {}
+        }
+    }
+
+    /// An edit was confirmed or never reached the server: ask again once
+    /// the edits out have been answered.
+    pub fn need_refresh(&mut self) {
+        match std::mem::take(self) {
+            Self::Idle => *self = Self::NeedsRefresh { out: Vec::new() },
+            Self::InFlight(out) | Self::NeedsRefresh { out } => {
+                *self = Self::NeedsRefresh { out };
+            }
+            Self::Deleted => *self = Self::Deleted,
+        }
+    }
+
+    /// The refresh went out.
+    pub fn refreshed(&mut self) {
+        if let Self::NeedsRefresh { out } = std::mem::take(self) {
+            *self = if out.is_empty() {
+                Self::Idle
+            } else {
+                Self::InFlight(out)
+            };
+        }
+    }
+
+    /// The set's contents arrived. An edit still in flight (a move applied
+    /// locally) may have changed the set after this answer was built, so
+    /// the box asks again once it is answered; otherwise the answer is
+    /// current.
+    pub fn set_arrived(&mut self) {
+        *self = match std::mem::take(self) {
+            Self::InFlight(out) | Self::NeedsRefresh { out } if !out.is_empty() => {
+                Self::NeedsRefresh { out }
+            }
+            Self::Deleted => Self::Deleted,
+            _ => Self::Idle,
+        };
+    }
+
+    /// The set was deleted.
+    pub fn delete(&mut self) {
+        *self = Self::Deleted;
+    }
+
+    /// `request` was answered (`ok` or an error); `apply` says the answer
+    /// changed the set, so the box refreshes.
+    pub fn finish(&mut self, request: Option<RequestId>, apply: bool) {
+        match std::mem::take(self) {
+            Self::InFlight(mut out) => {
+                out.retain(|held| Some(*held) != request);
+                *self = if out.is_empty() {
+                    Self::Idle
+                } else {
+                    Self::InFlight(out)
+                };
+            }
+            Self::NeedsRefresh { mut out } => {
+                out.retain(|held| Some(*held) != request);
+                *self = Self::NeedsRefresh { out };
+            }
+            other => *self = other,
+        }
+        if apply {
+            self.need_refresh();
+        }
     }
 }
 
 impl Session {
     /// A creator request went out for the open set.
-    pub(crate) fn begin_sticker_set_edit(&mut self, set_id: i64) {
+    pub(crate) fn begin_sticker_set_edit(&mut self, set_id: i64, request: RequestId) {
         if let Some(view) = self.stickers.sticker_set_view.as_mut()
             && view.set_id == set_id
         {
-            view.edits.pending = view.edits.pending.saturating_add(1);
+            view.edits.begin(request);
         }
     }
 
-    /// The one-shot toast of the last edit of an owned set.
+    /// The next toast of an edit of an owned set, oldest first.
     pub fn take_sticker_set_edit_note(&mut self) -> Option<String> {
-        self.stickers.creator_note.take()
+        self.stickers.creator_notes.pop_front()
     }
 
     /// A creator request was answered (`ok` or an error).
-    fn finish_sticker_set_edit(&mut self, set_id: i64, note: Option<String>, apply: bool) {
-        if note.is_some() {
-            self.stickers.creator_note = note;
+    fn finish_sticker_set_edit(
+        &mut self,
+        set_id: i64,
+        request: Option<RequestId>,
+        note: Option<String>,
+        apply: bool,
+    ) {
+        if let Some(note) = note {
+            self.stickers.creator_notes.push_back(note);
         }
         let Some(view) = self.stickers.sticker_set_view.as_mut() else {
             return;
@@ -92,10 +200,7 @@ impl Session {
         if view.set_id != set_id {
             return;
         }
-        view.edits.pending = view.edits.pending.saturating_sub(1);
-        if apply {
-            view.edits.refresh_needed = true;
-        }
+        view.edits.finish(request, apply);
     }
 
     /// The current user created `set_id` (tdesktop `AmCreator`): the open
@@ -190,11 +295,12 @@ impl Session {
             return;
         };
         let set_id = purpose.set_id();
+        let request = pending.map(|p| p.id);
         match purpose {
             StickerCreatorPurpose::AddNewSticker { emoji, .. }
             | StickerCreatorPurpose::AddExistingSticker { emoji, .. } => {
                 let note = if emoji { EMOJI_ADDED_NOTE } else { ADDED_NOTE };
-                self.finish_sticker_set_edit(set_id, Some(note.into()), true);
+                self.finish_sticker_set_edit(set_id, request, Some(note.into()), true);
             }
             StickerCreatorPurpose::RemoveSticker { file_id, .. } => {
                 // The sticker leaves the box at once; the refresh confirms.
@@ -204,30 +310,28 @@ impl Session {
                 {
                     stickers.retain(|sticker| sticker.file_id != file_id);
                 }
-                self.finish_sticker_set_edit(set_id, None, true);
+                self.finish_sticker_set_edit(set_id, request, None, true);
             }
             StickerCreatorPurpose::MoveSticker { .. } => {
                 // The move was applied locally when it went out; a refresh
                 // would make the stickers blink (tdesktop skips it too).
-                self.finish_sticker_set_edit(set_id, None, false);
+                self.finish_sticker_set_edit(set_id, request, None, false);
             }
             StickerCreatorPurpose::RenameSet { .. } => {
-                self.finish_sticker_set_edit(set_id, None, true);
+                self.finish_sticker_set_edit(set_id, request, None, true);
             }
             StickerCreatorPurpose::DeleteSet { .. } => {
                 if let Some(view) = self.stickers.sticker_set_view.as_mut()
                     && view.set_id == set_id
                 {
-                    view.edits.deleted = true;
+                    view.edits.delete();
                 }
-                self.finish_sticker_set_edit(set_id, None, false);
+                self.finish_sticker_set_edit(set_id, request, None, false);
             }
         }
-        self.media.media_library.set_stickers.remove(&set_id);
-        self.media.media_library.failed.remove(&set_id);
+        self.media.media_library.remove(&set_id);
         if !matches!(purpose, StickerCreatorPurpose::MoveSticker { .. }) {
             self.invalidate_installed_sticker_sets();
-            self.stickers.emoji.outdated_packs.insert(set_id);
             self.stickers.creator_refetch_sets = true;
         }
     }
@@ -273,7 +377,7 @@ impl Session {
             purpose,
             StickerCreatorPurpose::MoveSticker { .. } | StickerCreatorPurpose::RemoveSticker { .. }
         );
-        self.finish_sticker_set_edit(purpose.set_id(), Some(note), refresh);
+        self.finish_sticker_set_edit(purpose.set_id(), pending.map(|p| p.id), Some(note), refresh);
     }
 
     /// Reorder mode moved a sticker: apply it to the open view at once

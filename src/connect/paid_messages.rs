@@ -4,9 +4,10 @@
 //! Stars: the Stars leave only with a `sendMessage` the user confirmed.
 use super::*;
 use crate::ids::{ChatId, RequestId};
-use crate::paid_messages::{PaidSave, PaidTarget, PaidTrust};
+use crate::paid_messages::PaidTarget;
 use crate::paid_messages_guard::HeldSend;
 use crate::state::{RequestPurpose, unix_ms_now};
+use crate::telegram::envelope::CommonPayload;
 use crate::telegram::envelope::{EnvelopePayload, GroupsPayload, SettingsPayload};
 use crate::telegram::requests::{get_chat, get_supergroup};
 use crate::telegram::requests_paid_messages::{
@@ -27,6 +28,16 @@ impl<S: JsonSender> ConnectDriver<S> {
                     GroupsPayload::SupergroupFullInfo { .. }
                         | GroupsPayload::UpdateSupergroupFullInfo { .. }
                 )
+        ) || Self::changes_viewer_premium(payload)
+    }
+
+    /// The viewer's Premium may have changed (`updateOption is_premium`):
+    /// the answers cached under the old one are old.
+    pub(crate) fn changes_viewer_premium(payload: &EnvelopePayload) -> bool {
+        matches!(
+            payload,
+            EnvelopePayload::Common(CommonPayload::UpdateOption { name, .. })
+                if name == "is_premium"
         )
     }
 
@@ -34,32 +45,37 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// against, and writes the trusted prices when they changed.
     pub(crate) fn sync_paid_guard(&mut self) {
         let prices = self.session.paid_send_prices();
-        let trusted = self.session.payments.paid_messages.trust.entries();
+        let trusted = self.session.payments.paid_messages.trusted_prices();
         if let Some(guard) = self.sender.paid_guard() {
             guard.set_state(prices, trusted);
         }
-        if self.session.payments.paid_messages.trust_dirty {
-            self.session.payments.paid_messages.trust_dirty = false;
-            self.save_paid_trust();
-        }
+        self.save_paid_trust();
     }
 
     /// Reads the account's trusted prices once.
     fn load_paid_trust(&mut self) {
-        if self.session.payments.paid_messages.trust_loaded {
+        if !self.session.payments.paid_messages.trust_unread() {
             return;
         }
-        self.session.payments.paid_messages.trust_loaded = true;
-        if let Ok(text) = std::fs::read_to_string(self.paths.root.join(TRUST_FILE)) {
-            self.session.payments.paid_messages.trust = PaidTrust::from_json(&text);
-        }
+        let text = std::fs::read_to_string(self.paths.root.join(TRUST_FILE)).ok();
+        self.session
+            .payments
+            .paid_messages
+            .trust_loaded(text.as_deref());
         self.sync_paid_guard();
     }
 
-    fn save_paid_trust(&self) {
+    /// Writes the trusted prices when they changed; the file is clean
+    /// after, or the write failed and the store says why.
+    fn save_paid_trust(&mut self) {
+        let Some(json) = self.session.payments.paid_messages.trust_to_write() else {
+            return;
+        };
         let path = self.paths.root.join(TRUST_FILE);
-        let _ = std::fs::create_dir_all(&self.paths.root);
-        let _ = std::fs::write(path, self.session.payments.paid_messages.trust.to_json());
+        let written = std::fs::create_dir_all(&self.paths.root)
+            .and_then(|()| std::fs::write(path, json))
+            .map_err(|err| format!("Couldn't remember this price: {err}"));
+        self.session.payments.paid_messages.trust_written(written);
     }
 
     /// "Don't ask me again": trusts `stars` per message in a chat and
@@ -69,8 +85,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session
             .payments
             .paid_messages
-            .trust
-            .trust(chat_id.0, stars);
+            .remember_trust(chat_id.0, stars);
         self.save_paid_trust();
         self.sync_paid_guard();
     }
@@ -83,13 +98,21 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// The user confirmed: sends the oldest held request with its total,
     /// remembering the price when asked to.
     pub fn release_paid_send(&mut self, remember: bool) -> Result<(), ConnectSendError> {
-        let Some(held) = self.sender.paid_guard().and_then(|guard| guard.take_held()) else {
+        let Some(held) = self.sender.paid_guard().and_then(|guard| guard.held()) else {
             return Ok(());
         };
+        // The send leaves the guard only once it went out: a refused send
+        // keeps it held, so the box can pay again. The price is trusted
+        // only after that, so a send that never left does not skip the next
+        // confirmation.
+        self.sender.send_json(&held.with_price())?;
+        if let Some(guard) = self.sender.paid_guard() {
+            guard.take_held();
+        }
         if remember {
             self.remember_paid_trust(ChatId(held.chat_id), held.per_message);
         }
-        self.sender.send_json(&held.with_price())
+        Ok(())
     }
 
     /// The user cancelled: drops the oldest held request and its pending
@@ -113,7 +136,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         self.load_paid_trust();
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Ok(());
         };
         let Some(user_id) = self.session.private_chat_user_id(chat_id) else {
@@ -124,7 +147,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let is_contact = self.session.user(user_id).is_some_and(|u| u.is_contact);
         let now = unix_ms_now();
-        if is_contact || !self.session.payments.paid_messages.should_ask(user_id, now) {
+        let premium = self.session.my_is_premium();
+        if is_contact
+            || !self
+                .session
+                .payments
+                .paid_messages
+                .should_ask(user_id, now, premium)
+        {
             return Ok(());
         }
         let extra = self
@@ -133,13 +163,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session
             .payments
             .paid_messages
-            .mark_asking(user_id, now);
+            .mark_asking(user_id, extra, now, premium);
         if let Err(err) = self
             .sender
             .send_json(&can_send_message_to_user(extra, user_id))
         {
             self.session.requests.take(extra);
-            self.session.payments.paid_messages.ask_failed(user_id);
+            self.session
+                .payments
+                .paid_messages
+                .ask_failed(user_id, extra, now);
             return Err(err);
         }
         Ok(())
@@ -211,14 +244,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        let target = PaidTarget::User(user_id);
+        // A save of this user already out is the one that answers.
+        if let Some(out) = self.session.payments.paid_messages.save.request_for(target) {
+            return Ok(out);
+        }
         let extra = self
             .session
             .request_for_user(RequestPurpose::AllowUnpaidMessages, user_id);
-        self.session.payments.paid_messages.save = PaidSave::Saving(PaidTarget::User(user_id));
         let json = allow_unpaid_messages_from_user(extra, user_id, refund);
-        self.send_json_request(extra, &json).inspect_err(|_| {
-            self.session.payments.paid_messages.save = PaidSave::Idle;
-        })
+        let sent = self.send_json_request(extra, &json)?;
+        self.session
+            .payments
+            .paid_messages
+            .save
+            .begin(target, extra);
+        Ok(sent)
     }
 
     /// `setChatDirectMessagesGroup` for a channel: switch the direct
@@ -235,13 +276,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let choice = crate::paid_messages::DirectMessagesChoice { enabled, stars }
             .clamped(self.session.payments.paid_messages.max());
+        let target = PaidTarget::Channel(chat_id.0);
+        if let Some(out) = self.session.payments.paid_messages.save.request_for(target) {
+            return Ok(out);
+        }
         let extra = self
             .session
             .request(RequestPurpose::SetDirectMessagesGroup, Some(chat_id));
-        self.session.payments.paid_messages.save = PaidSave::Saving(PaidTarget::Channel(chat_id.0));
         let json = set_chat_direct_messages_group(extra, chat_id, choice.enabled, choice.stars);
-        self.send_json_request(extra, &json).inspect_err(|_| {
-            self.session.payments.paid_messages.save = PaidSave::Idle;
-        })
+        let sent = self.send_json_request(extra, &json)?;
+        self.session
+            .payments
+            .paid_messages
+            .save
+            .begin(target, extra);
+        Ok(sent)
     }
 }

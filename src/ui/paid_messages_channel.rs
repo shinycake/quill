@@ -7,7 +7,7 @@
 use super::app::QuillApp;
 use super::chat_theme::{danger, text_muted};
 use super::paid_messages_privacy::price_slider;
-use super::paid_messages_state::{DirectMessagesBox, PriceSlider};
+use super::paid_messages_state::{DirectMessagesBox, DirectStage, PriceSlider, PriceSource};
 use super::pressable::action_row;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
@@ -112,18 +112,29 @@ impl QuillApp {
         };
         let max = session.payments.paid_messages.max();
         if let Some(live) = self.live.as_mut() {
+            // A refusal of an earlier Save is not this box's.
+            live.driver
+                .session
+                .payments
+                .paid_messages
+                .save
+                .forget_failure(quill::paid_messages::PaidTarget::Channel(chat_id.0));
             // The price of an enabled group may not have arrived yet.
             let _ = live.driver.fetch_direct_messages_price(chat_id);
         }
-        let seeded = state.price.is_some();
+        let source = if state.price.is_some() {
+            PriceSource::Channel
+        } else {
+            PriceSource::Default
+        };
         let price = state.price.unwrap_or(DEFAULT_CHANNEL_PRICE);
         let slider = direct_messages_slider(cx, price, max);
         self.paid_messages.direct = Some(DirectMessagesBox {
             chat_id: chat_id.0,
             enabled: state.enabled,
             price: slider,
-            touched: false,
-            seeded,
+            source,
+            stage: DirectStage::Editing,
         });
         self.open_box(DialogKind::DirectMessages);
         cx.notify();
@@ -135,7 +146,7 @@ impl QuillApp {
         let Some(boxed) = self.paid_messages.direct.as_ref() else {
             return;
         };
-        if boxed.seeded || boxed.touched {
+        if boxed.source != PriceSource::Default {
             return;
         }
         let Some(session) = self.session() else {
@@ -148,7 +159,7 @@ impl QuillApp {
         let slider = direct_messages_slider(cx, price, max);
         if let Some(boxed) = self.paid_messages.direct.as_mut() {
             boxed.price = slider;
-            boxed.seeded = true;
+            boxed.source = PriceSource::Channel;
         }
     }
 
@@ -158,27 +169,76 @@ impl QuillApp {
     }
 
     fn save_direct_messages(&mut self, cx: &mut Context<Self>) {
-        let Some(boxed) = self.paid_messages.direct.take() else {
+        let Some(boxed) = self.paid_messages.direct.as_ref() else {
             return;
         };
+        if boxed.stage == DirectStage::Saving {
+            return;
+        }
         let chat_id = ChatId(boxed.chat_id);
         let stars = if boxed.enabled { boxed.price.price } else { 0 };
+        let enabled = boxed.enabled;
         if let Some(live) = self.live.as_mut() {
             if live
                 .driver
-                .set_direct_messages_group(chat_id, boxed.enabled, stars)
-                .is_err()
+                .set_direct_messages_group(chat_id, enabled, stars)
+                .is_ok()
             {
+                if let Some(boxed) = self.paid_messages.direct.as_mut() {
+                    boxed.stage = DirectStage::Saving;
+                }
+            } else {
                 self.set_note(StatusNote::error(tr(
                     keys::Q_MONEY_COULDNT_CHANGE_THE_DIRECT_MESSAGES,
                 )));
             }
         } else {
+            self.paid_messages.direct = None;
             self.set_note(StatusNote::info(tr(
                 keys::Q_MONEY_DIRECT_MESSAGES_NEED_A_LIVE,
             )));
         }
         cx.notify();
+    }
+
+    /// Per-frame, in the window that hosts the box: Save is out until its
+    /// answer. An accepted change closes the box; a refusal opens it up
+    /// again with the reason drawn in it.
+    pub(in crate::ui) fn direct_messages_upkeep(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use quill::paid_messages::{PaidTarget, TargetSave};
+        let Some(boxed) = self
+            .paid_messages
+            .direct
+            .as_ref()
+            .filter(|boxed| boxed.stage == DirectStage::Saving)
+        else {
+            return;
+        };
+        let target = PaidTarget::Channel(boxed.chat_id);
+        // Only this channel's own save counts: another target's (a Remove
+        // Fee) says nothing about this request.
+        let save = self
+            .session()
+            .and_then(|session| session.payments.paid_messages.save.of(target).cloned());
+        match save {
+            Some(TargetSave::Saving(_)) => {}
+            Some(TargetSave::Failed(_)) => {
+                if let Some(boxed) = self.paid_messages.direct.as_mut() {
+                    boxed.stage = DirectStage::Editing;
+                }
+                cx.notify();
+            }
+            // Idle: the change went through (or the answer was lost with
+            // its account).
+            None => {
+                self.close_direct_messages(cx);
+                self.close_kit_dialog_if_done(DialogKind::DirectMessages, window, cx);
+            }
+        }
     }
 
     pub(super) fn build_direct_messages_dialog(
@@ -207,7 +267,10 @@ impl QuillApp {
                 boxed.price.steps.last().copied().unwrap_or(0),
             );
             let price = boxed.price.price;
-            let saving = paid.save.is_saving();
+            let saving = boxed.stage == DirectStage::Saving
+                || paid
+                    .save
+                    .is_saving_for(quill::paid_messages::PaidTarget::Channel(chat_id.0));
             let error = paid
                 .save
                 .error_for(quill::paid_messages::PaidTarget::Channel(chat_id.0))
@@ -217,7 +280,8 @@ impl QuillApp {
             // Without the price the channel has now, only a deliberate
             // slider move may write one.
             let changed = boxed.enabled != was_enabled
-                || (boxed.enabled && (boxed.touched || known.is_some_and(|k| k != price)));
+                || (boxed.enabled
+                    && (boxed.source == PriceSource::Chosen || known.is_some_and(|k| k != price)));
             let link = session
                 .chat_usernames(chat_id)
                 .and_then(|lists| lists.active.first().cloned())
@@ -315,7 +379,7 @@ impl QuillApp {
                         ),
                 );
             }
-            if was_enabled && known.is_none() && !boxed.touched {
+            if was_enabled && known.is_none() && boxed.source != PriceSource::Chosen {
                 body = body.child(
                     div()
                         .text_xs()
@@ -351,10 +415,7 @@ impl QuillApp {
                         .label(tr(keys::SETTINGS_SAVE))
                         .primary()
                         .disabled(!changed || saving)
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.save_direct_messages(cx);
-                            this.close_kit_dialog_if_done(DialogKind::DirectMessages, window, cx);
-                        })),
+                        .on_click(cx.listener(|this, _, _, cx| this.save_direct_messages(cx))),
                 );
             dialog
                 .overlay(true)
@@ -393,7 +454,7 @@ fn direct_messages_slider(cx: &mut Context<QuillApp>, price: i64, max: i64) -> P
     price_slider(cx, price_steps(price, 0, max), price, |this, price| {
         if let Some(boxed) = this.paid_messages.direct.as_mut() {
             boxed.price.price = price;
-            boxed.touched = true;
+            boxed.source = PriceSource::Chosen;
         }
     })
 }

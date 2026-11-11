@@ -213,7 +213,9 @@ pub(crate) struct SelectionFx {
     mode: Glide,
     bar: Glide,
     last_change: Instant,
-    checks: HashMap<i64, CheckAnim>,
+    /// By chat and message: message ids repeat across chats, and a fade
+    /// can outlast a switch of chat.
+    checks: HashMap<(i64, i64), CheckAnim>,
     /// The count shown on the buttons while the bar slides away.
     pub(crate) last_count: usize,
 }
@@ -255,10 +257,17 @@ impl SelectionFx {
     /// Checked-progress of message `id`, `0..=1`, starting a fill or an
     /// un-fill when its state changed since the last frame. A row seen for
     /// the first time animates only right after selection mode began.
-    pub(crate) fn check(&mut self, id: i64, selected: bool, animate: bool, now: Instant) -> f32 {
+    pub(crate) fn check(
+        &mut self,
+        chat: i64,
+        id: i64,
+        selected: bool,
+        animate: bool,
+        now: Instant,
+    ) -> f32 {
         let target = if selected { 1. } else { 0. };
         let fresh_mode = elapsed_since(self.last_change, now) < Duration::from_millis(400);
-        let entry = self.checks.entry(id).or_insert_with(|| CheckAnim {
+        let entry = self.checks.entry((chat, id)).or_insert_with(|| CheckAnim {
             checked: false,
             glide: Glide::settled(
                 if selected && !(animate && fresh_mode) {
@@ -456,18 +465,22 @@ mod tests {
         assert!(!fx.moving(t0 + ms(200)));
 
         // The first message selected right as the mode starts fills in.
-        let p = fx.check(7, true, true, t0 + ms(1));
+        let p = fx.check(1, 7, true, true, t0 + ms(1));
         assert_eq!(p, 0.);
-        assert!((fx.check(7, true, true, t0 + ms(81)) - 0.5).abs() < 1e-2);
-        assert_eq!(fx.check(7, true, true, t0 + ms(300)), 1.);
+        assert!((fx.check(1, 7, true, true, t0 + ms(81)) - 0.5).abs() < 1e-2);
+        assert_eq!(fx.check(1, 7, true, true, t0 + ms(300)), 1.);
         // Unselecting runs the fill backwards.
-        let _ = fx.check(7, false, true, t0 + ms(400));
-        assert!((fx.check(7, false, true, t0 + ms(480)) - 0.5).abs() < 1e-2);
-        assert_eq!(fx.check(7, false, true, t0 + ms(700)), 0.);
+        let _ = fx.check(1, 7, false, true, t0 + ms(400));
+        assert!((fx.check(1, 7, false, true, t0 + ms(480)) - 0.5).abs() < 1e-2);
+        assert_eq!(fx.check(1, 7, false, true, t0 + ms(700)), 0.);
         // A row first seen well after the mode began snaps to its state.
-        assert_eq!(fx.check(9, true, true, t0 + ms(900)), 1.);
+        assert_eq!(fx.check(1, 9, true, true, t0 + ms(900)), 1.);
         // An inactive window snaps too.
-        assert_eq!(fx.check(11, true, false, t0 + ms(901)), 1.);
+        assert_eq!(fx.check(1, 11, true, false, t0 + ms(901)), 1.);
+
+        // The same message id in another chat has no state of its own yet.
+        assert_eq!(fx.check(2, 9, false, true, t0 + ms(950)), 0.);
+        assert_eq!(fx.check(1, 9, true, true, t0 + ms(950)), 1.);
 
         // Leaving the mode fades back and forgets the rows once settled.
         fx.sync_mode(false, true, t0 + ms(1000));

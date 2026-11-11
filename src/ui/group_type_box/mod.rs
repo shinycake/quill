@@ -33,10 +33,38 @@ use std::time::Duration;
 pub(crate) struct GroupTypeBox {
     pub(crate) draft: GroupTypeData,
     pub(crate) link_input: Entity<InputState>,
-    /// Counts keystrokes; a check timer for an older one does nothing.
-    version: u64,
-    /// Save found the link unusable; the line under the field says why.
-    save_refused: bool,
+    /// The link field's keystrokes and Save's verdict on them.
+    link: LinkCheck,
+}
+
+/// Where the link field stands. The pause before the server check lives
+/// in the stage: the next keystroke replaces it and closing the box drops
+/// it, and a dropped task never runs, so a check only ever goes out for the
+/// text of the box that is open. `Refused` (Save found the link unusable;
+/// the line under the field says why) leaves with the next keystroke, and
+/// keeps a pause still running so its check goes out.
+#[derive(Default)]
+enum LinkCheck {
+    /// No check waits: nothing was typed, or the text needs none.
+    #[default]
+    Settled,
+    Pausing(Task<()>),
+    Refused {
+        _pause: Option<Task<()>>,
+    },
+}
+
+impl LinkCheck {
+    /// Save refused the link: the pause, if one runs, goes on.
+    fn refused(self) -> Self {
+        match self {
+            Self::Settled => Self::Refused { _pause: None },
+            Self::Pausing(pause) => Self::Refused {
+                _pause: Some(pause),
+            },
+            refused @ Self::Refused { .. } => refused,
+        }
+    }
 }
 
 /// What the box knows about its chat, read from the session each frame.
@@ -60,8 +88,7 @@ impl GroupTypeBox {
         Self {
             draft,
             link_input,
-            version: 0,
-            save_refused: false,
+            link: LinkCheck::Settled,
         }
     }
 
@@ -81,7 +108,9 @@ impl GroupTypeBox {
             .session()
             .is_some_and(|s| s.group_username_check_failed(facts.chat_id, &text));
         match link_status(&text, &facts.editable, verdict) {
-            LinkStatus::Empty if self.save_refused => LinkStatus::Problem(LinkProblem::TooShort),
+            LinkStatus::Empty if matches!(self.link, LinkCheck::Refused { .. }) => {
+                LinkStatus::Problem(LinkProblem::TooShort)
+            }
             LinkStatus::Pending if failed => LinkStatus::Problem(LinkProblem::CheckFailed),
             status => status,
         }
@@ -91,14 +120,14 @@ impl GroupTypeBox {
 impl QuillApp {
     pub(crate) fn group_type_box(&self) -> Option<&GroupTypeBox> {
         match self.group_edit_box() {
-            Some(edit) => edit.type_box.as_ref(),
+            Some(edit) => edit.type_box(),
             None => self.new_chat_type_box(),
         }
     }
 
     fn group_type_box_mut(&mut self) -> Option<&mut GroupTypeBox> {
         if self.group_edit_box().is_some() {
-            return self.group_edit_box_mut()?.type_box.as_mut();
+            return self.group_edit_box_mut()?.type_box_mut();
         }
         self.new_chat_type_box_mut()
     }
@@ -106,7 +135,7 @@ impl QuillApp {
     /// The Type box open as its own dialog over the Edit box.
     fn group_type_box_dialog_open(&self) -> bool {
         self.group_edit_box()
-            .is_some_and(|edit| edit.type_box.is_some())
+            .is_some_and(|edit| edit.type_box().is_some())
     }
 
     /// The chat the Type box edits, and whether it is a creation step.
@@ -171,6 +200,10 @@ impl QuillApp {
             }
         })
         .detach();
+        // A refusal of an earlier visit does not show in this one.
+        if let Some(session) = self.session_mut() {
+            session.groups.group_type.toggle_error = None;
+        }
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.fetch_chat_invite_links(chat_id);
             if supergroup {
@@ -181,14 +214,20 @@ impl QuillApp {
             }
         }
         if let Some(edit) = self.group_edit_box_mut() {
-            edit.type_box = Some(GroupTypeBox::new(draft, link_input));
+            edit.sub =
+                crate::ui::group_edit_box::EditSub::Type(GroupTypeBox::new(draft, link_input));
         }
         cx.notify();
     }
 
     pub(in crate::ui) fn close_group_type_box(&mut self, cx: &mut Context<Self>) {
-        if let Some(edit) = self.group_edit_box_mut() {
-            edit.type_box = None;
+        if let Some(edit) = self.group_edit_box_mut()
+            && edit.type_box().is_some()
+        {
+            edit.sub = crate::ui::group_edit_box::EditSub::None;
+        }
+        if let Some(session) = self.session_mut() {
+            session.groups.group_type.toggle_error = None;
         }
         cx.notify();
     }
@@ -203,9 +242,8 @@ impl QuillApp {
             return;
         };
         let text = type_box.link_text(cx);
-        type_box.save_refused = false;
-        type_box.version = type_box.version.wrapping_add(1);
-        let version = type_box.version;
+        // The pause of the keystroke before goes with its stage.
+        type_box.link = LinkCheck::Settled;
         if facts.setup {
             self.new_chat_link_edited();
         }
@@ -213,20 +251,23 @@ impl QuillApp {
         if local_link_status(&text) != LinkStatus::Pending || text == facts.editable {
             return;
         }
-        self.spawn_screen(cx, async move |this, cx| {
+        let pause = self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(CHECK_DELAY_MS))
                 .await;
-            let _ = this.update(cx, |this, cx| this.check_group_link(version, cx));
-        })
-        .detach();
+            let _ = this.update(cx, |this, cx| this.check_group_link(cx));
+        });
+        if let Some(type_box) = self.group_type_box_mut() {
+            type_box.link = LinkCheck::Pausing(pause);
+        }
     }
 
-    fn check_group_link(&mut self, version: u64, cx: &mut Context<Self>) {
+    /// Ask the server about the link as typed now.
+    fn check_group_link(&mut self, cx: &mut Context<Self>) {
         let Some(type_box) = self.group_type_box() else {
             return;
         };
-        if type_box.version != version || !type_box.draft.public {
+        if !type_box.draft.public {
             return;
         }
         let text = type_box.link_text(cx);
@@ -239,6 +280,20 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The revoke freed its link: check the typed link again, once. Called
+    /// from the poll drains when the reducer settles the revoke, however
+    /// slowly TDLib answered. True when it did something.
+    pub(in crate::ui) fn drain_public_link_freed(&mut self, cx: &mut Context<Self>) -> bool {
+        let freed = self
+            .live
+            .as_mut()
+            .is_some_and(|live| live.driver.session.take_public_link_freed());
+        if freed {
+            self.recheck_group_type_link(cx);
+        }
+        freed
+    }
+
     /// After a link was freed: check the typed link again.
     pub(in crate::ui) fn recheck_group_type_link(&mut self, cx: &mut Context<Self>) {
         let Some(facts) = self.group_type_facts() else {
@@ -249,8 +304,7 @@ impl QuillApp {
         };
         let text = type_box.link_text(cx);
         if local_link_status(&text) == LinkStatus::Pending && text != facts.editable {
-            let version = type_box.version;
-            self.check_group_link(version, cx);
+            self.check_group_link(cx);
         }
     }
 
@@ -268,10 +322,9 @@ impl QuillApp {
                     .public_unavailable
                     .contains(&facts.chat_id.0)
             });
+            // The blocked choice is not stored: the box keeps showing
+            // Private, and Public takes once the limit has cleared.
             if !unavailable {
-                if let Some(type_box) = self.group_type_box_mut() {
-                    type_box.draft.public = true;
-                }
                 self.show_premium_limit(PremiumLimitKind::PublicLinks, 0, cx);
             }
             return;
@@ -284,9 +337,8 @@ impl QuillApp {
             type_box.draft.request_to_join = false;
         }
         let pending = public && local_link_status(&type_box.link_text(cx)) == LinkStatus::Pending;
-        let version = type_box.version;
         if pending {
-            self.check_group_link(version, cx);
+            self.check_group_link(cx);
         }
         cx.notify();
     }
@@ -323,7 +375,7 @@ impl QuillApp {
                 self.recheck_group_type_link(cx);
             }
             if let Some(type_box) = self.group_type_box_mut() {
-                type_box.save_refused = true;
+                type_box.link = std::mem::take(&mut type_box.link).refused();
                 type_box
                     .link_input
                     .update(cx, |input, cx| input.focus(window, cx));
@@ -338,18 +390,38 @@ impl QuillApp {
         let links = self
             .session()
             .map_or(0, |s| s.chat_active_invite_link_count(facts.chat_id));
-        let request_changed = type_box.draft.request_to_join != current.request_to_join;
+        let wanted = type_box.draft.request_to_join;
+        let request_changed = wanted != current.request_to_join;
+        if self.group_type_save_waits_for_links() {
+            // The count asked when the box opened is still out: the Save
+            // button is drawn busy until it settles.
+            return;
+        }
         if request_changed && links > 0 && !facts.basic {
-            self.ask_apply_to_invite_links(
-                &facts,
-                type_box.draft.request_to_join,
-                links,
-                window,
-                cx,
-            );
+            self.ask_apply_to_invite_links(&facts, wanted, links, window, cx);
             return;
         }
         self.finish_group_type_box(None, cx);
+    }
+
+    /// Save of a changed join approval asks about the existing invite
+    /// links, so it needs their count first. tdesktop asks for the count at
+    /// Save and waits for the answer (`requestInviteLinksCount`); Quill
+    /// asks when the box opens, and Save waits while that is still out. A
+    /// count that failed saves without the question, as tdesktop's `fail`
+    /// handler does (`done(0)`).
+    fn group_type_save_waits_for_links(&self) -> bool {
+        let (Some(facts), Some(type_box), Some(session)) = (
+            self.group_type_facts(),
+            self.group_type_box(),
+            self.session(),
+        ) else {
+            return false;
+        };
+        !facts.basic
+            && type_box.draft.request_to_join
+                != session.group_type_current(facts.chat_id).request_to_join
+            && session.chat_invite_link_count_loading(facts.chat_id)
     }
 
     /// "Apply to existing invite links" (tdesktop `saveRequestToJoin`).
@@ -370,6 +442,9 @@ impl QuillApp {
         let text = trn(key, links).replace("**", "");
         let app = cx.entity().downgrade();
         let skip_app = app.clone();
+        // The answer belongs to the Type box that asked: of this chat, still
+        // open, and still choosing what was asked about.
+        let chat_id = facts.chat_id;
         window.open_alert_dialog(cx, move |alert, _, _| {
             let app = app.clone();
             let skip_app = skip_app.clone();
@@ -380,15 +455,32 @@ impl QuillApp {
                 .cancel_text(tr(keys::MANAGE_PEER_REQUEST_APPLY_SKIP))
                 .show_cancel(true)
                 .on_ok(move |_, _, cx| {
-                    let _ = app.update(cx, |this, cx| this.finish_group_type_box(Some(true), cx));
+                    let _ = app.update(cx, |this, cx| {
+                        if this.type_box_still_asks(chat_id, enabled) {
+                            this.finish_group_type_box(Some(true), cx);
+                        }
+                    });
                     true
                 })
                 .on_cancel(move |_, _, cx| {
-                    let _ =
-                        skip_app.update(cx, |this, cx| this.finish_group_type_box(Some(false), cx));
+                    let _ = skip_app.update(cx, |this, cx| {
+                        if this.type_box_still_asks(chat_id, enabled) {
+                            this.finish_group_type_box(Some(false), cx);
+                        }
+                    });
                     true
                 })
         });
+    }
+
+    /// The Type box open now is the one of `chat_id` and still has
+    /// join approval at `enabled`: an alert's answer is for that box.
+    pub(super) fn type_box_still_asks(&self, chat_id: ChatId, enabled: bool) -> bool {
+        self.group_type_facts()
+            .is_some_and(|facts| facts.chat_id == chat_id)
+            && self
+                .group_type_box()
+                .is_some_and(|type_box| type_box.draft.request_to_join == enabled)
     }
 
     /// Hand the choice to the Edit box and close.
@@ -409,7 +501,12 @@ impl QuillApp {
         let Some(edit) = self.group_edit_box_mut() else {
             return;
         };
-        let Some(mut type_box) = edit.type_box.take() else {
+        // Only the Type box leaves here: another box over the Edit box stays.
+        if edit.type_box().is_none() {
+            return;
+        }
+        let crate::ui::group_edit_box::EditSub::Type(mut type_box) = std::mem::take(&mut edit.sub)
+        else {
             return;
         };
         if blocked {
@@ -460,6 +557,7 @@ impl QuillApp {
                     Button::new("group-type-save")
                         .label(tr(keys::SETTINGS_SAVE))
                         .primary()
+                        .loading(this.group_type_save_waits_for_links())
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.save_group_type_box(window, cx);
                             this.close_kit_dialog_if_done(DialogKind::GroupTypeBox, window, cx);

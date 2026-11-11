@@ -10,8 +10,7 @@
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Mutex, RwLock};
 
 const SETTINGS_FILE: &str = "agent_access.json";
 const TOKEN_FILE: &str = "agent-token";
@@ -90,9 +89,40 @@ static STORED: RwLock<Option<Stored>> = RwLock::new(None);
 /// wait on prompts hold this, so they don't run into each other.
 #[cfg(test)]
 pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-/// Bumped whenever the switch goes off or the token is reset, so open
-/// connections notice.
-static GENERATION: AtomicU64 = AtomicU64::new(0);
+/// What an open connection or a running call compares to know the gate
+/// moved under it. One value behind one lock, so a reader sees the lock
+/// flag and the counters from the same moment.
+#[derive(Clone, Copy)]
+struct Gate {
+    /// Bumped whenever the switch goes off or the token is reset, so open
+    /// connections notice.
+    generation: u64,
+    /// Counts every lock, so a tool that was already running when Quill
+    /// locked can tell (the lock holds for the whole call, not only its
+    /// start).
+    locks: u64,
+    /// Quill is locked by its passcode: agents read and send nothing until
+    /// the unlock (docs/decisions/lock-is-a-render-state.md). Set by the UI.
+    locked: bool,
+}
+
+static GATE: Mutex<Gate> = Mutex::new(Gate {
+    generation: 0,
+    locks: 0,
+    locked: false,
+});
+
+fn gate() -> Gate {
+    *crate::locks::lock_or_recover(&GATE)
+}
+
+fn change_gate(change: impl FnOnce(&mut Gate)) {
+    change(&mut crate::locks::lock_or_recover(&GATE));
+}
+
+fn bump_generation() {
+    change_gate(|gate| gate.generation = gate.generation.saturating_add(1));
+}
 
 fn root() -> Option<PathBuf> {
     crate::settings::safe_app_root()
@@ -134,45 +164,40 @@ fn save(change: impl FnOnce(&mut Stored)) {
     }
 }
 
-/// Quill is locked by its passcode: agents read and send nothing until
-/// the unlock (docs/decisions/lock-is-a-render-state.md). Set by the UI.
-static PAUSED_BY_LOCK: AtomicBool = AtomicBool::new(false);
-
 /// What an agent reads while Quill is locked.
 pub const LOCKED_MESSAGE: &str = "Quill is locked. Nothing can be read or sent until the user unlocks Quill. Ask the user to unlock it, then retry.";
 
 /// What a write tool answers when Quill locked while it ran.
 pub const LOCKED_WHILE_RUNNING_MESSAGE: &str = "Quill was locked while this ran, so its result is withheld. It may have been done: once the user unlocks Quill, check before you retry.";
 
-/// Counts every lock, so a tool that was already running when Quill locked
-/// can tell (the lock holds for the whole call, not only its start).
-static LOCKS: AtomicU64 = AtomicU64::new(0);
-
 /// Pause or resume every agent tool and resource for the passcode lock.
 pub fn set_paused_by_lock(locked: bool) {
-    PAUSED_BY_LOCK.store(locked, Ordering::SeqCst);
-    // After the flag: a call that read the count before this saw the flag
-    // unset at its start, and sees the count move by its end.
-    if locked {
-        LOCKS.fetch_add(1, Ordering::SeqCst);
-    }
+    // One step: a call that read the count before this saw Quill unlocked
+    // at its start, and sees the count move by its end.
+    change_gate(|gate| {
+        gate.locked = locked;
+        if locked {
+            gate.locks = gate.locks.saturating_add(1);
+        }
+    });
     crate::agent::events::wake_waiters();
     crate::wake::AGENT.poke();
 }
 
 /// How many times Quill has locked; read when a call starts.
 pub fn lock_count() -> u64 {
-    LOCKS.load(Ordering::SeqCst)
+    gate().locks
 }
 
 /// Quill is locked now, or locked at some point since `count` was read.
 pub fn locked_since(count: u64) -> bool {
-    paused_by_lock() || lock_count() != count
+    let gate = gate();
+    gate.locked || gate.locks != count
 }
 
 /// Whether agent tools and resources are paused because Quill is locked.
 pub fn paused_by_lock() -> bool {
-    PAUSED_BY_LOCK.load(Ordering::SeqCst)
+    gate().locked
 }
 
 /// Whether agents may connect.
@@ -188,7 +213,7 @@ pub fn set_enabled(on: bool) {
     }
     save(|stored| stored.enabled = on);
     if !on {
-        GENERATION.fetch_add(1, Ordering::SeqCst);
+        bump_generation();
         super::ui_driver::takeover::forget_hold();
         super::prompts::deny_all();
         super::activity::allow_all_again();
@@ -254,7 +279,7 @@ pub fn reset_token() {
         return;
     }
     renew_token();
-    GENERATION.fetch_add(1, Ordering::SeqCst);
+    bump_generation();
     super::prompts::deny_all();
     super::ui_driver::bridge::refuse_all(
         "The user reset the agent token in Quill, so nothing was sent to its window. Reconnect, then retry.",
@@ -266,7 +291,7 @@ pub fn reset_token() {
 /// The switch's generation; a connection opened under one generation ends
 /// once it changes.
 pub fn generation() -> u64 {
-    GENERATION.load(Ordering::SeqCst)
+    gate().generation
 }
 
 static TOKEN: RwLock<Option<String>> = RwLock::new(None);
@@ -429,7 +454,7 @@ mod tests {
         super::set_ui_driver(true);
         super::set_raw_calls(false);
         super::set_takeover_effect(TakeoverEffect::StillGlow);
-        grants::update(&account, |g| g.contacts = true);
+        let _ = grants::update(&account, |g| g.contacts = true);
         activity::record(activity::Action {
             id: 0,
             time: 0,
@@ -469,7 +494,7 @@ mod tests {
         super::set_ui_driver(false);
         super::set_raw_calls(true);
         super::set_takeover_effect(TakeoverEffect::Automatic);
-        grants::update(&account, |g| g.contacts = false);
+        let _ = grants::update(&account, |g| g.contacts = false);
         super::set_enabled(false);
     }
 
@@ -480,7 +505,7 @@ mod tests {
         let generation = super::generation();
         assert!(super::token_matches(&before));
         super::renew_token();
-        super::GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        super::bump_generation();
         let after = super::token();
         assert_ne!(before, after);
         assert!(!super::token_matches(&before), "the old token is refused");
@@ -549,6 +574,7 @@ mod tests {
             Ok(crate::agent::tools::ToolOutput {
                 text: "secret".into(),
                 data: serde_json::json!({}),
+                images: Vec::new(),
             })
         };
         let text = |result: Result<

@@ -13,13 +13,26 @@ impl QuillApp {
     /// (`updateOption`); at the limit the request is never sent and the
     /// TGX message shows instead.
     pub(in crate::ui) fn toggle_chat_pin(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
+        self.try_toggle_chat_pin(chat_id, cx);
+    }
+
+    /// [`Self::toggle_chat_pin`], saying whether the pin limit stopped it
+    /// (the limit box is up): a bulk pin stops at the first refusal. A
+    /// pin counts as soon as its request is sent (the driver flips the
+    /// chat optimistically), so each chat of a batch sees the ones before
+    /// it.
+    pub(in crate::ui) fn try_toggle_chat_pin(
+        &mut self,
+        chat_id: ChatId,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let session = match self.session() {
             Some(session) => session,
-            None => return,
+            None => return true,
         };
         let chat = match session.chats.get(&chat_id.0) {
             Some(chat) => chat,
-            None => return,
+            None => return true,
         };
         let archived = chat.in_archive;
         let pinned = if archived {
@@ -58,7 +71,7 @@ impl QuillApp {
                     0,
                     cx,
                 );
-                return;
+                return false;
             }
         }
         if let Some(live) = self.live.as_mut() {
@@ -70,7 +83,7 @@ impl QuillApp {
                 Err(_) => StatusNote::error(tr(keys::Q_CHATLIST_COULD_NOT_CHANGE_PIN)),
             });
             cx.notify();
-            return;
+            return true;
         }
         if self.demo_session.is_some() {
             self.apply_demo_pin(chat_id, !pinned, archived);
@@ -81,6 +94,7 @@ impl QuillApp {
             });
             cx.notify();
         }
+        true
     }
 
     /// Slice CL1: Mark as read / Mark as unread from the chat-row
