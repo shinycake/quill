@@ -1,0 +1,2 @@
+# In-flight variants that wait for nothing Quill started (scripts/check-stage-enums.py).
+# One per line: <rule>:<Enum>::<Variant> <reason>
