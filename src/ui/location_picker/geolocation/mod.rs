@@ -34,6 +34,14 @@ pub(in crate::ui) struct Locating {
     pub(in crate::ui) permission_prompt: Arc<AtomicBool>,
 }
 
+impl Drop for Locating {
+    /// Dropping the lookup (the picker closed, or it timed out) stops the
+    /// platform's location manager instead of leaving it running.
+    fn drop(&mut self) {
+        platform::cancel(&self.permission_prompt);
+    }
+}
+
 /// One "where am I" lookup. Call on the UI thread (CoreLocation answers on
 /// the run loop of the thread that asked).
 pub(in crate::ui) fn locate() -> Locating {

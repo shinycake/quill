@@ -4102,14 +4102,16 @@ Links, mini apps, location, and TDLib state and connection.
   goes back at once when the send never left (03-001). A phone share's answer
   is `PhoneShare::Sent|Refused(request)` and only the flow that sent it takes
   it; a timeout clears it (14-044). The marketplace gift says why Buy did
-  nothing and asks the text limit again (02-136).
+  nothing and asks the text limit again (02-136; its notes and the mini-app "no address"
+  line are lang keys).
 - **Location picker.** Venue queries are numbered from a counter that is never
   reset (`LocationSharing::venue_generation`); the ask for a place carries its
   stage (`Unsent|InFlight|Answered|Failed`), so closing the search after a
   failed lookup asks again; Resolving and Missing bots reset at `open()`
   (03-073, 03-085, 03-074). A locate's 30 s limit pauses while the system's
   permission prompt is open (`Locating::permission_prompt`, `WaitBudget`;
-  10-166). The macOS side could not be built here.
+  10-166). Dropping a `Locating` stops the macOS location manager unless a
+  newer lookup replaced it. The macOS side could not be built here.
 - **Connect.** Answers captured from an envelope are stashed before any step
   that can fail (02-037). A Grams name whose request never left is asked
   again (04-041); the secret-chat queue keeps the ids behind a failed send
@@ -4123,9 +4125,11 @@ Links, mini apps, location, and TDLib state and connection.
 - **State.** A failed map tile is retried when its chat is opened afresh
   (`MapThumbs` is one map of `Tile` stages; 05-187). A created invite link is
   merged only into a loaded list (05-197). `request_kind` classifies requests
-  by their own variant name (it read `Payments(GetPaymentForm)` as a user
-  action) and logout settles every request but a login submit (05-200); the
-  per-variant `kind()` the register proposes was not done. A calendar's
+  by an exhaustive `kind()` on every purpose enum (`state/request_kind/`, one
+  file each, so a new request must be classified; lookups carrying a payload,
+  like `GetGiftOption(PinnedMax)`, stay lookups). Logout settles every request
+  but a login submit, and the failure notes that settle would write are put
+  back (`logout_notes`; 05-200). A calendar's
   generation never repeats (05-231). Call privacy is one stage per rule
   (`CallPrivacyAsks`; 05-251). Saved Messages views page by request id
   (`SavedPage`), a failed page stops paging with a Retry strip
@@ -4134,7 +4138,8 @@ Links, mini apps, location, and TDLib state and connection.
   chat leaves the search jump alone (06-005). `updateDefaultBackground` with a
   null background removes the wallpaper and a refused delete puts it back
   (06-032). A replacement hub takes over a stopped one's routes and stopped
-  flag (06-065). A profile change that fails after Save closed its dialog
+  flag and its `seq` counter, which the sessions' out-of-order check needs
+  (06-065). A profile change that fails after Save closed its dialog
   shows as a note (05-155).
 - **Not changed.** 05-043 (`join_conference` already refuses a second join, and
   a test says so), 05-184 (tdesktop's `loadMoreRows` has no failure handler

@@ -118,3 +118,6 @@ pub(super) fn reverse_geocode(_point: GeoPoint) -> Option<Receiver<Option<String
 pub(super) fn system_country() -> Option<String> {
     quill::emoji::system_locale().and_then(|locale| locale_region(&locale))
 }
+
+/// Nothing to stop: the lookup ends with its own thread.
+pub(super) fn cancel(_lookup: &std::sync::Arc<std::sync::atomic::AtomicBool>) {}

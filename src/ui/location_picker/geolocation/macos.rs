@@ -146,6 +146,8 @@ impl Delegate {
 struct Running {
     manager: Retained<CLLocationManager>,
     _delegate: Retained<Delegate>,
+    /// The flag of the lookup it serves, to tell it from a later one.
+    lookup: Arc<AtomicBool>,
 }
 
 thread_local! {
@@ -187,6 +189,7 @@ pub(super) fn locate(prompt_open: &Arc<AtomicBool>) -> Receiver<GeoOutcome> {
         if let Some(old) = running.borrow_mut().replace(Running {
             manager,
             _delegate: delegate,
+            lookup: prompt_open.clone(),
         }) {
             // SAFETY: detach and stop the replaced lookup on its thread.
             unsafe {
@@ -196,6 +199,25 @@ pub(super) fn locate(prompt_open: &Arc<AtomicBool>) -> Receiver<GeoOutcome> {
         }
     });
     receiver
+}
+
+/// The lookup identified by `lookup` was dropped: stop its manager, unless a
+/// newer lookup has replaced it. Needs the thread that made the manager.
+pub(super) fn cancel(lookup: &Arc<AtomicBool>) {
+    RUNNING.with(|running| {
+        let mut running = running.borrow_mut();
+        if running
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(&current.lookup, lookup))
+            && let Some(old) = running.take()
+        {
+            // SAFETY: detach and stop on the thread that made the manager.
+            unsafe {
+                old.manager.setDelegate(None);
+                old.manager.stopUpdatingLocation();
+            }
+        }
+    });
 }
 
 /// `CLGeocoder` is deprecated for MapKit's `MKReverseGeocodingRequest`,

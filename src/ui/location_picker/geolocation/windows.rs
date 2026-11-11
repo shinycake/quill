@@ -65,3 +65,6 @@ pub(super) fn system_country() -> Option<String> {
     let written = usize::try_from(written).ok()?.checked_sub(1)?;
     String::from_utf16(buffer.get(..written)?).ok()
 }
+
+/// Nothing to stop: the lookup ends with its own thread.
+pub(super) fn cancel(_lookup: &std::sync::Arc<std::sync::atomic::AtomicBool>) {}
