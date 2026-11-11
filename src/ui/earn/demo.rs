@@ -93,7 +93,7 @@ impl QuillApp {
 
     fn demo_earn_learn(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.demo_earn_monetization(window, cx);
-        self.earn.open_box = Some(crate::ui::earn_state::EarnBox::Learn { diamonds: 0 });
+        self.earn.open_box = Some(crate::ui::earn_state::EarnBox::Learn);
     }
 
     fn demo_earn_bot_stars(&mut self, window: &mut Window, cx: &mut Context<Self>) {

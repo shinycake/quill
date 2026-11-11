@@ -50,7 +50,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.users_state.contacts.is_idle() {
             return;
         }
-        let _ = self.fetch_contacts();
+        // A fetch refused before it began (the chats path is not active)
+        // leaves the list idle: it ends in the error line and its Retry
+        // too, not in a tab that stays on "Loading contacts...".
+        if self.fetch_contacts().is_err() && self.session.users_state.contacts.is_idle() {
+            self.session
+                .users_state
+                .contacts
+                .fail_dropping_data("could not send the request");
+        }
     }
 
     /// Phase 6: user-scoped `getUserFullInfo` for the user info panel

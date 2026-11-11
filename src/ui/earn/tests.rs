@@ -110,12 +110,16 @@ fn the_learn_box_counts_diamonds_and_closes(cx: &mut TestAppContext) {
     app.read_with(vcx, |app, _| {
         assert_eq!(
             app.earn.open_box,
-            Some(crate::ui::earn_state::EarnBox::Learn { diamonds: 3 })
-        )
+            Some(crate::ui::earn_state::EarnBox::Learn)
+        );
+        assert_eq!(app.earn.diamonds, 3);
     });
     assert!(!note(&app, vcx).is_empty(), "each diamond shows a toast");
     click(vcx, "earn-learn-close");
-    app.read_with(vcx, |app, _| assert!(!app.earn.learn_open()));
+    app.read_with(vcx, |app, _| {
+        assert!(!app.earn.learn_open());
+        assert_eq!(app.earn.diamonds, 3, "the count outlives the box");
+    });
     assert_ne!(open_dialog(&shell, vcx), Some(DialogKind::EarnLearn));
 }
 

@@ -23,11 +23,6 @@ pub struct MediaState {
     /// What was asked to download and how each request ended; the status
     /// rows show is `downloads.status(id, &files)`.
     pub downloads: DownloadIntents,
-    /// Automatic downloads of full media in the open chat (MED3), whose
-    /// progress the history draws: their `updateFile`s redraw at once
-    /// (`redraw_need`), by the chat whose window asked for them. Pruned to
-    /// the requested downloads on each pass.
-    pub open_chat_media_downloads: HashMap<i32, ChatId>,
     /// Avatar file id → number of chats showing it (chat-list photos),
     /// kept where those ids are set.
     pub(crate) avatar_file_refs: HashMap<i32, u32>,
@@ -146,7 +141,6 @@ impl MediaState {
             disk_resume_due: Vec::new(),
             disk_paused_persisted: BTreeSet::new(),
             downloads: DownloadIntents::default(),
-            open_chat_media_downloads: HashMap::new(),
             avatar_file_refs: HashMap::new(),
             avatar_due: AvatarDue::Everything,
             avatar_claims: Default::default(),

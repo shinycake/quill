@@ -47,7 +47,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .payments
                 .giveaway
                 .award_members
-                .fail(generation, "Couldn't load the members.".to_string());
+                .fail(
+                    generation,
+                    crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_MEMBERS).to_string(),
+                );
             Err(err)
         };
         let supergroup_id = match self.session.chats.get(&chat_id).map(|c| &c.kind) {

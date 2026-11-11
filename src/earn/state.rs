@@ -620,12 +620,15 @@ impl EarnState {
             .collect()
     }
 
-    /// The URL waiting to open, the latest one.
-    pub fn open_url(&self) -> Option<&str> {
-        self.effects.iter().rev().find_map(|effect| match effect {
-            EarnEffect::OpenUrl(url) => Some(url.as_str()),
-            _ => None,
-        })
+    /// The URLs waiting to open, oldest first: the UI opens every one.
+    pub fn open_urls(&self) -> Vec<&str> {
+        self.effects
+            .iter()
+            .filter_map(|effect| match effect {
+                EarnEffect::OpenUrl(url) => Some(url.as_str()),
+                _ => None,
+            })
+            .collect()
     }
 
     /// The setup page is to be left.

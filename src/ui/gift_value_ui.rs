@@ -148,7 +148,8 @@ impl QuillApp {
 
     /// "learn more": ask for the value (tdesktop asks once per box and
     /// reopens from what it has). Offline (demos), a known value reopens
-    /// and anything else just shows the loading pill.
+    /// and anything else cannot be asked: the box says so, with a way out
+    /// (it is not left on the loading pill for good).
     pub(super) fn open_gift_value(&mut self, lookup: GiftValueLookup, cx: &mut Context<Self>) {
         match self.live.as_mut() {
             Some(live) => {
@@ -162,7 +163,10 @@ impl QuillApp {
                         }
                         _ => {
                             *slot = Some(GiftValueLookup {
-                                stage: GiftValueStage::Loading(0),
+                                stage: GiftValueStage::Failed(quill::lang::tr_with(
+                                    quill::lang::keys::Q_GIFT_VALUE_COULDNT_LOAD,
+                                    &[("reason", "not connected")],
+                                )),
                                 ..lookup
                             })
                         }

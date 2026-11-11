@@ -477,6 +477,9 @@ pub struct GramsHub {
     /// Users and chats already asked for (each once per session).
     pub asked_users: BTreeSet<i64>,
     pub asked_chats: BTreeSet<i64>,
+    /// How many rows the peer resolver has been through: it looks only at
+    /// rows that landed since, and starts over when the list is replaced.
+    pub peers_resolved: usize,
     /// Asked for and refused: shown as a deleted account, not a
     /// placeholder that never fills.
     pub missing_users: BTreeSet<i64>,
@@ -500,6 +503,7 @@ impl GramsHub {
     pub fn restart(&mut self, filter: TxFilter) {
         self.filter = filter;
         self.entries.clear();
+        self.peers_resolved = 0;
         self.next_offset.clear();
         self.stage = crate::state::PageStage::Idle;
         self.selected = None;
@@ -515,6 +519,7 @@ impl GramsHub {
         }
         if !append {
             self.entries.clear();
+            self.peers_resolved = 0;
         }
         let mut keys: BTreeSet<String> = self.entries.iter().map(|tx| tx.key.clone()).collect();
         for mut tx in page.transactions {
@@ -548,9 +553,14 @@ impl GramsHub {
         self.stage.error()
     }
 
-    /// Peers the loaded rows name, for the resolver.
-    pub fn peers(&self) -> impl Iterator<Item = MessageSender> + '_ {
-        self.entries.iter().filter_map(TonTx::peer)
+    /// Peers the rows that landed since the resolver last finished name,
+    /// with the index of the row each is in.
+    pub fn new_peers(&self) -> impl Iterator<Item = (usize, MessageSender)> + '_ {
+        self.entries
+            .iter()
+            .enumerate()
+            .skip(self.peers_resolved)
+            .filter_map(|(index, tx)| Some((index, tx.peer()?)))
     }
 
     /// Whether the All / Incoming / Outgoing tabs show.

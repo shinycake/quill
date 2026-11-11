@@ -66,8 +66,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             return sent;
         }
         let grams = &self.session.payments.hub.grams;
-        let peers: Vec<MessageSender> = grams.peers().collect();
-        for peer in peers {
+        let peers: Vec<(usize, MessageSender)> = grams.new_peers().collect();
+        for (index, peer) in peers {
             let grams = &self.session.payments.hub.grams;
             let ask = match peer {
                 MessageSender::User { user_id } => (self.session.user(user_id).is_none()
@@ -91,8 +91,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             if result.is_err() {
                 // Never left: not asked. Try again on the next tick (the
                 // names still wait) instead of keeping the placeholder for
-                // the session.
-                break;
+                // the session. The rows from this one on are looked at again.
+                grams.peers_resolved = index;
+                return sent;
             }
             if purpose == GramsPurpose::PeerUser {
                 grams.asked_users.insert(id);
@@ -101,6 +102,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             }
             sent = true;
         }
+        let grams = &mut self.session.payments.hub.grams;
+        grams.peers_resolved = grams.entries.len();
         sent
     }
 

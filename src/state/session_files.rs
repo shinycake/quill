@@ -86,7 +86,6 @@ impl Session {
         let media = &mut self.media;
         let downloads = &media.downloads;
         let avatars = &media.avatar_file_refs;
-        let open_chat = &media.open_chat_media_downloads;
         let extras = &media.download_extras;
         let sounds = &self.settings.sound_file_ids;
         // Queued tracks are not rendered, so no read keeps them recent.
@@ -105,7 +104,6 @@ impl Session {
                 || downloads.is_listed(id)
                 || queued.contains(&id)
                 || avatars.contains_key(&id)
-                || open_chat.contains_key(&id)
                 || extras.has_file(id)
                 || sounds.contains_key(&id)
         });

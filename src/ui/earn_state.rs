@@ -34,9 +34,9 @@ pub(crate) struct AskBoost {
 /// [`QuillApp::open_earn_box`], which also records the asking window.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum EarnBox {
-    /// The "Learn more" box of the Monetization page, with its TON easter
-    /// egg (tdesktop counts diamonds).
-    Learn { diamonds: u32 },
+    /// The "Learn more" box of the Monetization page (its TON easter egg
+    /// counts in [`EarnUi::diamonds`], which outlives the box).
+    Learn,
     /// A TON history row's details box.
     TonTx(TonTx),
     /// A Stars history row's receipt.
@@ -49,7 +49,7 @@ impl EarnBox {
     pub(crate) fn kind(&self) -> super::shell::DialogKind {
         use super::shell::DialogKind;
         match self {
-            Self::Learn { .. } => DialogKind::EarnLearn,
+            Self::Learn => DialogKind::EarnLearn,
             Self::TonTx(_) => DialogKind::EarnTonTx,
             Self::StarTx(_) => DialogKind::EarnStarTx,
             Self::AskBoost(_) => DialogKind::EarnAskBoost,
@@ -93,6 +93,9 @@ pub(crate) struct EarnUi {
     pub(super) fade: Option<super::earn::LayerFade>,
     /// The earn box that is open.
     pub(super) open_box: Option<EarnBox>,
+    /// The TON easter egg of the learn box (tdesktop counts diamonds); kept
+    /// between openings.
+    pub(super) diamonds: u32,
     /// The setup page's sliders, built for one bot's program and rebuilt
     /// when the page shows another.
     pub(super) sliders: Option<Box<SetupSliders>>,
@@ -123,7 +126,7 @@ impl crate::ui::on_screen::Farewell for EarnUi {
 
 impl EarnUi {
     pub(crate) fn learn_open(&self) -> bool {
-        matches!(self.open_box, Some(EarnBox::Learn { .. }))
+        matches!(self.open_box, Some(EarnBox::Learn))
     }
 
     pub(crate) fn ton_tx(&self) -> Option<&TonTx> {
@@ -172,6 +175,7 @@ impl EarnUi {
             restore: None,
             fade: None,
             open_box: None,
+            diamonds: 0,
             sliders: None,
             scroll: ScrollHandle::new(),
             box_scroll: ScrollHandle::new(),

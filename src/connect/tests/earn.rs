@@ -254,7 +254,7 @@ fn withdrawal_asks_without_password_then_with_it() {
     );
     let earn = &p.0.session.payments.earn;
     assert!(earn.withdraw.is_none());
-    assert_eq!(earn.open_url(), Some("https://fragment.com/w"));
+    assert_eq!(earn.open_urls(), ["https://fragment.com/w"]);
 }
 
 /// An answer to a withdrawal the user cancelled opens nothing, and it
@@ -278,7 +278,7 @@ fn a_cancelled_withdrawals_answer_opens_nothing() {
         json!({"@type": "httpUrl", "url": "https://fragment.com/w", "@extra": cancelled}),
     );
     let earn = &p.0.session.payments.earn;
-    assert_eq!(earn.open_url(), None, "Fragment does not open after Cancel");
+    assert!(earn.open_urls().is_empty(), "Fragment does not open after Cancel");
     assert_eq!(
         earn.withdraw.as_ref().map(|w| &w.step),
         Some(&WithdrawStep::Checking),

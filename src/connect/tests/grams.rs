@@ -97,6 +97,10 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
     // Names the page uses but the session lacks are asked for once each.
     assert!(driver.grams_tick(false));
     assert!(!driver.grams_tick(false));
+    // The rows were all looked at: the next tick has none to go through.
+    let grams = &driver.session.payments.hub.grams;
+    assert_eq!(grams.peers_resolved, grams.entries.len());
+    assert_eq!(grams.new_peers().count(), 0);
     let mut users: Vec<i64> = sent_of(&recorder, "getUser")
         .iter()
         .filter_map(|v| v["user_id"].as_i64())

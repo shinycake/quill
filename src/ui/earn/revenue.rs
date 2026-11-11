@@ -105,7 +105,7 @@ fn open_learn(cx: &mut Context<QuillApp>) -> impl Fn(&mut Window, &mut App) + 's
     let owner = cx.entity().downgrade();
     move |_, cx| {
         let _ = owner.update(cx, |this, cx| {
-            this.open_earn_box(crate::ui::earn_state::EarnBox::Learn { diamonds: 0 });
+            this.open_earn_box(crate::ui::earn_state::EarnBox::Learn);
             cx.notify();
         });
     }

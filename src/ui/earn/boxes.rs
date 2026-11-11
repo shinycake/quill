@@ -46,7 +46,7 @@ fn diamonds_toast(count: u32) -> String {
 impl QuillApp {
     fn close_earn_learn(&mut self, cx: &mut Context<Self>) {
         self.earn
-            .close_box_if(|b| matches!(b, EarnBox::Learn { .. }));
+            .close_box_if(|b| matches!(b, EarnBox::Learn));
         cx.notify();
     }
 
@@ -135,15 +135,10 @@ impl QuillApp {
                                 .debug_selector(|| "earn-learn-diamond".into())
                                 .cursor_pointer()
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    let mut count = 0;
-                                    if let Some(EarnBox::Learn { diamonds }) =
-                                        this.earn.open_box.as_mut()
-                                    {
-                                        if *diamonds < 100 {
-                                            *diamonds += 1;
-                                        }
-                                        count = *diamonds;
+                                    if this.earn.diamonds < 100 {
+                                        this.earn.diamonds += 1;
                                     }
+                                    let count = this.earn.diamonds;
                                     this.set_note(StatusNote::info(diamonds_toast(count)));
                                     cx.notify();
                                 }))

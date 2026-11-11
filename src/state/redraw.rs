@@ -279,7 +279,7 @@ fn file_need(session: &Session, file: &ParsedFile) -> RedrawNeed {
             .files
             .get(&id)
             .is_some_and(|known| known.local.is_downloading_completed);
-    let asked_by = session.media.open_chat_media_downloads.get(&id).copied();
+    let asked_by = session.media.downloads.asked_by_chat(id);
     let open_chat = asked_by.is_some();
     // Only the main window reports its rows; a chat window that draws
     // the chat shows the row's progress live.

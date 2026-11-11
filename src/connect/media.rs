@@ -124,18 +124,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(Vec::new());
         };
         let ids = self.session.auto_download_media_file_ids();
-        let session = &mut self.session;
-        session
-            .media
-            .open_chat_media_downloads
-            .retain(|id, _| session.media.downloads.is_requested(*id));
         let mut extras = Vec::new();
         for file_id in ids {
             if let Some(extra) = self.download_file(file_id, AUTO_MEDIA_DOWNLOAD_PRIORITY)? {
                 self.session
                     .media
-                    .open_chat_media_downloads
-                    .insert(file_id.0, chat_id);
+                    .downloads
+                    .note_open_chat(file_id.0, chat_id);
                 extras.push(extra);
             }
         }

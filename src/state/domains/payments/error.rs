@@ -108,7 +108,10 @@ impl Session {
             Some(RequestPurpose::Payments(PaymentsPurpose::GetAwardMembers { generation })) => {
                 self.payments.giveaway.award_members.fail(
                     generation,
-                    format!("Couldn't load the members: {}", error_reason(err)),
+                    crate::lang::tr_with(
+                        crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_MEMBERS_REASON,
+                        &[("reason", &error_reason(err))],
+                    ),
                 );
             }
             Some(RequestPurpose::GetStarGiftOptions) => {
