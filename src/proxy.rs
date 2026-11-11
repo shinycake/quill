@@ -709,7 +709,7 @@ pub struct ProxyState {
     /// Per-proxy-id ping results.
     pub pings: HashMap<i32, PingStatus>,
     /// The proxy-link box's stage (its proxy is not in the list).
-    pub link: LinkCheck,
+    pub link_check: LinkCheck,
     /// Option `prefer_ipv6` (tdesktop "Try connecting through IPv6").
     pub prefer_ipv6: bool,
     pub prefs: ProxyPrefs,

@@ -138,8 +138,8 @@ impl Session {
     /// stage carries settles it.
     fn settle_link_check(&mut self, pending: Option<&PendingRequest>, status: PingStatus) {
         let Some(pending) = pending else { return };
-        if self.settings.proxy.link == LinkCheck::Checking(pending.id) {
-            self.settings.proxy.link = LinkCheck::Done(status);
+        if self.settings.proxy.link_check == LinkCheck::Checking(pending.id) {
+            self.settings.proxy.link_check = LinkCheck::Done(status);
         }
     }
 

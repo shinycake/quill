@@ -231,7 +231,7 @@ impl QuillApp {
             let draft = link.draft.clone();
             let stage = this
                 .session()
-                .map_or(LinkCheck::Review, |s| s.settings.proxy.link);
+                .map_or(LinkCheck::Review, |s| s.settings.proxy.link_check);
             let warn = stage == LinkCheck::Warn;
             let ping = match stage {
                 LinkCheck::Checking(_) => Some(PingStatus::Checking),

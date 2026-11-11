@@ -246,7 +246,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         match self.sender.send_json(&ping_proxy(extra, draft)) {
             Ok(()) => {
-                self.session.settings.proxy.link = LinkCheck::Checking(extra);
+                self.session.settings.proxy.link_check = LinkCheck::Checking(extra);
                 Ok(extra)
             }
             Err(err) => {

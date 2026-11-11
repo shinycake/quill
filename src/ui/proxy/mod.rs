@@ -551,7 +551,7 @@ impl QuillApp {
                 self.settings.proxy.link = Some(ProxyLinkBox { draft });
                 self.open_box(crate::ui::shell::DialogKind::ProxyLink);
                 if let Some(live) = self.live.as_mut() {
-                    live.driver.session.settings.proxy.link = LinkCheck::Review;
+                    live.driver.session.settings.proxy.link_check = LinkCheck::Review;
                     let _ = live.driver.maybe_fetch_proxies();
                 }
             }
@@ -574,7 +574,7 @@ impl QuillApp {
     /// no longer matches and is ignored.
     fn reset_link_check(&mut self) {
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.settings.proxy.link = LinkCheck::Review;
+            live.driver.session.settings.proxy.link_check = LinkCheck::Review;
         }
     }
 
@@ -617,10 +617,10 @@ impl QuillApp {
         let draft = link.draft.clone();
         let _ = self.proxy_driver(|driver| {
             if acked {
-                driver.session.settings.proxy.link = LinkCheck::Review;
+                driver.session.settings.proxy.link_check = LinkCheck::Review;
                 let _ = driver.ping_link_proxy(&draft);
             } else {
-                driver.session.settings.proxy.link = LinkCheck::Warn;
+                driver.session.settings.proxy.link_check = LinkCheck::Warn;
             }
         });
         cx.notify();
