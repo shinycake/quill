@@ -29,18 +29,35 @@ pub(crate) const OPENING_SPINNER: Duration = Duration::from_millis(500);
 /// "Connecting…" once the picture stood still this long.
 pub(crate) const CONNECTING_AFTER: Duration = Duration::from_secs(5);
 
-/// What the overlay is decided from, read once per draw.
+/// What the overlay is decided from, read once per draw: one stage of the
+/// feed, never a state beside flags that may disagree with it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct LiveInput {
-    /// The live player's state; `None` before there is a player (no feed
-    /// yet, which reads as opening).
-    pub(crate) state: Option<PlayState>,
+pub(crate) enum LiveSource {
+    /// No player yet (no feed yet), which reads as opening.
+    NoPlayer,
+    /// The live player's state.
+    Player(PlayState),
     /// Nothing is expected: not joined, nobody broadcasting, or not
-    /// playable here. The placeholder shows without a spinner.
-    pub(crate) idle: bool,
+    /// playable here. The placeholder shows without a spinner; a player
+    /// that ended or failed still shows its end.
+    Idle(Option<PlayState>),
     /// The host knows the picture failed (the call's connect reported an
     /// error) although the player has not.
-    pub(crate) failed: bool,
+    HostFailed,
+}
+
+impl LiveSource {
+    /// The one stage the host's readings amount to: a failure the host
+    /// knows wins, then nothing expected, then the player.
+    pub(crate) fn read(player: Option<PlayState>, idle: bool, failed: bool) -> Self {
+        if failed {
+            Self::HostFailed
+        } else if idle {
+            Self::Idle(player)
+        } else {
+            player.map_or(Self::NoPlayer, Self::Player)
+        }
+    }
 }
 
 /// What shows over the picture.
@@ -76,23 +93,21 @@ enum Phase {
     Failed,
 }
 
-fn phase(input: LiveInput) -> Phase {
-    if input.failed || input.state == Some(PlayState::Failed) {
-        return Phase::Failed;
-    }
-    if input.state == Some(PlayState::Ended) {
-        return Phase::Ended;
-    }
-    if input.idle {
-        return Phase::Idle;
-    }
-    match input.state {
+fn phase(source: LiveSource) -> Phase {
+    let (player, idle) = match source {
+        LiveSource::HostFailed => return Phase::Failed,
+        LiveSource::NoPlayer => (None, false),
+        LiveSource::Player(state) => (Some(state), false),
+        LiveSource::Idle(state) => (state, true),
+    };
+    match player {
+        Some(PlayState::Failed) => Phase::Failed,
+        Some(PlayState::Ended) => Phase::Ended,
+        _ if idle => Phase::Idle,
         None | Some(PlayState::Opening) => Phase::Opening,
         Some(PlayState::Buffering) => Phase::Stalled,
         Some(PlayState::Paused) => Phase::Paused,
         Some(PlayState::Ready | PlayState::Playing) => Phase::None,
-        // Handled above.
-        Some(PlayState::Ended | PlayState::Failed) => Phase::None,
     }
 }
 
@@ -135,8 +150,8 @@ fn overlay_at(phase: Phase, elapsed: Duration) -> (LiveOverlay, Option<Duration>
 #[derive(Default)]
 pub(crate) struct LiveOverlayClock {
     phase: Option<(Phase, Instant)>,
-    armed: Option<Instant>,
-    timer: Option<gpui_kit::Task<()>>,
+    /// The redraw armed for the phase's next change: when, and its timer.
+    armed: Option<(Instant, gpui_kit::Task<()>)>,
 }
 
 impl LiveOverlayClock {
@@ -144,10 +159,10 @@ impl LiveOverlayClock {
     /// redraw is armed for that time yet (arm it with [`Self::arm`]).
     pub(crate) fn observe(
         &mut self,
-        input: LiveInput,
+        source: LiveSource,
         now: Instant,
     ) -> (LiveOverlay, Option<Instant>) {
-        let current = phase(input);
+        let current = phase(source);
         let since = match self.phase {
             Some((phase, since)) if phase == current => since,
             _ => {
@@ -159,10 +174,9 @@ impl LiveOverlayClock {
         let due = left.and_then(|left| now.checked_add(left));
         if due.is_none() {
             self.armed = None;
-            self.timer = None;
             return (overlay, None);
         }
-        if due == self.armed {
+        if due == self.armed.as_ref().map(|(at, _)| *at) {
             return (overlay, None);
         }
         (overlay, due)
@@ -170,23 +184,18 @@ impl LiveOverlayClock {
 
     /// Keep the redraw due at `due`.
     pub(crate) fn arm(&mut self, due: Instant, timer: gpui_kit::Task<()>) {
-        self.armed = Some(due);
-        self.timer = Some(timer);
+        self.armed = Some((due, timer));
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CONNECTING_AFTER, LiveInput, LiveOverlay, LiveOverlayClock, OPENING_SPINNER};
+    use super::{CONNECTING_AFTER, LiveOverlay, LiveOverlayClock, LiveSource, OPENING_SPINNER};
     use crate::ui::video_player::{PlayState, STALL_AFTER};
     use std::time::{Duration, Instant};
 
-    fn input(state: Option<PlayState>) -> LiveInput {
-        LiveInput {
-            state,
-            idle: false,
-            failed: false,
-        }
+    fn input(state: Option<PlayState>) -> LiveSource {
+        LiveSource::read(state, false, false)
     }
 
     #[test]
@@ -251,11 +260,7 @@ mod tests {
     fn failure_and_end_win_over_everything_and_idle_has_no_spinner() {
         let t0 = Instant::now();
         let mut clock = LiveOverlayClock::default();
-        let idle = LiveInput {
-            state: None,
-            idle: true,
-            failed: false,
-        };
+        let idle = LiveSource::read(None, true, false);
         let (overlay, due) = clock.observe(idle, t0);
         assert_eq!(overlay, LiveOverlay::Idle);
         assert_eq!(due, None);
@@ -263,15 +268,14 @@ mod tests {
         assert_eq!(overlay, LiveOverlay::Paused);
         let (overlay, _) = clock.observe(input(Some(PlayState::Ended)), t0);
         assert_eq!(overlay, LiveOverlay::Ended);
-        let failed = LiveInput {
-            state: Some(PlayState::Playing),
-            idle: true,
-            failed: true,
-        };
+        let failed = LiveSource::read(Some(PlayState::Playing), true, true);
         let (overlay, _) = clock.observe(failed, t0);
         assert_eq!(overlay, LiveOverlay::Failed);
         let (overlay, _) = clock.observe(input(Some(PlayState::Failed)), t0);
         assert_eq!(overlay, LiveOverlay::Failed);
+        // An idle feed whose player ended still shows the end.
+        let (overlay, _) = clock.observe(LiveSource::read(Some(PlayState::Ended), true, false), t0);
+        assert_eq!(overlay, LiveOverlay::Ended);
         // A sender with no video (Ready) draws nothing over the picture.
         let (overlay, _) = clock.observe(input(Some(PlayState::Ready)), t0);
         assert_eq!(overlay, LiveOverlay::None);

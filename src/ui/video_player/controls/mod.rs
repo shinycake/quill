@@ -18,6 +18,7 @@
 #![deny(clippy::indexing_slicing)]
 
 mod fade;
+mod gesture;
 mod live;
 mod live_overlay;
 mod metrics;
@@ -33,12 +34,13 @@ mod tests;
 #[cfg(feature = "demo-capture")]
 pub(crate) use fade::cursor_hides;
 pub(crate) use fade::{ControlsFade, hide_cursor};
+pub(crate) use gesture::{Drag, SpaceHold, WaitingCheck, WaitingGate};
 pub(crate) use live::{
     BADGE_GAP, BAR_HEIGHT, CONTROLS_BG, LiveActions, LiveFacts, LiveKeyAction, VolumeHoverHandler,
     VolumePart, bar_disc, live_badge, live_key_action, live_label, live_pill, live_pill_text_size,
     live_pill_width,
 };
-pub(crate) use live_overlay::{LiveInput, LiveOverlayClock};
+pub(crate) use live_overlay::{LiveOverlayClock, LiveSource};
 pub(crate) use overlay::{LiveOverlayParts, PictureOverlay, PictureState, stream_label_box};
 pub(crate) use scrubber::{HoverHandler, VideoScrubber, elapsed_label, remaining_label};
 pub(crate) use speed::{SpeedMenu, speed_trigger};
@@ -58,9 +60,7 @@ use metrics::{
     VOLUME_SKIP, VOLUME_WIDTH,
 };
 use quill::lang::{keys, tr};
-use quill::media_viewer::{BoostState, waiting_wait};
 use std::rc::Rc;
-use std::time::{Duration, Instant};
 
 /// The controller's per-viewer state on `ViewerUi`: the slider entities,
 /// what a drag previews, the pointer over the scrubber and the Space-hold
@@ -70,24 +70,19 @@ pub(crate) struct VideoControlsState {
     /// The seek slider, in seconds (`0..=duration`). Created when a clip
     /// starts, cleared when it stops.
     pub(crate) seek: Option<Entity<SliderState>>,
-    /// The dragged position while the seek thumb is held.
-    pub(crate) seek_preview: Option<f64>,
+    /// The slider being dragged, with what it previews.
+    pub(crate) drag: Drag,
     /// The volume slider, 0–100.
     pub(crate) volume: Option<Entity<SliderState>>,
-    /// The volume thumb is held.
-    pub(crate) volume_dragging: bool,
     /// The speed popover's slider (created on first use, kept).
     pub(crate) speed: Option<Entity<SliderState>>,
-    /// The speed shown while its slider is dragged.
-    pub(crate) speed_preview: Option<f64>,
     /// Screenshot demo: open the speed popover on the first frame.
     pub(crate) demo_speed_open: bool,
     /// The pointer's fraction over the scrubber while it hovers.
     pub(crate) hover: Option<f32>,
-    /// Space held to play at 2×.
-    pub(crate) boost: BoostState,
-    /// The hold check 200 ms after Space went down.
-    pub(crate) boost_timer: Option<Task<()>>,
+    /// Space held to play at 2×, with the hold check 200 ms after the key
+    /// went down.
+    pub(crate) boost: SpaceHold,
     /// The view the controller was last drawn in (the cached viewer slice,
     /// or a chat window), so a hover redraws only that view.
     pub(crate) panel_view: Option<EntityId>,
@@ -102,66 +97,67 @@ pub(crate) struct VideoControlsState {
 impl VideoControlsState {
     /// A slider is being dragged: the controls must not hide.
     pub(crate) fn dragging(&self) -> bool {
-        self.seek_preview.is_some() || self.volume_dragging || self.speed_preview.is_some()
+        self.drag != Drag::None
+    }
+
+    /// The dragged position while the seek thumb is held.
+    pub(crate) fn seek_preview(&self) -> Option<f64> {
+        self.drag.seek()
+    }
+
+    /// The volume thumb is held.
+    pub(crate) fn volume_dragging(&self) -> bool {
+        self.drag.volume()
+    }
+
+    /// The speed shown while its slider is dragged.
+    pub(crate) fn speed_preview(&self) -> Option<f64> {
+        self.drag.speed()
+    }
+
+    /// The seek thumb moved to `position`.
+    pub(crate) fn preview_seek(&mut self, position: f64) {
+        self.drag = Drag::Seek(position);
+    }
+
+    /// The seek thumb was let go (another slider's drag stays).
+    pub(crate) fn release_seek(&mut self) {
+        if self.drag.seek().is_some() {
+            self.drag = Drag::None;
+        }
+    }
+
+    pub(crate) fn hold_volume(&mut self) {
+        self.drag = Drag::Volume;
+    }
+
+    pub(crate) fn release_volume(&mut self) {
+        if self.drag.volume() {
+            self.drag = Drag::None;
+        }
+    }
+
+    /// The speed slider moved to `speed`.
+    pub(crate) fn preview_speed(&mut self, speed: f64) {
+        self.drag = Drag::Speed(speed);
+    }
+
+    pub(crate) fn release_speed(&mut self) {
+        if self.drag.speed().is_some() {
+            self.drag = Drag::None;
+        }
     }
 
     /// The clip stopped: drop its sliders and any pending gesture. Returns
     /// `true` when a boost was on.
     pub(crate) fn clear_clip(&mut self) -> bool {
         self.seek = None;
-        self.seek_preview = None;
+        // A drag cut off by the clip's end never gets its Release.
+        self.drag = Drag::None;
         self.volume = None;
-        self.volume_dragging = false;
-        // A speed drag cut off by the clip's end never gets its Release.
-        self.speed_preview = None;
         self.hover = None;
-        self.boost_timer = None;
         self.waiting = WaitingGate::default();
         self.boost.cancel()
-    }
-}
-
-/// The delay before a stall shows its spinner (tdesktop
-/// `kWaitingShowDelay`): the gate remembers when waiting began and the
-/// timer that redraws when the delay is up.
-#[derive(Default)]
-pub(crate) struct WaitingGate {
-    since: Option<Instant>,
-    timer: Option<Task<()>>,
-}
-
-/// What [`WaitingGate::observe`] decided.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum WaitingCheck {
-    /// Not waiting, or the delay is up and the spinner shows.
-    Settled { shown: bool },
-    /// Waiting, not long enough yet: redraw after this long.
-    Pending(Duration),
-}
-
-impl WaitingGate {
-    /// Feed whether the clip waits now. A pending delay that already has
-    /// its timer reports `Settled { shown: false }`.
-    pub(crate) fn observe(&mut self, waiting: bool, now: Instant) -> WaitingCheck {
-        if !waiting {
-            self.since = None;
-            self.timer = None;
-            return WaitingCheck::Settled { shown: false };
-        }
-        let since = *self.since.get_or_insert(now);
-        match waiting_wait(since, now) {
-            None => {
-                self.timer = None;
-                WaitingCheck::Settled { shown: true }
-            }
-            Some(_) if self.timer.is_some() => WaitingCheck::Settled { shown: false },
-            Some(wait) => WaitingCheck::Pending(wait),
-        }
-    }
-
-    /// Keep the timer that redraws once the delay is up.
-    pub(crate) fn arm(&mut self, timer: Task<()>) {
-        self.timer = Some(timer);
     }
 }
 
@@ -250,7 +246,7 @@ impl VideoController {
             row_id,
             transport: transport.clone(),
             seek: state.seek.clone(),
-            seek_preview: state.seek_preview,
+            seek_preview: state.seek_preview(),
             hover: state.hover,
             volume: state.volume.clone(),
             level: transport.volume,

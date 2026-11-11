@@ -57,21 +57,35 @@ fn the_waiting_gate_waits_half_a_second() {
 fn a_stopped_clip_drops_its_gestures() {
     let mut state = VideoControlsState::default();
     assert!(!state.dragging());
-    state.seek_preview = Some(3.0);
+    state.preview_seek(3.0);
     assert!(state.dragging());
-    state.seek_preview = None;
-    state.volume_dragging = true;
+    state.release_seek();
+    state.hold_volume();
     assert!(state.dragging());
     state.hover = Some(0.4);
-    state.speed_preview = Some(1.5);
+    state.preview_speed(1.5);
     let t0 = Instant::now();
     state.boost.press(t0);
     assert!(state.boost.tick(t0 + Duration::from_millis(250)));
     assert!(state.clear_clip(), "the boost was on");
     assert!(!state.dragging());
-    assert_eq!(state.speed_preview, None, "a cut-off speed drag ends too");
+    assert_eq!(state.speed_preview(), None, "a cut-off speed drag ends too");
     assert_eq!(state.hover, None);
     assert!(!state.boost.is_active());
+}
+
+#[test]
+fn releasing_one_slider_leaves_another_held() {
+    let mut state = VideoControlsState::default();
+    state.hold_volume();
+    state.release_seek();
+    state.release_speed();
+    assert!(
+        state.volume_dragging(),
+        "a late seek release is not the volume's"
+    );
+    state.release_volume();
+    assert!(!state.dragging());
 }
 
 /// WCAG relative luminance of an sRGB channel triple.

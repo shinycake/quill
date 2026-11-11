@@ -24,7 +24,7 @@ use crate::ui::frame_clock::{follow_app, trace_slice_render};
 use crate::ui::group_call_panel::MEMBERS_BG;
 use crate::ui::group_call_stream_layout::stream_full;
 use crate::ui::video_player::controls::{
-    LiveInput, LiveOverlayClock, LiveOverlayParts, PictureOverlay, PictureState,
+    LiveOverlayClock, LiveOverlayParts, LiveSource, PictureOverlay, PictureState,
 };
 use crate::ui::video_player::{VideoPlayer, WidthReport, follow_live_slot, video_frame};
 use gpui_kit::*;
@@ -166,11 +166,11 @@ impl Render for StreamPictureView {
             .player
             .as_ref()
             .is_some_and(VideoPlayer::has_live_frame);
-        let input = LiveInput {
-            state: parts.player.as_ref().map(VideoPlayer::state),
-            idle: parts.idle,
-            failed: parts.failure.is_some(),
-        };
+        let input = LiveSource::read(
+            parts.player.as_ref().map(VideoPlayer::state),
+            parts.idle,
+            parts.failure.is_some(),
+        );
         let now = cx.background_executor().now();
         let (overlay, due) = self.overlay.observe(input, now);
         if let Some(due) = due {

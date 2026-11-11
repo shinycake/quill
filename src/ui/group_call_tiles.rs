@@ -19,7 +19,7 @@
 use super::app::QuillApp;
 use super::chat_row::initials_avatar;
 use super::nested_click::SwallowPress;
-use super::video_player::controls::{LiveInput, LiveOverlayParts, PictureOverlay, PictureState};
+use super::video_player::controls::{LiveOverlayParts, LiveSource, PictureOverlay, PictureState};
 use super::video_player::{Purpose, VideoPlayer, video_frame};
 use crate::ui::app_theme::call_chrome;
 use gpui_kit::assets::IconName;
@@ -290,11 +290,7 @@ impl QuillApp {
             return Some((picture, Some(PictureState::LivePaused { wide: contain })));
         }
         let player = player?;
-        let input = LiveInput {
-            state: Some(player.state()),
-            idle: false,
-            failed: false,
-        };
+        let input = LiveSource::Player(player.state());
         let now = cx.background_executor().now();
         let (overlay, due) = self
             .group_call

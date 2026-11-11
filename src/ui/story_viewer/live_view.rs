@@ -16,7 +16,7 @@ use crate::ui::calls::stream_volume::VolumeHost;
 use crate::ui::message_text::kit_avatar_element;
 use crate::ui::screen_chooser::split_bold;
 use crate::ui::video_player::controls::{
-    LiveActions, LiveFacts, LiveInput, LiveOverlayParts, PictureOverlay, PictureState,
+    LiveActions, LiveFacts, LiveOverlayParts, LiveSource, PictureOverlay, PictureState,
     VideoController, VolumeHoverHandler,
 };
 use crate::ui::video_player::{VideoPlayer, follow_live_slot, video_frame};
@@ -157,11 +157,7 @@ impl QuillApp {
             .session()
             .and_then(|s| s.calls.story_stream.as_ref())
             .is_some_and(ActiveGroupCall::join_failed);
-        let input = LiveInput {
-            state: player.map(VideoPlayer::state),
-            idle: false,
-            failed,
-        };
+        let input = LiveSource::read(player.map(VideoPlayer::state), false, failed);
         let now = cx.background_executor().now();
         let (overlay, due) = self.stories.live.overlay.observe(input, now);
         if let Some(due) = due {

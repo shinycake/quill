@@ -25,7 +25,7 @@ enum DecoderLoad {
     #[default]
     Idle,
     /// Loading on the background executor; the redraw follows.
-    Loading(Task<()>),
+    Loading { _task: Task<()> },
     /// The load ended (and the windows were told).
     Settled,
 }
@@ -71,7 +71,7 @@ fn warm_with(load: fn() -> bool, loaded: fn(&mut App), cx: &mut App) {
             }
         });
     });
-    *cx.default_global::<DecoderLoad>() = DecoderLoad::Loading(task);
+    *cx.default_global::<DecoderLoad>() = DecoderLoad::Loading { _task: task };
 }
 
 #[cfg(test)]
@@ -130,7 +130,7 @@ mod tests {
             );
             assert!(matches!(
                 cx.global::<super::DecoderLoad>(),
-                super::DecoderLoad::Loading(_)
+                super::DecoderLoad::Loading { .. }
             ));
         });
     }
