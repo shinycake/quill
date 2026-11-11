@@ -630,23 +630,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             self.save_media_prefs();
         }
-        // Slice S4: persist per-network settings seeded from
-        // `getAutoDownloadSettingsPresets` (the reducer cannot touch the
-        // filesystem, so it marks them dirty instead). One attempt per mark:
-        // a write that fails (a read-only folder, a full disk) is said on the
-        // Data & Storage page and tried again when the settings change next,
-        // not on every ingest.
-        if std::mem::take(&mut self.session.settings.data_storage_dirty) {
-            let written = self.save_data_storage_prefs();
-            let save = &mut self.session.settings.data_storage_save;
-            match written {
-                Ok(()) => save.begin(crate::state::StorageSaveKind::Persist),
-                Err(_) => save.fail(
-                    crate::state::StorageSaveKind::Persist,
-                    "Couldn't save the Data and Storage settings.",
-                ),
-            }
-        }
+        self.persist_data_storage_if_dirty();
         if cleared_download_cache {
             let _ = self.maybe_fetch_storage_statistics();
         }

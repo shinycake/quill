@@ -895,16 +895,25 @@ fn a_save_refused_after_the_box_closed_goes_to_the_status_line(cx: &mut TestAppC
     assert!(app.read_with(vcx, |app, _| app.dialogs.business_dialog.is_none()));
     app.update(vcx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.settings.business.error = Some("Couldn't save the greeting".into());
+            session.settings.business.error = Some(quill::state::BusinessRefusal {
+                area: quill::state::BusinessArea::Save(
+                    quill::business_settings::BusinessSettingKind::Greeting,
+                ),
+                line: "Couldn't save the greeting".into(),
+            });
         }
         app.business_closed_error_upkeep();
     });
     assert_eq!(status_note(&app, vcx), "Couldn't save the greeting");
     // Said once.
     let left = app.read_with(vcx, |app, _| {
-        app.demo_session
-            .as_ref()
-            .and_then(|s| s.settings.business.error.clone())
+        app.demo_session.as_ref().and_then(|s| {
+            s.settings
+                .business
+                .error
+                .clone()
+                .map(|refusal| refusal.line)
+        })
     });
     assert_eq!(left, None);
 }

@@ -443,7 +443,6 @@ fn apply_placeholder_chats(
         quill::state::RequestPurpose::GetForumTopics,
         Some(FORUM_CHAT),
     );
-    session.threads.forum_topics.begin(FORUM_CHAT.0, extra);
     apply(
         session,
         &format!(

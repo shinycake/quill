@@ -100,7 +100,6 @@ impl QuillApp {
                 continue;
             }
             let extra = session.request(RequestPurpose::GetForumTopics, Some(ChatId(*chat)));
-            session.threads.forum_topics.begin(*chat, extra);
             let list: Vec<String> = topics
                 .iter()
                 .map(|(id, name, unread)| topic(*chat, *id, name, *unread))

@@ -213,17 +213,18 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<(), ConnectSendError> {
         self.session.settings.business.error = None;
         let sent = match (bot, previous) {
-            (Some(bot), _) => self.send_business_extra(SettingsPurpose::SaveConnectedBot, |extra| {
-                bots::set_connected_bot_request(extra, bot)
-            })?,
-            (None, Some(previous)) => {
-                self.send_business_extra(SettingsPurpose::SaveConnectedBot, |extra| {
+            (Some(bot), _) => self
+                .send_business_extra(SettingsPurpose::SaveConnectedBot, |extra| {
+                    bots::set_connected_bot_request(extra, bot)
+                })?,
+            (None, Some(previous)) => self
+                .send_business_extra(SettingsPurpose::SaveConnectedBot, |extra| {
                     bots::delete_connected_bot_request(extra, previous)
-                })?
-            }
+                })?,
             (None, None) => return Ok(()),
         };
-        self.session.settings.business_extra.bot_save = crate::state::ConnectedBotSave::Saving(sent);
+        self.session.settings.business_extra.bot_save =
+            crate::state::ConnectedBotSave::Saving(sent);
         self.session
             .settings
             .business_extra

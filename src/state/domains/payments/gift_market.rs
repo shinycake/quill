@@ -340,13 +340,9 @@ impl Session {
                 market.notes.push(note);
             }
             GiftMarketPurpose::Craft => {
-                let Some(craft) = market
-                    .craft
-                    .as_mut()
-                    .filter(|craft| {
-                        request.is_some_and(|request| craft.run == (CraftRun::Crafting { request }))
-                    })
-                else {
+                let Some(craft) = market.craft.as_mut().filter(|craft| {
+                    request.is_some_and(|request| craft.run == (CraftRun::Crafting { request }))
+                }) else {
                     return;
                 };
                 craft.run = CraftRun::Idle;

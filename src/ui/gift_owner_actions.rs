@@ -131,9 +131,9 @@ pub(super) fn gift_owner_actions(
             ),
         );
     }
-    if mine && !manage.collections.items().is_empty() {
+    if mine && !manage.collections.is_empty() {
         let mut chips = div().flex().flex_wrap().gap_1();
-        for collection in manage.collections.items() {
+        for collection in &manage.collections {
             let cid = collection.id;
             let gid = gift.id.clone();
             let inside = gift.in_collection(cid);

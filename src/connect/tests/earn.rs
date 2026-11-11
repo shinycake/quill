@@ -721,7 +721,10 @@ fn a_refused_ads_link_is_drawn_failed_and_asks_again_only_from_its_retry() {
     let page = p.0.session.payments.earn.page.as_ref().unwrap();
     assert!(matches!(page.ad_account_url, Load::Failed(_)));
     // Nothing re-asks by itself (a poll, another ingest).
-    feed(&mut p, json!({"@type": "updateOption", "name": "x", "value": {"@type": "optionValueBoolean", "value": true}}));
+    feed(
+        &mut p,
+        json!({"@type": "updateOption", "name": "x", "value": {"@type": "optionValueBoolean", "value": true}}),
+    );
     assert_eq!(count(&p.1, "getStarAdAccountUrl"), 1);
     // The Retry asks again; only that request's answer lands.
     p.0.retry_earn_ad_account_url(EarnPeer::User(BOT)).unwrap();

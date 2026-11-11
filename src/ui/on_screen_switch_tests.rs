@@ -104,7 +104,7 @@ fn a_switch_closes_the_checkout(cx: &mut TestAppContext) {
     frames(&mut vcx);
     app.update_in(&mut vcx, |app, window, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.checkout.form = quill::state::CheckoutForm::Loading {
+            session.payments.checkout = quill::state::CheckoutForm::Loading {
                 request: quill::ids::RequestId(1),
                 invoice: quill::state::PaymentRequest {
                     invoice: quill::payment_invoice::InputInvoice::Name("demo".into()),
@@ -364,7 +364,7 @@ fn a_switch_closes_a_dialog_hidden_behind_another(cx: &mut TestAppContext) {
     app.update_in(&mut vcx, |app, window, cx| {
         app.open_giveaway_form(CHAT, None, window, cx);
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.checkout.form = quill::state::CheckoutForm::Loading {
+            session.payments.checkout = quill::state::CheckoutForm::Loading {
                 request: quill::ids::RequestId(1),
                 invoice: quill::state::PaymentRequest {
                     invoice: quill::payment_invoice::InputInvoice::Name("demo".into()),

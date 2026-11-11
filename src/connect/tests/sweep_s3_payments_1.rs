@@ -931,8 +931,24 @@ fn a_refused_refetch_after_a_set_edit_keeps_both_lists_marked_for_the_next_try()
     assert!(t.driver.refetch_installed_sets_after_edit().is_err());
     assert_eq!(t.sender.count("getInstalledStickerSets"), 0);
     // The emoji list is still due, not left `Failed` for good.
-    assert!(t.driver.session.stickers.emoji.lists.installed.is_outdated());
-    assert!(t.driver.session.stickers.stickers.lists.installed.is_outdated());
+    assert!(
+        t.driver
+            .session
+            .stickers
+            .emoji
+            .lists
+            .installed
+            .is_outdated()
+    );
+    assert!(
+        t.driver
+            .session
+            .stickers
+            .stickers
+            .lists
+            .installed
+            .is_outdated()
+    );
     t.sender.refuse(&[]);
     t.driver.refetch_installed_sets_after_edit().unwrap();
     let asked = t.sender.all("getInstalledStickerSets");
@@ -942,8 +958,24 @@ fn a_refused_refetch_after_a_set_edit_keeps_both_lists_marked_for_the_next_try()
             .iter()
             .any(|ask| ask["sticker_type"]["@type"] == "stickerTypeCustomEmoji")
     );
-    assert!(!t.driver.session.stickers.emoji.lists.installed.is_outdated());
-    assert!(!t.driver.session.stickers.stickers.lists.installed.is_outdated());
+    assert!(
+        !t.driver
+            .session
+            .stickers
+            .emoji
+            .lists
+            .installed
+            .is_outdated()
+    );
+    assert!(
+        !t.driver
+            .session
+            .stickers
+            .stickers
+            .lists
+            .installed
+            .is_outdated()
+    );
     // Nothing is due any more: nothing more goes out.
     t.driver.refetch_installed_sets_after_edit().unwrap();
     assert_eq!(t.sender.count("getInstalledStickerSets"), 2);
