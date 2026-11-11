@@ -176,7 +176,10 @@ fn driver_inline_query_first_page_sends_dedupes_and_rolls_back() {
             assert_eq!(slot.chat_id, ChatId(1));
             assert_eq!(slot.bot_user_id, 77);
             assert_eq!(slot.query, "@gif cats");
-            assert!(matches!(slot.fetch, InlineQueryFetch::Loading));
+            assert!(matches!(
+                slot.fetch,
+                InlineQueryFetch::Loading { request } if request == extra
+            ));
         }
         None => panic!("inline query slot missing"),
     }
@@ -209,7 +212,7 @@ fn driver_inline_query_first_page_sends_dedupes_and_rolls_back() {
             .inline_query
             .as_ref()
             .map(|slot| &slot.fetch),
-        Some(InlineQueryFetch::Loading)
+        Some(InlineQueryFetch::Loading { request }) if *request == extra
     ));
     assert_eq!(inline_query_sends().len(), 1);
     let _ = std::fs::remove_dir_all(&dir);

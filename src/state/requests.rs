@@ -827,23 +827,6 @@ impl RequestRegistry {
         })
     }
 
-    /// Bots slice: whether a `getInlineQueryResults` request is in flight
-    /// for the (chat, bot) pair, whatever the page. `has_purpose_for_chat`
-    /// compares the full purpose (including `first_page`), so it cannot
-    /// dedup across pages.
-    pub fn has_inline_query_in_flight(&self, chat_id: ChatId, bot_user_id: i64) -> bool {
-        self.pending.values().any(|p| {
-            matches!(
-                p.purpose,
-                RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
-                    chat_id: c,
-                    bot_user_id: b,
-                    ..
-                }) if c == chat_id && b == bot_user_id
-            )
-        })
-    }
-
     /// Mutable access to a pending request (parity slice: stamping
     /// `PendingRequest::scope` after `register`).
     pub fn pending_mut(&mut self, id: RequestId) -> Option<&mut PendingRequest> {

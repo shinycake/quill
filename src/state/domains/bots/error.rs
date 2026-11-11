@@ -66,31 +66,28 @@ impl Session {
             // Bots slice: a failed first page lands in the slot so
             // the picker shows an honest error; a failed "load
             // more" keeps the loaded page retryable.
-            Some(RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
-                chat_id,
-                bot_user_id,
-                first_page,
-            })) => {
-                let failed_first_page = first_page
-                    && matches!(
-                        &self.bots.inline_query,
-                        Some(slot)
-                            if slot.chat_id == chat_id
-                                && slot.bot_user_id == bot_user_id
-                    );
-                if !first_page
-                    && let Some(slot) = self.bots.inline_query.as_mut()
-                    && slot.chat_id == chat_id
-                    && slot.bot_user_id == bot_user_id
-                    && let InlineQueryFetch::Loaded { next_offset, .. } = &slot.fetch
-                {
-                    slot.more_failed = Some(next_offset.clone());
-                }
-                if failed_first_page && let Some(slot) = self.bots.inline_query.as_mut() {
-                    slot.fetch = InlineQueryFetch::Failed(call_request_error_line(
-                        err,
-                        "Could not load inline results",
-                    ));
+            Some(RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults { .. })) => {
+                let asked = pending.map(|p| p.id);
+                if let Some(slot) = self.bots.inline_query.as_mut() {
+                    match &mut slot.fetch {
+                        InlineQueryFetch::Loading { request } if Some(*request) == asked => {
+                            slot.fetch = InlineQueryFetch::Failed(call_request_error_line(
+                                err,
+                                "Could not load inline results",
+                            ));
+                        }
+                        InlineQueryFetch::Loaded {
+                            next_offset, more, ..
+                        } => {
+                            if matches!(more, InlineMore::Asking { request } if Some(*request) == asked)
+                            {
+                                *more = InlineMore::Failed {
+                                    offset: next_offset.clone(),
+                                };
+                            }
+                        }
+                        _ => {}
+                    }
                 }
             }
             // Bots slice: a failed `@botname` lookup lands in the
@@ -205,13 +202,7 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::GetLoginUrlInfo) | Some(RequestPurpose::GetLoginUrl)
         ) {
-            let fallback_url = self
-                .bots
-                .login_url_request
-                .take()
-                .map(|request| request.raw_url)
-                .unwrap_or_default();
-            self.bots.last_login_url_info = Some(LoginUrlInfo::Failed { fallback_url });
+            self.bots.login_url.fail(pending.map(|p| p.id));
         }
         self.apply_web_app_error(pending, err);
     }

@@ -43,10 +43,57 @@ impl BackgroundSearch {
     }
 }
 
+/// The `getInstalledBackgrounds` answer of each theme: the server filters
+/// the list by theme, so each has its own fetch, asked and answered under
+/// its own request.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct InstalledBackgrounds {
+    light: crate::state::fetch::Fetch<Vec<Background>>,
+    dark: crate::state::fetch::Fetch<Vec<Background>>,
+}
+
+impl InstalledBackgrounds {
+    pub fn theme(&self, dark: bool) -> &crate::state::fetch::Fetch<Vec<Background>> {
+        if dark { &self.dark } else { &self.light }
+    }
+
+    pub fn theme_mut(&mut self, dark: bool) -> &mut crate::state::fetch::Fetch<Vec<Background>> {
+        if dark { &mut self.dark } else { &mut self.light }
+    }
+
+    /// Every installed background held, of either theme.
+    pub fn all(&self) -> impl Iterator<Item = &Background> {
+        [&self.light, &self.dark]
+            .into_iter()
+            .filter_map(|fetch| fetch.data())
+            .flatten()
+    }
+
+    /// An installed background by id, from either theme's list.
+    pub fn find(&self, id: i64) -> Option<&Background> {
+        self.all().find(|background| background.id == id)
+    }
+
+    /// Forget the last error of each list (a page opened: a failed list may
+    /// be asked once more).
+    pub fn clear_errors(&mut self) {
+        self.light.clear_error();
+        self.dark.clear_error();
+    }
+
+    /// `id` left the account's installed wallpapers: out of every list.
+    pub fn forget(&mut self, id: i64) {
+        for fetch in [&mut self.light, &mut self.dark] {
+            if let Some(list) = fetch.data_mut() {
+                list.retain(|background| background.id != id);
+            }
+        }
+    }
+}
+
 pub struct ChatsState {
-    /// `getInstalledBackgrounds` answer for the current theme; `None` until
-    /// fetched.
-    pub installed_backgrounds: crate::state::fetch::Fetch<Vec<Background>>,
+    /// `getInstalledBackgrounds` answers, per theme; nothing until fetched.
+    pub installed_backgrounds: InstalledBackgrounds,
     /// The account's default wallpaper per theme (`false` light, `true`
     /// dark), from `updateDefaultBackground` and `setDefaultBackground`.
     pub default_backgrounds: HashMap<bool, Background>,
@@ -135,7 +182,7 @@ pub struct ChatsState {
 impl ChatsState {
     pub(crate) fn new() -> Self {
         Self {
-            installed_backgrounds: crate::state::fetch::Fetch::Idle,
+            installed_backgrounds: InstalledBackgrounds::default(),
             default_backgrounds: HashMap::new(),
             chat_backgrounds: HashMap::new(),
             chat_theme_names: HashMap::new(),

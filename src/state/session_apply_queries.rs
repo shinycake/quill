@@ -17,26 +17,34 @@ impl Session {
             self.location.venues_answered(generation, page.venues);
             return;
         }
-        if let Some(RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
-            chat_id,
-            bot_user_id,
-            first_page,
-        })) = pending.map(|p| p.purpose)
+        if let Some(RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults { first_page, .. })) =
+            pending.map(|p| p.purpose)
         {
-            let slot_ok = match (first_page, self.bots.inline_query.as_ref()) {
-                (true, Some(slot)) => {
-                    slot.chat_id == chat_id
-                        && slot.bot_user_id == bot_user_id
-                        && matches!(slot.fetch, InlineQueryFetch::Loading)
-                }
-                (false, Some(slot)) => {
-                    slot.chat_id == chat_id
-                        && slot.bot_user_id == bot_user_id
-                        && matches!(slot.fetch, InlineQueryFetch::Loaded { .. })
-                }
+            // Only the request the slot waits for settles it: the first page
+            // under `Loading`, a next page under `Loaded.more`.
+            let asked = pending.map(|p| p.id);
+            let waits = match (first_page, self.bots.inline_query.as_ref()) {
+                (
+                    true,
+                    Some(InlineQuerySlot {
+                        fetch: InlineQueryFetch::Loading { request },
+                        ..
+                    }),
+                ) => Some(*request) == asked,
+                (
+                    false,
+                    Some(InlineQuerySlot {
+                        fetch:
+                            InlineQueryFetch::Loaded {
+                                more: InlineMore::Asking { request },
+                                ..
+                            },
+                        ..
+                    }),
+                ) => Some(*request) == asked,
                 _ => false,
             };
-            if slot_ok {
+            if waits {
                 // The grid shows these images; the download pass finds
                 // them through the stored results.
                 self.remember_files(&page.files);
@@ -69,6 +77,7 @@ impl Session {
                             button: page.button.or_else(|| old_button.clone()),
                             results,
                             next_offset,
+                            more: InlineMore::Idle,
                         }
                     }
                     _ => InlineQueryFetch::Loaded {
@@ -80,6 +89,7 @@ impl Session {
                             page.next_offset
                         },
                         results: page.results,
+                        more: InlineMore::Idle,
                     },
                 };
                 if let Some(slot) = self.bots.inline_query.as_mut() {

@@ -115,7 +115,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         content: serde_json::Value,
     ) -> serde_json::Value {
         let cover = cover_path(&self.session, chat_id, attachment);
-        with_video_options(content, cover.as_deref(), attachment.extras.start_timestamp)
+        with_video_options(content, cover.as_deref(), attachment.extras.start_timestamp())
     }
 
     /// [`Self::with_attachment_video_options`] for a built `sendMessage`.
@@ -155,11 +155,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let attachments: &[ComposerAttachment] = if !snapshot.album.is_empty() {
-            &snapshot.album
-        } else {
-            snapshot.attachment.as_slice()
-        };
+        let attachments: &[ComposerAttachment] = snapshot.content.attachments();
         if !paid_media_fits(attachments, true) {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -193,7 +189,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     height: probe.height,
                     supports_streaming: probe.supports_streaming,
                     cover: cover.as_deref(),
-                    start_timestamp: attachment.extras.start_timestamp,
+                    start_timestamp: attachment.extras.start_timestamp(),
                 },
                 None => PaidMediaItem::Photo { path },
             })

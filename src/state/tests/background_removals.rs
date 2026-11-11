@@ -5,10 +5,25 @@ use super::*;
 
 const SKY: &str = r#"{"@type":"background","id":5,"is_default":false,"is_dark":false,"name":"sky","type":{"@type":"backgroundTypeFill","fill":{"@type":"backgroundFillSolid","color":2}}}"#;
 
+/// The installed list of a theme was asked for and waits for its answer.
+fn asked_list(session: &mut Session, for_dark_theme: bool) -> RequestId {
+    let extra = session.request(
+        RequestPurpose::Chats(ChatsPurpose::GetInstalledBackgrounds { for_dark_theme }),
+        None,
+    );
+    let fetch = session
+        .chats_state
+        .installed_backgrounds
+        .theme_mut(for_dark_theme);
+    fetch.begin();
+    fetch.sent(extra);
+    extra
+}
+
 fn with_list() -> (Session, Arc<MemorySink>, AtomicU64) {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    let extra = session.request(RequestPurpose::GetInstalledBackgrounds, None);
+    let extra = asked_list(&mut session, false);
     apply_json(
         &mut session,
         &seq,
@@ -42,6 +57,40 @@ fn answer(
 }
 
 #[test]
+fn each_theme_keeps_its_own_installed_list() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let light = asked_list(&mut session, false);
+    let dark = asked_list(&mut session, true);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"backgrounds","@extra":"{}","backgrounds":[{SKY}]}}"#,
+            dark.0
+        ),
+    );
+    let lists = &session.chats_state.installed_backgrounds;
+    assert_eq!(lists.theme(true).data().map(Vec::len), Some(1));
+    assert!(lists.theme(false).is_loading(), "the light list still waits");
+    assert!(lists.theme(false).data().is_none());
+    // The light list's own answer lands under the light theme only.
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"backgrounds","@extra":"{}","backgrounds":[]}}"#,
+            light.0
+        ),
+    );
+    let lists = &session.chats_state.installed_backgrounds;
+    assert_eq!(lists.theme(false).data().map(Vec::len), Some(0));
+    assert_eq!(lists.theme(true).data().map(Vec::len), Some(1));
+}
+
+#[test]
 fn a_refused_removal_keeps_the_installed_wallpaper() {
     let (mut session, sink, seq) = with_list();
     let id = session.request(
@@ -52,6 +101,7 @@ fn a_refused_removal_keeps_the_installed_wallpaper() {
         session
             .chats_state
             .installed_backgrounds
+            .theme(false)
             .data()
             .map(Vec::len),
         Some(1)
@@ -61,6 +111,7 @@ fn a_refused_removal_keeps_the_installed_wallpaper() {
         session
             .chats_state
             .installed_backgrounds
+            .theme(false)
             .data()
             .map(Vec::len),
         Some(1)
@@ -75,6 +126,7 @@ fn a_refused_removal_keeps_the_installed_wallpaper() {
         session
             .chats_state
             .installed_backgrounds
+            .theme(false)
             .data()
             .map(Vec::len),
         Some(0)
@@ -87,6 +139,7 @@ fn a_refused_default_and_chat_delete_leave_the_wallpaper() {
     let first = session
         .chats_state
         .installed_backgrounds
+        .theme(false)
         .data()
         .and_then(|list| list.first().cloned());
     assert!(first.is_some(), "the fixture list has a wallpaper");

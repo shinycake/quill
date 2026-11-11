@@ -146,7 +146,7 @@ fn a_failed_next_inline_page_is_remembered_until_the_next_query() {
             .bots
             .inline_query
             .as_ref()
-            .and_then(|slot| slot.more_failed.clone()),
+            .and_then(|slot| slot.more_failed().map(str::to_string)),
         Some("n1".to_string())
     );
     // A new query replaces the slot and forgets the failed page.
@@ -160,7 +160,7 @@ fn a_failed_next_inline_page_is_remembered_until_the_next_query() {
             .bots
             .inline_query
             .as_ref()
-            .and_then(|slot| slot.more_failed.clone()),
+            .and_then(|slot| slot.more_failed().map(str::to_string)),
         None
     );
     let _ = std::fs::remove_dir_all(&dir);

@@ -529,14 +529,44 @@ pub enum PollVotersFetch {
 /// page-next keeps the loaded page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum InlineQueryFetch {
-    Loading,
+    /// The first page is out under `request`; only its answer or error
+    /// settles the slot.
+    Loading { request: RequestId },
     Loaded {
         inline_query_id: i64,
         button: Option<InlineQueryResultsButton>,
         results: Vec<InlineQueryResultSummary>,
         next_offset: String,
+        /// The next page of these results.
+        more: InlineMore,
     },
     Failed(String),
+}
+
+/// The "load more" of a loaded inline query.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum InlineMore {
+    #[default]
+    Idle,
+    /// The page at `next_offset` is out under `request`.
+    Asking { request: RequestId },
+    /// The page at `offset` failed: it is not asked again until the next
+    /// query replaces the slot.
+    Failed { offset: String },
+}
+
+impl InlineQueryFetch {
+    /// A request of this fetch is out.
+    pub fn in_flight(&self) -> bool {
+        matches!(
+            self,
+            Self::Loading { .. }
+                | Self::Loaded {
+                    more: InlineMore::Asking { .. },
+                    ..
+                }
+        )
+    }
 }
 
 /// Bots slice: the single active inline-query slot — which (chat, bot)
@@ -548,9 +578,19 @@ pub struct InlineQuerySlot {
     pub bot_user_id: i64,
     pub query: String,
     pub fetch: InlineQueryFetch,
-    /// The `next_offset` a "load more" request failed on: that page is not
-    /// asked again until the next query replaces the slot.
-    pub more_failed: Option<String>,
+}
+
+impl InlineQuerySlot {
+    /// The `next_offset` a "load more" request failed on, if it did.
+    pub fn more_failed(&self) -> Option<&str> {
+        match &self.fetch {
+            InlineQueryFetch::Loaded {
+                more: InlineMore::Failed { offset },
+                ..
+            } => Some(offset),
+            _ => None,
+        }
+    }
 }
 
 /// Bots slice: `@botname` → bot user id resolution for inline mode.

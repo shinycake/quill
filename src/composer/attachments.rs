@@ -104,17 +104,18 @@ impl ComposerAttachment {
                 (true, Some(_)) => {
                     attachment.kind = AttachmentKind::Document;
                     attachment.spoiler = false;
-                    attachment.extras.set_gif(false);
+                    attachment.extras.hold_gif();
                 }
                 (false, Some(kind))
                     if attachment.kind == AttachmentKind::Document
                         && !attachment.extras.file_only() =>
                 {
                     attachment.kind = kind;
+                    attachment.extras.release_gif();
                 }
                 (true, None) if gif && attachment.extras.is_gif() => {
                     attachment.kind = AttachmentKind::Document;
-                    attachment.extras.set_gif(false);
+                    attachment.extras.hold_gif();
                     attachment.spoiler = false;
                 }
                 (false, None) if gif && attachment.kind == AttachmentKind::Document => {
@@ -539,6 +540,23 @@ mod tests {
         let kinds: Vec<_> = both.iter().map(|att| att.kind).collect();
         assert_eq!(kinds, [AttachmentKind::Document, AttachmentKind::Photo]);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_gif_choice_survives_send_without_compression_on_and_off() {
+        let mut silent = attachment("a.mp4", AttachmentKind::Video);
+        silent.extras.set_gif(true);
+        let mut muted = attachment("b.mp4", AttachmentKind::Video);
+        muted.extras.gif = GifMode::SoundRemoved;
+        let mut list = [silent, muted];
+        ComposerAttachment::set_send_as_files(&mut list, true);
+        assert!(list.iter().all(|att| att.kind == AttachmentKind::Document));
+        assert!(list.iter().all(|att| !att.extras.is_gif()), "files, not animations");
+        assert!(list.iter().all(|att| !att.extras.sound_removed()));
+        ComposerAttachment::set_send_as_files(&mut list, false);
+        assert!(list.iter().all(|att| att.kind == AttachmentKind::Video));
+        assert_eq!(list[0].extras.gif, GifMode::Gif);
+        assert_eq!(list[1].extras.gif, GifMode::SoundRemoved);
     }
 
     #[test]

@@ -105,8 +105,8 @@ fn b1_login_url_info_error_degrades_to_url() {
         from_agent: false,
     };
     for purpose in [RequestPurpose::GetLoginUrlInfo, RequestPurpose::GetLoginUrl] {
-        session.bots.login_url_request = Some(login_request.clone());
         let extra = session.request(purpose, Some(ChatId(21)));
+        session.bots.login_url = LoginUrlStage::asking(extra, login_request.clone());
         apply_json(
             &mut session,
             &seq,
@@ -117,12 +117,64 @@ fn b1_login_url_info_error_degrades_to_url() {
             ),
         );
         assert_eq!(
-            session.bots.last_login_url_info,
-            Some(LoginUrlInfo::Failed {
-                fallback_url: "https://example.com/login".to_string()
-            })
+            session.bots.login_url.take_answer(),
+            Some((
+                LoginUrlInfo::Failed {
+                    fallback_url: "https://example.com/login".to_string()
+                },
+                login_request.clone()
+            ))
         );
     }
+}
+
+#[test]
+fn a_login_url_answer_is_taken_only_by_the_press_that_asked() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    let context = LoginUrlRequest {
+        chat_id: ChatId(21),
+        message_id: MessageId(301),
+        button_id: 11,
+        raw_url: "https://example.com/login".to_string(),
+        from_agent: false,
+    };
+    let asked = session.request(RequestPurpose::GetLoginUrl, Some(ChatId(21)));
+    session.bots.login_url = LoginUrlStage::asking(asked, context.clone());
+    // An answer of another request of the same kind changes nothing.
+    let other = session.request(RequestPurpose::GetLoginUrl, Some(ChatId(21)));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"httpUrl","@extra":"{}","url":"https://example.com/other"}}"#,
+            other.0
+        ),
+    );
+    assert!(matches!(
+        session.bots.login_url,
+        LoginUrlStage::Asking { request, .. } if request == asked
+    ));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"httpUrl","@extra":"{}","url":"https://example.com/authed"}}"#,
+            asked.0
+        ),
+    );
+    assert_eq!(
+        session.bots.login_url.take_answer(),
+        Some((
+            LoginUrlInfo::Open {
+                url: "https://example.com/authed".to_string()
+            },
+            context
+        ))
+    );
+    assert!(session.bots.login_url.is_idle());
 }
 
 #[test]
@@ -133,6 +185,16 @@ fn b1_get_login_url_http_url_opens() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(1);
     let extra = session.request(RequestPurpose::GetLoginUrl, Some(ChatId(21)));
+    session.bots.login_url = LoginUrlStage::asking(
+        extra,
+        LoginUrlRequest {
+            chat_id: ChatId(21),
+            message_id: MessageId(301),
+            button_id: 11,
+            raw_url: String::new(),
+            from_agent: false,
+        },
+    );
     apply_json(
         &mut session,
         &seq,
@@ -143,7 +205,7 @@ fn b1_get_login_url_http_url_opens() {
         ),
     );
     assert_eq!(
-        session.bots.last_login_url_info,
+        session.bots.login_url.take_answer().map(|(info, _)| info),
         Some(LoginUrlInfo::Open {
             url: "https://example.com/authed".to_string()
         })

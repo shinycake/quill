@@ -75,6 +75,41 @@ pub enum GifMode {
     /// `sendsVideoAsGif`): such a video leaves an album and goes out
     /// alone.
     SoundRemoved,
+    /// "Send without compression" is on: the file goes as a document, and
+    /// this is the animation it returns to when the tray goes back to media.
+    HeldAsFile(HeldGif),
+}
+
+/// The animation kind a file sent as a document goes back to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeldGif {
+    Gif,
+    SoundRemoved,
+}
+
+/// What the video editor did to a tray video: nothing, or edits that went
+/// into a copy (or only into the range and cover). One value, so the edits,
+/// the cover frame and the original file cannot disagree.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum VideoPrep {
+    /// The file is as it was picked.
+    #[default]
+    Untouched,
+    Edited(VideoEdit),
+}
+
+/// An edit the video editor saved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VideoEdit {
+    /// The edits `path` was made with.
+    pub edits: VideoEdits,
+    /// `inputVideo.start_timestamp` in seconds: the cover frame chosen in
+    /// the video editor.
+    pub start_timestamp: i32,
+    /// The file the editor started from, kept so the edit can be opened
+    /// again, when `path` is the edited copy; `None` when the edits went
+    /// into the file's own range and cover only.
+    pub source: Option<PathBuf>,
 }
 
 /// What the user set on one attachment besides the file itself.
@@ -85,14 +120,8 @@ pub struct AttachmentExtras {
     pub gif: GifMode,
     /// The cover picked with "Edit Cover" (`inputVideo.cover`).
     pub cover: Option<PathBuf>,
-    /// `inputVideo.start_timestamp` in seconds: the cover frame chosen in
-    /// the video editor.
-    pub start_timestamp: i32,
-    /// The file the video editor started from, kept so the edit can be
-    /// opened again; `path` is the edited copy.
-    pub source: Option<PathBuf>,
-    /// The edits `path` was made with.
-    pub edits: Option<VideoEdits>,
+    /// What the video editor did to the file.
+    pub video: VideoPrep,
     /// The thumbnail Quill made for a picture sent as a file
     /// (`inputDocument.thumbnail`; tdesktop `FinalizeFileThumbnail`).
     pub file_thumbnail: Option<FileThumbnail>,
@@ -138,8 +167,53 @@ impl AttachmentExtras {
         self.gif = match (on, self.gif) {
             (false, _) => GifMode::Off,
             (true, GifMode::Off) => GifMode::Gif,
+            (true, GifMode::HeldAsFile(HeldGif::Gif)) => GifMode::Gif,
+            (true, GifMode::HeldAsFile(HeldGif::SoundRemoved)) => GifMode::SoundRemoved,
             (true, kept) => kept,
         };
+    }
+
+    /// The file goes as a document for now: the animation is remembered.
+    pub fn hold_gif(&mut self) {
+        self.gif = match self.gif {
+            GifMode::Gif => GifMode::HeldAsFile(HeldGif::Gif),
+            GifMode::SoundRemoved => GifMode::HeldAsFile(HeldGif::SoundRemoved),
+            kept => kept,
+        };
+    }
+
+    /// The file goes as media again: a remembered animation returns.
+    pub fn release_gif(&mut self) {
+        if matches!(self.gif, GifMode::HeldAsFile(_)) {
+            self.set_gif(true);
+        }
+    }
+
+    /// The edits the video editor saved, to open it again.
+    pub fn video_edits(&self) -> Option<VideoEdits> {
+        match &self.video {
+            VideoPrep::Untouched => None,
+            VideoPrep::Edited(edit) => Some(edit.edits),
+        }
+    }
+
+    /// The file the editor started from when the file is its copy.
+    pub fn video_source(&self) -> Option<&Path> {
+        match &self.video {
+            VideoPrep::Edited(VideoEdit {
+                source: Some(source),
+                ..
+            }) => Some(source),
+            _ => None,
+        }
+    }
+
+    /// `inputVideo.start_timestamp`: the cover frame the editor chose.
+    pub fn start_timestamp(&self) -> i32 {
+        match &self.video {
+            VideoPrep::Untouched => 0,
+            VideoPrep::Edited(edit) => edit.start_timestamp,
+        }
     }
 
     /// A GIF made by taking the sound out of a video that had it.
