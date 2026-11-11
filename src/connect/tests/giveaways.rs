@@ -160,7 +160,7 @@ fn the_prices_of_another_channel_are_not_shown_for_this_one() {
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
     driver.request_giveaway_options(-100).unwrap();
     let first = sent_request(&recorder, "getPremiumGiveawayPaymentOptions")["@extra"].clone();
-    let answer = |extra: &Value| {
+    let answer = |extra: &serde_json::Value| {
         json!({"@type":"premiumGiveawayPaymentOptions","@extra":extra,
             "options":[{"currency":"USD","amount":1500,"winner_count":5,"month_count":3}]})
     };

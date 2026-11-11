@@ -194,7 +194,7 @@ fn revoking_a_link_frees_the_limit() {
         rig.answer(id, "ok");
     }
     let state = &rig.driver.session.groups.group_type;
-    assert_eq!(state.revoke, crate::state::PublicLinkStage::Idle);
+    assert_eq!(state.revoke, crate::state::PublicLinkStage::Freed);
     assert_eq!(state.public_limit_reached, Some(false));
     assert_eq!(rig.driver.session.payments.hub.limit_box, None);
 }

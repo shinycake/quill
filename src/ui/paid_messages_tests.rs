@@ -319,7 +319,15 @@ fn another_targets_save_does_not_close_the_direct_messages_box(cx: &mut TestAppC
         if let Some(boxed) = app.paid_messages.direct.as_mut() {
             boxed.stage = DirectStage::Saving;
         }
-        // Another target's save, however it ends, never settles this box.
+        // The box's own save is out; another target's, however it ends,
+        // never settles it.
+        if let Some(session) = app.demo_session.as_mut() {
+            session
+                .payments
+                .paid_messages
+                .save
+                .begin(PaidTarget::Channel(13), RequestId(9));
+        }
         let save = |app: &mut QuillApp, f: &dyn Fn(&mut PaidSave)| {
             if let Some(session) = app.demo_session.as_mut() {
                 f(&mut session.payments.paid_messages.save);
@@ -334,8 +342,7 @@ fn another_targets_save_does_not_close_the_direct_messages_box(cx: &mut TestAppC
         save(app, &|s| s.begin(PaidTarget::Channel(14), RequestId(2)));
         app.direct_messages_upkeep(window, cx);
         assert_eq!(stage(app), Some(DirectStage::Saving), "another channel");
-        save(app, &|s| s.begin(PaidTarget::Channel(13), RequestId(3)));
-        save(app, &|s| s.fail(RequestId(3), "no".into()));
+        save(app, &|s| s.fail(RequestId(9), "no".into()));
         app.direct_messages_upkeep(window, cx);
         assert_eq!(stage(app), Some(DirectStage::Editing), "its own refusal");
         if let Some(boxed) = app.paid_messages.direct.as_mut() {
