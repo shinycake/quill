@@ -170,14 +170,20 @@ pub fn song_name(performer: &str, title: &str, file_name: &str) -> String {
     }
 }
 
+/// Where the media file is: a download running (the menu then only offers
+/// to cancel it), on disk, or neither.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MediaFile {
+    #[default]
+    Remote,
+    Downloading,
+    Local,
+}
+
 /// What is known about the media right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct MediaFacts {
-    /// A download of the file is running (the menu then only offers to
-    /// cancel it).
-    pub downloading: bool,
-    /// The file is on disk.
-    pub local: bool,
+    pub file: MediaFile,
     /// Saving the content is allowed (`messageProperties.can_be_saved`,
     /// which is false in a protected chat).
     pub can_save: bool,
@@ -250,12 +256,12 @@ pub fn media_actions(target: &MediaTarget, facts: &MediaFacts) -> Vec<MediaActio
         }
         return actions;
     }
-    if facts.downloading {
+    if facts.file == MediaFile::Downloading {
         return vec![MediaAction::CancelDownload];
     }
     if target.kind == MediaKind::Animation {
         // A GIF that is not on disk (not autoplayed) can be opened.
-        if !facts.local {
+        if facts.file != MediaFile::Local {
             actions.push(MediaAction::OpenGif);
         }
         if facts.can_save && facts.gif_saved != Some(true) {
@@ -279,7 +285,7 @@ pub fn media_actions(target: &MediaTarget, facts: &MediaFacts) -> Vec<MediaActio
             actions.push(MediaAction::ToggleFavorite { remove: favorite });
         }
     }
-    if facts.local {
+    if facts.file == MediaFile::Local {
         actions.push(MediaAction::ShowInFolder);
     }
     if facts.can_save && facts.tone_ok {
@@ -528,7 +534,7 @@ mod tests {
 
     use crate::local_time::civil_at;
     use crate::message_menu::{
-        MediaAction, MediaFacts, MediaKind, MediaTarget, ToneLimits, copy_link_label,
+        MediaAction, MediaFacts, MediaFile, MediaKind, MediaTarget, ToneLimits, copy_link_label,
         fact_check_label, link_copied_note, media_actions, media_target, reacted_label,
         read_date_label, read_status_label, seen_kind, seen_label, sent_label, song_name,
         timecode_insertion, timecode_offered, timecode_text, tone_offered,
@@ -553,7 +559,7 @@ mod tests {
 
     fn local() -> MediaFacts {
         MediaFacts {
-            local: true,
+            file: MediaFile::Local,
             can_save: true,
             ..MediaFacts::default()
         }
@@ -607,7 +613,7 @@ mod tests {
     #[test]
     fn downloading_documents_only_offer_cancel() {
         let facts = MediaFacts {
-            downloading: true,
+            file: MediaFile::Downloading,
             ..local()
         };
         for kind in [MediaKind::Document, MediaKind::Video, MediaKind::Audio] {
@@ -630,7 +636,7 @@ mod tests {
         );
         // Not downloaded: nothing to show in the folder.
         let remote = MediaFacts {
-            local: false,
+            file: MediaFile::Remote,
             ..local()
         };
         assert_eq!(
@@ -654,7 +660,7 @@ mod tests {
         let mut animation = target(MediaKind::Animation);
         animation.copy_name = None;
         let remote = MediaFacts {
-            local: false,
+            file: MediaFile::Remote,
             gif_saved: Some(false),
             ..local()
         };

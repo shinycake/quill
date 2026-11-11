@@ -1,7 +1,8 @@
 //! Where a widget is drawn, with two windows showing it at once.
 
 use super::{
-    Presence, PresenceChange, Showing, WidgetEntry, next_query_token, prune_hidden, write_pending,
+    Live, Presence, PresenceChange, Showing, WidgetEntry, next_query_token, prune_hidden, ticks,
+    write_pending,
 };
 use quill::ids::ChatId;
 use quill::message_widget::WidgetKey;
@@ -120,20 +121,24 @@ fn heavy(since: u64) -> WidgetEntry {
 /// a window draws it, and again the moment it comes back.
 #[test]
 fn a_hidden_animated_widget_ticks_only_while_shown() {
-    let mut entry = WidgetEntry::new(Stored::default(), 100.0);
-    entry.wants_frames = true;
-    assert!(!entry.ticks(), "hidden");
-    assert_eq!(
-        entry.presence.show(MAIN, at(300.0)),
-        PresenceChange::CameBack
-    );
-    assert!(entry.ticks(), "back on screen it ticks again");
-    entry.presence.leave(MAIN, 1);
-    assert!(!entry.ticks());
+    let mut live = Live::new((), (String::new(), [0; 3]));
+    live.wants_frames = true;
+    let mut presence = Presence::Hidden { since: 0 };
+    assert!(!ticks(&presence, Some(&live)), "hidden");
+    assert_eq!(presence.show(MAIN, at(300.0)), PresenceChange::CameBack);
     assert!(
-        entry.wants_frames,
+        ticks(&presence, Some(&live)),
+        "back on screen it ticks again"
+    );
+    presence.leave(MAIN, 1);
+    assert!(!ticks(&presence, Some(&live)));
+    assert!(
+        live.wants_frames,
         "the runtime's ask is kept for the return"
     );
+    // A widget with no runtime asks for nothing.
+    presence.show(MAIN, at(300.0));
+    assert!(!ticks::<()>(&presence, None));
 }
 
 /// A pruned widget whose storage cannot be written sheds its runtime and
@@ -176,19 +181,25 @@ fn entry() -> WidgetEntry {
     WidgetEntry::new(Stored::default(), 100.0)
 }
 
-/// A press whose release cannot arrive (the widget went off screen, its
-/// runtime restarted) must not turn the next moves into a drag.
+/// A press whose release cannot arrive (the widget went off screen) must
+/// not turn the next moves into a drag.
 #[test]
 fn a_released_pointer_has_no_press_or_hover_left() {
-    let mut entry = entry();
-    entry.pressed = Some(0);
-    entry.hovered = true;
-    entry.hold = true;
-    entry.release_pointer();
+    let mut live = Live::new((), (String::new(), [0; 3]));
+    live.pointer.pressed = Some(0);
+    live.pointer.hovered = true;
+    live.pointer.hold = true;
+    live.pointer.selection = "kept".into();
+    live.pointer.release();
     assert_eq!(
-        (entry.pressed, entry.hovered, entry.hold),
+        (
+            live.pointer.pressed,
+            live.pointer.hovered,
+            live.pointer.hold
+        ),
         (None, false, false)
     );
+    assert_eq!(live.pointer.selection, "kept");
 }
 
 /// A bot edits the message to new HTML: nothing of the old content's
@@ -203,9 +214,11 @@ fn new_content_replaces_what_was_bound_to_the_old() {
     };
     let mut entry = entry();
     entry.identity = Some(identity("old"));
-    entry.pressed = Some(0);
+    entry.lifecycle = quill::message_widget::Lifecycle::Stopped {
+        reason: "cpu".into(),
+        streak: 2,
+    };
     entry.polled = Some("{}".into());
-    entry.crashes = 2;
     entry.poll = super::Poll::Asking;
     entry.replace_content(identity("new"), 150.0);
     assert_eq!(
@@ -213,9 +226,12 @@ fn new_content_replaces_what_was_bound_to_the_old() {
         Some("new")
     );
     assert!(entry.frame.is_none() && entry.polled.is_none());
-    assert_eq!(
-        (entry.height, entry.crashes, entry.pressed),
-        (150.0, 0, None)
-    );
+    // The runtime, what it asked for and the stops in a row went whole.
+    assert_eq!(entry.height, 150.0);
+    assert!(matches!(
+        entry.lifecycle,
+        quill::message_widget::Lifecycle::Idle
+    ));
+    assert_eq!(entry.lifecycle.streak(), 0);
     assert_eq!(entry.poll, super::Poll::Off);
 }

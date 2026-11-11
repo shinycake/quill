@@ -29,17 +29,49 @@ pub enum AddressLine<'a> {
     Text(&'a str),
 }
 
+/// The address under the pin, from asking to showing. One value: the
+/// place it is for travels with each stage, and an answer applies only
+/// to the place asked.
+#[derive(Debug, Clone, Default, PartialEq)]
+enum AddressStage {
+    /// Nothing is wanted or shown.
+    #[default]
+    Idle,
+    /// Resolve this once the pin rests (tdesktop `kResolveAddressDelay`).
+    Postponed(GeoPoint),
+    /// The UI should look this place up ([`LocationPicker::take_address_job`]).
+    Wanted(GeoPoint),
+    /// The UI is looking this place up.
+    Resolving(GeoPoint),
+    Shown {
+        point: GeoPoint,
+        text: String,
+    },
+    /// The pin is lifted: the address is kept for a return to the same
+    /// place.
+    HiddenWhileMoving {
+        point: GeoPoint,
+        text: String,
+    },
+}
+
+impl AddressStage {
+    /// The place a stage is asking for or showing.
+    fn point(&self) -> Option<GeoPoint> {
+        match self {
+            Self::Idle | Self::Postponed(_) => None,
+            Self::Wanted(point) | Self::Resolving(point) => Some(*point),
+            Self::Shown { point, .. } | Self::HiddenWhileMoving { point, .. } => Some(*point),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct Address {
-    text: String,
-    shown_once: bool,
-    /// The address that was shown, with the place it is for: restored
-    /// only when the pin comes back to that place.
-    hidden_while_moving: Option<(GeoPoint, String)>,
-    resolving_for: Option<GeoPoint>,
-    /// Resolve this once the pin rests (tdesktop `kResolveAddressDelay`).
-    postponed: Option<GeoPoint>,
-    job: Option<GeoPoint>,
+    stage: AddressStage,
+    /// Some address was shown before: a blank line then reads "Loading…"
+    /// instead of nothing. A latch of the history, not a stage.
+    ever_shown: bool,
 }
 
 /// Where the venue query for a place and text stands.
@@ -73,11 +105,35 @@ struct VenueSearch {
     /// Where a search looks (tdesktop `_venuesSearchLocation`); a search
     /// is offered once it is known.
     search_location: Option<GeoPoint>,
-    search_query: Option<String>,
-    search_shown: bool,
     no_search_location: Option<GeoPoint>,
-    /// The search waits for typing to pause (tdesktop `kSearchDebounceDelay`).
-    debounce: bool,
+    /// The search field (tdesktop `venuesSearchChanged`).
+    input: SearchInput,
+}
+
+/// The venue search field: closed, open and blank, typing (the search
+/// waits for typing to pause, tdesktop `kSearchDebounceDelay`), or
+/// settled on a query.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+enum SearchInput {
+    #[default]
+    Closed,
+    Blank(String),
+    Typing(String),
+    Settled(String),
+}
+
+impl SearchInput {
+    fn query(&self) -> Option<&str> {
+        match self {
+            Self::Closed => None,
+            Self::Blank(query) | Self::Typing(query) | Self::Settled(query) => Some(query),
+        }
+    }
+
+    /// A non-blank query is on.
+    fn is_shown(&self) -> bool {
+        matches!(self, Self::Typing(_) | Self::Settled(_))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,10 +184,8 @@ impl LocationPicker {
                 generation: first_generation,
                 cache: Vec::new(),
                 search_location: None,
-                search_query: None,
-                search_shown: false,
                 no_search_location: None,
-                debounce: false,
+                input: SearchInput::Closed,
             },
             places_in_area: false,
             tiles: Vec::new(),
@@ -173,18 +227,18 @@ impl LocationPicker {
     }
 
     pub fn search_shown(&self) -> bool {
-        self.venues.search_shown
+        self.venues.input.is_shown()
     }
 
     /// The search timer is armed; the UI fires [`Self::search_debounce_fired`].
     pub fn search_debounce_pending(&self) -> bool {
-        self.venues.debounce
+        matches!(self.venues.input, SearchInput::Typing(_))
     }
 
     pub fn address_line(&self) -> AddressLine<'_> {
-        if !self.address.text.is_empty() {
-            AddressLine::Text(&self.address.text)
-        } else if self.address.shown_once {
+        if let AddressStage::Shown { text, .. } = &self.address.stage {
+            AddressLine::Text(text)
+        } else if self.address.ever_shown {
             AddressLine::Loading
         } else {
             AddressLine::Hidden
@@ -212,14 +266,12 @@ impl LocationPicker {
             return;
         }
         self.moving = true;
-        if !self.address.text.is_empty()
-            && let Some(point) = self.address.resolving_for
-        {
-            self.address.hidden_while_moving =
-                Some((point, std::mem::take(&mut self.address.text)));
-        }
-        self.address.text.clear();
-        self.address.postponed = None;
+        self.address.stage = match std::mem::take(&mut self.address.stage) {
+            AddressStage::Shown { point, text } => AddressStage::HiddenWhileMoving { point, text },
+            // A lookup not started is dropped; one under way goes on.
+            AddressStage::Postponed(_) => AddressStage::Idle,
+            other => other,
+        };
         self.places_in_area = false;
     }
 
@@ -236,16 +288,21 @@ impl LocationPicker {
         }
         self.moving = false;
         let location = self.view.center();
-        let restored = match self.address.hidden_while_moving.take() {
-            Some((point, text)) if same_place(Some(point), Some(location)) => Some(text),
-            _ => None,
+        self.address.stage = match std::mem::take(&mut self.address.stage) {
+            // Back at the place the address is for.
+            AddressStage::HiddenWhileMoving { point, text }
+                if same_place(Some(point), Some(location)) =>
+            {
+                AddressStage::Shown { point, text }
+            }
+            // A lookup for this place is already out.
+            pending @ (AddressStage::Wanted(_) | AddressStage::Resolving(_))
+                if same_place(pending.point(), Some(location)) =>
+            {
+                pending
+            }
+            _ => AddressStage::Postponed(location),
         };
-        if let Some(text) = restored {
-            self.address.text = text;
-            self.address.postponed = None;
-        } else {
-            self.address.postponed = Some(location);
-        }
         if !same_place(
             self.venues.request.as_ref().map(|r| r.point),
             Some(location),
@@ -257,39 +314,49 @@ impl LocationPicker {
 
     /// The pin rested long enough: resolve its address.
     pub fn resolve_postponed(&mut self) {
-        if let Some(point) = self.address.postponed.take() {
+        if let AddressStage::Postponed(point) = self.address.stage {
+            self.address.stage = AddressStage::Idle;
             self.resolve_address(point);
         }
     }
 
     pub fn address_postponed(&self) -> bool {
-        self.address.postponed.is_some()
+        matches!(self.address.stage, AddressStage::Postponed(_))
     }
 
     fn resolve_address(&mut self, point: GeoPoint) {
-        if same_place(self.address.resolving_for, Some(point)) {
+        if same_place(self.address.stage.point(), Some(point)) {
             return;
         }
-        self.address.resolving_for = Some(point);
-        self.address.job = Some(point);
+        self.address.stage = AddressStage::Wanted(point);
     }
 
     /// The place whose address the UI should look up now.
     pub fn take_address_job(&mut self) -> Option<GeoPoint> {
-        self.address.job.take()
+        let AddressStage::Wanted(point) = self.address.stage else {
+            return None;
+        };
+        self.address.stage = AddressStage::Resolving(point);
+        Some(point)
     }
 
     /// The geocoder answered for `point`; without a name the coordinates
     /// stand in (tdesktop `resolveAddress`'s fallback).
     pub fn address_resolved(&mut self, point: GeoPoint, name: Option<String>) {
-        if !same_place(self.address.resolving_for, Some(point)) {
+        if !same_place(self.address.stage.point(), Some(point)) {
             return;
         }
-        self.address.text = name
+        let text = name
             .map(|name| name.trim().to_string())
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| point.coordinates_label());
-        self.address.shown_once = true;
+        // An answer that lands while the pin is lifted waits for its return.
+        self.address.stage = if self.moving {
+            AddressStage::HiddenWhileMoving { point, text }
+        } else {
+            AddressStage::Shown { point, text }
+        };
+        self.address.ever_shown = true;
     }
 
     /// tdesktop `resolveCurrentLocation`'s callback. A new exact fix flies
@@ -303,7 +370,7 @@ impl LocationPicker {
                     self.wait_for_location();
                     return;
                 }
-                if self.venues.search_query.as_deref().unwrap_or("").is_empty() {
+                if self.venues.input.query().unwrap_or("").is_empty() {
                     self.request_venues(point, "");
                 }
                 self.resolve_address(point);
@@ -335,9 +402,7 @@ impl LocationPicker {
     /// tdesktop `venuesSearchChanged`: `None` when the search field closed.
     pub fn search_changed(&mut self, query: Option<String>) {
         let shown = query.as_ref().is_some_and(|q| !q.trim().is_empty());
-        self.venues.search_query = query;
-        if self.venues.search_shown != shown {
-            self.venues.search_shown = shown;
+        if self.venues.input.is_shown() != shown {
             if shown {
                 self.venues.no_search_location = self.venues.request.as_ref().map(|r| r.point);
             } else if let Some(point) = self.venues.no_search_location
@@ -346,27 +411,29 @@ impl LocationPicker {
                 self.request_venues(point, "");
             }
         }
-        let location = self.venues.search_location;
-        let query = self.venues.search_query.clone().unwrap_or_default();
-        let cached = match location {
-            Some(point) if shown => self.venues_from_cache(point, &query),
+        let text = query.clone().unwrap_or_default();
+        let cached = match self.venues.search_location {
+            Some(point) if shown => self.venues_from_cache(point, &text),
             _ => false,
         };
-        if shown && !cached {
-            self.venues.list = VenueList::Loading;
-            self.venues.debounce = true;
-        } else {
-            self.venues.debounce = false;
-        }
+        self.venues.input = match query {
+            None => SearchInput::Closed,
+            Some(query) if !shown => SearchInput::Blank(query),
+            Some(query) if cached => SearchInput::Settled(query),
+            Some(query) => {
+                self.venues.list = VenueList::Loading;
+                SearchInput::Typing(query)
+            }
+        };
     }
 
     /// The search paused long enough: ask the bot.
     pub fn search_debounce_fired(&mut self) {
-        if !std::mem::take(&mut self.venues.debounce) {
+        let SearchInput::Typing(query) = std::mem::take(&mut self.venues.input) else {
             return;
-        }
+        };
+        self.venues.input = SearchInput::Settled(query.clone());
         if let Some(point) = self.venues.search_location {
-            let query = self.venues.search_query.clone().unwrap_or_default();
             self.request_venues(point, &query);
         }
     }

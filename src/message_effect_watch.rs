@@ -12,15 +12,15 @@
 //! not the effect then plays (power saving can skip it).
 #![deny(clippy::indexing_slicing)]
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 
 /// A message: chat id and message id.
 pub type MessageKey = (i64, i64);
 
-/// Messages remembered in each set, at most. Past it the oldest is
+/// Messages remembered, at most. Past it the oldest is
 /// forgotten; a forgotten message at worst plays or skips its effect once
 /// more.
-const MAX_KEYS: usize = 16_384;
+const MAX_KEYS: usize = 32_768;
 
 /// How a message with an effect reached the session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,79 +44,88 @@ impl EffectArrival {
     }
 }
 
-/// A set that forgets its oldest key when it is full, so a busy session
-/// never replays an effect it forgot or loses one that has not played.
+/// Where a message's effect stands. A message is in one stage, never both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EffectStage {
+    /// Its effect has not played here.
+    Unwatched,
+    /// Marked once: noting the message again never makes it unwatched.
+    Watched,
+}
+
+/// The stage of each message, forgetting the oldest when full, so a busy
+/// session never replays an effect it forgot or loses one that has not
+/// played.
 #[derive(Debug, Default)]
-struct BoundedKeys {
-    keys: HashSet<MessageKey>,
+struct BoundedStages {
+    stages: HashMap<MessageKey, EffectStage>,
     /// Insertion order. It may hold keys that were removed since; those
     /// are skipped when the oldest is dropped.
     order: VecDeque<MessageKey>,
 }
 
-impl BoundedKeys {
-    fn insert(&mut self, key: MessageKey) {
-        if !self.keys.insert(key) {
+impl BoundedStages {
+    fn set(&mut self, key: MessageKey, stage: EffectStage) {
+        if self.stages.insert(key, stage).is_some() {
             return;
         }
         self.order.push_back(key);
-        while self.keys.len() > MAX_KEYS {
+        while self.stages.len() > MAX_KEYS {
             let Some(oldest) = self.order.pop_front() else {
                 break;
             };
-            self.keys.remove(&oldest);
+            self.stages.remove(&oldest);
         }
         // Removed keys leave their place in `order`: shed them when they
         // outnumber the live ones.
         if self.order.len() > MAX_KEYS * 2 {
-            let keys = &self.keys;
-            self.order.retain(|key| keys.contains(key));
+            let stages = &self.stages;
+            self.order.retain(|key| stages.contains_key(key));
         }
     }
 
-    fn contains(&self, key: &MessageKey) -> bool {
-        self.keys.contains(key)
+    fn get(&self, key: &MessageKey) -> Option<EffectStage> {
+        self.stages.get(key).copied()
     }
 
-    fn remove(&mut self, key: &MessageKey) -> bool {
-        self.keys.remove(key)
+    fn remove(&mut self, key: &MessageKey) -> Option<EffectStage> {
+        self.stages.remove(key)
     }
 }
 
 /// The effect bookkeeping for every message the session holds.
 #[derive(Debug, Default)]
 pub struct EffectWatch {
-    unwatched: BoundedKeys,
-    /// Marked once: noting the message again never makes it unwatched.
-    watched: BoundedKeys,
+    messages: BoundedStages,
 }
 
 impl EffectWatch {
     /// A message sent with an effect was stored (again).
     pub fn note(&mut self, key: MessageKey, arrival: EffectArrival) {
-        if arrival.starts_unwatched() && !self.watched.contains(&key) {
-            self.unwatched.insert(key);
+        if arrival.starts_unwatched() && self.messages.get(&key) != Some(EffectStage::Watched) {
+            self.messages.set(key, EffectStage::Unwatched);
         }
     }
 
     /// A message sent from here got its final id (or failed under a new
     /// one): the effect it has not played moves with it.
     pub fn renamed(&mut self, old: MessageKey, new: MessageKey) {
-        if self.unwatched.remove(&old) {
-            self.unwatched.insert(new);
+        if self.messages.get(&old) == Some(EffectStage::Unwatched) {
+            self.messages.remove(&old);
+            self.messages.set(new, EffectStage::Unwatched);
         }
     }
 
     pub fn is_unwatched(&self, key: MessageKey) -> bool {
-        self.unwatched.contains(&key)
+        self.messages.get(&key) == Some(EffectStage::Unwatched)
     }
 
     /// tdesktop `markEffectWatched`: the message was shown. Returns
     /// whether its effect had not played, so this is its one automatic
     /// play.
     pub fn mark_watched(&mut self, key: MessageKey) -> bool {
-        let was = self.unwatched.remove(&key);
-        self.watched.insert(key);
+        let was = self.messages.remove(&key) == Some(EffectStage::Unwatched);
+        self.messages.set(key, EffectStage::Watched);
         was
     }
 }
@@ -190,8 +199,7 @@ mod tests {
             watch.note((2, id), EffectArrival::SentHere);
             watch.mark_watched((3, id));
         }
-        assert!(watch.unwatched.keys.len() <= MAX_KEYS);
-        assert!(watch.watched.keys.len() <= MAX_KEYS);
+        assert!(watch.messages.stages.len() <= MAX_KEYS);
     }
 
     #[test]
