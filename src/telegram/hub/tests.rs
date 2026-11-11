@@ -542,7 +542,11 @@ fn a_replacement_loop_reports_running_without_the_old_hub_touching_it() {
     let bridge = dead.bridge(1);
     tx.send(()).unwrap();
     drop(tx);
-    assert!(wait_until(|| bridge.stopped_unexpectedly()));
+    // The loop gives up after its run of panics. Joining its thread is the
+    // wait: it returns once the loop has ended and reported itself.
+    let ended = lock(&dead.thread).take().expect("the loop's thread");
+    let _ = ended.join();
+    assert!(bridge.stopped_unexpectedly());
     let (live_tx, live_rx) = mpsc::channel::<String>();
     let source: ReceiveSource =
         Box::new(move |timeout| live_rx.recv_timeout(Duration::from_secs_f64(timeout)).ok());

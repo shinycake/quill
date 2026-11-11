@@ -137,7 +137,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// set just now could give it.
     fn reread_system_proxy(&mut self, now: Instant) {
         let wanted = self.wants_system_proxy();
-        self.system_proxy.step(wanted, self.session.connection, now);
+        let changes = crate::system_proxy::changes();
+        if self
+            .system_proxy
+            .step(wanted, self.session.connection, changes, now)
+        {
+            crate::system_proxy::refresh();
+        }
     }
 
     /// Whether the OS proxy settings are followed right now: the user

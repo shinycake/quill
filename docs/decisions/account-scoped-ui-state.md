@@ -8050,7 +8050,7 @@ whose variants carry the data, with a way out of every stage.
 | --- | --- |
 | 06-042 | `FramePlan` holds one `SlotClock { Empty, Running { base, last } }`; the first picture fixes both at once. |
 | 06-043 | The sticker decoder library is cached only on success; a failed load is tried again on the next sticker. |
-| 06-053 | `system_proxy::Follow { Off, On { asked } }` per driver replaces the process-wide `WANTED` flag; the follow runs for background accounts too (above the background early return). |
+| 06-053 | `system_proxy::Follow { Off, On { asked, seen } }` per driver replaces the process-wide `WANTED` flag; the follow runs for background accounts too (above the background early return). The network watcher no longer reads the OS proxy: it counts the change (`network_changed`) and pokes the poll loops, and each client that follows reads once per change (`Follow::step` returns whether to). With nobody following nothing is read. |
 | 07-006, 07-007, 06-061, 07-008 | Out-of-range TDLib integers saturate or skip instead of wrapping (`sat_i32`, `i32::try_from`, `saturating_add`); a scheduled date past 2038 sends `i32::MAX`, never a past date. The birthday `as u8`/`as i32` casts in `parse.rs` are `try_from` too. |
 | 07-004 | `RequestLogGate` is `Gate { Shown, Hidden { calls, saved } }`; a failed level read stores TDLib's default when the first call hides. |
 | 07-002 | `LaunchChats` is one `Launch { Starting, Claimed, Asked, In }` behind one mutex; a new claim starts over for its own client. |

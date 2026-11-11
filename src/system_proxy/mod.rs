@@ -35,6 +35,7 @@ use crate::calls::proxy::ProxyKind;
 use crate::locks::lock_or_recover;
 use crate::proxy::{ProxyDraft, ProxyEntry};
 use crate::telegram::envelope::ConnectionState;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -68,16 +69,35 @@ pub fn detect() -> Option<ProxyDraft> {
     platform::detect()
 }
 
-/// Whether one client follows the OS proxy, and when it last asked for a
-/// fresh read. Each client owns its own, so one account turning the mode
-/// off cannot hide it from another.
+/// Whether one client follows the OS proxy, when it last asked for a fresh
+/// read while connecting, and the network change it has read up to. Each
+/// client owns its own, so one account turning the mode off cannot hide it
+/// from another.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Follow {
     #[default]
     Off,
     On {
         asked: Option<Instant>,
+        /// [`changes`] at the last look.
+        seen: u64,
     },
+}
+
+/// Network changes the OS reported so far (`net_watch`).
+static CHANGES: AtomicU64 = AtomicU64::new(0);
+
+/// The network changed, so the OS proxy may have. Nothing is read here: a
+/// client that follows the OS proxy reads it again at its next tick
+/// ([`Follow::step`]), and with nobody following nothing is read at all.
+pub fn network_changed() {
+    CHANGES.fetch_add(1, Ordering::Relaxed);
+    crate::wake::UPDATES.poke();
+}
+
+/// The count of network changes, for [`Follow::step`].
+pub fn changes() -> u64 {
+    CHANGES.load(Ordering::Relaxed)
 }
 
 impl Follow {
@@ -85,28 +105,35 @@ impl Follow {
     pub fn asked(self) -> Option<Instant> {
         match self {
             Self::Off => None,
-            Self::On { asked } => asked,
+            Self::On { asked, .. } => asked,
         }
     }
 
-    /// Move to the stage for `wanted` at `now`, reading the OS again on the
-    /// edge to following and while `connection` is opening one.
-    pub fn step(&mut self, wanted: bool, connection: ConnectionState, now: Instant) {
+    /// Move to the stage for `wanted` at `now`. True when the OS is to be
+    /// read again ([`refresh`]): on the edge to following, after a network
+    /// change (`changes` moved past the one last read) and while
+    /// `connection` is opening one. A client that does not follow never
+    /// asks.
+    #[must_use]
+    pub fn step(
+        &mut self,
+        wanted: bool,
+        connection: ConnectionState,
+        changes: u64,
+        now: Instant,
+    ) -> bool {
         let was = *self;
-        *self = if !wanted {
-            Self::Off
-        } else {
-            let asked = was.asked();
-            if reread_due(connection, asked, now) {
-                refresh();
-                Self::On { asked: Some(now) }
-            } else {
-                if was == Self::Off {
-                    refresh();
-                }
-                Self::On { asked }
-            }
+        if !wanted {
+            *self = Self::Off;
+            return false;
+        }
+        let connecting = reread_due(connection, was.asked(), now);
+        let current = matches!(was, Self::On { seen, .. } if seen == changes);
+        *self = Self::On {
+            asked: if connecting { Some(now) } else { was.asked() },
+            seen: changes,
         };
+        connecting || !current
     }
 }
 
@@ -171,7 +198,9 @@ pub fn latest(wanted: bool) -> Detected {
     found
 }
 
-/// Read the OS configuration again; a client that follows it asks.
+/// Read the OS configuration again. Only a client that follows it asks
+/// (`Follow::step` said so); the network watcher calls
+/// [`network_changed`] instead.
 pub fn refresh() {
     if let Some(reader) = READER.get() {
         reader.ask();

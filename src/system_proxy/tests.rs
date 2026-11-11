@@ -1,5 +1,5 @@
 use super::{
-    Detected, REREAD_EVERY, SYSTEM_PROXY_COMMENT, SystemProxyStep, is_system_entry,
+    Detected, Follow, REREAD_EVERY, SYSTEM_PROXY_COMMENT, SystemProxyStep, is_system_entry,
     parse_proxy_url, parse_windows_proxy_server, plan_system_proxy, proxy_from_dictionary,
     proxy_from_env, proxy_from_gsettings, reread_due, serve,
 };
@@ -289,4 +289,40 @@ fn plan_waits_for_the_first_read_and_drops_duplicates() {
     let mut custom = entry(1, a, false);
     custom.comment = "work".into();
     assert!(!is_system_entry(&custom));
+}
+
+/// Only a client that follows the OS proxy has it read again after a
+/// network change, and once per change: the watcher itself reads nothing.
+#[test]
+fn a_network_change_is_read_once_by_each_follower_and_by_nobody_else() {
+    let now = Instant::now();
+    let ready = ConnectionState::Ready;
+    let mut off = Follow::Off;
+    assert!(!off.step(false, ready, 3, now), "not following: no read");
+    assert_eq!(off, Follow::Off);
+
+    let mut follower = Follow::Off;
+    assert!(follower.step(true, ready, 3, now), "the edge to following");
+    assert!(!follower.step(true, ready, 3, now), "nothing changed since");
+    assert!(follower.step(true, ready, 4, now), "the network changed");
+    assert!(!follower.step(true, ready, 4, now), "read once per change");
+    assert_eq!(follower.asked(), None, "no connection was being opened");
+
+    // Turned off and on again across a change: the edge reads.
+    assert!(!follower.step(false, ready, 5, now));
+    assert!(follower.step(true, ready, 5, now));
+}
+
+#[test]
+fn a_follower_opening_a_connection_reads_again_on_the_reread_clock() {
+    let start = Instant::now();
+    let connecting = ConnectionState::Connecting;
+    let mut follower = Follow::Off;
+    assert!(follower.step(true, connecting, 0, start));
+    assert_eq!(follower.asked(), Some(start));
+    assert!(!follower.step(true, connecting, 0, start + REREAD_EVERY / 2));
+    assert_eq!(follower.asked(), Some(start));
+    let later = start + REREAD_EVERY;
+    assert!(follower.step(true, connecting, 0, later));
+    assert_eq!(follower.asked(), Some(later));
 }
