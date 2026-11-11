@@ -127,6 +127,7 @@ background.screen_preparing | how many screen clients are being prepared
 background.generation | which background start may land
 background.poll | the background poll task; dropping it ends the loop
 background.prepare | the accounts whose database key is being read, by key, and the workers still running
+background.restarts | failures in a row and the next start of each background account, keyed by its AccountKey
 background.clicks | account clicks from the tray and notifications, each with its key
 background.pending_open | the account to open once its client is ready, by key
 background.notify_from_all | the "notify from all accounts" setting
