@@ -481,6 +481,12 @@ fn the_suggestion_bar_asks_for_the_installed_sets_until_they_answer() {
             .is_some()
     );
     driver.ensure_suggestion_emoji_sets().unwrap();
-    assert_eq!(asked(&recorder), 2, "a failed list is asked for again");
+    assert_eq!(asked(&recorder), 1, "a rebuild does not re-ask a failure");
+    driver.retry_suggestion_emoji_sets().unwrap();
+    assert_eq!(
+        asked(&recorder),
+        2,
+        "a new list asks for a failed list again"
+    );
     let _ = dir;
 }

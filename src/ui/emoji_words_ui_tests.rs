@@ -434,6 +434,7 @@ fn suggest_emoji_says_so_when_the_lookup_fails(cx: &mut TestAppContext) {
         app.composer_ui.emoji_words.bar = WordBar::Asking {
             range: 0..4,
             word: "zzzz".to_string(),
+            request: None,
         };
         app.answer_asked_word(cx);
         assert!(matches!(app.composer_ui.emoji_words.bar, WordBar::Closed));

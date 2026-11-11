@@ -7,7 +7,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::emoji_bar::EmojiBarUi;
+use super::emoji_bar::{BarOwner, EmojiBarUi};
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -395,14 +395,24 @@ impl QuillApp {
             (Some(_), Some(at)) => Some(at),
             (Some(_), None) => first.then_some(0),
         };
+        let mut opened = false;
         if ui.active != active {
             // A new query starts at the strip's start; more emoji for the
             // same one (an answer, a set loaded) keep the view.
             if ui.active.as_ref().map(|a| &a.query) != active.as_ref().map(|a| &a.query) {
-                ui.bar.reset();
+                match active {
+                    Some(ref a) => {
+                        ui.bar.restart(BarOwner::Suggest);
+                        opened = a.query.kind != SuggestKind::Hashtag;
+                    }
+                    None => ui.bar.release(BarOwner::Suggest),
+                }
             }
             ui.active = active;
             cx.notify();
+        }
+        if opened {
+            self.retry_suggestion_emoji_sets();
         }
     }
 
@@ -477,7 +487,7 @@ impl QuillApp {
         let Some(active) = ui.active.take() else {
             return false;
         };
-        ui.bar.reset();
+        ui.bar.release(BarOwner::Suggest);
         if remember {
             ui.dismissed = Some((
                 active.query.kind,
@@ -563,7 +573,7 @@ impl QuillApp {
             return;
         };
         ui.selected = None;
-        ui.bar.reset();
+        ui.bar.release(BarOwner::Suggest);
         let Some(item) = active.items.get(index) else {
             return;
         };

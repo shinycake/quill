@@ -56,6 +56,18 @@ impl KeywordLookups {
             && !self.in_flight.values().any(|q| q == query)
     }
 
+    /// The request in flight for `query`, if one is.
+    pub fn request_for(&self, query: &str) -> Option<RequestId> {
+        self.in_flight
+            .iter()
+            .find_map(|(id, asked)| (asked == query).then_some(*id))
+    }
+
+    /// Whether request `id` is still in flight.
+    pub fn waits_for(&self, id: RequestId) -> bool {
+        self.in_flight.contains_key(&id)
+    }
+
     pub fn sent(&mut self, id: RequestId, query: String) {
         self.in_flight.insert(id, query);
     }

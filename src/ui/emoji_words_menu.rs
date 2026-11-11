@@ -116,11 +116,15 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        let ui = &mut self.screen.composer_ui.emoji_words;
-        ui.unhover(&mut self.screen.composer_ui.suggest);
-        ui.bar = WordBar::Asking {
+        let ui = &mut self.screen.composer_ui;
+        ui.emoji_words.unhover(&mut ui.suggest);
+        let request = self
+            .session()
+            .and_then(|s| s.stickers.emoji.keyword_lookups.request_for(&normalized));
+        self.composer_ui.emoji_words.bar = WordBar::Asking {
             range: action.start..action.end,
             word: normalized,
+            request,
         };
         self.answer_asked_word(cx);
     }
@@ -131,6 +135,7 @@ impl QuillApp {
         let WordBar::Asking {
             range,
             word: normalized,
+            ..
         } = &self.composer_ui.emoji_words.bar
         else {
             return;
@@ -146,6 +151,13 @@ impl QuillApp {
                 self.composer_ui.emoji_words.bar = WordBar::Closed;
                 self.set_note(StatusNote::info(tr(keys::Q_CHAT_EMOJI_WORD_LOOKUP_FAILED)));
                 cx.notify();
+                return;
+            }
+            // The lookup it waited for failed and a retry may be on its
+            // way: wait for that one.
+            let next = lookups.and_then(|l| l.request_for(&normalized));
+            if let WordBar::Asking { request, .. } = &mut self.composer_ui.emoji_words.bar {
+                *request = next;
             }
             return;
         }
@@ -159,9 +171,9 @@ impl QuillApp {
         if items.is_empty() {
             self.set_note(StatusNote::info(tr(keys::Q_CHAT_EMOJI_WORD_NONE)));
         } else {
-            let ui = &mut self.screen.composer_ui.emoji_words;
-            ui.unhover(&mut self.screen.composer_ui.suggest);
-            ui.bar = WordBar::Pinned(OpenBar::new((word, items)));
+            let ui = &mut self.screen.composer_ui;
+            ui.emoji_words
+                .show(OpenBar::new((word, items)), true, &mut ui.suggest);
         }
         cx.notify();
     }
