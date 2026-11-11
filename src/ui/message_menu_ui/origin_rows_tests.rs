@@ -142,7 +142,7 @@ fn only_a_gift_you_sent_offers_another(cx: &mut TestAppContext) {
     assert!(has(vcx, "menu-send-another-gift"));
     assert!(!has(vcx, "menu-original-date"));
     click(vcx, "menu-send-another-gift");
-    assert!(app.read_with(vcx, |app, _| app.message_ui.menu.is_none()));
+    assert!(app.read_with(vcx, |app, _| !app.message_ui.menu.is_open()));
 
     app.update(vcx, |app, _| {
         if let Some(session) = app.demo_session.as_mut()
@@ -250,7 +250,7 @@ fn your_hidden_read_time_offers_to_show_it(cx: &mut TestAppContext) {
     open_menu_on(&app, vcx, TIMES_CHAT, MessageId(71));
     hide_read_time(&app, vcx);
     click(vcx, "menu-read-show");
-    assert!(app.read_with(vcx, |app, _| app.message_ui.menu.is_none()));
+    assert!(app.read_with(vcx, |app, _| !app.message_ui.menu.is_open()));
     let shown = read_time_box(&app, vcx);
     assert_eq!(shown.map(|open| open.kind), Some(ShowOrPremium::ReadTime));
     click(vcx, "show-or-premium-show");

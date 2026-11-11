@@ -107,12 +107,12 @@ fn a_dialog_over_the_chat_keeps_the_keys(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     let chat = other_chat(&app, vcx);
     app.update(vcx, |app, cx| {
-        app.payments.marketplace_open = true;
+        app.payments.marketplace.open_for(ChatId(1), false);
         cx.notify();
     });
     frames(vcx);
     click(&app, vcx, chat);
-    assert!(app.read_with(vcx, |app, _| app.payments.marketplace_open));
+    assert!(app.read_with(vcx, |app, _| app.payments.marketplace.is_open()));
     assert_eq!(app.read_with(vcx, |app, _| app.open_chat_id()), Some(chat));
     assert!(!composer_focused(&app, vcx));
 }

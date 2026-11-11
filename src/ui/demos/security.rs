@@ -70,7 +70,7 @@ impl QuillApp {
             .update(cx, |input, cx| {
                 input.set_value("A little gift for you 🎁", window, cx)
             });
-        self.payments.marketplace_open = true;
+        self.payments.marketplace.open_for(ChatId(11), false);
     }
 
     pub(crate) fn demo_ready_sessions(&mut self, _window: &mut Window, cx: &mut Context<Self>) {

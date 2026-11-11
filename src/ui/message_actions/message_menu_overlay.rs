@@ -80,7 +80,7 @@ impl QuillApp {
         // Reactions lead the menu (Telegram Desktop): the chat's quick
         // strip in its own pill above the menu, expandable to every
         // reaction it allows.
-        let page = self.message_ui.menu_ui.page;
+        let page = self.message_ui.menu.page();
         let can_react = self.session().is_some_and(|s| s.can_react_to(&message));
         let strip = (can_react && page == MessageMenuPage::Main)
             .then(|| self.reaction_strip(chat_id, message_id, &message, cx))
@@ -121,8 +121,8 @@ impl QuillApp {
         }
         // Over a text selection, Reply quotes it and Copy copies it
         // (Telegram Desktop: "Quote & Reply", "Copy Selected Text").
-        let selection = self.message_ui.menu_selection.clone();
-        let selection_nth = self.message_ui.menu_selection_nth;
+        let selection = self.message_ui.menu.selection_text();
+        let selection_nth = self.message_ui.menu.selection_nth();
         let content = effective_content(&message.content, message.ephemeral.as_ref());
         // Over a checklist task, Reply becomes "Reply to Task".
         if can_reply && !self.menu_replies_to_task(content) {
@@ -259,8 +259,8 @@ impl QuillApp {
         // only while the chat is not already shown translated).
         if let Some(selected) = self
             .message_ui
-            .menu_selection
-            .clone()
+            .menu
+            .selection_text()
             .filter(|selected| self.translate_menu_offered(chat_id, selected))
         {
             item!(
@@ -310,7 +310,7 @@ impl QuillApp {
         // Over a link, the menu leads with what Telegram Desktop adds for it:
         // a copy entry named for the kind of link (`copyToClipboardContextItemText`),
         // and, for web links, Open.
-        if let Some(link) = self.message_ui.menu_link.clone() {
+        if let Some(link) = self.message_ui.menu.link() {
             let msg_key = (chat_id.0, message_id.0 as u64);
             if matches!(link, quill::text::LinkTarget::Url { .. }) {
                 let open = link.clone();
@@ -858,6 +858,7 @@ impl QuillApp {
                 ));
             }
         }
+        let on_audience = matches!(page, MessageMenuPage::Audience { .. });
         let page_rows: Vec<MenuRow> = match page {
             MessageMenuPage::Main => rows,
             sub => {
@@ -876,7 +877,7 @@ impl QuillApp {
                     &self.frame.menu.items,
                     cx,
                     |this, _, cx| {
-                        this.message_ui.menu_ui.page = MessageMenuPage::Main;
+                        this.message_ui.menu.show_page(MessageMenuPage::Main);
                         cx.notify();
                     },
                 )];
@@ -894,7 +895,7 @@ impl QuillApp {
             }
         };
         let stacked = stack_rows(page_rows);
-        if page == MessageMenuPage::Audience {
+        if on_audience {
             panel = panel.w(px(280.));
             panel = panel.child(
                 div()

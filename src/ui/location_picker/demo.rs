@@ -193,7 +193,7 @@ impl QuillApp {
         self.open_location_picker(cx);
         if let Ok(text) = std::env::var("QUILL_DEMO_LOCATION_SEARCH") {
             self.location_search_open(window, cx);
-            if let Some(input) = self.location_ui.search.clone() {
+            if let Some(input) = self.location_ui.search.input().cloned() {
                 input.update(cx, |input, cx| input.set_value(text.clone(), window, cx));
             }
             self.location_search_changed(Some(text), cx);

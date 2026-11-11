@@ -32,15 +32,35 @@ pub(crate) struct CardInput {
     pub(crate) state: Entity<InputState>,
     /// Shown as an error until the next edit says otherwise.
     pub(crate) invalid: bool,
-    /// The text just before a Backspace or Delete (see `field_edit`).
-    before_delete: Option<EditSnapshot>,
+    /// A Backspace or Delete whose edit has not landed yet (`field_edit`).
+    delete: DeleteEdit,
+    /// Counts the field's Backspace and Delete presses, so a press clears
+    /// only its own snapshot.
+    presses: u64,
+}
+
+/// The text just before a Backspace or Delete, until the edit it belongs
+/// to has been read or the effect cycle it was taken in is over.
+pub(crate) enum DeleteEdit {
+    None,
+    Pending { press: u64, before: EditSnapshot },
+}
+
+impl DeleteEdit {
+    /// The snapshot, leaving none behind.
+    fn take(&mut self) -> Option<EditSnapshot> {
+        match std::mem::replace(self, Self::None) {
+            Self::Pending { before, .. } => Some(before),
+            Self::None => None,
+        }
+    }
 }
 
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 impl CardInput {
     pub(crate) fn has_delete_snapshot(&self) -> bool {
-        self.before_delete.is_some()
+        matches!(self.delete, DeleteEdit::Pending { .. })
     }
 }
 
@@ -210,7 +230,8 @@ impl QuillApp {
                 field,
                 state,
                 invalid: false,
-                before_delete: None,
+                delete: DeleteEdit::None,
+                presses: 0,
             });
         }
         let card_form = CardForm {
@@ -353,8 +374,14 @@ impl QuillApp {
         let anchor = char_index(&value, anchor_byte);
         let at_front = backspace && cursor == 0 && anchor == 0;
         let snapshot = EditSnapshot::new(value, cursor, anchor);
+        let mut press = 0;
         if let Some(input) = self.card_form_mut().and_then(|form| form.input_mut(field)) {
-            input.before_delete = Some(snapshot);
+            input.presses += 1;
+            press = input.presses;
+            input.delete = DeleteEdit::Pending {
+                press,
+                before: snapshot,
+            };
         }
         // The input handles the key after this capture handler and emits
         // its Change in this same effect cycle. A defer queued from a defer
@@ -362,8 +389,10 @@ impl QuillApp {
         // start or end of the text) leaves no snapshot for later typing.
         self.defer_screen_in(window, cx, move |this, window, cx| {
             this.defer_screen_in(window, cx, move |this, _, _| {
-                if let Some(input) = this.card_form_mut().and_then(|form| form.input_mut(field)) {
-                    input.before_delete = None;
+                if let Some(input) = this.card_form_mut().and_then(|form| form.input_mut(field))
+                    && matches!(input.delete, DeleteEdit::Pending { press: held, .. } if held == press)
+                {
+                    input.delete = DeleteEdit::None;
                 }
             });
         });
@@ -388,7 +417,7 @@ impl QuillApp {
             return;
         };
         let now = field_text(input.state.read(cx));
-        let was = input.before_delete.take();
+        let was = input.delete.take();
         let result: FieldResult = match field {
             CardField::Number => edit_card_number(was.as_ref(), &now),
             CardField::Expiry => edit_expiry(was.as_ref(), &now, today()),

@@ -161,10 +161,10 @@ impl QuillApp {
         }
         let playing = self.viewer_video_playing();
         if !active && playing {
-            self.viewer.extra.inactive_paused = true;
+            self.viewer.extra.loop_pause = LoopPause::HeldByWindow;
             self.pause_viewer_video(cx);
-        } else if active && self.viewer.extra.inactive_paused {
-            self.viewer.extra.inactive_paused = false;
+        } else if active && self.viewer.extra.loop_pause == LoopPause::HeldByWindow {
+            self.viewer.extra.loop_pause = LoopPause::Free;
             self.resume_viewer_video(cx);
         }
     }

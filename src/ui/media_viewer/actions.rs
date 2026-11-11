@@ -298,7 +298,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.viewer.state.source() == ViewerSource::Profile {
+        if self.viewer.state.source().is_profile() {
             self.delete_viewer_profile_photo(cx);
         } else if let Some(confirm) = self.viewer_delete_confirm() {
             self.open_delete_dialog(confirm, window, cx);
@@ -314,7 +314,7 @@ impl QuillApp {
         // does not mean deleted.
         if matches!(
             self.viewer.state.source(),
-            ViewerSource::SharedMedia | ViewerSource::Profile | ViewerSource::Poll
+            ViewerSource::SharedMedia | ViewerSource::Profile(_) | ViewerSource::Poll
         ) {
             return;
         }
@@ -606,7 +606,8 @@ impl QuillApp {
                         let done =
                             !this.viewer.state.is_open() || this.viewer.visibility.is_hidden();
                         // Never mid-drag (a seek, volume or speed thumb).
-                        let held = this.viewer.over_controls || this.viewer.controls.dragging();
+                        let held =
+                            this.viewer.over_controls || this.viewer.controls.dragging();
                         if !done && controls_should_hide(idle, held) {
                             this.viewer.visibility.hide(std::time::Instant::now());
                             this.redraw_viewer_after_fade(cx);
@@ -653,7 +654,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.fetch_attached_sticker_sets(file_id).is_err()
         {
-            self.message_ui.menu_ui.sticker_set_open = false;
+            self.message_ui.menu_ui.end_sticker_set();
             self.set_note(StatusNote::error(tr(
                 keys::Q_AV_COULD_NOT_LOAD_THE_ATTACHED,
             )));

@@ -95,7 +95,7 @@ impl QuillApp {
         if host != self.windows.scope {
             return;
         }
-        if !self.message_ui.menu_ui.sticker_set_open {
+        if !self.message_ui.menu_ui.sticker_set_open() {
             self.sticker_box.pending = crate::ui::sticker_set_box::state::PickWait::None;
             return;
         }

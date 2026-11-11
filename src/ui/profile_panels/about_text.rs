@@ -26,7 +26,7 @@ impl QuillApp {
             entities,
             (chat_id.0, 0),
             false,
-            &self.message_ui.spoiler_revealed,
+            &self.message_ui.revealed,
             gpui_kit::px(14.0),
             &HashMap::new(),
             cx,

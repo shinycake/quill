@@ -22,6 +22,54 @@ use quill::selection_drag::{
 };
 use std::time::Duration;
 
+/// The drag selection: none, or the press with the pointer poll that
+/// follows it. Ending the drag drops the poll with it.
+#[derive(Default)]
+pub(crate) enum SelectionDrag {
+    #[default]
+    None,
+    Active {
+        drag: DragSelect,
+        _pump: Task<()>,
+    },
+}
+
+impl SelectionDrag {
+    pub(crate) fn get(&self) -> Option<&DragSelect> {
+        match self {
+            Self::Active { drag, .. } => Some(drag),
+            Self::None => None,
+        }
+    }
+
+    pub(crate) fn get_mut(&mut self) -> Option<&mut DragSelect> {
+        match self {
+            Self::Active { drag, .. } => Some(drag),
+            Self::None => None,
+        }
+    }
+
+    pub(crate) fn is_some(&self) -> bool {
+        matches!(self, Self::Active { .. })
+    }
+
+    pub(crate) fn is_none(&self) -> bool {
+        !self.is_some()
+    }
+
+    pub(crate) fn clear(&mut self) {
+        *self = Self::None;
+    }
+
+    /// End the drag and hand back the press.
+    pub(crate) fn take(&mut self) -> Option<DragSelect> {
+        match std::mem::take(self) {
+            Self::Active { drag, .. } => Some(drag),
+            Self::None => None,
+        }
+    }
+}
+
 /// A left press on a history row that may become a drag selection.
 #[derive(Debug, Clone)]
 pub(crate) struct DragSelect {
@@ -74,7 +122,7 @@ impl QuillApp {
                 let ids = self.loaded_selectable_ids(chat);
                 let range = quill::selection_pin::range_between(&ids, anchor, message_id);
                 self.add_to_selection(chat, range);
-                self.message_ui.selection_drag = None;
+                self.message_ui.selection_drag.clear();
                 cx.notify();
                 return;
             }
@@ -92,7 +140,7 @@ impl QuillApp {
                 .forward
                 .draft()
                 .is_some_and(|draft| draft.from_chat_id == chat && draft.contains(message_id));
-        self.message_ui.selection_drag = Some(DragSelect {
+        let drag = DragSelect {
             chat,
             press: message_id,
             pending,
@@ -100,8 +148,9 @@ impl QuillApp {
             click_toggles,
             forward,
             range: None,
-        });
-        self.start_selection_drag_loop(window, cx);
+        };
+        let pump = self.selection_drag_loop(window, cx);
+        self.message_ui.selection_drag = SelectionDrag::Active { drag, _pump: pump };
     }
 
     /// The pointer moved with the button down (`mouseActionUpdate`): start
@@ -113,11 +162,11 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<f32> {
-        let drag = self.message_ui.selection_drag.as_ref()?;
+        let drag = self.message_ui.selection_drag.get()?;
         // A message drag is under way (or this press may become one): no
         // range selects, and no swipe replies.
         if super::forward_drag_source::forward_lift_live(cx) {
-            self.message_ui.selection_drag = None;
+            self.message_ui.selection_drag.clear();
             self.message_ui.swipe_reply_start = None;
             return None;
         }
@@ -130,7 +179,7 @@ impl QuillApp {
         if range.is_none() {
             if !click_toggles && TextSelection::has_selection(window, cx) {
                 // The press landed on text: that drag selects text.
-                self.message_ui.selection_drag = None;
+                self.message_ui.selection_drag.clear();
                 return None;
             }
             if !moved_enough(
@@ -183,7 +232,7 @@ impl QuillApp {
             }
             Some(_) => {}
         }
-        if let Some(drag) = self.message_ui.selection_drag.as_mut() {
+        if let Some(drag) = self.message_ui.selection_drag.get_mut() {
             drag.range = range;
         }
         (beyond != 0).then(|| autoscroll_step(beyond) as f32)
@@ -300,7 +349,7 @@ impl QuillApp {
     pub(super) fn selection_drag_in(&self, chat: ChatId) -> Option<DragRange> {
         self.message_ui
             .selection_drag
-            .as_ref()
+            .get()
             .filter(|drag| drag.chat == chat)
             .and_then(DragSelect::range)
     }
@@ -360,11 +409,7 @@ impl QuillApp {
     /// resting beyond the list's edge keeps scrolling and extending the
     /// range even though no move events arrive. The loop ends with the
     /// drag; only one runs at a time.
-    fn start_selection_drag_loop(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.message_ui.selection_drag_loop {
-            return;
-        }
-        self.message_ui.selection_drag_loop = true;
+    fn selection_drag_loop(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Task<()> {
         let handle = window.window_handle();
         self.spawn_scoped_in(window, cx, async move |this, cx| {
             loop {
@@ -412,9 +457,7 @@ impl QuillApp {
                     }
                 }
             }
-            let _ = this.update(cx, |this, _| this.message_ui.selection_drag_loop = false);
         })
-        .detach();
     }
 }
 

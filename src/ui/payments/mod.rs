@@ -817,7 +817,7 @@ crate::ui::shell::register_dialogs! {
     // management dialog.
     Subscriptions => DialogSpec::new(
         3700,
-        |app| app.session().is_some_and(|s| s.payments.subscriptions_open),
+        |app| app.session().is_some_and(|s| s.payments.subscriptions.is_open()),
         QuillApp::build_subscriptions_dialog,
     )
     .close(|app, _, cx| app.close_subscriptions(cx)),

@@ -224,7 +224,7 @@ impl QuillApp {
             self.viewer.orientation.turns = *turns;
         }
         self.apply_viewer_quality_pref();
-        self.viewer.extra.inactive_paused = false;
+        self.viewer.extra.loop_pause = LoopPause::Free;
         self.stop_viewer_video();
         self.ensure_viewer_download(cx);
         self.download_viewer_strip_thumbs();
@@ -235,7 +235,7 @@ impl QuillApp {
         self.ask_profile_photo_message_actions();
         if !matches!(
             self.viewer.state.source(),
-            ViewerSource::Profile | ViewerSource::Poll
+            ViewerSource::Profile(_) | ViewerSource::Poll
         ) && let (Some(item), Some(live)) =
             (self.screen.viewer.state.current(), self.live.as_mut())
         {

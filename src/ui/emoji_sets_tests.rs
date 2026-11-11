@@ -139,7 +139,7 @@ fn remove_asks_before_removing_and_a_row_opens_the_pack(cx: &mut TestAppContext)
     let vcx = &mut vcx;
     vcx.update(|window, cx| window.click("emoji-pack-open-2".to_string(), cx));
     frames(vcx);
-    assert!(app.read_with(vcx, |app, _| app.message_ui.menu_ui.sticker_set_open));
+    assert!(app.read_with(vcx, |app, _| app.message_ui.menu_ui.sticker_set_open()));
     vcx.update(|window, cx| window.click("emoji-pack-remove-1".to_string(), cx));
     frames(vcx);
     assert!(app.read_with(vcx, |app, _| app.admin.group_confirm_dialog.is_some()));

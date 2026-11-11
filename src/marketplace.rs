@@ -159,6 +159,11 @@ impl GiftPurchase {
         matches!(self.stage, GiftPurchaseStage::Sending { .. })
     }
 
+    /// A request of this purchase is out.
+    pub fn is_busy(&self) -> bool {
+        self.is_loading() || self.is_sending()
+    }
+
     pub fn is_completed(&self) -> bool {
         matches!(self.stage, GiftPurchaseStage::Sent(_))
     }

@@ -187,7 +187,7 @@ fn viewing_a_set_closes_the_box_in_the_other_window(cx: &mut TestAppContext) {
     let open_in = |chat: Option<ChatId>, cx: &mut TestAppContext| {
         h.app
             .update(cx, |app, cx| {
-                app.in_window_scope(chat, cx, |app, _| app.message_ui.menu_ui.sticker_set_open)
+                app.in_window_scope(chat, cx, |app, _| app.message_ui.menu_ui.sticker_set_open())
             })
             .unwrap_or(false)
     };
@@ -203,7 +203,7 @@ fn a_closed_boxs_video_pick_opens_no_editor(cx: &mut TestAppContext) {
     use quill::sticker_set_box::SetKind;
     let h = new_app(cx);
     in_window(&h, h.main, None, cx, |app, window, cx| {
-        app.message_ui.menu_ui.sticker_set_open = false;
+        app.message_ui.menu_ui.end_sticker_set();
         app.sticker_box.pending =
             crate::ui::sticker_set_box::state::PickWait::Downloading(PendingVideo {
                 pick: PickExisting {
@@ -292,7 +292,7 @@ fn attached_stickers_close_the_box_in_the_other_window(cx: &mut TestAppContext) 
     let open_in = |chat: Option<ChatId>, cx: &mut TestAppContext| {
         h.app
             .update(cx, |app, cx| {
-                app.in_window_scope(chat, cx, |app, _| app.message_ui.menu_ui.sticker_set_open)
+                app.in_window_scope(chat, cx, |app, _| app.message_ui.menu_ui.sticker_set_open())
             })
             .unwrap_or(false)
     };

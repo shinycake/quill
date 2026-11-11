@@ -531,7 +531,7 @@ impl Render for QuillApp {
             // kit Phase 2 (redo): scheduled messages now hosted in a kit
             // Dialog via the shell sync — render wiring deleted.
             // M1: right-click message context menu.
-            .when_some(self.message_ui.menu, |this, menu| {
+            .when_some(self.message_ui.menu.at(), |this, menu| {
                 this.child(self.message_menu_overlay(menu, cx))
             })
             // The expanded reaction selector, where the menu was, or the
@@ -563,7 +563,7 @@ impl Render for QuillApp {
                     this.child(self.story_menu_overlay(chat_id, position, cx))
                 },
             )
-            .when_some(self.playback.playlist_menu, |this, menu| {
+            .when_some(self.playback.playlist.menu(), |this, menu| {
                 this.child(self.playlist_menu_overlay(menu, cx))
             })
             .when_some(self.chat_list.archive_menu, |this, position| {

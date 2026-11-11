@@ -45,7 +45,7 @@ pub(crate) fn country_name(session: Option<&Session>, iso2: &str) -> String {
 pub(in crate::ui) fn fact_check_block(
     message: &HistoryMessage,
     expanded: bool,
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &crate::ui::message_text::revealed::Revealed,
     font: Pixels,
     session: Option<&Session>,
     cx: &mut Context<QuillApp>,

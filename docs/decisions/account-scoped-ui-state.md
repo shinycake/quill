@@ -6965,6 +6965,57 @@ every send and the group sticker box shows "Loading" instead of asking twice;
 box never replaces a running forge (`CraftStage::choose`). Choosing Public or
 Private in the Type box leaves a refused link line as it was.
 
+### Sweep fixes (is-16)
+
+Implicit state: each of these was a set of bools, `Option`s used as flags or a
+side list kept beside a stage. Each is now one value whose variants carry their
+data, with a way out of every stage. A task that waits is held inside the
+stage, so dropping the stage cancels it.
+
+| Id | Fix |
+| --- | --- |
+| 10-164 | `HistoryUi::live_location_tick` is `Option<(ChatId, Task)>`: a screen change or another chat drops and stops the task. |
+| 10-169 | `LocationPickerUi`: `Search` (closed / open with input and `Wait` debounce), `MapPhase` (idle / settling / resolving), `Locate` and `Geocode` (idle / task, cleared by their answer). The search field closes only through `location_search_changed(None)`, so it is open exactly while `picker.search_open()` (test). The pointer `drag` stays an `Option<Drag>`: it is the hand, across several settle restarts. |
+| 10-173 | `MenuStage` (closed / open with the highlight) replaces `open` + `highlight`. |
+| 10-170, 11-p8-003 | `PaymentUi::marketplace` is `MarketplaceBox` (closed / kept / open with its draft: chat, privacy, error). The purchase is is-04's `GiftPurchaseStage` (it carries the `RequestId` of its quote and its send and matches each answer to it); is-16's `GiftStage` was dropped in the merge. Log-out forgets the box. |
+| 11-p8-004 | `PasswordField` holds the input and one `FieldStage` (away / waiting / typing) fed by `Showing` (off / sending / idle), one value in place of the `showing` + `idle` pair; the field takes the keyboard on entering `Idle` only. |
+| 11-p1-005 | `ViewerUi::reorient` is `Reorient` (idle / decoding with target and task): a newer press, a step or a close drops the decode, so no generation counter. |
+| 11-p1-004 | `ViewerChrome` (`viewer_chrome.rs`): shown (with the hide task) / hidden (at) beside the idle clock. |
+| 11-p1-006, 11-p2-002 | `LoopPause` (free / held by the window); the pause is cleared when the clip stops, so a stale one never resumes the next clip. |
+| 11-p2-001 | `SessionTick` (off / running task). The tick no longer stays flagged when its window is gone. |
+| 11-p2-003 | `ViewerSource::Profile(PhotoOwner)`: the owner is in the source. |
+| 11-p2-009, 11-p3-013, 11-p4-005 | `MessageMenu` (`message_menu_state.rs`): closed / open with selection, link, item, page (audience tab inside the page) and strip. Closing replaces it whole. |
+| 11-p3-006, 11-p4-007 | The report box is derived from the session's report flow (`Session::messages::message_report`) as a session-wide box: `open_message_report` names the asking window with `open_box(DialogKind::MessageReport)`, so one window shows it and nothing resets windows by hand. Only the sticker set box is local (`StickerBox`); a report no longer replaces it, and it is still there when the report ends (test). |
+| 11-p2-015 | `ChatPeek` (idle / pressing with the timer task / open): a release drops the timer instead of matching `(chat, Instant)`. |
+| 11-p3-004 | `game_scores` holds `Fetch<Vec<GameHighScore>>`; a refused request lands in `Failed`, which the panel draws with Retry (test). |
+| 11-p3-014 | `PollOptionMenu::properties` is `Fetch`; a refused lookup lands in `Failed` (test). |
+| 11-p4-001 | `SelectionDrag` (none / active with the pointer-poll task): ending the drag stops the poll. |
+| 11-p4-013 | `Revealed` has separate spoiler and quote sets; the `1 << 63` key trick is gone. |
+| 11-p5-003 | `TitleCheck` is the name Confirm judged (`Rejected(text)`, or `Sent(text)` for the create TDLib answers with `NO_CHAT_TITLE`); the error shows while the field still holds that text, so typing ends it with no reset. |
+| 11-p6-009, 11-p6-010 | `Hold` (waiting for input / lingering) replaces `waiting_for_input` + `hide_at`; `Popup::hiding()` reads the opacity target; `Clock` (stopped / running task) replaces `ticking`. |
+| 11-p6-013 | `ScreenClient` (empty / filled / goodbyes due) replaces `client_filled` + `goodbyes_due`. |
+| 11-p6-014, 11-p7-013 | `PriceSource` (default / channel / chosen) replaces `seeded` + `touched`. |
+| 11-p7-015 | `Layout` (size only / held with its bytes) replaces `paragraph` + `bytes`. |
+| 11-p7-012 | `LockScreen` (entry / offer the system prompt / confirm log out) replaces `suggest_system_unlock` + `logout_confirm`. |
+| 11-p7-014 | `DeleteEdit` carries a press number, so a press's deferred cleanup clears only its own snapshot. |
+| 11-p7-011 | `form_loading` is derived from `form_request`; `CheckoutStage` (open / paid / verifying) replaces `form_paid` + `verification_started`; `SubscriptionsBox` holds the open box and its cancel confirmation; `star_subscription_edit` is the request id of the edit in flight, cleared by its own answer. |
+| 11-p8-014 | `Gesture` (none / stroke / crop / item) replaces `current`, `drag` and `item_drag`. |
+| 11-p8-015 | Set-mode `corners` and the keep-ratio choice live in `EditorPurpose::Set { edit: SetEdit }`; `base_item` is the purpose. |
+| 12-005 | `seek_scrubbing` was `seek_preview_secs.is_some()`; the bool is gone. |
+| 12-006 | `PlaybackTick` (off / running task with what it showed). |
+| 12-011 | `PlaylistFlow` (closed / menu with its page / confirm remove). |
+| 12-012 | Skipped: `show_stats` is a setting fixed when the dialog opens (voters or stats) and never switches; `selected_option` is independent of it. Restored as the bool. |
+
+- **Skipped (already one value).** 08-103 and 11-p5-011: the mute panel is
+  already `MuteBox` + `MuteSection` (s4-settings); what is left beside it is a
+  lazily made input entity (`mute_time`), the auto-delete picker and the
+  defaults sound picker, which are other boxes. 11-p8-001: the box already has
+  `ApplyStage`. 11-p6-011: the full, chat-list and conversation redraws owed
+  by `PolledRedraw` are three independent obligations with their own intervals
+  (the type says so), not stages of one thing.
+- **Left as they are on purpose.** `LocationPickerUi::drag` (the pointer),
+  `PasscodeUi::shake_started` (an animation clock).
+
 ### Sweep fixes (is-01)
 
 Implicit-state entries: each names a struct whose stages were kept in step by

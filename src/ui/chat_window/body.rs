@@ -127,7 +127,7 @@ impl QuillApp {
             .children(self.custom_emoji_card(cx))
             .children(self.photo_editor_overlay(cx))
             // M1: right-click message context menu.
-            .when_some(self.message_ui.menu, |this, menu| {
+            .when_some(self.message_ui.menu.at(), |this, menu| {
                 this.child(self.message_menu_overlay(menu, cx))
             })
             // The expanded reaction selector, where the menu was.

@@ -23,7 +23,7 @@ pub(in crate::ui) fn file_album_history_row(
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
     session: Option<&Session>,
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &crate::ui::message_text::revealed::Revealed,
     corner: CornerActions,
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {

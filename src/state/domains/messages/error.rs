@@ -28,6 +28,23 @@ impl Session {
         {
             self.reject_composer_reply_target(chat_id, message_id, err);
         }
+        // The option menu's facts: a refusal leaves `Loading` so the page
+        // stops waiting for rows that will not come.
+        if let Some(RequestPurpose::Messages(MessagesPurpose::GetPollOptionProperties {
+            chat_id,
+            message_id,
+            option_key,
+        })) = pending.map(|p| p.purpose)
+            && let Some(menu) = self.messages.poll_option_menu.as_mut()
+            && menu.chat_id == chat_id
+            && menu.message_id == message_id
+            && poll_option_key(&menu.option_id) == option_key
+        {
+            menu.properties = crate::state::fetch::Fetch::Failed {
+                error: format!("{:?}", err.class),
+                stale: None,
+            };
+        }
         // A caption over the limit opens its box (tdesktop `CaptionLimitBox`).
         if matches!(
             pending.map(|p| p.purpose),

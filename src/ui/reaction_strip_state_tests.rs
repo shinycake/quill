@@ -216,7 +216,7 @@ fn clicking_away_resets_the_options_like_escape(cx: &mut TestAppContext) {
     frames(vcx);
     let (menu_open, state) = app.read_with(vcx, |app, _| {
         (
-            app.message_ui.menu.is_some(),
+            app.message_ui.menu.is_open(),
             app.demo_session
                 .as_ref()
                 .map(|s| s.stickers.message_reaction_options.clone()),

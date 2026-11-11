@@ -230,18 +230,15 @@ pub struct PaymentsState {
     /// `starSubscriptions`, shown in the Subscriptions dialog, with where
     /// its page and its one edit stand ([`StarSubscriptionsList`]).
     pub star_subscriptions: StarSubscriptionsList,
-    /// Slice `parity:bots-payment-recurring`: the Subscriptions dialog is
-    /// on screen.
-    pub subscriptions_open: bool,
+    /// Slice `parity:bots-payment-recurring`: the Subscriptions dialog, and
+    /// the subscription awaiting cancel confirmation in it.
+    pub subscriptions: SubscriptionsBox,
     /// Premium / Stars / received-gifts hub state (`crate::premium_hub`).
     pub hub: crate::premium_hub::PremiumHub,
     /// Gift management and the send-gift dialog (`crate::gift_manage`).
     pub gifts_manage: crate::gift_manage::GiftManageState,
     /// Revenue screens and affiliate programs (`crate::earn`).
     pub earn: crate::earn::EarnState,
-    /// Slice `parity:bots-payment-recurring`: subscription id awaiting
-    /// cancel confirmation in the dialog.
-    pub subscription_cancel_confirm: Option<String>,
     /// TDLib's `is_premium` option: the account's current Premium state.
     /// `None` until the option arrives.
     pub premium_option: Option<bool>,
@@ -275,6 +272,56 @@ pub struct PaymentInFlight {
     pub invoice: crate::payment_invoice::InputInvoice,
     /// The form it was sent for, read by the paid-media note.
     pub form: Option<PaymentFormData>,
+}
+
+/// The Subscriptions dialog: closed, or open with the subscription whose
+/// cancel waits for its confirmation. Closing drops the confirmation.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum SubscriptionsBox {
+    #[default]
+    Closed,
+    Open {
+        cancel_confirm: Option<String>,
+    },
+}
+
+impl SubscriptionsBox {
+    pub fn is_open(&self) -> bool {
+        matches!(self, Self::Open { .. })
+    }
+
+    /// The subscription id awaiting cancel confirmation.
+    pub fn cancel_confirm(&self) -> Option<&str> {
+        match self {
+            Self::Open { cancel_confirm } => cancel_confirm.as_deref(),
+            Self::Closed => None,
+        }
+    }
+
+    pub fn open(&mut self) {
+        if !self.is_open() {
+            *self = Self::Open {
+                cancel_confirm: None,
+            };
+        }
+    }
+
+    pub fn close(&mut self) {
+        *self = Self::Closed;
+    }
+
+    /// Ask to confirm a cancel (no effect while closed).
+    pub fn ask_cancel(&mut self, id: String) {
+        if let Self::Open { cancel_confirm } = self {
+            *cancel_confirm = Some(id);
+        }
+    }
+
+    pub fn clear_confirm(&mut self) {
+        if let Self::Open { cancel_confirm } = self {
+            *cancel_confirm = None;
+        }
+    }
 }
 
 impl PaymentsState {
@@ -378,11 +425,10 @@ impl PaymentsState {
             poll_countries_max: None,
             poll_open_period_max: None,
             star_subscriptions: StarSubscriptionsList::default(),
-            subscriptions_open: false,
+            subscriptions: SubscriptionsBox::Closed,
             hub: crate::premium_hub::PremiumHub::default(),
             gifts_manage: Default::default(),
             earn: Default::default(),
-            subscription_cancel_confirm: None,
             premium_option: None,
             premium_available: None,
             bank_card: None,

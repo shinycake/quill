@@ -25,7 +25,7 @@ use quill::state::StyleError;
 use quill::telegram::envelope::MessageSender;
 use quill::text::TextEntity;
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -398,7 +398,7 @@ impl QuillApp {
                     .child(Skeleton::new().w(relative(0.6)).h(px(12.)))
                     .into_any_element();
             }
-            let seen: HashSet<(i64, u64, u64, bool)> = HashSet::new();
+            let seen = crate::ui::message_text::revealed::Revealed::default();
             rich_text_line(
                 text,
                 entities,

@@ -78,11 +78,11 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.in_every_window(cx, |app, cx| {
-            app.message_ui.menu_ui.sticker_set_open = false;
+            app.message_ui.menu_ui.end_sticker_set();
             app.close_set_editors_not_for(set_id, cx);
         });
         self.sticker_box.reset();
-        self.message_ui.menu_ui.sticker_set_open = true;
+        self.message_ui.menu_ui.show_sticker_set();
     }
 
     /// This window's photo or video editor closes when it makes a sticker
@@ -108,7 +108,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.view_sticker_set(set_id).is_err()
         {
-            self.message_ui.menu_ui.sticker_set_open = false;
+            self.message_ui.menu_ui.end_sticker_set();
             self.set_note(StatusNote::error(tr(
                 keys::Q_MEDIA_COULD_NOT_OPEN_THE_STICKER,
             )));
@@ -207,7 +207,7 @@ impl QuillApp {
     /// as the main window) leaves no empty box behind.
     pub(in crate::ui) fn close_sticker_set_dialog(&mut self, cx: &mut Context<Self>) {
         self.in_every_window(cx, |app, _| {
-            app.message_ui.menu_ui.sticker_set_open = false;
+            app.message_ui.menu_ui.end_sticker_set();
         });
         self.sticker_box.reset();
         if let Some(live) = self.live.as_mut() {
@@ -562,7 +562,7 @@ impl QuillApp {
 /// Sticker") paints inside the app, under any kit dialog, so the box steps
 /// aside until the editor is done or cancelled.
 pub(super) fn sticker_box_shown(app: &QuillApp) -> bool {
-    app.message_ui.menu_ui.sticker_set_open && app.viewer.photo_editor.is_none()
+    app.message_ui.menu_ui.sticker_set_open() && app.viewer.photo_editor.is_none()
 }
 
 crate::ui::shell::register_dialogs! {

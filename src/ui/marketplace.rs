@@ -13,7 +13,7 @@ use quill::telegram::envelope::MessageSender;
 
 impl QuillApp {
     /// Open "Buy a collectible by name" for `chat`, the chat it buys for
-    /// until it closes (`PaymentUi::marketplace_chat`).
+    /// until it closes (`PaymentUi::marketplace`).
     pub(super) fn open_marketplace_for(
         &mut self,
         chat: Option<ChatId>,
@@ -48,16 +48,13 @@ impl QuillApp {
             self.payments
                 .marketplace_comment_input
                 .update(cx, |input, cx| input.set_value("", window, cx));
-            self.payments.marketplace_private = true;
-            self.payments.marketplace_error = None;
-            self.payments.marketplace_chat = Some(chat);
             if let Some(live) = self.live.as_mut() {
                 live.driver.session.payments.marketplace_gift = None;
             } else if let Some(session) = self.demo_session.as_mut() {
                 session.payments.marketplace_gift = None;
             }
         }
-        self.payments.marketplace_open = true;
+        self.payments.marketplace.open_for(chat, running.is_some());
         self.open_box(DialogKind::Marketplace);
         cx.notify();
     }
@@ -81,17 +78,15 @@ impl QuillApp {
             .value()
             .trim()
             .to_string();
-        let chat = self.payments.marketplace_chat;
+        let chat = self.payments.marketplace.chat();
         let result = chat.and_then(|chat| {
             self.live
                 .as_mut()
                 .map(|live| live.driver.fetch_marketplace_gift(chat, &name))
         });
-        if !matches!(result, Some(Ok(_))) {
-            self.payments.marketplace_error = Some(tr(keys::Q_OPS_CHOOSE_A_PRIVATE_CHAT_OR).into());
-        } else {
-            self.payments.marketplace_error = None;
-        }
+        let error = (!matches!(result, Some(Ok(_))))
+            .then(|| tr(keys::Q_OPS_CHOOSE_A_PRIVATE_CHAT_OR).into());
+        self.payments.marketplace.set_error(error);
         cx.notify();
     }
     pub(super) fn build_marketplace_dialog(
@@ -102,7 +97,7 @@ impl QuillApp {
     ) -> Dialog {
         let close =
             QuillShell::on_close_kind(app, shell, DialogKind::Marketplace, |this, _, cx| {
-                this.payments.marketplace_open = false;
+                this.payments.marketplace.close();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
@@ -110,6 +105,7 @@ impl QuillApp {
                 .session()
                 .and_then(|s| s.payments.marketplace_gift.clone());
             let limit = this.session().and_then(|s| s.payments.gift_text_length_max);
+            let marketplace_private = this.payments.marketplace.draft().is_none_or(|d| d.private);
             let busy = gift
                 .as_ref()
                 .is_some_and(|g| g.is_loading() || g.is_sending());
@@ -135,7 +131,12 @@ impl QuillApp {
                         .disabled(busy)
                         .on_click(cx.listener(|this, _, _, cx| this.load_marketplace_gift(cx))),
                 );
-            if let Some(error) = this.payments.marketplace_error.clone() {
+            if let Some(error) = this
+                .payments
+                .marketplace
+                .draft()
+                .and_then(|d| d.error.clone())
+            {
                 body = body.child(
                     div()
                         .id("gift-error")
@@ -219,16 +220,18 @@ impl QuillApp {
                         )
                         .child(
                             Button::new("gift-private")
-                                .label(if this.payments.marketplace_private {
+                                .label(if marketplace_private {
                                     tr(keys::Q_OPS_COMMENT_AND_SENDER_RECEIVER_ONLY)
                                 } else {
                                     tr(keys::Q_OPS_COMMENT_AND_SENDER_VISIBLE_TO)
                                 })
-                                .selected(this.payments.marketplace_private)
+                                .selected(marketplace_private)
                                 .disabled(busy || gift.is_completed())
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    this.payments.marketplace_private =
-                                        !this.payments.marketplace_private;
+                                    if let Some(draft) = this.payments.marketplace.open_draft_mut()
+                                    {
+                                        draft.private = !draft.private;
+                                    }
                                     cx.notify();
                                 })),
                         );
@@ -248,9 +251,9 @@ impl QuillApp {
                                     if this.payments.marketplace_name_input.read(cx).value().trim()
                                         != quoted_name
                                     {
-                                        this.payments.marketplace_error = Some(
+                                        this.payments.marketplace.set_error(Some(
                                             tr(keys::Q_OPS_LOAD_THE_NEWLY_ENTERED_GIFT).into(),
-                                        );
+                                        ));
                                         cx.notify();
                                         return;
                                     }
@@ -260,20 +263,18 @@ impl QuillApp {
                                         .read(cx)
                                         .value()
                                         .to_string();
-                                    let private = this.payments.marketplace_private;
+                                    let private =
+                                        this.payments.marketplace.draft().is_none_or(|d| d.private);
                                     if let Some(live) = this.live.as_mut() {
-                                        this.payments.marketplace_error = if live
+                                        let refused = live
                                             .driver
                                             .buy_marketplace_gift(price, &comment, private)
                                             .is_err()
-                                        {
-                                            Some(
+                                            .then(|| {
                                                 tr(keys::Q_OPS_PURCHASE_REFUSED_REVIEW_THE_QUOTE)
-                                                    .into(),
-                                            )
-                                        } else {
-                                            None
-                                        };
+                                                    .into()
+                                            });
+                                        this.payments.marketplace.set_error(refused);
                                     }
                                     cx.notify();
                                 })),
@@ -295,8 +296,8 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     Marketplace => DialogSpec::new(
         4100,
-        |app| app.payments.marketplace_open,
+        |app| app.payments.marketplace.is_open(),
         QuillApp::build_marketplace_dialog,
     )
-    .close(|app, _, cx| { app.payments.marketplace_open = false; cx.notify(); }),
+    .close(|app, _, cx| { app.payments.marketplace.close(); cx.notify(); }),
 }

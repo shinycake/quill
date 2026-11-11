@@ -16,10 +16,10 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::fragment_password::keep_password_field;
 use super::gift_manage_ui::{hint, stars};
 use super::gift_transfer_view::{StageView, stage_view};
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::fragment_password::Showing;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::*;
@@ -273,14 +273,15 @@ impl QuillApp {
                 GiftEvent::Deleted => deleted = true,
             }
         }
-        keep_password_field(
-            &self.screen.payments.gift_export_password,
-            &mut self.screen.payments.gift_export_password_focused,
-            in_password,
-            idle_password,
-            window,
-            cx,
-        );
+        let field = match (in_password, idle_password) {
+            (false, _) => Showing::Off,
+            (true, true) => Showing::Idle,
+            (true, false) => Showing::Sending,
+        };
+        self.screen
+            .payments
+            .gift_export_password
+            .keep(field, window, cx);
         if let Some(url) = url {
             self.open_fragment_url(&url, cx);
             self.clear_transfer_inputs(window, cx);

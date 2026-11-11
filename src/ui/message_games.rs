@@ -13,7 +13,7 @@ use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::state::Session;
 use quill::telegram::envelope::GameContent;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Slice bots-games: `messageGame` card — thumbnail (glyph when the game
@@ -29,7 +29,7 @@ pub(super) fn game_card(
     files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
-    revealed: &HashSet<(i64, u64, u64, bool)>,
+    revealed: &crate::ui::message_text::revealed::Revealed,
     font: Pixels,
     // The widest the card's photo may be: the bubble's room less the
     // card's own padding and border.
@@ -120,7 +120,7 @@ pub(super) fn game_card(
 }
 
 /// Slice bots-games: the inline high-score panel under a game card.
-/// Present in `Session::game_scores` = open; `None` = request in flight.
+/// Present in `Session::game_scores` = open; `Loading` = request in flight.
 fn game_scores_panel(
     chat_id: ChatId,
     message_id: MessageId,
@@ -202,6 +202,13 @@ impl QuillApp {
             cx.notify();
             return;
         }
+        self.load_game_scores(chat_id, message_id, cx);
+    }
+
+    /// Ask `getGameHighScores` for the panel: the first open, or Retry
+    /// after a refusal.
+    fn load_game_scores(&mut self, chat_id: ChatId, message_id: MessageId, cx: &mut Context<Self>) {
+        let key = (chat_id.0, message_id.0);
         let user_id = self
             .live
             .as_ref()

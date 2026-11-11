@@ -440,7 +440,7 @@ fn a_lock_screen_log_out_that_cannot_start_the_wipe_stays_locked(cx: &mut TestAp
     app.update_in(&mut vcx, |app, window, cx| {
         app.account.passcode.enabled = true;
         app.lock_by_passcode(cx);
-        app.account.passcode.logout_confirm = true;
+        app.account.passcode.screen = crate::ui::passcode::lock_screen::LockScreen::ConfirmLogout;
         app.confirm_lock_logout_in(Some(root.clone()), window, cx);
         // No data folder at all: the same.
         app.confirm_lock_logout_in(None, window, cx);
@@ -450,7 +450,7 @@ fn a_lock_screen_log_out_that_cannot_start_the_wipe_stays_locked(cx: &mut TestAp
         let passcode = &app.account.passcode;
         assert!(passcode.is_locked(), "no passcode was typed");
         assert!(passcode.enabled, "the passcode is still set");
-        assert!(!passcode.logout_confirm);
+        assert!(!passcode.screen.confirming_logout());
         assert!(
             passcode.lock_error.text().is_some(),
             "the lock screen says why"

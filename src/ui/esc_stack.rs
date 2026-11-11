@@ -751,8 +751,12 @@ mod dispatch_tests {
             (
                 "marketplace",
                 // box-host: a test sets the flag directly
-                |a| a.payments.marketplace_open = true,
-                |a| a.payments.marketplace_open,
+                |a| {
+                    a.payments
+                        .marketplace
+                        .open_for(quill::ids::ChatId(1), false)
+                },
+                |a| a.payments.marketplace.is_open(),
             ),
             (
                 "passcode settings",

@@ -4,7 +4,7 @@
 use super::app::QuillApp;
 use super::demo::{demo_file_json, demo_media_allowlist, demo_thumb_png_path};
 use super::play_intent::PlayTarget;
-use super::playback_state::{ChatMessage, SeekHover, SeekSite};
+use super::playback_state::{ChatMessage, PlaybackTick, SeekHover, SeekSite};
 use super::*;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::slider::{SliderEvent, SliderState, SliderValue};
@@ -138,7 +138,6 @@ impl QuillApp {
         quill::wake::CHROME.poke();
         self.playback.seek_slider = None;
         self.playback.player.sliders.clear();
-        self.playback.seek_scrubbing = false;
         self.playback.seek_preview_secs = None;
         self.playback.seek_hover = None;
     }
@@ -212,7 +211,6 @@ impl QuillApp {
         })
         .detach();
         self.playback.seek_slider = Some(slider);
-        self.playback.seek_scrubbing = false;
         self.playback.seek_preview_secs = None;
         self.note_track_started(kind, chat_id, message_id, cx);
         self.spawn_playback_tick(cx);
@@ -330,12 +328,10 @@ impl QuillApp {
             SliderEvent::Change(value) => {
                 // Drag (or track click) in progress: show the preview in the
                 // time label, but don't touch the player until Release.
-                self.playback.seek_scrubbing = true;
                 self.playback.seek_preview_secs = Some(f64::from(value.end()));
                 cx.notify();
             }
             SliderEvent::Release(value) => {
-                self.playback.seek_scrubbing = false;
                 self.playback.seek_preview_secs = None;
                 // A drag released off the scrubber gets no leave event;
                 // the next move over it sets the hover again.
@@ -379,15 +375,13 @@ impl QuillApp {
     /// (`media_session`), a change to the chat list that may move Previous
     /// or Next, or a resume or seek.
     pub(super) fn spawn_playback_tick(&mut self, cx: &mut Context<Self>) {
-        if self.playback.tick {
+        if matches!(self.playback.tick, PlaybackTick::Running { .. }) {
             // A new track on a paused tick: it plays now.
             quill::wake::CHROME.poke();
             return;
         }
-        self.playback.tick = true;
-        self.playback.tick_shown = None;
         // window-scope: the track is the screen's; the bar it moves is redrawn in every window.
-        self.spawn_screen(cx, async move |this, cx| {
+        let task = self.spawn_screen(cx, async move |this, cx| {
             let mut wait = Some(PLAYBACK_TICK);
             let mut seen = quill::wake::CHROME.epoch();
             loop {
@@ -432,7 +426,7 @@ impl QuillApp {
                         // rounded duration).
                         this.players.audio.settle();
                         let finished = this.players.audio.is_ended();
-                        if finished && !this.playback.seek_scrubbing {
+                        if finished && !this.playback.seek_scrubbing() {
                             // Capture the id first: the stops below save the
                             // (now end-of-track) position via clear_playback_state,
                             // then reset to 0.0 so replay-after-finish starts at the top.
@@ -458,7 +452,7 @@ impl QuillApp {
                         // in a chat not on screen redraws only the chat
                         // list, so the tick watches Previous / Next too.
                         let shown = this.track_shown(this.playlist_can_move());
-                        let moved = this.playback.tick_shown.replace(shown) != Some(shown);
+                        let moved = this.playback.note_tick_shown(shown);
                         if finished {
                             cx.notify();
                         } else if moved {
@@ -474,10 +468,13 @@ impl QuillApp {
                 wait = next;
             }
             let _ = this.update(cx, |this, _| {
-                this.playback.tick = false;
+                this.playback.tick = PlaybackTick::Off;
             });
-        })
-        .detach();
+        });
+        self.playback.tick = PlaybackTick::Running {
+            _task: task,
+            shown: None,
+        };
     }
 
     /// The position moved: redraw the seek bars, the player bar and the
@@ -493,7 +490,7 @@ impl QuillApp {
     /// `&mut Window`, which `SliderState::set_value` needs). Skipped while
     /// scrubbing so the user's drag is never fought.
     pub(super) fn sync_seek_slider(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.playback.seek_scrubbing {
+        if self.playback.seek_scrubbing() {
             return;
         }
         if let (Some(slider), Some(position)) = (

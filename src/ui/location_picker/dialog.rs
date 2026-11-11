@@ -44,7 +44,7 @@ impl QuillApp {
             window,
             |this, state, event: &InputEvent, window, cx| {
                 if !matches!(event, InputEvent::Change)
-                    || this.location_ui.search.as_ref().map(|s| s.entity_id())
+                    || this.location_ui.search.input().map(|s| s.entity_id())
                         != Some(state.entity_id())
                 {
                     return;
@@ -57,17 +57,19 @@ impl QuillApp {
         )
         .detach();
         input.update(cx, |input, cx| input.focus(window, cx));
-        self.location_ui.search = Some(input);
+        self.location_ui.search = super::state::Search::Open {
+            input,
+            debounce: super::state::Wait::Idle,
+        };
         self.location_search_changed(Some(String::new()), cx);
     }
 
     fn location_search_close(&mut self, cx: &mut Context<Self>) {
-        self.location_ui.search = None;
         self.location_search_changed(None, cx);
     }
 
     fn location_title(&self, cx: &mut Context<Self>) -> AnyElement {
-        if let Some(search) = self.location_ui.search.as_ref() {
+        if let Some(search) = self.location_ui.search.input() {
             return h_flex()
                 .w_full()
                 .pl_4()
@@ -379,7 +381,7 @@ impl QuillApp {
             });
         let body_of = app.downgrade();
         app.update(cx, |this, cx| {
-            let searching = this.location_ui.search.is_some();
+            let searching = this.location_ui.search.input().is_some();
             let title = this.location_title(cx);
             dialog
                 .w(px(WINDOW_WIDTH))

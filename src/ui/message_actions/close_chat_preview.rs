@@ -721,7 +721,7 @@ impl QuillApp {
                             ChatId(0),
                             MessageId(0),
                             &page.rich,
-                            &std::collections::HashSet::new(),
+                            &crate::ui::message_text::revealed::Revealed::default(),
                             false,
                             // Settings → Appearance: message font size.
                             self.msg_font(),

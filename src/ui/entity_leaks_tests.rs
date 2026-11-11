@@ -347,11 +347,13 @@ const MAIN_WINDOW: &[Surface] = &[
         name: "message menu",
         open: |h| {
             h.act(|app, _, cx| {
-                app.message_ui.menu = Some(crate::ui::menu_states::MessageMenuState {
-                    chat_id: ChatId(11),
-                    message_id: MessageId(101),
-                    position: point(px(500.), px(200.)),
-                });
+                app.message_ui
+                    .menu
+                    .open_at(crate::ui::menu_states::MessageMenuState {
+                        chat_id: ChatId(11),
+                        message_id: MessageId(101),
+                        position: point(px(500.), px(200.)),
+                    });
                 cx.notify();
             })
         },

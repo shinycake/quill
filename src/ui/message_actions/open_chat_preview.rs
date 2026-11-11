@@ -2,6 +2,7 @@
 //! row (slice CL); closing it lives in `close_chat_preview.rs`.
 
 use super::*;
+use std::time::Instant;
 
 impl QuillApp {
     /// Slice CL: start a long press on a chat-list row — after

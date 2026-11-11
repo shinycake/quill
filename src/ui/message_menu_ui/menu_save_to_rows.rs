@@ -294,8 +294,9 @@ impl QuillApp {
                             }),
                         ))
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.message_ui.menu_ui.page = MessageMenuPage::Audience;
-                            this.message_ui.menu_ui.audience_tab = None;
+                            this.message_ui
+                                .menu
+                                .show_page(MessageMenuPage::Audience { tab: None });
                             cx.notify();
                         }))
                         .into_any_element(),
@@ -343,8 +344,9 @@ impl QuillApp {
             .and_then(|s| s.histories.get(&menu.chat_id.0))
             .and_then(|h| h.messages.get(&menu.message_id.0))
             .is_some_and(|m| m.reaction_chips().len() > 1);
-        self.message_ui.menu_ui.page = MessageMenuPage::Audience;
-        self.message_ui.menu_ui.audience_tab = several.then(|| reaction.clone());
+        self.message_ui.menu.show_page(MessageMenuPage::Audience {
+            tab: several.then(|| reaction.clone()),
+        });
         if several && let Some(live) = self.live.as_mut() {
             live.driver.session.messages.wanted_reactor_tab =
                 Some((menu.chat_id, menu.message_id, reaction));
@@ -365,7 +367,9 @@ impl QuillApp {
                 .driver
                 .fetch_reactors_tab(chat_id, message_id, tab.as_ref(), false);
         }
-        self.message_ui.menu_ui.audience_tab = tab;
+        self.message_ui
+            .menu
+            .show_page(MessageMenuPage::Audience { tab });
         cx.notify();
     }
 
@@ -378,17 +382,15 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.close_message_menu();
-        // The flow is the session's: one report at a time, so a box another
-        // window still shows for the one this replaces goes.
-        self.end_report_boxes(cx);
-        self.message_ui.menu_ui.report_open = true;
+        // The flow is the session's: one report at a time, so it replaces
+        // the one another window showed. The box shows in this window.
+        self.open_box(DialogKind::MessageReport);
         if let Some(live) = self.live.as_mut() {
             if live
                 .driver
                 .report_messages(chat_id, &message_ids, "", "", None)
                 .is_err()
             {
-                self.message_ui.menu_ui.report_open = false;
                 self.set_note(StatusNote::error(tr(
                     keys::Q_CHAT_COULD_NOT_START_THE_REPORT,
                 )));
@@ -401,19 +403,11 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// Clear the report box's flag in every window: the flow it shows is
-    /// the session's, so no window keeps a box for a flow that is gone or
-    /// replaced.
-    fn end_report_boxes(&mut self, cx: &mut Context<Self>) {
-        self.in_every_window(cx, |this, _| this.message_ui.menu_ui.report_open = false);
-    }
-
     pub(in crate::ui) fn close_message_report(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.end_report_boxes(cx);
         // The details text belongs to the flow that ends here.
         self.message_ui
             .menu_ui

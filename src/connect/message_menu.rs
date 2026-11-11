@@ -328,7 +328,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 menu.chat_id == chat_id
                     && menu.message_id == message_id
                     && menu.option_id == item.option_id()
-                    && menu.properties.is_some_and(|p| p.can_get_link)
+                    && menu.properties.data().is_some_and(|p| p.can_get_link)
             });
         if !allowed {
             return Ok(None);
@@ -363,7 +363,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 menu.chat_id == chat_id
                     && menu.message_id == message_id
                     && menu.option_id == option_id
-                    && menu.properties.is_some_and(|p| p.can_be_deleted)
+                    && menu.properties.data().is_some_and(|p| p.can_be_deleted)
             });
         if !allowed {
             return Ok(None);

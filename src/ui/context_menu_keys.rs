@@ -369,7 +369,7 @@ impl QuillApp {
     /// own; the others only the main window draws, so a chat window's keys
     /// and Escape never reach them.
     pub(super) fn context_menu_open(&self) -> bool {
-        self.message_ui.menu.is_some() || (!self.windows.in_window() && self.main_menu_open())
+        self.message_ui.menu.is_open() || (!self.windows.in_window() && self.main_menu_open())
     }
 
     /// The menus only the main window draws: the chat list's row, archive
@@ -379,13 +379,13 @@ impl QuillApp {
             || self.chat_list.archive_menu.is_some()
             || self.admin.community.flow.row_menu.is_some()
             || self.chat_list.global.story_menu.is_some()
-            || self.playback.playlist_menu.is_some()
+            || self.playback.playlist.menu().is_some()
             || self.folders.tab_menu.is_some()
     }
 
     /// Close the message menu and forget the reaction options it asked for.
     pub(super) fn close_message_menu(&mut self) {
-        self.message_ui.menu = None;
+        self.message_ui.menu.close();
         let session = match self.live.as_mut() {
             Some(live) => Some(&mut live.driver.session),
             None => self.demo_session.as_deref_mut(),
@@ -403,7 +403,7 @@ impl QuillApp {
         }
         self.close_message_menu();
         if !self.windows.in_window() {
-            self.playback.playlist_menu = None;
+            self.playback.playlist.close_menu();
             self.chat_list.menu = None;
             self.chat_list.archive_menu = None;
             self.admin.community.flow.row_menu = None;
