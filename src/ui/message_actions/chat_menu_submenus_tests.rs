@@ -382,3 +382,41 @@ fn clear_history_is_hidden_when_the_server_allows_none(cx: &mut TestAppContext) 
     show_menu(&app, vcx, chat_id);
     assert!(!present(vcx, "chat-menu-clear"));
 }
+
+/// The Mute submenu's panel and its parent menu's, opened at `x`.
+fn menu_and_submenu_at(
+    x: f32,
+    cx: &mut TestAppContext,
+) -> (gpui_kit::Bounds<gpui_kit::Pixels>, gpui_kit::Bounds<gpui_kit::Pixels>) {
+    let (app, mut vcx, chat_id) = open(cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.chat_list.menu = Some(ChatMenuState::at(chat_id, point(px(x), px(200.))));
+        cx.notify();
+    });
+    frames(vcx);
+    click(vcx, "chat-menu-mute");
+    frames(vcx);
+    let drawn = |vcx: &mut VisualTestContext, selector: &'static str| {
+        vcx.debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} is drawn"))
+    };
+    (
+        drawn(vcx, "chat-menu-panel"),
+        drawn(vcx, "chat-menu-submenu"),
+    )
+}
+
+#[gpui_kit::test]
+fn the_mute_submenu_opens_right_of_the_menu_where_it_fits(cx: &mut TestAppContext) {
+    let (menu, submenu) = menu_and_submenu_at(120., cx);
+    assert_eq!(submenu.left(), menu.right(), "{submenu:?} beside {menu:?}");
+}
+
+#[gpui_kit::test]
+fn the_mute_submenu_moves_left_of_the_menu_near_the_right_edge(cx: &mut TestAppContext) {
+    // tdesktop PopupMenu::prepareGeometryFor: no room on the right puts the
+    // child menu on the parent's left.
+    let (menu, submenu) = menu_and_submenu_at(1000., cx);
+    assert_eq!(submenu.right(), menu.left(), "{submenu:?} beside {menu:?}");
+}
