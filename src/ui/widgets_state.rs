@@ -207,7 +207,9 @@ pub(super) struct WidgetEntry {
     pub input_window: Option<ChatId>,
     /// Stops in a row ([`quill::message_widget::MAX_CRASHES`]).
     pub crashes: u8,
-    /// The runtime animates: it ticks while it is shown.
+    /// What the runtime itself asked for last (it animates): it ticks only
+    /// while it is shown ([`Self::ticks`]); hidden, the ask stays here, so
+    /// coming back ticks it again.
     pub wants_frames: bool,
     pub cursor: String,
     pub poll: Poll,
@@ -255,6 +257,28 @@ impl WidgetEntry {
             queries: HashMap::new(),
             theme: None,
         }
+    }
+
+    /// It takes a display frame now: its runtime animates and a window
+    /// draws it.
+    pub(super) fn ticks(&self) -> bool {
+        self.presence.is_shown() && self.wants_frames
+    }
+
+    /// It holds a runtime or a frame (a few MB): what the hidden pool keeps
+    /// to a few and the prune sheds.
+    pub(super) fn holds_weight(&self) -> bool {
+        self.frame.is_some() || self.runtime().is_some()
+    }
+
+    /// Drops the runtime and the frame; the entry keeps `stored` (and what
+    /// of it is unwritten) and starts over from it when it shows again.
+    pub(super) fn shed(&mut self) {
+        self.lifecycle = Lifecycle::Idle;
+        self.frame = None;
+        self.wants_frames = false;
+        self.queries.clear();
+        self.theme = None;
     }
 
     /// The runtime, while it is live.
@@ -341,6 +365,38 @@ pub(super) fn write_pending(unsaved: &mut bool, save: impl FnOnce() -> std::io::
     match save() {
         Ok(()) => *unsaved = false,
         Err(err) => eprintln!("quill: could not save a widget's storage: {err}"),
+    }
+}
+
+/// Drops the hidden widgets that hold a runtime or a frame past `keep`,
+/// oldest first, writing what they still had to keep with `save`. One
+/// whose write fails sheds its runtime and frame and stays with its
+/// `stored` copy, still unsaved for the save timer and the farewell: it
+/// weighs nothing, so later passes neither retry it nor log it again.
+pub(super) fn prune_hidden(
+    entries: &mut HashMap<WidgetKey, WidgetEntry>,
+    keep: usize,
+    mut save: impl FnMut(WidgetKey, &Stored) -> std::io::Result<()>,
+) {
+    let mut hidden: Vec<(u64, WidgetKey)> = entries
+        .iter()
+        .filter(|(_, entry)| !entry.presence.is_shown() && entry.holds_weight())
+        .map(|(key, entry)| (entry.presence.hidden_since(), *key))
+        .collect();
+    let Some(excess) = hidden.len().checked_sub(keep) else {
+        return;
+    };
+    hidden.sort_unstable();
+    for (_, key) in hidden.into_iter().take(excess) {
+        let Some(entry) = entries.get_mut(&key) else {
+            continue;
+        };
+        write_pending(&mut entry.unsaved, || save(key, &entry.stored));
+        if entry.unsaved {
+            entry.shed();
+        } else {
+            entries.remove(&key);
+        }
     }
 }
 

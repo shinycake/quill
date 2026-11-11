@@ -1,7 +1,12 @@
 //! Where a widget is drawn, with two windows showing it at once.
 
-use super::{Presence, PresenceChange, Showing, next_query_token, write_pending};
+use super::{
+    Presence, PresenceChange, Showing, WidgetEntry, next_query_token, prune_hidden, write_pending,
+};
 use quill::ids::ChatId;
+use quill::message_widget::WidgetKey;
+use quill::message_widget::storage::Stored;
+use std::collections::HashMap;
 
 const MAIN: Option<ChatId> = None;
 const OTHER: Option<ChatId> = Some(ChatId(7));
@@ -89,4 +94,80 @@ fn a_failed_storage_write_stays_pending_until_one_takes() {
     assert!(!unsaved, "the write that took made it clean");
     // A clean entry writes nothing.
     write_pending(&mut unsaved, || panic!("nothing to write"));
+}
+
+fn key(n: i64) -> WidgetKey {
+    WidgetKey {
+        chat_id: ChatId(1),
+        message_id: quill::ids::MessageId(n),
+    }
+}
+
+/// A hidden entry holding a frame, gone `since` ticks ago, with storage
+/// still to write.
+fn heavy(since: u64) -> WidgetEntry {
+    let mut entry = WidgetEntry::new(Stored::default(), 100.0);
+    let image = std::sync::Arc::new(gpui_kit::RenderImage::new(smallvec::SmallVec::from_buf([
+        image::Frame::new(image::RgbaImage::new(2, 2)),
+    ])));
+    entry.frame = Some((image.into(), 10.0, 10.0));
+    entry.presence = Presence::Hidden { since };
+    entry.unsaved = true;
+    entry
+}
+
+/// A hidden animated widget keeps the runtime's ask; it ticks only while
+/// a window draws it, and again the moment it comes back.
+#[test]
+fn a_hidden_animated_widget_ticks_only_while_shown() {
+    let mut entry = WidgetEntry::new(Stored::default(), 100.0);
+    entry.wants_frames = true;
+    assert!(!entry.ticks(), "hidden");
+    assert_eq!(
+        entry.presence.show(MAIN, at(300.0)),
+        PresenceChange::CameBack
+    );
+    assert!(entry.ticks(), "back on screen it ticks again");
+    entry.presence.leave(MAIN, 1);
+    assert!(!entry.ticks());
+    assert!(
+        entry.wants_frames,
+        "the runtime's ask is kept for the return"
+    );
+}
+
+/// A pruned widget whose storage cannot be written sheds its runtime and
+/// frame at once and keeps only its stored copy; later passes neither
+/// write it again nor count it against the pool.
+#[test]
+fn a_failed_prune_write_sheds_and_is_not_retried() {
+    let mut entries: HashMap<WidgetKey, WidgetEntry> = HashMap::new();
+    for n in 0..3 {
+        entries.insert(key(n), heavy(n as u64 + 1));
+    }
+    let mut writes = 0;
+    for _ in 0..4 {
+        prune_hidden(&mut entries, 1, |_, _| {
+            writes += 1;
+            Err(std::io::Error::other("disk full"))
+        });
+    }
+    assert_eq!(writes, 2, "each excess entry tried once, never again");
+    assert_eq!(entries.len(), 3, "nothing unwritten is lost");
+    let light = entries.values().filter(|e| !e.holds_weight()).count();
+    assert_eq!(light, 2);
+    assert!(entries[&key(0)].unsaved && !entries[&key(0)].holds_weight());
+    assert!(entries[&key(2)].holds_weight(), "the newest stays warm");
+}
+
+/// A prune whose write takes drops the entry.
+#[test]
+fn a_prune_that_writes_drops_the_oldest() {
+    let mut entries: HashMap<WidgetKey, WidgetEntry> = HashMap::new();
+    for n in 0..3 {
+        entries.insert(key(n), heavy(n as u64 + 1));
+    }
+    prune_hidden(&mut entries, 2, |_, _| Ok(()));
+    assert!(!entries.contains_key(&key(0)));
+    assert_eq!(entries.len(), 2);
 }

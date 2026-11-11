@@ -11,7 +11,8 @@ use super::owned_image::OwnedImage;
 use super::status_note::StatusNote;
 use super::widget_runtime::{Launch, Runtime, RuntimeEvent, WIDGETS};
 use super::widgets_state::{
-    Identity, Poll, PresenceChange, Showing, WidgetEntry, WidgetStorage, write_pending,
+    Identity, Poll, PresenceChange, Showing, WidgetEntry, WidgetStorage, prune_hidden,
+    write_pending,
 };
 use gpui_kit::*;
 use quill::ids::ChatId;
@@ -103,7 +104,7 @@ impl QuillApp {
     pub(super) fn widgets_frame_start(&self, window: Option<ChatId>, cx: &mut Context<Self>) {
         let mut views = Vec::new();
         for entry in self.widgets.entries.values() {
-            if entry.presence.owner() != Some(window) || !entry.wants_frames {
+            if entry.presence.owner() != Some(window) || !entry.ticks() {
                 continue;
             }
             if let Some(runtime) = entry.lifecycle.runtime() {
@@ -134,39 +135,17 @@ impl QuillApp {
     const KEEP_HIDDEN: usize = 16;
 
     /// Drops the hidden widgets past [`Self::KEEP_HIDDEN`], oldest first,
-    /// writing what they still had to keep.
+    /// writing what they still had to keep ([`prune_hidden`]).
     fn prune_hidden_widgets(&mut self) {
-        let mut hidden: Vec<(u64, WidgetKey)> = self
-            .widgets
-            .entries
-            .iter()
-            .filter(|(_, entry)| !entry.presence.is_shown())
-            .map(|(key, entry)| (entry.presence.hidden_since(), *key))
-            .collect();
-        let Some(excess) = hidden.len().checked_sub(Self::KEEP_HIDDEN) else {
-            return;
-        };
-        if excess == 0 {
-            return;
-        }
-        hidden.sort_unstable();
         let dir = self.widget_dir();
-        for (_, key) in hidden.into_iter().take(excess) {
-            let Some(entry) = self.widgets.entries.remove(&key) else {
-                continue;
-            };
-            let mut entry = entry;
-            if let Some(dir) = &dir {
-                write_pending(&mut entry.unsaved, || {
-                    storage::save(dir, key, &entry.stored)
-                });
-            }
-            if entry.unsaved && dir.is_some() {
-                // Pruned with its storage unwritten, it would be lost: it
-                // stays, and the next prune or save writes it again.
-                self.widgets.entries.insert(key, entry);
-            }
-        }
+        prune_hidden(
+            &mut self.widgets.entries,
+            Self::KEEP_HIDDEN,
+            |key, stored| match &dir {
+                Some(dir) => storage::save(dir, key, stored),
+                None => Ok(()),
+            },
+        );
     }
 
     /// `window` (`None`: the main one) stopped drawing the widget `key`:
@@ -234,6 +213,9 @@ impl QuillApp {
         };
         // Only a stopped widget starting again changes what the rows show.
         let mut redraw = false;
+        // Back on screen while its runtime still animates: nothing else
+        // starts the frames again.
+        let mut resume = false;
         let dir = self.widget_dir();
         let left: Vec<WidgetKey> = self
             .widgets
@@ -279,6 +261,7 @@ impl QuillApp {
             if came_back {
                 // Its links ask from the window that shows it now.
                 entry.input_window = window;
+                resume |= entry.ticks();
             }
             if let PresenceChange::Width(width) = change
                 && let Some(runtime) = entry.lifecycle.runtime()
@@ -311,6 +294,9 @@ impl QuillApp {
                 redraw |= entry.lifecycle.is_stopped();
                 entry.lifecycle = Lifecycle::Waiting;
             }
+        }
+        if resume {
+            self.request_animation_tick_for(view, 60, cx);
         }
         self.sync_widget_data();
         self.start_waiting_widgets(cx);
