@@ -158,9 +158,17 @@ fn a_removed_accounts_notification_state_goes_with_it(cx: &mut TestAppContext) {
                 .insert((owner.clone(), CHAT), quill::ids::MessageId(5));
         }
         app.delivery.forget_account(&account);
-        assert!(!app.delivery.unsent_replies.contains_key(&(account.clone(), CHAT)));
+        assert!(
+            !app.delivery
+                .unsent_replies
+                .contains_key(&(account.clone(), CHAT))
+        );
         assert!(!app.delivery.reply_targets.contains_key(&(account, CHAT)));
-        assert!(app.delivery.unsent_replies.contains_key(&(other.clone(), CHAT)));
+        assert!(
+            app.delivery
+                .unsent_replies
+                .contains_key(&(other.clone(), CHAT))
+        );
         assert!(app.delivery.reply_targets.contains_key(&(other, CHAT)));
     });
 }

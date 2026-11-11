@@ -305,7 +305,9 @@ impl QuillApp {
         // next step.
         if let Some(live) = self.live.as_mut() {
             match left {
-                Some(NewChatStage::Creating { request, .. }) => live.driver.abandon_new_chat(request),
+                Some(NewChatStage::Creating { request, .. }) => {
+                    live.driver.abandon_new_chat(request)
+                }
                 Some(NewChatStage::Type {
                     save: TypeSaveStage::Saving(sent),
                     ..

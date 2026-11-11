@@ -12,7 +12,6 @@ use super::app::QuillApp;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::status_note::StatusNote;
-use state::SetBoxHost;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::dialog::Dialog;
@@ -27,6 +26,7 @@ use quill::sticker_set_box::{
     ARCHIVED_NOTE, SetKind, can_archive, copied_note, has_add_cell, set_link, share_label,
 };
 use quill::telegram::envelope::StickerItem;
+use state::SetBoxHost;
 use std::cell::RefCell;
 use std::rc::Rc;
 

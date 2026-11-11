@@ -448,7 +448,10 @@ impl QuillApp {
         if self.windows.in_window() {
             return None;
         }
-        match (&self.chat_list.menu.state(), &self.admin.community.flow.row_menu) {
+        match (
+            &self.chat_list.menu.state(),
+            &self.admin.community.flow.row_menu,
+        ) {
             (Some(menu), _) => menu.submenu,
             (None, Some(menu)) => menu.submenu,
             (None, None) => None,

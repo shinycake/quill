@@ -172,7 +172,10 @@ fn the_menu_removes_one_person_or_asks_before_disabling(cx: &mut TestAppContext)
     frames(vcx);
     let menu = app.update(vcx, |app, _| app.chat_list.menu.state());
     assert_eq!(
-        menu.map(|m| (m.chat_id, m.kind == crate::ui::menu_states::ChatMenuKind::TopPerson)),
+        menu.map(|m| (
+            m.chat_id,
+            m.kind == crate::ui::menu_states::ChatMenuKind::TopPerson
+        )),
         Some((ChatId(32), true))
     );
     click(vcx, "top-menu-remove");

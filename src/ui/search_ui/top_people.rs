@@ -181,7 +181,9 @@ impl QuillApp {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                    this.chat_list.menu.open(ChatMenuState::top_person(id, event.position));
+                    this.chat_list
+                        .menu
+                        .open(ChatMenuState::top_person(id, event.position));
                     cx.notify();
                 }),
             )

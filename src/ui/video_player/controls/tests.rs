@@ -2,7 +2,9 @@
 //! (needs the `demo-capture` feature for gpui-kit's test support).
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use super::{IconName, PANEL_OPACITY, SliderDrag, VideoControlsState, WaitingCheck, WaitingGate, volume_icon};
+use super::{
+    IconName, PANEL_OPACITY, SliderDrag, VideoControlsState, WaitingCheck, WaitingGate, volume_icon,
+};
 use std::time::{Duration, Instant};
 
 #[test]
@@ -60,7 +62,10 @@ fn a_stopped_clip_drops_its_gestures() {
     state.drag = SliderDrag::Seek(3.0);
     assert!(state.dragging());
     state.drag.end_volume();
-    assert!(state.dragging(), "letting go of another thumb leaves this drag");
+    assert!(
+        state.dragging(),
+        "letting go of another thumb leaves this drag"
+    );
     state.drag.end_seek();
     assert!(!state.dragging());
     state.drag = SliderDrag::Volume;

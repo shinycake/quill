@@ -126,9 +126,11 @@ fn a_custom_limit_returns_to_the_box(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     click_in(vcx, "invite-link-usage", 4);
     assert_eq!(shown(&shell, vcx), Some(DialogKind::InviteLinkLimit));
-    let input = app.read_with(vcx, |app, _| match app.invite_link_box()?.custom.as_ref()? {
-        CustomBox::Limit { input } => Some(input.clone()),
-        CustomBox::Date(_) => None,
+    let input = app.read_with(vcx, |app, _| {
+        match app.invite_link_box()?.custom.as_ref()? {
+            CustomBox::Limit { input } => Some(input.clone()),
+            CustomBox::Date(_) => None,
+        }
     });
     let input = input.expect("the number box is open");
     vcx.update(|window, cx| {

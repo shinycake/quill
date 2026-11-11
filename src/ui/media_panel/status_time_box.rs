@@ -211,10 +211,7 @@ impl QuillApp {
                 )))
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        content.child(
-                            body.take()
-                                .unwrap_or_else(|| div().into_any_element()),
-                        )
+                        content.child(body.take().unwrap_or_else(|| div().into_any_element()))
                     },
                 ))
                 .footer(footer)

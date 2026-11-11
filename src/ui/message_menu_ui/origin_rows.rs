@@ -132,14 +132,17 @@ impl QuillApp {
                 if let Some(session) = this.origin_session_mut() {
                     // A block already out is not replaced: its answer
                     // would find another target.
-                    let submitting = session.users_state.replies_block.as_ref().is_some_and(
-                        |open| {
-                            matches!(
-                                open.stage,
-                                quill::message_menu_origin::RepliesBlockStage::Submitting(_)
-                            )
-                        },
-                    );
+                    let submitting =
+                        session
+                            .users_state
+                            .replies_block
+                            .as_ref()
+                            .is_some_and(|open| {
+                                matches!(
+                                    open.stage,
+                                    quill::message_menu_origin::RepliesBlockStage::Submitting(_)
+                                )
+                            });
                     if !submitting {
                         session.users_state.replies_block = Some(block.clone());
                         this.open_box(DialogKind::BlockFromReplies);

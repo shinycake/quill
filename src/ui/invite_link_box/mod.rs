@@ -42,9 +42,7 @@ pub(crate) struct InviteLinkBox {
 /// number of users.
 pub(crate) enum CustomBox {
     Date(TimePicker),
-    Limit {
-        input: Entity<InputState>,
-    },
+    Limit { input: Entity<InputState> },
 }
 
 impl QuillApp {

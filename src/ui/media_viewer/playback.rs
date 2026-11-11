@@ -2,8 +2,8 @@
 //! preferences, the media-session tick, and zoom/pan.
 
 use super::*;
-use crate::ui::video_player::controls::SliderDrag;
 use crate::ui::status_note::StatusNote;
+use crate::ui::video_player::controls::SliderDrag;
 use quill::lang::{keys, tr, tr_with};
 use std::time::Instant;
 
@@ -327,9 +327,8 @@ impl QuillApp {
         cx.subscribe(&slider, move |this, _, event, cx| {
             this.in_window_scope(scope, cx, |this, cx| match event {
                 SliderEvent::Change(value) => {
-                    this.viewer.controls.drag = SliderDrag::Speed(
-                        quill::viewer_extras::snap_speed(f64::from(value.end())),
-                    );
+                    this.viewer.controls.drag =
+                        SliderDrag::Speed(quill::viewer_extras::snap_speed(f64::from(value.end())));
                     cx.notify();
                 }
                 SliderEvent::Release(value) => {

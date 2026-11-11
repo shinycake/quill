@@ -345,11 +345,7 @@ impl QuillApp {
         self.sync_location_picker(cx);
     }
 
-    fn location_search_changed(
-        &mut self,
-        edit: state::SearchEdit,
-        cx: &mut Context<Self>,
-    ) {
+    fn location_search_changed(&mut self, edit: state::SearchEdit, cx: &mut Context<Self>) {
         // The field is open exactly while the picker holds a query: this
         // one transition opens, edits and closes both, and an edit with no
         // field open reaches neither.

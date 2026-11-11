@@ -520,7 +520,9 @@ fn a_chat_menu_is_cut_with_its_row(cx: &mut TestAppContext) {
     for (chat, shown) in [(12_i64, false), (11, true)] {
         let anchor = row_anchor(vcx, chat as u64);
         app.update(vcx, |app, cx| {
-            app.chat_list.menu.open(ChatMenuState::at(ChatId(chat), anchor));
+            app.chat_list
+                .menu
+                .open(ChatMenuState::at(ChatId(chat), anchor));
             cx.notify();
         });
         settle(vcx);
