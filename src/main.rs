@@ -226,7 +226,7 @@ fn ui_main(args: &[String]) {
     let credentials = quill::credentials::load();
     ui::early_connect::begin(credentials.clone());
     let appearance = ui::QuillApp::load_appearance();
-    quill::tray::set_tray_enabled(appearance.show_tray_icon);
+    quill::tray::set_tray_enabled(appearance.work_mode.has_tray());
     ui::window_frame::set_native(appearance.native_window_frame);
     let start_in_tray =
         args.iter().any(|arg| arg == "--start-minimized") || appearance.start_in_tray;

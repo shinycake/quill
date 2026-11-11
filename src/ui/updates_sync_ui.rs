@@ -300,6 +300,7 @@ impl QuillApp {
             );
         };
         let bot_url = age_verification_bot_url(&params);
+        let asked_for = params.clone();
         let body = div()
             .flex()
             .flex_col()
@@ -330,7 +331,9 @@ impl QuillApp {
                         .label(tr(keys::Q_OPS_VERIFY_MY_AGE))
                         .primary()
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.account_boxes.age_check = AgeCheck::Started;
+                            this.account_boxes.age_check = AgeCheck::Started {
+                                asked_for: asked_for.clone(),
+                            };
                             this.open_link(&url, cx);
                         })),
                 )
@@ -348,13 +351,11 @@ impl QuillApp {
     /// `ShowAgeVerificationRequired`); once the user has started the
     /// verification, the server decides.
     pub(super) fn toggle_sensitive_content(&mut self, on: bool, cx: &mut Context<Self>) {
-        let needs_verification = self
-            .session()
-            .is_some_and(|s| s.sync.age_verification.is_some());
+        let asked = self.session().and_then(|s| s.sync.age_verification.clone());
         if quill::state::age_gate_blocks(
             on,
-            needs_verification,
-            self.account_boxes.age_check == AgeCheck::Started,
+            asked.is_some(),
+            self.account_boxes.age_check.started_for(asked.as_ref()),
         ) {
             self.account_boxes.notice = OpenNotice::AgeVerify;
             self.open_box(crate::ui::shell::DialogKind::AccountNotice);

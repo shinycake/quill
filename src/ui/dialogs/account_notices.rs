@@ -117,13 +117,16 @@ impl QuillApp {
         // A notice whose condition cleared (the freeze lifted, the age check
         // done) is closed for good: it must not open again unasked when the
         // condition comes back.
-        let condition = self.session().map(|session| {
-            (
-                session.sync.freeze.is_some(),
-                session.sync.age_verification.is_some(),
-            )
-        });
-        let (frozen, age_asked) = condition.unwrap_or_default();
+        let asked = self
+            .session()
+            .and_then(|session| session.sync.age_verification.clone());
+        let frozen = self
+            .session()
+            .is_some_and(|session| session.sync.freeze.is_some());
+        let age_asked = asked.is_some();
+        // A verification started for an earlier request does not count for a
+        // new one the server makes.
+        self.account_boxes.age_check.follow(asked.as_ref());
         match self.account_boxes.notice {
             OpenNotice::Frozen if !frozen => self.account_boxes.notice.close(),
             OpenNotice::AgeVerify if !age_asked => self.account_boxes.notice.close(),

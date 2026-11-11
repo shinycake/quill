@@ -27,7 +27,7 @@ use quill::settings::{
     AccountRecord, active_account, add_account, list_accounts, rename_account, safe_app_root,
     set_active_account,
 };
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// What one account row of the dialog shows besides its name: at most one
@@ -53,16 +53,77 @@ impl AccountRowEdit {
     }
 }
 
+/// Whether the Accounts dialog is open, and what it holds while it is. One
+/// value, replaced whole on open and on close, so a row question or an
+/// error line never outlives the dialog.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) enum AccountsDialog {
+    #[default]
+    Closed,
+    Open {
+        row_edit: AccountRowEdit,
+        /// Add/rename/remove failure text, shown inside the dialog. Switch
+        /// failures close the dialog and go to the status-note path.
+        error: Option<String>,
+    },
+}
+
+impl AccountsDialog {
+    /// The dialog just opened: no row question, no error.
+    pub(crate) fn opened() -> Self {
+        Self::Open {
+            row_edit: AccountRowEdit::None,
+            error: None,
+        }
+    }
+
+    pub(crate) fn is_open(&self) -> bool {
+        matches!(self, Self::Open { .. })
+    }
+
+    /// The row question now, none while closed.
+    pub(crate) fn row_edit(&self) -> AccountRowEdit {
+        match self {
+            Self::Open { row_edit, .. } => row_edit.clone(),
+            Self::Closed => AccountRowEdit::None,
+        }
+    }
+
+    pub(crate) fn error(&self) -> Option<&str> {
+        match self {
+            Self::Open { error, .. } => error.as_deref(),
+            Self::Closed => None,
+        }
+    }
+
+    /// Move to another row question; the error line belongs to the last one
+    /// and goes with it.
+    pub(crate) fn ask(&mut self, next: AccountRowEdit) {
+        if let Self::Open { row_edit, error } = self {
+            *row_edit = next;
+            *error = None;
+        }
+    }
+
+    /// Show a failure above the list, keeping the row question. While the
+    /// dialog is closed there is nowhere to show it: the line comes back.
+    pub(crate) fn fail(&mut self, line: String) -> Option<String> {
+        match self {
+            Self::Open { error, .. } => {
+                *error = Some(line);
+                None
+            }
+            Self::Closed => Some(line),
+        }
+    }
+}
+
 /// Slice parity:auth-multi-account: working state for the Accounts dialog.
 pub(crate) struct AccountsUiState {
-    pub(crate) open: bool,
-    pub(crate) row_edit: AccountRowEdit,
+    pub(crate) dialog: AccountsDialog,
     pub(crate) add_name: Entity<TextareaState>,
     /// The new name while a row is in `AccountRowEdit::Rename`; Enter saves.
     pub(crate) rename_name: Entity<InputState>,
-    /// Add/rename/remove failure text, shown inside the dialog. Switch failures
-    /// close the dialog and go to the status-note/notification path.
-    pub(crate) error: Option<String>,
 }
 
 impl AccountsUiState {
@@ -89,11 +150,9 @@ impl AccountsUiState {
         )
         .detach();
         Self {
-            open: false,
-            row_edit: AccountRowEdit::None,
+            dialog: AccountsDialog::Closed,
             add_name,
             rename_name,
-            error: None,
         }
     }
 }
@@ -107,23 +166,28 @@ impl QuillApp {
         ) {
             return;
         }
-        self.account.accounts.open = true;
+        self.account.accounts.dialog = AccountsDialog::opened();
         self.open_box(DialogKind::Accounts);
-        self.account.accounts.row_edit = AccountRowEdit::None;
-        self.account.accounts.error = None;
         cx.notify();
     }
 
     /// Slice parity:auth-multi-account: close the dialog and drop its
     /// working state (pending remove confirm, error, add-name input).
     pub(crate) fn close_accounts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.account.accounts.open = false;
-        self.account.accounts.row_edit = AccountRowEdit::None;
-        self.account.accounts.error = None;
+        self.account.accounts.dialog = AccountsDialog::Closed;
         self.account
             .accounts
             .add_name
             .update(cx, |input, cx| input.set_value("", window, cx));
+    }
+
+    /// An add, rename or remove failure: above the list while the dialog is
+    /// open, the status line when it already closed (a removal that fails
+    /// after the user closed the dialog).
+    pub(in crate::ui) fn fail_accounts_dialog(&mut self, line: String) {
+        if let Some(line) = self.account.accounts.dialog.fail(line) {
+            self.set_note(StatusNote::error(line));
+        }
     }
 
     /// Slice parity:auth-multi-account: switch failure → the
@@ -249,13 +313,12 @@ impl QuillApp {
             .trim()
             .to_string();
         if name.is_empty() {
-            self.account.accounts.error = Some(tr(keys::Q_OPS_GIVE_THE_NEW_ACCOUNT_A).into());
+            self.fail_accounts_dialog(tr(keys::Q_OPS_GIVE_THE_NEW_ACCOUNT_A).into());
             cx.notify();
             return;
         }
         let Some(root) = safe_app_root() else {
-            self.account.accounts.error =
-                Some(tr(keys::Q_OPS_ACCOUNTS_ARE_UNAVAILABLE_NO_APP).into());
+            self.fail_accounts_dialog(tr(keys::Q_OPS_ACCOUNTS_ARE_UNAVAILABLE_NO_APP).into());
             cx.notify();
             return;
         };
@@ -265,7 +328,7 @@ impl QuillApp {
             usize::from(self.session().and_then(|s| s.payments.premium_option) == Some(true));
         if let Some(note) = quill::signin::add_account_blocker(list_accounts(&root).len(), premium)
         {
-            self.account.accounts.error = Some(note);
+            self.fail_accounts_dialog(note);
             cx.notify();
             return;
         }
@@ -278,7 +341,7 @@ impl QuillApp {
                 self.switch_account(&key, &name, window, cx);
             }
             Err(e) => {
-                self.account.accounts.error = Some(tr_with(
+                self.fail_accounts_dialog(tr_with(
                     keys::Q_OPS_COULD_NOT_ADD_THE_ACCOUNT,
                     &[("e", &e.to_string())],
                 ));
@@ -294,8 +357,10 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.account.accounts.row_edit = AccountRowEdit::Rename(record.key.clone());
-        self.account.accounts.error = None;
+        self.account
+            .accounts
+            .dialog
+            .ask(AccountRowEdit::Rename(record.key.clone()));
         let input = self.account.accounts.rename_name.clone();
         let name = record.display_name.clone();
         input.update(cx, |input, cx| input.set_value(name, window, cx));
@@ -311,7 +376,7 @@ impl QuillApp {
     /// Save the name typed into the row being renamed. A blank name or a
     /// failed write keeps the row open with the reason above the list.
     pub(crate) fn save_account_name(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let AccountRowEdit::Rename(key) = self.account.accounts.row_edit.clone() else {
+        let AccountRowEdit::Rename(key) = self.account.accounts.dialog.row_edit() else {
             return;
         };
         let name = self
@@ -323,23 +388,21 @@ impl QuillApp {
             .trim()
             .to_string();
         if name.is_empty() {
-            self.account.accounts.error = Some(tr(keys::Q_OPS_GIVE_THE_ACCOUNT_A_NAME).into());
+            self.fail_accounts_dialog(tr(keys::Q_OPS_GIVE_THE_ACCOUNT_A_NAME).into());
             cx.notify();
             return;
         }
         let Some(root) = safe_app_root() else {
-            self.account.accounts.error =
-                Some(tr(keys::Q_OPS_ACCOUNTS_ARE_UNAVAILABLE_NO_APP).into());
+            self.fail_accounts_dialog(tr(keys::Q_OPS_ACCOUNTS_ARE_UNAVAILABLE_NO_APP).into());
             cx.notify();
             return;
         };
         match rename_account(&root, &key, &name) {
             Ok(()) => {
-                self.account.accounts.row_edit = AccountRowEdit::None;
-                self.account.accounts.error = None;
+                self.account.accounts.dialog.ask(AccountRowEdit::None);
             }
             Err(e) => {
-                self.account.accounts.error = Some(tr_with(
+                self.fail_accounts_dialog(tr_with(
                     keys::Q_OPS_COULD_NOT_RENAME_THE_ACCOUNT,
                     &[("e", &e.to_string())],
                 ));
@@ -352,8 +415,7 @@ impl QuillApp {
     /// UI never offers the active one — switch away from it first).
     pub(crate) fn remove_account_key(&mut self, key: &AccountKey, cx: &mut Context<Self>) {
         let Some(root) = self.accounts_root() else {
-            self.account.accounts.error =
-                Some(tr(keys::Q_OPS_ACCOUNTS_ARE_UNAVAILABLE_NO_APP).into());
+            self.fail_accounts_dialog(tr(keys::Q_OPS_ACCOUNTS_ARE_UNAVAILABLE_NO_APP).into());
             cx.notify();
             return;
         };
@@ -385,8 +447,7 @@ impl QuillApp {
                     .label(tr(keys::CANCEL))
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.account.accounts.row_edit = AccountRowEdit::None;
-                        this.account.accounts.error = None;
+                        this.account.accounts.dialog.ask(AccountRowEdit::None);
                         cx.notify();
                     })),
             )
@@ -454,9 +515,10 @@ impl QuillApp {
                         .label(tr(keys::BOX_REMOVE))
                         .ghost()
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.account.accounts.row_edit =
-                                AccountRowEdit::ConfirmRemove(key_remove_arm.clone());
-                            this.account.accounts.error = None;
+                            this.account
+                                .accounts
+                                .dialog
+                                .ask(AccountRowEdit::ConfirmRemove(key_remove_arm.clone()));
                             cx.notify();
                         })),
                 )
@@ -522,7 +584,7 @@ impl QuillApp {
                                     .label(tr(keys::CANCEL))
                                     .ghost()
                                     .on_click(cx.listener(|this, _, _, cx| {
-                                        this.account.accounts.row_edit = AccountRowEdit::None;
+                                        this.account.accounts.dialog.ask(AccountRowEdit::None);
                                         cx.notify();
                                     })),
                             ),
@@ -552,8 +614,8 @@ impl QuillApp {
                 .map(|root| list_accounts(root))
                 .unwrap_or_default();
             let active: Option<AccountKey> = root.as_ref().map(|root| active_account(root));
-            let error = this.account.accounts.error.clone();
-            let row_edit = this.account.accounts.row_edit.clone();
+            let error = this.account.accounts.dialog.error().map(str::to_owned);
+            let row_edit = this.account.accounts.dialog.row_edit();
             let mut body = div().flex().flex_col().gap_3();
             if let Some(line) = error {
                 body = body.child(
@@ -622,12 +684,9 @@ impl QuillApp {
                 .content(crate::ui::shell::scrollable_dialog_content({
                     // `content` needs an `Fn` closure, but the body is built once
                     // per dialog render — hand it over through a one-shot cell.
-                    let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+                    let body = Rc::new(Cell::new(Some(body.into_any_element())));
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))
@@ -644,8 +703,39 @@ crate::ui::shell::register_dialogs! {
         // Slice parity:auth-multi-account (UI): accounts sit with the
         // other settings-level dialogs (lowest priority band).
         7000,
-        |app| app.account.accounts.open,
+        |app| app.account.accounts.dialog.is_open(),
         QuillApp::build_accounts_dialog,
     )
     .close(|app, window, cx| app.close_accounts(window, cx)),
+}
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod tests {
+    use super::{AccountRowEdit, AccountsDialog};
+    use quill::ids::AccountKey;
+
+    #[test]
+    fn the_dialog_value_carries_its_row_question_and_error() {
+        let key = AccountKey::new("a1").expect("valid id");
+        let mut dialog = AccountsDialog::opened();
+        dialog.ask(AccountRowEdit::ConfirmRemove(key.clone()));
+        assert_eq!(dialog.fail("boom".into()), None);
+        assert_eq!(dialog.error(), Some("boom"));
+        assert_eq!(
+            dialog.row_edit(),
+            AccountRowEdit::ConfirmRemove(key.clone())
+        );
+        // The next question drops the last one's error line.
+        dialog.ask(AccountRowEdit::Rename(key));
+        assert_eq!(dialog.error(), None);
+        // Closing leaves nothing behind, and a failure with no dialog comes
+        // back for the status line.
+        dialog = AccountsDialog::Closed;
+        assert_eq!(dialog.row_edit(), AccountRowEdit::None);
+        assert_eq!(dialog.fail("late".into()), Some("late".into()));
+        dialog.ask(AccountRowEdit::None);
+        assert!(!dialog.is_open());
+        assert!(AccountsDialog::opened().error().is_none());
+    }
 }

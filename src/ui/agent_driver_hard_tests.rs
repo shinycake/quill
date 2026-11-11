@@ -143,7 +143,7 @@ fn menu_routes_to_hard_surfaces_refuse_while_injecting(cx: &mut TestAppContext) 
         let app = app.read(cx);
         assert!(!app.settings.open, "Settings");
         assert!(!app.account_boxes.lifecycle.is_open(), "log out");
-        assert!(!app.account.accounts.open, "accounts");
+        assert!(!app.account.accounts.dialog.is_open(), "accounts");
         assert!(!app.account.passcode.open, "passcode");
         assert!(!app.twofa.is_open(), "two-step verification");
         assert!(!app.account.passcode.is_locked(), "lock");

@@ -3,6 +3,7 @@
 
 use super::*;
 use gpui_kit::*;
+use quill::telegram::envelope::AgeVerificationParams;
 
 /// The process's account state: the account registry's dialog and the
 /// local passcode, which locks every account at once. What acts for the
@@ -38,8 +39,8 @@ pub(crate) struct AccountBoxes {
     /// The notice the user opened from the banner or the 18+ switch, if
     /// any (one box, so one value).
     pub(super) notice: OpenNotice,
-    /// Whether the user already started the age verification (so turning
-    /// on 18+ content goes to the server).
+    /// Whether the user already started the age verification the server
+    /// asks for (so turning on 18+ content goes to the server).
     pub(super) age_check: AgeCheck,
 }
 
@@ -63,12 +64,27 @@ impl OpenNotice {
 }
 
 /// How far the user took the age verification.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) enum AgeCheck {
     #[default]
     NotStarted,
-    /// The verification bot was opened.
-    Started,
+    /// The verification bot was opened for this request of the server. A
+    /// different request, or none, ends it (see [`AgeCheck::follow`]).
+    Started { asked_for: AgeVerificationParams },
+}
+
+impl AgeCheck {
+    /// The verification bot was opened for what the server asks now.
+    pub(super) fn started_for(&self, asked: Option<&AgeVerificationParams>) -> bool {
+        matches!(self, Self::Started { asked_for } if Some(asked_for) == asked)
+    }
+
+    /// Drop a start that answers a request the server no longer makes.
+    pub(super) fn follow(&mut self, asked: Option<&AgeVerificationParams>) {
+        if !self.started_for(asked) {
+            *self = Self::NotStarted;
+        }
+    }
 }
 
 impl AccountBoxes {
@@ -83,3 +99,38 @@ impl AccountBoxes {
 
 /// Flags and two text fields, dropped with the screen: nothing to say.
 impl super::on_screen::Farewell for AccountBoxes {}
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+mod tests {
+    use super::AgeCheck;
+    use quill::telegram::envelope::AgeVerificationParams;
+
+    fn params(country: &str) -> AgeVerificationParams {
+        AgeVerificationParams {
+            min_age: 18,
+            verification_bot_username: "age_bot".into(),
+            country: country.into(),
+        }
+    }
+
+    #[test]
+    fn a_started_verification_ends_with_the_request_it_answered() {
+        let first = params("GB");
+        let mut check = AgeCheck::Started {
+            asked_for: first.clone(),
+        };
+        assert!(check.started_for(Some(&first)));
+        check.follow(Some(&first));
+        assert!(check.started_for(Some(&first)));
+        // The server asks again, for another country: the start no longer counts.
+        let second = params("AU");
+        assert!(!check.started_for(Some(&second)));
+        check.follow(Some(&second));
+        assert_eq!(check, AgeCheck::NotStarted);
+        // The request clearing also ends it.
+        let mut check = AgeCheck::Started { asked_for: first };
+        check.follow(None);
+        assert_eq!(check, AgeCheck::NotStarted);
+    }
+}
