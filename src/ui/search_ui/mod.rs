@@ -559,7 +559,7 @@ impl QuillApp {
             return;
         }
         let fresh = !self.session().is_some_and(|s| {
-            s.search.chat_search.is_open() && s.search.chat_search.chat_id == s.open_chat_id()
+            s.search.chat_search.is_open() && s.search.chat_search.chat_id() == s.open_chat_id()
         });
         let opened = if let Some(live) = self.live.as_mut() {
             match live.driver.open_chat_search() {
@@ -622,7 +622,7 @@ impl QuillApp {
         // While choosing a "From:" member the field filters the members.
         if self
             .session()
-            .is_some_and(|s| s.search.chat_search.from_picker.is_some())
+            .is_some_and(|s| s.search.chat_search.from_picker().is_some())
         {
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.search_from_members(query.trim());
@@ -649,8 +649,8 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             let trimmed = query.trim();
             if session.search.chat_search.is_open()
-                && session.search.chat_search.query == trimmed
-                && !matches!(session.search.chat_search.status, SearchStatus::Closed)
+                && session.search.chat_search.query() == trimmed
+                && !matches!(session.search.chat_search.status(), SearchStatus::Closed)
             {
                 cx.notify();
                 return;
@@ -789,7 +789,7 @@ impl QuillApp {
                 self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEARCH_IN_CHAT)));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.search.chat_search.sender = sender;
+            session.search.chat_search.set_sender(sender);
             session.close_from_picker();
         }
         // The field's text was the member filter while choosing: start the
@@ -813,7 +813,7 @@ impl QuillApp {
                 self.set_note(StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_SEARCH_IN_CHAT)));
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            session.search.chat_search.media = media;
+            session.search.chat_search.set_media(media);
         }
         cx.notify();
     }
@@ -825,7 +825,7 @@ impl QuillApp {
     ) {
         let open = self
             .session()
-            .is_some_and(|s| s.search.chat_search.from_picker.is_some());
+            .is_some_and(|s| s.search.chat_search.from_picker().is_some());
         if open {
             if let Some(live) = self.live.as_mut() {
                 live.driver.session.close_from_picker();
@@ -898,7 +898,7 @@ impl QuillApp {
             .flex_col()
             .gap_0p5();
         let rows: Vec<(MessageSender, String)> = picker
-            .members
+            .members()
             .iter()
             .map(|m| {
                 (
@@ -908,7 +908,7 @@ impl QuillApp {
             })
             .collect();
         if rows.is_empty() {
-            let text = if picker.request.is_some() {
+            let text = if picker.loading() {
                 tr(keys::Q_CHAT_LOADING_MEMBERS)
             } else {
                 tr(keys::Q_CHAT_NO_MEMBERS_FOUND)

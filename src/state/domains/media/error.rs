@@ -30,7 +30,7 @@ impl Session {
             && let RequestPurpose::Media(MediaPurpose::LocationPicker(purpose)) = pending.purpose
         {
             match purpose {
-                LocationPickerPurpose::ResolveVenueBot => self.location.venue_bot_failed(),
+                LocationPickerPurpose::ResolveVenueBot => self.location.venue_bot_failed(pending.id.0),
                 LocationPickerPurpose::SearchVenues { generation } => {
                     self.location.venues_failed(generation)
                 }

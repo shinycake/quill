@@ -755,7 +755,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return Ok(None);
         };
-        if draft.draft_id != draft_id || !draft.can_stop {
+        if draft.draft_id != draft_id || !draft.can_stop() {
             return Ok(None);
         }
         let purpose = RequestPurpose::Bots(BotsPurpose::StopPendingMessage { topic_id, draft_id });
@@ -784,7 +784,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .filter(|draft| {
                 matches!(
                     draft.stop,
-                    crate::state::BotStopStage::Running | crate::state::BotStopStage::Failed
+                    crate::state::BotStopStage::Running { .. } | crate::state::BotStopStage::Failed
                 )
             })
         {

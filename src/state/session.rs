@@ -12,11 +12,17 @@ pub enum ShutdownPhase {
 #[derive(Debug, Clone)]
 pub struct PendingBotMessage {
     pub draft_id: i64,
-    pub can_stop: bool,
     pub keep_on_stop: bool,
     pub content: MessageContent,
     pub expires_at_ms: u64,
     pub stop: BotStopStage,
+}
+
+impl PendingBotMessage {
+    /// The Stop button is offered for this reply.
+    pub fn can_stop(&self) -> bool {
+        self.stop.can_stop()
+    }
 }
 
 pub struct Session {

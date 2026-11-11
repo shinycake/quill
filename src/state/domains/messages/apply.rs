@@ -161,16 +161,14 @@ impl Session {
                         .filter(|stop| {
                             matches!(stop, BotStopStage::Stopped | BotStopStage::Stopping(_))
                         });
-                    let stopped = carried == Some(BotStopStage::Stopped);
                     self.remember_files(&files);
                     self.messages.pending_bot_messages.insert(
                         (chat_id.0, forum_topic_id),
                         PendingBotMessage {
                             draft_id,
-                            can_stop: can_stop && !stopped,
                             keep_on_stop,
                             content,
-                            stop: carried.unwrap_or(BotStopStage::Running),
+                            stop: carried.unwrap_or(BotStopStage::Running { can_stop }),
                             expires_at_ms: unix_ms_now().saturating_add(
                                 self.messages.pending_bot_period_secs.saturating_mul(1000),
                             ),

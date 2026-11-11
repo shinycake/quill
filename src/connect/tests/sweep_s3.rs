@@ -142,7 +142,7 @@ fn a_deletion_in_another_chat_leaves_the_search_jump_alone() {
     use crate::state::ChatSearchJump;
     let (_dir, mut driver, _sender, _sink, _seq) = toggle_driver();
     let search = &mut driver.session.search.chat_search;
-    search.chat_id = Some(ChatId(1));
+    search.open_for(ChatId(1));
     search.jump = ChatSearchJump::Ready {
         message_id: MessageId(77),
     };

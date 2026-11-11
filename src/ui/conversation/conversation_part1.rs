@@ -477,7 +477,7 @@ impl QuillApp {
         let sender_name = title.clone();
         let chat_search_open = session.is_some_and(|s| s.search.chat_search.is_open());
         let highlight_id = session.and_then(|s| match s.search.chat_search.jump {
-            ChatSearchJump::Ready { message_id } | ChatSearchJump::Loading { message_id } => {
+            ChatSearchJump::Ready { message_id } | ChatSearchJump::Loading { message_id, .. } => {
                 Some(message_id)
             }
             ChatSearchJump::None | ChatSearchJump::Missing { .. } => None,

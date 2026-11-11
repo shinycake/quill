@@ -77,11 +77,19 @@ impl Session {
             Some(RequestPurpose::SearchFromMembers) => {
                 // Only the search the picker waits for ends; an older one's
                 // error keeps the newer answer coming.
-                if let Some(picker) = self.search.chat_search.from_picker.as_mut()
-                    && picker.request.is_some()
-                    && picker.request == pending.map(|p| p.id)
+                if let Some(picker) = self
+                    .search
+                    .chat_search
+                    .open_mut()
+                    .and_then(|open| open.from_picker.as_mut())
                 {
-                    picker.request = None;
+                    picker
+                        .members
+                        .failed(
+                            pending.map(|p| p.id),
+                            crate::state::request_errors::error_reason(&err),
+                            false,
+                        );
                 }
             }
             _ => {}

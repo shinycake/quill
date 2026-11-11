@@ -453,10 +453,10 @@ fn chat_search_happy_empty_stale_and_jump() {
             extra.0
         ),
     );
-    assert_eq!(session.search.chat_search.status, SearchStatus::Ready);
-    assert_eq!(session.search.chat_search.hits.len(), 2);
-    assert_eq!(session.search.chat_search.selected, Some(0));
-    assert_eq!(session.search.chat_search.hits[0].preview, "CANARY_CHAT_hi");
+    assert_eq!(session.search.chat_search.status(), SearchStatus::Ready);
+    assert_eq!(session.search.chat_search.hits().len(), 2);
+    assert_eq!(session.search.chat_search.selected(), Some(0));
+    assert_eq!(session.search.chat_search.hits()[0].preview, "CANARY_CHAT_hi");
     assert_eq!(
         session.begin_chat_search_jump(MessageId(101)),
         ChatSearchJumpNeed::AlreadyReady
@@ -505,7 +505,7 @@ fn chat_search_happy_empty_stale_and_jump() {
             empty_extra.0
         ),
     );
-    assert_eq!(session.search.chat_search.status, SearchStatus::Empty);
+    assert_eq!(session.search.chat_search.status(), SearchStatus::Empty);
 
     let stale = session.search.chat_search.begin_query("old");
     let stale_extra =
@@ -522,8 +522,8 @@ fn chat_search_happy_empty_stale_and_jump() {
             stale_extra.0
         ),
     );
-    assert_eq!(session.search.chat_search.status, SearchStatus::Searching);
-    assert!(session.search.chat_search.hits.is_empty());
+    assert_eq!(session.search.chat_search.status(), SearchStatus::Searching);
+    assert!(session.search.chat_search.hits().is_empty());
     apply_json(
         &mut session,
         &seq,
@@ -533,9 +533,9 @@ fn chat_search_happy_empty_stale_and_jump() {
             fresh_extra.0
         ),
     );
-    assert_eq!(session.search.chat_search.status, SearchStatus::Failed);
+    assert_eq!(session.search.chat_search.status(), SearchStatus::Failed);
     session.close_chat_search();
-    assert_eq!(session.search.chat_search.status, SearchStatus::Closed);
+    assert_eq!(session.search.chat_search.status(), SearchStatus::Closed);
     assert!(session.histories.get(&11).unwrap().contains(MessageId(90)));
     assert!(!sink.rendered().contains("CANARY_CHAT"));
 }
@@ -564,7 +564,7 @@ fn chat_search_jump_missing_deleted_and_inaccessible() {
         &sink,
         r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[70],"is_permanent":true,"from_cache":false}"#,
     );
-    session.search.chat_search.hits.push(SearchMessageHit {
+    session.search.chat_search.open_mut().unwrap().hits.push(SearchMessageHit {
         sender: None,
         chat_id: ChatId(11),
         message_id: MessageId(70),
@@ -594,7 +594,7 @@ fn chat_search_jump_missing_deleted_and_inaccessible() {
         }
     );
 
-    session.search.chat_search.hits.push(SearchMessageHit {
+    session.search.chat_search.open_mut().unwrap().hits.push(SearchMessageHit {
         sender: None,
         chat_id: ChatId(11),
         message_id: MessageId(80),

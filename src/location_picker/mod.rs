@@ -74,7 +74,11 @@ impl PickerRequest {
 enum VenueBot {
     #[default]
     Unknown,
-    Resolving,
+    /// The lookup is built and goes out now ([`LocationSharing::request_sent`]
+    /// names it, [`LocationSharing::request_unsent`] ends it).
+    Unsent,
+    /// The lookup is out as this request; only its answer or error ends it.
+    Resolving(u64),
     Found(i64),
     Missing,
     /// The lookup failed (FLOOD_WAIT, a server error): no venues in this
@@ -189,12 +193,12 @@ impl LocationSharing {
                     });
                 }
                 VenueBot::Unknown if !self.venue_bot_username.is_empty() => {
-                    self.venue_bot = VenueBot::Resolving;
+                    self.venue_bot = VenueBot::Unsent;
                     out.push(PickerRequest::ResolveVenueBot {
                         username: self.venue_bot_username.clone(),
                     });
                 }
-                VenueBot::Resolving => {}
+                VenueBot::Unsent | VenueBot::Resolving(_) => {}
                 VenueBot::Unknown | VenueBot::Missing | VenueBot::Failed => {
                     picker.venues_failed(generation)
                 }
@@ -231,7 +235,12 @@ impl LocationSharing {
                 self.icons
                     .insert(venue_type.clone(), IconState::Requested(extra));
             }
-            PickerRequest::ResolveVenueBot { .. } | PickerRequest::Venues { .. } => {}
+            PickerRequest::ResolveVenueBot { .. } => {
+                if self.venue_bot == VenueBot::Unsent {
+                    self.venue_bot = VenueBot::Resolving(extra);
+                }
+            }
+            PickerRequest::Venues { .. } => {}
         }
     }
 
@@ -265,8 +274,13 @@ impl LocationSharing {
         }
     }
 
-    /// `searchPublicChat` answered: `bot_user_id` when the chat is a bot.
-    pub fn venue_bot_resolved(&mut self, bot_user_id: Option<i64>) {
+    /// `searchPublicChat` `request` answered: `bot_user_id` when the chat is
+    /// a bot. The answer of any other request (an older option value) is
+    /// dropped.
+    pub fn venue_bot_resolved(&mut self, request: u64, bot_user_id: Option<i64>) {
+        if self.venue_bot != VenueBot::Resolving(request) {
+            return;
+        }
         self.venue_bot = bot_user_id.map_or(VenueBot::Missing, VenueBot::Found);
         if self.venue_bot == VenueBot::Missing {
             self.fail_current_venues();
@@ -275,7 +289,10 @@ impl LocationSharing {
 
     /// The lookup failed: not a missing bot, so the next picker asks
     /// again instead of showing no venues for the session.
-    pub fn venue_bot_failed(&mut self) {
+    pub fn venue_bot_failed(&mut self, request: u64) {
+        if self.venue_bot != VenueBot::Resolving(request) {
+            return;
+        }
         self.venue_bot = VenueBot::Failed;
         self.fail_current_venues();
     }

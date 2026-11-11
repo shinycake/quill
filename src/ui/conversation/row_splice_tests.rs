@@ -1009,7 +1009,6 @@ fn the_saved_sublist_splices_like_the_open_chat(cx: &mut TestAppContext) {
         session.threads.saved.sublist = Some(quill::state::SavedSublistView {
             topic_id,
             history,
-            page: quill::state::SavedPage::Idle,
         });
     };
     app.update(vcx, |app, cx| {

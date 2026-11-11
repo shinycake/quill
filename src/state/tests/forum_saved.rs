@@ -154,7 +154,7 @@ fn my_notes_and_hidden_author_use_tdesktop_names() {
 /// The open sublist waits for `extra`, as the driver records it on send.
 fn ask_sublist(session: &mut Session, extra: RequestId) {
     if let Some(view) = session.threads.saved.sublist.as_mut() {
-        view.page = SavedPage::Asking(extra);
+        view.history.ask_older(extra);
     }
 }
 
@@ -312,7 +312,7 @@ fn tag_search_pages_land_in_the_filter() {
     session.begin_saved_tag_search(0, tag.clone());
     let extra = session.request(RequestPurpose::SearchSavedMessages { topic_id: 0 }, None);
     if let Some(search) = session.threads.saved.tag_search.as_mut() {
-        search.page = SavedPage::Asking(extra);
+        search.history.ask_older(extra);
     }
     apply_json(
         &mut session,

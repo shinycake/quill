@@ -187,7 +187,7 @@ impl Session {
     }
 
     pub fn open_chat(&mut self, chat_id: ChatId) {
-        if self.search.chat_search.chat_id != Some(chat_id) {
+        if self.search.chat_search.chat_id() != Some(chat_id) {
             self.search.chat_search.close();
         }
         // Slice media-shared-gallery: switching chats closes the gallery so

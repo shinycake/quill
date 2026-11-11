@@ -357,6 +357,11 @@ impl SearchState {
         self.chats = Leg::Idle;
         self.messages_leg = Leg::Idle;
         self.public = Leg::Idle;
+        // A paid-search question was asked about these results' query: it
+        // goes with them, rather than stay over a list it no longer fits.
+        if matches!(self.confirm, Some(SearchConfirm::PaidPostSearch { .. })) {
+            self.confirm = None;
+        }
     }
 
     pub(crate) fn matches_generation(&self, pending: Option<&PendingRequest>) -> bool {
@@ -494,13 +499,26 @@ impl SearchState {
     }
 }
 
+/// What a load-around jump does once its window is in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JumpLanding {
+    /// Land on the message itself.
+    Message,
+    /// A date jump in `chat_id`: land where `mode` says relative to the
+    /// message TDLib resolved.
+    Date { chat_id: ChatId, mode: DateJumpMode },
+}
+
 /// Jump-to-message after an in-chat hit (Unigram `LoadMessageSliceAsync`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChatSearchJump {
     None,
     /// `getChatHistory` around the target is in flight — not yet loaded.
+    /// `then` is what the loaded window does next: land on the message, or
+    /// retarget a date jump (the jump leaves with this stage).
     Loading {
         message_id: MessageId,
+        then: JumpLanding,
     },
     Ready {
         message_id: MessageId,
@@ -515,7 +533,7 @@ impl ChatSearchJump {
     pub fn message_id(self) -> Option<MessageId> {
         match self {
             Self::None => None,
-            Self::Loading { message_id }
+            Self::Loading { message_id, .. }
             | Self::Ready { message_id }
             | Self::Missing { message_id } => Some(message_id),
         }
@@ -568,6 +586,11 @@ pub enum ChatSearchJumpNeed {
 pub enum OlderEnd {
     #[default]
     Open,
+    /// A Saved Messages page request is out (sublist or tag filter): only
+    /// its answer extends the list, and an answer to any other (a view left
+    /// and entered again) is dropped. Leaves with the answer, its error, or
+    /// the window being replaced.
+    Asking(RequestId),
     Failed,
     /// A page reached the start of the topic (`next_from_message_id` 0, or
     /// an empty page): nothing older to ask for. Leaves when the oldest
@@ -589,31 +612,97 @@ pub enum NewerEnd {
 }
 
 /// In-chat search (tdesktop `searchInChat` / ComposeSearch): `searchChatMessages`.
+/// What survives closing the bar (the generation that drops late answers,
+/// the jump a hit starts, the quiet window of a typed query) lives here;
+/// everything the open bar owns is replaced whole with its surface.
 #[derive(Debug, Clone)]
 pub struct ChatSearchState {
-    pub chat_id: Option<ChatId>,
-    pub query: String,
+    pub surface: ChatSearchSurface,
     pub generation: u64,
-    pub status: SearchStatus,
+    pub jump: ChatSearchJump,
+    /// Bumped by every jump request, so the UI can restart its highlight
+    /// fade when the same message is jumped to again.
+    pub jump_serial: u64,
+    /// The typed query waiting out its quiet window; a new generation
+    /// drops it.
+    pub(crate) typed: super::debounce::Debounce<String>,
+}
+
+/// The in-chat search bar: shut, or open on one chat with everything it
+/// holds. Opening and closing replace the value, so nothing of a search
+/// outlives its bar.
+#[derive(Debug, Clone, Default)]
+pub enum ChatSearchSurface {
+    #[default]
+    Closed,
+    Open(OpenChatSearch),
+}
+
+/// Where the open bar stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChatSearchPhase {
+    #[default]
+    Idle,
+    Searching,
+    Ready,
+    Empty,
+    Failed,
+}
+
+impl From<ChatSearchPhase> for SearchStatus {
+    fn from(phase: ChatSearchPhase) -> Self {
+        match phase {
+            ChatSearchPhase::Idle => Self::Idle,
+            ChatSearchPhase::Searching => Self::Searching,
+            ChatSearchPhase::Ready => Self::Ready,
+            ChatSearchPhase::Empty => Self::Empty,
+            ChatSearchPhase::Failed => Self::Failed,
+        }
+    }
+}
+
+/// An open in-chat search.
+#[derive(Debug, Clone)]
+pub struct OpenChatSearch {
+    pub chat_id: ChatId,
+    pub query: String,
+    pub phase: ChatSearchPhase,
     pub hits: Vec<SearchMessageHit>,
     pub total_count: i32,
     /// The older pages: where they continue from, and whether one is in
     /// flight or failed.
     pub paging: ChatSearchPaging,
     pub selected: Option<usize>,
-    pub jump: ChatSearchJump,
-    /// Bumped by every jump request, so the UI can restart its highlight
-    /// fade when the same message is jumped to again.
-    pub jump_serial: u64,
     /// "From: member" (`sender_id` of `searchChatMessages`).
     pub sender: Option<MessageSender>,
     /// The media tab (`filter` of `searchChatMessages`).
     pub media: crate::search_filters::SearchMediaKind,
     /// The member picker replacing the results while choosing a sender.
     pub from_picker: Option<FromPicker>,
-    /// The typed query waiting out its quiet window; a new generation
-    /// drops it.
-    pub(crate) typed: super::debounce::Debounce<String>,
+}
+
+impl OpenChatSearch {
+    fn new(chat_id: ChatId) -> Self {
+        Self {
+            chat_id,
+            query: String::new(),
+            phase: ChatSearchPhase::Idle,
+            hits: Vec::new(),
+            total_count: 0,
+            paging: ChatSearchPaging::End,
+            selected: None,
+            sender: None,
+            media: crate::search_filters::SearchMediaKind::All,
+            from_picker: None,
+        }
+    }
+
+    fn clear_results(&mut self) {
+        self.hits.clear();
+        self.total_count = 0;
+        self.paging = ChatSearchPaging::End;
+        self.selected = None;
+    }
 }
 
 /// The older pages of an in-chat search (`foundChatMessages` pages by
@@ -651,27 +740,31 @@ impl ChatSearchPaging {
 pub struct FromPicker {
     /// The text the members were last searched with.
     pub query: String,
-    pub members: Vec<MessageSender>,
-    /// The in-flight `searchChatMembers`; other answers are dropped.
-    pub request: Option<RequestId>,
+    /// The members for `query`: the in-flight `searchChatMembers` holds its
+    /// request (other answers are dropped) and the previous list meanwhile.
+    pub members: crate::state::fetch::Fetch<Vec<MessageSender>>,
+}
+
+impl FromPicker {
+    /// The members to list: the answer, or the last one while a new
+    /// query loads or after it failed.
+    pub fn members(&self) -> &[MessageSender] {
+        self.members.data().map_or(&[], Vec::as_slice)
+    }
+
+    /// A member search is out.
+    pub fn loading(&self) -> bool {
+        self.members.is_loading()
+    }
 }
 
 impl Default for ChatSearchState {
     fn default() -> Self {
         Self {
-            chat_id: None,
-            query: String::new(),
+            surface: ChatSearchSurface::Closed,
             generation: 0,
-            status: SearchStatus::Closed,
-            hits: Vec::new(),
-            total_count: 0,
-            paging: ChatSearchPaging::End,
-            selected: None,
             jump: ChatSearchJump::None,
             jump_serial: 0,
-            sender: None,
-            media: crate::search_filters::SearchMediaKind::All,
-            from_picker: None,
             typed: Default::default(),
         }
     }
@@ -685,51 +778,143 @@ impl ChatSearchState {
         self.typed.cancel();
     }
 
+    /// The open search, when the bar is open.
+    pub fn open(&self) -> Option<&OpenChatSearch> {
+        match &self.surface {
+            ChatSearchSurface::Open(open) => Some(open),
+            ChatSearchSurface::Closed => None,
+        }
+    }
+
+    pub fn open_mut(&mut self) -> Option<&mut OpenChatSearch> {
+        match &mut self.surface {
+            ChatSearchSurface::Open(open) => Some(open),
+            ChatSearchSurface::Closed => None,
+        }
+    }
+
+    /// The in-chat search bar is open.
+    pub fn is_open(&self) -> bool {
+        self.open().is_some()
+    }
+
+    /// The chat the open bar searches.
+    pub fn chat_id(&self) -> Option<ChatId> {
+        self.open().map(|open| open.chat_id)
+    }
+
+    pub fn query(&self) -> &str {
+        self.open().map_or("", |open| open.query.as_str())
+    }
+
+    /// What the bar shows (`Closed` when it is not open).
+    pub fn status(&self) -> SearchStatus {
+        self.open()
+            .map_or(SearchStatus::Closed, |open| open.phase.into())
+    }
+
+    pub fn hits(&self) -> &[SearchMessageHit] {
+        self.open().map_or(&[], |open| open.hits.as_slice())
+    }
+
+    pub fn total_count(&self) -> i32 {
+        self.open().map_or(0, |open| open.total_count)
+    }
+
+    pub fn selected(&self) -> Option<usize> {
+        self.open().and_then(|open| open.selected)
+    }
+
+    pub fn sender(&self) -> Option<MessageSender> {
+        self.open().and_then(|open| open.sender)
+    }
+
+    pub fn media(&self) -> crate::search_filters::SearchMediaKind {
+        self.open()
+            .map_or(crate::search_filters::SearchMediaKind::All, |open| {
+                open.media
+            })
+    }
+
+    pub fn from_picker(&self) -> Option<&FromPicker> {
+        self.open().and_then(|open| open.from_picker.as_ref())
+    }
+
+    /// Choose (or clear) the "From:" member of the open bar.
+    pub fn set_sender(&mut self, sender: Option<MessageSender>) {
+        if let Some(open) = self.open_mut() {
+            open.sender = sender;
+        }
+    }
+
+    /// Choose the media tab of the open bar.
+    pub fn set_media(&mut self, media: crate::search_filters::SearchMediaKind) {
+        if let Some(open) = self.open_mut() {
+            open.media = media;
+        }
+    }
+
+    /// Open or close the member picker of the open bar.
+    pub fn set_from_picker(&mut self, picker: Option<FromPicker>) {
+        if let Some(open) = self.open_mut() {
+            open.from_picker = picker;
+        }
+    }
+
     /// A search runs for a non-empty query, a chosen sender or a media tab.
     pub fn has_criteria(&self) -> bool {
-        !self.query.is_empty()
-            || self.sender.is_some()
-            || self.media != crate::search_filters::SearchMediaKind::All
+        self.open().is_some_and(|open| {
+            !open.query.is_empty()
+                || open.sender.is_some()
+                || open.media != crate::search_filters::SearchMediaKind::All
+        })
     }
 
     /// An older page can be fetched (the results are a partial first page).
     pub fn can_load_more(&self) -> bool {
-        self.is_open()
-            && matches!(self.paging, ChatSearchPaging::More { .. })
-            && (self.hits.len() as i32) < self.total_count
+        self.open().is_some_and(|open| {
+            matches!(open.paging, ChatSearchPaging::More { .. })
+                && (open.hits.len() as i32) < open.total_count
+        })
     }
 
     /// The cursor of the page to ask: the next one, or the failed one the
     /// user retries.
     pub fn page_to_ask(&self) -> Option<MessageId> {
-        match self.paging {
+        match self.open()?.paging {
             ChatSearchPaging::More { from } if self.can_load_more() => Some(from),
-            ChatSearchPaging::Failed { from } if self.is_open() => Some(from),
+            ChatSearchPaging::Failed { from } => Some(from),
             _ => None,
         }
     }
 
     /// The page from `from` goes out.
     pub(crate) fn begin_more(&mut self, from: MessageId) {
-        self.paging = ChatSearchPaging::Loading { from };
+        if let Some(open) = self.open_mut() {
+            open.paging = ChatSearchPaging::Loading { from };
+        }
     }
 
     /// The page that was going out never left, or failed: back to waiting
     /// for the user's Retry.
     pub(crate) fn fail_more(&mut self) {
-        if let ChatSearchPaging::Loading { from } = self.paging {
-            self.paging = ChatSearchPaging::Failed { from };
+        if let Some(open) = self.open_mut()
+            && let ChatSearchPaging::Loading { from } = open.paging
+        {
+            open.paging = ChatSearchPaging::Failed { from };
         }
     }
 
     /// An older page is in flight.
     pub fn loading_more(&self) -> bool {
-        matches!(self.paging, ChatSearchPaging::Loading { .. })
+        self.open()
+            .is_some_and(|open| matches!(open.paging, ChatSearchPaging::Loading { .. }))
     }
 
     /// The last older page failed (the Retry strip shows).
     pub fn more_failed(&self) -> bool {
-        matches!(self.paging, ChatSearchPaging::Failed { .. })
+        self.open()
+            .is_some_and(|open| matches!(open.paging, ChatSearchPaging::Failed { .. }))
     }
 
     /// Append an older page (deduped; `selected` stays on its message).
@@ -739,69 +924,53 @@ impl ChatSearchState {
         total_count: i32,
         next_from_message_id: MessageId,
     ) {
+        let Some(open) = self.open_mut() else {
+            return;
+        };
         for hit in hits {
-            if !self.hits.iter().any(|h| h.message_id == hit.message_id) {
-                self.hits.push(hit);
+            if !open.hits.iter().any(|h| h.message_id == hit.message_id) {
+                open.hits.push(hit);
             }
         }
-        self.total_count = total_count.max(self.hits.len() as i32);
-        self.paging = ChatSearchPaging::after(next_from_message_id);
+        open.total_count = total_count.max(open.hits.len() as i32);
+        open.paging = ChatSearchPaging::after(next_from_message_id);
     }
 
-    /// The in-chat search bar is open: its status says so (`Closed` is the
-    /// only status of a search that is not).
-    pub fn is_open(&self) -> bool {
-        self.status != SearchStatus::Closed
-    }
-
+    /// Open the bar on `chat_id`: a fresh search, unless it already is.
     pub fn open_for(&mut self, chat_id: ChatId) {
-        if self.is_open() && self.chat_id == Some(chat_id) {
+        if self.chat_id() == Some(chat_id) {
             return;
         }
-        self.chat_id = Some(chat_id);
-        self.query.clear();
+        self.surface = ChatSearchSurface::Open(OpenChatSearch::new(chat_id));
         self.bump_generation();
-        self.status = SearchStatus::Idle;
-        self.sender = None;
-        self.media = crate::search_filters::SearchMediaKind::All;
-        self.from_picker = None;
-        self.clear_results();
+        self.jump = ChatSearchJump::None;
     }
 
     pub fn close(&mut self) {
-        self.chat_id = None;
-        self.query.clear();
-        self.sender = None;
-        self.media = crate::search_filters::SearchMediaKind::All;
-        self.from_picker = None;
-        self.status = SearchStatus::Closed;
+        self.surface = ChatSearchSurface::Closed;
         self.bump_generation();
-        self.clear_results();
+        self.jump = ChatSearchJump::None;
     }
 
     pub fn begin_query(&mut self, query: &str) -> u64 {
-        self.query = query.to_string();
         self.bump_generation();
-        self.status = SearchStatus::Searching;
-        self.clear_results();
+        self.jump = ChatSearchJump::None;
+        if let Some(open) = self.open_mut() {
+            open.query = query.to_string();
+            open.phase = ChatSearchPhase::Searching;
+            open.clear_results();
+        }
         self.generation
     }
 
     pub fn clear_query(&mut self) {
-        self.query.clear();
         self.bump_generation();
-        self.clear_results();
-        if self.is_open() {
-            self.status = SearchStatus::Idle;
-        }
-    }
-
-    pub(crate) fn clear_results(&mut self) {
-        self.hits.clear();
-        self.total_count = 0;
-        self.paging = ChatSearchPaging::End;
-        self.selected = None;
         self.jump = ChatSearchJump::None;
+        if let Some(open) = self.open_mut() {
+            open.query.clear();
+            open.phase = ChatSearchPhase::Idle;
+            open.clear_results();
+        }
     }
 
     pub(crate) fn matches_generation(&self, pending: Option<&PendingRequest>) -> bool {
@@ -809,7 +978,7 @@ impl ChatSearchState {
             .and_then(|p| p.search_generation)
             .is_some_and(|search_gen| search_gen == self.generation)
             && self.is_open()
-            && pending.and_then(|p| p.chat_id) == self.chat_id
+            && pending.and_then(|p| p.chat_id) == self.chat_id()
     }
 
     pub(crate) fn accept_hits(
@@ -819,62 +988,67 @@ impl ChatSearchState {
         next_from_message_id: MessageId,
         error: bool,
     ) {
-        self.hits = hits;
-        self.total_count = total_count;
-        self.paging = ChatSearchPaging::after(next_from_message_id);
-        self.selected = if self.hits.is_empty() { None } else { Some(0) };
         self.jump = ChatSearchJump::None;
-        self.status = if !self.hits.is_empty() {
-            SearchStatus::Ready
+        let Some(open) = self.open_mut() else {
+            return;
+        };
+        open.hits = hits;
+        open.total_count = total_count;
+        open.paging = ChatSearchPaging::after(next_from_message_id);
+        open.selected = if open.hits.is_empty() { None } else { Some(0) };
+        open.phase = if !open.hits.is_empty() {
+            ChatSearchPhase::Ready
         } else if error {
-            SearchStatus::Failed
+            ChatSearchPhase::Failed
         } else {
-            SearchStatus::Empty
+            ChatSearchPhase::Empty
         };
     }
 
     pub fn selected_hit(&self) -> Option<&SearchMessageHit> {
-        self.selected.and_then(|i| self.hits.get(i))
+        let open = self.open()?;
+        open.selected.and_then(|i| open.hits.get(i))
     }
 
     /// Newer hit (Unigram `NextExecute`: lower index; results are newest-first).
     pub fn select_newer(&mut self) -> Option<MessageId> {
-        let index = self.selected?;
+        let open = self.open_mut()?;
+        let index = open.selected?;
         if index == 0 {
             return None;
         }
-        self.selected = Some(index - 1);
-        self.hits.get(index - 1).map(|hit| hit.message_id)
+        open.selected = Some(index - 1);
+        open.hits.get(index - 1).map(|hit| hit.message_id)
     }
 
     /// Older hit (Unigram `PreviousExecute`: higher index).
     pub fn select_older(&mut self) -> Option<MessageId> {
-        let index = self.selected?;
-        if index + 1 >= self.hits.len() {
+        let open = self.open_mut()?;
+        let index = open.selected?;
+        if index + 1 >= open.hits.len() {
             return None;
         }
-        self.selected = Some(index + 1);
-        self.hits.get(index + 1).map(|hit| hit.message_id)
+        open.selected = Some(index + 1);
+        open.hits.get(index + 1).map(|hit| hit.message_id)
     }
 
     pub fn select_message(&mut self, message_id: MessageId) -> bool {
-        let Some(index) = self
-            .hits
-            .iter()
-            .position(|hit| hit.message_id == message_id)
-        else {
+        let Some(open) = self.open_mut() else {
             return false;
         };
-        self.selected = Some(index);
+        let Some(index) = open.hits.iter().position(|hit| hit.message_id == message_id) else {
+            return false;
+        };
+        open.selected = Some(index);
         true
     }
 
     /// tdesktop `lng_search_messages_n_of_amount`: "N of M" with M the
     /// server's total, not just the pages loaded so far.
     pub fn position_label(&self) -> String {
-        match (self.selected, self.hits.len()) {
+        match (self.selected(), self.hits().len()) {
             (Some(i), n) if n > 0 => {
-                format!("{} of {}", i + 1, (self.total_count.max(0) as usize).max(n))
+                format!("{} of {}", i + 1, (self.total_count().max(0) as usize).max(n))
             }
             _ => String::new(),
         }

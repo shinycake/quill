@@ -165,7 +165,6 @@ impl Session {
         self.threads.saved.sublist = Some(SavedSublistView {
             topic_id,
             history: TopicHistory::default(),
-            page: SavedPage::Idle,
         });
         self.view_generation.bump();
     }
@@ -182,7 +181,6 @@ impl Session {
             topic_id,
             tag,
             history: TopicHistory::default(),
-            page: SavedPage::Idle,
         });
         self.view_generation.bump();
     }
@@ -195,11 +193,7 @@ impl Session {
     ) -> Option<&mut SavedTagSearch> {
         let pending = pending?;
         let search = self.threads.saved.tag_search.as_mut()?;
-        if search.page != SavedPage::Asking(pending.id) {
-            return None;
-        }
-        search.page = SavedPage::Idle;
-        Some(search)
+        search.history.settle_older(pending.id).then_some(search)
     }
 
     /// A `searchSavedMessages` page failed: the filter stops paging and
@@ -217,9 +211,8 @@ impl Session {
             return;
         };
         if let Some(view) = self.threads.saved.sublist.as_mut()
-            && view.page == SavedPage::Asking(pending.id)
+            && view.history.settle_older(pending.id)
         {
-            view.page = SavedPage::Idle;
             view.history.fail_older();
         }
     }
@@ -253,11 +246,13 @@ impl Session {
             .sublist
             .as_mut()
             .filter(|view| view.topic_id == topic_id)
-            .filter(|view| pending.is_some_and(|p| view.page == SavedPage::Asking(p.id)))
+            .filter(|view| {
+                pending.is_some_and(|p| view.history.older == OlderEnd::Asking(p.id))
+            })
         else {
             return;
         };
-        view.page = SavedPage::Idle;
+        view.history.older = OlderEnd::Open;
         let empty = messages.is_empty();
         let mut oldest: Option<i64> = None;
         for message in messages {
