@@ -563,7 +563,10 @@ impl QuillApp {
                         // logging out, closed) has nothing to log out of:
                         // the notice goes, or it could never be dismissed.
                         let sent = this.live.as_mut().map(|live| {
-                            if !matches!(live.driver.session.auth, AuthorizationState::Ready) {
+                            if !matches!(
+                                live.driver.session.auth,
+                                quill::telegram::envelope::AuthorizationState::Ready
+                            ) {
                                 live.driver.session.dismiss_service_notice();
                                 return Ok(());
                             }
