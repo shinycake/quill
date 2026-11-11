@@ -200,28 +200,31 @@ fn hub_pages_append_and_replace() {
         peer: None,
         kind: String::new(),
     };
+    hub.tx.begin(RequestId(1), false);
     hub.apply_transactions(
+        RequestId(1),
         StarTxPage {
             balance: StarAmount { stars: 9, nanos: 0 },
             transactions: vec![tx("a")],
             next_offset: "n".into(),
         },
-        false,
     );
+    hub.tx.begin(RequestId(2), true);
     hub.apply_transactions(
+        RequestId(2),
         StarTxPage {
             balance: StarAmount { stars: 9, nanos: 0 },
             transactions: vec![tx("b")],
             next_offset: String::new(),
         },
-        true,
     );
-    assert_eq!(hub.transactions.len(), 2);
-    assert!(hub.tx_offset.is_empty());
+    assert_eq!(hub.transactions().len(), 2);
+    assert!(hub.tx.next_offset().is_empty());
     hub.tx_selected = Some("b".into());
     assert_eq!(hub.selected_tx().map(|t| t.id.as_str()), Some("b"));
-    hub.apply_transactions(StarTxPage::default(), false);
-    assert!(hub.transactions.is_empty());
+    hub.tx.begin(RequestId(3), false);
+    hub.apply_transactions(RequestId(3), StarTxPage::default());
+    assert!(hub.transactions().is_empty());
 }
 
 #[test]

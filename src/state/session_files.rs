@@ -93,7 +93,7 @@ impl Session {
         let queued: HashSet<i32> = media
             .playlists
             .values()
-            .flat_map(|playlist| playlist.tracks.iter().map(|track| track.file_id.0))
+            .flat_map(|playlist| playlist.tracks().iter().map(|track| track.file_id.0))
             .collect();
         media.files.evict(|file| {
             let id = file.id.0;
@@ -487,7 +487,7 @@ impl Session {
         }
         // The received-gifts dialog shows each gift's sticker.
         if self.payments.hub.gifts_open {
-            for gift in &self.payments.hub.gifts {
+            for gift in self.payments.hub.gift_list() {
                 if let Some(file_id) = gift
                     .gift
                     .sticker

@@ -168,24 +168,33 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let playlist = self.session.media.playlists.entry(user_id).or_default();
-        if playlist.loading || (!append && playlist.loaded) || (append && !playlist.has_more()) {
+        // The first page is asked once: never asked, or a change outdated it.
+        if playlist.loading()
+            || (!append && !playlist.asks_first_page())
+            || (append && !playlist.has_more())
+        {
             return Ok(());
         }
         let offset = if append {
-            playlist.tracks.len() as i32
+            playlist.tracks().len() as i32
         } else {
             0
         };
-        playlist.loading = true;
         let extra = self.session.request_for_user(
             RequestPurpose::Media(MediaPurpose::GetProfileAudios { append }),
             user_id,
         );
+        if let Some(playlist) = self.session.media.playlists.get_mut(&user_id) {
+            playlist.list.begin(extra, append);
+        }
         let json = get_user_profile_audios(extra, user_id, offset, PROFILE_PAGE);
         let sent = self.send_profile_request(extra, &json);
         if sent.is_err() {
-            self.session
-                .fail_profile_audios(user_id, "Could not send the request.".to_string());
+            self.session.fail_profile_audios(
+                user_id,
+                None,
+                "Could not send the request.".to_string(),
+            );
         }
         sent
     }
@@ -200,10 +209,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .media
                 .playlists
                 .get(&user_id)
-                .is_none_or(|playlist| playlist.error.is_none() && playlist.tracks.is_empty());
+                .is_none_or(|playlist| playlist.error().is_none() && playlist.tracks().is_empty());
             if empty {
-                self.session
-                    .fail_profile_audios(user_id, "Could not send the request.".to_string());
+                self.session.fail_profile_audios(
+                    user_id,
+                    None,
+                    "Could not send the request.".to_string(),
+                );
             }
         }
     }
@@ -212,7 +224,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// When nothing goes out the failure and its Retry stay.
     pub fn retry_playlist(&mut self, user_id: i64) {
         let failed = match self.session.media.playlists.get(&user_id) {
-            Some(playlist) if playlist.error.is_some() && playlist.tracks.is_empty() => {
+            Some(playlist) if playlist.error().is_some() && playlist.tracks().is_empty() => {
                 self.session.media.playlists.remove(&user_id)
             }
             _ => None,
@@ -295,7 +307,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .media
             .playlists
             .values()
-            .flat_map(|playlist| &playlist.tracks)
+            .flat_map(|playlist| playlist.tracks())
             .find(|track| track.file_id == file_id)
             .cloned();
         let Some(track) = track.filter(|_| self.chats_path_active()) else {

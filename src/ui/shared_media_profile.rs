@@ -299,7 +299,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let playlist = self.session()?.media.playlists.get(&user_id)?;
-        let first = playlist.tracks.first()?;
+        let first = playlist.tracks().first()?;
         Some(
             action_row(
                 ("profile-music-button", user_id as u64),
@@ -377,7 +377,7 @@ impl QuillApp {
             .overflow_y_scroll()
             .py_1();
         if let Some(playlist) = playlist {
-            for (index, track) in playlist.tracks.iter().enumerate() {
+            for (index, track) in playlist.tracks().iter().enumerate() {
                 let message_id = playlist_message_id(track.file_id);
                 let active = playing == Some(message_id);
                 let (file_id, duration) = (track.file_id, f64::from(track.duration));
@@ -478,8 +478,8 @@ impl QuillApp {
                 );
             }
         }
-        let failed = playlist.is_some_and(|p| p.loaded && p.tracks.is_empty() && p.error.is_some());
-        let empty = !failed && playlist.is_none_or(|p| p.loaded && p.tracks.is_empty());
+        let failed = playlist.is_some_and(|p| p.loaded() && p.tracks().is_empty() && p.error().is_some());
+        let empty = !failed && playlist.is_none_or(|p| p.loaded() && p.tracks().is_empty());
         div()
             .id("playlist-panel")
             .flex_1()

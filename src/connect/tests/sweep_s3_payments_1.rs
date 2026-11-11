@@ -588,42 +588,44 @@ fn a_star_history_or_gifts_first_page_that_cannot_be_sent_shows_its_error() {
             .set_star_transactions_filter(crate::premium_hub::TxFilter::Outgoing)
             .is_err()
     );
-    assert!(t.driver.session.payments.hub.tx_error.is_some());
+    assert!(t.driver.session.payments.hub.tx.error().is_some());
     assert!(
         t.driver
             .open_received_gifts(crate::telegram::envelope::MessageSender::User { user_id: ME })
             .is_err()
     );
     let hub = &t.driver.session.payments.hub;
-    assert!(hub.gifts_error.is_some() && !hub.gifts_loading);
+    assert!(hub.gifts.error().is_some() && !hub.gifts.loading());
 }
 
 #[test]
-fn a_stale_gift_refetch_waits_for_a_page_in_flight_and_is_cleared_by_its_answer() {
+fn an_outdated_gift_list_is_refetched_once_and_a_refused_refetch_is_not_retried() {
     let mut t = Flaky::new();
     let owner = crate::telegram::envelope::MessageSender::User { user_id: ME };
     t.driver.open_received_gifts(owner).unwrap();
-    t.driver.session.payments.hub.gifts_stale = true;
-    // The first page is still out: no second first-page request.
-    assert!(
-        t.driver
-            .refresh_received_gifts_if_stale()
-            .unwrap()
-            .is_none()
-    );
-    assert_eq!(t.sender.count("getReceivedGifts"), 1);
-    assert!(t.driver.session.payments.hub.gifts_stale);
     t.answer(
         "getReceivedGifts",
         json!({"@type": "receivedGifts", "total_count": 0, "gifts": [], "next_offset": ""}),
     );
-    assert!(!t.driver.session.payments.hub.gifts_stale);
+    assert!(t.driver.session.payments.hub.gifts.loaded());
+    // A mutation lands: the list is out of date and asked for again.
+    t.driver.session.payments.hub.gifts.outdate();
+    assert!(t.driver.refresh_received_gifts_if_stale().unwrap().is_some());
+    assert_eq!(t.sender.count("getReceivedGifts"), 2);
+    // Not asked twice while the first page is out.
+    assert!(t.driver.refresh_received_gifts_if_stale().unwrap().is_none());
+    t.answer(
+        "getReceivedGifts",
+        json!({"@type": "receivedGifts", "total_count": 0, "gifts": [], "next_offset": ""}),
+    );
+    assert!(t.driver.session.payments.hub.gifts.loaded());
     // A refetch whose send is refused is not retried every frame.
-    t.driver.session.payments.hub.gifts_stale = true;
+    t.driver.session.payments.hub.gifts.outdate();
     t.sender.refuse(&["getReceivedGifts"]);
     assert!(t.driver.refresh_received_gifts_if_stale().is_err());
-    assert!(!t.driver.session.payments.hub.gifts_stale);
-    assert!(t.driver.session.payments.hub.gifts_error.is_some());
+    assert!(!t.driver.session.payments.hub.gifts.is_outdated());
+    assert!(t.driver.session.payments.hub.gifts.error().is_some());
+    assert!(t.driver.refresh_received_gifts_if_stale().unwrap().is_none());
 }
 
 #[test]

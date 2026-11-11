@@ -18,16 +18,16 @@ impl QuillApp {
         };
         if !hub.stars_open
             || hub.tx_selected.is_some()
-            || (hub.tx_error.is_some() && !scrolled)
+            || (hub.tx.error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.payments.stars_scroll),
-                !hub.tx_offset.is_empty(),
-                hub.tx_loading,
+                !hub.tx.next_offset().is_empty(),
+                hub.tx.loading(),
             )
             || !self
                 .payments
                 .stars_asked
-                .allow(hub.transactions.len(), scrolled)
+                .allow(hub.transactions().len(), scrolled)
         {
             return;
         }
@@ -47,13 +47,13 @@ impl QuillApp {
         };
         if !hub.gifts_open
             || hub.gift_selected.is_some()
-            || (hub.gifts_error.is_some() && !scrolled)
+            || (hub.gifts_failure().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.payments.gifts_scroll),
-                !hub.gifts_offset.is_empty(),
-                hub.gifts_loading,
+                !hub.gifts.next_offset().is_empty(),
+                hub.gifts.loading(),
             )
-            || !self.payments.gifts_asked.allow(hub.gifts.len(), scrolled)
+            || !self.payments.gifts_asked.allow(hub.gift_list().len(), scrolled)
         {
             return;
         }

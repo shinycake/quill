@@ -212,11 +212,10 @@ impl Session {
             }
             PaymentsPayload::StarTransactions(page) => {
                 if let Some(p) = pending
-                    && let RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { append }) =
+                    && let RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { .. }) =
                         p.purpose
-                    && p.id.0 == self.payments.hub.tx_request
                 {
-                    self.payments.hub.apply_transactions(page, append);
+                    self.payments.hub.apply_transactions(p.id, page);
                 }
             }
             PaymentsPayload::ReceivedGifts(page) => {
@@ -251,9 +250,8 @@ impl Session {
                             .collect(),
                     );
                 } else if let Some(p) = pending
-                    && let RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append }) =
+                    && let RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { .. }) =
                         p.purpose
-                    && p.id.0 == self.payments.hub.gifts_request
                 {
                     let files: Vec<ParsedFile> = page
                         .gifts
@@ -261,14 +259,12 @@ impl Session {
                         .flat_map(|gift| gift.gift.files.iter().cloned())
                         .collect();
                     self.remember_files(&files);
-                    self.payments.hub.apply_gifts(page, append);
+                    self.payments.hub.apply_gifts(p.id, page);
                 }
             }
             PaymentsPayload::PremiumFeatures(info) => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetPremiumFeatures) {
-                    self.payments.hub.premium_loading = false;
-                    self.payments.hub.premium_error = None;
-                    self.payments.hub.premium = Some(info);
+                    self.payments.hub.premium.succeed(info);
                 }
             }
             PaymentsPayload::PremiumState(info) => {
@@ -278,8 +274,7 @@ impl Session {
             }
             PaymentsPayload::BusinessFeatures(features) => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetBusinessFeatures) {
-                    self.payments.hub.business_features_loading = false;
-                    self.payments.hub.business_features = Some(features);
+                    self.payments.hub.business_features.succeed(features);
                 }
             }
             PaymentsPayload::GiveawayInfo(info) => self.apply_giveaway_info(info, pending),

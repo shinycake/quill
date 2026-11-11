@@ -85,14 +85,15 @@ pub(super) fn seed_gift_transfer_session(sink: Arc<MemorySink>) -> Session {
     let hub = &mut session.payments.hub;
     hub.gifts_open = true;
     hub.gifts_owner = Some(MessageSender::User { user_id: ME });
-    hub.gifts = parse_received_gift(&own_received_gift(
+    hub.set_gifts(
+        parse_received_gift(&own_received_gift(
         export_date(&mode, now),
         mode == "action-locked",
     ))
     .into_iter()
-    .collect();
-    hub.gifts_total = 1;
-    hub.gifts_loaded = true;
+        .collect(),
+        1,
+    );
     hub.gift_selected = Some(DEMO_GIFT.into());
     // The chat with Maya is open: her row comes first.
     if mode == "open-chat" {
@@ -107,7 +108,7 @@ impl QuillApp {
         self.open_gift_transfer(DEMO_GIFT, window, cx);
         let export = self
             .session()
-            .and_then(|s| s.payments.hub.gifts.first())
+            .and_then(|s| s.payments.hub.gift_list().first())
             .map_or(ExportState::Unavailable, |g| g.export_state(now_unix()));
         let edit = |picker: &mut TransferPicker| match mode.as_str() {
             "locked" | "confirm" => picker.tap_export(export),

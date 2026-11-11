@@ -454,16 +454,14 @@ impl Session {
                     }) = pending.purpose
                     && let Some(chat_id) = pending.chat_id
                     && let Some(state) = self.groups.invite_pages.members_mut(chat_id.0)
-                    && state.request == Some(pending.id)
+                    && state.waits_for(pending.id)
                 {
                     if !append {
                         state.members.clear();
                     }
                     state.members.extend(members);
                     state.total_count = total_count;
-                    state.loading = false;
-                    state.error = None;
-                    state.request = None;
+                    state.stage = MembersStage::Idle;
                 }
             }
             // Phase D3a: `getChatJoinRequests` answer.

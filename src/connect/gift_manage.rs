@@ -78,7 +78,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session
             .payments
             .hub
-            .gifts
+            .gift_list()
             .iter()
             .find(|g| g.id == id)
             .cloned()
@@ -162,10 +162,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         manage.flow = None;
         manage.note = None;
         let hub = &mut self.session.payments.hub;
-        hub.gifts.clear();
-        hub.gifts_total = 0;
-        hub.gifts_offset.clear();
-        hub.gifts_loaded = false;
+        hub.gifts.reset();
         hub.gifts_error = None;
         hub.gift_selected = None;
         hub.gift_convert_confirm = None;
@@ -184,7 +181,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if manage.active_collection != 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let current = pinned_ids(&hub.gifts);
+        let current = pinned_ids(hub.gift_list());
         let ids = match (
             gift.pin_gate(true, current.len(), manage.limits.pinned()),
             pinned,

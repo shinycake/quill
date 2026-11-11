@@ -9,6 +9,9 @@
 //! behind an explicit confirmation in the UI.
 #![deny(clippy::indexing_slicing)]
 
+use crate::ids::RequestId;
+use crate::state::fetch::Fetch;
+use crate::state::paged::Paged;
 use crate::telegram::envelope::{MessageSender, StickerContent, parse_sticker_value};
 pub use feature::{BusinessFeature, PremiumFeature};
 use serde_json::Value;
@@ -669,6 +672,7 @@ fn limit_title(constructor: &str) -> Option<&'static str> {
 pub mod feature;
 pub mod fragment;
 pub mod gift_value;
+pub mod paging;
 pub mod promo;
 
 /// A Premium preview the session asks the UI to open, and the chat whose
@@ -761,32 +765,24 @@ pub struct PremiumHub {
     pub stars_open: bool,
     pub balance: Option<StarAmount>,
     pub filter: TxFilter,
-    pub transactions: Vec<StarTx>,
-    pub tx_offset: String,
-    pub tx_loaded: bool,
-    pub tx_loading: bool,
-    pub tx_error: Option<String>,
-    /// `@extra` of the newest transactions request; older answers (a
-    /// filter switched mid-flight) are dropped.
-    pub tx_request: u64,
+    /// The history for `filter`. Its page in flight carries the request,
+    /// so an answer of a filter switched mid-flight is dropped.
+    pub tx: Paged<paging::TxList>,
     /// Transaction whose details box is showing.
     pub tx_selected: Option<String>,
     // Gifts.
     pub gifts_open: bool,
     pub gifts_owner: Option<MessageSender>,
-    pub gifts: Vec<ReceivedGift>,
-    pub gifts_total: i32,
-    pub gifts_offset: String,
-    pub gifts_loaded: bool,
-    pub gifts_loading: bool,
+    /// The open list of `gifts_owner`. Its page in flight carries the
+    /// request, so a stale answer is dropped; a mutation outdates it.
+    pub gifts: Paged<paging::GiftList>,
+    /// The last gift mutation (`toggleGiftIsSaved`, `sellGift`, ...) that
+    /// failed; the list's own error is in `gifts`.
     pub gifts_error: Option<String>,
-    /// `@extra` of the newest gifts request (stale answers are dropped).
-    pub gifts_request: u64,
     pub gift_selected: Option<String>,
     /// `sellGift` awaiting confirmation for this gift id.
     pub gift_convert_confirm: Option<String>,
     pub gift_mutating: bool,
-    pub gifts_stale: bool,
     // Premium.
     pub premium_open: bool,
     /// `premium_bot_username` / `premium_invoice_slug` from the app config.
@@ -801,15 +797,11 @@ pub struct PremiumHub {
     /// `/start <ref>` by itself. Tied to the link's resolve (`generation`):
     /// that resolve failing drops it.
     pub auto_start: Option<PremiumAutoStart>,
-    pub premium: Option<PremiumInfo>,
+    pub premium: Fetch<PremiumInfo>,
     pub premium_state: Option<PremiumStateInfo>,
-    pub premium_loading: bool,
-    pub premium_error: Option<String>,
     /// `getPremiumStickerExamples`: the stickers the stickers feature
-    /// preview shows, and whether the request is in flight or done.
-    pub premium_stickers: Vec<crate::telegram::envelope::StickerItem>,
-    pub premium_stickers_loading: bool,
-    pub premium_stickers_asked: bool,
+    /// preview shows; asked once, again after a failure.
+    pub premium_stickers: Fetch<Vec<crate::telegram::envelope::StickerItem>>,
     /// The locked sticker whose click opened the stickers preview; it leads
     /// the preview (tdesktop `Descriptor::requestedSticker`).
     pub premium_requested: Option<crate::telegram::envelope::StickerItem>,
@@ -821,8 +813,7 @@ pub struct PremiumHub {
     pub promo_request: Option<PromoRequest>,
     /// `getBusinessFeatures`: the Business screen's rows in the server's
     /// order; `None` until it answers.
-    pub business_features: Option<Vec<BusinessFeature>>,
-    pub business_features_loading: bool,
+    pub business_features: Fetch<Vec<BusinessFeature>>,
     /// The limit box that is open (pins, caption, GIFs, ...), with how far
     /// over the limit the action went when that is known (caption).
     pub limit_box: Option<(crate::premium_limits::PremiumLimitKind, i64)>,
@@ -837,45 +828,86 @@ pub struct PremiumHub {
 }
 
 impl PremiumHub {
-    pub fn apply_transactions(&mut self, page: StarTxPage, append: bool) {
-        self.tx_loading = false;
-        self.tx_error = None;
-        self.tx_loaded = true;
-        self.balance = Some(page.balance);
-        self.tx_offset = page.next_offset;
-        if append {
-            self.transactions.extend(page.transactions);
-        } else {
-            self.transactions = page.transactions;
+    /// A `getStarTransactions` page answered; only the page in flight lands.
+    pub fn apply_transactions(&mut self, request: RequestId, page: StarTxPage) {
+        let balance = page.balance;
+        if self.tx.answer(
+            request,
+            paging::TxList {
+                transactions: page.transactions,
+                next_offset: page.next_offset,
+            },
+        ) {
+            self.balance = Some(balance);
         }
     }
 
-    pub fn apply_gifts(&mut self, page: GiftsPage, append: bool) {
-        self.gifts_loading = false;
-        self.gifts_error = None;
-        self.gifts_loaded = true;
-        // Only a first page answers a refetch; an appended page of the old
-        // list leaves the list stale.
-        if !append {
-            self.gifts_stale = false;
+    /// A `getReceivedGifts` page answered; only the page in flight lands.
+    pub fn apply_gifts(&mut self, request: RequestId, page: GiftsPage) {
+        if self.gifts.answer(
+            request,
+            paging::GiftList {
+                gifts: page.gifts,
+                total: page.total_count,
+                next_offset: page.next_offset,
+            },
+        ) {
+            self.gifts_error = None;
         }
-        self.gifts_total = page.total_count;
-        self.gifts_offset = page.next_offset;
-        if append {
-            self.gifts.extend(page.gifts);
-        } else {
-            self.gifts = page.gifts;
+    }
+
+    /// The Stars history so far.
+    pub fn transactions(&self) -> &[StarTx] {
+        self.tx.data().map_or(&[], |l| l.transactions.as_slice())
+    }
+
+    /// The open gifts list so far.
+    pub fn gift_list(&self) -> &[ReceivedGift] {
+        self.gifts.data().map_or(&[], |l| l.gifts.as_slice())
+    }
+
+    /// The count the server reports for the open list.
+    pub fn gifts_total(&self) -> i32 {
+        self.gifts.data().map_or(0, |l| l.total)
+    }
+
+    /// Why the gifts list or the last gift mutation failed.
+    pub fn gifts_failure(&self) -> Option<&str> {
+        self.gifts.error().or(self.gifts_error.as_deref())
+    }
+
+    /// Drop gift `id` from the open list (it was deleted); `true` when it
+    /// was there.
+    pub fn remove_gift(&mut self, id: &str) -> bool {
+        let Some(list) = self.gifts.data_mut() else {
+            return false;
+        };
+        let before = list.gifts.len();
+        list.gifts.retain(|g| g.id != id);
+        let removed = list.gifts.len() < before;
+        if removed {
+            list.total = list.total.saturating_sub(1);
         }
+        removed
+    }
+
+    /// Show `gifts` as the answered list (a demo, or a test).
+    pub fn set_gifts(&mut self, gifts: Vec<ReceivedGift>, total: i32) {
+        self.gifts = Paged::Ready(paging::GiftList {
+            gifts,
+            total,
+            next_offset: String::new(),
+        });
     }
 
     pub fn selected_tx(&self) -> Option<&StarTx> {
         let id = self.tx_selected.as_deref()?;
-        self.transactions.iter().find(|tx| tx.id == id)
+        self.transactions().iter().find(|tx| tx.id == id)
     }
 
     pub fn selected_gift(&self) -> Option<&ReceivedGift> {
         let id = self.gift_selected.as_deref()?;
-        self.gifts.iter().find(|g| g.id == id)
+        self.gift_list().iter().find(|g| g.id == id)
     }
 
     /// Whether the open gifts list belongs to the signed-in user (the only
@@ -889,7 +921,9 @@ impl PremiumHub {
 
     /// Flip `is_saved` after the server confirmed `toggleGiftIsSaved`.
     pub fn set_gift_saved(&mut self, id: &str, saved: bool) {
-        if let Some(gift) = self.gifts.iter_mut().find(|g| g.id == id) {
+        if let Some(list) = self.gifts.data_mut()
+            && let Some(gift) = list.gifts.iter_mut().find(|g| g.id == id)
+        {
             gift.is_saved = saved;
         }
     }

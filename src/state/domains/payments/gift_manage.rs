@@ -50,7 +50,7 @@ impl Session {
                     && manage.collection(manage.active_collection).is_none()
                 {
                     manage.active_collection = 0;
-                    self.payments.hub.gifts_stale = true;
+                    self.payments.hub.gifts.outdate();
                 }
             }
             (GiftManagePayload::Collection(_), PaymentsPurpose::ChangeGiftCollection) => {
@@ -60,15 +60,15 @@ impl Session {
                     .close_flow_answered_by(PaymentsPurpose::ChangeGiftCollection);
                 self.payments.hub.gift_mutating = false;
                 self.payments.hub.gifts_error = None;
-                self.payments.hub.gifts_stale = true;
+                self.payments.hub.gifts.outdate();
             }
             (GiftManagePayload::Upgraded(summary), PaymentsPurpose::UpgradeGift) => {
                 let hub = &mut self.payments.hub;
                 hub.gift_mutating = false;
                 hub.gifts_error = None;
                 hub.gift_selected = None;
-                hub.gifts_stale = true;
-                hub.tx_loaded = false;
+                hub.gifts.outdate();
+                hub.tx.outdate();
                 let manage = &mut self.payments.gifts_manage;
                 manage.close_flow_answered_by(PaymentsPurpose::UpgradeGift);
                 manage.note = Some(if summary.title.is_empty() {
@@ -118,14 +118,14 @@ impl Session {
             PaymentsPurpose::SetPinnedGifts => {
                 hub.gift_mutating = false;
                 hub.gifts_error = None;
-                hub.gifts_stale = true;
+                hub.gifts.outdate();
                 manage.note = Some("Pinned gifts updated.".into());
             }
             PaymentsPurpose::TransferGift => {
                 hub.gift_mutating = false;
                 hub.gifts_error = None;
-                hub.gifts_stale = true;
-                hub.tx_loaded = false;
+                hub.gifts.outdate();
+                hub.tx.outdate();
                 // tdesktop `ShowGiftTransferredToast`, then the recipient's
                 // chat (`showPeerHistory`). Only the picker that sent this
                 // transfer closes and names its recipient; another flow
@@ -148,14 +148,14 @@ impl Session {
             PaymentsPurpose::SetGiftResalePrice => {
                 hub.gift_mutating = false;
                 hub.gifts_error = None;
-                hub.gifts_stale = true;
+                hub.gifts.outdate();
                 manage.close_flow_answered_by(PaymentsPurpose::SetGiftResalePrice);
                 manage.note = Some("Resale price updated.".into());
             }
             PaymentsPurpose::DeleteGiftCollection => {
                 hub.gift_mutating = false;
                 hub.gifts_error = None;
-                hub.gifts_stale = true;
+                hub.gifts.outdate();
                 manage.close_flow_answered_by(PaymentsPurpose::DeleteGiftCollection);
                 manage.active_collection = 0;
                 manage.collections_stale = true;
@@ -164,7 +164,7 @@ impl Session {
             PaymentsPurpose::DeleteGift => self.finish_gift_delete(),
             PaymentsPurpose::SendStarGift => {
                 // Stars were spent whichever dialog asked.
-                hub.tx_loaded = false;
+                hub.tx.outdate();
                 let ours = manage.send.waits_for(pending);
                 if ours {
                     manage.send.request = None;
@@ -212,11 +212,7 @@ impl Session {
         hub.gift_mutating = false;
         hub.gifts_error = None;
         if let Some(id) = manage.deleting.take() {
-            let before = hub.gifts.len();
-            hub.gifts.retain(|g| g.id != id);
-            if hub.gifts.len() < before {
-                hub.gifts_total = hub.gifts_total.saturating_sub(1);
-            }
+            hub.remove_gift(&id);
             if hub.gift_selected.as_deref() == Some(id.as_str()) {
                 hub.gift_selected = None;
             }
@@ -224,7 +220,7 @@ impl Session {
         manage.collections_stale = true;
         // The list may have been reopened while the request was out: the
         // server's list stays the source of truth.
-        hub.gifts_stale = true;
+        hub.gifts.outdate();
         manage.deleted = true;
     }
 

@@ -5,7 +5,7 @@ use crate::ids::{ChatId, RequestId};
 use crate::state::GroupsPurpose;
 use crate::state::send_failed_line;
 use crate::state::{
-    INVITE_ADMIN_PAGE_SIZE, InviteLinkCountsFetch, InviteLinkFetch, InviteLinkMembersState,
+    INVITE_ADMIN_PAGE_SIZE, InviteLinkCountsFetch, InviteLinkFetch, InviteLinkMembersState, MembersStage,
     JoinRequestFetch, RequestPurpose,
 };
 use crate::telegram::requests::{
@@ -310,7 +310,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(state) = self.session.groups.invite_pages.members(chat_id.0) else {
             return Ok(None);
         };
-        if state.loading || state.members.len() as i32 >= state.total_count {
+        if state.loading() || state.members.len() as i32 >= state.total_count {
             return Ok(None);
         }
         let Some(last) = state.members.last() else {
@@ -336,15 +336,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             invite_link: invite_link.to_owned(),
             total_count: 0,
             members: Vec::new(),
-            loading: true,
-            error: None,
-            request: Some(extra),
+            stage: MembersStage::Loading(extra),
         };
         match self.session.groups.invite_pages.members_mut(chat_id.0) {
             Some(state) if append => {
-                state.loading = true;
-                state.error = None;
-                state.request = Some(extra);
+                state.stage = MembersStage::Loading(extra);
             }
             _ => {
                 self.session
@@ -367,9 +363,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // not leave; a first page has nothing to keep.
             match self.session.groups.invite_pages.members_mut(chat_id.0) {
                 Some(state) if append && !state.members.is_empty() => {
-                    state.loading = false;
-                    state.request = None;
-                    state.error = Some(
+                    state.stage = MembersStage::Failed(
                         crate::lang::tr(
                             crate::lang::keys::Q_INVITE_LINK_COULD_NOT_LOAD_MORE_MEMBERS,
                         )

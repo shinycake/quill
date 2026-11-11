@@ -110,19 +110,23 @@ fn account_loss_resets_the_loading_flags_of_pending_lookups() {
         None,
     );
     session.payments.star_subs.list.begin(subscriptions, false);
-    session.payments.hub.tx_loading = true;
     let history = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { append: false }),
         None,
     );
-    session.payments.hub.tx_request = history.0;
-    session.payments.hub.gifts_loading = true;
+    session.payments.hub.tx.begin(history, false);
     let gifts = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append: false }),
         None,
     );
-    session.payments.hub.gifts_request = gifts.0;
-    session.media.playlists.entry(9).or_default().loading = true;
+    session.payments.hub.gifts.begin(gifts, false);
+    session
+        .media
+        .playlists
+        .entry(9)
+        .or_default()
+        .list
+        .begin(RequestId(9_000), false);
     session.request_for_user(
         RequestPurpose::Media(MediaPurpose::GetProfileAudios { append: false }),
         9,
@@ -134,9 +138,9 @@ fn account_loss_resets_the_loading_flags_of_pending_lookups() {
 
     assert!(!session.settings.privacy_data.network.is_loading());
     assert!(!session.payments.star_subs.list.loading());
-    assert!(!session.payments.hub.tx_loading);
-    assert!(!session.payments.hub.gifts_loading);
-    assert!(!session.media.playlists[&9].loading);
+    assert!(!session.payments.hub.tx.loading());
+    assert!(!session.payments.hub.gifts.loading());
+    assert!(!session.media.playlists[&9].loading());
     assert!(session.requests.is_empty());
     assert!(session.requests.get(user_action).is_none());
     assert!(session.stale_history_requests.is_empty());

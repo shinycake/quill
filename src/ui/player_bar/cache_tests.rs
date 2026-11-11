@@ -228,15 +228,13 @@ fn give_saved_track(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
     app.update(vcx, |app, _| {
         let session = app.demo_session.as_mut().expect("demo session");
         let playlist = session.media.playlists.entry(77).or_default();
-        playlist.tracks = vec![quill::telegram::envelope::ProfileAudio {
+        playlist.set_ready(vec![quill::telegram::envelope::ProfileAudio {
             file_id: quill::ids::FileId(5),
             title: "Saved".into(),
             performer: String::new(),
             file_name: String::new(),
             duration: 30,
-        }];
-        playlist.total_count = 1;
-        playlist.loaded = true;
+        }]);
         app.playback.playing_audio = Some(quill::state::playlist_message_id(quill::ids::FileId(5)));
         app.playback.player.chat = Some(CHAT);
     });

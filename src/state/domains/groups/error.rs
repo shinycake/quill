@@ -356,11 +356,12 @@ impl Session {
                 if let Some(pending) = pending
                     && let Some(chat_id) = pending.chat_id
                     && let Some(state) = self.groups.invite_pages.members_mut(chat_id.0)
-                    && state.request == Some(pending.id)
+                    && state.waits_for(pending.id)
                 {
-                    state.loading = false;
-                    state.request = None;
-                    state.error = Some(call_request_error_line(err, "Could not load members"));
+                    state.stage = MembersStage::Failed(call_request_error_line(
+                        err,
+                        "Could not load members",
+                    ));
                 }
             }
             Some(RequestPurpose::GetAdminChatInviteLinks { revoked }) => {

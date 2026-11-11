@@ -28,7 +28,7 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     let mut vcx = VisualTestContext::from_window(handle.into(), cx);
     app.update(&mut vcx, |app, _| {
         let session = app.demo_session.as_mut().expect("demo session");
-        session.payments.hub.premium = Some(parse_premium_features(&serde_json::json!({
+        session.payments.hub.premium = quill::state::fetch::Fetch::Ready(parse_premium_features(&serde_json::json!({
             "features": [
                 {"@type": "premiumFeatureIncreasedLimits"},
                 {"@type": "premiumFeatureVoiceRecognition"},

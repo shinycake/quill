@@ -292,7 +292,7 @@ impl Session {
             Some(RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { .. })) => {
                 self.payments.hub.gift_mutating = false;
                 self.payments.hub.gifts_error = None;
-                self.payments.hub.gifts_stale = true;
+                self.payments.hub.gifts.outdate();
             }
             Some(RequestPurpose::SellGift) => {
                 self.payments.hub.gift_mutating = false;
@@ -304,8 +304,8 @@ impl Session {
                     self.payments.hub.gift_convert_confirm = None;
                     self.payments.hub.gift_selected = None;
                 }
-                self.payments.hub.gifts_stale = true;
-                self.payments.hub.tx_loaded = false;
+                self.payments.hub.gifts.outdate();
+                self.payments.hub.tx.outdate();
             }
             _ => {}
         }

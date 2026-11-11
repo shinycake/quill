@@ -389,15 +389,15 @@ fn deleting_a_gift_sends_delete_gift_and_removes_it_on_ok() {
     assert_eq!(sent["received_gift_id"], "a");
     assert!(p.0.session.payments.hub.gift_mutating);
     // Nothing is optimistic: the gift stays until the answer.
-    assert_eq!(p.0.session.payments.hub.gifts.len(), 3);
+    assert_eq!(p.0.session.payments.hub.gift_list().len(), 3);
     feed(&mut p, json!({"@type": "ok", "@extra": extra.as_extra()}));
     let hub = &p.0.session.payments.hub;
     assert!(!hub.gift_mutating);
     assert_eq!(
-        hub.gifts.iter().map(|g| g.id.as_str()).collect::<Vec<_>>(),
+        hub.gift_list().iter().map(|g| g.id.as_str()).collect::<Vec<_>>(),
         ["b", "c"]
     );
-    assert_eq!(hub.gifts_total, 2);
+    assert_eq!(hub.gifts_total(), 2);
     assert_eq!(hub.gift_selected, None);
     // The toast is a one-shot, and the server's list is refetched.
     assert!(p.0.session.payments.gifts_manage.deleted);
@@ -416,7 +416,7 @@ fn a_failed_delete_keeps_the_gift_and_says_why() {
     );
     let hub = &p.0.session.payments.hub;
     assert!(!hub.gift_mutating);
-    assert_eq!(hub.gifts.len(), 1);
+    assert_eq!(hub.gift_list().len(), 1);
     assert_eq!(p.0.session.payments.gifts_manage.deleting, None);
     assert!(
         p.0.session
@@ -580,10 +580,16 @@ fn a_channel_creator_can_delete_its_gift_and_an_admin_cannot() {
     p.0.session.chats.get_mut(&-1002).unwrap().my_member_status =
         Some(crate::telegram::envelope::ChannelMemberStatus::Administrator);
     p.0.session.payments.hub.gifts_owner = Some(MessageSender::Chat { chat_id: -1002 });
-    p.0.session.payments.hub.gifts = vec![
-        crate::premium_hub::parse_received_gift(&regular("a", json!({"can_be_deleted": true})))
+    p.0.session.payments.hub.set_gifts(
+        vec![
+            crate::premium_hub::parse_received_gift(&regular(
+                "a",
+                json!({"can_be_deleted": true}),
+            ))
             .unwrap(),
-    ];
+        ],
+        1,
+    );
     assert!(p.0.delete_received_gift("a").is_err());
     assert_eq!(count(&p.1, "deleteGift"), 0);
     p.0.session.payments.hub.gifts_owner = Some(MessageSender::Chat { chat_id: -1001 });

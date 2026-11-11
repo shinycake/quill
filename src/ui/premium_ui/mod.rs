@@ -210,17 +210,17 @@ impl QuillApp {
                     });
                 }
                 body = body.child(tabs);
-                if let Some(err) = hub.tx_error.as_ref() {
-                    body = body.child(div().text_sm().child(err.clone()));
+                if let Some(err) = hub.tx.error() {
+                    body = body.child(div().text_sm().child(err.to_string()));
                 }
-                if hub.tx_loading && hub.transactions.is_empty() {
+                if hub.tx.loading() && hub.transactions().is_empty() {
                     body = body.child(
                         div()
                             .text_sm()
                             .text_color(muted)
                             .child(tr(keys::Q_MONEY_LOADING_TRANSACTIONS)),
                     );
-                } else if hub.transactions.is_empty() && hub.tx_loaded {
+                } else if hub.transactions().is_empty() && hub.tx.loaded() {
                     body = body.child(
                         div()
                             .text_sm()
@@ -228,10 +228,10 @@ impl QuillApp {
                             .child(tr(keys::Q_MONEY_NO_TRANSACTIONS_YET)),
                     );
                 }
-                for (ix, tx) in hub.transactions.iter().enumerate() {
+                for (ix, tx) in hub.transactions().iter().enumerate() {
                     body = body.child(tx_row(session, ix, tx, cx));
                 }
-                if !hub.tx_offset.is_empty() && hub.tx_loading {
+                if !hub.tx.next_offset().is_empty() && hub.tx.loading() {
                     body = body.child(loading_row("stars-loading", cx));
                 }
                 body = body.child(star_packs::star_packs_section(session, cx));
@@ -410,17 +410,17 @@ impl QuillApp {
                     &this.payments.gift_collection_input,
                     cx,
                 ));
-                if let Some(err) = hub.gifts_error.as_ref() {
-                    body = body.child(div().text_sm().child(err.clone()));
+                if let Some(err) = hub.gifts_failure() {
+                    body = body.child(div().text_sm().child(err.to_string()));
                 }
-                if hub.gifts_loading && hub.gifts.is_empty() {
+                if hub.gifts.loading() && hub.gift_list().is_empty() {
                     body = body.child(
                         div()
                             .text_sm()
                             .text_color(muted)
                             .child(tr(keys::Q_MONEY_LOADING_GIFTS)),
                     );
-                } else if hub.gifts.is_empty() && hub.gifts_loaded {
+                } else if hub.gift_list().is_empty() && hub.gifts.loaded() {
                     body = body.child(
                         div()
                             .text_sm()
@@ -428,19 +428,19 @@ impl QuillApp {
                             .child(tr(keys::Q_MONEY_NO_GIFTS_YET)),
                     );
                 }
-                if hub.gifts_total > 0 {
+                if hub.gifts_total() > 0 {
                     body = body.child(div().text_xs().text_color(muted).child(format!(
                         "{} gift{}",
-                        hub.gifts_total,
-                        if hub.gifts_total == 1 { "" } else { "s" }
+                        hub.gifts_total(),
+                        if hub.gifts_total() == 1 { "" } else { "s" }
                     )));
                 }
                 let mut grid = div().flex().flex_wrap().gap_2();
-                for (ix, gift) in hub.gifts.iter().enumerate() {
+                for (ix, gift) in hub.gift_list().iter().enumerate() {
                     grid = grid.child(gift_tile(session, ix, gift, mine, &roots, cx));
                 }
                 body = body.child(grid);
-                if !hub.gifts_offset.is_empty() && hub.gifts_loading {
+                if !hub.gifts.next_offset().is_empty() && hub.gifts.loading() {
                     body = body.child(loading_row("gifts-loading", cx));
                 }
             }
@@ -865,8 +865,8 @@ fn gift_details(
     if let Some(actions) = owner_actions {
         col = col.child(actions);
     }
-    if let Some(err) = hub.gifts_error.as_ref() {
-        col = col.child(div().text_sm().child(err.clone()));
+    if let Some(err) = hub.gifts_failure() {
+        col = col.child(div().text_sm().child(err.to_string()));
     }
     col.into_any_element()
 }

@@ -54,15 +54,16 @@ pub(super) fn seed_gift_delete_session(sink: Arc<MemorySink>) -> Session {
         },
         _ => MessageSender::User { user_id: ME },
     });
-    hub.gifts = [
+    hub.set_gifts(
+        [
         regular_gift(DELETABLE, 100, true),
         regular_gift(KEPT, 250, false),
     ]
     .iter()
     .filter_map(parse_received_gift)
-    .collect();
-    hub.gifts_total = 2;
-    hub.gifts_loaded = true;
+        .collect(),
+        2,
+    );
     hub.gift_selected = Some(DELETABLE.into());
     session
 }

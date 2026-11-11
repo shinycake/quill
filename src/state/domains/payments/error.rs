@@ -166,11 +166,10 @@ impl Session {
             // Only the newest history request fails the list: an older one
             // answering late must not stop the spinner of the live one.
             Some(RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { .. })) => {
-                if pending.is_some_and(|p| p.id.0 == self.payments.hub.tx_request) {
-                    self.payments.hub.tx_loading = false;
-                    self.payments.hub.tx_error =
-                        Some(format!("Couldn't load transactions: {}", error_reason(err)));
-                }
+                self.payments.hub.tx.fail(
+                    pending.map(|p| p.id),
+                    format!("Couldn't load transactions: {}", error_reason(err)),
+                );
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GetWearableGifts)) => {
                 self.users_state
@@ -180,15 +179,14 @@ impl Session {
             Some(RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { .. })) => {
                 // Only the newest page's error counts (an older page's is
                 // not the list on screen's).
-                if pending.is_some_and(|p| p.id.0 == self.payments.hub.gifts_request) {
-                    self.payments.hub.gifts_loading = false;
-                    // A failed refetch is not asked again every frame.
-                    self.payments.hub.gifts_stale = false;
-                    self.payments.hub.gifts_error = Some(crate::lang::tr_with(
+                // A failed refetch is not asked again every frame.
+                self.payments.hub.gifts.fail(
+                    pending.map(|p| p.id),
+                    crate::lang::tr_with(
                         crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_GIFTS_REASON,
                         &[("reason", &error_reason(err))],
-                    ));
-                }
+                    ),
+                );
             }
             Some(
                 RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { .. })
@@ -201,11 +199,13 @@ impl Session {
             }
             // The Business screen keeps tdesktop's fallback order.
             Some(RequestPurpose::GetBusinessFeatures) => {
-                self.payments.hub.business_features_loading = false;
+                self.payments
+                    .hub
+                    .business_features
+                    .fail(error_reason(err));
             }
             Some(RequestPurpose::GetPremiumFeatures) => {
-                self.payments.hub.premium_loading = false;
-                self.payments.hub.premium_error = Some(format!(
+                self.payments.hub.premium.fail(format!(
                     "Couldn't load Premium features: {}",
                     error_reason(err)
                 ));
@@ -263,8 +263,10 @@ impl Session {
             }
             // The next look at the sticker preview asks again.
             Some(RequestPurpose::GetPremiumStickerExamples) => {
-                self.payments.hub.premium_stickers_loading = false;
-                self.payments.hub.premium_stickers_asked = false;
+                self.payments
+                    .hub
+                    .premium_stickers
+                    .fail(error_reason(err));
             }
             _ => {}
         }

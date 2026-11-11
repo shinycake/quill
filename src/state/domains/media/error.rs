@@ -78,6 +78,7 @@ impl Session {
         {
             self.fail_profile_audios(
                 user_id,
+                pending.map(|p| p.id),
                 call_request_error_line(err, "Could not load the playlist"),
             );
         }

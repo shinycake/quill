@@ -55,7 +55,7 @@ impl Session {
     pub fn premium_limit_pair(&self, kind: PremiumLimitKind) -> LimitPair {
         let hub = &self.payments.hub;
         hub.premium
-            .as_ref()
+            .data()
             .and_then(|info| info.limit_pair(kind))
             .or_else(|| hub.limits.answered(kind))
             .unwrap_or_else(|| limit_pair(None, kind))

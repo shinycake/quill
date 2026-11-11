@@ -11,7 +11,7 @@ impl Session {
             &self.stickers.stickers.favorites,
             &self.stickers.stickers.found_stickers,
             &self.stickers.stickers.suggestions,
-            &self.payments.hub.premium_stickers,
+            self.payments.hub.premium_stickers.items(),
         ]
         .into_iter()
         .flatten()

@@ -397,9 +397,35 @@ pub struct InviteLinkMembersState {
     pub invite_link: String,
     pub total_count: i32,
     pub members: Vec<crate::telegram::envelope::ParsedChatInviteLinkMember>,
-    pub loading: bool,
-    pub error: Option<String>,
-    pub request: Option<crate::ids::RequestId>,
+    pub stage: MembersStage,
+}
+
+/// The newest page request of an [`InviteLinkMembersState`]. Only the
+/// request it names lands; its answer, its error and a failed send each
+/// leave `Loading`, and closing the details drops the whole state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MembersStage {
+    Idle,
+    Loading(crate::ids::RequestId),
+    Failed(String),
+}
+
+impl InviteLinkMembersState {
+    pub fn loading(&self) -> bool {
+        matches!(self.stage, MembersStage::Loading(_))
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        match &self.stage {
+            MembersStage::Failed(error) => Some(error),
+            _ => None,
+        }
+    }
+
+    /// The page this state waits for is `request`.
+    pub fn waits_for(&self, request: crate::ids::RequestId) -> bool {
+        self.stage == MembersStage::Loading(request)
+    }
 }
 
 /// Page size shared by join-request and link-member lists.

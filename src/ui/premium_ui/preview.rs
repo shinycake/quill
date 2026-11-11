@@ -56,10 +56,11 @@ impl QuillApp {
         let Some(hub) = self.session().map(|s| &s.payments.hub) else {
             return vec![feature];
         };
-        let premium = hub.premium.as_ref().map_or(&[][..], |i| &i.features[..]);
+        let premium = hub.premium.data().map_or(&[][..], |i| &i.features[..]);
         let business = hub
             .business_features
-            .as_deref()
+            .data()
+            .map(Vec::as_slice)
             .unwrap_or(&BusinessFeature::FALLBACK_ORDER);
         preview_order(premium, business, feature)
     }

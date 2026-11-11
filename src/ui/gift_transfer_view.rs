@@ -63,7 +63,7 @@ pub(super) fn stage_view(app: &QuillApp, cx: &mut Context<QuillApp>) -> Option<S
     let gift = session
         .payments
         .hub
-        .gifts
+        .gift_list()
         .iter()
         .find(|g| g.id == picker.id);
     let name = picker.gift_name.clone();

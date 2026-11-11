@@ -38,7 +38,7 @@ pub(super) fn preview_stickers(
     let requested = hub.premium_requested.as_ref();
     requested
         .into_iter()
-        .chain(hub.premium_stickers.iter().filter(move |sticker| {
+        .chain(hub.premium_stickers.items().iter().filter(move |sticker| {
             requested.is_none_or(|requested| requested.file_id != sticker.file_id)
         }))
         .take(super::preview::STICKER_TILES)
@@ -230,10 +230,10 @@ impl QuillApp {
                     },
                 )),
         );
-        if let Some(err) = hub.premium_error.as_ref() {
-            body = body.child(div().text_sm().child(err.clone()));
+        if let Some(err) = hub.premium.error() {
+            body = body.child(div().text_sm().child(err.to_string()));
         }
-        if hub.premium_loading && hub.premium.is_none() {
+        if hub.premium.is_loading() && hub.premium.data().is_none() {
             body = body.child(
                 div()
                     .text_sm()
@@ -241,7 +241,7 @@ impl QuillApp {
                     .child(tr(keys::Q_MONEY_LOADING_FEATURES)),
             );
         }
-        if let Some(info) = hub.premium.as_ref() {
+        if let Some(info) = hub.premium.data() {
             let mut list = div().flex().flex_col().gap_1();
             for (index, &feature) in info.features.iter().enumerate() {
                 let target = PromoPage::for_feature(feature.into(), PreviewOpen::Overview);
@@ -355,7 +355,7 @@ impl QuillApp {
     /// "Doubled limits": each limit with its free and Premium value.
     fn promo_limits(&self, cx: &mut Context<Self>) -> Div {
         let muted = cx.theme().muted_foreground;
-        let info = self.session().and_then(|s| s.payments.hub.premium.as_ref());
+        let info = self.session().and_then(|s| s.payments.hub.premium.data());
         let mut body = div().flex().flex_col().gap_2().child(
             div()
                 .text_sm()
