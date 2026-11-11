@@ -326,7 +326,7 @@ fn the_custom_emoji_card_shows_where_the_emoji_was_tapped(cx: &mut TestAppContex
     let _chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, cx| {
         app.set_window_scope(Some(OTHER));
-        app.message_ui.custom_emoji_tapped = Some(77);
+        app.note_custom_emoji_tap(77);
         if let Some(session) = app.demo_session.as_mut() {
             session.stickers.custom_emoji_preview = Some(quill::state::CustomEmojiPreview {
                 emoji_id: 77,
