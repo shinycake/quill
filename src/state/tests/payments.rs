@@ -12,15 +12,14 @@ fn payment_form_applies_only_to_own_request() {
         )
     };
     apply_json(&mut session, &seq, &sink, &form_json("999"));
-    assert!(session.payments.form.is_none());
+    assert!(session.payments.checkout.form().is_none());
     let extra = session.request(RequestPurpose::GetPaymentForm, Some(ChatId(51)));
-    session.payments.form_request = Some(extra);
-    session.payments.form_loading = true;
+    session.payments.checkout = crate::state::CheckoutForm::Loading { request: extra };
     apply_json(&mut session, &seq, &sink, &form_json(&extra.0.to_string()));
-    let form = session.payments.form.as_ref().expect("form applies");
+    let form = session.payments.checkout.form().expect("form applies");
     assert_eq!(form.id, 7);
     assert_eq!(form.product_title, "Time machine");
-    assert!(!session.payments.form_loading);
+    assert!(!session.payments.checkout.is_loading());
 }
 
 #[test]
@@ -29,7 +28,7 @@ fn payment_request_survives_form_and_validated_answers() {
     let seq = AtomicU64::new(0);
     // Buy press: `getPaymentForm` sent, request context set.
     let extra = session.request(RequestPurpose::GetPaymentForm, Some(ChatId(51)));
-    session.payments.form_request = Some(extra);
+    session.payments.checkout = crate::state::CheckoutForm::Loading { request: extra };
     session.payments.request = Some(PaymentRequest {
         invoice: crate::payment_invoice::InputInvoice::Message {
             chat_id: ChatId(51),
@@ -45,7 +44,7 @@ fn payment_request_survives_form_and_validated_answers() {
             extra.0
         ),
     );
-    assert!(session.payments.form.is_some());
+    assert!(session.payments.checkout.form().is_some());
     assert!(
         session.payments.request.is_some(),
         "form answer must not clear the payment request"
@@ -83,9 +82,8 @@ fn payment_request_survives_form_and_validated_answers() {
 fn payment_form_error_surfaces_note() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.payments.form_loading = true;
     let extra = session.request(RequestPurpose::GetPaymentForm, Some(ChatId(51)));
-    session.payments.form_request = Some(extra);
+    session.payments.checkout = crate::state::CheckoutForm::Loading { request: extra };
     apply_json(
         &mut session,
         &seq,
@@ -95,7 +93,7 @@ fn payment_form_error_surfaces_note() {
             extra.0
         ),
     );
-    assert!(!session.payments.form_loading);
+    assert!(!session.payments.checkout.is_loading());
     assert!(
         session
             .payments
@@ -191,22 +189,22 @@ fn star_subscriptions_apply_only_to_own_request() {
         )
     };
     apply_json(&mut session, &seq, &sink, &subs_json("999"));
-    assert!(session.payments.star_subscriptions.is_none());
+    assert!(session.payments.star_subscriptions.data().is_none());
     let extra = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
         None,
     );
-    session.payments.star_subscriptions_request = Some(extra);
+    session.payments.star_subscriptions.begin_load(extra);
     apply_json(&mut session, &seq, &sink, &subs_json(&extra.0.to_string()));
     let subs = session
         .payments
         .star_subscriptions
-        .as_ref()
+        .data()
         .expect("list applies");
     assert_eq!(subs.subscriptions.len(), 1);
     assert_eq!(subs.subscriptions[0].id, "sub1");
     assert_eq!(subs.star_amount, 500);
-    assert!(!session.payments.star_subscriptions_loading());
+    assert!(!session.payments.star_subscriptions.is_loading());
 }
 
 #[test]
@@ -225,19 +223,19 @@ fn star_subscriptions_append_page_merges() {
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
         None,
     );
-    session.payments.star_subscriptions_request = Some(extra);
+    session.payments.star_subscriptions.begin_load(extra);
     apply_json(
         &mut session,
         &seq,
         &sink,
         &subs_json(&extra.0.to_string(), "sub1", "50"),
     );
-    assert_eq!(session.payments.star_subscriptions_offset, "50");
+    assert_eq!(session.payments.star_subscriptions.offset(), "50");
     let extra = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: true }),
         None,
     );
-    session.payments.star_subscriptions_request = Some(extra);
+    session.payments.star_subscriptions.begin_load(extra);
     apply_json(
         &mut session,
         &seq,
@@ -247,12 +245,12 @@ fn star_subscriptions_append_page_merges() {
     let subs = session
         .payments
         .star_subscriptions
-        .as_ref()
+        .data()
         .expect("list applies");
     assert_eq!(subs.subscriptions.len(), 2);
     assert_eq!(subs.subscriptions[0].id, "sub1");
     assert_eq!(subs.subscriptions[1].id, "sub2");
-    assert_eq!(session.payments.star_subscriptions_offset, "");
+    assert_eq!(session.payments.star_subscriptions.offset(), "");
 }
 
 #[test]
@@ -263,16 +261,16 @@ fn star_subscription_mutation_ok_marks_stale() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::EditStarSubscription, None);
-    session.payments.star_subscriptions_mutating = true;
+    session.payments.star_subscriptions.begin_edit(extra);
     apply_json(
         &mut session,
         &seq,
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(session.payments.star_subscriptions_stale);
-    assert!(!session.payments.star_subscriptions_mutating);
-    assert!(session.payments.star_subscriptions_error.is_none());
+    assert!(session.payments.star_subscriptions.is_stale());
+    assert!(!session.payments.star_subscriptions.is_editing());
+    assert!(session.payments.star_subscriptions.error().is_none());
 }
 
 #[test]
@@ -285,7 +283,7 @@ fn star_subscriptions_error_surfaces() {
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
         None,
     );
-    session.payments.star_subscriptions_request = Some(extra);
+    session.payments.star_subscriptions.begin_load(extra);
     apply_json(
         &mut session,
         &seq,
@@ -295,13 +293,13 @@ fn star_subscriptions_error_surfaces() {
             extra.0
         ),
     );
-    assert!(!session.payments.star_subscriptions_loading());
+    assert!(!session.payments.star_subscriptions.is_loading());
     // `error_reason` never echoes the native TDLib message (it can
     // contain secrets) — the classified reason surfaces instead.
     let err = session
         .payments
-        .star_subscriptions_error
-        .as_ref()
+        .star_subscriptions
+        .error()
         .expect("error surfaces");
     assert_eq!(err, "Couldn't load subscriptions: invalid request");
 }

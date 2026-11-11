@@ -170,8 +170,8 @@ fn the_channels_tab_asks_for_recommendations_once() {
         r#""total_count":2,"chat_ids":[21,22]"#,
     );
     let tabs = &fx.driver.session.search.search.tabs;
-    assert_eq!(tabs.recommended, vec![ChatId(21), ChatId(22)]);
-    assert!(tabs.recommended_loaded && !tabs.recommended_loading);
+    assert_eq!(tabs.recommended.data(), Some(&vec![ChatId(21), ChatId(22)]));
+    assert!(!tabs.recommended.is_loading());
     fx.open_tab(SearchTab::Chats);
     fx.open_tab(SearchTab::Channels);
     assert_eq!(fx.requests("getRecommendedChats").len(), 1);
@@ -531,7 +531,7 @@ fn a_calendar_day_with_no_media_keeps_the_box_open_with_a_note() {
     fx.driver.jump_to_date(19_000).unwrap();
     let search = &fx.driver.session.search;
     assert!(search.history_calendar.is_some());
-    assert!(search.date_jump_note.is_some());
+    assert!(search.date_jump_note().is_some());
     assert!(fx.requests("searchChatMessages").is_empty());
 }
 

@@ -25,8 +25,8 @@ impl QuillApp {
             let Some(session) = this.session() else {
                 return dialog.on_close(on_close.clone());
             };
-            if session.payments.form.is_none()
-                && !session.payments.form_loading
+            if session.payments.checkout.form().is_none()
+                && !session.payments.checkout.is_loading()
                 && session.payments.note.is_none()
             {
                 return dialog.on_close(on_close.clone());
@@ -35,7 +35,7 @@ impl QuillApp {
                 return dialog.on_close(on_close.clone());
             };
             let mut body = div().flex().flex_col().gap_3();
-            if session.payments.form_loading {
+            if session.payments.checkout.is_loading() {
                 body = body.child(
                     div()
                         .text_sm()
@@ -50,7 +50,7 @@ impl QuillApp {
                         .child(note.clone()),
                 );
             }
-            let Some(form) = session.payments.form.as_ref() else {
+            let Some(form) = session.payments.checkout.form() else {
                 let body = body.into_any_element();
                 return dialog
                     .content(crate::ui::shell::scrollable_dialog_content({
@@ -126,7 +126,7 @@ impl QuillApp {
         };
         let is_test = self
             .session()
-            .and_then(|session| session.payments.form.as_ref())
+            .and_then(|session| session.payments.checkout.form())
             .is_some_and(|form| match &form.form_type {
                 PaymentFormTypeData::Regular(regular) => regular.invoice.is_test,
                 _ => false,
@@ -260,7 +260,7 @@ impl QuillApp {
                 return dialog.on_close(on_close);
             };
             let mut body = div().flex().flex_col().gap_3();
-            if let Some(subs) = session.payments.star_subscriptions.as_ref() {
+            if let Some(subs) = session.payments.star_subscriptions.data() {
                 body = body.child(
                     div()
                         .flex()
@@ -285,8 +285,8 @@ impl QuillApp {
                     );
                 }
             }
-            if session.payments.star_subscriptions_loading()
-                && session.payments.star_subscriptions.is_none()
+            if session.payments.star_subscriptions.is_loading()
+                && session.payments.star_subscriptions.data().is_none()
             {
                 body = body.child(
                     div()
@@ -295,11 +295,11 @@ impl QuillApp {
                         .child(tr(keys::Q_MONEY_LOADING_SUBSCRIPTIONS)),
                 );
             }
-            if let Some(err) = session.payments.star_subscriptions_error.as_ref() {
-                body = body.child(div().text_sm().child(err.clone()));
+            if let Some(err) = session.payments.star_subscriptions.error() {
+                body = body.child(div().text_sm().child(err.to_string()));
             }
-            if let Some(subs) = session.payments.star_subscriptions.as_ref() {
-                if subs.subscriptions.is_empty() && !session.payments.star_subscriptions_loading() {
+            if let Some(subs) = session.payments.star_subscriptions.data() {
+                if subs.subscriptions.is_empty() && !session.payments.star_subscriptions.is_loading() {
                     body = body.child(
                         div()
                             .text_sm()
@@ -307,7 +307,7 @@ impl QuillApp {
                             .child(tr(keys::Q_MONEY_NO_ACTIVE_SUBSCRIPTIONS)),
                     );
                 }
-                let mutating = session.payments.star_subscriptions_mutating;
+                let mutating = session.payments.star_subscriptions.is_editing();
                 let confirming = session.payments.subscription_cancel_confirm.clone();
                 let chat_titles: std::collections::HashMap<i64, String> = session
                     .chats
@@ -323,7 +323,7 @@ impl QuillApp {
                         cx,
                     ));
                 }
-                if !subs.next_offset.is_empty() && session.payments.star_subscriptions_loading() {
+                if !subs.next_offset.is_empty() && session.payments.star_subscriptions.is_loading() {
                     body = body.child(loading_row("subs-loading", cx));
                 }
             }
@@ -388,16 +388,16 @@ impl QuillApp {
             return;
         };
         if !payments.subscriptions_open
-            || (payments.star_subscriptions_error.is_some() && !scrolled)
+            || (payments.star_subscriptions.error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.payments.subs_scroll),
-                !payments.star_subscriptions_offset.is_empty(),
-                payments.star_subscriptions_loading(),
+                !payments.star_subscriptions.offset().is_empty(),
+                payments.star_subscriptions.is_loading(),
             )
             || !self.payments.subs_asked.allow(
                 payments
                     .star_subscriptions
-                    .as_ref()
+                    .data()
                     .map_or(0, |subs| subs.subscriptions.len()),
                 scrolled,
             )

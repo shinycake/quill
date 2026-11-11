@@ -133,10 +133,10 @@ impl QuillApp {
         let shown = payments.is_some_and(|p| p.shows(&invoice));
         let view = CheckoutView {
             dialog_open: self.payments.dialog.is_some(),
-            paid: shown && payments.is_some_and(|p| p.form_paid),
+            paid: shown && payments.is_some_and(|p| p.checkout.is_paid()),
             sending: payments.is_some_and(|p| p.is_paying(&invoice)),
             note: shown && payments.is_some_and(|p| p.note.is_some()),
-            verification: shown && payments.is_some_and(|p| p.verification_started),
+            verification: shown && payments.is_some_and(|p| p.checkout.is_verifying()),
         };
         let Some(window) = self.mini_apps.window.as_mut() else {
             return;
@@ -302,7 +302,7 @@ mod demo {
         fn demo_mini_app_invoice(&mut self, window: &mut Window, cx: &mut Context<Self>) {
             if let Some(session) = self.demo_session.as_mut() {
                 // box-host: demo
-                session.payments.form = Some(PaymentFormData {
+                session.payments.checkout = quill::state::CheckoutForm::Ready(PaymentFormData {
                     id: 1,
                     form_type: PaymentFormTypeData::Stars { star_count: 50 },
                     seller_bot_user_id: 900,

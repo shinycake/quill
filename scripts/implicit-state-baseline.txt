@@ -121,9 +121,6 @@ ParsedGroupCall::loaded_all_participants
 ParsedSession::is_password_pending
 PasswordBox::sending
 PasswordBox::sending+error
-PaymentsState::form_loading
-PaymentsState::form_loading+receipt_error
-PaymentsState::verification_started
 PhotoSources::busy
 PlayHead::started
 PlaybackHealth::output_failed

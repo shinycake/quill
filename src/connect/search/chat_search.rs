@@ -466,14 +466,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .and_then(|c| c.shared_tab)
         {
-            self.session.search.date_jump_note = None;
+            self.session.search.clear_date_jump_note();
             self.jump_shared_media_to_day(tab, day_number)?;
             return Ok(None);
         }
         let Some(calendar) = self.session.search.history_calendar.take() else {
             return Ok(None);
         };
-        self.session.search.date_jump_note = None;
+        self.session.search.clear_date_jump_note();
         // The jump runs in the view in place: it must be the chat the box
         // was opened for (a box left over from a view that is gone has
         // nothing to jump in).

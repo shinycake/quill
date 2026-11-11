@@ -19,9 +19,8 @@ impl Session {
             // (rendered only there) would stay invisible.
             // An earlier checkout's form fetch failing is not this one's.
             Some(RequestPurpose::GetPaymentForm) => {
-                if extra.is_some() && self.payments.form_request == extra {
-                    self.payments.form_request = None;
-                    self.payments.form_loading = false;
+                if extra.is_some() && self.payments.checkout.waits_for(extra) {
+                    self.payments.checkout = CheckoutForm::Closed;
                     self.payments.note = Some(crate::lang::tr_with(
                         crate::lang::keys::Q_MONEY_PAYMENT_FAILED_REASON,
                         &[("reason", &error_reason(err))],
@@ -36,7 +35,6 @@ impl Session {
                     )
                 {
                     self.payments.order_info = OrderInfoStage::Unvalidated;
-                    self.payments.form_loading = false;
                     self.payments.note = Some(crate::lang::tr_with(
                         crate::lang::keys::Q_MONEY_PAYMENT_FAILED_REASON,
                         &[("reason", &error_reason(err))],
@@ -211,18 +209,15 @@ impl Session {
             Some(RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { .. })) => {
                 // Only the page in flight fails the list; an error does not
                 // leave the list stale to be asked every frame.
-                if extra.is_some() && self.payments.star_subscriptions_request == extra {
-                    self.payments.star_subscriptions_request = None;
-                    self.payments.star_subscriptions_stale = false;
-                    self.payments.star_subscriptions_error = Some(format!(
-                        "Couldn't load subscriptions: {}",
-                        error_reason(err)
-                    ));
+                if let Some(request) = extra {
+                    self.payments.star_subscriptions.page_failed(
+                        request,
+                        format!("Couldn't load subscriptions: {}", error_reason(err)),
+                    );
                 }
             }
             Some(RequestPurpose::EditStarSubscription | RequestPurpose::ReuseStarSubscription) => {
-                self.payments.star_subscriptions_mutating = false;
-                self.payments.star_subscriptions_error = Some(format!(
+                self.payments.star_subscriptions.edit_failed(format!(
                     "Couldn't update the subscription: {}",
                     error_reason(err)
                 ));
