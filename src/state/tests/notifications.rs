@@ -43,6 +43,10 @@ fn scope_mute_default_suppresses_toast_and_sound() {
         RequestPurpose::GetScopeNotificationSettings,
         NotificationSettingsScope::GroupChats,
     );
+    session
+        .settings
+        .scope_notification_settings
+        .begin(NotificationSettingsScope::GroupChats, extra);
     apply_json(
         &mut session,
         &seq,
@@ -68,6 +72,10 @@ fn scope_mute_default_suppresses_toast_and_sound() {
         RequestPurpose::GetScopeNotificationSettings,
         NotificationSettingsScope::GroupChats,
     );
+    session
+        .settings
+        .scope_notification_settings
+        .begin(NotificationSettingsScope::GroupChats, extra);
     apply_json(
         &mut session,
         &seq,
@@ -109,6 +117,10 @@ fn scope_show_preview_does_not_hide_desktop_text() {
         RequestPurpose::GetScopeNotificationSettings,
         NotificationSettingsScope::GroupChats,
     );
+    session
+        .settings
+        .scope_notification_settings
+        .begin(NotificationSettingsScope::GroupChats, extra);
     apply_json(
         &mut session,
         &seq,
@@ -145,8 +157,8 @@ fn failed_scope_settings_fetch_retries() {
     // when it sends the request.
     session
         .settings
-        .scope_settings_loading
-        .insert(NotificationSettingsScope::GroupChats);
+        .scope_notification_settings
+        .begin(NotificationSettingsScope::GroupChats, extra);
     // TDLib answers with an error.
     apply_json(
         &mut session,
@@ -158,11 +170,26 @@ fn failed_scope_settings_fetch_retries() {
         ),
     );
     assert!(
+        session
+            .settings
+            .scope_notification_settings
+            .error(&NotificationSettingsScope::GroupChats)
+            .is_some(),
+        "a failed fetch is shown, not asked again by itself"
+    );
+    assert!(
         !session
             .settings
-            .scope_settings_loading
-            .contains(&NotificationSettingsScope::GroupChats),
-        "failed fetch must free the scope for retry"
+            .scope_notification_settings
+            .wants_fetch(&NotificationSettingsScope::GroupChats)
+    );
+    // Opening the page frees the scope for a retry.
+    session.settings.scope_notification_settings.reopen();
+    assert!(
+        session
+            .settings
+            .scope_notification_settings
+            .wants_fetch(&NotificationSettingsScope::GroupChats)
     );
     assert!(
         !session
@@ -177,8 +204,8 @@ fn failed_scope_settings_fetch_retries() {
     );
     session
         .settings
-        .scope_settings_loading
-        .insert(NotificationSettingsScope::GroupChats);
+        .scope_notification_settings
+        .begin(NotificationSettingsScope::GroupChats, extra);
     apply_json(
         &mut session,
         &seq,
@@ -192,10 +219,11 @@ fn failed_scope_settings_fetch_retries() {
             .contains_key(&NotificationSettingsScope::GroupChats)
     );
     assert!(
-        !session
+        session
             .settings
-            .scope_settings_loading
-            .contains(&NotificationSettingsScope::GroupChats)
+            .scope_notification_settings
+            .error(&NotificationSettingsScope::GroupChats)
+            .is_none()
     );
 }
 
@@ -425,6 +453,10 @@ fn inapp_sounds_toggle_gates_notification_sound() {
         RequestPurpose::GetScopeNotificationSettings,
         NotificationSettingsScope::GroupChats,
     );
+    session
+        .settings
+        .scope_notification_settings
+        .begin(NotificationSettingsScope::GroupChats, extra);
     apply_json(
         &mut session,
         &seq,

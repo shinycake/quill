@@ -335,10 +335,11 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetScopeNotificationSettings)
                     && let Some(scope) = pending.and_then(|p| p.scope)
                 {
-                    self.settings
-                        .scope_notification_settings
-                        .insert(scope, settings);
-                    self.settings.scope_settings_loading.remove(&scope);
+                    self.settings.scope_notification_settings.answered(
+                        scope,
+                        pending.map(|p| p.id),
+                        settings,
+                    );
                 }
             }
             SettingsPayload::UpdateScopeNotificationSettings { scope, settings } => {
@@ -351,7 +352,6 @@ impl Session {
                         .scope_notification_settings
                         .insert(scope, settings);
                 }
-                self.settings.scope_settings_loading.remove(&scope);
             }
             SettingsPayload::UpdateReactionNotificationSettings { settings } => {
                 // Parity slice: no getter exists — the update stream is the

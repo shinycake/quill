@@ -9,10 +9,12 @@ mod language_link;
 mod passkeys;
 mod purpose;
 mod quick_replies;
+mod scope_settings;
 mod state;
 mod tone_upload;
 
 pub use business::*;
+pub use scope_settings::ScopeSettings;
 pub use business_extra::*;
 pub use export_files::ExportFiles;
 pub use language::*;

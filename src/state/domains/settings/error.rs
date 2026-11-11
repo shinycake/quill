@@ -291,15 +291,17 @@ impl Session {
             _ => {}
         }
         self.settle_notification_save(pending, true);
-        // Parity slice: a failed `getScopeNotificationSettings` must
-        // not leave the scope in `scope_settings_loading` — otherwise
-        // `maybe_fetch_scope_notification_settings` skips it on every
-        // later ingest and every "Defaults for all chats…" open.
-        // Dropping it here means the next fetch retries.
+        // A failed `getScopeNotificationSettings` leaves its scope refused:
+        // nothing asks again by itself (every ingest would), the
+        // Notifications page asks again when it opens.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetScopeNotificationSettings)
             && let Some(scope) = pending.and_then(|p| p.scope)
         {
-            self.settings.scope_settings_loading.remove(&scope);
+            self.settings.scope_notification_settings.failed(
+                &scope,
+                pending.map(|p| p.id),
+                error_reason(err),
+            );
         }
         // A failed `getChatNotificationSettingsExceptions` ends its
         // loading stage: the list says so, with a Retry, and nothing asks
