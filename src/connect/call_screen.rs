@@ -791,12 +791,14 @@ mod wait_tests {
     #[test]
     fn the_engine_wait_ends_after_its_limit_and_not_before() {
         let start = Instant::now();
-        let mut screen = CallScreen::default();
-        screen.share = Share::Picked {
-            pick: Pick {
-                source: SourceId("window:1".into()),
-                audio: false,
+        let mut screen = CallScreen {
+            share: Share::Picked {
+                pick: Pick {
+                    source: SourceId("window:1".into()),
+                    audio: false,
+                },
             },
+            ..CallScreen::default()
         };
         assert!(
             !screen.engine_wait_expired(start),
