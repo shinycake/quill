@@ -8043,3 +8043,29 @@ whose variants carry the data, with a way out of every stage.
 - **A refused refetch of a stale proxy list** lands in
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
+
+### Sweep fixes (r2-05)
+
+| id | what changed |
+| --- | --- |
+| 10-058, 10-059 | `send_supergroup_members` (one seam for fetch and refresh): a refused send records `Failed(send_failed_line)` for a list with no page, and puts the old page and its ask back for a refresh, so the picker never reads "Loading" for good. The Add exception / Remove picker's Failed arm has a Retry. |
+| 10-066 | `check_group_username` records `UsernameCheck::Failed` when the send is refused; the status line says the check failed and Save asks again. |
+| 10-067 | The private Type box's link block matches `InviteLinkFetch`: Failed shows the reason with Retry, Loaded without a primary link says "No invite links." |
+| 10-068 | A refused link-count send is `InviteLinkCountsFetch::Failed`; Save with a changed join approval asks the count again and stays open instead of skipping "apply to existing links". |
+| 10-069 | Link check versions come from one process-wide counter, so a detached timer of a closed box never matches the next box. |
+| 12-B001 | The quick reply poll ends when nothing is awaited: no accepted text (`TextSave::Accepted` waits for the shortcut id) and behind the lock. |
+| 12-B002 | The text save settles on its own request through `acks` (expected when sent, forgotten when the screen or box goes); a request that left flight with no answer gives the text back. |
+| 13-043 | `LiveJoin::Joining { target, request }`: when the `getGroupCall` request is gone with no tracker and no pending join, the join is `Refused` and "Join live" shows. |
+| 13-047 | A refused `getStory` send starts the story's retry clock, so the pending open sees a failed ask and is dropped with the note (or the repost's gone box). |
+| 01-002 | `take_turn` returns a `Turn`; the new-person and chat slots are kept only on `commit()` after the send, and a dropped turn gives them back. Tests no longer sleep (`State::reserve` takes `now`). |
+| 01-022 | `BoostWork::Slots` and `Boosting` carry their `RequestId`; an answer or error applies only when the box waits for that id. A press adopts a slots read still out by its id. |
+| 01-023 | The note lives in the phase (`Main { note }`, `Reassign { note }`), so it leaves with it. |
+| 01-034, 01-035, 01-036 | A refused speaker send goes back to idle (`unsent`). `answered` and `failed` apply only to a slot that is fetching, so a revoke's late answer is dropped. `ShareLink::Unavailable` is recomputed at each click (a member promoted to admin gets the speaker link asked). |
+| 02-003, 02-004 | One rule, `ComposerAttachment::sends_as_files`, for the checkbox, the next drop and the send options; a file kept as a file counts neither way. |
+| 03-B003 | A file call that times out is `Skip::Unavailable`, not an aborted chat. An error mid-chat is `ChatOutcome::Partial`: the row and summary count the saved messages (`partial_chats`, with a line in the finished box). |
+| 03-B004 | `AccountStage::ChatsList { found }` and `Chats { index, count, name, chat }`; `Stage::Collecting { read }` and `Writing { done, total }`. The next chat starts from `Starting`, so no stale writing counts. |
+| 03-C001 | A handler read that dies is stamped now (or "could not read" with no answer), so the page does not start another read at each draw. |
+| 10-065 | Skipped: tdesktop shows no result for an unban or a kick in the picker, a refusal lands in the member action error, and no stage is stuck. |
+| 12-B004 | Skipped: the asked step is drawn on the button until the pane is replaced, so a later press is the user answering the question they see. |
+| 13-048 | Skipped: a waiting open can coexist with an open viewer (a repost press pauses it), so the two are independent; the Option is the whole stage. |
+| 01-010 | Fixed with 01-002. |
