@@ -3,7 +3,7 @@
 //! `updateDecorations`): the controls' state, presses, moving and resizing
 //! the window, the snap slide, and resizes the window system makes.
 
-use super::{Press, Slide, VideoPip, open, place};
+use super::{Gesture, Press, Slide, VideoPip, open, place};
 use gpui_kit::*;
 use quill::media_viewer::pip::layout::{ControlsLayout, OverState, PressAction};
 use quill::media_viewer::pip::panel::{
@@ -72,12 +72,10 @@ impl VideoPip {
         }
         let frame = self.current_frame(window, cx);
         self.presses.press(over);
-        self.dragged = false;
-        self.press = Some(Press {
+        self.gesture = Gesture::Pressed(Press {
             part: resize_part(local, frame.size(), self.attached.with(self.snapped)),
             cursor: place::cursor(window),
             start: frame,
-            dragging: false,
         });
     }
 
@@ -92,7 +90,7 @@ impl VideoPip {
         let local = local_point(event.position);
         let over = self.over_at(window, local);
         self.set_over(over, cx);
-        let Some(mut press) = self.press else {
+        let Some(mut press) = self.gesture.press() else {
             let edge = resize_part(local, self.frame.size(), self.attached.with(self.snapped));
             if self.edge != edge {
                 self.edge = edge;
@@ -107,15 +105,13 @@ impl VideoPip {
         }
         let cursor = place::cursor(window);
         let delta = cursor.minus(press.cursor);
-        if !press.dragging
+        if !self.gesture.is_dragging()
             && delta.manhattan() > START_DRAG_DISTANCE
             && !self.presses.drag_disabled()
         {
-            press.dragging = true;
-            self.dragged = true;
             if self.wayland {
                 // The compositor moves and resizes (`startSystemDrag`).
-                self.press = None;
+                self.gesture = Gesture::Idle { dragged: true };
                 self.presses.release(over, true);
                 match resize_edge(press.part) {
                     Some(edge) => window.start_window_resize(edge),
@@ -132,9 +128,9 @@ impl VideoPip {
                 (self.attached, self.snapped) =
                     count_position(press.start, screen, moving, self.wayland);
             }
+            self.gesture = Gesture::Dragging(press);
         }
-        self.press = Some(press);
-        if !press.dragging {
+        if !self.gesture.is_dragging() {
             return;
         }
         let screen = if press.part == RectPart::Center {
@@ -178,9 +174,11 @@ impl VideoPip {
 
     fn finish_press(&mut self, local: PipPoint, window: &mut Window, cx: &mut Context<Self>) {
         let over = self.over_at(window, local);
-        let press = self.press.take();
-        let action = self.presses.release(over, self.dragged);
-        if press.is_some_and(|press| press.dragging) {
+        let dragging = self.gesture.is_dragging();
+        let dragged = self.gesture.dragged();
+        self.gesture = Gesture::Idle { dragged };
+        let action = self.presses.release(over, dragged);
+        if dragging {
             self.finish_drag(window, cx);
         }
         // Buttons act through their own clicks (and keys); the picture
@@ -236,7 +234,7 @@ impl VideoPip {
             return true;
         }
         self.slide = None;
-        if !self.press.is_some_and(|press| press.dragging) {
+        if !self.gesture.is_dragging() {
             self.settle(window, cx);
         }
         false
@@ -284,7 +282,7 @@ impl VideoPip {
         let Some(ratio) = self.picture_ratio() else {
             return;
         };
-        if ratio == self.ratio || self.press.is_some_and(|press| press.dragging) {
+        if ratio == self.ratio || self.gesture.is_dragging() {
             return;
         }
         self.ratio = ratio;
@@ -308,7 +306,7 @@ impl VideoPip {
     /// Frames the window sets itself already fit; a pixel of rounding is
     /// left alone so the two never fight.
     pub(super) fn on_bounds_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.press.is_some() || self.slide.is_some() {
+        if self.gesture.press().is_some() || self.slide.is_some() {
             return;
         }
         let Some(screen) = place::own_screen(window, cx) else {

@@ -46,7 +46,7 @@ fn drop_passed_pictures(queue: &mut VecDeque<VideoFrame>, floor: f64) {
 fn paint_floor(clock: &Clock, sound: Option<f64>, now: Instant) -> Option<f64> {
     let position = match sound {
         Some(heard) => heard,
-        None if clock.is_playing() && !clock.held => clock.position(now),
+        None if clock.is_playing() && !clock.is_held() => clock.position(now),
         None => return None,
     };
     Some(position - SYNC_TOLERANCE)
@@ -56,7 +56,7 @@ fn paint_floor(clock: &Clock, sound: Option<f64>, now: Instant) -> Option<f64> {
 /// until the clock passes the second queued picture, which it then drops.
 fn idle_wait(state: &State, sound: Option<f64>, now: Instant) -> Duration {
     let clock = &state.clock;
-    if sound.is_some() || !clock.is_playing() || clock.held {
+    if sound.is_some() || !clock.is_playing() || clock.is_held() {
         return IDLE_WAIT;
     }
     let Some(next) = state.video.get(1) else {
@@ -121,10 +121,10 @@ impl Decoder {
 
     pub(super) fn turn<'s>(&mut self, shared: &'s Shared, now: Instant) -> Turn<'s> {
         let mut state = lock(&shared.state);
-        if state.stop {
+        if state.decoding.is_stopped() {
             return Turn::Stop;
         }
-        if let Some(target) = state.seek.take() {
+        if let Some(target) = state.decoding.take_seek() {
             let epoch = state.epoch;
             drop(state);
             let result = self.demuxer.seek(target);
@@ -132,8 +132,7 @@ impl Decoder {
             if state.epoch == epoch
                 && let Err(err) = result
             {
-                state.error = Some(err);
-                state.eof = true;
+                state.decoding.fail(err);
             }
             return Turn::Worked;
         }
@@ -153,7 +152,7 @@ impl Decoder {
             .then_some((state.video.len(), state.video_cap));
         let audio_buffered = audio.as_ref().map(|audio| audio.buffered_secs());
         let step = next_step(video_queued, audio_buffered);
-        if state.eof || step == Step::Wait {
+        if state.decoding.at_end() || step == Step::Wait {
             let wait = idle_wait(&state, sound, now);
             return Turn::Idle(state, wait);
         }
@@ -173,7 +172,7 @@ impl Decoder {
         };
         self.decoded_a_picture |= matches!(item, Ok(Some(Item::Video(_))));
         let mut state = lock(&shared.state);
-        if state.epoch != epoch || state.seek.is_some() || state.stop {
+        if state.epoch != epoch || state.decoding.seek_pending() || state.decoding.is_stopped() {
             return Turn::Worked;
         }
         match item {
@@ -191,14 +190,12 @@ impl Decoder {
             Ok(None) if reaching => return Turn::Idle(state, IDLE_WAIT),
             Ok(None) => {
                 if self.has_video && !self.decoded_a_picture {
-                    state.error = Some("The video has no pictures".to_string());
+                    state.decoding.fail("The video has no pictures".to_string());
+                } else {
+                    state.decoding.end();
                 }
-                state.eof = true;
             }
-            Err(err) => {
-                state.error = Some(err);
-                state.eof = true;
-            }
+            Err(err) => state.decoding.fail(err),
         }
         Turn::Worked
     }

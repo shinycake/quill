@@ -156,7 +156,7 @@ impl QuillApp {
                 match result {
                     Ok(pixels) => {
                         if this.viewer.photo_editor.is_none() {
-                            this.viewer.photo_editor = Some(PhotoEditor::for_message_edit(
+                            this.viewer.photo_editor.open(PhotoEditor::for_message_edit(
                                 asked_for.0,
                                 asked_for.1,
                                 pixels,

@@ -3,3 +3,5 @@
 State::frame_requested mirrors the C qw_state struct field by field (repr(C)); it is a per-poll flag from the native side, not a stage Quill keeps
 ActiveGroupCall::loaded_all_participants TDLib's groupCall.loaded_all_participants: the server's own report that the participant list is complete, mirrored as is
 ActiveGroupCall::loaded_all_participants+screen_share_error TDLib's groupCall.loaded_all_participants beside the screen share's last failure: independent
+
+MiniAppWindow::closing_confirmation the mini app's own setting (`web_app_setup_closing_behavior`: ask before closing), set and cleared by the app; not a stage of anything Quill runs

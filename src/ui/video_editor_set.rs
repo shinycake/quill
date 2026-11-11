@@ -47,7 +47,7 @@ impl QuillApp {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return true;
         };
-        let (Some(info), false) = (editor.info, editor.busy) else {
+        let Some(info) = editor.info().filter(|_| !editor.busy()) else {
             return false;
         };
         let job = VideoStickerJob {

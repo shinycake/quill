@@ -523,7 +523,7 @@ impl QuillApp {
             matches!(&editor.purpose, super::photo_editor::EditorPurpose::Attachment(item) if item.slot == slot)
         });
         if on_sent_tray {
-            self.viewer.photo_editor = None;
+            self.viewer.photo_editor.take();
         }
     }
 

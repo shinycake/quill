@@ -6,7 +6,7 @@ use crate::diagnostics::DiagnosticSink;
 use crate::diagnostics::MemorySink;
 use crate::ids::{AccountKey, ChatId};
 use crate::platform::MemorySecretStore;
-use crate::state::{Session, WebAppOpenResult, WriteAccessResult};
+use crate::state::{Session, WebAppOpenResult, WriteAccessResult, WriteAnswer};
 use crate::telegram::client::copy_and_parse;
 use crate::web_app::LaunchSource;
 use crate::web_app::theme::ThemeParams;
@@ -230,7 +230,7 @@ fn write_access_goes_through_consent_on_404() {
     ));
     assert_eq!(
         h.driver.session.bots.web_apps.write_access,
-        Some((42, WriteAccessResult::NeedsConsent))
+        Some(WriteAnswer::new(extra, 42, WriteAccessResult::NeedsConsent))
     );
     let extra = h.driver.allow_bot_to_send_messages(42).expect("sent");
     assert_eq!(h.last("allowBotToSendMessages")["bot_user_id"], 42);
@@ -244,7 +244,7 @@ fn write_access_goes_through_consent_on_404() {
     ));
     assert_eq!(
         h.driver.session.bots.web_apps.write_access,
-        Some((42, WriteAccessResult::Granted))
+        Some(WriteAnswer::new(extra, 42, WriteAccessResult::Granted))
     );
     let extra = h.driver.can_bot_send_messages(42).expect("sent");
     h.ingest(&format!(
@@ -253,7 +253,7 @@ fn write_access_goes_through_consent_on_404() {
     ));
     assert_eq!(
         h.driver.session.bots.web_apps.write_access,
-        Some((42, WriteAccessResult::Allowed))
+        Some(WriteAnswer::new(extra, 42, WriteAccessResult::Allowed))
     );
 }
 

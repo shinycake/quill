@@ -18,8 +18,8 @@
 use super::app::QuillApp;
 use super::composer_sends::TrayItem;
 use super::shell::{DialogKind, QuillShell};
+use super::video_editor_stage::EditorStage;
 use super::video_editor_timeline::EditorMotion;
-use super::video_player::VideoPlayer;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
@@ -142,11 +142,9 @@ pub(super) struct VideoEditorDialog {
     pub(super) target: EditorTarget,
     /// The file the edits start from.
     pub(super) source: PathBuf,
-    /// Probed size, length and sound; `None` while it is read.
-    pub(super) info: Option<VideoSource>,
     pub(super) edits: VideoEdits,
-    /// The strip's selection; `None` until the video is read.
-    pub(super) timeline: Option<Timeline>,
+    /// Reading, ready (the strip's selection, the player) or encoding.
+    pub(super) stage: EditorStage,
     /// The still frame (turned and mirrored like the edit) at the cover:
     /// the picture when the video can't play here, and the cover bubble.
     /// With the time of the source it was cut at, so a cover moved since is
@@ -156,13 +154,6 @@ pub(super) struct VideoEditorDialog {
     /// The cover still's cutter, matched by its own token so an encode's
     /// serial bump does not orphan a cut.
     pub(super) still_cut: StillCut,
-    /// Bumped by every probe and encode; late answers are dropped.
-    pub(super) serial: u64,
-    /// The edited copy is being encoded.
-    pub(super) busy: bool,
-    pub(super) note: Option<String>,
-    /// The player looping the kept range, muted.
-    pub(super) player: Option<VideoPlayer>,
     /// Paused by a click on the picture (tdesktop `_userPaused`).
     pub(super) user_paused: bool,
     /// Where the player is, for the playhead.
@@ -255,20 +246,15 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let serial = next_editor_serial();
+        let (stage, serial) = EditorStage::reading();
         self.composer_ui.send_box.video_editor = Some(VideoEditorDialog {
             target,
             source: source.clone(),
-            info: None,
             edits: VideoEdits::full(0),
-            timeline: None,
+            stage,
             preview: None,
             still: None,
             still_cut: StillCut::Idle,
-            serial,
-            busy: false,
-            note: Some(tr(keys::Q_AV_READING_THE_VIDEO).into()),
-            player: None,
             user_paused: false,
             playback_ms: None,
             motion: EditorMotion::default(),
@@ -298,7 +284,7 @@ impl QuillApp {
             .send_box
             .video_editor
             .as_ref()
-            .is_none_or(|editor| editor.serial != serial)
+            .is_none_or(|editor| !editor.is_reading(serial))
         {
             return;
         }
@@ -334,7 +320,7 @@ impl QuillApp {
         }
         let Some(info) = info else {
             if let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() {
-                editor.note = Some(tr(keys::Q_AV_THIS_ISNT_A_VIDEO_QUILL).into());
+                editor.stage = EditorStage::Unreadable;
             }
             cx.notify();
             return;
@@ -368,10 +354,8 @@ impl QuillApp {
         };
         let at = edits.cover_ms;
         if let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() {
-            editor.info = Some(info);
+            editor.become_ready(info, timeline);
             editor.edits = edits;
-            editor.timeline = Some(timeline);
-            editor.note = None;
         }
         self.start_video_editor_player(cx);
         self.refresh_video_preview(at, cx);
@@ -427,7 +411,7 @@ impl QuillApp {
                             editor.still = Some(still.into());
                         }
                     }
-                    Err(note) => editor.note = Some(note),
+                    Err(note) => editor.set_note(note),
                 }
                 if let Some(next) = next {
                     this.refresh_video_preview(next, cx);
@@ -476,7 +460,7 @@ impl QuillApp {
             EditorTarget::Avatar => return self.finish_avatar_video_editor(window, cx),
             EditorTarget::Tray(_) | EditorTarget::MessageEdit => {}
         }
-        let (Some(info), false) = (editor.info, editor.busy) else {
+        let Some(info) = editor.info().filter(|_| !editor.busy()) else {
             return false;
         };
         let edits = editor.edits;
@@ -491,11 +475,9 @@ impl QuillApp {
             self.close_video_editor(cx);
             return true;
         }
-        editor.player = None;
-        editor.busy = true;
-        editor.note = Some(tr(keys::Q_AV_PREPARING_THE_VIDEO).into());
-        editor.serial += 1;
-        let serial = editor.serial;
+        let Some((_, serial)) = editor.begin_encode() else {
+            return false;
+        };
         let encode_source = source.clone();
         let worker =
             cx.background_spawn(async move { render_edited(&encode_source, &effective, &info) });
@@ -507,7 +489,7 @@ impl QuillApp {
                     .send_box
                     .video_editor
                     .as_ref()
-                    .is_some_and(|editor| editor.serial == serial);
+                    .is_some_and(|editor| editor.is_encoding(serial));
                 match result {
                     Ok(output) if current => {
                         this.apply_video_edit(output, source, edits, info, cx);
@@ -519,8 +501,7 @@ impl QuillApp {
                     }
                     Err(note) if current => {
                         if let Some(editor) = this.composer_ui.send_box.video_editor.as_mut() {
-                            editor.busy = false;
-                            editor.note = Some(note);
+                            editor.encode_failed(note);
                         }
                         this.start_video_editor_player(cx);
                         cx.notify();
@@ -663,7 +644,7 @@ impl QuillApp {
 /// A serial base no earlier editor used, so a probe, still or strip frame
 /// still running for a closed editor never matches a newly opened one.
 /// Each editor counts up from its base for its own requests.
-fn next_editor_serial() -> u64 {
+pub(super) fn next_editor_serial() -> u64 {
     use std::sync::atomic::{AtomicU64, Ordering};
     static OPENED: AtomicU64 = AtomicU64::new(0);
     (OPENED.fetch_add(1, Ordering::Relaxed) + 1) << 32

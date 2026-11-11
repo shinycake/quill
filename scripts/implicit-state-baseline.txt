@@ -1,7 +1,6 @@
 # Implicit-state debt (scripts/check-implicit-state.py). Only remove lines.
 ActiveGroupCall::loaded_all_participants
 AppearancePrefs::ignore_battery_saving
-Assembly::started
 AudioEngine::failed
 AudioEngine::start_failed
 AudioEngine::start_failed+error
@@ -18,7 +17,7 @@ CallSnap::connecting
 CallSummary::busy
 CallUi::window_opening
 CameraDraft::starting
-Ceremony::finished
+
 ChatSummary::my_rights_fetched
 ChatSwipeFacts::is_saved
 ChatUi::inline_query_waiting
@@ -64,7 +63,6 @@ HistoryState::loaded_complete
 HistoryState::newer_failed
 HistoryUi::anchor_pending
 InlineMembersUi::admins_asked
-InstallResult::failed
 
 JoinedLines::started
 Latest::wake_pending
@@ -84,9 +82,6 @@ MediaFacts::in_saved_messages
 MediaMenuFacts::downloading
 MediaState::disk_paused_saved_changed
 MembersView::loading
-MiniAppWindow::closing_confirmation
-MiniAppWindow::data_sent
-MiniAppWindow::waiting_write_access
 MutedSpeechHint::done
 NewChatView::busy
 NewChatView::busy+failure
@@ -157,10 +152,8 @@ Tempo::done
 Tempo::inner_done
 ThreadView::reading_started
 TopPerson::saved_messages
-TransportMachine::loop_sent
 UiClip::failed
-UpdatePill::downloading
+
+UiClip::failed
 Validation::finished
-VideoEditorDialog::busy
 WebApps::grossing_loading
-WhatsNewUi::opening

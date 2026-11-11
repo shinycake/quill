@@ -236,7 +236,9 @@ fn viewing_another_set_closes_the_other_windows_sticker_editor(cx: &mut TestAppC
     in_window(&h, chat_window, Some(OTHER), cx, |app, _, cx| {
         app.view_message_sticker_set(78, cx);
         let pixels = image::RgbaImage::from_pixel(300, 300, image::Rgba([1, 2, 3, 255]));
-        app.viewer.photo_editor = PhotoEditor::for_set(pixels, 78, SetKind::Stickers);
+        if let Some(editor) = PhotoEditor::for_set(pixels, 78, SetKind::Stickers) {
+            app.viewer.photo_editor.open(editor);
+        }
         assert!(app.viewer.photo_editor.is_some());
     });
     in_window(&h, h.main, None, cx, |app, _, cx| {

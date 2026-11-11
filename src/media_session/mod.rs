@@ -138,6 +138,18 @@ pub fn clear() {
     publish(None);
 }
 
+/// Whether the widget shows an entry (UI tests).
+#[cfg(any(test, feature = "test-support"))]
+pub fn shows_entry() -> bool {
+    LAST.lock_or_recover().is_some()
+}
+
+/// Pretend the widget shows an entry, without reaching the OS (UI tests).
+#[cfg(any(test, feature = "test-support"))]
+pub fn seed_entry(info: NowPlaying) {
+    *LAST.lock_or_recover() = Some((info, Instant::now()));
+}
+
 #[cfg(all(feature = "ui", any(target_os = "macos", target_os = "linux", windows)))]
 fn set_backend(info: Option<&NowPlaying>) {
     backend::set(info);

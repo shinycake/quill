@@ -30,7 +30,7 @@ impl QuillApp {
     /// MED1: apply a finished viewer seek (paused or playing; the player
     /// keeps its sound in step).
     pub(in crate::ui) fn seek_viewer_to(&mut self, secs: f64, cx: &mut Context<Self>) {
-        let Some(player) = &self.viewer.player else {
+        let Some(player) = self.viewer.clip.player() else {
             return;
         };
         player.seek(secs);
@@ -93,7 +93,7 @@ impl QuillApp {
             ViewerKeyAction::TogglePlayback => self.toggle_viewer_video(cx),
             ViewerKeyAction::HoldSpace => self.viewer_space_down(window, cx),
             ViewerKeyAction::StepFrame(forward) => {
-                if let Some(player) = &self.viewer.player {
+                if let Some(player) = self.viewer.clip.player() {
                     player.step_frame(forward);
                 }
                 cx.notify();
@@ -156,7 +156,7 @@ impl QuillApp {
     /// Looping clips play only while the window is active (tdesktop pauses
     /// them in the background): pause on deactivation, resume on return.
     pub(super) fn sync_viewer_window_activity(&mut self, active: bool, cx: &mut Context<Self>) {
-        if !self.viewer_loops() || self.viewer.player.is_none() {
+        if !self.viewer_loops() || self.viewer.clip.player().is_none() {
             return;
         }
         let playing = self.viewer_video_playing();
@@ -296,7 +296,7 @@ impl QuillApp {
         }
         // The speed is the app's: every window's viewer clip takes it.
         self.in_every_window(cx, |app, _| {
-            if let Some(player) = app.viewer.player.as_ref().filter(|_| !app.viewer_loops()) {
+            if let Some(player) = app.viewer.clip.player().filter(|_| !app.viewer_loops()) {
                 player.set_rate(next);
                 restarted = true;
             }
@@ -440,7 +440,7 @@ impl QuillApp {
         }
         let volume = self.players.volume;
         self.in_every_window(cx, |app, _| {
-            if let Some(player) = app.viewer.player.as_ref().filter(|_| !app.viewer_loops()) {
+            if let Some(player) = app.viewer.clip.player().filter(|_| !app.viewer_loops()) {
                 player.set_volume(volume);
             }
         });
@@ -522,18 +522,17 @@ impl QuillApp {
     /// controls redraw themselves (`video_player`), so this never redraws
     /// the window on its own.
     pub(in crate::ui) fn spawn_viewer_session_tick(&mut self, cx: &mut Context<Self>) {
-        if self.viewer.session_tick {
+        if self.viewer.clip.has_tick() {
             return;
         }
-        self.viewer.session_tick = true;
-        self.spawn_scoped(cx, async move |this, cx| {
+        let tick = self.spawn_scoped(cx, async move |this, cx| {
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(250))
                     .await;
                 let cont = this
                     .update(cx, |this, cx| {
-                        if this.viewer.player.is_none() {
+                        if this.viewer.clip.player().is_none() {
                             if this.active_playback_id().is_none() {
                                 quill::media_session::publish(None);
                             }
@@ -542,23 +541,26 @@ impl QuillApp {
                         this.drive_viewer_media_session(cx);
                         let failed = this
                             .viewer
-                            .player
-                            .as_ref()
+                            .clip
+                            .player()
                             .and_then(|player| player.take_error());
-                        if let Some(error) = failed
-                            && let Some(item) = this.viewer.state.current()
-                        {
-                            this.viewer.clip_error =
-                                Some(video::viewer_error_message(item, &error));
+                        let line = failed.and_then(|error| {
+                            let item = this.viewer.state.current()?;
+                            Some(video::viewer_error_message(item, &error))
+                        });
+                        if let Some(line) = line {
+                            this.viewer.clip.player_failed(line);
                             cx.notify();
                         }
-                        this.viewer.player.is_some()
+                        this.viewer.clip.player().is_some()
                     })
                     .unwrap_or_else(|_| {
                         // The clip's window closed: the OS widget must not
                         // keep showing it, unless something else plays.
                         let _ = this.main().update(cx, |this, _| {
-                            if this.viewer.player.is_none() && this.active_playback_id().is_none() {
+                            if this.viewer.clip.player().is_none()
+                                && this.active_playback_id().is_none()
+                            {
                                 quill::media_session::publish(None);
                             }
                         });
@@ -568,11 +570,8 @@ impl QuillApp {
                     break;
                 }
             }
-            let _ = this.update(cx, |this, _| {
-                this.viewer.session_tick = false;
-            });
-        })
-        .detach();
+        });
+        self.viewer.clip.set_tick(tick);
     }
 
     /// Scroll-zoom the viewer visual around the pointer (`anchor`, px from
