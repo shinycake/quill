@@ -8057,7 +8057,7 @@ listed; the rest of the bundle's files hold no other entry.
 | 05-070 | `SearchState::clear_results` drops a `PaidPostSearch` confirmation with the results it was asked about |
 | 05-083 | `BotStopStage::Running { can_stop }`; `PendingBotMessage::can_stop()` is derived, the second field is gone |
 | 05-074 | `VenueBot::{Unsent, Resolving(request)}`; `venue_bot_resolved` and `venue_bot_failed` take the request and ignore any other |
-| 05-080 | `pending_attention` bool deleted: `attention_chats` queues the chats whose messages asked for attention and the drain turns it into the event; allow and baseline lines removed |
+| 05-080 | Kept as `pending_attention: bool` with its allow line: a one-shot event the notifier takes (`std::mem::take` in the drain), not a stage of any request. A list of chats read only for "is it empty" was the same flag in another type, so it was not kept; the stale baseline lines are gone |
 | 05-072 | `InlineQueryFetch::Loading(RequestId)` and `InlineMore::{Ready, Asking(RequestId), Failed}` inside `Loaded` replace `more_failed`; answers and errors apply only to the request the slot holds (a late page of an older query no longer appends to the new list) |
 | 05-073 | `PollVotersFetch::Loading(RequestId)` and `VotersMore::Asking(RequestId)`; a late page after `updatePoll` dropped the entry is dropped |
 | 05-081 | kept: `loaded_all_participants` is TDLib's own report that the list is complete, replaced whole by every `updateGroupCall`, no request of ours in it; already allowed in `implicit-state-allow.txt`, so the duplicate baseline line is removed |

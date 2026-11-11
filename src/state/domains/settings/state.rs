@@ -258,12 +258,12 @@ pub struct SettingsState {
     /// Phase 8.1: notifications decided by the reducer, drained by the UI for
     /// OS dispatch. Same-chat bursts coalesce into one entry ("N new messages").
     pub pending_notifications: Vec<QueuedNotification>,
-    /// The chats whose notification-worthy messages arrived since the last
-    /// drain: the UI bounces the Dock icon / flashes the taskbar once for a
-    /// non-empty list (when the user wants it and the OS is not in Do Not
-    /// Disturb). Queued independently of the "Desktop notifications"
-    /// switch, like tdesktop's alert; one entry per chat.
-    pub attention_chats: Vec<ChatId>,
+    /// A notification-worthy message arrived: the UI bounces the Dock icon /
+    /// flashes the taskbar (when the user wants it and the OS is not in
+    /// Do Not Disturb). Set independently of the "Desktop notifications"
+    /// switch, like tdesktop's alert. An event the notifier takes, not a
+    /// stage: nothing is asked and nothing answers it.
+    pub pending_attention: bool,
     /// TDLib option `disable_contact_registered_notifications`: the inverse
     /// of tdesktop's "Contact joined Telegram" event switch.
     pub disable_contact_registered_notifications: bool,
@@ -550,7 +550,7 @@ impl SettingsState {
             inapp_sounds_enabled: true,
             desktop_notifications: true,
             pending_notifications: Vec::new(),
-            attention_chats: Vec::new(),
+            pending_attention: false,
             disable_contact_registered_notifications: false,
             notified: ShownNotifications::default(),
             default_auto_delete: Fetch::Idle,
