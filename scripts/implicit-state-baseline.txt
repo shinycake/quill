@@ -42,7 +42,6 @@ PasswordBox::sending+error
 PlaybackHealth::output_failed
 
 
-RowState::pending
 
 
 

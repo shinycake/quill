@@ -124,7 +124,9 @@ impl QuillApp {
             .child(self.effect_cell_picture(effect, picture_side, Motion::Playing(Some(flag)), cx))
             .children(corner)
             .child(tracker(move |bounds| {
-                cells.cells.borrow_mut().insert(id, bounds);
+                if let Ok(mut cells) = cells.cells.try_borrow_mut() {
+                    cells.insert(id, bounds);
+                }
             }))
             .on_click(cx.listener(move |this, _, _, cx| this.choose_send_effect(id, cx)))
             .into_any_element()

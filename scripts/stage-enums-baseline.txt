@@ -178,7 +178,6 @@ unkeyed:ChatSearchPaging::Loading 1
 unkeyed:ChatStatisticsFetch::Loading 1
 unkeyed:ComposerReplyFetch::Loading 1
 unkeyed:ConferenceStage::Upgrading 1
-unkeyed:CoverStage::Probing 1
 unkeyed:CreateStage::Creating 1
 unkeyed:CustomEmojiCard::Asked 1
 unkeyed:DebugConfirm::Asking 1

@@ -108,6 +108,8 @@ super::super::on_screen::on_screen_fields! {
     viewer: ViewerUi,
     /// The window's own "Search in chat" field (`SearchUi::chat_input`).
     chat_search_input: Entity<TextareaState>,
+    /// The window's own "From:" filter field (`SearchUi::member_input`).
+    member_search_input: Entity<TextareaState>,
     /// The window's own share box, forward selection and picker field.
     share: ShareUi,
     /// The window's own passcode field on the lock screen
@@ -251,6 +253,7 @@ impl WindowSlot {
             pickers: PickerUi::new(window, cx, emoji_search_input, reaction_search_input),
             viewer: ViewerUi::new(),
             chat_search_input: QuillApp::new_chat_search_field(window, cx),
+            member_search_input: QuillApp::new_member_search_field(window, cx),
             share: ShareUi::new(window, cx, forward_search_input),
             lock_field: LockField::new(window, cx, app.account.passcode.is_locked()),
             surfaces: Surfaces::new(std::time::Instant::now()),
@@ -317,6 +320,10 @@ impl QuillApp {
         std::mem::swap(&mut self.pickers, &mut slot.pickers);
         std::mem::swap(&mut self.viewer, &mut slot.viewer);
         std::mem::swap(&mut self.search_ui.chat_input, &mut slot.chat_search_input);
+        std::mem::swap(
+            &mut self.search_ui.member_input,
+            &mut slot.member_search_input,
+        );
         std::mem::swap(&mut self.share, &mut slot.share);
         std::mem::swap(&mut self.account.passcode.lock, &mut slot.lock_field);
         std::mem::swap(&mut self.slices.window, &mut slot.slices);

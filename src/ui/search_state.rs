@@ -7,6 +7,9 @@ use gpui_kit::*;
 pub(crate) struct SearchUi {
     pub(super) input: Entity<TextareaState>,
     pub(super) chat_input: Entity<TextareaState>,
+    /// The "From:" picker's filter field, shown in place of `chat_input`
+    /// while a sender is chosen.
+    pub(super) member_input: Entity<TextareaState>,
     /// The Channels tab lists all joined channels, not the first five.
     pub(super) channels_expanded: bool,
     /// Sideways scroll of the tab strip.
@@ -47,10 +50,12 @@ impl SearchUi {
     pub(super) fn new(
         search_input: Entity<TextareaState>,
         chat_search_input: Entity<TextareaState>,
+        member_search_input: Entity<TextareaState>,
     ) -> Self {
         Self {
             input: search_input,
             chat_input: chat_search_input,
+            member_input: member_search_input,
             channels_expanded: false,
             tabs_scroll: ScrollHandle::new(),
             results_scroll: ScrollHandle::new(),

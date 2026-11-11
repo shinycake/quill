@@ -618,19 +618,20 @@ impl QuillApp {
         cx.notify();
     }
 
-    pub(super) fn sync_chat_search_query(&mut self, query: &str, cx: &mut Context<Self>) {
+    /// The "From:" picker's own field changed: filter the members. With no
+    /// picker open nothing is asked.
+    pub(super) fn sync_chat_search_members(&mut self, query: &str, cx: &mut Context<Self>) {
         if self.pane_mode() != PaneMode::Ready || !self.chat_search_is_open() {
             return;
         }
-        // While choosing a "From:" member the field filters the members.
-        if self
-            .session()
-            .is_some_and(|s| s.search.chat_search.from_picker().is_some())
-        {
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.search_from_members(query.trim());
-            }
-            cx.notify();
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.search_from_members(query.trim());
+        }
+        cx.notify();
+    }
+
+    pub(super) fn sync_chat_search_query(&mut self, query: &str, cx: &mut Context<Self>) {
+        if self.pane_mode() != PaneMode::Ready || !self.chat_search_is_open() {
             return;
         }
         if let Some(live) = self.live.as_mut() {
@@ -780,17 +781,6 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// The in-chat search field means either the message query or, while
-    /// the "From:" picker is open, a member filter. Whenever the meaning
-    /// changes (the picker opens, closes or picks), the field starts empty
-    /// and takes focus: this is the one place that does it.
-    fn restart_chat_search_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.search_ui.chat_input.update(cx, |input, cx| {
-            input.set_value("", window, cx);
-            input.focus(window, cx);
-        });
-    }
-
     pub(super) fn chat_search_pick_sender(
         &mut self,
         sender: Option<MessageSender>,
@@ -805,9 +795,11 @@ impl QuillApp {
             session.search.chat_search.set_sender(sender);
             session.close_from_picker();
         }
-        // The field's text was the member filter while choosing: start the
-        // message query from scratch.
-        self.restart_chat_search_field(window, cx);
+        // The message field was never touched by the picker: it still holds
+        // the query the new sender narrows.
+        self.search_ui
+            .chat_input
+            .update(cx, |input, cx| input.focus(window, cx));
         cx.notify();
     }
 
@@ -849,8 +841,19 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.open_from_picker();
         }
-        // The field now filters members (or messages again): start empty.
-        self.restart_chat_search_field(window, cx);
+        // The member field starts empty each time the picker opens; the
+        // message field keeps its text.
+        let input = if open {
+            &self.search_ui.chat_input
+        } else {
+            &self.search_ui.member_input
+        };
+        input.update(cx, |input, cx| {
+            if !open {
+                input.set_value("", window, cx);
+            }
+            input.focus(window, cx);
+        });
         cx.notify();
     }
 
@@ -996,6 +999,11 @@ mod tab_results;
 mod tab_strip;
 mod top_people;
 mod top_people_demo;
+
+#[cfg(test)]
+#[cfg(feature = "demo-capture")]
+#[path = "member_field_tests.rs"]
+mod member_field_tests;
 
 #[cfg(test)]
 mod match_tests {

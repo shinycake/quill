@@ -219,7 +219,10 @@ impl QuillApp {
             if entry.experimental {
                 self.show_settings_sub(super::SubPage::Experimental, cx);
             }
-            self.settings.arrival = Some(super::Arrival::new(entry.id));
+            self.settings.arrival = Some(super::Arrival::new(
+                entry.id,
+                cx.background_executor().now(),
+            ));
         } else {
             self.settings.arrival = None;
         }

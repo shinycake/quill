@@ -34,11 +34,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// An explicit refresh: drop the held list and ask again. A fetch
     /// already in flight is the refresh, so its stage is left alone.
     pub fn refresh_active_sessions(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetActiveSessions)
-        {
+        if self.session.settings.sessions.is_loading() {
             return Ok(None);
         }
         self.session.settings.sessions = crate::state::fetch::Fetch::Idle;
@@ -367,11 +363,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// An explicit refresh: drop the held list and ask again. A fetch
     /// already in flight is the refresh, so its stage is left alone.
     pub fn refresh_connected_websites(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetConnectedWebsites)
-        {
+        if self.session.settings.connected_websites.is_loading() {
             return Ok(None);
         }
         self.session.settings.connected_websites = crate::state::fetch::Fetch::Idle;

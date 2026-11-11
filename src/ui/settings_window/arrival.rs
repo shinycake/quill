@@ -52,13 +52,12 @@ enum Stage {
 }
 
 impl Arrival {
-    pub(super) fn new(target: &'static str) -> Arrival {
+    /// `now` is the frame clock's time (`cx.background_executor().now()`).
+    pub(super) fn new(target: &'static str, now: Instant) -> Arrival {
         Arrival {
             target,
             row: Rc::default(),
-            stage: Stage::Seeking {
-                since: Instant::now(),
-            },
+            stage: Stage::Seeking { since: now },
         }
     }
 }
@@ -119,9 +118,12 @@ impl QuillApp {
         let Some(arrival) = &self.settings.arrival else {
             return;
         };
+        let now = cx.background_executor().now();
         let over = match arrival.stage {
-            Stage::Washing { landed, .. } => landed.elapsed() >= TOTAL,
-            Stage::Seeking { since } => arrival.row.get().is_none() && since.elapsed() >= TOTAL,
+            Stage::Washing { landed, .. } => now.saturating_duration_since(landed) >= TOTAL,
+            Stage::Seeking { since } => {
+                arrival.row.get().is_none() && now.saturating_duration_since(since) >= TOTAL
+            }
         };
         if over {
             self.settings.arrival = None;
@@ -146,7 +148,7 @@ impl QuillApp {
                 if let Some(arrival) = &mut self.settings.arrival {
                     let landed = match arrival.stage {
                         Stage::Washing { landed, .. } => landed,
-                        Stage::Seeking { .. } => Instant::now(),
+                        Stage::Seeking { .. } => now,
                     };
                     arrival.stage = Stage::Washing {
                         landed,
@@ -179,7 +181,11 @@ impl QuillApp {
         let wash = arrival.map(|arrival| {
             let (opacity, seeking) = match arrival.stage {
                 Stage::Washing { landed, .. } => {
-                    (wash_opacity(landed.elapsed(), cx.reduce_motion()), false)
+                    let elapsed = cx
+                        .background_executor()
+                        .now()
+                        .saturating_duration_since(landed);
+                    (wash_opacity(elapsed, cx.reduce_motion()), false)
                 }
                 Stage::Seeking { .. } => (0., true),
             };

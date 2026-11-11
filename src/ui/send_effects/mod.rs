@@ -81,16 +81,16 @@ pub(super) struct Preview {
     /// The chosen cell's centre: the card centres on it.
     pub(super) center: Point<Pixels>,
     pub(super) shown: Instant,
-    /// Where the card is: waiting for the effect's files, playing, or
-    /// fading out. Paint moves it on from `Waiting` once.
+    /// Where the card is: on show before its effect plays, playing, or
+    /// fading out. Paint moves it on from `Shown` once.
     pub(super) stage: Cell<PreviewStage>,
 }
 
 /// The stages of a card.
 #[derive(Clone, Copy)]
 pub(super) enum PreviewStage {
-    /// Shown, the effect not yet restarted (its files may be missing).
-    Waiting,
+    /// On show, the effect not yet restarted (its files may be missing).
+    Shown,
     /// The effect plays over the card.
     Playing,
     /// Fading out since.
@@ -104,7 +104,7 @@ impl Preview {
             effect_id,
             center,
             shown: now,
-            stage: Cell::new(PreviewStage::Waiting),
+            stage: Cell::new(PreviewStage::Shown),
         }
     }
 
@@ -112,7 +112,7 @@ impl Preview {
     pub(super) fn hiding(&self) -> Option<Instant> {
         match self.stage.get() {
             PreviewStage::Hiding(since) => Some(since),
-            PreviewStage::Waiting | PreviewStage::Playing => None,
+            PreviewStage::Shown | PreviewStage::Playing => None,
         }
     }
 
@@ -127,7 +127,7 @@ impl Preview {
     /// from its first frame).
     pub(super) fn begin_playing(&self) -> bool {
         match self.stage.get() {
-            PreviewStage::Waiting => {
+            PreviewStage::Shown => {
                 self.stage.set(PreviewStage::Playing);
                 true
             }
@@ -379,9 +379,9 @@ impl QuillApp {
         let center = open
             .areas
             .cells
-            .borrow()
-            .get(&effect_id)
-            .map(|bounds| bounds.center())
+            .try_borrow()
+            .ok()
+            .and_then(|cells| cells.get(&effect_id).map(|bounds| bounds.center()))
             .unwrap_or(open.position);
         let now = cx.background_executor().now();
         let next = Preview::new(effect_id, center, now);
