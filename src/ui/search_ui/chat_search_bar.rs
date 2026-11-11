@@ -729,3 +729,97 @@ impl QuillApp {
             .into_any_element()
     }
 }
+
+impl QuillApp {
+    /// The members list that replaces the hits while a "From:" is chosen.
+    pub(super) fn chat_search_picker(
+        &self,
+        picker: &FromPicker,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let session = self.session();
+        let mut list = div()
+            .id("chat-search-from-list")
+            .flex()
+            .flex_col()
+            .gap_0p5();
+        let rows: Vec<(MessageSender, String)> = picker
+            .members()
+            .iter()
+            .map(|m| {
+                (
+                    *m,
+                    session.map_or_else(|| "member".into(), |s| s.sender_label(*m)),
+                )
+            })
+            .collect();
+        if rows.is_empty() {
+            let text = if picker.loading() {
+                tr(keys::Q_CHAT_LOADING_MEMBERS)
+            } else {
+                tr(keys::Q_CHAT_NO_MEMBERS_FOUND)
+            };
+            list = list.child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(text),
+            );
+        }
+        for (sender, name) in rows {
+            let photo = match sender {
+                MessageSender::User { user_id } => self.chat_photo_for_row(ChatId(user_id)),
+                MessageSender::Chat { chat_id } => self.chat_photo_for_row(ChatId(chat_id)),
+            };
+            let key = match sender {
+                MessageSender::User { user_id } => user_id as u64,
+                MessageSender::Chat { chat_id } => chat_id as u64 ^ (1 << 62),
+            };
+            list = list.child(
+                div()
+                    .id(("chat-search-from", key))
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .role(gpui_kit::Role::Button)
+                    .aria_label(tr_with(
+                        keys::Q_CHAT_SEARCH_MESSAGES_FROM,
+                        &[("name", &name.to_string())],
+                    ))
+                    .tab_index(0)
+                    .cursor_pointer()
+                    .pressable(cx.theme())
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.chat_search_pick_sender(Some(sender), window, cx);
+                    }))
+                    .child(crate::ui::chat_row::chat_avatar(
+                        &name,
+                        photo.as_deref(),
+                        28.,
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_sm()
+                            .child(crate::ui::bidi_line::name_line(name)),
+                    ),
+            );
+        }
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+                div()
+                    .text_xs()
+                    .font_semibold()
+                    .child(tr(keys::Q_CHAT_SEARCH_MESSAGES_FROM_2)),
+            )
+            .child(list.max_h(px(240.)).overflow_y_scroll())
+    }
+}
