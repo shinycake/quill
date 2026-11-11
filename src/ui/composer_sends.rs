@@ -337,12 +337,10 @@ impl ComposerSends {
             .get_mut(&item.slot.account)?
             .slots
             .get_mut(&item.slot.draft)?;
-        let result = send
-            .attachments
+        send.attachments
             .get_mut(item.index)
             .filter(|attachment| attachment.path == item.path)
-            .map(f);
-        result
+            .map(f)
     }
 
     /// Whether `item` is still in its tray, as the same file.
