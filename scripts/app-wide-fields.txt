@@ -37,7 +37,6 @@ preferences.send_to * | the Explorer "Send to" shortcut belongs to the machine: 
 preferences.system_accent_poll | the one task waiting for the OS accent read to land
 preferences.font_picker | the font family picker entity
 preferences.accent_picker | the accent color picker entity
-preferences.index_sliders * | slider entities, keyed by setting; most are app settings, but the two storage-limit sliders show one account's TDLib limits, so every arrival on Data and Storage (and every leave) drops them and they are rebuilt from the account shown (`forget_storage_sliders`)
 preferences.translate * | the translation preferences file
 preferences.update_state | the updater's state, for the install
 preferences.update_banner_dismissed | the update banner was dismissed, for the run

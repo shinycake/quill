@@ -407,7 +407,7 @@ impl QuillApp {
                     this.market_back(cx);
                     this.close_kit_dialog_if_done(DialogKind::GiftMarket, window, cx);
                 } else {
-                    this.market_push(MarketBox::AuctionBid { gift_id }, cx);
+                    this.market_push(MarketBox::bid(gift_id), cx);
                 }
             },
         ));
@@ -655,7 +655,7 @@ impl QuillApp {
             }
         });
         self.gift_market.recipient = recipient;
-        self.market_push(MarketBox::AuctionBid { gift_id }, cx);
+        self.market_push(MarketBox::bid(gift_id), cx);
     }
 
     pub(super) fn active_auctions_box(&mut self, cx: &mut Context<Self>) -> BoxView {

@@ -39,6 +39,16 @@ impl Paging {
     }
 }
 
+/// The Administrators fallback (members hidden from the viewer): asked once
+/// for a group since the block opened or Retry was pressed, so a failing
+/// list is not asked on every frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum AdminsFallback {
+    #[default]
+    NotAsked,
+    Asked(ChatId),
+}
+
 pub(crate) struct InlineMembersUi {
     /// Rows drawn so far; grows as the list scrolls.
     pub(super) shown: usize,
@@ -47,10 +57,7 @@ pub(crate) struct InlineMembersUi {
     pub(super) chat: Option<ChatId>,
     /// Where the next-page request stands.
     pub(super) paging: Paging,
-    /// The Administrators fallback was asked for this group since the block
-    /// opened or Retry was pressed: a failed answer is not asked again on
-    /// every frame.
-    pub(super) admins_asked: bool,
+    pub(super) admins: AdminsFallback,
     pub(super) snapshot: RefCell<Option<MembersSnapshot>>,
 }
 
@@ -63,7 +70,7 @@ impl InlineMembersUi {
             scroll: ScrollHandle::new(),
             chat: None,
             paging: Paging::Idle,
-            admins_asked: false,
+            admins: AdminsFallback::NotAsked,
             snapshot: RefCell::new(None),
         }
     }
@@ -73,7 +80,7 @@ impl InlineMembersUi {
         self.shown = quill::inline_members::ROWS_STEP;
         self.chat = chat;
         self.paging = Paging::Idle;
-        self.admins_asked = false;
+        self.admins = AdminsFallback::NotAsked;
         self.snapshot.replace(None);
     }
 }

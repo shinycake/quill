@@ -347,7 +347,7 @@ impl QuillApp {
     /// Start the two limit sliders on what TDLib reports. They are made
     /// once per visit (`open_data_storage` drops them).
     pub(super) fn ensure_storage_sliders(&mut self, cx: &mut Context<Self>) {
-        let sliders = &self.preferences.index_sliders;
+        let sliders = &self.index_sliders;
         if sliders.contains(StepSlider::StorageSize) && sliders.contains(StepSlider::StorageKeep) {
             return;
         }
@@ -419,7 +419,7 @@ impl QuillApp {
 
     /// Leaving the page with a drag that never released: its limits go now.
     pub(in crate::ui) fn apply_unreleased_storage_drag(&mut self) {
-        let drag = std::mem::take(&mut self.preferences.index_sliders.storage);
+        let drag = std::mem::take(&mut self.index_sliders.storage);
         if let StorageDrag::Moved {
             account,
             size,

@@ -75,15 +75,11 @@ pub(crate) struct PlaybackUi {
     /// resume from it) after pause/stop.
     pub(super) positions: HashMap<ChatMessage, f64>,
     /// History row whose `image/gif` file is looping (`inline_playback`),
-    /// with the window and chat it plays in.
-    pub(super) playing_animation: Option<PlayingGif>,
+    /// with the window and chat it plays in, and its pictures once decoded.
+    pub(super) animation: GifPlayback,
     /// GIFs that autoplayed once, by chat: leaving a chat resets only
     /// its own, so another window's GIF does not start over.
     pub(super) autoplayed_gifs: std::collections::HashSet<ChatMessage>,
-    /// The playing GIF's held pictures (`gif_clip`), once decoded. Shared
-    /// with the history row (and its animation layer) that draws it.
-    pub(super) gif: Option<std::sync::Arc<super::gif_clip::GifClip>>,
-    pub(super) gif_started_at: Option<Instant>,
     /// The GIF decodes running, by chat message (one per GIF at a time).
     pub(super) gif_decodes: HashMap<ChatMessage, GifDecode>,
     /// A linked `?t=` media timestamp waiting for its message to load
@@ -101,14 +97,64 @@ pub(crate) struct PlayingGif {
     pub(super) message: ChatMessage,
 }
 
+/// The looping GIF of the history, one value. It leaves for `Idle` on
+/// `stop_animation_playback` (a stop, another playback, a closed window or
+/// chat), which drops the clip with it.
+#[derive(Clone, Default)]
+pub(crate) enum GifPlayback {
+    #[default]
+    Idle,
+    /// Chosen; the first picture is still being decoded.
+    Waiting(PlayingGif),
+    /// Playing: the held pictures (`gif_clip`), shared with the history row
+    /// (and its animation layer) that draws them.
+    Playing {
+        playing: PlayingGif,
+        clip: std::sync::Arc<super::gif_clip::GifClip>,
+        started: Instant,
+    },
+}
+
+impl GifPlayback {
+    pub(super) fn playing(&self) -> Option<PlayingGif> {
+        match self {
+            Self::Idle => None,
+            Self::Waiting(playing) | Self::Playing { playing, .. } => Some(*playing),
+        }
+    }
+
+    pub(super) fn clip(&self) -> Option<&std::sync::Arc<super::gif_clip::GifClip>> {
+        match self {
+            Self::Playing { clip, .. } => Some(clip),
+            _ => None,
+        }
+    }
+
+    /// The first picture is in: the chosen GIF plays from `started`.
+    pub(super) fn begin_clip(
+        &mut self,
+        clip: std::sync::Arc<super::gif_clip::GifClip>,
+        started: Instant,
+    ) {
+        if let Self::Waiting(playing) = *self {
+            *self = Self::Playing {
+                playing,
+                clip,
+                started,
+            };
+        }
+    }
+}
+
 impl PlaybackUi {
     /// The playing GIF, for its history row.
     pub(super) fn gif_play(&self) -> Option<super::gif_clip::GifPlay> {
-        let clip = self.gif.clone()?;
-        Some(super::gif_clip::GifPlay::new(
-            clip,
-            self.gif_started_at.unwrap_or_else(Instant::now),
-        ))
+        match &self.animation {
+            GifPlayback::Playing { clip, started, .. } => {
+                Some(super::gif_clip::GifPlay::new(clip.clone(), *started))
+            }
+            _ => None,
+        }
     }
 
     /// Length of the active track; `None` when no row is active.
@@ -133,10 +179,8 @@ impl PlaybackUi {
             tick: false,
             tick_shown: None,
             positions: HashMap::new(),
-            playing_animation: None,
+            animation: GifPlayback::Idle,
             autoplayed_gifs: Default::default(),
-            gif: None,
-            gif_started_at: None,
             gif_decodes: HashMap::new(),
             pending_media_seek: None,
         }

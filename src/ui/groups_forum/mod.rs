@@ -774,7 +774,7 @@ impl QuillApp {
                     .tooltip(tr(keys::Q_PEOPLE_TOPIC_INFO))
                     .accessibility_label(tr(keys::Q_PEOPLE_TOPIC_INFO))
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.chat_ui.topic_info_open = !this.chat_ui.topic_info_open;
+                        this.chat_ui.info_card.toggle_topic();
                         cx.notify();
                     })),
             )

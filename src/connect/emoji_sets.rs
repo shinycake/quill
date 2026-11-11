@@ -293,7 +293,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
-    fn emoji_set_request(
+    pub(super) fn emoji_set_request(
         &mut self,
         purpose: RequestPurpose,
         build: impl FnOnce(RequestId) -> String,
@@ -493,26 +493,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.stickers.emoji.installed.can_ask()
+        if self.session.stickers.emoji.lists.installed.can_ask()
             && self.session.stickers.emoji.installed_sets.is_empty()
-            && !self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetInstalledEmojiSets)
         {
-            let extra = self
-                .session
-                .request(RequestPurpose::GetInstalledEmojiSets, None);
-            if let Err(err) =
-                self.sender
-                    .send_json(&crate::telegram::requests_emoji::get_installed_emoji_sets(
-                        extra,
-                    ))
-            {
-                self.session.requests.take(extra);
-                return Err(err);
-            }
-            self.session.stickers.emoji.installed.begin();
+            self.emoji_set_request(
+                RequestPurpose::GetInstalledEmojiSets,
+                get_installed_emoji_sets,
+            )?;
         }
         let ids: Vec<i64> = self
             .session

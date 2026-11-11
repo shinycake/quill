@@ -60,6 +60,33 @@ impl ScrollAim {
     }
 }
 
+/// Where the forum topic column stands in one window. `Peek` leaves when a
+/// chat is chosen from the list or the open chat stops being a forum;
+/// `Column` and `Hidden` are laid out again every frame
+/// (`forum_column_layout`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ForumColumnUi {
+    /// No topic column is on screen.
+    #[default]
+    Hidden,
+    /// The column is on screen, so the conversation shows a hint instead
+    /// of repeating the topic list.
+    Column,
+    /// On a narrow window the column replaces the chat list; the user
+    /// brought the list back until another chat opens.
+    Peek,
+}
+
+impl ForumColumnUi {
+    pub(crate) fn peeking(self) -> bool {
+        self == Self::Peek
+    }
+
+    pub(crate) fn on_screen(self) -> bool {
+        self == Self::Column
+    }
+}
+
 pub(crate) struct HistoryUi {
     /// kit Phase 3: message-history virtualization — scroller state with
     /// tail-following, owned by the app so prepend/append keep the anchor.
@@ -73,13 +100,10 @@ pub(crate) struct HistoryUi {
     /// list's paint (overdraw rows included); the history's own canvas
     /// turns them into `seen`.
     pub(super) painted_ids: std::rc::Rc<std::cell::RefCell<Vec<(Bounds<Pixels>, Vec<MessageId>)>>>,
-    /// On a narrow window the forum's topic column replaces the chat list;
-    /// this brings the list back until another forum opens. Each window
-    /// lays out its own column.
-    pub(super) forum_chats_peek: bool,
-    /// The forum topic column is on screen in this window this frame, so
-    /// the conversation shows a hint instead of repeating the topic list.
-    pub(super) forum_column_shown: bool,
+    /// The forum topic column in this window: on screen, hidden, or
+    /// pushed aside by a peek at the chat list. Each window lays out its
+    /// own column.
+    pub(super) forum_column: ForumColumnUi,
     /// Messages whose row's bottom edge was inside the viewport at the last
     /// paint (tdesktop `HistoryInner` reads an unread message once its
     /// bottom is shown), not the list's overdraw. Reported as
@@ -184,9 +208,10 @@ pub(crate) struct HistoryUi {
     /// Where the dissolves read the time: the wall clock in the app, a
     /// clock that only moves when told to in tests.
     pub(super) vanish_clock: std::cell::Cell<super::vanish::VanishClock>,
-    /// The open chat whose live-location countdowns are being refreshed
-    /// (`Some` exactly while that task runs; see `live_location_tick`).
-    pub(super) live_location_tick_chat: Option<ChatId>,
+    /// The open chat whose live-location countdowns are being refreshed,
+    /// with the task that does it: dropping the owner stops the tick, and
+    /// the task clears this itself when it ends (see `live_location_tick`).
+    pub(super) live_location_tick: Option<(ChatId, Task<()>)>,
     /// The history's width, class and pane: seeded from the pane it is laid
     /// out in until the paint probe measures it (`chat_wide_ui`).
     pub(super) measure: std::rc::Rc<std::cell::Cell<super::history_anchor::HistoryMeasure>>,
@@ -242,8 +267,7 @@ impl HistoryUi {
             scroller: cx.new(|cx| MessageScrollerState::new(0, cx)),
             rows: Vec::new(),
             painted_ids: Default::default(),
-            forum_chats_peek: false,
-            forum_column_shown: false,
+            forum_column: ForumColumnUi::Hidden,
             seen: Default::default(),
             on_screen: Default::default(),
             reported_visible: None,
@@ -284,7 +308,7 @@ impl HistoryUi {
             vanish_now: Default::default(),
             vanish_conflicts: Default::default(),
             vanish_clock: Default::default(),
-            live_location_tick_chat: None,
+            live_location_tick: None,
             measure: Default::default(),
             pull: Default::default(),
             subsection_tabs: Default::default(),

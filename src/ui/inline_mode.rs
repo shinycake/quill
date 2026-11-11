@@ -24,6 +24,24 @@ use quill::state::{InlineBotResolve, InlineQueryFetch};
 use quill::telegram::envelope::{InlineQueryResultSummary, InlineQueryResultsButton};
 use std::time::Duration;
 
+/// The secret-chat inline-bot warning (TGX `SecretChatContextBotAlert`).
+/// It lives with the chat that asked, so another chat never confirms it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) enum BotAlert {
+    #[default]
+    None,
+    /// A typed `@bot query` asked: confirming re-syncs the field.
+    Typed,
+    /// A `SwitchInline` press asked: the query is inserted on Confirm.
+    Switch(String),
+}
+
+impl BotAlert {
+    pub(super) fn is_pending(&self) -> bool {
+        *self != Self::None
+    }
+}
+
 /// What the results panel shows for the current `@bot query` trigger.
 #[derive(Clone)]
 pub(super) enum InlineView {
@@ -164,8 +182,8 @@ impl QuillApp {
             // Trigger gone: close, and clear a typed-mode alert marker
             // (an empty stash is ours; a non-empty one belongs to a
             // `SwitchInline` button press).
-            if self.chat_ui.pending_inline_bot_alert.as_deref() == Some("") {
-                self.chat_ui.pending_inline_bot_alert = None;
+            if self.chat_ui.bot_alert == BotAlert::Typed {
+                self.chat_ui.bot_alert = BotAlert::None;
             }
             self.chat_ui.inline.close();
             return;
@@ -174,8 +192,8 @@ impl QuillApp {
         // alert before any query is sent. The banner renders while the
         // stash is set; confirming re-syncs (the text is already there).
         if self.open_chat_is_secret() && !self.composer_ui.inline_bot_alert_shown {
-            if self.chat_ui.pending_inline_bot_alert.is_none() {
-                self.chat_ui.pending_inline_bot_alert = Some(String::new());
+            if !self.chat_ui.bot_alert.is_pending() {
+                self.chat_ui.bot_alert = BotAlert::Typed;
             }
             self.chat_ui.inline.close();
             cx.notify();

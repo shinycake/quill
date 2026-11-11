@@ -80,6 +80,38 @@ pub(crate) struct Capture {
     /// (`chat_window::recording`).
     origin: Option<ChatId>,
     purpose: CaptureFor,
+    /// Lock, the discard row, "Play once" and the preview of a paused
+    /// voice message belong to this recording: whatever ends it (send,
+    /// story reply, cancel, a closed window) drops them with it, so none
+    /// carries over into the next one.
+    mode: RecordMode,
+    discard: DiscardRow,
+    delivery: Delivery,
+    /// The paused recording is being played back (position of the
+    /// preview).
+    preview: Option<PlaybackClock>,
+}
+
+/// MED2: lock-to-record — a locked recording ignores Esc; only Send or
+/// Cancel (with confirmation) ends it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecordMode {
+    Held,
+    Locked,
+}
+
+/// MED2: the record bar's discard-confirmation row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DiscardRow {
+    Hidden,
+    Confirming,
+}
+
+/// "Play once": the voice message goes out as a one-time message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Delivery {
+    Normal,
+    PlayOnce,
 }
 
 pub(crate) struct RecordingUi {
@@ -91,16 +123,10 @@ pub(crate) struct RecordingUi {
     /// The camera or microphone prompt now showing (one per press).
     pub(super) permission: PermissionAsk,
     pub(super) open_voice: Arc<dyn Fn() -> Result<VoiceCapture, String> + Send + Sync>,
-    /// MED2: lock-to-record — a locked recording ignores Esc; only Send
-    /// or Cancel (with confirmation) ends it.
-    pub(super) locked: bool,
-    /// MED2: the record bar is showing the discard-confirmation row.
-    pub(super) discard_confirm: bool,
-    /// The paused recording is being played back (position of the preview).
-    pub(super) preview: Option<PlaybackClock>,
-    /// "Play once": the voice message goes out as a one-time message.
-    pub(super) once: bool,
-    pub(super) voice_tick: bool,
+    /// The 100 ms tick that moves the record bar and the preview; it ends
+    /// itself (and clears this) when nothing needs it, and dropping the
+    /// owner stops it.
+    pub(super) tick: Option<gpui_kit::Task<()>>,
     /// The live camera image while a video message records.
     pub(super) round_preview: std::cell::RefCell<super::round_record::RoundPreview>,
 }
@@ -133,17 +159,82 @@ impl RecordingUi {
             next_start: 0,
             permission: PermissionAsk::Idle,
             open_voice: Arc::new(VoiceCapture::start),
-            locked: false,
-            discard_confirm: false,
-            preview: None,
-            once: false,
-            voice_tick: false,
+            tick: None,
             round_preview: Default::default(),
         }
     }
 }
 
 impl RecordingUi {
+    pub(super) fn locked(&self) -> bool {
+        self.capture
+            .as_ref()
+            .is_some_and(|capture| capture.mode == RecordMode::Locked)
+    }
+
+    /// Locks or unlocks the recording; nothing records, nothing changes.
+    pub(super) fn set_locked(&mut self, locked: bool) {
+        if let Some(capture) = self.capture.as_mut() {
+            capture.mode = if locked {
+                RecordMode::Locked
+            } else {
+                RecordMode::Held
+            };
+        }
+    }
+
+    pub(super) fn discard_confirming(&self) -> bool {
+        self.capture
+            .as_ref()
+            .is_some_and(|capture| capture.discard == DiscardRow::Confirming)
+    }
+
+    pub(super) fn set_discard_confirming(&mut self, confirming: bool) {
+        if let Some(capture) = self.capture.as_mut() {
+            capture.discard = if confirming {
+                DiscardRow::Confirming
+            } else {
+                DiscardRow::Hidden
+            };
+        }
+    }
+
+    pub(super) fn play_once(&self) -> bool {
+        self.capture
+            .as_ref()
+            .is_some_and(|capture| capture.delivery == Delivery::PlayOnce)
+    }
+
+    /// Switches "Play once"; the new value, `false` when nothing records.
+    pub(super) fn toggle_play_once(&mut self) -> bool {
+        let Some(capture) = self.capture.as_mut() else {
+            return false;
+        };
+        capture.delivery = match capture.delivery {
+            Delivery::Normal => Delivery::PlayOnce,
+            Delivery::PlayOnce => Delivery::Normal,
+        };
+        capture.delivery == Delivery::PlayOnce
+    }
+
+    pub(super) fn preview(&self) -> Option<&PlaybackClock> {
+        self.capture.as_ref()?.preview.as_ref()
+    }
+
+    pub(super) fn preview_mut(&mut self) -> Option<&mut PlaybackClock> {
+        self.capture.as_mut()?.preview.as_mut()
+    }
+
+    pub(super) fn set_preview(&mut self, clock: PlaybackClock) {
+        if let Some(capture) = self.capture.as_mut() {
+            capture.preview = Some(clock);
+        }
+    }
+
+    pub(super) fn take_preview(&mut self) -> Option<PlaybackClock> {
+        self.capture.as_mut()?.preview.take()
+    }
+
     pub(super) fn active(&self) -> bool {
         self.capture.is_some()
     }
@@ -265,13 +356,8 @@ impl RecordingUi {
         media
     }
 
-    /// Lock, the discard row, "Play once" and the camera image belong to
-    /// one recording: whatever ends it (send, story reply, cancel, a closed
-    /// window) ends them too, so none carries over into the next one.
+    /// The camera image belongs to one recording too.
     fn end_capture_flags(&mut self) {
-        self.locked = false;
-        self.discard_confirm = false;
-        self.once = false;
         if let Ok(mut preview) = self.round_preview.try_borrow_mut() {
             preview.end();
         }
@@ -298,6 +384,10 @@ impl QuillApp {
             media,
             origin: self.windows.scope,
             purpose,
+            mode: RecordMode::Held,
+            discard: DiscardRow::Hidden,
+            delivery: Delivery::Normal,
+            preview: None,
         });
     }
 }

@@ -4,7 +4,7 @@
 //! cursor.
 
 use crate::ui::app::QuillApp;
-use crate::ui::media_panel::PanelTab;
+use crate::ui::media_panel::{PanelMode, PanelTab};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
 use gpui_kit::component::{Selectable, Sizable};
@@ -16,30 +16,24 @@ impl QuillApp {
     /// main window draws the box, so a chat window's panel is never its.
     pub(in crate::ui) fn group_title_emoji_active(&self) -> bool {
         !self.windows.in_window()
-            && self.group_edit_box().is_some_and(|edit| edit.title_emoji)
-            && self.pickers.media_panel.is_open()
-            && self.pickers.media_panel.reaction().is_none()
-            && self.pickers.media_panel.status().is_none()
+            && self.group_edit_box().is_some()
+            && self.pickers.media_panel.for_group_title()
     }
 
-    pub(super) fn toggle_group_title_emoji(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn toggle_group_title_emoji(&mut self, cx: &mut Context<Self>) {
         if self.group_title_emoji_active() {
             self.close_group_title_emoji(cx);
             return;
         }
-        let Some(edit) = self.group_edit_box_mut() else {
+        if self.group_edit_box().is_none() {
             return;
-        };
-        edit.title_emoji = true;
+        }
         self.open_media_panel(PanelTab::Emoji, cx);
+        self.set_media_panel_mode(PanelMode::GroupTitle);
     }
 
     pub(super) fn close_group_title_emoji(&mut self, cx: &mut Context<Self>) {
-        let active = self.group_title_emoji_active();
-        if let Some(edit) = self.group_edit_box_mut() {
-            edit.title_emoji = false;
-        }
-        if active {
+        if self.group_title_emoji_active() {
             self.close_media_panel(cx);
         }
     }

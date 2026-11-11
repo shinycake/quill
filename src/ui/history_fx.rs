@@ -166,15 +166,29 @@ pub(crate) enum DateMotion {
     Still { until_fade: Duration },
 }
 
+/// Where the floating date pill stands. `Showing` runs from the first
+/// scroll until its hold ran out; the next scroll after that starts a new
+/// one (so the old timer goes with the old value).
+#[derive(Default)]
+enum PillStage {
+    #[default]
+    Hidden,
+    Showing(Showing),
+}
+
+struct Showing {
+    since: Instant,
+    last_scroll: Instant,
+    hide_after: Duration,
+    /// Redraws the pill when its fade-out is due (tdesktop's
+    /// `_scrollDateHideTimer`); the task clears itself when it fires.
+    wake: Option<Task<()>>,
+}
+
 /// What the floating date pill shows, and until when.
 #[derive(Default)]
 pub(crate) struct ScrollDate {
-    shown_at: Option<Instant>,
-    last_scroll: Option<Instant>,
-    hide_after: Duration,
-    /// Redraws the pill when its fade-out is due (tdesktop's
-    /// `_scrollDateHideTimer`).
-    wake: Option<Task<()>>,
+    pill: PillStage,
     /// Day of the row at the top of the viewport (None: unknown).
     pub(crate) top_label: Option<String>,
     /// The top row starts its day, so an inline separator is on screen.
@@ -189,44 +203,71 @@ impl ScrollDate {
     /// The list scrolled at `now`.
     pub(crate) fn scrolled(&mut self, now: Instant, day_changed: bool) {
         if self.opacity(now) <= 0. {
-            self.shown_at = Some(now);
-            self.hide_after = DATE_HIDE_AFTER;
+            self.pill = PillStage::Showing(Showing {
+                since: now,
+                last_scroll: now,
+                hide_after: DATE_HIDE_AFTER,
+                wake: None,
+            });
         }
-        if day_changed {
-            self.hide_after = DATE_HIDE_AFTER_DAY_CHANGE;
+        if let PillStage::Showing(showing) = &mut self.pill {
+            if day_changed {
+                showing.hide_after = DATE_HIDE_AFTER_DAY_CHANGE;
+            }
+            showing.last_scroll = now;
         }
-        self.last_scroll = Some(now);
     }
 
     /// The day under the top edge changed while the pill is up.
     pub(crate) fn hold_for_day_change(&mut self) {
-        if self.last_scroll.is_some() {
-            self.hide_after = DATE_HIDE_AFTER_DAY_CHANGE;
+        if let PillStage::Showing(showing) = &mut self.pill {
+            showing.hide_after = DATE_HIDE_AFTER_DAY_CHANGE;
+        }
+    }
+
+    /// The timer that redraws the pill at its fade-out runs.
+    fn wake_armed(&self) -> bool {
+        matches!(
+            &self.pill,
+            PillStage::Showing(Showing { wake: Some(_), .. })
+        )
+    }
+
+    fn arm_wake(&mut self, task: Task<()>) {
+        if let PillStage::Showing(showing) = &mut self.pill {
+            showing.wake = Some(task);
+        }
+    }
+
+    fn wake_fired(&mut self) {
+        if let PillStage::Showing(showing) = &mut self.pill {
+            showing.wake = None;
         }
     }
 
     /// 0 while hidden, fading in and out around the visible stretch.
     pub(crate) fn opacity(&self, now: Instant) -> f32 {
-        let (Some(shown), Some(last)) = (self.shown_at, self.last_scroll) else {
+        let PillStage::Showing(showing) = &self.pill else {
             return 0.;
         };
-        let remaining = (last + self.hide_after).saturating_duration_since(now);
-        let fade_in =
-            (now.saturating_duration_since(shown).as_secs_f32() / DATE_FADE.as_secs_f32()).min(1.);
+        let remaining = (showing.last_scroll + showing.hide_after).saturating_duration_since(now);
+        let fade_in = (now.saturating_duration_since(showing.since).as_secs_f32()
+            / DATE_FADE.as_secs_f32())
+        .min(1.);
         let fade_out = (remaining.as_secs_f32() / DATE_FADE.as_secs_f32()).min(1.);
         fade_in.min(fade_out)
     }
 
     pub(crate) fn motion(&self, now: Instant) -> DateMotion {
-        let (Some(shown), Some(last)) = (self.shown_at, self.last_scroll) else {
+        let PillStage::Showing(showing) = &self.pill else {
             return DateMotion::Hidden;
         };
-        let remaining = (last + self.hide_after).saturating_duration_since(now);
+        let remaining = (showing.last_scroll + showing.hide_after).saturating_duration_since(now);
         if remaining.is_zero() {
             return DateMotion::Hidden;
         }
         let until_fade = remaining.saturating_sub(DATE_FADE);
-        if now.saturating_duration_since(shown) < DATE_FADE || until_fade.is_zero() {
+        if now.saturating_duration_since(showing.since) < DATE_FADE || until_fade.is_zero() {
             return DateMotion::Fading;
         }
         DateMotion::Still { until_fade }
@@ -410,16 +451,17 @@ impl QuillApp {
     }
 
     fn wake_date_pill(&mut self, wait: Duration, cx: &mut Context<Self>) {
-        if self.history.scroll_date.wake.is_some() {
+        if self.history.scroll_date.wake_armed() {
             return;
         }
-        self.history.scroll_date.wake = Some(self.spawn_scoped(cx, async move |app, cx| {
+        let task = self.spawn_scoped(cx, async move |app, cx| {
             cx.background_executor().timer(wait).await;
             let _ = app.update(cx, |this, cx| {
-                this.history.scroll_date.wake = None;
+                this.history.scroll_date.wake_fired();
                 this.notify_conversation(cx);
             });
-        }));
+        });
+        self.history.scroll_date.arm_wake(task);
     }
 }
 

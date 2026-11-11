@@ -121,7 +121,7 @@ impl Session {
         }
         let emoji_purpose = pending.map(|p| p.purpose);
         if emoji_purpose == Some(RequestPurpose::GetInstalledEmojiSets) {
-            self.stickers.emoji.installed.fail(error_reason(err));
+            self.stickers.emoji.lists.installed.fail(error_reason(err));
         }
         if emoji_purpose == Some(RequestPurpose::SetEmojiStatus)
             && matches!(

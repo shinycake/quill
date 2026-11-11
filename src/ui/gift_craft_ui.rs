@@ -8,7 +8,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::gift_market_state::MarketBox;
+use super::gift_market_state::{CraftStage, MarketBox};
 use super::gift_market_ui::{BoxView, collectible_tile, feature_row, two_line_button};
 use super::gift_resale_buy::attribute_row;
 use super::shell::DialogKind;
@@ -152,8 +152,7 @@ impl QuillApp {
         let gate = gift.gate(true, now_unix());
         if let Some(notice) = gate_notice(gate) {
             self.gift_market.push(notice);
-        } else if gate == CraftGate::Ready {
-            self.gift_market.craft_primary = Some(gift);
+        } else if gate == CraftGate::Ready && self.gift_market.craft.choose(gift) {
             self.gift_market.push(MarketBox::CraftInfo);
         }
         self.open_box(crate::ui::shell::DialogKind::GiftMarket);
@@ -162,7 +161,7 @@ impl QuillApp {
 
     /// "Start Crafting": the craft box with the gift in the first slot.
     fn start_crafting(&mut self, cx: &mut Context<Self>) {
-        let Some(primary) = self.gift_market.craft_primary.clone() else {
+        let Some(primary) = self.gift_market.craft.primary().cloned() else {
             return;
         };
         let started = match self.live.as_mut() {
@@ -222,7 +221,7 @@ impl QuillApp {
             }),
         };
         if started {
-            self.gift_market.forge_started = Some(Instant::now());
+            self.gift_market.craft.start_forge(Instant::now());
         } else {
             self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_CRAFT_THE_GIFT)));
         }
@@ -261,7 +260,7 @@ impl QuillApp {
 
     /// Ends the forge once it ran its time and the answer is in.
     pub(super) fn craft_frame_upkeep(&mut self, cx: &mut Context<Self>) {
-        let Some(started) = self.gift_market.forge_started else {
+        let Some(started) = self.gift_market.craft.forge_since() else {
             return;
         };
         if started.elapsed().as_secs_f32() < FORGE_SECONDS {
@@ -269,7 +268,7 @@ impl QuillApp {
         }
         let demo = self.live.is_none();
         let Some(craft) = self.craft_mut() else {
-            self.gift_market.forge_started = None;
+            self.gift_market.craft.end_forge();
             return;
         };
         if demo && craft.crafting() {
@@ -285,7 +284,7 @@ impl QuillApp {
         ) {
             craft.clear_result();
         }
-        self.gift_market.forge_started = None;
+        self.gift_market.craft.end_forge();
         match result {
             Some(CraftResult::Success { .. } | CraftResult::Fail) => {
                 self.market_replace(MarketBox::CraftResult, cx);
@@ -322,13 +321,12 @@ impl QuillApp {
         }
         // Closing the boxes while the forge runs leaves the craft in
         // flight: its outcome still opens the result box.
-        if self.gift_market.forge_started.is_some()
+        if self.gift_market.craft.forge_since().is_some()
             || self.craft_session().is_some_and(|craft| craft.crafting())
         {
             return;
         }
-        self.gift_market.craft_primary = None;
-        self.gift_market.forge_started = None;
+        self.gift_market.craft = CraftStage::Idle;
         if let Some(market) = self.gift_market_mut() {
             market.craft = None;
         }
@@ -338,7 +336,7 @@ impl QuillApp {
         let roots = self.media_display_roots();
         let mut body = div().flex().flex_col().gap_4();
         if let Some(session) = self.session()
-            && let Some(primary) = self.gift_market.craft_primary.as_ref()
+            && let Some(primary) = self.gift_market.craft.primary()
         {
             body = body.child(
                 div()
@@ -398,7 +396,7 @@ impl QuillApp {
     }
 
     pub(super) fn craft_box(&mut self, cx: &mut Context<Self>) -> BoxView {
-        if let Some(started) = self.gift_market.forge_started {
+        if let Some(started) = self.gift_market.craft.forge_since() {
             return self.forge_box(started, cx);
         }
         let roots = self.media_display_roots();

@@ -16,19 +16,25 @@ pub(super) struct LayerDraws(Vec<LayerDraw>);
 #[derive(Debug)]
 struct LayerDraw {
     painter: EntityId,
+    stage: LayerStage,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LayerStage {
+    /// Neither ticked nor redrawn since the tick's own draw.
+    Idle,
     /// The clock ticked it and it has not drawn since: its next draw is
     /// the tick's own.
-    ticked: bool,
+    Ticked,
     /// The vsync it last drew on after its tick's own draw.
-    redrawn: Option<Instant>,
+    Redrawn(Instant),
 }
 
 impl LayerDraws {
     /// The clock ticked `painter` (any other view is no layer: ignored).
     pub(super) fn ticked(&mut self, painter: EntityId) {
         if let Some(draw) = self.0.iter_mut().find(|draw| draw.painter == painter) {
-            draw.ticked = true;
-            draw.redrawn = None;
+            draw.stage = LayerStage::Ticked;
         }
     }
 
@@ -39,10 +45,10 @@ impl LayerDraws {
     /// emoji frame (`frame_clock::content_now`).
     pub(super) fn drawn(&mut self, painter: EntityId, at: Instant, counts: bool) {
         if let Some(draw) = self.0.iter_mut().find(|draw| draw.painter == painter) {
-            if std::mem::take(&mut draw.ticked) {
-                draw.redrawn = None;
+            if draw.stage == LayerStage::Ticked {
+                draw.stage = LayerStage::Idle;
             } else if counts {
-                draw.redrawn = Some(at);
+                draw.stage = LayerStage::Redrawn(at);
             }
             return;
         }
@@ -54,8 +60,7 @@ impl LayerDraws {
         }
         self.0.push(LayerDraw {
             painter,
-            ticked: false,
-            redrawn: Some(at),
+            stage: LayerStage::Redrawn(at),
         });
     }
 
@@ -68,11 +73,10 @@ impl LayerDraws {
         let mut oldest: Option<Instant> = None;
         for target in targets {
             let painter = target?;
-            let at = self
-                .0
-                .iter()
-                .find(|draw| draw.painter == painter)?
-                .redrawn?;
+            let LayerStage::Redrawn(at) = self.0.iter().find(|draw| draw.painter == painter)?.stage
+            else {
+                return None;
+            };
             oldest = Some(oldest.map_or(at, |oldest| oldest.min(at)));
         }
         oldest

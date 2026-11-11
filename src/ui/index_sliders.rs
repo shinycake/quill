@@ -65,6 +65,8 @@ pub(crate) struct IndexSliders {
     pub(super) storage: StorageDrag,
 }
 
+impl crate::ui::on_screen::Farewell for IndexSliders {}
+
 impl IndexSliders {
     pub(super) fn get(&self, key: StepSlider) -> Option<&Entity<SliderState>> {
         self.map.get(&key)
@@ -112,7 +114,7 @@ impl QuillApp {
             this.on_step_slider(key, event, cx);
         })
         .detach();
-        self.preferences.index_sliders.map.insert(key, slider);
+        self.index_sliders.map.insert(key, slider);
     }
 
     /// A slider moved (`Change`, while dragging) or was let go (`Release`).
@@ -130,11 +132,11 @@ impl QuillApp {
                 // drag step would flood TDLib, so the release applies, or
                 // the page's leave if no release came.
                 if matches!(event, SliderEvent::Release(_)) {
-                    self.preferences.index_sliders.storage = StorageDrag::Settled;
+                    self.index_sliders.storage = StorageDrag::Settled;
                     self.apply_storage_sliders(cx);
                 } else if let Some(account) = self.session().map(|s| s.account.clone()) {
                     let (size, keep) = self.storage_slider_limits(cx);
-                    self.preferences.index_sliders.storage = StorageDrag::Moved {
+                    self.index_sliders.storage = StorageDrag::Moved {
                         account,
                         size,
                         keep,
@@ -148,7 +150,7 @@ impl QuillApp {
 
     /// The limits the two storage sliders are on.
     pub(super) fn storage_slider_limits(&self, cx: &App) -> (Option<i64>, Option<i64>) {
-        let sliders = &self.preferences.index_sliders;
+        let sliders = &self.index_sliders;
         let size = sliders
             .index(StepSlider::StorageSize, cx)
             .and_then(size_limit_at);
@@ -168,7 +170,7 @@ impl QuillApp {
         value: String,
         cx: &App,
     ) -> Option<AnyElement> {
-        let slider = self.preferences.index_sliders.get(key)?;
+        let slider = self.index_sliders.get(key)?;
         Some(
             div()
                 .id(id)

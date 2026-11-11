@@ -169,6 +169,9 @@ on_screen_fields! {
     earn: super::earn_state::EarnUi,
     /// Gift resale, auctions and crafting boxes (`ui/gift_market_state.rs`).
     gift_market: super::gift_market_state::GiftMarketUi,
+    /// The step sliders of the open settings pages and the auto-delete
+    /// picker (`ui/index_sliders.rs`); they show this account's values.
+    index_sliders: super::index_sliders::IndexSliders,
     /// The giveaway form (`ui/giveaway_state.rs`).
     giveaway: super::giveaway_state::GiveawayUi,
     /// Paid messages: price, confirmation, Remove Fee (`ui/paid_messages_state.rs`).
@@ -344,6 +347,7 @@ impl OnScreen {
             payments: super::payments_state::PaymentUi::new(window, cx),
             earn: super::earn_state::EarnUi::new(window, cx),
             gift_market: super::gift_market_state::GiftMarketUi::new(),
+            index_sliders: Default::default(),
             giveaway: super::giveaway_state::GiveawayUi::new(),
             paid_messages: super::paid_messages_state::PaidMessagesUi::new(),
             paid_reaction: super::paid_reaction_state::PaidReactionUi::new(),

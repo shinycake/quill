@@ -150,6 +150,23 @@ impl QuillApp {
     /// The Add and the row Save leave their Sending stage on TDLib's
     /// answer; needs the window that shows the box (to clear its field).
     pub(super) fn settle_welcome_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The row being edited leaves with its message (deleted here or
+        // elsewhere): an edit of a message that is gone is dropped.
+        let edit_gone = self
+            .admin
+            .welcome_dialog
+            .as_ref()
+            .and_then(|dialog| Some((dialog.editing?, dialog.chat_id)))
+            .is_some_and(|(id, chat_id)| {
+                self.session()
+                    .and_then(|s| s.groups.welcome_messages.get(&chat_id.0))
+                    .is_some_and(|messages| !messages.items().iter().any(|m| m.id == id))
+            });
+        if edit_gone && let Some(dialog) = self.admin.welcome_dialog.as_mut() {
+            dialog.editing = None;
+            dialog.save = Submit::Editing;
+            cx.notify();
+        }
         let requests = self.session().map(|session| &session.requests);
         let Some((add, save)) = self
             .admin

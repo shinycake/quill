@@ -45,12 +45,11 @@ GiveawayInfoLookup::loading
 GiveawayInfoLookup::loading+error
 GiveawaySummary::finished
 
-HdrViewer::in_flight
+
 HeaderFacts::is_saved_messages
 HistoryState::load_failed
 HistoryState::loaded_complete
 HistoryState::newer_failed
-InlineMembersUi::admins_asked
 
 JoinedLines::started
 Latest::wake_pending
@@ -67,7 +66,6 @@ MediaFacts::downloading
 MediaFacts::in_saved_messages
 MediaMenuFacts::downloading
 MediaState::disk_paused_saved_changed
-MembersView::loading
 MiniAppWindow::closing_confirmation
 MutedSpeechHint::done
 NewChatView::busy

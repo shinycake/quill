@@ -198,9 +198,6 @@ pub(crate) struct PreferencesUi {
     /// `ColorSelect`), tdesktop's "custom" accent circle. Holds the last
     /// custom color; choosing one sets `appearance.accent_rgb`.
     pub(super) accent_picker: Entity<gpui_kit::component::color_picker::ColorPickerState>,
-    /// The step sliders of the network editor, the local storage limits and
-    /// the auto-delete picker (`index_sliders.rs`).
-    pub(super) index_sliders: super::index_sliders::IndexSliders,
     /// Translation prefs (`translate_prefs.json`); the dialog and the
     /// bar's toast are the screen's (`OnScreen::translate`).
     pub(super) translate: super::translate_ui::TranslateUi,
@@ -233,7 +230,6 @@ impl PreferencesUi {
             system_accent_poll: None,
             font_picker,
             accent_picker,
-            index_sliders: Default::default(),
             translate: super::translate_ui::TranslateUi::load(),
             update_state: if demo.is_none() {
                 quill::update_install::startup_state()

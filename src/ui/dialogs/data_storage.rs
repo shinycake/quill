@@ -271,7 +271,7 @@ impl QuillApp {
     /// (`ensure_storage_sliders`). An account switch leaves no page, so
     /// the page's arrival drops them too.
     pub(crate) fn forget_storage_sliders(&mut self) {
-        let sliders = &mut self.preferences.index_sliders;
+        let sliders = &mut self.index_sliders;
         sliders.remove(StepSlider::StorageSize);
         sliders.remove(StepSlider::StorageKeep);
     }
@@ -652,10 +652,7 @@ impl QuillApp {
                             .accessibility_label(title.to_string())
                             .on_click(cx.listener(move |this, &on, _, cx| {
                                 // Switching on resumes at the slider's step.
-                                let index = this
-                                    .preferences
-                                    .index_sliders
-                                    .index(StepSlider::DataCap(kind), cx);
+                                let index = this.index_sliders.index(StepSlider::DataCap(kind), cx);
                                 if let Some(draft) = this.settings.data_storage_editor.draft_mut() {
                                     draft.set_cap_enabled(kind, on);
                                     if let Some(index) = index.filter(|_| on) {

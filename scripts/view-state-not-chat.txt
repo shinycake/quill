@@ -28,7 +28,8 @@ HistoryUi.sponsored.spots * | rebuilt from the open chat's placed ads after ever
 HistoryUi.ends | compared with the history synced next; a new chat's ends differ
 HistoryUi.anchor.Anchoring.landed | compared with the session's highlight, which is the open chat's; the anchor starts a new chat with none
 HistoryUi.anchor.Anchored.landed | compared with the session's highlight, which is the open chat's; the anchor starts a new chat with none
-HistoryUi.live_location_tick_chat | marks a running tick task, as slow_mode_tick
+
+HistoryUi.live_location_tick | the running tick task and the chat it ticks for, as slow_mode_tick
 ShareUi.forward.Bar.dest | the chat the forward bar waits in; kept across chats on purpose (dismiss_forward_for_view)
 ShareUi.forward.Picking.bar | the forward bar the share box was opened over, which leaving the box returns to; it goes with the bar (dismiss_forward_for_view)
 ViewerUi.clip.Playing.item | the media viewer's clip, which outlives a chat change (the viewer is the screen's)
@@ -37,8 +38,9 @@ ViewerUi.pending_seek | a media-timestamp link's seek for the viewer's clip, as 
 
 ViewerUi.pending_seek | a media-timestamp link's seek for the viewer's clip, as ViewerUi.video
 ComposerUi.suggest.stickers_dismissed | carries its chat and text: another chat never matches
-MessageUi.a11y.announce_first | carries its chat; read against the chat viewed
+MessageUi.a11y.focus.ArmedForFirst.0 | carries its chat; read against the chat viewed
 MessageUi.rendered_sponsored | each ad carries the chat painted; the next frame reports only the open chat's
+HistoryUi.anchor | the chat and topic the scroller last synced for: the check that resets it on a change
 HistoryUi.row_hover.under | the row under the pointer, rebuilt by every paint and move
 HistoryUi.row_hover.painted | the rows' hitboxes, rebuilt by every paint
 HistoryUi.stream_reveal.Finishing.message | the bot reply finishing its reveal: the reveal names its chat and starts over in another

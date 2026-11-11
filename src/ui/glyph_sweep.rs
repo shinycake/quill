@@ -39,19 +39,42 @@ struct PendingSweep {
     text: bool,
 }
 
+/// Where a window's sweep stands. `Marked` leaves when the frame after the
+/// mark starts (`finish_pending_sweep`), or with the window
+/// (`forget_closed_windows`).
+#[derive(Clone, Copy, Default)]
+enum Sweep {
+    #[default]
+    Idle,
+    /// The use mark is taken; the next frame to start drops what it did not
+    /// ask for.
+    Marked(PendingSweep),
+}
+
+/// Whether the window left the foreground since the last sweep began: any
+/// emoji are then worth a sweep.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum IdleTrigger {
+    #[default]
+    Foreground,
+    Left,
+}
+
+/// Emoji and text glyph counts of one moment.
+#[derive(Clone, Copy, Default)]
+struct GlyphCounts {
+    emoji: usize,
+    text: usize,
+}
+
 #[derive(Default)]
 struct WindowSweep {
-    pending: Option<PendingSweep>,
-    /// Emoji glyphs the last sweep kept (what was on screen then).
-    kept: usize,
-    /// Text glyphs the last sweep of them kept.
-    kept_text: usize,
-    /// Emoji glyphs the atlas held at the start of the last frame.
-    seen: usize,
-    /// Text glyphs the atlas held at the start of the last frame.
-    seen_text: usize,
-    /// The window went to the background since the last sweep began.
-    sweep_when_idle: bool,
+    sweep: Sweep,
+    /// What the last sweep kept (what was on screen then).
+    kept: GlyphCounts,
+    /// What the atlas held at the start of the last frame.
+    seen: GlyphCounts,
+    trigger: IdleTrigger,
 }
 
 thread_local! {
@@ -75,7 +98,7 @@ fn text_worth_a_sweep(count: usize, kept: usize) -> bool {
 
 pub(super) fn window_activation(id: WindowId, active: bool) {
     if !active {
-        with_sweep(id, |sweep| sweep.sweep_when_idle = true);
+        with_sweep(id, |sweep| sweep.trigger = IdleTrigger::Left);
         super::image_budget::note_activity();
     }
 }
@@ -98,16 +121,19 @@ fn begin(window: &mut Window) {
     let count = window.emoji_glyph_count();
     let text_count = window.text_glyph_count();
     let (emoji, text) = with_sweep(id, |sweep| {
+        if matches!(sweep.sweep, Sweep::Marked(_)) {
+            return (false, false);
+        }
+        let left = mem::take(&mut sweep.trigger) == IdleTrigger::Left;
         (
-            sweep.pending.is_none()
-                && worth_a_sweep(count, sweep.kept, mem::take(&mut sweep.sweep_when_idle)),
-            sweep.pending.is_none() && text_worth_a_sweep(text_count, sweep.kept_text),
+            worth_a_sweep(count, sweep.kept.emoji, left),
+            text_worth_a_sweep(text_count, sweep.kept.text),
         )
     });
     if emoji || text {
         let mark = window.begin_emoji_glyph_sweep();
         with_sweep(id, |sweep| {
-            sweep.pending = Some(PendingSweep { mark, text });
+            sweep.sweep = Sweep::Marked(PendingSweep { mark, text });
         });
     }
 }
@@ -119,7 +145,13 @@ pub(super) fn start_frame(window: &mut Window, cx: &mut App) {
 
 fn finish_pending_sweep(window: &mut Window, cx: &mut App) {
     let handle = window.window_handle();
-    if let Some(pending) = with_sweep(handle.window_id(), |sweep| sweep.pending.take()) {
+    let marked = with_sweep(handle.window_id(), |sweep| {
+        match mem::take(&mut sweep.sweep) {
+            Sweep::Idle => None,
+            Sweep::Marked(pending) => Some(pending),
+        }
+    });
+    if let Some(pending) = marked {
         // Deferred work runs once this frame is drawn.
         cx.defer(move |cx| {
             let _ = handle.update(cx, |_, window, _| sweep(window, pending));
@@ -131,13 +163,16 @@ fn note_new_glyphs(window: &mut Window) {
     let id = window.window_handle().window_id();
     let count = window.emoji_glyph_count();
     let text_count = window.text_glyph_count();
-    let (seen, seen_text) = with_sweep(id, |sweep| {
-        (
-            mem::replace(&mut sweep.seen, count),
-            mem::replace(&mut sweep.seen_text, text_count),
+    let seen = with_sweep(id, |sweep| {
+        mem::replace(
+            &mut sweep.seen,
+            GlyphCounts {
+                emoji: count,
+                text: text_count,
+            },
         )
     });
-    if count > seen || text_count > seen_text && text_count > KEEP_TEXT {
+    if count > seen.emoji || text_count > seen.text && text_count > KEEP_TEXT {
         super::image_budget::note_activity();
     }
 }
@@ -148,11 +183,13 @@ fn sweep(window: &mut Window, pending: PendingSweep) {
     let text_gone = pending.text.then(|| window.sweep_text_glyphs(pending.mark));
     let text_kept = window.text_glyph_count();
     with_sweep(window.window_handle().window_id(), |sweep| {
-        sweep.kept = kept;
-        sweep.seen = kept;
-        sweep.seen_text = text_kept;
+        sweep.kept.emoji = kept;
+        sweep.seen = GlyphCounts {
+            emoji: kept,
+            text: text_kept,
+        };
         if text_gone.is_some() {
-            sweep.kept_text = text_kept;
+            sweep.kept.text = text_kept;
         }
     });
     if super::frame_clock::trace_ticks() {

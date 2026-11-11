@@ -56,7 +56,7 @@ fn move_slider(
     release: bool,
 ) {
     app.update_in(vcx, |app, window, cx| {
-        let Some(slider) = app.preferences.index_sliders.get(key).cloned() else {
+        let Some(slider) = app.index_sliders.get(key).cloned() else {
             panic!("slider {key:?} missing");
         };
         let value = SliderValue::Single(index as f32);
@@ -190,9 +190,7 @@ fn storage_limit_sliders_restart_from_the_account_shown(cx: &mut TestAppContext)
     move_slider(&app, vcx, StepSlider::StorageSize, 9, true);
     let index = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
         app.read_with(vcx, |app, cx| {
-            app.preferences
-                .index_sliders
-                .index(StepSlider::StorageSize, cx)
+            app.index_sliders.index(StepSlider::StorageSize, cx)
         })
     };
     assert_eq!(index(&app, vcx), Some(9));

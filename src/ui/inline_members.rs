@@ -4,7 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use crate::ui::inline_members_state::Paging;
+use crate::ui::inline_members_state::{AdminsFallback, Paging};
 use crate::ui::scroll_load::scrolled_near_end;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
@@ -116,7 +116,7 @@ impl QuillApp {
         };
         if stale.contains(&shape.chat.0) {
             self.inline_members.paging = Paging::Idle;
-            self.inline_members.admins_asked = false;
+            self.inline_members.admins = AdminsFallback::NotAsked;
             self.inline_members_fetch(shape, cx);
             cx.notify();
         }
@@ -179,9 +179,9 @@ impl QuillApp {
         // once per open (or Retry), so a failing list is not asked every
         // frame.
         if self.inline_members_filter(shape) == MemberListFilter::Administrators
-            && !self.inline_members.admins_asked
+            && self.inline_members.admins != AdminsFallback::Asked(shape.chat)
         {
-            self.inline_members.admins_asked = true;
+            self.inline_members.admins = AdminsFallback::Asked(shape.chat);
             if let Some(live) = self.live.as_mut() {
                 let _ = live.driver.fetch_supergroup_members(
                     shape.chat,

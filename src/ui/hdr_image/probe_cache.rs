@@ -48,12 +48,13 @@ pub(crate) fn has_hdr(path: &Path, cx: &mut Context<QuillApp>) -> bool {
     probed.insert(path.to_path_buf(), Entry::Probing);
     drop(probed);
     let path = path.to_path_buf();
-    let job = cx.background_spawn({
-        let path = path.clone();
-        async move { super::probe_file(&path) }
-    });
-    cx.spawn(async move |this, cx| {
-        let result = job.await;
+    // The job records its own answer, so `Probing` leaves even when the
+    // foreground continuation below is dropped; a probe that panics counts
+    // as unreadable.
+    let job = cx.background_spawn(async move {
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| super::probe_file(&path)))
+                .unwrap_or(None);
         let entry = match result {
             Some(hdr) => Entry::Known(hdr),
             None => Entry::Unreadable(Instant::now()),
@@ -61,6 +62,10 @@ pub(crate) fn has_hdr(path: &Path, cx: &mut Context<QuillApp>) -> bool {
         if let Ok(mut probed) = PROBED.lock() {
             probed.insert(path, entry);
         }
+        result
+    });
+    cx.spawn(async move |this, cx| {
+        let result = job.await;
         if result == Some(true) {
             let _ = this.update(cx, |_, cx| cx.notify());
         }

@@ -857,13 +857,13 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if !self.composer_ui.inline_bot_alert_shown && self.open_chat_is_secret() {
-            self.chat_ui.pending_inline_bot_alert = Some(query.to_string());
+            self.chat_ui.bot_alert = crate::ui::inline_mode::BotAlert::Switch(query.to_string());
             cx.notify();
             return;
         }
         // A stash left over from another chat (the open chat changed
         // since the gated press) never survives an ungated insert.
-        self.chat_ui.pending_inline_bot_alert = None;
+        self.chat_ui.bot_alert = crate::ui::inline_mode::BotAlert::None;
         let next = quill::composer::insert_switch_inline_text(&self.composer_markup(cx), query);
         self.set_composer_markup(&next, window, cx);
         self.sync_command_menu(cx);
@@ -882,8 +882,11 @@ impl QuillApp {
         if !self.open_chat_is_secret() {
             return;
         }
-        let Some(query) = self.chat_ui.pending_inline_bot_alert.take() else {
-            return;
+        let alert = std::mem::take(&mut self.chat_ui.bot_alert);
+        let query = match alert {
+            crate::ui::inline_mode::BotAlert::None => return,
+            crate::ui::inline_mode::BotAlert::Typed => String::new(),
+            crate::ui::inline_mode::BotAlert::Switch(query) => query,
         };
         self.composer_ui.inline_bot_alert_shown = true;
         if !query.is_empty() {

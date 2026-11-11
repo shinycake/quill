@@ -184,11 +184,6 @@ pub struct EmojiPanel {
     /// Slice S10: installed emoji sets (`getInstalledStickerSets` with
     /// `stickerTypeCustomEmoji`) — the "Emoji Sets" settings list.
     pub installed_sets: Vec<StickerSetInfo>,
-    /// Where the installed list's request stands (the list itself is
-    /// `installed_sets`). `Ready` once answered, so an empty list means
-    /// none rather than not loaded yet; a failed request is asked for
-    /// again by the next caller.
-    pub installed: crate::state::fetch::Fetch<()>,
     /// Slice S10: archived emoji sets (`getArchivedStickerSets`, paged).
     pub archived_sets: Vec<StickerSetInfo>,
     /// Slice S10: trending/discover emoji sets + premium-row flag.
@@ -374,7 +369,6 @@ impl Session {
         }
         self.stickers.emoji.lists.installed.succeed(());
         self.stickers.emoji.installed_sets = sets;
-        self.stickers.emoji.installed.succeed(());
     }
 
     /// Slice S10: store an archived-emoji-sets page. First page replaces,
@@ -429,7 +423,7 @@ impl Session {
     /// refetches the authoritative list.
     pub fn invalidate_installed_emoji_sets(&mut self) {
         self.stickers.emoji.installed_sets.clear();
-        self.stickers.emoji.installed = Default::default();
+        self.stickers.emoji.lists.installed = Default::default();
     }
 
     /// Slice S10: purpose-gated dispatch for the emoji payloads. Stray

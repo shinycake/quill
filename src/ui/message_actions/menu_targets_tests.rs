@@ -143,13 +143,13 @@ fn the_inline_bot_warning_stash_stays_with_the_chat_that_asked(cx: &mut TestAppC
     let vcx = &mut vcx;
     let (_, other) = other_chat(&app, vcx);
     app.update_in(vcx, |app, window, cx| {
-        app.chat_ui.pending_inline_bot_alert = Some("query".into());
+        app.chat_ui.bot_alert = crate::ui::inline_mode::BotAlert::Switch("query".into());
         app.select_listed_chat(other, window, cx);
     });
     frames(vcx);
     assert_eq!(
-        app.read_with(vcx, |app, _| app.chat_ui.pending_inline_bot_alert.clone()),
-        None,
+        app.read_with(vcx, |app, _| app.chat_ui.bot_alert.clone()),
+        crate::ui::inline_mode::BotAlert::None,
         "another chat's composer never receives it"
     );
 }

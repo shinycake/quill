@@ -40,7 +40,7 @@ impl InlineVideos {
         ) else {
             self.with(|state| {
                 if let Some(slot) = state.players.get_mut(&key) {
-                    slot.rest = Rest::Stuck;
+                    slot.presence = Presence::Stuck;
                 }
             });
             return;
@@ -56,12 +56,11 @@ impl InlineVideos {
         let mark = player.shown_count();
         let replaced = self.with(|state| {
             let slot = state.players.get_mut(&key)?;
-            slot.rest = Rest::Awake;
+            slot.presence = Presence::InView;
             slot.bytes = source.bytes;
             for seen in slot.windows.values_mut() {
                 seen.mark = mark;
             }
-            slot.hidden_since = None;
             Some(std::mem::replace(&mut slot.player, player))
         });
         drop(replaced);
