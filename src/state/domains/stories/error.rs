@@ -173,6 +173,7 @@ impl Session {
                     self.fail_profile_tab(
                         chat_id,
                         SharedMediaTab::Stories,
+                        pending.and_then(|p| p.search_generation),
                         crate::state::request_errors::call_request_error_line(
                             err,
                             "Could not load this tab",

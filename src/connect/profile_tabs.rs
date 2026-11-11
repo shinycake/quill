@@ -103,13 +103,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(owner) = self.profile_owner(chat_id) else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        if append {
-            if !self.session.media.shared_media.begin_profile_more(tab) {
+        let generation = if append {
+            let Some(generation) = self.session.media.shared_media.begin_profile_more(tab) else {
                 return Ok(());
-            }
+            };
+            generation
         } else {
-            self.session.media.shared_media.begin_profile_fetch(tab);
-        }
+            self.session.media.shared_media.begin_profile_fetch(tab)
+        };
         let next_offset = self
             .session
             .media
@@ -130,12 +131,17 @@ impl<S: JsonSender> ConnectDriver<S> {
                 } else {
                     0
                 };
-                self.get_chat_posted_to_chat_page_stories(chat_id, from, PROFILE_PAGE)
-                    .map(|_| ())
+                self.get_chat_posted_to_chat_page_stories(
+                    chat_id,
+                    from,
+                    PROFILE_PAGE,
+                    Some(generation),
+                )
+                .map(|_| ())
             }
             SharedMediaTab::Gifts => {
                 let extra = self.session.request(
-                    RequestPurpose::Media(MediaPurpose::GetProfileGifts { append }),
+                    RequestPurpose::Media(MediaPurpose::GetProfileGifts { append, generation }),
                     Some(chat_id),
                 );
                 let offset = if append { next_offset.as_str() } else { "" };
@@ -145,8 +151,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             _ => Err(ConnectSendError::InvalidRequest),
         };
         if result.is_err() {
-            self.session
-                .fail_profile_tab(chat_id, tab, "Could not send the request.".to_string());
+            self.session.fail_profile_tab(
+                chat_id,
+                tab,
+                Some(generation),
+                "Could not send the request.".to_string(),
+            );
         }
         result
     }

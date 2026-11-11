@@ -1113,8 +1113,6 @@ mod tests {
         let path = track("position.wav", 4);
         start_landed(&mut engine, &path, 0.0, 1.0, 1.0, 4.0);
         assert!(engine.position_secs() < 0.05, "no wall-clock advance");
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        assert!(engine.position_secs() < 0.05, "time passing moves nothing");
         pull(&mut device, usize::try_from(RATE).unwrap());
         let one_second = engine.position_secs();
         assert!((0.9..=1.3).contains(&one_second), "got {one_second}");

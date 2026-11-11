@@ -239,25 +239,34 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Phase 9.7: `getChatPostedToChatPageStories` (schema 1.8.67, line
     /// 13776). The first page (`from_story_id == 0`) also carries
-    /// `pinned_story_ids`; the reducer accumulates pages.
+    /// `pinned_story_ids`; the reducer accumulates pages. The gallery's
+    /// Stories tab passes its `generation`: only a request with the same
+    /// stamp counts as already in flight, and an answer for another stamp
+    /// is dropped. The stories page itself passes `None`.
     pub fn get_chat_posted_to_chat_page_stories(
         &mut self,
         chat_id: ChatId,
         from_story_id: i32,
         limit: i32,
+        generation: Option<u64>,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.story_page_chat(chat_id) || from_story_id < 0 || limit <= 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self
-            .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::GetChatPostedToChatPageStories, chat_id)
-        {
+        let purpose = RequestPurpose::GetChatPostedToChatPageStories;
+        // Only a request of the same stamp stands for this one: the
+        // gallery's after a reopen is not answered by the old gallery's.
+        if self.session.requests.pending.values().any(|p| {
+            p.purpose == purpose && p.chat_id == Some(chat_id) && p.search_generation == generation
+        }) {
             return Ok(None);
         }
-        let purpose = RequestPurpose::GetChatPostedToChatPageStories;
-        let extra = self.session.request(purpose, Some(chat_id));
+        let extra = match generation {
+            Some(generation) => self
+                .session
+                .request_chat_search(purpose, chat_id, generation),
+            None => self.session.request(purpose, Some(chat_id)),
+        };
         self.session
             .begin_story_page_check(story_page_op_label(purpose), extra);
         let json = get_chat_posted_to_chat_page_stories(extra, chat_id, from_story_id, limit);

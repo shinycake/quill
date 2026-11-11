@@ -445,3 +445,45 @@ fn animated_emoji_suggestion_requests_once_per_emoji_and_clears() {
     drop(driver);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// 09-080, 09-X037: the composer's emoji suggestions ask for the installed
+/// list from the driver's own state: a send that did not go out, or an
+/// answer that failed, is asked for again; an answered list is not.
+#[test]
+fn the_suggestion_bar_asks_for_the_installed_sets_until_they_answer() {
+    let (dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let asked = |recorder: &RecordingSender| {
+        recorder
+            .snapshot()
+            .iter()
+            .filter(|json| json.contains(r#""@type":"getInstalledStickerSets""#))
+            .count()
+    };
+    recorder.refuse_sends(true);
+    assert!(driver.ensure_suggestion_emoji_sets().is_err());
+    assert_eq!(asked(&recorder), 0);
+    recorder.refuse_sends(false);
+    driver.ensure_suggestion_emoji_sets().unwrap();
+    assert_eq!(asked(&recorder), 1);
+    driver.ensure_suggestion_emoji_sets().unwrap();
+    assert_eq!(asked(&recorder), 1, "one request in flight is enough");
+    let sent = recorder
+        .snapshot()
+        .into_iter()
+        .rev()
+        .find(|json| json.contains(r#""@type":"getInstalledStickerSets""#))
+        .expect("the request");
+    let extra = serde_json::from_str::<serde_json::Value>(&sent).unwrap()["@extra"].clone();
+    let failure = json!({"@type":"error","@extra":extra,"code":500,"message":"later"});
+    driver
+        .ingest(copy_and_parse(&failure.to_string(), &seq, &sink).unwrap())
+        .unwrap();
+    assert!(driver.session.stickers.emoji.installed.error().is_some());
+    driver.ensure_suggestion_emoji_sets().unwrap();
+    assert_eq!(asked(&recorder), 2, "a failed list is asked for again");
+    let _ = dir;
+}

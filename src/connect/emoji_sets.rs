@@ -495,14 +495,14 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// The composer's emoji suggestions offer custom emoji from the
     /// installed emoji sets (tdesktop `SuggestionsWidget::appendCustom`):
-    /// load the installed list when `list` (once per session, from the
-    /// caller) and the sets' contents. Loaded and loading sets are
+    /// load the installed list when it was never asked for or its last
+    /// request failed, and the sets' contents. Loaded and loading sets are
     /// skipped, so this is cheap to call whenever the strip is rebuilt.
-    pub fn ensure_suggestion_emoji_sets(&mut self, list: bool) -> Result<(), ConnectSendError> {
+    pub fn ensure_suggestion_emoji_sets(&mut self) -> Result<(), ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if list
+        if self.session.stickers.emoji.installed.can_ask()
             && self.session.stickers.emoji.installed_sets.is_empty()
             && !self
                 .session
@@ -521,6 +521,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 return Err(err);
             }
+            self.session.stickers.emoji.installed.begin();
         }
         let ids: Vec<i64> = self
             .session

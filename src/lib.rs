@@ -9,6 +9,7 @@ pub mod advanced;
 pub mod agent;
 pub mod ai_compose;
 pub mod album;
+pub mod album_pin;
 pub mod animated_emoji;
 pub mod animation;
 pub mod app_theme;

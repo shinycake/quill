@@ -52,6 +52,7 @@ mod photo_gallery;
 mod premium_hub;
 mod premium_limit;
 mod profile_panels;
+mod reaction_undo;
 mod redraw;
 mod requests;
 mod requests_download_index;
