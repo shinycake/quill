@@ -11,7 +11,7 @@ use super::owned_image::OwnedImage;
 use super::status_note::StatusNote;
 use super::widget_runtime::{Launch, Runtime, RuntimeEvent, WIDGETS};
 use super::widgets_state::{
-    Identity, Noted, Poll, PresenceChange, SafeArea, Showing, WidgetEntry, WidgetStorage,
+    Identity, Noted, Poll, PresenceChange, Showing, WidgetEntry, WidgetStorage,
 };
 use gpui_kit::*;
 use quill::ids::ChatId;
@@ -84,9 +84,8 @@ impl QuillApp {
         }
     }
 
-    /// A widget row rendered in this pass at `width` CSS px, with the time
-    /// covering `safe_area` of it.
-    pub(super) fn note_widget(&self, key: WidgetKey, width: f32, safe_area: SafeArea) {
+    /// A widget row rendered in this pass at `width` CSS px.
+    pub(super) fn note_widget(&self, key: WidgetKey, width: f32) {
         let window = self.windows.scope;
         self.widgets
             .passes
@@ -94,7 +93,7 @@ impl QuillApp {
             .seen
             .entry(window)
             .or_default()
-            .insert(key, Noted { width, safe_area });
+            .insert(key, Noted { width });
     }
 
     /// A frame of the window `window` (`None`: the main one) starts: the
@@ -242,7 +241,7 @@ impl QuillApp {
             self.widget_left(key, window);
         }
         self.prune_hidden_widgets();
-        for (key, Noted { width, safe_area }) in seen {
+        for (key, Noted { width }) in seen {
             let Some((content, outgoing)) = self.widget_message(key) else {
                 continue;
             };
@@ -291,13 +290,6 @@ impl QuillApp {
                     runtime.set_theme(theme.0.clone(), theme.1);
                     entry.theme = Some(theme.clone());
                 }
-                if entry.presence.owner() == Some(window) && entry.safe_area != safe_area {
-                    runtime.set_safe_area(safe_area.json().to_string());
-                }
-            }
-            // A runtime that starts later takes it in its options.
-            if entry.presence.owner() == Some(window) {
-                entry.safe_area = safe_area;
             }
             if came_back
                 && has_id
@@ -443,7 +435,6 @@ impl QuillApp {
             "maxHeight": quill::message_widget::MAX_HEIGHT,
             "visible": entry.presence.is_shown(),
             "locale": quill::lang::current_pack_id(),
-            "safeArea": entry.safe_area.json(),
             "theme": serde_json::from_str::<serde_json::Value>(&theme).unwrap_or_default(),
             "storage": {"local": entry.stored.local, "session": session_area},
             "data": {"chatData": content.chat_data, "publicData": entry.polled.clone().unwrap_or(content.public_data)},

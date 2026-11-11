@@ -328,11 +328,9 @@ pub(crate) struct MessageChrome {
 }
 
 /// The time pill's distance from the picture's right and bottom edges.
-pub(crate) const MEDIA_PILL_INSET: f32 = 10.;
+const MEDIA_PILL_INSET: f32 = 10.;
 /// The time pill's padding beside the time (`px_1p5`).
-pub(crate) const MEDIA_PILL_PAD_X: f32 = 6.;
-/// The time pill's height: one `text_xs` line.
-pub(crate) const MEDIA_PILL_HEIGHT: f32 = 18.;
+const MEDIA_PILL_PAD_X: f32 = 6.;
 
 /// The time on a picture: a dark pill in the bottom-right corner of the
 /// nearest positioned parent (the bubble, or a bubble-less media block).
