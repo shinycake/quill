@@ -266,6 +266,12 @@ impl QuillApp {
     /// section kept from before shows meanwhile, and waits for an answer
     /// on its way to another window instead of cancelling it.
     fn follow_gif_wanted(&mut self, cx: &mut Context<Self>) {
+        // Typed text is waiting for its pause: asking for the section still
+        // shown would replace the stage and drop that timer, and the text
+        // would never search. The search that follows asks for the list.
+        if matches!(self.pickers.gif_tab, GifTab::Typing { .. }) {
+            return;
+        }
         let Some(panel) = self.session().map(|session| &session.stickers.gifs) else {
             return;
         };
@@ -298,9 +304,11 @@ impl QuillApp {
             return;
         };
         let wanted = self.pickers.gif_tab.wanted().clone();
+        // `Wants` only: a section already asked for is not asked again, and
+        // typed text waiting for its pause keeps its timer (as above).
         if matches!(self.gif_shown(panel), GifShown::Missing)
             && !gifs_on_their_way(panel)
-            && !matches!(&self.pickers.gif_tab, GifTab::Asked(asked) if *asked == wanted)
+            && matches!(self.pickers.gif_tab, GifTab::Wants(_))
         {
             self.request_gifs(wanted, cx);
         }

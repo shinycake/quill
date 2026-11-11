@@ -732,8 +732,9 @@ pub(in crate::ui) fn follow_app<V: 'static>(
 /// the clips' frame requests, which only have their own window at hand.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct AppGate {
-    /// A Quill window is active (`FrameState::window_active`).
-    pub(super) active: bool,
+    /// A Quill window is active: `FrameState::window_active` itself, the
+    /// same cell, not a copy of it.
+    pub(super) active: std::rc::Rc<std::cell::Cell<bool>>,
     /// The windows whose own content holds still meanwhile: those the
     /// active window hides whole (`chat_window::cover`).
     pub(super) held: Vec<WindowId>,
@@ -744,7 +745,7 @@ impl Global for AppGate {}
 impl AppGate {
     /// Whether content in `window` animates under this gate.
     fn animates(&self, window: WindowId) -> bool {
-        self.active && !self.held.contains(&window)
+        self.active.get() && !self.held.contains(&window)
     }
 
     /// Whether `window` is hidden whole behind the active window.

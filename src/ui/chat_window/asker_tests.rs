@@ -725,3 +725,68 @@ fn closing_the_panel_drops_the_gif_typing_pause(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(!fired.get(), "the dropped pause never fires");
 }
+
+/// Sweep r2-27 (10-002, 10-003): while typed text waits for its pause, the
+/// upkeep does not ask for the section the tab still shows. That ask would
+/// replace the stage and drop the timer, and the typed text would never
+/// search. Both paths: the window in use and a window nobody pressed in.
+#[gpui_kit::test]
+fn typed_gif_text_keeps_its_pause_through_the_upkeep(cx: &mut TestAppContext) {
+    use crate::ui::gifs_ui::{GifTab, GifWanted};
+    use crate::ui::media_panel::PanelTab;
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use std::time::Duration;
+    let h = new_app(cx);
+    let _chat_window = h.open_in_new_window(OTHER, cx);
+    for pressed_here in [true, false] {
+        let fired = Rc::new(Cell::new(false));
+        h.app.update(cx, |app, cx| {
+            // The main window searched "dogs": the session's list is its.
+            app.set_window_scope(None);
+            app.note_window_press(None);
+            app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
+            app.pickers.media_panel.tab = PanelTab::Gifs;
+            app.pickers.gif_tab = GifTab::Wants(GifWanted::Search("dogs".into()));
+            app.gif_tab_upkeep(cx);
+            // The chat window shows "cat" (not in the list) and "cats" was
+            // just typed there.
+            app.set_window_scope(Some(OTHER));
+            if pressed_here {
+                app.note_window_press(Some(OTHER));
+            }
+            app.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
+            app.pickers.media_panel.tab = PanelTab::Gifs;
+            let flag = fired.clone();
+            let pause = cx.spawn(async move |_, cx| {
+                cx.background_executor()
+                    .timer(Duration::from_millis(400))
+                    .await;
+                flag.set(true);
+            });
+            app.pickers.gif_tab = GifTab::Typing {
+                wanted: GifWanted::Search("cat".into()),
+                _pause: pause,
+            };
+            app.gif_tab_upkeep(cx);
+            assert!(
+                matches!(app.pickers.gif_tab, GifTab::Typing { .. }),
+                "the typing stage and its timer stay (pressed here: {pressed_here})"
+            );
+            let searching = app.session().and_then(|s| {
+                let gifs = &s.stickers.gifs;
+                gifs.search_mode().then(|| gifs.search_query().to_string())
+            });
+            assert_eq!(searching.as_deref(), Some("dogs"), "nothing was asked");
+            app.set_window_scope(None);
+        });
+        cx.executor().advance_clock(Duration::from_secs(1));
+        cx.run_until_parked();
+        assert!(fired.get(), "the pause ends and the typed text searches");
+        h.app.update(cx, |app, _| {
+            app.set_window_scope(Some(OTHER));
+            app.pickers.gif_tab = GifTab::default();
+            app.set_window_scope(None);
+        });
+    }
+}
