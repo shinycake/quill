@@ -23,6 +23,7 @@ use crate::telegram::requests::{
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
+mod answer_captures;
 pub(crate) mod batch;
 mod lifecycle;
 mod pumps;
@@ -367,26 +368,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // `Session::instant_view` into the IV reader. The URL rides
         // `Session::instant_view_urls` (the purpose stays `Copy`).
         // The reader opens in the window that asked (`SessionView`).
-        let instant_view_answer: Option<(Option<ChatId>, String, RichMessageContent)> =
-            match &owned.envelope.payload {
-                EnvelopePayload::Messages(MessagesPayload::WebPageInstantView { rich }) => owned
-                    .envelope
-                    .extra
-                    .and_then(|id| {
-                        let pending = self.session.requests.get(id)?;
-                        (pending.purpose == RequestPurpose::GetWebPageInstantView)
-                            .then_some((id, pending.window))
-                    })
-                    .and_then(|(id, window)| {
-                        let messages = &mut self.session.messages;
-                        messages.instant_view_agent_requests.remove(&id);
-                        messages
-                            .instant_view_urls
-                            .remove(&id)
-                            .map(|url| (window, url, rich.clone()))
-                    }),
-                _ => None,
-            };
+        let instant_view_answer = self.take_instant_view_answer(&owned.envelope);
         // MED4: a failed `getWebPageInstantView` (TDLib 404 = the page has
         // no Instant View) falls back to the browser like TGX — the URL
         // is stashed for the UI drain, never rendered as a reader.
@@ -395,29 +377,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // the pending request; the composer chip reads
         // `Session::composer_previews`. A late answer for a URL no longer
         // kept is dropped.
-        let link_preview_answer: Option<ComposerLinkPreview> = match &owned.envelope.payload {
-            EnvelopePayload::Messages(MessagesPayload::LinkPreview { preview }) => owned
-                .envelope
-                .extra
-                .and_then(|id| {
-                    (self.session.requests.purpose(id) == Some(RequestPurpose::GetLinkPreview))
-                        .then_some(id)
-                })
-                .and_then(|id| {
-                    self.session
-                        .messages
-                        .composer_preview_urls
-                        .remove(&id)
-                        .map(|url| ComposerLinkPreview {
-                            url,
-                            fetch: match preview.clone() {
-                                Some(preview) => LinkPreviewFetch::Loaded(Box::new(preview)),
-                                None => LinkPreviewFetch::NotFound,
-                            },
-                        })
-                }),
-            _ => None,
-        };
+        let link_preview_answer = self.take_link_preview_answer(&owned.envelope);
         // MED4b: a 404/400 or an empty answer is "no link info" (TGX
         // `isNotFound`); any other error is `Failed`, asked again when the URL
         // is typed again. Every answer ends "Getting link info".
