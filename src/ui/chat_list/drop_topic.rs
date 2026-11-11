@@ -34,8 +34,6 @@ pub(in crate::ui) struct DropTopic {
     chat_id: ChatId,
     payload: DropPayload,
     search: Entity<TextareaState>,
-    /// The request for the forum's topics could not be sent.
-    load_failed: bool,
 }
 
 /// One row of the chooser.
@@ -73,15 +71,15 @@ impl QuillApp {
         )
         .detach();
         // The topics of a forum that is not open are not loaded yet.
-        let load_failed = self
-            .live
-            .as_mut()
-            .is_some_and(|live| live.driver.load_forum_topics(chat_id).is_err());
+        // (A request that cannot be sent marks the forum's load failed in
+        // the session, which `drop_topic_failed` reads.)
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.load_forum_topics(chat_id);
+        }
         self.chat_list.drop_topic = Some(DropTopic {
             chat_id,
             payload,
             search,
-            load_failed,
         });
         self.open_box(DialogKind::DropTopic);
         cx.notify();
@@ -182,13 +180,12 @@ impl QuillApp {
         let Some(waiting) = self.chat_list.drop_topic.as_ref() else {
             return false;
         };
-        waiting.load_failed
-            || self.session().is_some_and(|session| {
-                session
-                    .threads
-                    .forum_topics_failed
-                    .contains(&waiting.chat_id.0)
-            })
+        self.session().is_some_and(|session| {
+            session
+                .threads
+                .forum_topics_failed
+                .contains(&waiting.chat_id.0)
+        })
     }
 
     fn close_drop_topic(&mut self, cx: &mut Context<Self>) {

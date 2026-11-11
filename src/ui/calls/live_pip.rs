@@ -43,13 +43,34 @@ pub(crate) enum LivePipSource {
 
 /// An open (or opening) live PiP.
 pub(crate) struct LivePipLink {
-    /// `None` until the window is made (it opens deferred).
-    pub(crate) window: Option<PipWindow>,
+    pub(crate) window: PipWindowStage,
     pub(crate) source: LivePipSource,
     /// The account it was opened in.
     account: Option<AccountKey>,
     /// The window the picture was in, brought to the front on enlarge.
     return_to: Option<AnyWindowHandle>,
+}
+
+/// The PiP's window: it opens deferred, so the link exists first.
+pub(crate) enum PipWindowStage {
+    Opening,
+    Open(PipWindow),
+}
+
+impl PipWindowStage {
+    pub(crate) fn window(&self) -> Option<&PipWindow> {
+        match self {
+            Self::Opening => None,
+            Self::Open(window) => Some(window),
+        }
+    }
+
+    fn into_window(self) -> Option<PipWindow> {
+        match self {
+            Self::Opening => None,
+            Self::Open(window) => Some(window),
+        }
+    }
 }
 
 impl QuillApp {
@@ -131,7 +152,7 @@ impl QuillApp {
         self.close_live_pip(cx);
         let account = self.session().map(|session| session.account.clone());
         self.group_call.live_pip = Some(LivePipLink {
-            window: None,
+            window: PipWindowStage::Opening,
             source,
             account,
             return_to,
@@ -157,13 +178,11 @@ impl QuillApp {
         cx.defer(move |cx| {
             let opened = open_pip_window(open, cx);
             let _ = weak.update(cx, |app, cx| {
-                let pending = app
-                    .group_call
-                    .live_pip
-                    .as_mut()
-                    .filter(|link| link.source == source && link.window.is_none());
+                let pending = app.group_call.live_pip.as_mut().filter(|link| {
+                    link.source == source && matches!(link.window, PipWindowStage::Opening)
+                });
                 match (pending, opened) {
-                    (Some(link), Some(window)) => link.window = Some(window),
+                    (Some(link), Some(window)) => link.window = PipWindowStage::Open(window),
                     // Closed before it opened: the window goes too.
                     (None, Some(window)) => close_window(window, false, cx),
                     (Some(_), None) => {
@@ -195,7 +214,7 @@ impl QuillApp {
         let Some(link) = self.group_call.live_pip.take() else {
             return;
         };
-        if let Some(window) = link.window {
+        if let Some(window) = link.window.into_window() {
             close_window(window, false, cx);
         }
         cx.refresh_windows();
@@ -205,7 +224,12 @@ impl QuillApp {
     /// viewer on the story): the PiP lets go of the player, which plays on
     /// there, and closes.
     fn detach_live_pip(&mut self, cx: &mut Context<Self>) {
-        if let Some(window) = self.group_call.live_pip.take().and_then(|link| link.window) {
+        if let Some(window) = self
+            .group_call
+            .live_pip
+            .take()
+            .and_then(|link| link.window.into_window())
+        {
             close_window(window, true, cx);
         }
     }
@@ -268,7 +292,7 @@ impl QuillApp {
             return;
         };
         let source = link.source;
-        if let Some(window) = link.window.as_ref() {
+        if let Some(window) = link.window.window() {
             let closed = window
                 .view
                 .upgrade()
@@ -309,7 +333,7 @@ impl QuillApp {
                         })
                 }
             };
-        if shown_again && link.window.is_some() {
+        if shown_again && link.window.window().is_some() {
             self.detach_live_pip(cx);
         }
     }

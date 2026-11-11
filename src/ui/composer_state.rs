@@ -41,6 +41,14 @@ impl DraftClear {
     }
 }
 
+/// The slow-mode countdown's tick task: none, or running for a chat. The
+/// task sets `Idle` when the gate lifts or the open chat changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SlowModeTick {
+    Idle,
+    Ticking(ChatId),
+}
+
 pub(crate) struct ComposerUi {
     /// Highlighted row of the composer's `@` suggestions.
     pub(super) mention_selected: usize,
@@ -102,9 +110,9 @@ pub(crate) struct ComposerUi {
     pub(super) archive: super::drop_zones::ArchiveJob,
     /// A demo's fixed drop-zone state (no real drag in a screenshot).
     pub(super) drop_preview: Option<quill::drop_modes::DragState>,
-    /// Phase A1: the open chat whose slow-mode countdown is ticking
-    /// (`Some` exactly while the 1s tick task runs). Mirrors `voice_tick`.
-    pub(super) slow_mode_tick_chat: Option<ChatId>,
+    /// Phase A1: the slow-mode countdown's 1s tick task, for the open chat
+    /// it ticks for. Mirrors `voice_tick`.
+    pub(super) slow_mode_tick: SlowModeTick,
     /// The attachment tray's file checks, price box and video editor.
     pub(super) send_box: super::send_box_state::SendBoxUi,
     pub(super) text_limit: super::composer_ui::TextLimitMemo,
@@ -137,7 +145,7 @@ impl ComposerUi {
             drop_state: None,
             archive: Default::default(),
             drop_preview: None,
-            slow_mode_tick_chat: None,
+            slow_mode_tick: SlowModeTick::Idle,
             send_box: super::send_box_state::SendBoxUi::new(),
             text_limit: Default::default(),
             spelling: Default::default(),

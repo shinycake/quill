@@ -4,7 +4,8 @@
 use super::app::QuillApp;
 use super::demo::{demo_file_json, demo_media_allowlist, demo_thumb_png_path};
 use super::play_intent::PlayTarget;
-use super::playback_state::{ChatMessage, SeekHover, SeekSite};
+use super::playback_state::{ChatMessage, PlaybackTick, SeekHover, SeekSite};
+use super::players_state::BuildsWatch;
 use super::*;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::slider::{SliderEvent, SliderState, SliderValue};
@@ -259,13 +260,13 @@ impl QuillApp {
     }
 
     fn watch_audio_builds(&mut self, cx: &mut Context<Self>) {
-        if std::mem::replace(&mut self.players.builds_watched, true) {
+        if self.players.builds.is_watching() {
             return;
         }
         self.players.audio.set_on_built(|| AUDIO_BUILT.poke());
         let mut seen = AUDIO_BUILT.epoch();
         // screen-scope: the player is the app's; its builds land for whichever account is on screen.
-        Self::spawn_app(cx, async move |this, cx| {
+        let task = Self::spawn_app(cx, async move |this, cx| {
             loop {
                 AUDIO_BUILT.wait_since(seen).await;
                 seen = AUDIO_BUILT.epoch();
@@ -274,8 +275,8 @@ impl QuillApp {
                     break;
                 }
             }
-        })
-        .detach();
+        });
+        self.players.builds = BuildsWatch::Watching { _task: task };
     }
 
     fn land_audio_build(&mut self, cx: &mut Context<Self>) {
@@ -379,15 +380,13 @@ impl QuillApp {
     /// (`media_session`), a change to the chat list that may move Previous
     /// or Next, or a resume or seek.
     pub(super) fn spawn_playback_tick(&mut self, cx: &mut Context<Self>) {
-        if self.playback.tick {
+        if self.playback.tick.is_running() {
             // A new track on a paused tick: it plays now.
             quill::wake::CHROME.poke();
             return;
         }
-        self.playback.tick = true;
-        self.playback.tick_shown = None;
         // window-scope: the track is the screen's; the bar it moves is redrawn in every window.
-        self.spawn_screen(cx, async move |this, cx| {
+        let task = self.spawn_screen(cx, async move |this, cx| {
             let mut wait = Some(PLAYBACK_TICK);
             let mut seen = quill::wake::CHROME.epoch();
             loop {
@@ -458,7 +457,7 @@ impl QuillApp {
                         // in a chat not on screen redraws only the chat
                         // list, so the tick watches Previous / Next too.
                         let shown = this.track_shown(this.playlist_can_move());
-                        let moved = this.playback.tick_shown.replace(shown) != Some(shown);
+                        let moved = this.playback.tick.note_shown(shown);
                         if finished {
                             cx.notify();
                         } else if moved {
@@ -474,10 +473,13 @@ impl QuillApp {
                 wait = next;
             }
             let _ = this.update(cx, |this, _| {
-                this.playback.tick = false;
+                this.playback.tick = PlaybackTick::Idle;
             });
-        })
-        .detach();
+        });
+        self.playback.tick = PlaybackTick::Running {
+            shown: None,
+            _task: task,
+        };
     }
 
     /// The position moved: redraw the seek bars, the player bar and the

@@ -2,6 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use crate::ui::composer_state::SlowModeTick;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::ChatId;
@@ -87,10 +88,10 @@ impl QuillApp {
         else {
             return;
         };
-        if self.composer_ui.slow_mode_tick_chat == Some(chat_id) {
+        if self.composer_ui.slow_mode_tick == SlowModeTick::Ticking(chat_id) {
             return;
         }
-        self.composer_ui.slow_mode_tick_chat = Some(chat_id);
+        self.composer_ui.slow_mode_tick = SlowModeTick::Ticking(chat_id);
         self.spawn_scoped(cx, async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
@@ -104,8 +105,8 @@ impl QuillApp {
                         if still_open && still_gated {
                             true
                         } else {
-                            if this.composer_ui.slow_mode_tick_chat == Some(chat_id) {
-                                this.composer_ui.slow_mode_tick_chat = None;
+                            if this.composer_ui.slow_mode_tick == SlowModeTick::Ticking(chat_id) {
+                                this.composer_ui.slow_mode_tick = SlowModeTick::Idle;
                             }
                             false
                         }

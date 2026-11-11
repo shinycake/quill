@@ -28,6 +28,33 @@ pub(crate) struct SeekHover {
 
 pub(crate) use quill::ids::ChatMessage;
 
+/// The playback progress tick: no task, or one running with what the seek
+/// bars, the player bar and the Touch Bar showed of the track at its last
+/// pass (it redraws them only when that changed). Dropping the stage drops
+/// the task.
+pub(super) enum PlaybackTick {
+    Idle,
+    Running {
+        shown: Option<TrackShown>,
+        _task: gpui_kit::Task<()>,
+    },
+}
+
+impl PlaybackTick {
+    pub(super) fn is_running(&self) -> bool {
+        matches!(self, Self::Running { .. })
+    }
+
+    /// Record what the pass showed; whether it differs from the pass
+    /// before.
+    pub(super) fn note_shown(&mut self, now: TrackShown) -> bool {
+        match self {
+            Self::Running { shown, .. } => shown.replace(now) != Some(now),
+            Self::Idle => false,
+        }
+    }
+}
+
 /// The active track as the seek bars, the player bar and the Touch Bar
 /// draw it (`PlaybackUi::track_shown`). A paused track's stays the same
 /// until its chat gains or loses a song.
@@ -66,11 +93,8 @@ pub(crate) struct PlaybackUi {
     pub(super) seek_preview_secs: Option<f64>,
     /// Where the pointer rests over a seek control of the active track.
     pub(super) seek_hover: Option<SeekHover>,
-    /// Guard for the playback progress tick task.
-    pub(super) tick: bool,
-    /// What the seek bars, the player bar and the Touch Bar showed of the
-    /// track at the last tick: the tick redraws them only when it changed.
-    pub(super) tick_shown: Option<TrackShown>,
+    /// The playback progress tick task, while one runs.
+    pub(super) tick: PlaybackTick,
     /// Last known position per chat message, so rows keep their seek bar fill (and
     /// resume from it) after pause/stop.
     pub(super) positions: HashMap<ChatMessage, f64>,
@@ -130,8 +154,7 @@ impl PlaybackUi {
             seek_scrubbing: false,
             seek_preview_secs: None,
             seek_hover: None,
-            tick: false,
-            tick_shown: None,
+            tick: PlaybackTick::Idle,
             positions: HashMap::new(),
             playing_animation: None,
             autoplayed_gifs: Default::default(),

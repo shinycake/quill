@@ -100,7 +100,7 @@ pub(super) fn live_pip_window(
             app.group_call
                 .live_pip
                 .as_ref()
-                .and_then(|link| link.window.as_ref())
+                .and_then(|link| link.window.window())
                 .map(|window| window.window)
         })
         .expect("the live PiP opened");
@@ -148,7 +148,7 @@ fn a_stream_pip_shows_the_live_badge_and_no_scrubber(cx: &mut TestAppContext) {
         let link = app.group_call.live_pip.as_ref().expect("the link");
         let view = link
             .window
-            .as_ref()
+            .window()
             .and_then(|window| window.view.upgrade())
             .expect("its view");
         let pip = view.read(cx);

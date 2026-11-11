@@ -50,7 +50,7 @@ impl QuillApp {
             return;
         };
         // Not made yet: it opens on the slot's player.
-        let Some(window) = link.window.clone() else {
+        let Some(window) = link.window.window().cloned() else {
             return;
         };
         let source = link.source;

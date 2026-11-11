@@ -47,7 +47,7 @@ fn pip_player(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<Vid
             .live_pip
             .as_ref()?
             .window
-            .as_ref()?
+            .window()?
             .view
             .upgrade()?;
         view.read(cx).player().cloned()
@@ -57,7 +57,7 @@ fn pip_player(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<Vid
 fn pip_window_id(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<WindowId> {
     app.read_with(vcx, |app, _| {
         let link = app.group_call.live_pip.as_ref()?;
-        link.window.as_ref().map(|window| window.window.window_id())
+        link.window.window().map(|window| window.window.window_id())
     })
 }
 

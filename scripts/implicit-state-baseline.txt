@@ -43,7 +43,6 @@ CraftSession::candidates_loading
 DestRow::saved
 DragSelect::pending
 Drawn::leaving
-DropTopic::load_failed
 EarnLimits::app_config_loaded
 EmojiPanel::mutation_failed
 EmojiStyleUi::started
