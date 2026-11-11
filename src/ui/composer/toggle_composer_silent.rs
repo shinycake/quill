@@ -98,8 +98,23 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// M1: load the chat's scheduled sends and open the dialog.
+    /// M1: load the chat's scheduled sends and open the dialog, nothing
+    /// ticked.
     pub(in crate::ui) fn open_scheduled_dialog(&mut self, cx: &mut Context<Self>) {
+        self.request_scheduled_list();
+        self.chat_ui.scheduled_box.open_fresh();
+        cx.notify();
+    }
+
+    /// The dialog comes back from the schedule picker (a new time, or
+    /// Cancel): the messages ticked before it stay ticked.
+    pub(in crate::ui) fn resume_scheduled_dialog(&mut self, cx: &mut Context<Self>) {
+        self.request_scheduled_list();
+        self.chat_ui.scheduled_box.resume();
+        cx.notify();
+    }
+
+    fn request_scheduled_list(&mut self) {
         self.chat_ui.hide_schedule_popup();
         if let Some(live) = self.live.as_mut()
             && let Some(chat_id) = live.driver.session.open_chat_id()
@@ -113,8 +128,6 @@ impl QuillApp {
                 ))),
             }
         }
-        self.chat_ui.scheduled_dialog_open = true;
-        cx.notify();
     }
 
     /// M1: delete a scheduled send (`deleteMessages`, revoke false —

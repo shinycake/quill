@@ -303,7 +303,7 @@ impl QuillApp {
         );
         self.chat_ui.schedule_picker = None;
         if reopen {
-            self.open_scheduled_dialog(cx);
+            self.resume_scheduled_dialog(cx);
         }
         cx.notify();
     }
@@ -402,13 +402,13 @@ impl QuillApp {
             }
             ScheduleTarget::Reschedule(message_id) => {
                 self.edit_scheduled_state(message_id, scheduling, cx);
-                self.open_scheduled_dialog(cx);
+                self.resume_scheduled_dialog(cx);
             }
             ScheduleTarget::RescheduleSelected => {
-                for id in std::mem::take(&mut self.chat_ui.scheduled_selected) {
+                for id in self.chat_ui.scheduled_box.take_selected() {
                     self.edit_scheduled_state(id, scheduling, cx);
                 }
-                self.open_scheduled_dialog(cx);
+                self.resume_scheduled_dialog(cx);
             }
             ScheduleTarget::Share => {
                 self.submit_share(
@@ -555,7 +555,6 @@ impl QuillApp {
                 .tooltip(title)
                 .accessibility_label(title)
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.chat_ui.scheduled_selected.clear();
                     this.open_scheduled_dialog(cx);
                 }))
                 .into_any_element(),
@@ -573,7 +572,7 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::Scheduled, |this, _, cx| {
-                this.chat_ui.scheduled_dialog_open = false;
+                this.chat_ui.scheduled_box.close();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
@@ -601,7 +600,7 @@ impl QuillApp {
 
     /// The scheduled messages that are ticked and still scheduled.
     fn selected_scheduled(&self) -> Vec<MessageId> {
-        let mut selected = self.chat_ui.scheduled_selected.clone();
+        let mut selected = self.chat_ui.scheduled_box.selected().to_vec();
         let existing: Vec<MessageId> = self
             .session()
             .and_then(|s| Some(s.scheduled_in(s.open_chat_id()?).map(|m| m.id).collect()))
@@ -632,7 +631,7 @@ impl QuillApp {
                         for id in ids {
                             this.edit_scheduled_state(id, ComposerScheduling::None, cx);
                         }
-                        this.chat_ui.scheduled_selected.clear();
+                        this.chat_ui.scheduled_box.clear_selection();
                         cx.notify();
                     });
                     true
@@ -662,7 +661,7 @@ impl QuillApp {
                         for id in ids {
                             this.delete_scheduled_message(id, cx);
                         }
-                        this.chat_ui.scheduled_selected.clear();
+                        this.chat_ui.scheduled_box.clear_selection();
                         cx.notify();
                     });
                     true
@@ -705,7 +704,7 @@ impl QuillApp {
                     .ghost()
                     .small()
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.chat_ui.scheduled_dialog_open = false;
+                        this.chat_ui.scheduled_box.hide_for_picker();
                         this.open_schedule_picker(ScheduleTarget::RescheduleSelected, window, cx);
                         this.close_kit_dialog_if_done(DialogKind::Scheduled, window, cx);
                     })),
@@ -725,7 +724,7 @@ impl QuillApp {
                     .ghost()
                     .small()
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.chat_ui.scheduled_selected.clear();
+                        this.chat_ui.scheduled_box.clear_selection();
                         cx.notify();
                     })),
             )
@@ -797,7 +796,7 @@ impl QuillApp {
                         .label(tr(keys::Q_OPS_RESCHEDULE))
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.chat_ui.scheduled_dialog_open = false;
+                            this.chat_ui.scheduled_box.hide_for_picker();
                             this.open_schedule_picker(ScheduleTarget::Reschedule(id), window, cx);
                             this.close_kit_dialog_if_done(DialogKind::Scheduled, window, cx);
                         })),
@@ -808,7 +807,7 @@ impl QuillApp {
                         .label(tr(keys::Q_OPS_EDIT))
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.chat_ui.scheduled_dialog_open = false;
+                            this.chat_ui.scheduled_box.close();
                             this.begin_edit(edit.clone(), window, cx);
                             this.close_kit_dialog_if_done(DialogKind::Scheduled, window, cx);
                         })),
@@ -841,10 +840,7 @@ impl QuillApp {
                                 Checkbox::new(format!("scheduled-pick-{}", id.0))
                                     .checked(selected.contains(&id))
                                     .on_click(cx.listener(move |this, _, _, cx| {
-                                        quill::selection_pin::toggle_id(
-                                            &mut this.chat_ui.scheduled_selected,
-                                            id,
-                                        );
+                                        this.chat_ui.scheduled_box.toggle(id);
                                         cx.notify();
                                     })),
                             )
@@ -879,12 +875,12 @@ impl QuillApp {
 crate::ui::shell::register_dialogs! {
     Scheduled => DialogSpec::new(
         300,
-        |app| app.chat_ui.scheduled_dialog_open,
+        |app| app.chat_ui.scheduled_box.is_open(),
         QuillApp::build_scheduled_dialog,
     )
     .per_window()
     .close(|app, _, cx| {
-            app.chat_ui.scheduled_dialog_open = false;
+            app.chat_ui.scheduled_box.close();
             cx.notify();
         }),
 }

@@ -55,7 +55,6 @@ impl QuillApp {
         if self.shortcut_blocked(window, cx) || self.writable_open_chat().is_none() {
             return false;
         }
-        self.chat_ui.scheduled_selected.clear();
         self.open_scheduled_dialog(cx);
         true
     }

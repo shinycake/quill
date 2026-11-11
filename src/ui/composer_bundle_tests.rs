@@ -193,8 +193,8 @@ fn the_scheduled_list_and_the_link_preview_toggle_follow_the_chat(cx: &mut TestA
     let vcx = &mut vcx;
     app.update_in(vcx, |app, window, cx| {
         assert!(app.show_scheduled_by_key(window, cx));
-        assert!(app.chat_ui.scheduled_dialog_open);
-        app.chat_ui.scheduled_dialog_open = false;
+        assert!(app.chat_ui.scheduled_box.is_open());
+        app.chat_ui.scheduled_box.close();
 
         // No link in the text: nothing to toggle.
         assert!(!app.toggle_link_preview_by_key(window, cx));

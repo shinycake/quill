@@ -722,6 +722,29 @@ fn an_edit_leaves_edit_mode_only_on_its_answer(cx: &mut TestAppContext) {
     assert_ne!(field(&app, vcx), "the edited text", "the draft is back");
 }
 
+/// Sweep r2-24 (08-089, 08-090): an edit already sent cannot be cancelled
+/// (it would land anyway); sending closes an open "Cancel editing?" box.
+#[gpui_kit::test]
+fn a_sent_edit_cannot_be_cancelled(cx: &mut TestAppContext) {
+    use quill::ids::RequestId;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    begin_edit(&app, vcx);
+    set_field(&app, vcx, "something else entirely");
+    escape(&app, vcx);
+    assert!(confirm_open(&app, vcx));
+    app.update(vcx, |app, _| app.chat_ui.mark_edit_sending(RequestId(7)));
+    assert!(!confirm_open(&app, vcx), "sending ends the question");
+    escape(&app, vcx);
+    assert!(!confirm_open(&app, vcx), "no box over a sent edit");
+    assert!(editing(&app, vcx), "the answer decides, not Esc");
+    app.update(vcx, |app, _| {
+        app.chat_ui.set_cancel_edit_confirm(true);
+        assert!(!app.chat_ui.cancel_edit_confirm_open());
+        assert_eq!(app.chat_ui.edit_sending(), Some(RequestId(7)));
+    });
+}
+
 /// Sweep 08-135: a rich send that TDLib refuses gives its text back.
 #[gpui_kit::test]
 fn a_refused_rich_send_gives_the_text_back(cx: &mut TestAppContext) {
