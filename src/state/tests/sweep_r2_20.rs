@@ -122,3 +122,66 @@ fn a_report_waits_for_its_own_request_and_leaves_on_its_error_or_a_failed_send()
     apply_json(&mut session, &seq, &sink, &error(asked));
     assert!(matches!(session.messages.sponsored_report, SponsoredReportFlow::Idle));
 }
+
+#[test]
+fn an_older_sessions_refresh_neither_fails_nor_fills_the_newer_one_in_either_order() {
+    let sessions_json = |extra: RequestId| {
+        format!(r#"{{"@type":"sessions","@extra":"{}","sessions":[]}}"#, extra.0)
+    };
+    let error_json = |extra: RequestId| {
+        format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"boom"}}"#,
+            extra.0
+        )
+    };
+    for newest_first in [false, true] {
+        let (mut session, sink) = session();
+        let seq = AtomicU64::new(0);
+        let old = session.request(RequestPurpose::GetActiveSessions, None);
+        session.settings.sessions.begin();
+        session.settings.sessions.sent(old);
+        let new = session.request(RequestPurpose::GetActiveSessions, None);
+        session.settings.sessions.begin();
+        session.settings.sessions.sent(new);
+        if newest_first {
+            apply_json(&mut session, &seq, &sink, &sessions_json(new));
+            apply_json(&mut session, &seq, &sink, &error_json(old));
+        } else {
+            apply_json(&mut session, &seq, &sink, &error_json(old));
+            assert!(session.settings.sessions.is_loading(), "the older error is not the newer fetch's");
+            apply_json(&mut session, &seq, &sink, &sessions_json(new));
+        }
+        assert!(session.settings.sessions.data().is_some(), "newest_first={newest_first}");
+        assert!(session.settings.sessions.error().is_none());
+    }
+}
+
+#[test]
+fn a_scope_default_update_beats_the_fetch_still_out() {
+    use crate::telegram::envelope::NotificationSettingsScope::GroupChats;
+    let (mut session, _sink) = session();
+    let ask = session.request_for_scope(RequestPurpose::GetScopeNotificationSettings, GroupChats);
+    session.settings.scope_notification_settings.begin(GroupChats, ask);
+    let update = ScopeNotificationSettings {
+        mute_for: 77,
+        ..Default::default()
+    };
+    session
+        .settings
+        .scope_notification_settings
+        .insert(GroupChats, update);
+    // The fetch's older answer finds nothing waiting for it.
+    let older = ScopeNotificationSettings::default();
+    assert!(!session
+        .settings
+        .scope_notification_settings
+        .answered(GroupChats, Some(ask), older));
+    assert_eq!(
+        session
+            .settings
+            .scope_notification_settings
+            .get(&GroupChats)
+            .map(|s| s.mute_for),
+        Some(77)
+    );
+}

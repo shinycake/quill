@@ -8043,3 +8043,46 @@ whose variants carry the data, with a way out of every stage.
 - **A refused refetch of a stale proxy list** lands in
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
+
+### Sweep fixes (r2-20)
+
+Round 2, bundle 20: the state of messages, payments, settings, stickers,
+stories, threads and users. Every fetch answer and error lands only in the
+stage whose request it is; one-shot slots and hand-kept flags became a value
+of their own.
+
+| id | what changed |
+| --- | --- |
+| 05-039 | `SponsoredReportFlow` has `Choosing(target)` (before the send) and `Asking { target, request }`; the request is never an `Option` in a stage, `Picking` holds the flight only |
+| 03-A007, 05-036 | `EarnPage::ton/stars/ad_account_url` are `Load<T>` with the `RequestId` inside `Loading`; an answer or error settles only its own request; the Buy Ads link has its own failed and empty stages |
+| 05-031 | gift collections are `Fetch<Vec<GiftCollection>>` with a request id; a failure is drawn with Retry; a change outdates it |
+| 05-034, 05-035 | giveaway options answer through `Fetch::answered`/`failed` by request id; `GiveawayLaunch::Launching` holds a `RequestId` (no 0 sentinel). The `map_or(0, ..)` in `payments/gift_market.rs` is guarded by `waits_for(0)` and `purpose` implying a pending request; its typed conversion belongs to the gift market bundle (`gift_market/state.rs`) |
+| 05-032 | the checkout is one `Checkout { request, form, order_info, shipping_id, note }` replaced whole when it opens, its form arrives or fails, and when it closes (`start_invoice_checkout` no longer resets four of five by hand; a failed form fetch no longer leaves `shows()` true) |
+| 05-033 | "Media Unlocked" and a failed receipt go through the `notices` queue; verification pages queue (a second payment no longer replaces the first), and leaving the account's screen ends `Verifying` |
+| 05-042 | sessions, websites, storage statistics, account TTL, auto-delete and saved sounds are matched by request id at every answer and error site; every `begin()` is followed by `sent(extra)` |
+| 05-043, 08-033 | Business saves are `(RequestId, kind)` removed by id; the refusal carries its `BusinessArea` and a screen draws only its own |
+| 05-040 | `BotLookup` legs are `LookupLeg` (`Asking(request)`, `Found`, `Failed`); a refused search says so instead of "not found" |
+| 08-031 | a bot save does not rewrite the `connected_bot` fetch; the fetch answers only under its request; the save answer forgets the written bot only when no other save is out |
+| 05-045 | `SetOption { generation }` and `Synchronize { generation }` belong to their switch; their error ends it with `SwitchFailed` |
+| 05-044 | quick reply `sending`/`changing` mirrors are deleted; the request registry carries what each request is for (`subject_id`) |
+| 05-041 | `ScopeSettings`: one `Fetch` per scope (no loading set beside the data); a refused scope shows Retry and is asked again when the page opens, not on every ingest |
+| 05-046 | `pending_attention: bool` became `attention_chats: Vec<ChatId>`; its baseline and allow lines are gone |
+| 05-047 | `data_storage_dirty` is deleted: the driver writes when `data_storage != data_storage_persisted` (set only after a good write); auto-download answers are kept per request and taken by the editor that sent the save |
+| 05-057 | `AttachedSets { Idle, Asked(request), Answered(first) }` replaces `attached_request` + `attached_answer` |
+| 05-063 | `ManagerCommit::stage: CommitStage { Queued, Sent(request) }`; the failure the manager records is now read by the poll and shown once |
+| 05-058 | `MasksPanel::archived` is `Fetch<ArchivedMasks>` with the next offset inside |
+| 05-054 | one `active_reactions` list |
+| 05-055 | the stale marks are `Fetch::Outdated` on their lists (`recent`, `favorites`, `trending`, saved GIFs, installed sets) and `MessageReactionsState::Stale` for the open picker; a refused refetch keeps the mark |
+| 05-051 | `StoriesState::available_reactions` is a `Fetch` answered only by `GetStoryAvailableReactions` under its request; a failure is stored and the next open asks again |
+| 05-059 | `ForumTopicsMap::begin(chat, request)`; the answer and error settle only that request, so a list dropped for a created topic stays dropped |
+| 05-052 | `CloseFriendsList::answered(request, ids)` |
+| 05-053 | contact changes `outdate()` the list in place (it no longer blanks under a spinner); the refetch drops the older in-flight `getContacts` |
+| 05-060 | `SaveWatch::take_outcome` reads the request registry itself instead of a caller-supplied `in_flight` |
+
+Files read again from the top with the re-sweep criteria and left with no
+finding: every file of the bundle. Kept as they are, with the reason: the
+one-shot UI notes in `MessagesState` (`Notes`, `message_link`,
+`instant_view`, AI results) are each drained by the one surface that asked
+and their register entries were all closed in round 1;
+`StickersManager::open` and `sponsored_hidden` are a box's visibility and a
+fact the server confirmed.
