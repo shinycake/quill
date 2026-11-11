@@ -18,6 +18,9 @@ use std::time::Instant;
 pub(crate) struct PinDrag {
     pub(super) archived: bool,
     pub(super) reorder: quill::pin_reorder::PinReorder,
+    /// A press on another pinned row that went down during the release
+    /// slide: the slide goes on, and that row's drag starts under the pointer.
+    pub(super) next_press: Option<(i64, f32)>,
 }
 
 /// The pinned-row gesture: a press that may become a drag, then the drag
@@ -51,22 +54,44 @@ impl PinGesture {
         }
     }
 
-    /// A press went down on `chat`. A release slide in progress goes on.
+    /// A press went down on `chat`. A release slide in progress goes on;
+    /// the press waits in it for the drag it may become.
     pub(super) fn press(&mut self, chat: i64, y: f32) {
-        if !matches!(self, Self::Dragging(_)) {
-            *self = Self::Pressed { chat, y };
+        match self {
+            Self::Dragging(drag) => drag.next_press = Some((chat, y)),
+            _ => *self = Self::Pressed { chat, y },
         }
     }
 
     /// Where the press on `chat` went down, taking it.
     pub(super) fn take_press(&mut self, chat: i64) -> Option<f32> {
-        match *self {
-            Self::Pressed { chat: pressed, y } if pressed == chat => {
+        match self {
+            Self::Pressed { chat: pressed, y } if *pressed == chat => {
+                let y = *y;
                 *self = Self::Idle;
                 Some(y)
             }
+            Self::Dragging(drag) => match drag.next_press {
+                Some((pressed, y)) if pressed == chat => {
+                    drag.next_press = None;
+                    Some(y)
+                }
+                _ => None,
+            },
             _ => None,
         }
+    }
+
+    /// The release slide settled: the gesture ends, but a press made
+    /// during it stays pressed.
+    pub(super) fn settle(&mut self) {
+        *self = match std::mem::take(self) {
+            Self::Dragging(PinDrag {
+                next_press: Some((chat, y)),
+                ..
+            }) => Self::Pressed { chat, y },
+            _ => Self::Idle,
+        };
     }
 
     /// End the gesture, unsaved. Whether a drag was running.

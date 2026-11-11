@@ -665,6 +665,7 @@ impl QuillApp {
                         PinGesture::Dragging(crate::ui::chat_list_state::PinDrag {
                             archived: drag.archived,
                             reorder,
+                            next_press: None,
                         })
                     });
             // A reorder is not a long press: no peek preview over the drag.

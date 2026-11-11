@@ -6796,37 +6796,39 @@ lost the fields it replaced.
 | 07-019 | `LifecycleStage { Closed, Open, ConfirmDelete, ConfirmLogout }`: at most one inline confirm is armed. |
 | 07-020 | `AccountOp { Idle, Loading(id), Mutating(id), Failed(line) }` for the account TTL and Delete Account (answers settle by request id); `default_auto_delete: Fetch<i32>`. A TTL write can no longer start while the read is out. `AuthState::password_state_loading` is already `PasswordFlight`. |
 | 07-021 | Skipped: already `OpenNotice` + `AgeCheck`. |
-| 07-022, 09-095, 09-X049 | The scroll hook is set on every open of the page (setting it again replaces it), so `event_log_hooked` is gone; the poll is `EventLogPoll { Idle, Running(chat) }`. The keystroke counter and the autoload mark are tokens, not stages. |
+| 07-022, 09-095, 09-X049 | The scroll hook is set on every open of the page (setting it again replaces it), so `event_log_hooked` is gone. `AdminUi::event_log_page: Option<EventLogPage>` is the page last opened with the timers that belong to it: the poll task, the search debounce task and the autoload mark. Opening it for another chat replaces it, which stops the first chat's timers (the old `EventLogPoll` was a chat id the detached task reset itself, and a second chat overwrote the first's mark). A newer search edit replaces the debounce task, so the keystroke counter is gone. |
 | 10-090 | `TextPromptKind::CustomTitle { chat_id, user_id }` and `CommunityName { community_id }` carry their owners; `UsernameDialog` has no `chat_id`. |
 | 10-091 | `GroupConfirmAction` variants carry their own chat (`DeleteChat { chat_id }`, `BlockUser { chat_id, block }`, ...); the chat-less ones have none, and no `ChatId(0)` placeholder is left. The dialog slot stays one per account (the shell shows one box at a time). |
 | 01-029 | `DebugConfirm { Closed, Asking { logs_on } }`. |
 | 07-037 | Skipped: already `ComposerStage`; `local_error` is a form validation line, not a stage. |
 | 07-038 | `CustomThemes { Unread, Reading { task }, Read(list) }`. |
-| 07-039 | `Omarchy { Unprobed, Absent, Found, Watching }`. |
-| 07-046 | `Standing { Current, Stale, Failed }` replaces `failed` + `stale`; `Fault { None, Seen, Unseen }` replaces `error` + `start_failed` (a later success clears an untold start failure, which the next build start did already). `track`, `building` and `sim_clock` stay: the old sound plays on while a seek builds, and the simulation is the demo backend. |
-| 07-047 | `DeviceLink { Down { failed_at }, Opening, Up(device) }` and `Watch { None, Running }` (the watch thread outlives a taken device by design). |
+| 07-039 | `Omarchy { Unprobed, Absent, Found, Watching { state, _task } }`: the watcher is owned by its stage, so leaving it (`use_omarchy_dir`) stops it and a second one can no longer run beside it. |
+| 07-046 | `Standing { Current, Stale, Failed }` replaces `failed` + `stale`; `Fault { None, Seen, Unseen }` replaces `error` + `start_failed`. An untold start failure stays until `take_start_failed` tells it: a later success, resume or lost player no longer clears it (`Fault::worked`, `Fault::seen`). `track`, `building` and `sim_clock` stay: the old sound plays on while a seek builds, and the simulation is the demo backend. |
+| 07-047 | `DeviceLink { Down { failed_at }, Opening, Up { device, watch } }`: the watch thread is a `WatchHandle` owned by the device's stage. Taking the device drops the handle, which stops the thread at its next look under the lock; a panicking watch marks its device unwatched so the next use starts another. No hand reset in `look` or `WatchEnded` is left. |
 | 08-039 | `ActiveTrack { None, Voice(id), Audio(id) }` and `Scrub { Idle, Dragging(secs) }`. The per-track data (`track_length`, `seek_slider`, `seek_hover`, the bar's chat and meta) is still separate and is cleared in `clear_playback_state`. |
 | 08-040, 12-007 | `PlaybackTick { Idle, Running { shown, task } }` and `BuildsWatch { Idle, Watching { task } }` hold their tasks. |
-| 08-046 | The registration consent is dropped in `AuthUi::follow_auth`, one place. |
+| 08-046 | `AuthUi::registration: RegistrationStep { Idle, Asking(terms), Accepted(terms) }` replaces the loose `accepted_registration_terms`; `follow_auth` builds it from the authorization state on every poll, so it exists only in `WaitRegistration` and a tick holds only for the terms it was given for. |
 | 08-044 | Skipped: already `TermsPrompt` + `TermsStage`. |
-| 08-023 | `BotTexts { Loading { name, about, loads }, Loaded, Failed }` in the session and `EditStage { Loading, Editing(SaveCheck) }` in the box. |
+| 08-023 | `BotText`/`BotSave` in the session (integration branch) and `EditStage { Loading, Editing(SaveCheck) }` in the box. The 150 ms fill loop is gone: the first frame after both texts are `Ready` (frame upkeep of the window hosting the box, like the Business box) fills the fields once and moves the stage to `Editing`. |
 | 08-017 | Skipped: already `BotStopStage`; `can_stop` is what the bot reports. |
 | 08-027 | The driver marks the similar-bots section `Loading` as it sends; Loading draws a label, not the fetch button. |
 | 08-004, 08-032 | `BotLink { Loading, Empty, Connected(id) }` and `BotNotice { None, Warning, ConfirmLeave }`. |
-| 08-031 | Skipped: the section drafts outlive the view that edits them (Picker, Day, TimeZone and StickerPick edit their parent's draft) and are dropped in one place, `business_go` on the hub. |
+| 08-031 | `BusinessDialog::screen: Screen`, one value: `Greeting { draft, picker }`, `Away { draft, picker }`, `Hours { draft, sub: Week / Day { day, rows } / TimeZone }`, `Location`, `StartPage { draft, sub: Page / Stickers }`, `ChatLinks { edit, confirm_delete }`, `Chatbots { draft, picker }`. A draft is `Draft::Waiting` until the full info arrives. A sub-screen is part of the section it hangs from, so the picker, the day rows, the sticker panel and the link box cannot outlive it, and `View` is derived. `local_error` and `note` are one `Line { None, Error, Note }`. |
 | 08-085 | `Loop { Off, On { sound, hold, phase } }` with `LoopPhase { Playing, Due(at) }`. |
 | 08-084 | `CueStage { Ringing, Connected, Ended }`. |
 | 08-080 | `RecentCallsPage { Idle, Loading(id), Failed }` and `RecentCallsClear { Idle, Clearing(id) }`. |
 | 08-087 | `PipWindowStage { Opening, Open(window) }`. |
-| 08-058 | `SlowModeTick { Idle, Ticking(chat) }`. |
+| 08-058 | `SlowModeTick { Idle, Ticking { chat, _task } }`: the stage owns the tick task; a tick for another chat replaces it. |
 | 08-051 | Skipped: already `AppearanceStage`. |
 | 08-063 | `DropOnRow { hover, seen: Dragged { Nothing, Files(FileDrag), Forward }, freeze: Freeze { Thawed, Frozen }, preview }`. |
 | 08-066 | A topic list request that cannot be sent marks the forum failed in the session set the chooser already reads; `DropTopic::load_failed` is gone. |
 | 08-069 | Skipped: already `SidebarTab`. |
-| 08-070 | `PinGesture { Idle, Pressed, Dragging }` and `ChatPeek { Idle, Pressing, Open }`. |
+| 08-070 | `PinGesture { Idle, Pressed, Dragging }` and `ChatPeek { Idle, Pressing, Open }`. A press on another pinned row during the release slide waits in the drag (`next_press`): the slide goes on, and that row's drag starts under the pointer (it used to start at the drag threshold). |
 
 Tests: `an_older_account_request_does_not_settle_a_newer_one`,
-`a_hidden_export_stays_hidden_until_the_box_is_asked_for_again`, and the
+`a_hidden_export_stays_hidden_until_the_box_is_asked_for_again`,
+`a_press_during_the_release_slide_starts_its_drag_under_the_pointer`,
+`a_watch_ends_with_its_device`, `a_second_chats_page_replaces_the_first`, and the
 existing ones updated to the new shapes (similar bots now assert that the
 driver, not the UI, marks Loading).
 

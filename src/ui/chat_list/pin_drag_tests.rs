@@ -212,3 +212,29 @@ fn a_bulk_pin_over_the_limit_opens_the_limit_box_and_pins_nothing(cx: &mut TestA
     assert_eq!(pinned, 0, "no free slot: nothing pinned");
     assert!(limit_open, "the limit box says why");
 }
+
+#[gpui_kit::test]
+fn a_press_during_the_release_slide_starts_its_drag_under_the_pointer(cx: &mut TestAppContext) {
+    let (app, mut vcx, pinned) = open(cx);
+    let (first, second) = (pinned[0], pinned[1]);
+    drag(&app, &mut vcx, first, 10.0);
+    drag(&app, &mut vcx, first, 20.0);
+    app.update(&mut vcx, |app, cx| app.finish_pin_drag(cx));
+    // The slide is running; the next row goes down at y = 120.
+    app.update(&mut vcx, |app, _| app.chat_list.pin.press(second, 120.0));
+    assert!(
+        app.read_with(&vcx, |app, _| app.chat_list.pin.drag().is_some()),
+        "the press does not cut the slide"
+    );
+    drag(&app, &mut vcx, second, 110.0);
+    let offset = app.read_with(&vcx, |app, _| {
+        app.chat_list.pin.drag().map(|drag| {
+            assert_eq!(drag.reorder.dragging(), Some(second));
+            drag.reorder.offset(second, std::time::Instant::now())
+        })
+    });
+    assert!(
+        offset.is_some_and(|offset| offset < -5.0),
+        "the row follows the pointer from the press ({offset:?})"
+    );
+}

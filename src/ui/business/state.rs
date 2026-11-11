@@ -34,21 +34,6 @@ pub(crate) enum View {
 }
 
 impl View {
-    /// Where Back goes.
-    pub(super) fn parent(self, picker_for: Option<Recipients>) -> View {
-        match self {
-            View::Day(_) | View::TimeZone => View::Hours,
-            View::Picker => match picker_for {
-                Some(Recipients::Away) => View::Away,
-                Some(Recipients::Bot) => View::Chatbots,
-                _ => View::Greeting,
-            },
-            View::StickerPick => View::StartPage,
-            View::LinkEdit => View::ChatLinks,
-            _ => View::Hub,
-        }
-    }
-
     /// Screens that save when they are left (tdesktop saves a section in
     /// its destructor).
     pub(super) fn saves_on_leave(self) -> bool {
@@ -222,21 +207,55 @@ pub(crate) struct ChatbotDraft {
     pub(super) notice: BotNotice,
 }
 
+/// The one line under the screen: a refusal or a passing confirmation
+/// ("Chat link copied to clipboard."). A new one replaces the old.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) enum Line {
+    #[default]
+    None,
+    Error(String),
+    Note(String),
+}
+
 pub(crate) struct BusinessDialog {
-    pub(super) view: View,
-    pub(super) greeting: Option<GreetingDraft>,
-    pub(super) away: Option<AwayDraft>,
-    pub(super) hours: Option<HoursDraft>,
-    pub(super) day_rows: Vec<DayRow>,
-    pub(super) location: Option<LocationDraft>,
-    pub(super) picker: Option<PickerDraft>,
-    pub(super) start_page: Option<StartPageDraft>,
-    pub(super) link_edit: Option<LinkEditDraft>,
-    /// The link waiting for "Delete" to be confirmed.
-    pub(super) confirm_delete: Option<String>,
-    pub(super) chatbot: Option<ChatbotDraft>,
+    pub(super) screen: super::screen::Screen,
     pub(super) zone_search: Entity<InputState>,
-    pub(super) local_error: Option<String>,
-    /// A passing confirmation ("Chat link copied to clipboard.").
-    pub(super) note: Option<String>,
+    pub(super) line: Line,
+}
+
+impl BusinessDialog {
+    pub(super) fn view(&self) -> View {
+        self.screen.view()
+    }
+
+    pub(super) fn local_error(&self) -> Option<&str> {
+        match &self.line {
+            Line::Error(line) => Some(line),
+            _ => None,
+        }
+    }
+
+    pub(super) fn note(&self) -> Option<&str> {
+        match &self.line {
+            Line::Note(line) => Some(line),
+            _ => None,
+        }
+    }
+
+    /// Drop a refusal; a confirmation stays.
+    pub(super) fn clear_error(&mut self) {
+        if matches!(self.line, Line::Error(_)) {
+            self.line = Line::None;
+        }
+    }
+
+    pub(super) fn take_error(&mut self) -> Option<String> {
+        match std::mem::take(&mut self.line) {
+            Line::Error(line) => Some(line),
+            other => {
+                self.line = other;
+                None
+            }
+        }
+    }
 }

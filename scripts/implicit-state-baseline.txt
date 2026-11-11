@@ -92,7 +92,6 @@ MiniAppWindow::waiting_write_access
 MutedSpeechHint::done
 NewChatView::busy
 NewChatView::busy+failure
-OutputState::opening
 Paged::loaded
 Paged::loading
 Paged::loading+error

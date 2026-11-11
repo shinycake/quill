@@ -317,6 +317,22 @@ impl Fault {
         }
     }
 
+    /// Something worked: the fault clears, except a start failure the app
+    /// has not been told yet, which stays until it is.
+    fn worked(&mut self) {
+        if !matches!(self, Self::Unseen(_)) {
+            *self = Self::None;
+        }
+    }
+
+    /// Something failed in a way the app asks about itself: an untold
+    /// start failure stays the one to tell.
+    fn seen(&mut self, error: AudioError) {
+        if !matches!(self, Self::Unseen(_)) {
+            *self = Self::Seen(error);
+        }
+    }
+
     /// A new build starts: a start failure it replaces is not told.
     fn build_started(&mut self) {
         if let Self::Unseen(error) = *self {
@@ -431,10 +447,10 @@ impl AudioEngine {
     }
 
     fn note(&mut self, result: &Result<(), AudioError>) {
-        self.fault = match result {
-            Ok(()) => Fault::None,
-            Err(error) => Fault::Seen(*error),
-        };
+        match result {
+            Ok(()) => self.fault.worked(),
+            Err(error) => self.fault.seen(*error),
+        }
     }
 
     /// What the track is doing, read from the sound itself.
@@ -542,7 +558,7 @@ impl AudioEngine {
         // thread; this is where one that couldn't open shows.
         if let Some(track) = self.track.as_ref().filter(|t| t.player.lost()) {
             track.player.pause();
-            self.fault = Fault::Seen(AudioError::NoOutput);
+            self.fault.seen(AudioError::NoOutput);
         }
     }
 
@@ -623,11 +639,11 @@ impl AudioEngine {
                     probe: built.probe,
                 });
                 self.standing = Standing::Current;
-                self.fault = if playing {
-                    Fault::None
+                if playing {
+                    self.fault.worked();
                 } else {
-                    Fault::Seen(AudioError::NoOutput)
-                };
+                    self.fault.seen(AudioError::NoOutput);
+                }
             }
         }
     }
@@ -741,12 +757,12 @@ impl AudioEngine {
                 clock.seek_at(0.0, now);
             }
             clock.resume_at(now);
-            self.fault = Fault::None;
+            self.fault.worked();
             return Ok(());
         }
         if let Some(building) = self.building.as_mut() {
             building.land_paused = false;
-            self.fault = Fault::None;
+            self.fault.worked();
             if let Some(track) = self
                 .track
                 .as_ref()
@@ -781,7 +797,7 @@ impl AudioEngine {
             self.note(&woke);
             return woke;
         }
-        self.fault = Fault::None;
+        self.fault.worked();
         Ok(())
     }
 

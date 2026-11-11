@@ -131,7 +131,7 @@ impl QuillApp {
         self.reset_link_save();
         self.business_go(View::LinkEdit, window, cx);
         if let Some(d) = self.business_mut() {
-            d.link_edit = Some(LinkEditDraft {
+            d.screen.open_link_edit(LinkEditDraft {
                 link: link.map(|l| l.link),
                 text,
                 name,
@@ -149,7 +149,7 @@ impl QuillApp {
             .dialogs
             .business_dialog
             .as_ref()
-            .and_then(|d| d.link_edit.as_ref())
+            .and_then(|d| d.screen.link_edit())
             .map(|e| {
                 (
                     e.link.clone(),
@@ -173,7 +173,7 @@ impl QuillApp {
             return;
         }
         if let Some(d) = self.business_mut() {
-            d.local_error = None;
+            d.clear_error();
         }
         cx.notify();
     }
@@ -187,7 +187,7 @@ impl QuillApp {
             Some(live) => live.driver.delete_chat_link(link),
         };
         if let Some(d) = self.business_mut() {
-            d.confirm_delete = None;
+            d.screen.set_confirm_delete(None);
         }
         if sent.is_err() {
             self.business_error(tr(keys::Q_OPS_COULD_NOT_DELETE_THE_LINK), cx);
@@ -288,7 +288,7 @@ impl QuillApp {
                             tr(keys::CHAT_LINK_DELETE),
                             |this, link, _, cx| {
                                 if let Some(d) = this.business_mut() {
-                                    d.confirm_delete = Some(link.link.clone());
+                                    d.screen.set_confirm_delete(Some(link.link.clone()));
                                 }
                                 cx.notify();
                             },
@@ -304,7 +304,7 @@ impl QuillApp {
             .dialogs
             .business_dialog
             .as_ref()
-            .and_then(|d| d.confirm_delete.clone());
+            .and_then(|d| d.screen.confirm_delete().cloned());
         let full = links
             .as_ref()
             .is_some_and(|l| l.len() >= self.business_links_max());
@@ -350,7 +350,7 @@ impl QuillApp {
                                     .ghost()
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         if let Some(d) = this.business_mut() {
-                                            d.confirm_delete = None;
+                                            d.screen.set_confirm_delete(None);
                                         }
                                         cx.notify();
                                     })),
@@ -447,7 +447,7 @@ impl QuillApp {
             .dialogs
             .business_dialog
             .as_ref()
-            .and_then(|d| d.link_edit.as_ref())
+            .and_then(|d| d.screen.link_edit())
             .map(|e| (e.text.clone(), e.name.clone()))
         else {
             return div();

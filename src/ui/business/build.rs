@@ -266,11 +266,11 @@ impl QuillApp {
             let Some((view, include, new_link, local_error, note)) =
                 this.dialogs.business_dialog.as_ref().map(|d| {
                     (
-                        d.view,
-                        d.picker.as_ref().is_some_and(|p| p.include),
-                        d.link_edit.as_ref().is_none_or(|e| e.link.is_none()),
-                        d.local_error.clone(),
-                        d.note.clone(),
+                        d.view(),
+                        d.screen.picker().is_some_and(|p| p.include),
+                        d.screen.link_edit().is_none_or(|e| e.link.is_none()),
+                        d.local_error().map(str::to_string),
+                        d.note().map(str::to_string),
                     )
                 })
             else {

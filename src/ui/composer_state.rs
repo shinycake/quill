@@ -42,11 +42,22 @@ impl DraftClear {
 }
 
 /// The slow-mode countdown's tick task: none, or running for a chat. The
-/// task sets `Idle` when the gate lifts or the open chat changes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// task is owned here: a tick for another chat replaces it, and dropping
+/// the composer stops it. It ends by itself when the gate lifts or the
+/// open chat changes, and the next gated frame starts a new one.
 pub(crate) enum SlowModeTick {
     Idle,
-    Ticking(ChatId),
+    Ticking {
+        chat: ChatId,
+        _task: gpui_kit::Task<()>,
+    },
+}
+
+impl SlowModeTick {
+    /// Whether a tick task for `chat_id` was started and has not ended.
+    pub(super) fn ticks_for(&self, chat_id: ChatId) -> bool {
+        matches!(self, Self::Ticking { chat, .. } if *chat == chat_id)
+    }
 }
 
 pub(crate) struct ComposerUi {

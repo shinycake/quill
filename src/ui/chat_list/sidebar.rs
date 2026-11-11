@@ -338,8 +338,10 @@ impl QuillApp {
             let now = std::time::Instant::now();
             // A deactivated window never gets the release: the drag ends
             // there, unsaved, instead of redrawing at 60 Hz for good.
-            if reorder.settled(now) || !self.frame.window_active.get() {
+            if !self.frame.window_active.get() {
                 self.chat_list.pin.end();
+            } else if reorder.settled(now) {
+                self.chat_list.pin.settle();
             } else {
                 self.request_animation_tick(60, cx);
             }

@@ -144,7 +144,7 @@ impl QuillApp {
     /// nothing is left to wait for: the screen is gone, the bot arrived,
     /// or the request failed (its error line shows).
     pub(super) fn business_bot_pump(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(mut draft) = self.business_mut().and_then(|d| d.chatbot.take()) else {
+        let Some(mut draft) = self.business_mut().and_then(|d| d.screen.take_chatbot()) else {
             return true;
         };
         if !draft.bot.is_loaded() {
@@ -156,7 +156,7 @@ impl QuillApp {
         });
         let done = draft.bot.is_loaded() || failed;
         if let Some(d) = self.business_mut() {
-            d.chatbot = Some(draft);
+            d.screen.put_chatbot(draft);
         }
         cx.notify();
         done
@@ -227,7 +227,7 @@ impl QuillApp {
 
     pub(super) fn add_business_bot(&mut self, user_id: i64, cx: &mut Context<Self>) {
         let (name, _) = self.business_bot_name(user_id);
-        if let Some(bot) = self.business_mut().and_then(|d| d.chatbot.as_mut()) {
+        if let Some(bot) = self.business_mut().and_then(|d| d.screen.chatbot_mut()) {
             bot.bot = BotLink::Connected(user_id);
             if bot.notice == BotNotice::ConfirmLeave {
                 bot.notice = BotNotice::None;
@@ -240,7 +240,7 @@ impl QuillApp {
     }
 
     fn remove_business_bot(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(bot) = self.business_mut().and_then(|d| d.chatbot.as_mut()) {
+        if let Some(bot) = self.business_mut().and_then(|d| d.screen.chatbot_mut()) {
             bot.bot = BotLink::Empty;
             bot.recipients = BusinessRecipients::everyone();
             bot.rights = BotRights::default();
@@ -263,10 +263,10 @@ impl QuillApp {
             .dialogs
             .business_dialog
             .as_ref()
-            .and_then(|d| d.chatbot.as_ref())
+            .and_then(|d| d.screen.chatbot())
             .and_then(|b| b.bot.connected());
         let name = committed.map(|id| self.business_bot_name(id).0);
-        if let Some(bot) = self.business_mut().and_then(|d| d.chatbot.as_mut()) {
+        if let Some(bot) = self.business_mut().and_then(|d| d.screen.chatbot_mut()) {
             let was = bot.rights;
             bot.rights.set(right, on);
             let warning = BotRights::warning(&was, &bot.rights).map(|text| {
@@ -378,7 +378,7 @@ impl QuillApp {
             .dialogs
             .business_dialog
             .as_ref()
-            .and_then(|d| d.chatbot.as_ref())
+            .and_then(|d| d.screen.chatbot())
             .map(|b| {
                 (
                     b.username.clone(),
@@ -451,7 +451,7 @@ impl QuillApp {
                                 .label(tr(keys::BOX_OK))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     if let Some(bot) =
-                                        this.business_mut().and_then(|d| d.chatbot.as_mut())
+                                        this.business_mut().and_then(|d| d.screen.chatbot_mut())
                                     {
                                         bot.notice = BotNotice::None;
                                     }
@@ -493,7 +493,7 @@ impl QuillApp {
                                     .ghost()
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         if let Some(bot) =
-                                            this.business_mut().and_then(|d| d.chatbot.as_mut())
+                                            this.business_mut().and_then(|d| d.screen.chatbot_mut())
                                         {
                                             bot.notice = BotNotice::None;
                                         }
@@ -508,7 +508,7 @@ impl QuillApp {
                                         // Clearing the field drops the found bots,
                                         // so leaving no longer asks.
                                         if let Some(bot) =
-                                            this.business_mut().and_then(|d| d.chatbot.as_mut())
+                                            this.business_mut().and_then(|d| d.screen.chatbot_mut())
                                         {
                                             let input = bot.username.clone();
                                             input.update(cx, |input, cx| {
@@ -597,7 +597,7 @@ impl QuillApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Leave {
-        let Some(draft) = self.business_mut().and_then(|d| d.chatbot.take()) else {
+        let Some(draft) = self.business_mut().and_then(|d| d.screen.take_chatbot()) else {
             return Leave::Go(None);
         };
         let found = matches!(
@@ -613,10 +613,10 @@ impl QuillApp {
         });
         let loaded = draft.bot.is_loaded();
         if let Some(d) = self.business_mut() {
-            d.chatbot = Some(draft);
+            d.screen.put_chatbot(draft);
         }
         if ask {
-            if let Some(bot) = self.business_mut().and_then(|d| d.chatbot.as_mut()) {
+            if let Some(bot) = self.business_mut().and_then(|d| d.screen.chatbot_mut()) {
                 bot.notice = BotNotice::ConfirmLeave;
             }
             cx.notify();

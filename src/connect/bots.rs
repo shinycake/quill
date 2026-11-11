@@ -202,13 +202,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let purpose = RequestPurpose::GetBotSimilarBots;
-        if self
-            .session
-            .requests
-            .has_purpose_for_user(purpose, bot_user_id)
-        {
-            return Ok(None);
-        }
         let extra = self.session.request_for_user(purpose, bot_user_id);
         if let Err(err) = self
             .sender

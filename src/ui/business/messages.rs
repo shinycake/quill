@@ -127,17 +127,17 @@ impl QuillApp {
         if let Some(d) = self.business_mut() {
             match kind {
                 MessageKind::Greeting => {
-                    if let Some(g) = d.greeting.as_mut() {
+                    if let Some(g) = d.screen.greeting_mut() {
                         g.enabled = on;
                     }
                 }
                 MessageKind::Away => {
-                    if let Some(a) = d.away.as_mut() {
+                    if let Some(a) = d.screen.away_mut() {
                         a.enabled = on;
                     }
                 }
             }
-            d.local_error = None;
+            d.clear_error();
         }
         cx.notify();
     }
@@ -222,7 +222,7 @@ impl QuillApp {
             .dialogs
             .business_dialog
             .as_ref()
-            .and_then(|d| d.greeting.as_ref())
+            .and_then(|d| d.screen.greeting())
             .map(|g| (g.enabled, g.days))
         else {
             return div();
@@ -265,7 +265,8 @@ impl QuillApp {
                                 .label(bs::days_label(*d))
                         }))
                         .on_click(cx.listener(|this, &ix: &usize, _, cx| {
-                            if let Some(g) = this.business_mut().and_then(|d| d.greeting.as_mut())
+                            if let Some(g) =
+                                this.business_mut().and_then(|d| d.screen.greeting_mut())
                                 && let Some(&days) = bs::INACTIVITY_DAYS.get(ix.min(3))
                             {
                                 g.days = days;
@@ -283,7 +284,7 @@ impl QuillApp {
             .dialogs
             .business_dialog
             .as_ref()
-            .and_then(|d| d.away.as_ref())
+            .and_then(|d| d.screen.away())
             .map(|a| {
                 (
                     a.enabled,
@@ -338,7 +339,7 @@ impl QuillApp {
                             .label(*label)
                     }))
                     .on_click(cx.listener(move |this, &ix: &usize, _, cx| {
-                        if let Some(a) = this.business_mut().and_then(|d| d.away.as_mut())
+                        if let Some(a) = this.business_mut().and_then(|d| d.screen.away_mut())
                             && let Some(choice) = choices.get(ix.min(2))
                         {
                             a.schedule = choice.0;
@@ -379,7 +380,7 @@ impl QuillApp {
                         offline_only,
                         cx,
                         |this, on, cx| {
-                            if let Some(a) = this.business_mut().and_then(|d| d.away.as_mut()) {
+                            if let Some(a) = this.business_mut().and_then(|d| d.screen.away_mut()) {
                                 a.offline_only = on;
                             }
                             cx.notify();
@@ -396,7 +397,7 @@ impl QuillApp {
             .dialogs
             .business_dialog
             .as_ref()
-            .and_then(|d| d.greeting.as_ref())
+            .and_then(|d| d.screen.greeting())
         else {
             return Leave::Go(None);
         };
@@ -427,7 +428,7 @@ impl QuillApp {
             .dialogs
             .business_dialog
             .as_ref()
-            .and_then(|d| d.away.as_ref())
+            .and_then(|d| d.screen.away())
         else {
             return Leave::Go(None);
         };

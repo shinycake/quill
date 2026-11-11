@@ -20,7 +20,6 @@ use quill::state::DeepLinkAction;
 use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
-use std::time::Duration;
 
 pub(super) struct BotEditDialog {
     bot_id: i64,
@@ -133,68 +132,28 @@ impl QuillApp {
             stage: EditStage::Loading,
         });
         self.open_box(DialogKind::BotEdit);
-        // The texts arrive from the session on the poll; fill the fields
-        // once. Watched until they arrive or the box closes, however slow
-        // the link: Save stays off until then. The fields are filled with
-        // the window the box opened in, or the main window once that one
-        // closed (the box goes on there).
-        let opened_in = window.window_handle();
-        self.spawn_screen(cx, async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(150))
-                    .await;
-                let Ok(main) = this.update(cx, |this, _| this.main_window.handle) else {
-                    break;
-                };
-                let filled = [Some(opened_in), main]
-                    .into_iter()
-                    .flatten()
-                    .find_map(|handle| {
-                        handle
-                            .update(cx, |_, window, cx| {
-                                this.update(cx, |this, cx| this.fill_bot_edit(window, cx))
-                            })
-                            .ok()
-                            .and_then(Result::ok)
-                    });
-                match filled {
-                    Some(true) => break,
-                    Some(false) => {}
-                    // No window could take the texts just now (the opening
-                    // one closed and the main one is hidden): try again
-                    // while the box is still open.
-                    None => {
-                        let open = this
-                            .update(cx, |this, _| this.dialogs.bot_edit_dialog.is_some())
-                            .unwrap_or(false);
-                        if !open {
-                            break;
-                        }
-                    }
-                }
-            }
-        })
-        .detach();
         cx.notify();
     }
 
-    /// Put the loaded texts in the fields; `true` when nothing is left to do.
-    fn fill_bot_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+    /// Frame upkeep of the window hosting the box: once the session holds
+    /// both texts, they go in the fields and the box is editing. Save stays
+    /// off until then. A failed load leaves the box as it is (it says so
+    /// and offers Close).
+    pub(in crate::ui) fn fill_bot_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(dialog) = self.dialogs.bot_edit_dialog.as_ref() else {
-            return true;
+            return;
         };
         if matches!(dialog.stage, EditStage::Editing(_)) {
-            return true;
+            return;
         }
         let Some(edit) = self.session().and_then(|s| s.bots.owned.edit.clone()) else {
-            return true;
+            return;
         };
         if edit.load_failed() {
-            return true;
+            return;
         }
         let (Some(name), Some(about)) = (edit.name.text(), edit.about.text()) else {
-            return false;
+            return;
         };
         let (name, about) = (name.to_string(), about.to_string());
         let (name_input, about_input) = (dialog.name.clone(), dialog.about.clone());
@@ -204,7 +163,6 @@ impl QuillApp {
             dialog.stage = EditStage::Editing(SaveCheck::Accepted);
         }
         cx.notify();
-        true
     }
 
     pub(super) fn close_bot_edit(&mut self, cx: &mut Context<Self>) {
@@ -339,7 +297,7 @@ impl QuillApp {
             let edit = this.session().and_then(|s| s.bots.owned.edit.clone());
             // Save diffs the fields against the bot's texts: until the
             // fields hold them, an empty field would clear the bot's.
-            let loaded = state.filled
+            let loaded = matches!(state.stage, EditStage::Editing(_))
                 && edit
                     .as_ref()
                     .is_some_and(|e| e.name.text().is_some() && e.about.text().is_some());

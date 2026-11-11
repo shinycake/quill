@@ -41,8 +41,12 @@ pub(crate) enum Omarchy {
     Unprobed,
     Absent,
     Found(OmarchyState),
-    /// Found, and the watcher re-reads it when the generation changes.
-    Watching(OmarchyState),
+    /// Found, and the watcher re-reads it when the generation changes. The
+    /// watcher's task is owned here: leaving this stage stops it.
+    Watching {
+        state: OmarchyState,
+        _task: Task<()>,
+    },
 }
 
 impl Omarchy {
@@ -54,25 +58,26 @@ impl Omarchy {
     fn state(&self) -> Option<&OmarchyState> {
         match self {
             Self::Unprobed | Self::Absent => None,
-            Self::Found(state) | Self::Watching(state) => Some(state),
+            Self::Found(state) | Self::Watching { state, .. } => Some(state),
         }
     }
 
-    /// The watcher started: `Found` becomes `Watching`.
-    fn watch(&mut self) {
+    /// The watcher started: `Found` becomes `Watching`. Any other stage has
+    /// no theme to watch, and the task is dropped (stopped).
+    fn watch(&mut self, task: Task<()>) {
         if let Self::Found(_) = self
             && let Self::Found(state) = std::mem::take(self)
         {
-            *self = Self::Watching(state);
+            *self = Self::Watching { state, _task: task };
         }
     }
 
     /// A re-read theme replaces the state, keeping the watcher's stage.
-    fn replace(&mut self, state: OmarchyState) {
-        *self = match self {
-            Self::Watching(_) => Self::Watching(state),
-            _ => Self::Found(state),
-        };
+    fn replace(&mut self, new: OmarchyState) {
+        match self {
+            Self::Watching { state, .. } | Self::Found(state) => *state = new,
+            Self::Unprobed | Self::Absent => *self = Self::Found(new),
+        }
     }
 }
 
@@ -107,9 +112,8 @@ impl QuillApp {
             return;
         };
         let dir = state.dir.clone();
-        self.preferences.app_theme.omarchy.watch();
         // screen-scope: the Omarchy watcher re-applies the app's appearance for whichever account is on screen.
-        cx.spawn(async move |this, cx| {
+        let task = cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(POLL).await;
                 let probe = dir.clone();
@@ -136,8 +140,8 @@ impl QuillApp {
                     return;
                 };
             }
-        })
-        .detach();
+        });
+        self.preferences.app_theme.omarchy.watch(task);
     }
 }
 

@@ -88,11 +88,10 @@ impl QuillApp {
         else {
             return;
         };
-        if self.composer_ui.slow_mode_tick == SlowModeTick::Ticking(chat_id) {
+        if self.composer_ui.slow_mode_tick.ticks_for(chat_id) {
             return;
         }
-        self.composer_ui.slow_mode_tick = SlowModeTick::Ticking(chat_id);
-        self.spawn_scoped(cx, async move |this, cx| {
+        let task = self.spawn_scoped(cx, async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
                 let cont = this
@@ -105,7 +104,8 @@ impl QuillApp {
                         if still_open && still_gated {
                             true
                         } else {
-                            if this.composer_ui.slow_mode_tick == SlowModeTick::Ticking(chat_id) {
+                            // The tick task is done: the stage goes with it.
+                            if this.composer_ui.slow_mode_tick.ticks_for(chat_id) {
                                 this.composer_ui.slow_mode_tick = SlowModeTick::Idle;
                             }
                             false
@@ -116,7 +116,11 @@ impl QuillApp {
                     break;
                 }
             }
-        })
-        .detach();
+        });
+        // A tick for another chat is replaced, which stops its task.
+        self.composer_ui.slow_mode_tick = SlowModeTick::Ticking {
+            chat: chat_id,
+            _task: task,
+        };
     }
 }
