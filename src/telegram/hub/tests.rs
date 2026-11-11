@@ -269,7 +269,11 @@ fn a_replacement_hub_keeps_the_open_clients_routed() {
     assert!(owned.seq > seen, "seq continues past the old hub's");
     let revision = session.revision;
     session.apply(owned);
-    assert_eq!(session.last_seq, seen + 1, "applied, not out-of-order-ignored");
+    assert_eq!(
+        session.last_seq,
+        seen + 1,
+        "applied, not out-of-order-ignored"
+    );
     assert!(session.revision > revision);
 }
 
