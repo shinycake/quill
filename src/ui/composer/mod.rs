@@ -137,6 +137,13 @@ impl QuillApp {
                     self.submit_rich_composer(blocks, window, cx);
                     return;
                 }
+                // In a bot's "All" view the message starts a thread of its
+                // own and goes there.
+                if let Some(chat_id) = self.open_chat_id()
+                    && self.send_waits_for_bot_thread(chat_id, &text, cx)
+                {
+                    return;
+                }
                 let plan = self.live.as_ref().map(|live| {
                     let session = &live.driver.session;
                     (
@@ -963,6 +970,7 @@ impl QuillApp {
 
 mod attach_picker;
 mod bar_clicks;
+pub(in crate::ui) mod bot_thread;
 mod cancel_edit_confirm;
 mod command_menu;
 pub(super) use command_menu::CommandMenu;

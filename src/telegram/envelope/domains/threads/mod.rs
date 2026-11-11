@@ -35,9 +35,12 @@ pub enum ThreadsPayload {
         total_count: i32,
         topics: Vec<ForumTopic>,
     },
-    /// `forumTopicInfo` — `createForumTopic` answer. Only the chat id is
-    /// kept; the topic list is refetched on success.
-    ForumTopic { chat_id: i64 },
+    /// `forumTopicInfo` — `createForumTopic` answer: the chat and the new
+    /// topic.
+    ForumTopic {
+        chat_id: i64,
+        info: Option<Box<ForumTopicInfoUpdate>>,
+    },
     /// Subsection tabs: `updateForumTopicInfo` (schema 1.8.67, line 10652).
     UpdateForumTopicInfo(ForumTopicInfoUpdate),
     /// Subsection tabs: `updateForumTopic` (schema 1.8.67, line 10665).
