@@ -374,11 +374,11 @@ fn move_to_my_wallet_opens_the_notice_once_the_gift_is_unlocked(cx: &mut TestApp
     assert_eq!(notice(&app, vcx), None);
     app.update_in(vcx, |app, window, cx| {
         app.transfer_step_back(window, cx);
-        if let Some(session) = app.demo_session.as_mut() {
-            if let Some(list) = session.payments.hub.gifts.data_mut() {
-                for gift in &mut list.gifts {
-                    gift.manage.export_date = 1;
-                }
+        if let Some(session) = app.demo_session.as_mut()
+            && let Some(list) = session.payments.hub.gifts.data_mut()
+        {
+            for gift in &mut list.gifts {
+                gift.manage.export_date = 1;
             }
         }
         app.tap_transfer_export(cx);

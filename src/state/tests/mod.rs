@@ -76,6 +76,7 @@ mod story_missing;
 mod story_page_ops;
 mod story_tray_load;
 mod subsection_tabs;
+mod sweep_is05;
 mod sweep_payments_2;
 mod sweep_s4_accounts;
 mod sweep_s4_links_tdlib_1;
