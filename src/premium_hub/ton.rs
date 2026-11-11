@@ -488,20 +488,9 @@ pub struct GramsHub {
     /// How many of `entries` have had their peers checked; the rows after
     /// it still need checking. A new first page starts again at zero.
     pub peers_checked: usize,
-    /// Collect's password box or security check, while open.
+    /// Collect's password box or security check while open, then how it
+    /// ended until the UI has acted on it.
     pub withdraw: Option<GramWithdraw>,
-    /// What closed the box, for the UI to act on once.
-    pub withdraw_outcome: Option<WithdrawOutcome>,
-}
-
-/// How Collect's box ended, for the window to act on once.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WithdrawOutcome {
-    /// Fragment's page from `getGramWithdrawalUrl`, to open through the
-    /// link policy.
-    Url(String),
-    /// `AMOUNT_TOO_SMALL` closed the box: show the toast.
-    TooSmall,
 }
 
 impl GramsHub {

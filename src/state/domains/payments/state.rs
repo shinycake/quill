@@ -443,3 +443,62 @@ impl PaymentsState {
         }
     }
 }
+
+impl PaymentsState {
+    /// The one way a gift's panel opens or closes from the UI. What was open
+    /// for another gift goes with it: the convert confirmation (`GiftView`),
+    /// and an Upgrade or resale price form that names a different gift (it
+    /// would hide this gift's buttons behind it).
+    pub fn select_gift(&mut self, id: Option<String>) {
+        self.gifts_manage.flow.take_if(|flow| match flow {
+            crate::gift_manage::GiftFlow::Upgrade { id: open, .. }
+            | crate::gift_manage::GiftFlow::Resale { id: open } => {
+                id.as_deref() != Some(open.as_str())
+            }
+            _ => false,
+        });
+        self.hub.gift_view.select(id);
+    }
+}
+
+#[cfg(test)]
+mod select_gift_tests {
+    use super::*;
+    use crate::gift_manage::GiftFlow;
+
+    fn state_with(flow: GiftFlow, selected: &str) -> PaymentsState {
+        let mut payments = PaymentsState::new();
+        payments.hub.gift_view.select(Some(selected.into()));
+        payments
+            .hub
+            .gift_view
+            .confirm_convert(Some(selected.into()));
+        payments.gifts_manage.flow = Some(flow);
+        payments
+    }
+
+    #[test]
+    fn selecting_another_gift_drops_the_flow_and_confirm_of_the_first() {
+        let mut payments = state_with(
+            GiftFlow::Upgrade {
+                id: "a".into(),
+                keep_details: false,
+            },
+            "a",
+        );
+        payments.select_gift(Some("b".into()));
+        assert_eq!(payments.hub.gift_view.selected(), Some("b"));
+        assert!(payments.gifts_manage.flow.is_none());
+        assert_eq!(payments.hub.gift_view.confirming(), None);
+    }
+
+    #[test]
+    fn selecting_the_same_gift_keeps_its_flow_and_other_flows_stay() {
+        let mut payments = state_with(GiftFlow::Resale { id: "a".into() }, "a");
+        payments.select_gift(Some("a".into()));
+        assert!(payments.gifts_manage.flow.is_some());
+        payments.gifts_manage.flow = Some(GiftFlow::NewCollection);
+        payments.select_gift(None);
+        assert_eq!(payments.gifts_manage.flow, Some(GiftFlow::NewCollection));
+    }
+}

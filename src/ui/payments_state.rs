@@ -70,6 +70,13 @@ pub(crate) struct PaymentUi {
     /// The 2-step verification password of the Gram withdrawal
     /// (`premium_ui::grams_withdraw`); emptied when it is sent and when the
     /// box closes.
+    /// A Premium limit toast claimed by the window it shows in (the one
+    /// last pressed when it appeared). It lives with the account on
+    /// screen, so a switch drops it.
+    pub(super) limit_toast: Option<(
+        quill::premium_limits::PremiumLimitKind,
+        Option<quill::ids::ChatId>,
+    )>,
     pub(super) grams_withdraw_password: super::fragment_password::PasswordField,
     /// The transfer picker's people for the current search
     /// (`gift_transfer_view`).
@@ -221,6 +228,7 @@ impl PaymentUi {
             gift_export_password: super::fragment_password::PasswordField::new(
                 gift_export_password,
             ),
+            limit_toast: None,
             grams_withdraw_password: super::fragment_password::PasswordField::new(
                 grams_withdraw_password,
             ),

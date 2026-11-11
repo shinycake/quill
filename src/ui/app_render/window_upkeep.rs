@@ -83,11 +83,9 @@ impl QuillApp {
         // A Premium preview a reducer asked for, in the window showing
         // the chat it is about.
         self.pump_promo_request(cx);
-        // A Premium limit's toast (a full GIF list, too many pins), in the
-        // window of the last press: the one whose action hit the limit.
-        if self.windows.pressed_here() {
-            self.premium_limit_toast_upkeep(window, cx);
-        }
+        // A Premium limit's toast (a full GIF list, too many pins): claimed
+        // by the window of the last press, shown in that window.
+        self.premium_limit_toast_upkeep(window, cx);
         self.gift_boxes_upkeep(window, cx);
         // A video chosen for an owned set finished downloading: its editor,
         // in the window the pick was made in.
@@ -250,6 +248,7 @@ impl QuillApp {
         if self
             .windows
             .dialog_may_show_in(DialogKind::GramsWithdraw, here)
+            || self.grams_outcome_window() == Some(here)
         {
             self.grams_withdraw_frame_upkeep(window, cx);
         }

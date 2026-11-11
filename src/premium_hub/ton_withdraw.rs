@@ -12,6 +12,17 @@ use crate::gift_manage::ExportError;
 use crate::ids::RequestId;
 use serde_json::json;
 
+/// How a withdrawal ended, for the UI to act on once (open Fragment's page,
+/// show the toast). It lives in the stage, so a box that goes away takes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WithdrawOutcome {
+    /// Fragment's page from `getGramWithdrawalUrl`, opened through the link
+    /// policy.
+    Url(String),
+    /// `AMOUNT_TOO_SMALL`: tdesktop closes the box with a toast.
+    TooSmall,
+}
+
 /// Where an open withdrawal stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GramWithdraw {
@@ -26,6 +37,9 @@ pub enum GramWithdraw {
     /// tdesktop `PrePasswordErrorBox`: no password set (`later: false`) or
     /// one set too recently (`later: true`).
     SecurityCheck { later: bool },
+    /// The request was answered and the box is closed; the UI takes the
+    /// outcome ([`Self::take_done`]) in the window that hosted the box.
+    Done(WithdrawOutcome),
 }
 
 impl GramWithdraw {
@@ -58,7 +72,23 @@ impl GramWithdraw {
     pub fn pending(&self) -> Option<RequestId> {
         match self {
             Self::Password { request, .. } => *request,
-            Self::SecurityCheck { .. } => None,
+            Self::SecurityCheck { .. } | Self::Done(_) => None,
+        }
+    }
+
+    /// The box is on screen (a password box or the security check).
+    pub fn shows_box(&self) -> bool {
+        !matches!(self, Self::Done(_))
+    }
+
+    /// Take the outcome of a finished withdrawal, leaving no stage.
+    pub fn take_done(slot: &mut Option<Self>) -> Option<WithdrawOutcome> {
+        match slot.take() {
+            Some(Self::Done(outcome)) => Some(outcome),
+            other => {
+                *slot = other;
+                None
+            }
         }
     }
 

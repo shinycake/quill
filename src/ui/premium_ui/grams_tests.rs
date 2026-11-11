@@ -242,7 +242,7 @@ fn the_withdrawal_url_opens_only_through_the_link_policy(cx: &mut TestAppContext
         let url = url.to_string();
         app.update_in(vcx, |app, _, cx| {
             if let Some(grams) = app.demo_session.as_mut().map(|s| &mut s.payments.hub.grams) {
-                grams.withdraw_outcome = Some(WithdrawOutcome::Url(url));
+                grams.withdraw = Some(GramWithdraw::Done(WithdrawOutcome::Url(url)));
             }
             cx.notify();
         });
@@ -275,7 +275,7 @@ fn the_withdrawal_url_opens_only_through_the_link_policy(cx: &mut TestAppContext
     );
     let left = app.read_with(vcx, |app, _| {
         app.session()
-            .and_then(|s| s.payments.hub.grams.withdraw_outcome.clone())
+            .is_some_and(|s| matches!(s.payments.hub.grams.withdraw, Some(GramWithdraw::Done(_))))
     });
-    assert_eq!(left, None);
+    assert!(!left, "taken once");
 }

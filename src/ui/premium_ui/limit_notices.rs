@@ -180,9 +180,25 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(kind) = self.hub_mut().and_then(|hub| hub.take_limit_toast()) else {
+        // The window of the last press claims a toast the session holds, so
+        // it shows there from its next frame, whether or not a press made
+        // it, and not at some later press.
+        if self.windows.pressed_here()
+            && let Some(kind) = self.hub_mut().and_then(|hub| hub.take_limit_toast())
+        {
+            let here = self.windows.scope;
+            self.screen.payments.limit_toast = Some((kind, here));
+        }
+        let here = self.windows.scope;
+        let Some((kind, _)) = self
+            .screen
+            .payments
+            .limit_toast
+            .filter(|(_, window)| window.filter(|chat| self.windows.has(*chat)) == here)
+        else {
             return;
         };
+        self.screen.payments.limit_toast = None;
         let Some(toast) = self.session().and_then(|s| limit_toast_text(s, kind)) else {
             return;
         };

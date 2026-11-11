@@ -104,6 +104,14 @@ impl QuillApp {
         }
     }
 
+    fn payments_state_mut(&mut self) -> Option<&mut quill::state::PaymentsState> {
+        if let Some(live) = self.live.as_mut() {
+            Some(&mut live.driver.session.payments)
+        } else {
+            self.demo_session.as_mut().map(|s| &mut *s.payments)
+        }
+    }
+
     // ---- Stars ----------------------------------------------------------
 
     pub(super) fn open_stars(&mut self, cx: &mut Context<Self>) {
@@ -291,8 +299,9 @@ impl QuillApp {
     pub(super) fn close_gifts(&mut self, cx: &mut Context<Self>) {
         if let Some(hub) = self.hub_mut() {
             hub.gifts_open = false;
-            hub.gift_view.select(None);
-            hub.gift_view.confirm_convert(None);
+        }
+        if let Some(payments) = self.payments_state_mut() {
+            payments.select_gift(None);
         }
         cx.notify();
     }
@@ -301,18 +310,8 @@ impl QuillApp {
         // An Upgrade or resale price confirmation left open on another
         // gift belongs to that gift: it goes, or this gift's buttons would
         // stay hidden behind it.
-        if let Some(manage) = self.gift_manage_mut() {
-            manage.flow.take_if(|flow| match flow {
-                quill::gift_manage::GiftFlow::Upgrade { id: open, .. }
-                | quill::gift_manage::GiftFlow::Resale { id: open } => {
-                    id.as_deref() != Some(open.as_str())
-                }
-                _ => false,
-            });
-        }
-        if let Some(hub) = self.hub_mut() {
-            hub.gift_view.select(id);
-            hub.gift_view.confirm_convert(None);
+        if let Some(payments) = self.payments_state_mut() {
+            payments.select_gift(id);
         }
         cx.notify();
     }
