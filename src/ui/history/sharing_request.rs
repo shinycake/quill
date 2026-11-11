@@ -77,6 +77,9 @@ pub(in crate::ui) fn sharing_request_row(
     }
     let buttons = view.buttons.then(|| {
         let (chat_id, message_id) = (message.chat_id, message.id);
+        // One answer at a time: the driver ignores a second press, so the
+        // buttons say so while the first is on its way.
+        let answering = session.sharing_request_answering(chat_id, message_id);
         let button = |id: &'static str, label: &'static str, approve: bool| {
             Button::new((id, row_id))
                 .debug_selector(move || id.to_string())
@@ -86,6 +89,7 @@ pub(in crate::ui) fn sharing_request_row(
                 .rounded_xl()
                 .label(label)
                 .flex_1()
+                .disabled(answering)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.answer_sharing_request(chat_id, message_id, approve, cx);
                 }))

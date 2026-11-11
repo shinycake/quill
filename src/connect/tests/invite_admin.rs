@@ -691,6 +691,72 @@ fn a_fetch_that_cannot_be_sent_is_a_failed_page_with_a_retry() {
     );
 }
 
+/// Round 2, 10-037: a refresh while an older ask is out replaces it under
+/// a new request id, so the list is never left unasked, and the older
+/// answer finds the list waiting for another request and is dropped.
+#[test]
+fn a_refresh_replaces_the_ask_in_flight_and_the_older_answer_is_dropped() {
+    let mut rig = Rig::new(false, ADMIN);
+    let older = rig
+        .driver
+        .fetch_chat_invite_links(ChatId(13))
+        .unwrap()
+        .expect("the first ask goes out");
+    let newer = rig
+        .driver
+        .refresh_chat_invite_links(ChatId(13))
+        .unwrap()
+        .expect("a refresh asks even while the first is out");
+    assert_ne!(older, newer);
+    assert_eq!(
+        rig.driver.session.groups.invite_links.get(&13),
+        Some(&InviteLinkFetch::Loading(newer))
+    );
+    rig.ingest(&format!(
+        r#"{{"@type":"chatInviteLinks","@extra":"{}","total_count":0,"invite_links":[]}}"#,
+        older.0
+    ));
+    assert_eq!(
+        rig.driver.session.groups.invite_links.get(&13),
+        Some(&InviteLinkFetch::Loading(newer)),
+        "the older answer is not the list's"
+    );
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":400,"message":"CHAT_ADMIN_REQUIRED"}}"#,
+        older.0
+    ));
+    assert_eq!(
+        rig.driver.session.groups.invite_links.get(&13),
+        Some(&InviteLinkFetch::Loading(newer)),
+        "nor is its error"
+    );
+    rig.ingest(&format!(
+        r#"{{"@type":"chatInviteLinks","@extra":"{}","total_count":0,"invite_links":[]}}"#,
+        newer.0
+    ));
+    assert!(matches!(
+        rig.driver.session.groups.invite_links.get(&13),
+        Some(InviteLinkFetch::Loaded(_))
+    ));
+    // The administrators list asks again too.
+    let mut owner = Rig::new(false, CREATOR);
+    assert!(
+        owner
+            .driver
+            .fetch_chat_administrators(ChatId(13))
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        owner
+            .driver
+            .refresh_chat_administrators(ChatId(13))
+            .unwrap()
+            .is_some(),
+        "the refresh is sent, not skipped for the ask in flight"
+    );
+}
+
 #[test]
 fn a_join_request_ask_that_cannot_go_out_fails_instead_of_loading() {
     // Not connected: the send is refused.

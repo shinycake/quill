@@ -8043,3 +8043,29 @@ whose variants carry the data, with a way out of every stage.
 - **A refused refetch of a stale proxy list** lands in
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
+
+### Sweep fixes (r2-37)
+
+Re-sweep bundle for the welcome editor, the earn pages, folders, group
+admin panels and boxes, the forum column and sharing requests.
+
+| ids | what changed |
+| --- | --- |
+| 09-056 | `WelcomeDialog::row` is one `RowEdit { Closed, Open { id, save } }`; opening another row replaces it whole and is refused while the open row's Save is out. |
+| 09-069/070/071, 10-053/077/078 | `ui/dialog_body.rs::one_shot_body` hands a dialog body over through a `Cell`; the `RefCell` takes are gone (and their baseline lines). |
+| 09-072/073 | `EarnUi::layer` is one `EarnLayer { Closed, Open { back, restore, fade, refused } }`; the close timer is the `Task` inside the fade's `Closing` stage. |
+| 09-074 | A refused app-config or balance ask leaves `Failed`, so the per-frame upkeep does not ask again. |
+| 09-075 | A refused page load is `refused` in the layer; Monetization, Setup and Join draw the error with Retry. |
+| 09-076/077 | The boost box shows Retry while its link is empty; the locked "Switch Off Ads" click asks for the boost level again until it is known. |
+| 09-078, 09-080 | "End anyway" and the withdrawal password Submit are disabled while a save or send is in flight; a second Submit keeps the typed password. |
+| 09-113 | A second `addlist` link keeps an Adding box; a replaced Checking drops its arrived answer. |
+| 09-114 | `FolderLoad::Ready { error }` carries the line; `FolderEditorDialog::error` is gone. |
+| 09-116 | `FolderUi::deletes` holds each delete's request; the toast waits for its answer (`DeleteChatFolder` is answered to a box). |
+| 10-037 | An unasked invite-link, join-request or administrator list draws Retry, not a spinner; a refresh replaces the request in flight and an older answer or error is dropped. |
+| 10-038 | `GroupsState::chat_boost_status` is `Fetch<(level, count)>`: the old level stays beside a refetch, a failure draws Retry, answers match their request. |
+| 10-060 | `PermissionsSubmit::Partial { sent, reason }` keeps tracking the part that left. |
+| 10-061, 10-075, 10-076 | Delete/Leave/Remove wait while the Edit box's Save is out; Remove from list tracks its request like Delete; unsent bulk removals stay selected. |
+| 10-063 | `open_member_dialog_on` opens on the wanted tab: one ask. |
+| 10-064 | An unknown supergroup or basic group draws its name alone; its id is never used as a chat id. |
+| 10-074 | `HistoryUi::forum_peek` is only the user's choice (`ForumPeek`, keyed by the forum); the column layout is a pure function, nothing is written from render. |
+| 10-088 | Accept/Reject are disabled while the answer is out; the driver already ignored a second press. |

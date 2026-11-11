@@ -675,13 +675,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 {
                     let _ = self.load_chat_welcome_messages(chat_id);
                 }
-                RequestPurpose::BoostChat
-                    if !self
-                        .session
-                        .groups
-                        .chat_boost_status
-                        .contains_key(&chat_id.0) =>
-                {
+                RequestPurpose::BoostChat => {
+                    // Asks only when the status is not held (or is due).
                     let _ = self.fetch_chat_boost_status(chat_id);
                 }
                 _ => {}

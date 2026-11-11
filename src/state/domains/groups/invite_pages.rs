@@ -158,3 +158,24 @@ mod tests {
         assert_eq!(pages, InvitePages::default());
     }
 }
+
+impl crate::state::GroupsState {
+    /// The `getChatInviteLinks` answer of `request`. A refresh asks again
+    /// under a new id, so an older request's answer finds the list waiting
+    /// for another and is dropped.
+    pub(crate) fn answer_invite_links(
+        &mut self,
+        chat: i64,
+        request: crate::ids::RequestId,
+        list: crate::state::InviteLinkList,
+    ) {
+        let newer = matches!(
+            self.invite_links.get(&chat),
+            Some(crate::state::InviteLinkFetch::Loading(waiting)) if *waiting != request
+        );
+        if !newer {
+            self.invite_links
+                .insert(chat, crate::state::InviteLinkFetch::Loaded(list));
+        }
+    }
+}

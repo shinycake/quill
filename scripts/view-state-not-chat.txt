@@ -71,3 +71,4 @@ HistoryUi.aim * | a landing is ended by the history's sync when the chat or topi
 PickerUi.media_panel * | sticker set and emoji status ids; the reaction target carries its chat and message
 ViewerUi.photo_editor * | the editor's target carries its own chat or sticker set; it is not opened from a chat's history
 MessageUi.custom_emoji.Asked.emoji_id | a custom emoji's id, not a chat's: the card it shows is about that emoji and its set, the same in any chat
+HistoryUi.forum_peek.Chats.forum | the forum the user peeked at the chat list over; it counts only while that chat is the open one (`ForumPeek::is_for`), and opening any chat ends it

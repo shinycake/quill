@@ -23,7 +23,7 @@ use quill::boost_box::{
 };
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
-use quill::state::{RequestPurpose, Session};
+use quill::state::Session;
 
 fn chat_title(session: &Session, chat_id: i64) -> String {
     session
@@ -282,8 +282,9 @@ impl QuillApp {
                 }
             }
             None if session
-                .requests
-                .has_purpose_for_chat(RequestPurpose::GetChatBoostStatus, chat_id) =>
+                .groups
+                .boost_status_fetch(chat_id.0)
+                .is_some_and(|fetch| fetch.shows_loading()) =>
             {
                 body = body.child(
                     div()

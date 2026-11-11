@@ -124,9 +124,8 @@ impl Session {
                         on: self.chat_auto_translate(chat_id),
                         level: self
                             .groups
-                            .chat_boost_status
-                            .get(&chat_id.0)
-                            .map(|(level, _)| *level),
+                            .boost_level_count(chat_id.0)
+                            .map(|(level, _)| level),
                         required: auto_translate_level(
                             self.groups.chat_boost_features.get(&chat_id.0),
                         ),

@@ -11,7 +11,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with, trn_with};
-use quill::state::{AdminListFetch, InviteLinkFetch, JoinRequestFetch, RequestPurpose};
+use quill::state::{AdminListFetch, InviteLinkFetch, JoinRequestFetch};
 use quill::telegram::envelope::{ChannelMemberStatus, ChatAdministratorEntry, ChatKind};
 impl QuillApp {
     /// Slice G2: channel boost status (`getChatBoostStatus`, schema
@@ -41,11 +41,12 @@ impl QuillApp {
         }
         let status = self
             .session()
-            .and_then(|session| session.groups.chat_boost_status.get(&chat_id.0).copied());
-        let in_flight = self.session().is_some_and(|session| {
+            .and_then(|session| session.groups.boost_level_count(chat_id.0));
+        let loading = self.session().is_some_and(|session| {
             session
-                .requests
-                .has_purpose_for_chat(RequestPurpose::GetChatBoostStatus, chat_id)
+                .groups
+                .boost_status_fetch(chat_id.0)
+                .is_some_and(|fetch| fetch.shows_loading())
         });
         let mut section = div().flex().flex_col().w_full().gap_1().child(
             div()
@@ -82,7 +83,7 @@ impl QuillApp {
                         )),
                 );
             }
-            None if in_flight => {
+            None if loading => {
                 section = section.child(
                     div()
                         .text_sm()
@@ -117,14 +118,11 @@ impl QuillApp {
         Some(section.into_any_element())
     }
 
-    /// Slice G2: re-request the boost status (bypasses the cache).
+    /// Slice G2: re-request the boost status (bypasses the cache; what is
+    /// held stays on screen until the answer replaces it).
     pub(super) fn refresh_boost_status(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver
-                .session
-                .groups
-                .chat_boost_status
-                .remove(&chat_id.0);
+            live.driver.session.groups.outdate_boost_status(chat_id.0);
             if live.driver.fetch_chat_boost_status(chat_id).is_err() {
                 self.set_note(StatusNote::error(tr(
                     keys::Q_PEOPLE_COULD_NOT_LOAD_BOOST_STATUS,

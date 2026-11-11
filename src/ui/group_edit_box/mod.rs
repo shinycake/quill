@@ -328,6 +328,14 @@ impl QuillApp {
         }
     }
 
+    /// Whether `chat`'s Edit box has a Save or an exit in flight (a Delete
+    /// or Leave waits for it instead of replacing its stage).
+    pub(in crate::ui) fn group_edit_box_saving(&self, chat: ChatId) -> bool {
+        self.admin.group_edit_box.as_ref().is_some_and(|edit| {
+            edit.chat_id == chat && edit.state(self.session()) == EditBoxState::Saving
+        })
+    }
+
     /// Delete or Leave of `chat` is out: its Edit box stays, saving, and
     /// closes when TDLib answers, or stays with the reason when it refuses.
     pub(in crate::ui) fn track_chat_exit(&mut self, chat: ChatId, request: RequestId) {

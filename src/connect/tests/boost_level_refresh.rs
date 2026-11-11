@@ -36,7 +36,7 @@ fn a_moved_boost_level_refetches_the_status() {
         .session
         .groups
         .chat_boost_status
-        .insert(ChatId(13).0, (1, 4));
+        .insert(ChatId(13).0, crate::state::fetch::Fetch::Ready((1, 4)));
     let asked = |recorder: &RecordingSender| {
         recorder
             .snapshot()
@@ -50,5 +50,12 @@ fn a_moved_boost_level_refetches_the_status() {
 
     ingest(&mut driver, &supergroup_update(2));
     assert_eq!(asked(&recorder), 1);
-    assert!(!driver.session.groups.chat_boost_status.contains_key(&13));
+    // The old level stays for display while the new one is asked for.
+    let groups = &driver.session.groups;
+    assert_eq!(groups.boost_level_count(13), Some((1, 4)));
+    assert!(
+        groups
+            .boost_status_fetch(13)
+            .is_some_and(|fetch| fetch.is_loading())
+    );
 }

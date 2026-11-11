@@ -30,6 +30,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
+        self.send_chat_administrators(chat_id)
+    }
+
+    fn send_chat_administrators(
+        &mut self,
+        chat_id: ChatId,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
         self.session
             .groups
             .admin_lists
@@ -57,8 +64,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         chat_id: ChatId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.session.groups.admin_lists.remove(&chat_id.0);
-        self.fetch_chat_administrators(chat_id)
+        if !self.chats_path_active() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        if !self.session.chat_can_manage_admins(chat_id) {
+            self.session.groups.admin_lists.remove(&chat_id.0);
+            return Ok(None);
+        }
+        // A request still in flight asked before the refresh: this one
+        // replaces it rather than leaving the list unasked.
+        self.send_chat_administrators(chat_id)
     }
 
     /// Phase D3c: `getChatEventLog` first page (TDLib 1.8.67,

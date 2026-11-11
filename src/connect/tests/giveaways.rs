@@ -244,7 +244,11 @@ fn a_prepaid_giveaway_launches_only_on_the_explicit_call() {
     let recorder = Arc::new(RecordingSender::new());
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
-    driver.session.groups.chat_boost_status.insert(-100, (1, 2));
+    driver
+        .session
+        .groups
+        .chat_boost_status
+        .insert(-100, crate::state::fetch::Fetch::Ready((1, 2)));
 
     // A new giveaway (not prepaid) never launches.
     let paid = GiveawayDraft::new(-100, None, NOW);
@@ -301,8 +305,16 @@ fn a_launch_answer_for_one_chat_does_not_land_in_another_chats_form() {
         let recorder = Arc::new(RecordingSender::new());
         let seq = AtomicU64::new(0);
         let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
-        driver.session.groups.chat_boost_status.insert(-100, (1, 2));
-        driver.session.groups.chat_boost_status.insert(-200, (3, 4));
+        driver
+            .session
+            .groups
+            .chat_boost_status
+            .insert(-100, crate::state::fetch::Fetch::Ready((1, 2)));
+        driver
+            .session
+            .groups
+            .chat_boost_status
+            .insert(-200, crate::state::fetch::Fetch::Ready((3, 4)));
         let extra = driver
             .launch_prepaid_giveaway(&prepaid_draft(), NOW)
             .unwrap();

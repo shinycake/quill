@@ -60,7 +60,32 @@ impl QuillApp {
                 )),
         );
         match fetch {
-            None | Some(InviteLinkFetch::Loading(_)) => {
+            None => {
+                // Never asked (the rights arrived after the panel opened):
+                // say so, with a way to ask.
+                section = section.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .w_full()
+                        .gap_1()
+                        .child(
+                            div()
+                                .flex_1()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(tr(keys::Q_PEOPLE_COULD_NOT_REFRESH_INVITE_LINKS)),
+                        )
+                        .child(ghost_text_button(
+                            "invite-links-retry-load",
+                            tr(keys::Q_PEOPLE_RETRY),
+                            cx.listener(move |this, _, _, cx| {
+                                this.refresh_invite_links(chat_id, cx);
+                            }),
+                        )),
+                );
+            }
+            Some(InviteLinkFetch::Loading(_)) => {
                 section = section.child(
                     div()
                         .flex()
@@ -329,7 +354,32 @@ impl QuillApp {
         ));
         let mut section = div().flex().flex_col().w_full().gap_1().child(header);
         match fetch {
-            None | Some(JoinRequestFetch::Loading { .. }) => {
+            None => {
+                // Never asked (the rights arrived after the panel opened):
+                // say so, with a way to ask.
+                section = section.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .w_full()
+                        .gap_1()
+                        .child(
+                            div()
+                                .flex_1()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(tr(keys::Q_CHAT_COULD_NOT_LOAD_JOIN_REQUESTS)),
+                        )
+                        .child(ghost_text_button(
+                            "join-requests-retry-load",
+                            tr(keys::Q_PEOPLE_RETRY),
+                            cx.listener(move |this, _, _, cx| {
+                                this.refresh_join_requests(chat_id, cx);
+                            }),
+                        )),
+                );
+            }
+            Some(JoinRequestFetch::Loading { .. }) => {
                 section = section.child(
                     div()
                         .flex()
@@ -516,7 +566,32 @@ impl QuillApp {
             );
         }
         match fetch {
-            None | Some(AdminListFetch::Loading) => {
+            None => {
+                // Never asked (the rights arrived after the panel opened):
+                // say so, with a way to ask.
+                section = section.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .w_full()
+                        .gap_1()
+                        .child(
+                            div()
+                                .flex_1()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(tr(keys::Q_PEOPLE_COULD_NOT_REFRESH_ADMINISTRATORS)),
+                        )
+                        .child(ghost_text_button(
+                            "admin-list-retry-load",
+                            tr(keys::Q_PEOPLE_RETRY),
+                            cx.listener(move |this, _, _, cx| {
+                                this.refresh_administrators(chat_id, cx);
+                            }),
+                        )),
+                );
+            }
+            Some(AdminListFetch::Loading) => {
                 section = section.child(
                     div()
                         .flex()

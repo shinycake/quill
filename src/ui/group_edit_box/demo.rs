@@ -111,7 +111,9 @@ fn seed_counts(session: &mut Session) {
         );
     }
     groups.pending_join_request_counts.insert(GROUP, 1);
-    groups.chat_boost_status.insert(CHANNEL, (2, 14));
+    groups
+        .chat_boost_status
+        .insert(CHANNEL, quill::state::fetch::Fetch::Ready((2, 14)));
     groups.chat_boost_features.insert(
         CHANNEL,
         ParsedBoostFeatures {

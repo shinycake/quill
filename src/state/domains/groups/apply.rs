@@ -207,14 +207,13 @@ impl Session {
                     .chat_has_welcome_messages
                     .insert(chat_id, has_welcome_messages);
             }
-            // Slice G2: `getChatBoostStatus` answer (schema 1.8.67, line
-            // 13917) — correlated via the pending request's `chat_id`.
+            // Slice G2: `getChatBoostStatus` answer (schema 1.8.67, line 13917).
             GroupsPayload::ChatBoostStatus(status) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                {
                     self.groups
-                        .chat_boost_status
-                        .insert(chat_id.0, (status.level, status.boost_count));
-                    self.groups.chat_boost_details.insert(chat_id.0, status);
+                        .answer_boost_status(chat_id.0, pending.id, status);
                 }
             }
             GroupsPayload::ApplicationConfig {
@@ -380,9 +379,10 @@ impl Session {
                 {
                     match pending.purpose {
                         RequestPurpose::GetChatInviteLinks => {
-                            self.groups.invite_links.insert(
+                            self.groups.answer_invite_links(
                                 chat_id.0,
-                                InviteLinkFetch::Loaded(InviteLinkList { total_count, links }),
+                                pending.id,
+                                InviteLinkList { total_count, links },
                             );
                         }
                         // B8: the revoke answer holds only the revoked link

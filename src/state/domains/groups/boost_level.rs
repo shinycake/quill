@@ -2,7 +2,51 @@
 //! boost status Quill cached for it (level, boost count, next-level goal)
 //! is out of date.
 
-use crate::state::Session;
+use crate::state::fetch::Fetch;
+use crate::state::{GroupsState, Session};
+
+impl GroupsState {
+    /// `(level, boost_count)` of `chat`, the newest answer held (it stays
+    /// while a refetch runs or after one fails).
+    pub fn boost_level_count(&self, chat: i64) -> Option<(i32, i32)> {
+        self.chat_boost_status
+            .get(&chat)
+            .and_then(|fetch| fetch.data().copied())
+    }
+
+    /// The status of `chat`: not asked, in flight, answered or failed.
+    pub fn boost_status_fetch(&self, chat: i64) -> Option<&Fetch<(i32, i32)>> {
+        self.chat_boost_status.get(&chat)
+    }
+
+    /// A boost or a level change made what is held out of date: it stays
+    /// on screen until the refetch replaces it. A request in flight asked
+    /// before the change, so its answer is dropped.
+    pub fn outdate_boost_status(&mut self, chat: i64) {
+        if let Some(fetch) = self.chat_boost_status.get_mut(&chat) {
+            fetch.outdate();
+        }
+    }
+
+    /// Record a status answer, as the answer to `request` of `chat`.
+    /// `false` when the status no longer waits for that request.
+    pub(crate) fn answer_boost_status(
+        &mut self,
+        chat: i64,
+        request: crate::ids::RequestId,
+        status: crate::telegram::envelope::ParsedBoostStatus,
+    ) -> bool {
+        let value = (status.level, status.boost_count);
+        let taken = self
+            .chat_boost_status
+            .get_mut(&chat)
+            .is_some_and(|fetch| fetch.answered(Some(request), value));
+        if taken {
+            self.chat_boost_details.insert(chat, status);
+        }
+        taken
+    }
+}
 
 impl Session {
     /// Record the level an `updateSupergroup` carried. A level that differs
@@ -40,7 +84,7 @@ impl Session {
             })
             .collect();
         for chat in &chats {
-            self.groups.chat_boost_status.remove(&chat.0);
+            self.groups.outdate_boost_status(chat.0);
         }
         chats
     }

@@ -97,7 +97,7 @@ mod tests {
             save: Submit::Editing,
         };
         if let Some(save) = row.save_mut() {
-            *save = Submit::sent(vec![RequestId(9)]);
+            *save = Submit::Sending(vec![RequestId(9)]);
         }
         assert_eq!(row.id(), Some(4));
         assert_eq!(row.save(), Some(&Submit::Sending(vec![RequestId(9)])));

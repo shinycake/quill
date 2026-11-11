@@ -60,8 +60,8 @@ impl QuillApp {
         }
         let level = self
             .session()
-            .and_then(|s| s.groups.chat_boost_status.get(&chat_id))
-            .map(|(level, _)| *level);
+            .and_then(|s| s.groups.boost_level_count(chat_id))
+            .map(|(level, _)| level);
         let levels = self.wallpaper_levels(chat_id);
         let gate = match (custom, levels.gate(true, level), levels.gate(false, level)) {
             (true, gate, _) => gate,

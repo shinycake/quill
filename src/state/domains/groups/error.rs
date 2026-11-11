@@ -228,11 +228,30 @@ impl Session {
             // error instead of spinning forever.
             // A list that already holds an answer (a newer request landed
             // first) is not failed by an older request's error.
+            // The boost status ends in the error its panel draws with a
+            // Retry; an older request's error leaves a newer one waiting.
+            Some(RequestPurpose::GetChatBoostStatus) => {
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && let Some(fetch) = self.groups.chat_boost_status.get_mut(&chat_id.0)
+                {
+                    fetch.failed(
+                        Some(pending.id),
+                        call_request_error_line(err, "Could not load boost status"),
+                        false,
+                    );
+                }
+            }
             Some(RequestPurpose::GetChatInviteLinks) => {
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id)
                     && !matches!(
                         self.groups.invite_links.get(&chat_id.0),
                         Some(InviteLinkFetch::Loaded(_))
+                    )
+                    // An older request's error leaves a newer one waiting.
+                    && !matches!(
+                        (self.groups.invite_links.get(&chat_id.0), pending),
+                        (Some(InviteLinkFetch::Loading(waiting)), Some(p)) if *waiting != p.id
                     )
                 {
                     self.groups.invite_links.insert(

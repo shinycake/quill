@@ -7,8 +7,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::super::app::QuillApp;
-use super::super::dialogs::PermissionsDialog;
 use super::super::dialogs::{GroupConfirmAction, MemberTab};
+use super::super::dialogs::{PermissionsDialog, PermissionsSubmit};
 use super::super::pressable::action_row;
 use super::super::shell::{DialogKind, QuillShell};
 use super::stops_slider::{
@@ -32,7 +32,7 @@ use quill::permissions_box::{
     SLOW_MODE_STOPS, bottom_rows, has_send_restrictions, initial, lock, media_on, set_media,
     suggests_broadcast_group, toggle,
 };
-use quill::state::{Submit, SubmitView};
+use quill::state::SubmitView;
 use quill::telegram::envelope::ChatPermissions;
 
 fn boosts_label(boosts: i32) -> String {
@@ -65,7 +65,7 @@ impl QuillApp {
             slow_mode_delay: session.chat_slow_mode_delay(chat_id),
             boosts: session.chat_unrestrict_boost_count(chat_id),
             lock_hint: None,
-            submit: Submit::default(),
+            submit: PermissionsSubmit::default(),
         });
         self.open_box(DialogKind::Permissions);
         cx.notify();
@@ -122,20 +122,22 @@ impl QuillApp {
             match live.driver.save_permissions_box(chat_id, save) {
                 Ok(PermissionsSent::Sent(ids)) => {
                     if let Some(dialog) = self.admin.permissions_dialog.as_mut() {
-                        dialog.submit = Submit::sent(ids);
+                        dialog.submit = PermissionsSubmit::sent(ids);
                     }
                 }
                 // Part of the Save is out and a later part was refused: the
                 // box stays and says which part, and its Save sends only
                 // what still differs.
-                Ok(PermissionsSent::Partial { refused, .. }) => {
+                Ok(PermissionsSent::Partial { sent, refused }) => {
                     let part = tr(match refused {
                         PermissionsPart::SlowMode => keys::Q_PEOPLE_PERMISSIONS_PART_SLOW_MODE,
                         PermissionsPart::Boosts => keys::Q_PEOPLE_PERMISSIONS_PART_BOOSTS,
                     });
                     let reason = tr_with(keys::Q_PEOPLE_PERMISSIONS_PARTIAL, &[("part", part)]);
                     if let Some(dialog) = self.admin.permissions_dialog.as_mut() {
-                        dialog.submit = Submit::Failed(reason);
+                        // The part that left is still tracked: its own
+                        // refusal shows first.
+                        dialog.submit = PermissionsSubmit::Partial { sent, reason };
                     }
                 }
                 // Nothing differs: nothing to save, the box just closes.
@@ -195,8 +197,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_member_dialog(chat_id, window, cx);
-        self.member_dialog_tab(tab, cx);
+        self.open_member_dialog_on(chat_id, tab, window, cx);
     }
 
     pub(super) fn build_permissions_dialog(
@@ -373,7 +374,7 @@ impl QuillApp {
                     cx,
                 ));
         }
-        if let Submit::Failed(reason) = &dialog.submit {
+        if let Some(reason) = dialog.submit.failure() {
             body = body.child(
                 div()
                     .id("permissions-refused")

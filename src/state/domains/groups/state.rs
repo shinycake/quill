@@ -256,8 +256,10 @@ pub struct GroupsState {
     /// beside a refetch. `Loading` is the in-flight guard.
     pub welcome_messages: HashMap<i64, crate::state::fetch::Fetch<Vec<ParsedWelcomeMessage>>>,
     /// Slice G2: `(level, boost_count)` from `getChatBoostStatus`
-    /// (schema 1.8.67, lines 13917/6943), keyed by chat id.
-    pub chat_boost_status: HashMap<i64, (i32, i32)>,
+    /// (schema 1.8.67, lines 13917/6943), keyed by chat id: asked,
+    /// answered or failed, the last answer kept beside a refetch (read it
+    /// with [`GroupsState::boost_level_count`]).
+    pub chat_boost_status: HashMap<i64, crate::state::fetch::Fetch<(i32, i32)>>,
     /// Full `getChatBoostStatus` answer (progress to the next level,
     /// Premium audience), keyed by chat id.
     pub chat_boost_details: HashMap<i64, ParsedBoostStatus>,

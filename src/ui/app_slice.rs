@@ -790,10 +790,14 @@ impl QuillApp {
                 // Position ticks notify only the slices, so the knob and the
                 // a11y value follow playback from here, not the root render.
                 self.sync_seek_slider(window, cx);
+                // With the topic column on screen the pane only asks for a
+                // topic.
+                let forum_on_screen =
+                    self.forum_column_layout(window) != quill::state::ForumColumn::Hidden;
                 div()
                     .size_full()
                     .flex()
-                    .child(self.conversation(ConversationPart::Top, cx))
+                    .child(self.conversation(ConversationPart::Top, forum_on_screen, cx))
                     .into_any_element()
             }
             SliceKind::Composer => {
@@ -813,7 +817,7 @@ impl QuillApp {
                             .flex_none()
                             .flex()
                             .flex_col()
-                            .child(self.conversation(ConversationPart::Bottom, cx))
+                            .child(self.conversation(ConversationPart::Bottom, false, cx))
                             .into_any_element(),
                     })
                     .into_any_element()

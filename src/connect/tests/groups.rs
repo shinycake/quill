@@ -286,7 +286,11 @@ fn driver_mutation_confirmed_refetches_dropped_cache() {
         .groups
         .welcome_messages
         .insert(13, crate::state::fetch::Fetch::Ready(vec![]));
-    driver.session.groups.chat_boost_status.insert(13, (0, 0));
+    driver
+        .session
+        .groups
+        .chat_boost_status
+        .insert(13, crate::state::fetch::Fetch::Ready((0, 0)));
     let sent_types = || {
         recorder
             .snapshot()

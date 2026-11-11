@@ -499,12 +499,11 @@ impl QuillApp {
                 current.as_ref(),
                 session
                     .groups
-                    .chat_boost_status
-                    .get(&chat_id.0)
+                    .boost_level_count(chat_id.0)
                     .and_then(|(level, _)| {
                         custom_reactions_allowed(
                             session.groups.chat_boost_features.get(&chat_id.0),
-                            *level,
+                            level,
                         )
                     }),
             )

@@ -11,6 +11,7 @@ impl QuillApp {
     pub(in crate::ui) fn conversation(
         &mut self,
         part: ConversationPart,
+        forum_on_screen: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         if part.top() {
@@ -38,7 +39,7 @@ impl QuillApp {
                 cx,
             )
             .into_any_element(),
-            PaneMode::Ready => self.session_history(cx).into_any_element(),
+            PaneMode::Ready => self.session_history(forum_on_screen, cx).into_any_element(),
         };
         let composer = self.composer_available(mode).then_some(true);
         let composer_note: Option<String> = match mode {
@@ -452,7 +453,11 @@ impl QuillApp {
             .children(dust.map(super::anim_layer::occluder))
     }
 
-    pub(in crate::ui) fn session_history(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(in crate::ui) fn session_history(
+        &mut self,
+        forum_on_screen: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         super::video_player::warm_decoder(cx);
         let session = self.session();
         let open = session.and_then(|s| s.open_chat_id());
@@ -624,7 +629,7 @@ impl QuillApp {
                     // Phase 5.1: opening a forum supergroup shows its topics;
                     // with the topic column on screen the pane only asks for
                     // a choice.
-                    if self.history.forum_column.on_screen() {
+                    if forum_on_screen {
                         pane_placeholder(
                             tr(keys::Q_CHAT_CHOOSE_A_TOPIC),
                             tr(keys::Q_CHAT_PICK_A_TOPIC_FROM_THE),
