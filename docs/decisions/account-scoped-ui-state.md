@@ -5536,3 +5536,7 @@ Minor entries of the messages area, proved one by one.
   are keyed by chat and message, and each menu opens by asking its own, so
   a stale value never applies to another message. 11-p3-003: already
   `EffectLookup` with `forget_dropped` (a lost answer is asked again).
+- **Test repaired.** `an_old_bot_message_loaded_after_the_start_does_not_bring_the_user_back`
+  (already failing on the integration branch) opened the bot's chat only after
+  the start went, so a frame in between saw the user outside it and ended the
+  trip; the chat is opened before the start, as in the app.
