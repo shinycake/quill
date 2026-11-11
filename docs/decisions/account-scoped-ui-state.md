@@ -6784,3 +6784,70 @@ Thirty-four minor entries; each was proved against the integration branch first.
   process-wide (`next_query_token`). 13-165: tdesktop toasts the hide at
   once (the bar is optimistic here too, with `RequestRollback`), and the
   local hidden flag is already keyed by account.
+
+### Sweep fixes (is-03)
+
+Implicit-state entries: each struct's stages (bools, `Option`s used as flags,
+a side list beside a stage) became one value. Baseline lines of the converted
+fields are dropped (220 to 194); three more (`CraftSession::candidates_*`,
+`GifPanel::*`, `GramsHub::*`) went with their structs.
+
+- **Paged lists: `PageStage`** (`src/state/page_stage.rs`). `Idle`,
+  `Loading { request, more }`, `Ready`, `Failed(line)`. The request sits in
+  the stage, so only its own answer or failure acts (a changed filter or tab
+  drops the older page). The resale search (02-067), the Grams history
+  (02-072) and the craft box's "your gifts" list use it, replacing
+  `loading`/`loaded`/`error`/`request_id` kept side by side. A send that never
+  left ends in `Failed`, which the list draws.
+- **`Fetch<T>` and small stage enums.** Archive settings (02-022), contacts
+  (02-029, the invalidation is `Idle`), saved tags and the Grams balance probe
+  are `Fetch`. The saved sublist list is `SavedTopicsLoad` (`Idle`, `Started`,
+  `Retry`, `Exhausted`); the reconnect path calls one
+  `retry_after_reconnect` (05-172, 05-209, 02-059). `SavedTagSearch::loaded`
+  was written and never read, so it is gone (05-210). The award members list is
+  `MembersStage` (03-057, 02-070, 10-028); the gift value lookup is
+  `GiftValueStage { Idle, Loading(id), Failed, Ready { info, open } }`
+  (02-068, 04-044, 10-023); the giveaway info lookup carries its request in
+  `GiveawayInfoStage` (10-021, 05-116 for the lookup). The emoji pack change
+  is `SetMutation` (02-055); GIFs are `SavedGifs` and `GifSearch` (02-060).
+- **Matched to what asked.** The gifts list's one change in flight is
+  `GiftMutation::Running { request }`, settled only by its own answer, so a
+  late answer of a reopened list no longer unlocks it (02-064, 10-026). The
+  Fragment export's unlocked step is `ExportSend::Unlocked` in the transfer
+  stage, not a flag the driver takes after each ingest (02-064).
+- **Earn.** The withdraw password step is `Password { error }` or
+  `SendingPassword` (09-X040, 02-050); the setup page's save is a `BoxSend`;
+  the join box parked for the recipients lives inside
+  `Recipients::Loading { join }` and goes with that attempt (02-049, 05-122);
+  toasts, a URL to open and "leave the setup page" are one `EarnEffect` queue
+  (`setup_closed`, 02-050, 05-122); the UI's four boxes are one `EarnBox`
+  opened by `open_earn_box` (09-X041); the link box carries the time it
+  opened, so its first render plays the icon (09-073).
+- **Queues and work.** The poll batch is `Batch { Closed { owed }, Open { dirty } }`:
+  a pass leaves the set only after it ran, so a send error in the media pass
+  no longer loses it (02-040). The composer draft save is `DraftSave { Idle,
+  Waiting { pending, started_ms } }`: the pending save and its quiet-window
+  clock are one value (02-027). `DiskPressure` replaces the held bool beside
+  the room (05-096); the persisted disk pauses are compared with what was last
+  saved, not flagged (05-096); `AvatarDue { Everything, Some(set) }` replaces
+  `avatar_rescan` (05-096, 05-247 in part). The sticker category is chosen by
+  its `EmojiCategorySource`, so a reloaded list cannot name another (10-172).
+  The deep link's `ResolvingInfo` carries the link text (02-042 in part).
+- **Already fixed on the integration branch.** 02-069, 05-116 (options),
+  10-022 (`GiveawayOptions` is two `Fetch`es), 02-044 (`DiskSearch`),
+  02-057 (`InviteStage`), 02-108 (`ShareLink` per link), 09-074 (sliders
+  keyed by bot, `ensure_setup_sliders`).
+- **Skipped, with the reason.** 02-035: `close_held_until` is one
+  `Option<Instant>` (the deadline of one hold), `restart` is a per-client
+  attribute and `unconfirmed` records the outcome of clients already gone;
+  none is a stage kept in step with another. 02-113: the conference join's
+  teardown is already one function (`forget_conference_crypto`); its state is
+  split between the reducer and the driver and a rewrite needs a live call to
+  check. 05-242: `open_topic`, `thread`, `direct.open` and `sublist` have 219
+  sites in 80 files; the priority clash is one function (`open_topic_id`).
+  09-121: the `focused` bool is the per-frame edge memory of "focus the field
+  when the box becomes idle", which needs the window; it is not a request
+  stage. 05-247: the per-file `DownloadStage` redesign touches the request
+  registry, the status rows and every unstick path; only the avatar rescan
+  marker was folded in. 02-042: `deep_link_from_agent` is consumed by the UI
+  at every terminal state across 80 `deep_link` sites and stays.

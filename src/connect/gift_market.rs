@@ -417,7 +417,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .as_ref()
             .ok_or(ConnectSendError::InvalidRequest)?;
         let (own, market) = (
-            !craft.candidates_loaded && !craft.candidates_loading,
+            !craft.candidates_stage.loaded() && !craft.candidates_stage.is_loading(),
             !craft.market.loaded() && !craft.market.is_loading(),
         );
         if own {
@@ -454,7 +454,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .craft
             .as_ref()
             .ok_or(ConnectSendError::InvalidRequest)?;
-        if craft.candidates_loading || craft.candidates_offset.is_empty() {
+        if craft.candidates_stage.is_loading() || craft.candidates_offset.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.craft_candidates_page(true)
@@ -472,7 +472,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             craft.candidates_page = 0;
             craft.candidates_offset.clear();
         }
-        craft.candidates_loading = true;
+        craft.candidates_stage.begin(more);
         let (gift_id, page) = (craft.regular_gift_id, craft.candidates_page);
         let offset = craft.candidates_offset.clone();
         let result = self.send_market(
@@ -482,10 +482,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(craft) = self.session.payments.gift_market.craft.as_mut() {
             match &result {
                 Ok(extra) => {
-                    craft.candidates_request = extra.0;
+                    craft.candidates_stage.sent(extra.0);
                     craft.candidates_page = page.saturating_add(1);
                 }
-                Err(_) => craft.candidates_loading = false,
+                Err(_) => craft.candidates_stage.send_failed(crate::gift_market::error_note(
+                    GiftMarketPurpose::GiftsForCrafting { gift_id, page },
+                    "not connected",
+                )),
             }
         }
         result

@@ -164,17 +164,16 @@ fn market_failures_hit_only_the_request_that_failed() {
         RequestPurpose::Payments(PaymentsPurpose::GiftMarket(candidates(0))),
         None,
     );
-    session.payments.gift_market.craft = Some(CraftSession {
-        candidates_loading: true,
-        candidates_request: live.0,
-        ..CraftSession::default()
-    });
+    let mut craft = CraftSession::default();
+    craft.candidates_stage.begin(false);
+    craft.candidates_stage.sent(live.0);
+    session.payments.gift_market.craft = Some(craft);
     fail(&mut session, stale, &sink);
     let craft = session.payments.gift_market.craft.as_ref().unwrap();
-    assert!(craft.candidates_loading && !craft.candidates_loaded);
+    assert!(craft.candidates_stage.is_loading() && !craft.candidates_stage.loaded());
     fail(&mut session, live, &sink);
     let craft = session.payments.gift_market.craft.as_ref().unwrap();
-    assert!(!craft.candidates_loading && craft.candidates_loaded);
+    assert!(!craft.candidates_stage.is_loading() && craft.candidates_stage.loaded());
 }
 
 #[test]

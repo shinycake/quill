@@ -185,9 +185,8 @@ pub struct CraftSession {
     pub candidates_total: i32,
     pub candidates_offset: String,
     pub candidates_page: u32,
-    pub candidates_loading: bool,
-    pub candidates_loaded: bool,
-    pub candidates_request: u64,
+    /// The "your gifts" list's page request and what it answered.
+    pub candidates_stage: PageStage,
     /// `attribute_persistence_probabilities`.
     pub probabilities: Vec<Vec<i32>>,
     /// Suitable listings on sale (resale in craft mode).

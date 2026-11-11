@@ -174,7 +174,7 @@ impl QuillApp {
                     && old.regular_gift_id == next.regular_gift_id
                 {
                     next.candidates = old.candidates;
-                    next.candidates_loaded = old.candidates_loaded;
+                    next.candidates_stage = old.candidates_stage;
                     next.probabilities = old.probabilities;
                     next.market = old.market;
                 }
@@ -247,7 +247,7 @@ impl QuillApp {
                     .retain(|gift| !used.contains(&gift.received_gift_id));
             } else {
                 craft.candidates.clear();
-                craft.candidates_loaded = false;
+                craft.candidates_stage = quill::state::PageStage::Idle;
                 craft.candidates_offset.clear();
                 craft.market =
                     ResaleSearch::new(craft.regular_gift_id, ResaleFilter::default(), true);

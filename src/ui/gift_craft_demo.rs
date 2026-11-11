@@ -79,7 +79,7 @@ pub(super) fn seed_gift_craft_session(sink: Arc<MemorySink>) -> Session {
         craft.add(gift.clone());
     }
     craft.candidates = gifts.iter().skip(1).cloned().collect();
-    craft.candidates_loaded = true;
+    craft.candidates_stage.ready();
     craft.probabilities = vec![
         vec![1000],
         vec![600, 1000],

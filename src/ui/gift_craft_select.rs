@@ -177,7 +177,7 @@ impl QuillApp {
                     .child(tile),
             );
         }
-        if craft.candidates_loading && own_count == 0 {
+        if craft.candidates_stage.is_loading() && own_count == 0 {
             body = body.child(
                 div()
                     .text_sm()
@@ -194,7 +194,7 @@ impl QuillApp {
         } else {
             body = body.child(own);
         }
-        if !craft.candidates_loading && !craft.candidates_offset.is_empty() {
+        if !craft.candidates_stage.is_loading() && !craft.candidates_offset.is_empty() {
             body = body.child(
                 Button::new("craft-own-more")
                     .label(tr(keys::Q_MONEY_SHOW_MORE))

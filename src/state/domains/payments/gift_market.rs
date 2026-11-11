@@ -111,12 +111,11 @@ impl Session {
                     .gift_market
                     .craft
                     .as_mut()
-                    .filter(|craft| craft.candidates_request == request)
+                    .filter(|craft| craft.candidates_stage.waits_for(request))
                 else {
                     return;
                 };
-                craft.candidates_loading = false;
-                craft.candidates_loaded = true;
+                craft.candidates_stage.ready();
                 craft.candidates_total = candidates.total_count;
                 craft.candidates_offset = if candidates.gifts.is_empty() {
                     String::new()
@@ -320,12 +319,11 @@ impl Session {
                 let Some(craft) = market
                     .craft
                     .as_mut()
-                    .filter(|craft| request != 0 && craft.candidates_request == request)
+                    .filter(|craft| craft.candidates_stage.waits_for(request))
                 else {
                     return;
                 };
-                craft.candidates_loading = false;
-                craft.candidates_loaded = true;
+                craft.candidates_stage.fail(request, note.clone());
                 market.notes.push(note);
             }
             GiftMarketPurpose::Craft => {
