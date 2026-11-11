@@ -113,7 +113,7 @@ fn submitted_block_driver() -> (
 #[test]
 fn the_blocked_note_waits_for_the_ok_answer() {
     let (mut driver, recorder, extra) = submitted_block_driver();
-    let seq = AtomicU64::new(0);
+    let seq = AtomicU64::new(1_000);
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
     assert!(driver.session.users_state.replies_blocked.is_empty());
     let sent = recorder.snapshot().len();
@@ -134,7 +134,7 @@ fn the_blocked_note_waits_for_the_ok_answer() {
 #[test]
 fn a_rejected_block_gives_the_box_its_choices_back() {
     let (mut driver, _recorder, extra) = submitted_block_driver();
-    let seq = AtomicU64::new(0);
+    let seq = AtomicU64::new(1_000);
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
     let error = format!(r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"X"}}"#);
     driver

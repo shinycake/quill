@@ -37,7 +37,7 @@ fn the_load_is_loading_until_the_answer_and_gone_after_it() {
     let answer = format!(
         r#"{{"@type":"richMessage","@extra":"{extra}","is_rtl":false,"is_full":true,"blocks":[]}}"#
     );
-    let seq = AtomicU64::new(0);
+    let seq = AtomicU64::new(1_000);
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
     driver
         .ingest(copy_and_parse(&answer, &seq, &sink).unwrap())
@@ -49,7 +49,7 @@ fn the_load_is_loading_until_the_answer_and_gone_after_it() {
 fn a_failed_load_is_failed_and_can_be_asked_again() {
     let (mut driver, extra, key) = asked();
     let error = format!(r#"{{"@type":"error","@extra":"{extra}","code":500,"message":"X"}}"#);
-    let seq = AtomicU64::new(0);
+    let seq = AtomicU64::new(1_000);
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
     driver
         .ingest(copy_and_parse(&error, &seq, &sink).unwrap())
