@@ -361,12 +361,12 @@ fn history(
 ) -> AnyElement {
     let muted = cx.theme().muted_foreground;
     let mut col = div().flex().flex_col().gap_1().pt_3();
-    if let Some(error) = grams.error.as_ref() {
-        col = col.child(div().text_sm().child(error.clone()));
+    if let Some(error) = grams.error() {
+        col = col.child(div().text_sm().child(error.to_string()));
     }
     // tdesktop shows no history section until it has rows.
     if grams.entries.is_empty() && !grams.shows_tabs() {
-        if grams.loading {
+        if grams.is_loading() {
             col = col.child(
                 div()
                     .text_sm()
@@ -406,7 +406,7 @@ fn history(
                 .child(tab_label(TxFilter::All)),
         );
     }
-    if grams.loading && grams.entries.is_empty() {
+    if grams.is_loading() && grams.entries.is_empty() {
         col = col.child(
             div()
                 .text_sm()
@@ -417,7 +417,7 @@ fn history(
     for tx in &grams.entries {
         col = col.child(tx_row(session, tx, roots, cx));
     }
-    if grams.has_more() && grams.loading {
+    if grams.has_more() && grams.is_loading() {
         col = col.child(loading_row("grams-loading", cx));
     }
     col.into_any_element()

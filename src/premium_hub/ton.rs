@@ -459,16 +459,14 @@ pub struct GramsHub {
     pub open: bool,
     /// Known after the first answer (probe or page).
     pub balance_nano: Option<i64>,
-    /// The Settings probe was sent this session.
-    pub probed: bool,
+    /// The Settings probe, asked once per session: a failure leaves the
+    /// row hidden and is not asked again.
+    pub probe: crate::state::fetch::Fetch<()>,
     pub filter: TxFilter,
     pub entries: Vec<TonTx>,
     pub next_offset: String,
-    pub loaded: bool,
-    pub loading: bool,
-    pub error: Option<String>,
-    /// `@extra` of the newest page request; older answers are dropped.
-    pub request: u64,
+    /// The newest page request; older answers are dropped.
+    pub stage: crate::state::PageStage,
     /// The first All page had incoming / outgoing rows (tdesktop shows the
     /// tabs only when both directions exist).
     pub has_in: bool,
@@ -483,8 +481,6 @@ pub struct GramsHub {
     /// placeholder that never fills.
     pub missing_users: BTreeSet<i64>,
     pub missing_chats: BTreeSet<i64>,
-    /// A page landed; its peers still need checking.
-    pub peers_dirty: bool,
     /// Collect's password box or security check, while open.
     pub withdraw: Option<GramWithdraw>,
     /// Fragment's page from `getGramWithdrawalUrl`, for the UI to open
@@ -505,16 +501,12 @@ impl GramsHub {
         self.filter = filter;
         self.entries.clear();
         self.next_offset.clear();
-        self.loaded = false;
-        self.loading = false;
-        self.error = None;
+        self.stage = crate::state::PageStage::Idle;
         self.selected = None;
     }
 
     pub fn apply_page(&mut self, page: TonTxPage, append: bool) {
-        self.loading = false;
-        self.error = None;
-        self.loaded = true;
+        self.stage.ready();
         self.balance_nano = Some(page.balance_nano);
         self.next_offset = page.next_offset;
         if !append && self.filter == TxFilter::All {
@@ -535,7 +527,20 @@ impl GramsHub {
             keys.insert(tx.key.clone());
             self.entries.push(tx);
         }
-        self.peers_dirty = true;
+    }
+
+    /// A page is loading (the first one, or a later one).
+    pub fn is_loading(&self) -> bool {
+        self.stage.is_loading()
+    }
+
+    /// Any page arrived for the current tab.
+    pub fn loaded(&self) -> bool {
+        self.stage.loaded()
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        self.stage.error()
     }
 
     /// Peers the loaded rows name, for the resolver.

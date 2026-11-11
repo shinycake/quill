@@ -20,9 +20,10 @@ impl Session {
                 match purpose {
                     Some((GramsPurpose::Probe, _)) => {
                         self.payments.hub.grams.balance_nano = Some(page.balance_nano);
+                        self.payments.hub.grams.probe.succeed(());
                     }
                     Some((GramsPurpose::Page { append }, id))
-                        if id.0 == self.payments.hub.grams.request =>
+                        if self.payments.hub.grams.stage.waits_for(id.0) =>
                     {
                         self.remember_files(&files);
                         self.payments.hub.grams.apply_page(page, append);
@@ -56,13 +57,13 @@ impl Session {
         let peer = pending.and_then(|p| p.chat_id).map(|id| id.0);
         match purpose {
             // The Settings row just stays hidden.
-            GramsPurpose::Probe | GramsPurpose::Revenue => {}
+            GramsPurpose::Probe => grams.probe.fail(error_reason(err)),
+            GramsPurpose::Revenue => {}
             GramsPurpose::PeerUser => grams.missing_users.extend(peer),
             GramsPurpose::PeerChat => grams.missing_chats.extend(peer),
             GramsPurpose::Page { .. } => {
-                if pending.is_some_and(|p| p.id.0 == grams.request) {
-                    grams.loading = false;
-                    grams.error = Some(error_reason(err));
+                if let Some(pending) = pending {
+                    grams.stage.fail(pending.id.0, error_reason(err));
                 }
             }
             GramsPurpose::WithdrawalUrl => {

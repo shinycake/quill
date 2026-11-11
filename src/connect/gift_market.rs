@@ -131,12 +131,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                     search.page = page.saturating_add(1);
                 }
                 Err(_) => {
-                    search.stage = crate::gift_market::ResaleStage::Failed(
-                        crate::gift_market::error_note(
-                            GiftMarketPurpose::SearchResale { gift_id, page },
-                            "not connected",
-                        ),
-                    )
+                    search.stage.send_failed(crate::gift_market::error_note(
+                        GiftMarketPurpose::SearchResale { gift_id, page },
+                        "not connected",
+                    ))
                 }
             }
         }

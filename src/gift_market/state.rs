@@ -6,6 +6,7 @@ use super::{
 };
 use crate::gift_manage::GiftRecipient;
 use crate::marketplace::GiftPrice;
+use crate::state::PageStage;
 use crate::state::fetch::Fetch;
 use std::collections::HashMap;
 
@@ -23,23 +24,7 @@ pub struct ResaleSearch {
     pub next_offset: String,
     /// The next page to ask for.
     pub page: u32,
-    pub stage: ResaleStage,
-}
-
-/// Where one resale search stands.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum ResaleStage {
-    /// No page was asked for the current filter.
-    #[default]
-    Idle,
-    /// The request `request` (0 until it is sent) is in flight; `more` is a
-    /// later page, so earlier pages count as loaded.
-    Loading { request: u64, more: bool },
-    /// The last page arrived.
-    Ready,
-    /// The last request failed, with the line the list shows. Pages that
-    /// arrived before stay.
-    Failed(String),
+    pub stage: PageStage,
 }
 
 impl ResaleSearch {
@@ -59,24 +44,17 @@ impl ResaleSearch {
 
     /// A request is in flight.
     pub fn is_loading(&self) -> bool {
-        matches!(self.stage, ResaleStage::Loading { .. })
+        self.stage.is_loading()
     }
 
     /// Whether any page arrived for the current filter (a failure also
     /// ends the first wait).
     pub fn loaded(&self) -> bool {
-        match self.stage {
-            ResaleStage::Idle => false,
-            ResaleStage::Loading { more, .. } => more,
-            ResaleStage::Ready | ResaleStage::Failed(_) => true,
-        }
+        self.stage.loaded()
     }
 
     pub fn error(&self) -> Option<&str> {
-        match &self.stage {
-            ResaleStage::Failed(reason) => Some(reason),
-            _ => None,
-        }
+        self.stage.error()
     }
 
     /// A page is about to be asked for: the first one starts the list over.
@@ -85,33 +63,29 @@ impl ResaleSearch {
             self.page = 0;
             self.next_offset.clear();
         }
-        self.stage = ResaleStage::Loading { request: 0, more };
+        self.stage.begin(more);
     }
 
     /// The page asked for goes out as `request`.
     pub fn sent(&mut self, request: u64) {
-        if let ResaleStage::Loading { more, .. } = self.stage {
-            self.stage = ResaleStage::Loading { request, more };
-        }
+        self.stage.sent(request);
     }
 
     /// Whether this search waits for the answer to `request`.
     pub fn waits_for(&self, request: u64) -> bool {
-        request != 0 && matches!(self.stage, ResaleStage::Loading { request: r, .. } if r == request)
+        self.stage.waits_for(request)
     }
 
     /// The request `request` failed. Only the search that sent it fails; a
     /// newer filter's search keeps loading.
     pub fn fail(&mut self, request: u64, note: String) {
-        if self.waits_for(request) {
-            self.stage = ResaleStage::Failed(note);
-        }
+        self.stage.fail(request, note);
     }
 
     /// Takes a page: the first replaces the list, later ones append. Own
     /// listings are dropped in craft mode (tdesktop skips them).
     pub fn apply(&mut self, page: ResalePage, my_user_id: Option<i64>, append: bool) {
-        self.stage = ResaleStage::Ready;
+        self.stage.ready();
         self.total_count = page.total_count;
         self.next_offset = if page.listings.is_empty() {
             String::new()

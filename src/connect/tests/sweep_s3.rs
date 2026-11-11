@@ -46,7 +46,6 @@ fn a_grams_peer_request_that_never_left_is_asked_again() {
         date: 1,
         kind: TonTxKind::SuggestedPostPayment { chat_id: 13 },
     });
-    driver.session.payments.hub.grams.peers_dirty = true;
     sender.refuse(true);
     assert!(!driver.grams_tick(false), "nothing left");
     assert!(driver.session.payments.hub.grams.asked_chats.is_empty());

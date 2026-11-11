@@ -128,7 +128,7 @@ fn keys_stay_unique_when_ids_are_empty_or_repeat() {
     assert_eq!(keys, ["0-10", "a", "2-12", "3-10"]);
     hub.selected = Some("2-12".into());
     assert_eq!(hub.selected_tx().map(|tx| tx.gram_nano), Some(3));
-    assert!(hub.peers_dirty);
+    assert!(hub.loaded());
 }
 
 #[test]
@@ -250,7 +250,7 @@ fn paging_appends_and_a_fresh_page_replaces() {
     assert_eq!(hub.balance_nano, Some(1));
     // A new tab starts over and keeps the tabs.
     hub.restart(TxFilter::Outgoing);
-    assert!(hub.entries.is_empty() && !hub.loaded);
+    assert!(hub.entries.is_empty() && !hub.loaded());
     assert!(hub.shows_tabs());
     // Only incoming rows: one "All Transactions" list, no tabs.
     let mut one_way = GramsHub::default();
