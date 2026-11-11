@@ -577,17 +577,16 @@ impl QuillApp {
 
     /// "PDF · 1.2 MB" (tdesktop's file row: extension and size).
     fn send_card_file_meta(&self, attachment: &ComposerAttachment) -> String {
-        let size = *self
-            .composer_sends
-            .reads
-            .file_sizes
-            .borrow_mut()
-            .entry(attachment.path.clone())
-            .or_insert_with(|| {
-                std::fs::metadata(&attachment.path)
-                    .ok()
-                    .map(|meta| meta.len())
-            });
+        let read = || {
+            std::fs::metadata(&attachment.path)
+                .ok()
+                .map(|meta| meta.len())
+        };
+        // A cache only: when the cell is busy, read the size again.
+        let size = match self.composer_sends.reads.file_sizes.try_borrow_mut() {
+            Ok(mut sizes) => *sizes.entry(attachment.path.clone()).or_insert_with(read),
+            Err(_) => read(),
+        };
         let extension = attachment
             .path
             .extension()

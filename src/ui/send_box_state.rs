@@ -135,7 +135,7 @@ impl TrayReads {
     /// holds any more (`QuillApp::forget_tray_checks`).
     pub(super) fn forget<'a>(&mut self, paths: impl Iterator<Item = &'a Path>) {
         let mut sizes = self.photo_sizes.borrow_mut();
-        let mut bytes = self.file_sizes.borrow_mut();
+        let bytes = self.file_sizes.get_mut();
         for path in paths {
             sizes.remove(path);
             bytes.remove(path);
