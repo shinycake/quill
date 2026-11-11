@@ -361,16 +361,9 @@ fn attachment_menu_bots_and_custom_requests_round_trip() {
         r#"{{"@type":"attachmentMenuBot","@extra":"{}","bot_user_id":43,"name":"Maps","supports_group_chats":true,"request_write_access":false,"is_added":false,"show_in_attachment_menu":true,"show_in_side_menu":false}}"#,
         extra.as_extra()
     ));
-    let bot = h
-        .driver
-        .session
-        .bots
-        .web_apps
-        .attachment_menu_bot
-        .clone()
-        .unwrap()
-        .1
-        .unwrap();
+    let (asked, bot) = h.driver.session.bots.web_apps.attachment_menu_bot[0].clone();
+    assert_eq!(asked, extra, "the answer names its request");
+    let bot = bot.unwrap();
     assert_eq!(bot.bot_user_id, 43);
     assert!(!bot.is_added);
     let extra = h
@@ -387,6 +380,7 @@ fn attachment_menu_bots_and_custom_requests_round_trip() {
     assert_eq!(
         h.driver.session.bots.web_apps.attachment_menu_toggled,
         [crate::state::AttachmentToggle {
+            request: extra,
             bot_user_id: 43,
             result: Ok(true)
         }]
@@ -423,9 +417,31 @@ fn a_search_answer_names_its_bot_even_when_refused() {
         r#"{{"@type":"error","@extra":"{}","code":404,"message":"Not Found"}}"#,
         extra.as_extra()
     ));
-    let (bot_id, app) = h.driver.session.bots.web_apps.found.clone().unwrap();
-    assert_eq!(bot_id, 42);
+    let (asked, app) = h.driver.session.bots.web_apps.found[0].clone();
+    assert_eq!(asked, extra);
     assert!(app.is_err());
+}
+
+/// Two searches of one bot's apps answer in either order: each answer
+/// names the request it is for, so the newer wait is never given the older
+/// app's answer.
+#[test]
+fn two_searches_of_one_bot_keep_their_own_answers() {
+    let mut h = Harness::ready();
+    let first = h.driver.search_web_app(42, "shop").expect("sent");
+    let second = h.driver.search_web_app(42, "maps").expect("sent");
+    for (extra, name, skip) in [(second, "maps", true), (first, "shop", false)] {
+        h.ingest(&format!(
+            r#"{{"@type":"foundWebApp","@extra":"{}","web_app":{{"@type":"webApp","short_name":"{name}","title":"{name}","description":""}},"request_write_access":false,"skip_confirmation":{skip}}}"#,
+            extra.as_extra()
+        ));
+    }
+    let found = &h.driver.session.bots.web_apps.found;
+    assert_eq!(found.len(), 2, "neither answer overwrote the other");
+    assert_eq!(found[0].0, second);
+    assert_eq!(found[1].0, first);
+    assert!(found[0].1.as_ref().is_ok_and(|app| app.skip_confirmation));
+    assert!(found[1].1.as_ref().is_ok_and(|app| !app.skip_confirmation));
 }
 
 /// Round 17 C finding 19: a data send keeps the mini-app poll alive until
@@ -453,9 +469,9 @@ fn named_app_links_search_first() {
         r#"{{"@type":"foundWebApp","@extra":"{}","web_app":{{"@type":"webApp","short_name":"shop","title":"Shop","description":""}},"request_write_access":true,"skip_confirmation":false}}"#,
         extra.as_extra()
     ));
-    let (bot_id, app) = h.driver.session.bots.web_apps.found.clone().unwrap();
+    let (asked, app) = h.driver.session.bots.web_apps.found[0].clone();
     let app = app.unwrap();
-    assert_eq!(bot_id, 42);
+    assert_eq!(asked, extra);
     assert_eq!(app.title, "Shop");
     assert!(app.request_write_access);
     let theme = ThemeParams::light_default();

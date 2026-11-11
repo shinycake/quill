@@ -193,6 +193,8 @@ pub static CHROME: Signal = Signal::new();
 pub static PASSCODE: Signal = Signal::new();
 /// The "save power on low battery" switch changed.
 pub static BATTERY: Signal = Signal::new();
+/// A mini app's helper sent an event, or TDLib answered a mini-app call.
+pub static MINI_APPS: Signal = Signal::new();
 /// Agent access changed: a grant, a connection, or a prompt for the user
 /// (`crate::agent`).
 pub static AGENT: Signal = Signal::new();

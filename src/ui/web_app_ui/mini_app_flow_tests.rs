@@ -278,6 +278,7 @@ fn an_account_switch_closes_the_mini_app_and_what_waits(cx: &mut TestAppContext)
             bot_id: BOT,
         };
         let awaited = Awaited {
+            request: quill::ids::RequestId(1),
             then: waiting,
             window: None,
         };
