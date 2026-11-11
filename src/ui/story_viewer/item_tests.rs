@@ -83,7 +83,7 @@ fn opening_over_the_viewer_starts_clean(cx: &mut TestAppContext) {
     app.update(&mut vcx, |app, cx| {
         app.stories.with_viewer_ui(|open| {
             open.privacy_edit = Some(privacy_edit());
-            open.reply_open = true;
+            open.open_reply();
         });
         app.open_story_viewer(ChatId(MAYA), 5, StoryOpenScope::Tray, cx);
     });
@@ -92,7 +92,7 @@ fn opening_over_the_viewer_starts_clean(cx: &mut TestAppContext) {
         let open = app.stories.viewer_ui();
         assert!(app.stories.viewer.is_open());
         assert!(open.privacy_edit.is_none(), "the old viewer's editor");
-        assert!(!open.reply_open, "the old viewer's reply row");
+        assert!(!open.reply_is_open(), "the old viewer's reply row");
     });
 }
 
@@ -108,7 +108,7 @@ fn a_release_cancels_the_story_reply_being_recorded(cx: &mut TestAppContext) {
             let path = std::env::temp_dir().join("quill-story-reply-release-test.ogg");
             Ok(quill::voice::VoiceCapture::preview(path, 1, vec![4]))
         });
-        app.stories.with_viewer_ui(|open| open.reply_open = true);
+        app.stories.with_viewer_ui(|open| open.open_reply());
         app.start_voice_capture(CaptureFor::StoryReply, cx);
     });
     vcx.run_until_parked();

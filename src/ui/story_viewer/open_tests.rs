@@ -265,8 +265,8 @@ fn a_release_drops_what_the_viewer_had_open(cx: &mut TestAppContext) {
         assert!(app.stories.viewer_ui().privacy_edit.is_some());
         app.release_story_viewer(cx);
         // Nothing opens over a closed viewer.
-        app.stories.with_viewer_ui(|open| open.reply_open = true);
-        assert!(!app.stories.viewer_ui().reply_open);
+        app.stories.with_viewer_ui(|open| open.open_reply());
+        assert!(!app.stories.viewer_ui().reply_is_open());
     });
     app.update(vcx, |app, cx| {
         app.open_story_viewer(ChatId(MAYA), 5, StoryOpenScope::Tray, cx);

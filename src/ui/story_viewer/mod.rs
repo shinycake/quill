@@ -344,11 +344,11 @@ impl QuillApp {
     /// Phase 9.2: toggle the reply row in the viewer (`story.can_be_replied`
     /// gates the button).
     pub(super) fn toggle_story_reply(&mut self, cx: &mut Context<Self>) {
-        if self.stories.viewer_ui().reply_open {
+        if self.stories.viewer_ui().reply_is_open() {
             self.end_story_reply(cx);
         } else {
             if let Some(open) = self.stories.viewer_ui_mut() {
-                open.reply_open = true;
+                open.open_reply();
             }
         }
         cx.notify();
@@ -764,7 +764,7 @@ impl QuillApp {
         !self.frame.main_active.get()
             || self.refused_while_locked()
             || self.stories.viewer_ui().reaction_picker_open
-            || self.stories.viewer_ui().reply_open
+            || self.stories.viewer_ui().reply_is_open()
             || self.stories.viewer_ui().pause.is_paused()
             // A repost's press waits for its story's answer.
             || self

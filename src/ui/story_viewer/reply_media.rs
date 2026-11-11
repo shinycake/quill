@@ -44,7 +44,7 @@ impl QuillApp {
     /// The story the reply row is replying to.
     pub(in crate::ui) fn story_reply_target(&self) -> Option<(ChatId, i32)> {
         reply_target(
-            self.stories.viewer_ui().reply_open,
+            self.stories.viewer_ui().reply_is_open(),
             self.stories
                 .viewer
                 .current()
@@ -58,8 +58,8 @@ impl QuillApp {
     pub(in crate::ui) fn story_reply_panel_active(&self) -> bool {
         !self.windows.in_window()
             && picks_go_to_story(
-                self.stories.viewer_ui().reply_open,
-                self.stories.viewer_ui().reply_panel,
+                self.stories.viewer_ui().reply_is_open(),
+                self.stories.viewer_ui().reply_panel_shown(),
             )
             && self.pickers.media_panel.is_open()
             && self.pickers.media_panel.reaction().is_none()
@@ -68,7 +68,7 @@ impl QuillApp {
 
     /// A recording started from the story reply row is in progress.
     pub(in crate::ui) fn story_reply_recording_active(&self) -> bool {
-        self.stories.viewer_ui().reply_open
+        self.stories.viewer_ui().reply_is_open()
             && self.recording.purpose() == Some(CaptureFor::StoryReply)
     }
 
@@ -101,22 +101,22 @@ impl QuillApp {
             self.cancel_recording(cx);
         }
         if let Some(open) = self.stories.viewer_ui_mut() {
-            open.reply_open = false;
+            open.close_reply();
         }
         if let Some(open) = self.stories.viewer_ui_mut() {
-            open.reply_panel = false;
+            open.close_reply_panel();
         }
     }
 
     pub(super) fn toggle_story_reply_panel(&mut self, tab: PanelTab, cx: &mut Context<Self>) {
         if self.story_reply_panel_active() && self.pickers.media_panel.tab == tab {
             if let Some(open) = self.stories.viewer_ui_mut() {
-                open.reply_panel = false;
+                open.close_reply_panel();
             }
             self.close_media_panel(cx);
         } else {
             if let Some(open) = self.stories.viewer_ui_mut() {
-                open.reply_panel = true;
+                open.open_reply_panel();
             }
             self.open_media_panel(tab, cx);
         }
@@ -422,7 +422,7 @@ impl QuillApp {
         }
         if self.story_reply_panel_active() {
             if let Some(open) = self.stories.viewer_ui_mut() {
-                open.reply_panel = false;
+                open.close_reply_panel();
             }
             self.close_media_panel(cx);
         }
