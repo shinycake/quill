@@ -4,6 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::QuillApp;
+use super::settings_state::SystemAccent;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::IndexPath;
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
@@ -115,8 +116,7 @@ impl QuillApp {
         if self.demo_session.is_some() {
             return;
         }
-        self.preferences.system_accent = quill::system_accent::read();
-        self.preferences.system_accent_probed = true;
+        self.preferences.system_accent = SystemAccent::Read(quill::system_accent::read());
         if quill::system_accent::pending() && self.preferences.system_accent_poll.is_none() {
             // screen-scope: the system accent is an app-wide setting; it applies to whichever account is on screen.
             let poll = cx.spawn(async move |this, cx| {
@@ -127,7 +127,8 @@ impl QuillApp {
                 }
                 let _ = this.update(cx, |this, cx| {
                     this.preferences.system_accent_poll = None;
-                    this.preferences.system_accent = quill::system_accent::read();
+                    this.preferences.system_accent =
+                        SystemAccent::Read(quill::system_accent::read());
                     this.apply_appearance(cx);
                     cx.notify();
                 });

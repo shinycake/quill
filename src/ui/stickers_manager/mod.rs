@@ -164,7 +164,8 @@ impl QuillApp {
 
     /// Open the box on the installed stickers.
     pub(super) fn open_archived_stickers(&mut self, cx: &mut Context<Self>) {
-        self.settings.sticker_settings_open = true;
+        self.settings
+            .set_box(crate::ui::settings_state::SettingsBox::Stickers, true);
         self.open_box(DialogKind::ArchivedStickers);
         self.settings.sticker_manager.composer_tab = self
             .session()
@@ -200,7 +201,11 @@ impl QuillApp {
 
     /// Close the box and send what it changed (tdesktop `saveChanges`).
     pub(super) fn close_stickers_manager(&mut self, cx: &mut Context<Self>) {
-        let was_open = std::mem::replace(&mut self.settings.sticker_settings_open, false);
+        let was_open = self
+            .settings
+            .box_open(crate::ui::settings_state::SettingsBox::Stickers);
+        self.settings
+            .set_box(crate::ui::settings_state::SettingsBox::Stickers, false);
         self.finish_manager(Kind::Stickers);
         if let Some(live) = self.live.as_mut() {
             live.driver.close_sticker_panel();
@@ -577,7 +582,7 @@ crate::ui::shell::register_dialogs! {
     /// Settings > Chats > "Manage sticker sets".
     ArchivedStickers => DialogSpec::new(
         5000,
-        |app| app.settings.sticker_settings_open,
+        |app| app.settings.box_open(crate::ui::settings_state::SettingsBox::Stickers),
         QuillApp::build_stickers_manager_dialog,
     )
     .close(|app, _, cx| app.close_stickers_manager(cx)),

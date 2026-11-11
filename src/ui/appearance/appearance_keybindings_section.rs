@@ -1,6 +1,7 @@
 //! Methods moved out of `appearance.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::keybindings::Capture;
 use quill::lang::{keys, tr};
 
 impl QuillApp {
@@ -25,7 +26,12 @@ impl QuillApp {
             .map(|live| live.driver.load_custom_keybindings())
             .unwrap_or_default();
         let resolved = resolve_keybindings(&customs);
-        let capturing = self.preferences.keybinding_capture.clone();
+        let capturing = self
+            .preferences
+            .keybinding
+            .capture
+            .waiting()
+            .map(str::to_owned);
         let rows = REBINDABLE_ACTIONS.iter().map(|ra| {
             let row_state = resolved.iter().find(|row| row.id == ra.id);
             let current = row_state
@@ -48,10 +54,10 @@ impl QuillApp {
                 None
             } else {
                 self.preferences
-                    .keybinding_error
-                    .as_ref()
-                    .filter(|(err_id, _)| err_id == ra.id)
-                    .map(|(_, message)| message.clone())
+                    .keybinding
+                    .capture
+                    .refusal_of(ra.id)
+                    .map(str::to_owned)
                     .or(persisted_error)
             };
             // A joined pair like "cmd-shift-g / ctrl-shift-g" is wider than
@@ -101,12 +107,13 @@ impl QuillApp {
                                 .on_click({
                                     let id = id.clone();
                                     cx.listener(move |this, _, window, cx| {
-                                        if this.preferences.keybinding_capture.as_deref()
+                                        if this.preferences.keybinding.capture.waiting()
                                             == Some(id.as_str())
                                         {
-                                            this.preferences.keybinding_capture = None;
+                                            this.preferences.keybinding.capture = Capture::Idle;
                                         } else {
-                                            this.preferences.keybinding_capture = Some(id.clone());
+                                            this.preferences.keybinding.capture =
+                                                Capture::Waiting(id.clone());
                                             window.focus(&this.preferences.keybinding_focus, cx);
                                         }
                                         cx.notify();
@@ -130,15 +137,7 @@ impl QuillApp {
                                             let customs = live.driver.load_custom_keybindings();
                                             apply_custom_bindings(cx, &customs);
                                         }
-                                        this.preferences.keybinding_capture = None;
-                                        if this
-                                            .preferences
-                                            .keybinding_error
-                                            .as_ref()
-                                            .is_some_and(|(err_id, _)| err_id == &id)
-                                        {
-                                            this.preferences.keybinding_error = None;
-                                        }
+                                        this.preferences.keybinding.capture = Capture::Idle;
                                         cx.notify();
                                     })
                                 }),
@@ -206,14 +205,20 @@ impl QuillApp {
         if !self.keybinding_capture_active() {
             return;
         }
-        let Some(id) = self.preferences.keybinding_capture.clone() else {
+        let Some(id) = self
+            .preferences
+            .keybinding
+            .capture
+            .waiting()
+            .map(str::to_owned)
+        else {
             return;
         };
         if keystroke.is_modifier_key() {
             return;
         }
         if keystroke.key == "escape" && !keystroke.modifiers.modified() {
-            self.preferences.keybinding_capture = None;
+            self.preferences.keybinding.capture = Capture::Idle;
             cx.notify();
             return;
         }
@@ -226,8 +231,10 @@ impl QuillApp {
             .map(|live| live.driver.load_custom_keybindings())
             .unwrap_or_default();
         if let Some(conflict) = keybinding_conflict(&id, &chord, &customs) {
-            self.preferences.keybinding_error = Some((id, conflict_message(&chord, &conflict)));
-            self.preferences.keybinding_capture = None;
+            self.preferences.keybinding.capture = Capture::Refused {
+                action: id,
+                message: conflict_message(&chord, &conflict),
+            };
             cx.notify();
             return;
         }
@@ -241,16 +248,8 @@ impl QuillApp {
         });
         if let Some(customs) = saved {
             apply_custom_bindings(cx, &customs);
-            if self
-                .preferences
-                .keybinding_error
-                .as_ref()
-                .is_some_and(|(err_id, _)| err_id == &id)
-            {
-                self.preferences.keybinding_error = None;
-            }
         }
-        self.preferences.keybinding_capture = None;
+        self.preferences.keybinding.capture = Capture::Idle;
         cx.notify();
     }
 }

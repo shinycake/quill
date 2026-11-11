@@ -146,7 +146,10 @@ fn log_out_asks_before_signing_out(cx: &mut TestAppContext) {
     assert_eq!(open_dialog(&shell, vcx), None);
     app.read_with(vcx, |app, _| {
         assert!(app.settings.open);
-        assert!(!app.settings.log_out_confirm);
+        assert!(
+            !app.settings
+                .box_open(crate::ui::settings_state::SettingsBox::LogOut)
+        );
     });
 }
 

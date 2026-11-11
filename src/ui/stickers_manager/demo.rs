@@ -79,7 +79,8 @@ impl QuillApp {
         stickers.masks.archived = stickers.stickers.archived.iter().take(1).cloned().collect();
         stickers.masks.archived_loaded = true;
         stickers.masks.open = true;
-        self.settings.sticker_settings_open = false;
+        self.settings
+            .set_box(crate::ui::settings_state::SettingsBox::Stickers, false);
     }
 
     fn demo_stickers_manager(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -128,7 +129,8 @@ impl QuillApp {
         stickers.open = true;
         stickers.tab = StickerTab::Installed;
         session.stickers.manager.open = true;
-        self.settings.sticker_settings_open = true;
+        self.settings
+            .set_box(crate::ui::settings_state::SettingsBox::Stickers, true);
         self.set_note(StatusNote::silent("screenshot demo — stickers manager"));
     }
 }
