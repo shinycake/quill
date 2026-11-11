@@ -161,6 +161,9 @@ fn an_old_bot_message_loaded_after_the_start_does_not_bring_the_user_back(cx: &m
             app.take_inline_start(ChatId(bot_chat), cx),
             "the start goes"
         );
+        // The user lands in the bot's chat with the start: a frame between
+        // the two would see the origin chat and end the trip.
+        app.demo_session.as_mut().expect("a demo session").open_chat = Some(ChatId(bot_chat));
     });
     // The user lands in the bot's chat; its history loads: an old answer
     // of the bot, then the user's own start.

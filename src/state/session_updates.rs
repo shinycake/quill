@@ -78,6 +78,9 @@ impl Session {
             // TDLib asks for these only of a client that is not signed in.
             self.sign_in_origin = crate::account_data::SignInOrigin::Fresh;
         }
+        if !matches!(state, AuthorizationState::WaitPassword { .. }) {
+            self.auth_state.password_recovery = PasswordRecovery::Idle;
+        }
         self.auth = state;
         self.auth_view = view_for(&self.auth);
         self.auth_state.last_auth_error = None;

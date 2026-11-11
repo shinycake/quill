@@ -76,7 +76,7 @@ fn draft_cap(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, kind: CapKind)
     app.read_with(vcx, |app, _| {
         app.settings
             .data_storage_editor
-            .as_ref()
+            .shown()
             .map(|(_, draft)| draft.cap(kind))
     })
 }
@@ -92,7 +92,7 @@ fn network_editor_size_caps_follow_their_sliders(cx: &mut TestAppContext) {
     vcx.update(|window, cx| window.click("data-storage-net-Wi-Fi", cx));
     frames(vcx);
     let wifi = app.read_with(vcx, |app, _| {
-        app.settings.data_storage_editor.as_ref().map(|(n, _)| *n)
+        app.settings.data_storage_editor.shown().map(|(n, _)| n)
     });
     assert_eq!(wifi, Some(NetworkKind::WiFi), "the row opens the editor");
     for id in [

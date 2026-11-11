@@ -106,7 +106,7 @@ impl QuillApp {
         let index = position(value.end(), key.steps());
         match key {
             StepSlider::DataCap(kind) => {
-                if let Some((_, draft)) = self.settings.data_storage_editor.as_mut() {
+                if let Some(draft) = self.settings.data_storage_editor.draft_mut() {
                     draft.set_cap(kind, cap_at(index));
                 }
             }

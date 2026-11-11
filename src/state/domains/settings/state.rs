@@ -28,7 +28,17 @@ impl ReadDateStage {
     }
 }
 
+/// How the last `setAutoDownloadSettings` ended, by the request that asked:
+/// the editor that sent it closes on `Saved` and reopens on `Refused`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoDownloadAnswer {
+    Saved(RequestId),
+    Refused(RequestId),
+}
+
 pub struct SettingsState {
+    /// See [`AutoDownloadAnswer`].
+    pub auto_download_answer: Option<AutoDownloadAnswer>,
     /// Mirror of `settings::Preferences::notify_view` (tdesktop "Name" /
     /// "Text"), loaded from `prefs.json` at connect time.
     pub notify_view: crate::notify::NotifyView,
@@ -340,6 +350,7 @@ impl SettingsState {
             data_storage: DataStoragePrefs::default(),
             data_storage_dirty: false,
             auto_download_presets_loading: false,
+            auto_download_answer: None,
             data_storage_error: None,
             storage_freed: None,
             storage_clearing: false,

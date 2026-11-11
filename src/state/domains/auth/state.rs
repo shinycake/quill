@@ -3,7 +3,21 @@
 //! with `new`.
 use crate::state::*;
 
+/// The 2FA password step's recovery e-mail: one stage, moved by the
+/// answer to the request that asked (`requestAuthenticationPasswordRecovery`),
+/// so the screen asks for the code only once the server sent it. A refused
+/// request, or auth leaving the password step, goes back to `Idle`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PasswordRecovery {
+    #[default]
+    Idle,
+    Requested(RequestId),
+    CodeSent,
+}
+
 pub struct AuthState {
+    /// See [`PasswordRecovery`].
+    pub password_recovery: PasswordRecovery,
     /// Last classified error for phone / code / password submit. Never a secret.
     pub last_auth_error: Option<AuthRequestError>,
     /// `getCountries` rows for the sign-in picker and the country boxes:
@@ -53,6 +67,7 @@ pub struct AuthState {
 impl AuthState {
     pub(crate) fn new() -> Self {
         Self {
+            password_recovery: PasswordRecovery::Idle,
             last_auth_error: None,
             countries: crate::state::fetch::Fetch::Idle,
             guessed_country_iso: None,

@@ -387,7 +387,15 @@ impl QuillApp {
             return false;
         };
         match open.state.check_share(view.shown, now_unix()) {
-            Ok(shown) => shown.link == link && view.appearance == *appearance,
+            Ok(shown) => {
+                let same = shown.link == link && view.appearance == *appearance;
+                if !same {
+                    // The box changed while the picture was made: say so
+                    // rather than let the press go nowhere.
+                    self.show_qr_toast(QrToast::Changed, cx);
+                }
+                same
+            }
             Err(toast) => {
                 if let Some(toast) = toast {
                     self.show_qr_toast(toast, cx);
@@ -501,7 +509,10 @@ impl QuillApp {
                     }
                     return;
                 };
-                open.share_image = image;
+                open.share = super::QrShare::Chooser {
+                    window: from,
+                    image,
+                };
                 this.as_asked_by(from, |this| {
                     this.in_asking_window(cx, |this, _| this.share.link_text = Some(shown.link));
                 });

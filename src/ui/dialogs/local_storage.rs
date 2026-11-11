@@ -242,7 +242,7 @@ impl QuillApp {
     }
 
     /// Send the confirmed clear (`optimizeStorage`).
-    fn run_storage_clear(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn run_storage_clear(&mut self, cx: &mut Context<Self>) {
         let Some(pending) = self.settings.storage_confirm.take() else {
             return;
         };
@@ -254,16 +254,20 @@ impl QuillApp {
             ),
             StorageClear::Chat(chat_id) => (Vec::new(), vec![chat_id]),
         };
-        if pending == StorageClear::Selected {
-            self.settings.storage_selected.clear();
-        }
-        if let Some(live) = self.live.as_mut() {
+        let sent = if let Some(live) = self.live.as_mut() {
             // Send failures land on `data_storage_error`, shown on this
             // dialog (the S3 pattern).
-            let _ = live.driver.clear_storage(&types, &chats);
+            live.driver.clear_storage(&types, &chats).is_ok()
         } else if let Some(demo) = self.demo_session.as_mut() {
             demo.settings.storage_stats = None;
             demo.settings.storage_freed = Some(54_525_952);
+            true
+        } else {
+            false
+        };
+        // The ticks go with a clear that went out; a refused one keeps them.
+        if sent && pending == StorageClear::Selected {
+            self.settings.storage_selected.clear();
         }
         cx.notify();
     }
