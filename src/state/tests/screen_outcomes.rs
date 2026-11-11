@@ -101,8 +101,10 @@ fn every_drained_outcome_is_forgotten_on_return() {
             .chars()
             .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '.')
             .collect();
-        let rest = &part[path.len()..];
-        if !rest.starts_with("take()") {
+        if !part
+            .get(path.len()..)
+            .is_some_and(|rest| rest.starts_with("take()"))
+        {
             continue;
         }
         let Some(field) = path.rsplit('.').next() else {
