@@ -63,7 +63,15 @@ fn gift_code_is_applied_only_by_the_explicit_call() {
         sent_request(&recorder, "checkPremiumGiftCode")["code"],
         "AbC"
     );
-    assert!(driver.session.payments.gift_code.as_ref().unwrap().loading());
+    assert!(
+        driver
+            .session
+            .payments
+            .gift_code
+            .as_ref()
+            .unwrap()
+            .loading()
+    );
     // Not known yet: apply refuses.
     assert!(driver.apply_gift_code().is_err());
     feed(
@@ -82,7 +90,15 @@ fn gift_code_is_applied_only_by_the_explicit_call() {
 
     let extra = driver.apply_gift_code().unwrap();
     assert_eq!(count_sent(&recorder, "applyPremiumGiftCode"), 1);
-    assert!(driver.session.payments.gift_code.as_ref().unwrap().applying());
+    assert!(
+        driver
+            .session
+            .payments
+            .gift_code
+            .as_ref()
+            .unwrap()
+            .applying()
+    );
     // A second click while applying sends nothing.
     assert!(driver.apply_gift_code().is_err());
     feed(
@@ -156,7 +172,15 @@ fn a_failed_apply_keeps_the_box_open_with_the_reason() {
     assert!(lookup.info().is_some());
     // The failed apply is a way out, not a dead end: Apply asks again.
     assert!(driver.apply_gift_code().is_ok());
-    assert!(driver.session.payments.gift_code.as_ref().unwrap().applying());
+    assert!(
+        driver
+            .session
+            .payments
+            .gift_code
+            .as_ref()
+            .unwrap()
+            .applying()
+    );
     std::fs::remove_dir_all(dir).unwrap();
 }
 

@@ -1,9 +1,9 @@
 //! Connect driver: members, admins, invites, join requests, event log.
 use super::*;
 use crate::ids::{ChatId, RequestId};
+use crate::state::GroupsPurpose;
 use crate::state::TransferStage;
 use crate::state::fetch::Fetch;
-use crate::state::GroupsPurpose;
 use crate::state::{
     AdminListFetch, AdminRightsFetch, CHAT_EVENT_LOG_PAGE_SIZE, ChatEventLogFetch, InviteLinkFetch,
     JoinRequestFetch, MemberListFilter, MemberStatusChange, OwnerLookup, RequestPurpose,

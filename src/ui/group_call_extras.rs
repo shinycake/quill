@@ -532,7 +532,11 @@ impl QuillApp {
         call: &quill::state::ActiveGroupCall,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let options = call.join_as_options.data().map(Vec::as_slice).unwrap_or(&[]);
+        let options = call
+            .join_as_options
+            .data()
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
         if call.is_joined || options.len() < 2 {
             return None;
         }

@@ -6784,3 +6784,39 @@ Thirty-four minor entries; each was proved against the integration branch first.
   process-wide (`next_query_token`). 13-165: tdesktop toasts the hide at
   once (the bar is optimistic here too, with `RequestRollback`), and the
   local hidden flag is already keyed by account.
+
+### Sweep fixes (is-04)
+
+Implicit-state entries: each struct that kept its stages as bools, `Option`s
+and side lists now holds one value per stage, with an exit for the answer,
+the error and the owner going away. Every field converted left
+`scripts/implicit-state-baseline.txt`; two TDLib-reported facts went to the
+allow list with a reason.
+
+| Entry | Fix |
+| --- | --- |
+| 02-107 | `ActiveGroupCall::join_as_options` is a `Fetch<Vec<MessageSender>>`: begun only when the request left, failed by its error arm, never re-asked from `ingest`. |
+| 02-109 | The call link stage already was one `CallLinkStage`. The hash (`call_link`) is now set only once `getGroupCall` left and dropped when it fails. The "Discarded end screen keeps `active_call` Some" claim no longer holds: `end_active_call` takes it on the terminal update. |
+| 02-100 | `ActiveGroupCall::transport` is `GroupTransport` (`NoTransport`, `AnswerReady`, `Connected{error}`, `Failed`) and `screen_share` is `GroupScreenShare` (`Off`, `Starting{answer}`, `Sharing`); a rejoin resets both together, and a stray screen answer with no start in flight is dropped. |
+| 02-125 | The three emoji icon lists (chat photo, profile photo, background) are `Fetch<Vec<StickerItem>>`; a failure is asked again at the next open, an empty answer is not. |
+| 02-131 | The welcome pack per chat is one `Fetch<Vec<_>>` (the cached pack lives in the stage). |
+| 02-130 | The join-request list carries its query and the request it waits for (`Loading{query, request}`, `JoinRequestList{query, more}`); the three maps are gone. |
+| 02-129, 05-092 | `InviteLinkMembersState` and `LinkRequestsState` hold a `PageStage` (the stage `BoostsListState` already had). |
+| 02-127, 05-234 | `BoostsListState` already had `PageStage`; nothing left to convert. |
+| 05-235 | `InviteLinkFetch::Loading(RequestId)`; an admin's two link lists take only their own answer. |
+| 02-134, 05-143 | `LanguageStage` (`Idle`, `Fetching`), `SwitchStrings` for the two string sets and a `LanguageEvent` queue (`Install`, `Patch`, `Reload`, `SwitchFailed`) replace `switching` and the four one-shot fields. `packs_loading` no longer exists (`packs` is a `Fetch`). |
+| 10-159, 05-115, 02-137 | `GiftCodeStage` (`Checking`, `Known`, `Applying`, `Applied`, `Failed`, `ApplyFailed`); a failed apply can be tried again. |
+| 10-160, 05-144 | `LanguageLinkStage` (`Looking`, `Known`, `Failed`). |
+| 05-091, 05-192, 02-166 | `OwnershipState{check: Fetch<CanTransferOwnershipResult>, transfer: TransferStage}`. |
+| 09-030, 02-135, 03-087 | `GiftPurchaseStage` (`Loading`, `Quoted`, `Sending`, `Sent`, `Failed`); the answer is matched to the request, the note is derived. |
+| 09-031 | `SettingsState::storage_stats` is a `Fetch<StorageStats>`. |
+| 02-138 | `MasksPanel`: `Fetch` per list, `MasksWanted` for dialog/strip, `sets: HashMap<_, Fetch<_>>` for the strip. |
+| 02-147 | One `forward_flights` list; no special first slot. |
+| 02-149, 03-041 | `WorkerLink::handoff` (`Idle`, `Handed`, `Awaiting`) replaces `pending` + `asked`. The cancel flag and the ended channel stay: they are the signals shared with the worker thread, and `Progress.stage` already is the run's stage enum. `Option<Export>` means "an export object exists", not a stage. |
+| 02-143 | `send_snapshot`, `send_animation`, `send_sticker`, the album and the paid-media send have `_to(place)` forms; the old names read the place at the click. `open_chat`/`open_topic` stay: they are the main window's selection, not a stage. |
+| 02-192, 04-032 | `RichHtmlStage` (`Running`, `Done(outcome)`) in the shared slot. |
+| 02-169 | One `EventLog` per chat (query, filter, users, fetch, waits). |
+| 02-170 | One `MemberAsk` per list (first request, query, `MoreMembers`). |
+| 02-165, 05-049, 08-020 | `BotText`, `BotSave` per field; `BotUsernameCheck` and `CreateStage` (the submission rides in the stage). The 150 ms poll task is gone: `drain_bot_create` runs from the existing poll drains. |
+| 02-163, 04-055 | `TrustFile` (`NotLoaded`, `Clean`, `Dirty`, `SaveFailed`); a failed write is shown. |
+| 02-161, 05-015, 12-026 | `StarPacksState::options` is a `Fetch<Vec<StarPack>>`; `open` stays a view flag. |

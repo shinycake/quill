@@ -370,7 +370,10 @@ pub struct InviteLinkList {
 #[derive(Debug, Clone, PartialEq)]
 pub enum JoinRequestFetch {
     /// A first page for `query` is in flight as `request`.
-    Loading { query: String, request: RequestId },
+    Loading {
+        query: String,
+        request: RequestId,
+    },
     Loaded(JoinRequestList),
     Failed(String),
 }

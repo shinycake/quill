@@ -274,14 +274,15 @@ impl GiftPurchase {
     /// A request failed: loading ends with no quote, a send goes back to the
     /// quote it was sent from.
     pub fn fail(&mut self, line: String) {
-        self.stage = match std::mem::replace(&mut self.stage, GiftPurchaseStage::Failed(String::new())) {
-            GiftPurchaseStage::Sending { quote, price, .. } => GiftPurchaseStage::Quoted {
-                quote,
-                price: Some(price),
-                note: Some(line),
-            },
-            _ => GiftPurchaseStage::Failed(line),
-        };
+        self.stage =
+            match std::mem::replace(&mut self.stage, GiftPurchaseStage::Failed(String::new())) {
+                GiftPurchaseStage::Sending { quote, price, .. } => GiftPurchaseStage::Quoted {
+                    quote,
+                    price: Some(price),
+                    note: Some(line),
+                },
+                _ => GiftPurchaseStage::Failed(line),
+            };
     }
 }
 
@@ -342,7 +343,9 @@ mod stage_tests {
             price: GiftPrice::Stars(25),
             request: RequestId(2),
         };
-        gift.accept_result(GiftPurchaseResult::PriceIncreased(Some(GiftPrice::Stars(40))));
+        gift.accept_result(GiftPurchaseResult::PriceIncreased(Some(GiftPrice::Stars(
+            40,
+        ))));
         assert_eq!(gift.price(), Some(GiftPrice::Stars(40)));
         assert!(!gift.is_sending() && !gift.is_completed());
     }

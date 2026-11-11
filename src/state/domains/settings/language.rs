@@ -39,7 +39,10 @@ pub enum SwitchStrings {
     Neither,
     Pack(Strings),
     Base(Strings),
-    Both { pack: Strings, base: Strings },
+    Both {
+        pack: Strings,
+        base: Strings,
+    },
 }
 
 impl SwitchStrings {
@@ -94,7 +97,7 @@ impl LanguageSwitch {
 pub enum LanguageStage {
     #[default]
     Idle,
-    Fetching(LanguageSwitch),
+    Fetching(Box<LanguageSwitch>),
 }
 
 /// What the language flow hands to the UI, in the order it happened. The UI
@@ -351,7 +354,9 @@ impl Session {
                 if state.switching().map(|s| s.generation) == Some(generation) {
                     state.stage = LanguageStage::Idle;
                     state.forget_failure();
-                    state.events.push(LanguageEvent::SwitchFailed(error_reason(err)));
+                    state
+                        .events
+                        .push(LanguageEvent::SwitchFailed(error_reason(err)));
                 }
             }
             // The badge types it asked for are asked again by the next pump.

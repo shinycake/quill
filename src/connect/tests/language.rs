@@ -537,10 +537,7 @@ fn a_client_coming_on_screen_follows_the_choice_saved_now() {
     let language = &f.driver.session.settings.language;
     assert!(!language.install_queued(), "the old pack is not installed");
     assert!(!language.reload_queued());
-    assert_eq!(
-        language.switching().map(|s| s.info.id.as_str()),
-        Some("fr")
-    );
+    assert_eq!(language.switching().map(|s| s.info.id.as_str()), Some("fr"));
 }
 
 /// Refuses every request, as a closed client does.

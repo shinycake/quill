@@ -34,7 +34,12 @@ fn installed_and_archived_masks_stay_out_of_the_regular_panel() {
     let masks = &session.stickers.masks;
     assert!(matches!(masks.installed, Fetch::Ready(_)));
     assert_eq!(
-        masks.installed.items().iter().map(|s| s.id).collect::<Vec<_>>(),
+        masks
+            .installed
+            .items()
+            .iter()
+            .map(|s| s.id)
+            .collect::<Vec<_>>(),
         [11, 12]
     );
     assert_eq!(masks.installed.items()[0].size, 3);

@@ -185,12 +185,13 @@ impl QuillApp {
         let Some(edit) = self.session().and_then(|s| s.bots.owned.edit.clone()) else {
             return true;
         };
-        if edit.load_failed {
+        if edit.load_failed() {
             return true;
         }
-        let (Some(name), Some(about)) = (edit.name, edit.about) else {
+        let (Some(name), Some(about)) = (edit.name.text(), edit.about.text()) else {
             return false;
         };
+        let (name, about) = (name.to_string(), about.to_string());
         let (name_input, about_input) = (dialog.name.clone(), dialog.about.clone());
         name_input.update(cx, |input, cx| input.set_value(name, window, cx));
         about_input.update(cx, |input, cx| input.set_value(about, window, cx));
@@ -225,10 +226,11 @@ impl QuillApp {
         let Some(edit) = self.session().and_then(|s| s.bots.owned.edit.clone()) else {
             return;
         };
-        let (Some(current_name), Some(current_about)) = (edit.name, edit.about) else {
+        let (Some(current_name), Some(current_about)) = (edit.name.text(), edit.about.text())
+        else {
             return;
         };
-        let changes = match owned_bots::edit_changes(&current_name, &current_about, &name, &about) {
+        let changes = match owned_bots::edit_changes(current_name, current_about, &name, &about) {
             Ok(changes) => changes,
             Err(problem) => {
                 if let Some(dialog) = self.dialogs.bot_edit_dialog.as_mut() {
@@ -335,10 +337,10 @@ impl QuillApp {
             let loaded = state.filled
                 && edit
                     .as_ref()
-                    .is_some_and(|e| e.name.is_some() && e.about.is_some());
-            let load_failed = edit.as_ref().is_some_and(|e| e.load_failed);
+                    .is_some_and(|e| e.name.text().is_some() && e.about.text().is_some());
+            let load_failed = edit.as_ref().is_some_and(|e| e.load_failed());
             let saving = edit.as_ref().is_some_and(|e| e.saving() > 0);
-            let server_error = edit.as_ref().and_then(|e| e.error.clone());
+            let server_error = edit.as_ref().and_then(|e| e.error().map(str::to_string));
             let username = this
                 .session()
                 .and_then(|s| s.user(bot_id))
@@ -353,18 +355,18 @@ impl QuillApp {
             let local_error = state.check.problem_for(&typed_name, &typed_about);
             // "Saved" says the fields hold what the server has: an edit
             // after the save takes it away.
-            let unsaved =
-                edit.as_ref()
-                    .is_none_or(|e| match (e.name.as_deref(), e.about.as_deref()) {
-                        (Some(current_name), Some(current_about)) => !owned_bots::edit_changes(
-                            current_name,
-                            current_about,
-                            &typed_name,
-                            &typed_about,
-                        )
-                        .is_ok_and(|changes| changes.is_empty()),
-                        _ => true,
-                    });
+            let unsaved = edit
+                .as_ref()
+                .is_none_or(|e| match (e.name.text(), e.about.text()) {
+                    (Some(current_name), Some(current_about)) => !owned_bots::edit_changes(
+                        current_name,
+                        current_about,
+                        &typed_name,
+                        &typed_about,
+                    )
+                    .is_ok_and(|changes| changes.is_empty()),
+                    _ => true,
+                });
             let saved = edit.as_ref().is_some_and(|e| e.saved > 0) && !unsaved;
 
             let status = if load_failed {

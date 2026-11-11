@@ -241,10 +241,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             .filter(|id| !self.session.stickers.masks.sets.contains_key(id))
             .collect();
         for set_id in wanted {
-            match self
-                .mask_request(StickersPurpose::GetMaskSet { set_id }.into(), |id| {
-                    get_sticker_set(id, set_id)
-                }) {
+            match self.mask_request(StickersPurpose::GetMaskSet { set_id }.into(), |id| {
+                get_sticker_set(id, set_id)
+            }) {
                 Ok(Some(_)) => {
                     self.session
                         .stickers

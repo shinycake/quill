@@ -512,8 +512,11 @@ impl Session {
                     && let Some(chat_id) = pending.chat_id
                     && self.groups.take_member_more((chat_id.0, filter), pending)
                 {
-                    self.groups.member_asks.entry((chat_id.0, filter)).or_default().more =
-                        MoreMembers::Failed;
+                    self.groups
+                        .member_asks
+                        .entry((chat_id.0, filter))
+                        .or_default()
+                        .more = MoreMembers::Failed;
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::GetSupergroupMembers { filter })) => {

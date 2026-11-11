@@ -4,8 +4,8 @@
 //! `boxes/peers/channel_ownership_transfer.cpp`,
 //! `boxes/select_future_owner_box.cpp`.
 use super::*;
-use crate::state::fetch::Fetch;
 use crate::lang::{keys, tr, tr_with, trn};
+use crate::state::fetch::Fetch;
 
 /// Answer of `getChatOwnerAfterLeaving` for one chat.
 #[derive(Debug, Clone, PartialEq, Eq)]

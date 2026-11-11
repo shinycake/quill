@@ -493,7 +493,9 @@ impl Session {
                     // that answers later finds the list no longer waiting
                     // for it and is dropped above.
                     let held = self.groups.join_requests.get(&chat_id.0);
-                    let query = held.map(|held| held.query().to_string()).unwrap_or_default();
+                    let query = held
+                        .map(|held| held.query().to_string())
+                        .unwrap_or_default();
                     let mut all = Vec::new();
                     if pending.purpose == RequestPurpose::GetMoreChatJoinRequests
                         && let Some(JoinRequestFetch::Loaded(old)) = held

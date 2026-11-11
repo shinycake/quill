@@ -103,8 +103,8 @@ fn a_mask_set_that_was_not_sent_is_asked_again() {
     let (_dir, mut driver, sender, _sink, _seq) = toggle_driver();
     let masks = &mut driver.session.stickers.masks;
     masks.set_strip_wanted(true);
-    masks.installed = crate::state::fetch::Fetch::Ready(vec![
-        crate::telegram::envelope::StickerSetInfo {
+    masks.installed =
+        crate::state::fetch::Fetch::Ready(vec![crate::telegram::envelope::StickerSetInfo {
             id: 11,
             title: String::new(),
             name: String::new(),
@@ -115,8 +115,7 @@ fn a_mask_set_that_was_not_sent_is_asked_again() {
             covers: Vec::new(),
             cover_files: Vec::new(),
             is_viewed: true,
-        },
-    ]);
+        }]);
     sender.refuse(true);
     let _ = driver.load_editor_masks();
     assert!(driver.session.stickers.masks.sets.is_empty());

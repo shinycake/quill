@@ -726,7 +726,8 @@ impl Session {
                 if let Some(state) = self.groups.invite_pages.join_requests_mut(chat_id.0)
                     && link == Some(state.invite_link.as_str())
                 {
-                    if let PageStage::Loading(page) = std::mem::replace(&mut state.stage, PageStage::Ready)
+                    if let PageStage::Loading(page) =
+                        std::mem::replace(&mut state.stage, PageStage::Ready)
                     {
                         self.requests.take(page);
                     }

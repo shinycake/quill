@@ -73,9 +73,7 @@ impl GiftCodeLookup {
     /// Why the check or the apply failed.
     pub fn error(&self) -> Option<&str> {
         match &self.stage {
-            GiftCodeStage::Failed(error) | GiftCodeStage::ApplyFailed { error, .. } => {
-                Some(error)
-            }
+            GiftCodeStage::Failed(error) | GiftCodeStage::ApplyFailed { error, .. } => Some(error),
             _ => None,
         }
     }

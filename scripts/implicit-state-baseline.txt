@@ -12,9 +12,6 @@ AwardMembers::loading+error
 Backdrops::loading
 BackendStatus::failed
 BarFacts::bot_start_pending
-BotCreateDialog::submitted
-BotEditTexts::load_failed
-BotEditTexts::load_failed+error
 BusinessSettingsState::time_zones_requested
 BusinessSettingsState::time_zones_requested+error
 CallSnap::connecting
@@ -105,7 +102,6 @@ OutputState::opening
 Paged::loaded
 Paged::loading
 Paged::loading+error
-PaidMessages::trust_loaded
 PanelMotion::opening
 ParsedFile::uploading
 ParsedGroupCall::loaded_all_participants
@@ -169,9 +165,6 @@ SignInUi::tick_armed+error_clock
 StageFacts::create_pending
 StageFacts::type_failed
 StageFacts::type_pending
-StarPacksState::loaded
-StarPacksState::loading
-StarPacksState::loading+error
 State::started
 Step::started
 StickerPanel::greeting_loaded

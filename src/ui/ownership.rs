@@ -142,7 +142,12 @@ impl QuillApp {
             dialog.stage = stage;
         }
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.groups.ownership.transfer.forget_settled();
+            live.driver
+                .session
+                .groups
+                .ownership
+                .transfer
+                .forget_settled();
         }
         cx.notify();
     }

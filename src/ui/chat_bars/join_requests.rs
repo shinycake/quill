@@ -279,7 +279,8 @@ impl QuillApp {
                 .and_then(|s| s.groups.join_requests.get(&chat_id.0))
                 .cloned();
             // A next page is on its way while the list holds its request id.
-            let loading_more = matches!(&fetch, Some(JoinRequestFetch::Loaded(list)) if list.more.is_some());
+            let loading_more =
+                matches!(&fetch, Some(JoinRequestFetch::Loaded(list)) if list.more.is_some());
             let mut title = tr(keys::Q_CHAT_JOIN_REQUESTS_2).to_string();
             let mut body = div().flex().flex_col().gap_2();
             let searching = fetch.as_ref().is_some_and(|f| !f.query().is_empty());

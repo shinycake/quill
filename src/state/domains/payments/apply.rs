@@ -273,11 +273,7 @@ impl Session {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarGiftOptions) {
                     self.payments.stars_gift.answer(extra, options);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStarPackOptions) {
-                    let packs = &mut self.payments.star_packs;
-                    packs.loading = false;
-                    packs.loaded = true;
-                    packs.error = None;
-                    packs.options = options;
+                    self.payments.star_packs.options.succeed(options);
                 }
             }
             PaymentsPayload::GiftManage(payload) => self.apply_gift_manage(payload, pending),

@@ -331,12 +331,10 @@ impl Session {
             // picker out and the join goes ahead as yourself.
             Some(RequestPurpose::Calls(CallsPurpose::GetVideoChatAvailableParticipants {
                 group_call_id,
-            })) => {
-                self.fail_group_call_join_as_options(
-                    group_call_id,
-                    &call_request_error_line(err, "Couldn't load who you can join as"),
-                )
-            }
+            })) => self.fail_group_call_join_as_options(
+                group_call_id,
+                &call_request_error_line(err, "Couldn't load who you can join as"),
+            ),
             // A failed "Add People" search ends it with what the other
             // half found (tdesktop's `fail` handler refreshes the rows).
             Some(

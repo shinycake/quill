@@ -1,7 +1,7 @@
 //! State reducer tests: groups (continued from groups.rs).
 use super::common::*;
-use crate::state::fetch::Fetch;
 use super::*;
+use crate::state::fetch::Fetch;
 
 #[test]
 fn event_log_gate() {

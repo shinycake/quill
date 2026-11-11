@@ -99,7 +99,8 @@ impl QuillApp {
             .collect();
         let empty_note = if panel.installed.error().is_some() {
             Some(tr(keys::Q_MISC_COULD_NOT_LOAD_MASKS))
-        } else if matches!(&panel.installed, quill::state::fetch::Fetch::Ready(sets) if sets.is_empty()) {
+        } else if matches!(&panel.installed, quill::state::fetch::Fetch::Ready(sets) if sets.is_empty())
+        {
             Some(tr(keys::Q_MISC_NO_MASKS_INSTALLED))
         } else {
             None

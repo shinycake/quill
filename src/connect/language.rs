@@ -88,11 +88,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let base_id = info.base_language_pack_id.clone();
         let custom = !info.is_official && !info.is_installed;
-        state.stage = crate::state::LanguageStage::Fetching(LanguageSwitch::new(
+        state.stage = crate::state::LanguageStage::Fetching(Box::new(LanguageSwitch::new(
             info,
             generation,
             base_id.is_empty(),
-        ));
+        )));
         let sent = self.send_language_switch(&id, &base_id, custom, generation);
         if sent.is_err() {
             // A send that never left must not leave the switch pending.

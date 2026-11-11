@@ -52,9 +52,9 @@ impl LanguageLinkLookup {
     /// `pending` is this box's own lookup.
     fn is_ours(&self, pending: Option<&PendingRequest>) -> bool {
         matches!(self.stage, LanguageLinkStage::Looking(request)
-            if pending.is_some_and(|p| {
-                p.purpose == RequestPurpose::GetLanguagePackInfo && p.id == request
-            }))
+        if pending.is_some_and(|p| {
+            p.purpose == RequestPurpose::GetLanguagePackInfo && p.id == request
+        }))
     }
 }
 

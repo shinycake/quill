@@ -110,7 +110,9 @@ impl QuillApp {
                 .session()
                 .and_then(|s| s.payments.marketplace_gift.clone());
             let limit = this.session().and_then(|s| s.payments.gift_text_length_max);
-            let busy = gift.as_ref().is_some_and(|g| g.is_loading() || g.is_sending());
+            let busy = gift
+                .as_ref()
+                .is_some_and(|g| g.is_loading() || g.is_sending());
             let mut body = div()
                 .flex()
                 .flex_col()

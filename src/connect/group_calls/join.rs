@@ -225,7 +225,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         let group_call_id = match &self.session.calls.active_group_call {
-            Some(call) if !call.is_joined && call.join_as_options.is_idle() && call.is_video_chat => {
+            Some(call)
+                if !call.is_joined && call.join_as_options.is_idle() && call.is_video_chat =>
+            {
                 call.id
             }
             _ => return Ok(()),

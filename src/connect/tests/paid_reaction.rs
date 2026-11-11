@@ -277,8 +277,11 @@ fn star_packs_load_once_and_land_in_the_state() {
         .to_string(),
     );
     let packs = &driver.session.payments.star_packs;
-    assert!(packs.loaded && !packs.loading);
-    assert_eq!(packs.options[0].star_count, 100);
+    assert!(matches!(
+        packs.options,
+        crate::state::fetch::Fetch::Ready(_)
+    ));
+    assert_eq!(packs.options.items()[0].star_count, 100);
     assert!(driver.maybe_fetch_star_packs().unwrap().is_none());
 }
 
@@ -371,4 +374,24 @@ fn star_reactions_are_enabled_only_when_listed() {
     assert!(driver.session.paid_reactions_enabled(ChatId(-100)));
     assert!(!driver.session.paid_reactions_enabled(ChatId(-101)));
     assert!(!driver.session.paid_reactions_enabled(ChatId(-102)));
+}
+
+#[test]
+fn a_failed_star_pack_request_is_a_way_out_asked_again_at_the_next_open() {
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    assert!(driver.maybe_fetch_star_packs().unwrap().is_some());
+    assert!(driver.session.payments.star_packs.options.is_loading());
+    let request = sent_request(&recorder, "getStarPaymentOptions");
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &serde_json::json!({
+            "@type": "error", "@extra": request["@extra"], "code": 500, "message": "boom"
+        })
+        .to_string(),
+    );
+    assert!(!driver.session.payments.star_packs.options.is_loading());
+    assert!(driver.session.payments.star_packs.options.error().is_some());
+    assert!(driver.maybe_fetch_star_packs().unwrap().is_some());
 }

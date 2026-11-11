@@ -707,7 +707,13 @@ impl QuillApp {
             .role(Role::List)
             .aria_label(tr(keys::Q_MISC_COLLECTIBLE_GIFTS));
         let mut count = 0;
-        for (ix, gift) in session.users_state.wearable_gifts.items().iter().enumerate() {
+        for (ix, gift) in session
+            .users_state
+            .wearable_gifts
+            .items()
+            .iter()
+            .enumerate()
+        {
             let Some(colors) = gift.gift.colors.clone() else {
                 continue;
             };
