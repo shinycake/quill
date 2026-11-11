@@ -65,7 +65,7 @@ fn bound_call(driver: &ConnectDriver<Arc<RecordingSender>>) -> Option<(i32, Opti
     driver
         .conference_crypto
         .as_ref()
-        .map(|known| (known.key, known.crypto.group_call_id()))
+        .map(|known| (known.key.engine_key(), known.crypto.group_call_id()))
 }
 
 #[test]
@@ -741,5 +741,22 @@ fn a_conference_whose_payload_failed_sends_nothing_and_can_be_tried_again() {
         .accept_group_call_invitation(3, 42)
         .expect("try again");
     assert_eq!(sent_count(&harness.2, "joinGroupCall"), 1);
+    let _ = std::fs::remove_dir_all(&harness.0);
+}
+
+/// An offer that fails before the join is answered ends the whole join: the
+/// session's pending join, the crypto, the offer and the engine instance.
+#[test]
+fn a_failed_offer_ends_the_whole_join_in_one_step() {
+    let mut harness = conference_driver();
+    harness
+        .1
+        .accept_group_call_invitation(3, 42)
+        .expect("accept sends");
+    assert!(harness.1.session.calls.pending_conference.is_some());
+    harness.1.abandon_conference_join();
+    assert!(harness.1.session.calls.pending_conference.is_none());
+    assert!(harness.1.conference_crypto.is_none());
+    assert!(harness.3.conferences().is_empty(), "the instance is gone");
     let _ = std::fs::remove_dir_all(&harness.0);
 }

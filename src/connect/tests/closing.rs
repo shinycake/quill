@@ -424,7 +424,7 @@ fn a_shut_down_bridge_is_sent_nothing_and_never_counts_as_closed() {
 }
 
 #[test]
-fn dropping_the_set_finishes_its_clients_within_the_quit_deadline() {
+fn dropping_the_set_finishes_its_clients_without_waiting_for_them() {
     let (client, handle) = client();
     let mut set = ClosingSet::new();
     set.push(key(1), client, false);
@@ -432,7 +432,7 @@ fn dropping_the_set_finishes_its_clients_within_the_quit_deadline() {
     drop(set);
     let took = started.elapsed();
     assert!(handle.finished());
-    assert!(took < QUIT_CLOSE_DEADLINE * 3, "{took:?}");
+    assert!(took < QUIT_CLOSE_DEADLINE / 2, "{took:?}");
 }
 
 const CALL_ID: i32 = 5;
