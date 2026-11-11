@@ -30,3 +30,6 @@
 "lng_formatting_link_create" = "Create";
 "lng_weeks#one" = "{count} week";
 "lng_weeks#other" = "{count} weeks";
+"qll_invite_link_could_not_load_more_members" = "Could not load more members";
+"qll_invite_link_could_not_load_more_requests" = "Could not load more requests";
+"qll_invite_link_could_not_load_more_join_requests" = "Could not load more join requests";

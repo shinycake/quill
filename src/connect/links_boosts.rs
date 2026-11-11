@@ -226,7 +226,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             {
                 Some(state) if append && !state.requests.is_empty() => {
                     state.request = None;
-                    state.error = Some("Could not load more requests".into());
+                    state.error = Some(
+                        crate::lang::tr(
+                            crate::lang::keys::Q_INVITE_LINK_COULD_NOT_LOAD_MORE_REQUESTS,
+                        )
+                        .into(),
+                    );
                 }
                 _ => self
                     .session

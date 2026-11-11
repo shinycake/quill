@@ -22,7 +22,10 @@ impl Session {
                 if extra.is_some() && self.payments.form_request == extra {
                     self.payments.form_request = None;
                     self.payments.form_loading = false;
-                    self.payments.note = Some(format!("Payment failed: {}", error_reason(err)));
+                    self.payments.note = Some(crate::lang::tr_with(
+                        crate::lang::keys::Q_MONEY_PAYMENT_FAILED_REASON,
+                        &[("reason", &error_reason(err))],
+                    ));
                 }
             }
             Some(RequestPurpose::ValidateOrderInfo) => {
@@ -34,14 +37,20 @@ impl Session {
                 {
                     self.payments.order_info = OrderInfoStage::Unvalidated;
                     self.payments.form_loading = false;
-                    self.payments.note = Some(format!("Payment failed: {}", error_reason(err)));
+                    self.payments.note = Some(crate::lang::tr_with(
+                        crate::lang::keys::Q_MONEY_PAYMENT_FAILED_REASON,
+                        &[("reason", &error_reason(err))],
+                    ));
                 }
             }
             // The payment that failed leaves the in-flight list; the note
             // is the checkout's only while it shows that invoice.
             Some(RequestPurpose::SendPaymentForm) => {
                 if let Some(failed) = self.payments.take_paying(extra) {
-                    let text = format!("Payment failed: {}", error_reason(err));
+                    let text = crate::lang::tr_with(
+                        crate::lang::keys::Q_MONEY_PAYMENT_FAILED_REASON,
+                        &[("reason", &error_reason(err))],
+                    );
                     if self.payments.shows(&failed.invoice) {
                         self.payments.note = Some(text);
                     } else {
@@ -129,7 +138,10 @@ impl Session {
                 }
                 self.payments.notify(
                     NoticeKind::Error,
-                    format!("Stars were not sent: {}", error_reason(err)),
+                    crate::lang::tr_with(
+                        crate::lang::keys::Q_MONEY_STARS_NOT_SENT_REASON,
+                        &[("reason", &error_reason(err))],
+                    ),
                 );
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::RemovePendingPaidReaction {
@@ -165,8 +177,10 @@ impl Session {
                     self.payments.hub.gifts_loading = false;
                     // A failed refetch is not asked again every frame.
                     self.payments.hub.gifts_stale = false;
-                    self.payments.hub.gifts_error =
-                        Some(format!("Couldn't load gifts: {}", error_reason(err)));
+                    self.payments.hub.gifts_error = Some(crate::lang::tr_with(
+                        crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_GIFTS_REASON,
+                        &[("reason", &error_reason(err))],
+                    ));
                 }
             }
             Some(

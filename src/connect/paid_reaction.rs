@@ -106,9 +106,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             if sent {
                 paid.begin_commit(pending.chat_id, pending.message_id, extra);
             } else if paid.commit_unsent(pending.chat_id, pending.message_id) {
-                self.session
-                    .payments
-                    .notify(NoticeKind::Error, "Stars were not sent");
+                self.session.payments.notify(
+                    NoticeKind::Error,
+                    crate::lang::tr(crate::lang::keys::Q_MONEY_STARS_NOT_SENT),
+                );
             }
         }
         any

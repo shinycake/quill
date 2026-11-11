@@ -228,7 +228,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             payments.star_subscriptions_request = None;
             // A page that never left shows its error; it is not asked again
             // by itself.
-            payments.star_subscriptions_error = Some("Couldn't load the subscriptions".into());
+            payments.star_subscriptions_error = Some(
+                crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_THE_SUBSCRIPTIONS).into(),
+            );
             return Err(err);
         }
         Ok(extra)

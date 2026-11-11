@@ -282,7 +282,9 @@ impl Session {
                 }
                 self.groups.invite_link_error = Some(call_request_error_line(
                     err,
-                    "Could not load more join requests",
+                    crate::lang::tr(
+                        crate::lang::keys::Q_INVITE_LINK_COULD_NOT_LOAD_MORE_JOIN_REQUESTS,
+                    ),
                 ));
             }
             Some(RequestPurpose::Groups(GroupsPurpose::ProcessAllChatJoinRequests { .. })) => {

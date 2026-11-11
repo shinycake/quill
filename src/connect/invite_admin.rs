@@ -336,7 +336,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Some(state) if append && !state.members.is_empty() => {
                     state.loading = false;
                     state.request = None;
-                    state.error = Some("Could not load more members".into());
+                    state.error = Some(
+                        crate::lang::tr(
+                            crate::lang::keys::Q_INVITE_LINK_COULD_NOT_LOAD_MORE_MEMBERS,
+                        )
+                        .into(),
+                    );
                 }
                 _ => self.session.groups.invite_pages.close_members(chat_id.0),
             }

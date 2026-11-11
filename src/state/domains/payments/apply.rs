@@ -84,11 +84,17 @@ impl Session {
                         }
                         if !shown && self.payments.unlocked_notice.is_none() {
                             // The checkout was closed while it paid.
-                            self.payments.notify(NoticeKind::Info, "Payment successful");
+                            self.payments.notify(
+                                NoticeKind::Info,
+                                crate::lang::tr(crate::lang::keys::Q_MONEY_PAYMENT_SUCCESS_NOTE),
+                            );
                         }
                         if shown {
                             self.payments.form_paid = true;
-                            self.payments.note = Some("✅ Payment successful".to_string());
+                            self.payments.note = Some(format!(
+                                "✅ {}",
+                                crate::lang::tr(crate::lang::keys::Q_MONEY_PAYMENT_SUCCESS_NOTE)
+                            ));
                         }
                     } else if !result.verification_url.is_empty() {
                         // Schema: the URL is for additional payment
@@ -109,9 +115,14 @@ impl Session {
                             self.payments.verification_started = true;
                         }
                     } else if shown {
-                        self.payments.note = Some("Payment failed".to_string());
+                        self.payments.note = Some(
+                            crate::lang::tr(crate::lang::keys::Q_MONEY_PAYMENT_FAILED).to_string(),
+                        );
                     } else {
-                        self.payments.notify(NoticeKind::Error, "Payment failed");
+                        self.payments.notify(
+                            NoticeKind::Error,
+                            crate::lang::tr(crate::lang::keys::Q_MONEY_PAYMENT_FAILED),
+                        );
                     }
                 }
             }

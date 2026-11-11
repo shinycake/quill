@@ -244,7 +244,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return;
         };
-        let failed = "Couldn't load the revenue".to_string();
+        let failed = crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_REVENUE).to_string();
         if page.ton.is_loading()
             && !self
                 .session

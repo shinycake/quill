@@ -156,14 +156,16 @@ impl Session {
                 // out has nobody to show it: Stars moved, so say so.
                 if !ours || !manage.send.open {
                     // Closed while it was out: Stars moved, so say so.
-                    self.payments
-                        .notices
-                        .push(PaymentNotice::new(NoticeKind::Info, "Gift sent."));
+                    self.payments.notices.push(PaymentNotice::new(
+                        NoticeKind::Info,
+                        crate::lang::tr(crate::lang::keys::Q_MONEY_GIFT_SENT),
+                    ));
                     return;
                 }
                 manage.send.error = None;
                 manage.send.selected = None;
-                manage.send.done = Some("Gift sent.".into());
+                manage.send.done =
+                    Some(crate::lang::tr(crate::lang::keys::Q_MONEY_GIFT_SENT).into());
             }
             _ => {}
         }

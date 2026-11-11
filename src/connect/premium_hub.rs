@@ -92,7 +92,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             // empty list with nothing drawn.
             let hub = &mut self.session.payments.hub;
             hub.tx_loading = false;
-            hub.tx_error = Some("Couldn't load the Stars history".into());
+            hub.tx_error = Some(
+                crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_STARS_HISTORY).into(),
+            );
             return Err(err);
         }
         Ok(extra)
@@ -163,7 +165,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Err(err) = self.send_json_request(extra, &json) {
             let hub = &mut self.session.payments.hub;
             hub.gifts_loading = false;
-            hub.gifts_error = Some("Couldn't load gifts".into());
+            hub.gifts_error =
+                Some(crate::lang::tr(crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_GIFTS).into());
             return Err(err);
         }
         Ok(extra)

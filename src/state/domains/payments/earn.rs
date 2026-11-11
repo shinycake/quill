@@ -463,7 +463,10 @@ impl Session {
                         page.ton_unavailable = true;
                         page.ton = Load::Idle;
                     } else {
-                        page.ton = Load::Failed(format!("Couldn't load the revenue: {reason}"));
+                        page.ton = Load::Failed(crate::lang::tr_with(
+                            crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_REVENUE_REASON,
+                            &[("reason", &reason)],
+                        ));
                         // tdesktop toasts the error too.
                         earn.notes.push(reason.clone());
                     }
@@ -474,7 +477,10 @@ impl Session {
                     earn.self_stats = Some(false);
                 }
                 if let Some(page) = earn.page.as_mut().filter(|p| p.peer == peer) {
-                    page.stars = Load::Failed(format!("Couldn't load the revenue: {reason}"));
+                    page.stars = Load::Failed(crate::lang::tr_with(
+                        crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_REVENUE_REASON,
+                        &[("reason", &reason)],
+                    ));
                     // tdesktop toasts the error too.
                     earn.notes.push(reason.clone());
                 }

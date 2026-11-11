@@ -909,3 +909,14 @@
 "qll_money_statistics_unavailable" = "Statistics are not available for this chat.";
 "qll_money_statistics_send_failed" = "Could not send the statistics request.";
 "qll_money_statistics_info_failed" = "Could not load the chat's details.";
+"qll_money_payment_success_note" = "Payment successful";
+"qll_money_payment_failed" = "Payment failed";
+"qll_money_payment_failed_reason" = "Payment failed: {reason}";
+"qll_money_gift_sent" = "Gift sent.";
+"qll_money_could_not_load_gifts_reason" = "Couldn't load gifts: {reason}";
+"qll_money_could_not_load_stars_history" = "Couldn't load the Stars history";
+"qll_money_could_not_load_the_subscriptions" = "Couldn't load the subscriptions";
+"qll_money_could_not_load_revenue" = "Couldn't load the revenue";
+"qll_money_could_not_load_revenue_reason" = "Couldn't load the revenue: {reason}";
+"qll_money_stars_not_sent" = "Stars were not sent";
+"qll_money_stars_not_sent_reason" = "Stars were not sent: {reason}";
