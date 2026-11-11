@@ -94,9 +94,9 @@ impl QuillApp {
     ) -> Option<AnyElement> {
         if !self
             .session()?
-            .payments
-            .paid
-            .offered_for(chat_id.0, message_id.0)
+            .stickers
+            .message_reaction_options
+            .paid_offered_for(chat_id, message_id)
         {
             return None;
         }

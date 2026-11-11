@@ -83,6 +83,7 @@ mod logout_notes;
 mod map_thumbs;
 mod media_library;
 mod member_list;
+mod notify_shown;
 pub mod optimistic;
 mod ownership_types;
 mod paging;
@@ -213,6 +214,7 @@ pub use media_library::{
     MAX_LIBRARY_LOADS, MediaLibrary, MessageReactionOptions, MessageReactionsState, ReactionChoice,
 };
 pub use member_list::*;
+pub use notify_shown::{NotifyShown, ShownNotifications};
 pub use ownership_types::*;
 pub use photo_gallery::{PhotoActions, PhotoDelete, chat_gallery, user_gallery};
 pub use redraw::{RedrawNeed, RowsOnScreen, redraw_need};

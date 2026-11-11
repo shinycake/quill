@@ -909,7 +909,10 @@ fn forward_outcomes_queue_until_the_ui_takes_them() {
             &mut session,
             &seq,
             &sink,
-            &format!(r#"{{"@type":"error","@extra":"{}","code":400,"message":"x"}}"#, extra.0),
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"x"}}"#,
+                extra.0
+            ),
         );
     }
     assert!(!session.messages.forwards.in_flight());
@@ -917,4 +920,40 @@ fn forward_outcomes_queue_until_the_ui_takes_them() {
         .map(|result| result.dest_chat_id)
         .collect();
     assert_eq!(dests, [ChatId(12), ChatId(13)]);
+}
+
+/// The next page of a reactions tab is part of the tab's stage: it pages,
+/// appends when it answers, and a failed page leaves the list as it was.
+#[test]
+fn a_reactions_tab_pages_and_keeps_its_list_when_the_next_page_fails() {
+    use crate::telegram::envelope::AddedReactionsPage;
+    let (mut session, _sink) = session();
+    let (chat, message) = (ChatId(5), MessageId(9));
+    session.begin_message_audience(chat, message);
+    let page = |offset: &str| AddedReactionsPage {
+        total_count: 3,
+        reactions: Vec::new(),
+        next_offset: offset.to_string(),
+    };
+    session.accept_added_reactions(chat, message, 0, false, page("2"));
+    session.audience_tab_loading_more(chat, message, 0);
+    let audience = session.messages.message_audience.as_ref().unwrap();
+    assert!(audience.reactions.is_paging());
+    assert_eq!(audience.reactions.ready().unwrap().next_offset, "2");
+    session.fail_audience(RequestPurpose::Messages(
+        MessagesPurpose::GetMessageAddedReactions {
+            chat_id: chat,
+            message_id: message,
+            filter: 0,
+            append: true,
+        },
+    ));
+    let audience = session.messages.message_audience.as_ref().unwrap();
+    assert!(!audience.reactions.is_paging(), "the failure ends the page");
+    assert_eq!(audience.reactions.ready().unwrap().next_offset, "2");
+    session.audience_tab_loading_more(chat, message, 0);
+    session.accept_added_reactions(chat, message, 0, true, page(""));
+    let audience = session.messages.message_audience.as_ref().unwrap();
+    assert!(!audience.reactions.is_paging());
+    assert!(audience.reactions.ready().unwrap().next_offset.is_empty());
 }

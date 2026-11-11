@@ -140,12 +140,21 @@ fn seconds_left_counts_down_to_one() {
 
 #[test]
 fn the_picker_offer_is_per_message() {
-    let paid = PaidReactions {
-        offered: Some((1, 10)),
-        ..PaidReactions::default()
-    };
-    assert!(paid.offered_for(1, 10));
-    assert!(!paid.offered_for(1, 11));
+    use crate::ids::{ChatId, MessageId};
+    use crate::state::{MessageReactionOptions, MessageReactionsState};
+    let state = MessageReactionsState::Ready(MessageReactionOptions {
+        chat_id: ChatId(1),
+        message_id: MessageId(10),
+        top: Vec::new(),
+        recent: Vec::new(),
+        popular: Vec::new(),
+        allow_custom_emoji: false,
+        premium_locked: Vec::new(),
+        paid_offered: true,
+    });
+    assert!(state.paid_offered_for(ChatId(1), MessageId(10)));
+    assert!(!state.paid_offered_for(ChatId(1), MessageId(11)));
+    assert!(!MessageReactionsState::Idle.paid_offered_for(ChatId(1), MessageId(10)));
 }
 
 #[test]

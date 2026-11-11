@@ -216,7 +216,7 @@ impl Session {
                     self.stories.story_fetch.forget_retries();
                     self.threads.saved.retry_when_online = false;
                     // So do sticker and emoji sets whose load failed.
-                    self.media.media_library.failed.clear();
+                    self.media.media_library.forget_failures();
                 }
                 self.connection = state;
             }

@@ -233,7 +233,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let offset = if more {
             match slot.and_then(|slot| slot.ready()) {
                 Some(page)
-                    if !page.next_offset.is_empty() && !audience.more_loading.contains(&filter) =>
+                    if !page.next_offset.is_empty()
+                        && !slot.is_some_and(|slot| slot.is_paging()) =>
                 {
                     page.next_offset.clone()
                 }

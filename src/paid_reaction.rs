@@ -152,9 +152,6 @@ impl PendingPaid {
 #[derive(Debug, Clone, Default)]
 pub struct PaidReactions {
     pending: Vec<PendingPaid>,
-    /// The message whose reaction picker offered the Star reaction (from
-    /// `getMessageAvailableReactions`).
-    pub offered: Option<(i64, i64)>,
     /// `paid_reaction_star_count_max`, once known.
     pub max_stars: Option<i64>,
     /// Channels the account may send Stars as in a chat
@@ -189,11 +186,6 @@ impl PaidReactions {
             Some((chat, channels)) if *chat == chat_id => channels,
             _ => &[],
         }
-    }
-
-    /// Whether the picker for this message offers the Star reaction.
-    pub fn offered_for(&self, chat_id: i64, message_id: i64) -> bool {
-        self.offered == Some((chat_id, message_id))
     }
 
     /// Stars still held for Undo on a message.

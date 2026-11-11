@@ -170,11 +170,7 @@ impl QuillApp {
         .enumerate()
         .map(|(ix, emoji)| emoji_item(6000 + ix as i64, ICON_SET, emoji, FileId(0)))
         .collect();
-        session
-            .media
-            .media_library
-            .set_stickers
-            .insert(ICON_SET, set.clone());
+        session.media.media_library.insert(ICON_SET, set.clone());
         session.stickers.emoji.installed_sets = vec![StickerSetInfo {
             id: ICON_SET,
             title: "High Seas".into(),

@@ -370,7 +370,7 @@ impl QuillApp {
         };
         let mut seen = std::collections::HashSet::new();
         let mut out = Vec::new();
-        let library = &session.media.media_library.set_stickers;
+        let library = &session.media.media_library;
         let sources: Vec<&StickerItem> = session
             .stickers
             .stickers
@@ -515,7 +515,7 @@ impl QuillApp {
             Some((viewed_id, _, _, stickers)) if viewed_id == set_id => Some(stickers),
             _ => self
                 .session()
-                .and_then(|s| s.media.media_library.set_stickers.get(&set_id).cloned()),
+                .and_then(|s| s.media.media_library.get(&set_id).cloned()),
         };
         if known.is_some_and(|stickers| {
             stickers

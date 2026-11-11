@@ -54,11 +54,7 @@ impl QuillApp {
                 item.set_id = 78;
                 stickers.push(item);
             }
-            session
-                .media
-                .media_library
-                .set_stickers
-                .insert(78, stickers.clone());
+            session.media.media_library.insert(78, stickers.clone());
             session
                 .stickers
                 .stickers

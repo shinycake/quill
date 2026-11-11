@@ -232,12 +232,7 @@ fn removing_a_sticker_drops_it_from_the_box_once_confirmed() {
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
     open_owned_set(&mut driver, &seq, &sink, true);
-    driver
-        .session
-        .media
-        .media_library
-        .set_stickers
-        .insert(77, Vec::new());
+    driver.session.media.media_library.insert(77, Vec::new());
 
     let extra = driver.remove_sticker_from_set(77, FileId(2)).unwrap();
     assert_eq!(
@@ -253,12 +248,7 @@ fn removing_a_sticker_drops_it_from_the_box_once_confirmed() {
     assert_eq!(viewed_ids(&driver), vec![1, 3]);
     assert!(edits(&driver).refresh_needed());
     assert!(
-        !driver
-            .session
-            .media
-            .media_library
-            .set_stickers
-            .contains_key(&77),
+        !driver.session.media.media_library.contains_key(&77),
         "the panel's cached set is forgotten"
     );
     drop(dir);

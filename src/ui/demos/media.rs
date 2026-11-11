@@ -430,11 +430,7 @@ impl QuillApp {
                     stickers.push(item);
                 }
             }
-            session
-                .media
-                .media_library
-                .set_stickers
-                .insert(77, stickers);
+            session.media.media_library.insert(77, stickers);
         }
         self.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
         self.pickers.media_panel.tab = crate::ui::media_panel::PanelTab::Stickers;

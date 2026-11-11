@@ -26,7 +26,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A set whose load failed (a FLOOD_WAIT while scrolling fast) is
         // asked for again when the panel opens next, not left blank until
         // restart.
-        self.session.media.media_library.failed.clear();
+        self.session.media.media_library.forget_failures();
         if !self.session.stickers.stickers.installed_loaded
             && !self
                 .session
@@ -95,7 +95,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 return Err(err);
             }
-            self.session.media.media_library.loading.insert(set_id);
+            self.session.media.media_library.begin_load(set_id, extra);
         }
         Ok(())
     }

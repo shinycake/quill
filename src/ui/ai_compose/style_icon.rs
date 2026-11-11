@@ -39,7 +39,7 @@ impl QuillApp {
             .threads
             .forum_topic_icons
             .iter()
-            .chain(session.media.media_library.set_stickers.values().flatten())
+            .chain(session.media.media_library.values().flatten())
             .find(|item| item.custom_emoji_id == Some(id))?;
         self.panel_still(item)
     }
@@ -61,7 +61,7 @@ impl QuillApp {
             .installed_sets
             .iter()
             .filter_map(|set| {
-                let items = session.media.media_library.set_stickers.get(&set.id)?;
+                let items = session.media.media_library.get(&set.id)?;
                 Some((Some(set.title.clone()), items.clone()))
             });
         std::iter::once((None, icons)).chain(sets).collect()

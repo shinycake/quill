@@ -43,13 +43,20 @@ pub struct MessageReportFlow {
     pub chat_id: ChatId,
     pub message_ids: Vec<MessageId>,
     pub stage: MessageReportStage,
-    /// Titles of the reasons chosen so far, shown as the breadcrumb under
-    /// the title (tdesktop shows the chosen reason's text as the next
-    /// step's title).
-    pub trail: Vec<String>,
-    /// Title the previous step's `OptionRequired` carried, for the Back
-    /// button to restore.
-    pub previous: Vec<(String, Vec<ReportOption>)>,
+    /// The reasons chosen so far, oldest first.
+    pub steps: Vec<ReportStep>,
+}
+
+/// One reason chosen in the report flow.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReportStep {
+    /// The reason's text, shown as the breadcrumb under the title (tdesktop
+    /// shows the chosen reason's text as the next step's title).
+    pub chosen: String,
+    /// The title and options the step it was chosen in carried, for the
+    /// Back button to restore.
+    pub title: String,
+    pub options: Vec<ReportOption>,
 }
 
 /// The poll option a right-click opened the menu on, and what TDLib allows
@@ -80,15 +87,22 @@ pub enum Audience<T> {
     NotAsked,
     Loading,
     Ready(T),
+    /// Ready, and the next page is in flight.
+    Paging(T),
     Failed,
 }
 
 impl<T> Audience<T> {
     pub fn ready(&self) -> Option<&T> {
         match self {
-            Self::Ready(value) => Some(value),
+            Self::Ready(value) | Self::Paging(value) => Some(value),
             _ => None,
         }
+    }
+
+    /// The next page of a ready list is on its way.
+    pub fn is_paging(&self) -> bool {
+        matches!(self, Self::Paging(_))
     }
 
     pub fn is_loading(&self) -> bool {
@@ -115,8 +129,6 @@ pub struct MessageAudience {
     /// Per-reaction tabs, by `reaction_filter_key` (the "All" tab is
     /// `reactions`).
     pub filtered: HashMap<u64, Audience<AddedReactionsPage>>,
-    /// Tabs whose next page is in flight.
-    pub more_loading: HashSet<u64>,
 }
 
 impl MessageAudience {
@@ -129,7 +141,6 @@ impl MessageAudience {
             reactions: Audience::NotAsked,
             author: Audience::NotAsked,
             filtered: HashMap::new(),
-            more_loading: HashSet::new(),
         }
     }
 }
@@ -311,8 +322,7 @@ impl Session {
             chat_id,
             message_ids,
             stage: MessageReportStage::Checking(request),
-            trail: Vec::new(),
-            previous: Vec::new(),
+            steps: Vec::new(),
         });
     }
 
@@ -329,8 +339,11 @@ impl Session {
     ) {
         if let Some(flow) = self.messages.message_report.as_mut() {
             if let Some((text, title, options)) = chosen {
-                flow.trail.push(text);
-                flow.previous.push((title, options));
+                flow.steps.push(ReportStep {
+                    chosen: text,
+                    title,
+                    options,
+                });
             }
             flow.stage = MessageReportStage::Sending(request);
         }
@@ -341,10 +354,9 @@ impl Session {
         let Some(flow) = self.messages.message_report.as_mut() else {
             return false;
         };
-        let Some((title, options)) = flow.previous.pop() else {
+        let Some(ReportStep { title, options, .. }) = flow.steps.pop() else {
             return false;
         };
-        flow.trail.pop();
         flow.stage = MessageReportStage::PickOption { title, options };
         true
     }
@@ -491,17 +503,17 @@ impl Session {
         let Some(a) = self.audience_for(chat_id, message_id) else {
             return;
         };
-        a.more_loading.remove(&filter);
         let slot = if filter == 0 {
             &mut a.reactions
         } else {
             a.filtered.entry(filter).or_default()
         };
-        match slot {
-            Audience::Ready(existing) if append => {
+        match std::mem::take(slot) {
+            Audience::Ready(mut existing) | Audience::Paging(mut existing) if append => {
                 existing.reactions.extend(page.reactions);
                 existing.total_count = page.total_count.max(existing.total_count);
                 existing.next_offset = page.next_offset;
+                *slot = Audience::Ready(existing);
             }
             _ => *slot = Audience::Ready(page),
         }
@@ -526,7 +538,16 @@ impl Session {
         filter: u64,
     ) {
         if let Some(a) = self.audience_for(chat_id, message_id) {
-            a.more_loading.insert(filter);
+            let slot = if filter == 0 {
+                Some(&mut a.reactions)
+            } else {
+                a.filtered.get_mut(&filter)
+            };
+            if let Some(slot) = slot
+                && let Audience::Ready(page) = std::mem::take(slot)
+            {
+                *slot = Audience::Paging(page);
+            }
         }
     }
 
@@ -564,14 +585,22 @@ impl Session {
                 append,
             }) => {
                 if let Some(a) = self.audience_for(chat_id, message_id) {
-                    a.more_loading.remove(&filter);
+                    let slot = if filter == 0 {
+                        Some(&mut a.reactions)
+                    } else {
+                        a.filtered.get_mut(&filter)
+                    };
                     // A failed next page keeps what was already listed.
-                    if !append {
-                        if filter == 0 {
-                            a.reactions = Audience::Failed;
-                        } else {
-                            a.filtered.insert(filter, Audience::Failed);
+                    if append {
+                        if let Some(slot) = slot
+                            && let Audience::Paging(page) = std::mem::take(slot)
+                        {
+                            *slot = Audience::Ready(page);
                         }
+                    } else if let Some(slot) = slot {
+                        *slot = Audience::Failed;
+                    } else {
+                        a.filtered.insert(filter, Audience::Failed);
                     }
                 }
             }

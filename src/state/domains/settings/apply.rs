@@ -32,7 +32,7 @@ impl Session {
             SettingsPayload::UpdateActiveNotifications { chat_ids } => {
                 // Notifications of a previous launch: remember the chats so
                 // a later read clears them too.
-                self.settings.shown_notification_chats.extend(chat_ids);
+                self.settings.notified.mark_active(chat_ids);
             }
             // Phase C2i: `getUserPrivacySettingRules` answer — map the
             // rule list to the simple Everybody / Contacts / Nobody

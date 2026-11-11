@@ -103,8 +103,7 @@ impl QuillApp {
             let mut shown: Vec<(AccountKey, ChatId)> = Vec::new();
             for client in &mut self.background.clients {
                 if let Some(live) = client.live.as_mut() {
-                    let chats =
-                        std::mem::take(&mut live.driver.session.settings.shown_notification_chats);
+                    let chats = live.driver.session.settings.notified.take_shown();
                     shown.extend(chats.into_iter().map(|chat| (client.key.clone(), chat)));
                 }
             }

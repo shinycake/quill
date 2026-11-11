@@ -170,7 +170,7 @@ impl QuillApp {
             return PickerContents::default();
         };
         let panel = &session.stickers.stickers;
-        let library = &session.media.media_library.set_stickers;
+        let library = &session.media.media_library;
         let sections: Vec<StickerSection<'_>> = panel
             .sets
             .iter()

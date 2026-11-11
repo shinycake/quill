@@ -194,9 +194,7 @@ impl Session {
         sound: Option<notify::NotificationSoundKind>,
         photo: Option<crate::ids::FileId>,
     ) {
-        self.settings
-            .shown_notification_chats
-            .insert(notification.chat_id);
+        self.settings.notified.mark_shown(notification.chat_id);
         notify::coalesce_notification_with_sound(
             &mut self.settings.pending_notifications,
             notification,
@@ -212,11 +210,7 @@ impl Session {
         self.settings
             .pending_notifications
             .retain(|queued| queued.chat_id != chat_id);
-        if self.settings.shown_notification_chats.remove(&chat_id)
-            && !self.settings.pending_notification_clears.contains(&chat_id)
-        {
-            self.settings.pending_notification_clears.push(chat_id);
-        }
+        self.settings.notified.clear(chat_id);
     }
 
     /// A new unread reaction on one of our messages: notify when the

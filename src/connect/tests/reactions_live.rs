@@ -175,6 +175,7 @@ fn picker_options_are_refetched_when_reactions_change() {
             popular: Vec::new(),
             allow_custom_emoji: false,
             premium_locked: Vec::new(),
+            paid_offered: false,
         });
     // Another chat's change leaves the options alone.
     feed(
@@ -251,7 +252,7 @@ fn reactor_tabs_page_per_reaction() {
     let ready = audience.filtered[&key].ready().unwrap();
     assert_eq!(ready.reactions.len(), 2);
     assert!(ready.next_offset.is_empty());
-    assert!(audience.more_loading.is_empty());
+    assert!(!audience.filtered[&key].is_paging());
     assert!(matches!(audience.reactions, Audience::NotAsked));
     // Nothing more to load.
     driver

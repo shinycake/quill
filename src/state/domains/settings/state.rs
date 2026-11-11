@@ -197,9 +197,6 @@ pub struct SettingsState {
     /// Phase 8.1: notifications decided by the reducer, drained by the UI for
     /// OS dispatch. Same-chat bursts coalesce into one entry ("N new messages").
     pub pending_notifications: Vec<QueuedNotification>,
-    /// Chats whose OS notification should be withdrawn (read elsewhere or
-    /// removed by TDLib); drained by the UI, which dismisses the toast.
-    pub pending_notification_clears: Vec<ChatId>,
     /// A notification-worthy message arrived: the UI bounces the Dock icon /
     /// flashes the taskbar (when the user wants it and the OS is not in
     /// Do Not Disturb). Set independently of the "Desktop notifications"
@@ -209,8 +206,10 @@ pub struct SettingsState {
     /// of tdesktop's "Contact joined Telegram" event switch.
     pub disable_contact_registered_notifications: bool,
     /// Chats with an OS notification we showed (or TDLib reports active
-    /// from a previous launch); only these produce a clear.
-    pub shown_notification_chats: std::collections::HashSet<ChatId>,
+    /// from a previous launch), and those whose toast the UI withdraws
+    /// (read elsewhere or removed by TDLib; drained by the UI, which
+    /// dismisses the toast). Only shown chats produce a clear.
+    pub notified: ShownNotifications,
     /// `getDefaultMessageAutoDeleteTime` (seconds, 0 = off): the fetch or
     /// write in flight, the cached value, or the honest one-line failure
     /// of the last request.
@@ -473,10 +472,9 @@ impl SettingsState {
             inapp_sounds_enabled: true,
             desktop_notifications: true,
             pending_notifications: Vec::new(),
-            pending_notification_clears: Vec::new(),
             pending_attention: false,
             disable_contact_registered_notifications: false,
-            shown_notification_chats: std::collections::HashSet::new(),
+            notified: ShownNotifications::default(),
             default_auto_delete: Fetch::Idle,
             saved_notification_sounds: Vec::new(),
             saved_sounds_loaded: false,
