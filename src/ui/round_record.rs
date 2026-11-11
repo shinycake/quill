@@ -89,10 +89,7 @@ impl QuillApp {
         let (progress, image) = {
             let (capture, preview) = self.recording.video_with_preview_mut()?;
             preview.take_latest(&capture.preview());
-            (
-                capture.progress(),
-                preview.image.as_deref().cloned(),
-            )
+            (capture.progress(), preview.image.as_deref().cloned())
         };
         let ring = cx.theme().primary;
         let placeholder = cx.theme().muted;

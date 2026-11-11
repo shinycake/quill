@@ -17,12 +17,12 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::ids::RequestId;
 use quill::lang::{keys, tr, tr_with};
 use quill::local_path::sandboxed_display_path;
 use quill::peer_color::{
     ApplyOutcome, PeerColorDraft, PeerColorTab, name_swatches, profile_swatches,
 };
-use quill::ids::RequestId;
 use quill::state::{Answer, RequestAcks};
 use std::cell::Cell;
 use std::rc::Rc;
@@ -223,15 +223,14 @@ impl QuillApp {
                 };
                 let mut waiting = Vec::new();
                 let mut failed = false;
-                let mut sent = |result: Result<RequestId, _>, driver_acks: &mut RequestAcks| {
-                    match result {
+                let mut sent =
+                    |result: Result<RequestId, _>, driver_acks: &mut RequestAcks| match result {
                         Ok(id) => {
                             driver_acks.expect(id);
                             waiting.push(id);
                         }
                         Err(_) => failed = true,
-                    }
-                };
+                    };
                 if name {
                     let result = if draft.gift_colors_id != 0 {
                         live.driver.set_upgraded_gift_colors(draft.gift_colors_id)
@@ -258,7 +257,8 @@ impl QuillApp {
                     } else {
                         ApplyStage::Applying {
                             waiting,
-                            refused: failed.then(|| tr(keys::Q_MISC_COULD_NOT_CHANGE_THE_COLORS).to_string()),
+                            refused: failed
+                                .then(|| tr(keys::Q_MISC_COULD_NOT_CHANGE_THE_COLORS).to_string()),
                         }
                     };
                 }
@@ -321,9 +321,7 @@ impl QuillApp {
                 .content(crate::ui::shell::scrollable_dialog_content({
                     let body = Rc::new(Cell::new(Some(body.into_any_element())));
                     move |content, _, _| {
-                        let body = body
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     }
                 }))

@@ -74,7 +74,9 @@ fn dropping_a_track_on_another_row_reorders_the_list(cx: &mut TestAppContext) {
     let (app, _shell, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     open_playlist(&app, vcx);
-    app.update_in(vcx, |app, _, cx| app.reorder_playlist_track(FileId(1), FileId(3), cx));
+    app.update_in(vcx, |app, _, cx| {
+        app.reorder_playlist_track(FileId(1), FileId(3), cx)
+    });
     vcx.run_until_parked();
     assert_eq!(order(&app, vcx), [2, 3, 1]);
     // The same row and rows past the end leave the list alone.

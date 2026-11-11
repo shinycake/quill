@@ -158,7 +158,11 @@ impl QuillApp {
         // A playing voice message also offers a reply stamped with where the
         // player is (Telegram Desktop `AddTimecodeAction`).
         let playing_here = self.playback.active.voice() == Some(message_id)
-            && self.playback.active.chat().is_none_or(|chat| chat == chat_id);
+            && self
+                .playback
+                .active
+                .chat()
+                .is_none_or(|chat| chat == chat_id);
         if quill::message_menu::timecode_offered(
             effective_content(&message.content, message.ephemeral.as_ref()),
             playing_here,

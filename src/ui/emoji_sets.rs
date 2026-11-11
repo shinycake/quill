@@ -96,7 +96,7 @@ impl QuillApp {
     /// The search field changed: once typing pauses, the packs matching it
     /// replace the list; clearing the field brings the last tab back.
     pub(super) fn emoji_sets_search_typed(&mut self, cx: &mut Context<Self>) {
-                let query = self
+        let query = self
             .pickers
             .emoji_set_search_input
             .read(cx)

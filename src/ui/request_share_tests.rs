@@ -80,7 +80,12 @@ fn closing_the_box_drops_its_lookup(cx: &mut TestAppContext) {
     });
     // The lookup has not answered yet: the box is in its searching stage.
     let lookup = app.read_with(vcx, |app, _| {
-        match app.message_ui.request_share.as_ref().map(|share| &share.kind) {
+        match app
+            .message_ui
+            .request_share
+            .as_ref()
+            .map(|share| &share.kind)
+        {
             Some(RequestShareKind::Location {
                 stage: LocateStage::Locating(task),
                 ..

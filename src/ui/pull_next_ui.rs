@@ -432,9 +432,7 @@ impl QuillApp {
                     }
                 });
                 let now = self.history.pull.now();
-                self.history
-                    .pull
-                    .begin_jump(Next::Topic(next), task, now);
+                self.history.pull.begin_jump(Next::Topic(next), task, now);
             }
         }
     }
@@ -520,9 +518,7 @@ impl QuillApp {
             }
         });
         let now = self.history.pull.now();
-        self.history
-            .pull
-            .begin_jump(Next::Chat(next), task, now);
+        self.history.pull.begin_jump(Next::Chat(next), task, now);
     }
 
     /// A jump's task is over: once the history follows the chat or topic

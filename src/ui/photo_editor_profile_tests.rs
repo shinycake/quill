@@ -31,9 +31,16 @@ fn open_demo(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     (app, vcx)
 }
 
-fn set_photo(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, close_meanwhile: bool) -> String {
+/// The note before and after pressing Set Photo.
+fn set_photo(
+    app: &Entity<QuillApp>,
+    vcx: &mut VisualTestContext,
+    close_meanwhile: bool,
+) -> (String, String) {
+    let before = app.read_with(vcx, |app, _| app.connection.note().text().to_string());
     app.update_in(vcx, |app, window, cx| {
-        app.dialogs.edit_profile_dialog = Some(EditProfileDialog::new(window, cx, "Ada", "", "", ""));
+        app.dialogs.edit_profile_dialog =
+            Some(EditProfileDialog::new(window, cx, "Ada", "", "", ""));
         let editor = PhotoEditor::new(
             EditorPurpose::Profile(PhotoTarget::Profile),
             image::RgbaImage::from_pixel(64, 64, image::Rgba([10, 20, 30, 255])),
@@ -44,15 +51,16 @@ fn set_photo(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, close_meanwhil
         }
     });
     vcx.run_until_parked();
-    app.read_with(vcx, |app, _| app.connection.note().text().to_string())
+    let after = app.read_with(vcx, |app, _| app.connection.note().text().to_string());
+    (before, after)
 }
 
 #[gpui_kit::test]
 fn the_photo_is_applied_while_its_dialog_is_open(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_demo(cx);
-    let note = set_photo(&app, &mut vcx, false);
-    assert!(
-        !note.is_empty(),
+    let (before, after) = set_photo(&app, &mut vcx, false);
+    assert_ne!(
+        before, after,
         "the demo has no account: the open dialog is told so"
     );
 }
@@ -60,6 +68,6 @@ fn the_photo_is_applied_while_its_dialog_is_open(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn a_dialog_closed_before_the_render_ends_gets_no_photo(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_demo(cx);
-    let note = set_photo(&app, &mut vcx, true);
-    assert!(note.is_empty(), "nothing is applied or said: {note:?}");
+    let (before, after) = set_photo(&app, &mut vcx, true);
+    assert_eq!(before, after, "nothing is applied or said");
 }

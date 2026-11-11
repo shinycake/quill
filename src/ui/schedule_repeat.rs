@@ -70,8 +70,7 @@ impl QuillApp {
                                 .checked(choice.period == shown.period)
                                 .on_click(move |_, _, cx| {
                                     let _ = owner.update(cx, |this, cx| {
-                                        if let Some(picker) = this.chat_ui.schedule_picker_mut()
-                                        {
+                                        if let Some(picker) = this.chat_ui.schedule_picker_mut() {
                                             picker.repeat = choice.period;
                                         }
                                         cx.notify();

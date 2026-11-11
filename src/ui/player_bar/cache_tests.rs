@@ -214,13 +214,8 @@ fn a_saved_track_has_no_neighbours_in_the_chat(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     let saved = quill::state::playlist_message_id(quill::ids::FileId(5));
     app.update(vcx, |app, cx| {
-        app.playback.active = crate::ui::playback_state::ActiveTrack::for_test(
-            cx,
-            false,
-            CHAT,
-            saved,
-            30.0,
-        );
+        app.playback.active =
+            crate::ui::playback_state::ActiveTrack::for_test(cx, false, CHAT, saved, 30.0);
     });
     assert_eq!(
         app.read_with(vcx, |app, _| app.playlist_can_move()),

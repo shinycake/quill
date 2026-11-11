@@ -378,9 +378,7 @@ impl QuillApp {
             .content(move |content, window, cx| {
                 let margin = cx.theme().spacing_tokens().lg;
                 let height = (window.viewport_size().height - margin * 2.).max(px(320.));
-                let body = body
-                    .take()
-                    .unwrap_or_else(|| div().into_any_element());
+                let body = body.take().unwrap_or_else(|| div().into_any_element());
                 content.child(div().relative().h(height).w_full().child(body))
             })
             .on_close(on_close)

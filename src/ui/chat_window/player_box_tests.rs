@@ -41,9 +41,8 @@ fn the_bar_title_jumps_in_the_tracks_own_window(cx: &mut TestAppContext) {
     let h = new_app(cx);
     let _chat_window = h.open_in_new_window(OTHER, cx);
     in_window(&h, h.main, None, cx, |app, window, cx| {
-        app.playback.active = crate::ui::playback_state::ActiveTrack::for_test(
-            cx, true, OTHER, OTHER_LAST, 10.0,
-        );
+        app.playback.active =
+            crate::ui::playback_state::ActiveTrack::for_test(cx, true, OTHER, OTHER_LAST, 10.0);
         app.jump_to_playing(window, cx);
     });
     assert_eq!(
@@ -314,9 +313,8 @@ fn attached_stickers_close_the_box_in_the_other_window(cx: &mut TestAppContext) 
 fn deleting_the_tracks_chat_stops_the_player_and_releases_its_history(cx: &mut TestAppContext) {
     let h = new_app(cx);
     in_window(&h, h.main, None, cx, |app, _, cx| {
-        app.playback.active = crate::ui::playback_state::ActiveTrack::for_test(
-            cx, true, OTHER, OTHER_LAST, 10.0,
-        );
+        app.playback.active =
+            crate::ui::playback_state::ActiveTrack::for_test(cx, true, OTHER, OTHER_LAST, 10.0);
         app.sync_history_holds();
         assert!(app.session().is_some_and(|s| s.chat_history_in_use(OTHER)));
         app.check_playing_track(cx);

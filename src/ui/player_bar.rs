@@ -91,7 +91,12 @@ fn random_below(n: usize) -> usize {
 
 impl QuillApp {
     /// Title and subtitle for a message, from the chat history.
-    pub(super) fn track_meta_for(&self, chat: ChatId, id: MessageId, kind: PlaybackKind) -> TrackMeta {
+    pub(super) fn track_meta_for(
+        &self,
+        chat: ChatId,
+        id: MessageId,
+        kind: PlaybackKind,
+    ) -> TrackMeta {
         let message = self.session().and_then(|session| {
             session
                 .histories
@@ -452,7 +457,8 @@ impl QuillApp {
             }
             return;
         }
-        let (Some(chat), Some(id)) = (self.playback.active.chat(), self.active_playback_id()) else {
+        let (Some(chat), Some(id)) = (self.playback.active.chat(), self.active_playback_id())
+        else {
             return;
         };
         if self.open_chat_id() == Some(chat) {

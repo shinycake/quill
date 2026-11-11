@@ -553,7 +553,11 @@ impl QuillApp {
         // Playback continues across chats, and message ids repeat between
         // them: a row is the active one only in the track's own chat.
         let active = self.active_playback_id() == Some(message_id)
-            && self.playback.active.chat().is_none_or(|chat| chat == chat_id);
+            && self
+                .playback
+                .active
+                .chat()
+                .is_none_or(|chat| chat == chat_id);
         if active {
             let display = self
                 .playback
@@ -608,7 +612,11 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if self.playback.active.voice() == Some(message_id)
-            && self.playback.active.chat().is_none_or(|chat| chat == chat_id)
+            && self
+                .playback
+                .active
+                .chat()
+                .is_none_or(|chat| chat == chat_id)
         {
             // Active row: pause ↔ resume (the row stays active so the seek
             // bar keeps working and Play resumes from the frozen position).
@@ -688,7 +696,12 @@ impl QuillApp {
         // A saved track (negative id) is the same row from any chat's
         // profile; a message's row is active only in its own chat.
         if self.playback.active.audio() == Some(message_id)
-            && (message_id.0 < 0 || self.playback.active.chat().is_none_or(|chat| chat == chat_id))
+            && (message_id.0 < 0
+                || self
+                    .playback
+                    .active
+                    .chat()
+                    .is_none_or(|chat| chat == chat_id))
         {
             // Active row: pause ↔ resume (see voice toggle).
             if self.is_playing() {

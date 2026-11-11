@@ -27,7 +27,10 @@ fn answered(id: u64, answer: Answer) -> RequestAcks {
 fn applying_ends_sent_only_when_every_request_was_accepted() {
     let mut stage = applying(&[1, 2]);
     assert!(stage.settle(&mut answered(1, Answer::Done)));
-    assert!(matches!(stage, ApplyStage::Applying { .. }), "2 still waits");
+    assert!(
+        matches!(stage, ApplyStage::Applying { .. }),
+        "2 still waits"
+    );
     assert!(stage.settle(&mut answered(2, Answer::Done)));
     assert_eq!(stage, ApplyStage::Sent);
 }

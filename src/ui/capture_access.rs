@@ -227,5 +227,4 @@ impl QuillApp {
             .and_then(|live| live.driver.session.calls.active_call.as_ref())
             .map(|call| call.id)
     }
-
 }

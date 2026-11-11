@@ -94,13 +94,8 @@ fn open_everything(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) {
         app.chat_ui.rich.set_editor(true);
         app.chat_list.archive_menu = Some(point(px(10.), px(10.)));
         app.chat_list.selected.insert(CHAT.0);
-        app.playback.active = crate::ui::playback_state::ActiveTrack::for_test(
-            cx,
-            false,
-            CHAT,
-            MessageId(1),
-            30.0,
-        );
+        app.playback.active =
+            crate::ui::playback_state::ActiveTrack::for_test(cx, false, CHAT, MessageId(1), 30.0);
         cx.notify();
     });
     frames(vcx);

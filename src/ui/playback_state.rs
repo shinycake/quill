@@ -94,7 +94,7 @@ impl ActiveTrack {
     ) -> Self {
         let slider = cx.new(|_| SliderState::new());
         let meta = super::player_bar::TrackMeta {
-            title: String::new().into(),
+            title: String::new(),
             subtitle: String::new(),
         };
         let track = Track::new(message, chat, length, meta, slider);
@@ -337,10 +337,7 @@ impl GifPlayback {
     }
 
     /// The decode that answers to `flag` is the one this stage holds.
-    pub(super) fn is_decode(
-        &self,
-        flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
-    ) -> bool {
+    pub(super) fn is_decode(&self, flag: &std::sync::Arc<std::sync::atomic::AtomicBool>) -> bool {
         match self {
             Self::Idle => false,
             Self::Waiting { decode, .. } | Self::Playing { decode, .. } => decode.is(flag),

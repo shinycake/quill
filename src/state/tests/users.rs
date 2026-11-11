@@ -392,7 +392,10 @@ fn failed_color_requests_surface_the_error_and_icons_flag() {
         ),
     );
     assert!(
-        matches!(session.acks.take(extra), Some(crate::state::Answer::Failed(_))),
+        matches!(
+            session.acks.take(extra),
+            Some(crate::state::Answer::Failed(_))
+        ),
         "the box that sent it gets its own refusal"
     );
 

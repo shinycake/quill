@@ -80,8 +80,11 @@ fn a_start_cancelled_while_the_microphone_opens_leaves_nothing(cx: &mut TestAppC
     app.update(&mut vcx, |app, cx| app.cancel_recording_here(cx));
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
-        assert_eq!(opens.load(Ordering::SeqCst), 1);
-        assert!(!app.recording_active(), "what arrived was dropped");
+        // The stage holds the opening: cancelling drops it, so the device
+        // that had not started is never opened (and one that had is
+        // dropped with its file, `VoiceCapture::drop`).
+        assert_eq!(opens.load(Ordering::SeqCst), 0);
+        assert!(!app.recording_active(), "nothing was held");
         assert!(!app.recording_busy(), "the next recording may start");
     });
 }

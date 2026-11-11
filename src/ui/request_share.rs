@@ -30,13 +30,24 @@ const MAX_ROWS: usize = 60;
 #[derive(Clone)]
 pub(super) enum RequestShareKind {
     /// The phone number: confirmed at once, nothing to choose or look up.
-    Phone { bot_user_id: i64 },
+    Phone {
+        bot_user_id: i64,
+    },
     /// The device's current location (Telegram X `shareCurrentLocation`;
     /// tdesktop only says it is unavailable). `one_time` hides the keyboard
     /// once the location is sent.
-    Location { one_time: bool, stage: LocateStage },
-    Users { spec: RequestUsersSpec, pick: Pick },
-    Chat { spec: RequestChatSpec, pick: Pick },
+    Location {
+        one_time: bool,
+        stage: LocateStage,
+    },
+    Users {
+        spec: RequestUsersSpec,
+        pick: Pick,
+    },
+    Chat {
+        spec: RequestChatSpec,
+        pick: Pick,
+    },
 }
 
 /// Where the location lookup stands. The lookup task lives in its stage, so
@@ -54,9 +65,13 @@ pub(super) enum LocateStage {
 /// Choosing chats (users and chats requests).
 #[derive(Clone)]
 pub(super) enum Pick {
-    Picking { selected: Vec<ChatId> },
+    Picking {
+        selected: Vec<ChatId>,
+    },
     /// The confirmation page after picking.
-    Confirm { selected: Vec<ChatId> },
+    Confirm {
+        selected: Vec<ChatId>,
+    },
 }
 
 impl Pick {
