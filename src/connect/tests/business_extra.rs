@@ -465,3 +465,25 @@ fn a_refused_link_save_goes_back_to_idle_and_only_its_own_answer_counts() {
     assert_eq!(save(&driver), ChatLinkSave::Idle);
     assert!(driver.session.settings.business.error.is_some());
 }
+
+#[test]
+fn a_links_or_bot_load_that_cannot_be_sent_fails_with_retry_not_a_spinner() {
+    let (mut driver, recorder, _sink, _seq) = driver_parts();
+    recorder.refuse(Some("getBusinessChatLinks"));
+    assert!(driver.ensure_chat_links().is_err());
+    let state = &driver.session.settings.business_extra;
+    assert!(state.chat_links.error().is_some(), "Failed, not Idle");
+    // A render's ensure does not ask again; Retry does, and can succeed.
+    assert!(driver.ensure_chat_links().is_ok());
+    assert_eq!(count_sent(&recorder, "getBusinessChatLinks"), 0);
+    recorder.refuse(None);
+    assert!(driver.retry_chat_links().is_ok());
+    assert_eq!(count_sent(&recorder, "getBusinessChatLinks"), 1);
+
+    recorder.refuse(Some("getBusinessConnectedBot"));
+    assert!(driver.ensure_connected_bot().is_err());
+    let state = &driver.session.settings.business_extra;
+    assert!(state.connected_bot.error().is_some());
+    assert!(driver.ensure_connected_bot().is_ok());
+    assert_eq!(count_sent(&recorder, "getBusinessConnectedBot"), 0);
+}

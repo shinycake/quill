@@ -74,8 +74,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session.settings.business_extra.chat_links.begin();
         let sent =
             self.send_business_extra(SettingsPurpose::GetChatLinks, links::get_links_request);
+        // A send that never left lands in `Failed` (drawn with Retry), not
+        // back in `Idle`, which a page draws as a spinner and asks again.
         if sent.is_err() {
-            self.session.settings.business_extra.chat_links.cancel();
+            self.session
+                .settings
+                .business_extra
+                .chat_links
+                .fail("The chat links request was not sent.");
         }
         sent.map(|_| ())
     }
@@ -178,7 +184,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             bots::get_connected_bot_request,
         );
         if sent.is_err() {
-            self.session.settings.business_extra.connected_bot.cancel();
+            self.session
+                .settings
+                .business_extra
+                .connected_bot
+                .fail("The chatbot request was not sent.");
         }
         sent.map(|_| ())
     }
