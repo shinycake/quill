@@ -77,7 +77,9 @@ pub enum NewChatStage {
     AutoDelete,
     /// The group's members picker; Create sends.
     Members,
-    /// The create request is out; `back` is where a refusal returns.
+    /// The create request is out; `back` is where a refusal returns. A
+    /// supergroup or channel leaves it for `Type` as its answer is taken;
+    /// only a group stays in it, `Created`, until its dialog closes.
     Creating {
         request: RequestId,
         back: NewChatBack,
@@ -90,7 +92,8 @@ pub enum NewChatStage {
 }
 
 /// How the create request stands. It leaves `InFlight` with its answer, or
-/// when the request is gone without one (`Lost`).
+/// when the request is gone without one (`Lost`). `Created` is a group's:
+/// a supergroup's answer moves the stage to `NewChatStage::Type`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CreateProgress {
     InFlight,
@@ -225,7 +228,7 @@ impl NewChatView {
     }
 }
 
-pub fn view(kind: NewChatKind, stage: &NewChatStage) -> NewChatView {
+pub fn view(stage: &NewChatStage) -> NewChatView {
     let plain = |step| NewChatView {
         step,
         state: ViewState::Idle,
@@ -240,9 +243,6 @@ pub fn view(kind: NewChatKind, stage: &NewChatStage) -> NewChatView {
                 NewChatBack::Members => NewChatStep::Members,
             };
             match progress {
-                CreateProgress::Created(chat) if kind.is_supergroup() => {
-                    plain(NewChatStep::Type(*chat))
-                }
                 CreateProgress::Created(chat) => plain(NewChatStep::Done(*chat)),
                 CreateProgress::Refused { failure, reason } => NewChatView {
                     step: back,
@@ -371,18 +371,15 @@ mod tests {
     fn a_group_goes_info_members_then_done() {
         let kind = NewChatKind::Group;
         assert_eq!(kind.info_confirm(), keys::CREATE_GROUP_NEXT);
-        assert_eq!(view(kind, &NewChatStage::Info).step, NewChatStep::Info);
-        let waiting = view(
-            kind,
-            &creating(NewChatBack::Members, CreateProgress::InFlight),
-        );
+        assert_eq!(view(&NewChatStage::Info).step, NewChatStep::Info);
+        let waiting = view(&creating(NewChatBack::Members, CreateProgress::InFlight));
         assert_eq!(waiting.step, NewChatStep::Members);
         assert!(waiting.busy());
         assert_eq!(
-            view(
-                kind,
-                &creating(NewChatBack::Members, CreateProgress::Created(CHAT))
-            )
+            view(&creating(
+                NewChatBack::Members,
+                CreateProgress::Created(CHAT)
+            ))
             .step,
             NewChatStep::Done(CHAT)
         );
@@ -390,10 +387,7 @@ mod tests {
 
     #[test]
     fn a_lost_create_returns_to_the_form_without_a_reason() {
-        let shown = view(
-            NewChatKind::Group,
-            &creating(NewChatBack::Members, CreateProgress::Lost),
-        );
+        let shown = view(&creating(NewChatBack::Members, CreateProgress::Lost));
         assert_eq!(shown.step, NewChatStep::Members);
         assert!(!shown.busy() && shown.failure().is_none());
     }
@@ -403,25 +397,21 @@ mod tests {
         let kind = NewChatKind::Channel;
         assert_eq!(kind.info_confirm(), keys::CREATE_GROUP_CREATE);
         assert_eq!(
-            view(
-                kind,
-                &creating(NewChatBack::Info, CreateProgress::Created(CHAT))
-            )
-            .step,
+            view(&creating(NewChatBack::Info, CreateProgress::Created(CHAT))).step,
             NewChatStep::Type(CHAT)
         );
         let saving = NewChatStage::Type {
             chat: CHAT,
             save: TypeSaveStage::Saving(vec![RequestId(8)]),
         };
-        let busy = view(kind, &saving);
+        let busy = view(&saving);
         assert_eq!(busy.step, NewChatStep::Type(CHAT));
         assert!(busy.busy());
         let refused = NewChatStage::Type {
             chat: CHAT,
             save: TypeSaveStage::Refused("USERNAME_INVALID".into()),
         };
-        let shown = view(kind, &refused);
+        let shown = view(&refused);
         assert_eq!(shown.step, NewChatStep::Type(CHAT));
         assert!(!shown.busy());
     }
@@ -432,7 +422,7 @@ mod tests {
             failure: CreateFailure::Restricted,
             reason: "nope".into(),
         };
-        let shown = view(NewChatKind::Megagroup, &creating(NewChatBack::Info, failed));
+        let shown = view(&creating(NewChatBack::Info, failed));
         assert_eq!(shown.step, NewChatStep::Info);
         assert_eq!(shown.failure(), Some((CreateFailure::Restricted, "nope")));
         assert!(!shown.busy());

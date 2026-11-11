@@ -2,7 +2,7 @@
 //! the photo set once the chat exists, and how the request ended
 //! (`crate::new_chat`).
 use crate::lang::{keys, tr};
-use crate::new_chat::{CreateProgress, CreationOutcome, NewChatStage, TypeSaveStage};
+use crate::new_chat::{CreateProgress, CreationOutcome, NewChatKind, NewChatStage, TypeSaveStage};
 use crate::profile_photo_sources::ChatPhotoInput;
 use crate::state::*;
 
@@ -66,7 +66,9 @@ impl Session {
     /// was answered or lost, a type Save whose requests ended (all well:
     /// the subscribers step; any refused or lost: the step with TDLib's
     /// reason). A stage with nothing to settle comes back as it was.
-    pub fn settled_new_chat(&self, stage: &NewChatStage) -> NewChatStage {
+    /// A supergroup or channel whose create was answered is at its type
+    /// step at once: the create request is not held past its answer.
+    pub fn settled_new_chat(&self, kind: NewChatKind, stage: &NewChatStage) -> NewChatStage {
         match stage {
             NewChatStage::Creating {
                 request,
@@ -80,6 +82,12 @@ impl Session {
                     .get(request)
                     .and_then(|creation| creation.outcome.clone());
                 let progress = match outcome {
+                    Some(CreationOutcome::Created(chat)) if kind.is_supergroup() => {
+                        return NewChatStage::Type {
+                            chat,
+                            save: TypeSaveStage::Editing,
+                        };
+                    }
                     Some(CreationOutcome::Created(chat)) => CreateProgress::Created(chat),
                     Some(CreationOutcome::Failed { failure, reason }) => {
                         CreateProgress::Refused { failure, reason }
