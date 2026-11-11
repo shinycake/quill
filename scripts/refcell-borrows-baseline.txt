@@ -195,7 +195,6 @@ QuillApp::premium_autoplay::played.borrow 1
 QuillApp::premium_autoplay::played.borrow_mut 2
 QuillApp::premium_autoplay::seen.borrow 1
 QuillApp::premium_autoplay::seen.borrow_mut 1
-QuillApp::render::media_roots_frame.borrow_mut 1
 QuillApp::report_visible_sponsored::rendered_sponsored.borrow_mut 1
 QuillApp::request_app_tick_unless::animation_targets.borrow 1
 QuillApp::request_app_tick_unless::still_ticks.borrow_mut 1
@@ -217,7 +216,6 @@ QuillApp::shortcuts_reference::bindings.borrow 1
 QuillApp::sidebar_chats::row_fx.borrow_mut 1
 QuillApp::spawn_system_unlock_wait::held.borrow_mut 1
 QuillApp::spawn_system_unlock_wait::master.borrow_mut 1
-QuillApp::status_toast_in::toasts.borrow_mut 1
 QuillApp::step_search_selection::search_bounds.borrow 1
 QuillApp::step_search_selection::search_order.borrow 1
 QuillApp::still_tick::still_ticks.borrow_mut 2

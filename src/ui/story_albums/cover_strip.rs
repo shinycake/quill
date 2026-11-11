@@ -48,6 +48,13 @@ pub(in crate::ui) struct CoverPicker {
     serial: u64,
 }
 
+impl CoverPicker {
+    /// The story this picker is for.
+    pub(in crate::ui) fn story(&self) -> (i64, i32) {
+        (self.chat_id, self.story_id)
+    }
+}
+
 /// The cover picker's clip. Each stage leaves on its own: `WaitingForClip`
 /// when the clip is local (`cover_upkeep` looks each frame, so a clip that
 /// finishes downloading is picked up) or the picker closes; `Probing` with
@@ -578,12 +585,6 @@ impl QuillApp {
             .into_any_element()
     }
 
-    /// The story the open cover picker is for.
-    pub(in crate::ui) fn open_cover_story(&self) -> Option<(i64, i32)> {
-        let cover = self.stories.viewer_ui().cover()?;
-        Some((cover.chat_id, cover.story_id))
-    }
-
     /// Phase 9.5: send `editStoryCover` (`td_api.tl:13738`) for the chosen
     /// frame. The driver gates on `can_be_edited`; the tick closes the
     /// picker on success.
@@ -619,7 +620,7 @@ impl QuillApp {
             {
                 Ok(request) => {
                     if let Some(open) = self.stories.viewer_ui_mut() {
-                        open.cover_request = Some(request);
+                        open.cover_request = Some((request, (chat_id, story_id)));
                     }
                 }
                 Err(_) => {

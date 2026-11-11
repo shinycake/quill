@@ -92,13 +92,16 @@ impl ViewerPanel {
 pub(crate) struct StoryViewerUi {
     /// The one panel open over the story.
     pub(super) panel: ViewerPanel,
-    /// The `editStoryCover` call on its way; its answer closes the picker.
-    /// Its own value, not the panel's: a call the picker sent stays tracked
-    /// after another panel replaced it, so its answer still settles.
-    pub(super) cover_request: Option<quill::ids::RequestId>,
-    /// The `setStoryPrivacySettings` call on its way; its answer closes
-    /// the editor (kept apart from the panel like `cover_request`).
-    pub(super) privacy_request: Option<quill::ids::RequestId>,
+    /// The `editStoryCover` call on its way, with the story it was sent
+    /// for; its answer closes the picker if that story's picker is still
+    /// the open panel. Its own value, not the panel's: a call the picker
+    /// sent stays tracked after another panel replaced it, so its answer
+    /// still settles.
+    pub(super) cover_request: Option<(quill::ids::RequestId, (i64, i32))>,
+    /// The `setStoryPrivacySettings` call on its way, with its story; its
+    /// answer closes that story's editor (kept apart from the panel like
+    /// `cover_request`).
+    pub(super) privacy_request: Option<(quill::ids::RequestId, (i64, i32))>,
     /// B14: the press-and-hold / Space pause.
     pub(super) pause: quill::story_extras::StoryUserPause,
     /// The story-page call sent from here (Hide, the profile toggle, the
@@ -124,6 +127,30 @@ impl StoryViewerUi {
     /// already sent (`cover_request`, `privacy_request`) stays tracked.
     pub(super) fn show(&mut self, panel: ViewerPanel) {
         self.panel = panel;
+    }
+
+    /// The cover call settled: it is over, and on success the picker closes
+    /// if it is the one for the story the call was sent for (a fresh picker
+    /// of another story, or a reopened one, stays).
+    pub(super) fn cover_settled(&mut self, saved: bool) {
+        let story = self.cover_request.take().map(|(_, story)| story);
+        let still_open = self
+            .cover()
+            .is_some_and(|cover| Some(cover.story()) == story);
+        if saved && still_open {
+            self.close(PanelKind::Cover);
+        }
+    }
+
+    /// The privacy call settled, like [`Self::cover_settled`].
+    pub(super) fn privacy_settled(&mut self, saved: bool) {
+        let story = self.privacy_request.take().map(|(_, story)| story);
+        let still_open = self
+            .privacy_edit()
+            .is_some_and(|edit| Some((edit.chat_id, edit.story_id)) == story);
+        if saved && still_open {
+            self.close(PanelKind::Privacy);
+        }
     }
 
     /// The panel of `kind` closes; another panel stays.
@@ -494,7 +521,10 @@ impl StoryUi {
 
 #[cfg(test)]
 mod reply_tests {
-    use super::{StoryViewerUi, ViewerPanel};
+    use super::{PanelKind, StoryViewerUi, ViewerPanel};
+    use crate::ui::story_albums::StoryPrivacyEdit;
+    use quill::ids::RequestId;
+    use quill::story_composer::StoryPrivacy;
 
     #[test]
     fn the_panel_belongs_to_an_open_row_and_goes_with_it() {
@@ -512,5 +542,43 @@ mod reply_tests {
         // Reopening starts without the old panel.
         ui.open_reply();
         assert!(!ui.reply_panel());
+    }
+
+    fn editing(chat_id: i64, story_id: i32) -> ViewerPanel {
+        ViewerPanel::Privacy(StoryPrivacyEdit {
+            chat_id,
+            story_id,
+            privacy: StoryPrivacy::Everyone,
+            selected_user_ids: Vec::new(),
+        })
+    }
+
+    /// A save's answer closes the editor of the story it was sent for, and
+    /// leaves a fresh editor of another story (or none) alone.
+    #[test]
+    fn a_saved_privacy_answer_closes_only_its_own_story_editor() {
+        let mut ui = StoryViewerUi::default();
+        ui.privacy_request = Some((RequestId(1), (5, 3)));
+        ui.show(editing(5, 4));
+        ui.privacy_settled(true);
+        assert!(
+            ui.is_open(PanelKind::Privacy),
+            "another story's editor stays"
+        );
+        assert_eq!(ui.privacy_request, None, "the call is over");
+
+        ui.privacy_request = Some((RequestId(2), (5, 4)));
+        ui.privacy_settled(true);
+        assert!(!ui.is_open(PanelKind::Privacy), "its own editor closes");
+    }
+
+    #[test]
+    fn a_refused_privacy_answer_keeps_the_editor_open() {
+        let mut ui = StoryViewerUi::default();
+        ui.privacy_request = Some((RequestId(1), (5, 3)));
+        ui.show(editing(5, 3));
+        ui.privacy_settled(false);
+        assert!(ui.is_open(PanelKind::Privacy));
+        assert_eq!(ui.privacy_request, None);
     }
 }

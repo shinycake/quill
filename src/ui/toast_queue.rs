@@ -7,6 +7,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::status_note::{NoteKind, StatusNote};
+use gpui_kit::Task;
 use quill::ids::ChatId;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -58,16 +59,40 @@ impl Showing {
     }
 }
 
+/// The wake-up scheduled for the visible toast: none, or a deadline with
+/// the timer task that redraws at it. The task lives here, so a new
+/// deadline, a click, a cleared note or the queue going away drops it.
+#[derive(Default)]
+enum Wake {
+    #[default]
+    Idle,
+    /// A wake-up is wanted at `deadline`; `timer` is the task waiting for
+    /// it (`None` between [`ToastQueue::rewake`] and [`ToastQueue::arm`]).
+    Armed {
+        deadline: Instant,
+        timer: Option<Task<()>>,
+    },
+}
+
+impl Wake {
+    fn deadline(&self) -> Option<Instant> {
+        match self {
+            Self::Idle => None,
+            Self::Armed { deadline, .. } => Some(*deadline),
+        }
+    }
+}
+
 /// The current status note, the toasts it feeds and the wake-up scheduled
 /// for the visible one: one value, so a note, its toast and its timer end
 /// together.
-#[derive(Clone, Debug, Default)]
+#[derive(Default)]
 pub(crate) struct ToastQueue {
     /// The current note. Every write names its kind through
     /// [`Self::set_note_in`], so a toast never depends on the words.
     note: StatusNote,
-    /// The deadline a wake-up is already scheduled for.
-    wake: Option<Instant>,
+    /// The wake-up scheduled for the visible toast, with its timer.
+    wake: Wake,
     showing: Option<Showing>,
     waiting: VecDeque<Toast>,
     /// The pointer over the toast slot: the next toast starts paused too,
@@ -105,7 +130,7 @@ impl ToastQueue {
     /// Drops the current note and its toasts.
     pub(crate) fn clear_note(&mut self) {
         *self = Self {
-            wake: self.wake,
+            wake: std::mem::take(&mut self.wake),
             ..Self::default()
         };
     }
@@ -129,17 +154,37 @@ impl ToastQueue {
     /// toast's has moved since the last one.
     pub(crate) fn rewake(&mut self, now: Instant) -> Option<Instant> {
         let deadline = self.deadline(now);
-        if deadline == self.wake {
+        if deadline == self.wake.deadline() {
             return None;
         }
-        self.wake = deadline;
+        // The timer of the deadline before goes with it.
+        self.wake = match deadline {
+            Some(deadline) => Wake::Armed {
+                deadline,
+                timer: None,
+            },
+            None => Wake::Idle,
+        };
         deadline
+    }
+
+    /// The timer task [`Self::rewake`] asked for. One for a deadline that
+    /// has moved on since is dropped (and so cancelled) here.
+    pub(crate) fn arm(&mut self, deadline: Instant, task: Task<()>) {
+        if let Wake::Armed {
+            deadline: wanted,
+            timer,
+        } = &mut self.wake
+            && *wanted == deadline
+        {
+            *timer = Some(task);
+        }
     }
 
     /// The wake-up for `deadline` fired.
     pub(crate) fn woke(&mut self, deadline: Instant) {
-        if self.wake == Some(deadline) {
-            self.wake = None;
+        if self.wake.deadline() == Some(deadline) {
+            self.wake = Wake::Idle;
         }
     }
 
@@ -147,7 +192,7 @@ impl ToastQueue {
     /// wake-up is no longer wanted.
     pub(crate) fn dismiss_by_click(&mut self, now: Instant) {
         self.dismiss(now);
-        self.wake = None;
+        self.wake = Wake::Idle;
     }
 
     /// Queues a note for the main window.

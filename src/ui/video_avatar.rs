@@ -118,7 +118,8 @@ impl QuillApp {
             Cover::Failed(file) => *file == animation.file_id,
             Cover::None => false,
         };
-        if !keep {
+        // Locked, no clip opens (one already playing is paused below).
+        if !keep && !self.refused_while_locked() {
             self.video_avatar.cover = self.open_cover_clip(owner, animation, scale, cx);
         }
         // The lock screen covers it too (the kit's dialogs read closed then).

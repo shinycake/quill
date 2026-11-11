@@ -89,7 +89,6 @@ bare:MenuSend::Sent 1
 bare:MessageStatsFetch::Loading 1
 bare:MuteState::Connecting 1
 bare:NextPage::Loading 1
-bare:Notes::Loading 1
 bare:Opening::Pending 1
 bare:OutboxReceipt::Sent 1
 bare:OwnLinkState::Waiting 1

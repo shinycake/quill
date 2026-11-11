@@ -809,7 +809,7 @@ impl QuillApp {
             ) {
                 Ok(request) => {
                     if let Some(open) = self.stories.viewer_ui_mut() {
-                        open.privacy_request = Some(request);
+                        open.privacy_request = Some((request, (edit.chat_id, edit.story_id)));
                     }
                 }
                 Err(_) => {
