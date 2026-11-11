@@ -57,11 +57,21 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// monoforum it lists).
     pub(crate) fn maybe_preload_direct_topics(&mut self, chat_id: ChatId) {
         if !self.session.is_direct_messages_admin(chat_id)
-            || self.session.threads.direct.preloaded(chat_id.0)
+            || !self.session.threads.direct.never_asked(chat_id.0)
         {
             return;
         }
         let _ = self.load_more_direct_topics(chat_id);
+    }
+
+    /// Opening an administered direct messages chat whose first page failed
+    /// asks for it again.
+    pub(crate) fn retry_direct_topics_on_open(&mut self, chat_id: ChatId) {
+        if self.session.is_direct_messages_admin(chat_id)
+            && !self.session.threads.direct.preloaded(chat_id.0)
+        {
+            let _ = self.load_more_direct_topics(chat_id);
+        }
     }
 
     /// The next page of conversations (the tabs scrolled to their end).

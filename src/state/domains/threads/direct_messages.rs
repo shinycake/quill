@@ -36,8 +36,8 @@ pub enum TopicsLoad {
     /// A page was asked for (and may have answered).
     Asked,
     /// The last page failed with an error that is not the end of the list.
-    /// The preload does not ask again (tdesktop does not either); scrolling
-    /// the tabs does.
+    /// The update-driven preload does not ask again; opening the chat or
+    /// scrolling the tabs does.
     Failed,
     /// `loadDirectMessagesChatTopics` answered 404: all are loaded.
     Exhausted,
@@ -49,9 +49,19 @@ impl DirectMessagesTopics {
         self.loads.get(&chat_id) == Some(&TopicsLoad::Exhausted)
     }
 
-    /// The first page was asked for (the preload happens once).
+    /// The first page went out and did not fail (or the list ended). A
+    /// failed first page is not loaded: opening the chat asks again.
     pub fn preloaded(&self, chat_id: i64) -> bool {
-        self.loads.contains_key(&chat_id)
+        matches!(
+            self.loads.get(&chat_id),
+            Some(TopicsLoad::Asked | TopicsLoad::Exhausted)
+        )
+    }
+
+    /// No page was ever asked for: the update-driven preload sends the
+    /// first one (a failed page is retried on open, not on every update).
+    pub fn never_asked(&self, chat_id: i64) -> bool {
+        !self.loads.contains_key(&chat_id)
     }
 
     /// A page went out.

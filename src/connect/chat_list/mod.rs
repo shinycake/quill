@@ -118,6 +118,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.maybe_fetch_supergroup_profile(chat_id)?;
         self.maybe_fetch_supergroup_full_info_for_header(chat_id)?;
         self.maybe_fetch_forum_topics(chat_id)?;
+        self.retry_direct_topics_on_open(chat_id);
         Ok(())
     }
 
