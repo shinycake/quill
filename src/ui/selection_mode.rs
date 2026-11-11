@@ -973,15 +973,23 @@ impl QuillApp {
                         }
                         // Reports and "delete all" name the user's
                         // messages, so they go out before the delete.
+                        // A refused send stops here, so the delete is not
+                        // done without them.
                         if let (true, Some(offer), Some(live)) =
                             (picked.any(), offer, this.live.as_mut())
+                            && live
+                                .driver
+                                .moderate_message(
+                                    offer.chat_id,
+                                    &[confirm.message_id],
+                                    offer.user_id,
+                                    picked,
+                                )
+                                .is_err()
                         {
-                            let _ = live.driver.moderate_message(
-                                offer.chat_id,
-                                &[confirm.message_id],
-                                offer.user_id,
-                                picked,
-                            );
+                            this.set_note(StatusNote::error(tr(keys::Q_OPS_REQUEST_NOT_SENT)));
+                            cx.notify();
+                            return;
                         }
                         this.confirm_delete(confirm, cx);
                     });

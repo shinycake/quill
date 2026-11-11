@@ -136,6 +136,7 @@ impl QuillApp {
         let task = self.spawn_scoped(cx, async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
+                let mut finished = None;
                 let cont = this
                     .update(cx, |this, cx| {
                         let now_ms = unix_ms_now();
@@ -149,21 +150,21 @@ impl QuillApp {
                             this.notify_conversations(cx);
                             true
                         } else {
-                            // This task ends: let go of it without
-                            // cancelling the update it is inside.
+                            // This task ends: it leaves the stage, and is
+                            // let go of after this update, not under it.
                             if this
                                 .chat_ui
                                 .self_destruct_tick
                                 .as_ref()
                                 .is_some_and(|(chat, _)| *chat == chat_id)
-                                && let Some((_, task)) = this.chat_ui.self_destruct_tick.take()
                             {
-                                task.detach();
+                                finished = this.chat_ui.self_destruct_tick.take();
                             }
                             false
                         }
                     })
                     .unwrap_or(false);
+                drop(finished);
                 if !cont {
                     break;
                 }
