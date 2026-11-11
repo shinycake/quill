@@ -26,7 +26,6 @@ detached:QuillApp::schedule_chat_search_commit 1
 detached:QuillApp::schedule_draft_commit 1
 detached:QuillApp::schedule_search_commit 1
 detached:QuillApp::show_notification_with_preview 1
-detached:QuillApp::show_qr_toast 1
 detached:QuillApp::show_rich_paste_notice 1
 detached:QuillApp::show_saved_toast 1
 detached:QuillApp::show_translate_toast 1

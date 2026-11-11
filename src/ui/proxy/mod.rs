@@ -43,31 +43,6 @@ pub(crate) struct ProxyUi {
     pub(crate) ip_warning_acked: bool,
 }
 
-/// The line under the proxy list: hidden, or showing with the timer that
-/// hides it. A newer line replaces the stage, which cancels the older
-/// timer, so no timer hides a line that is not its own.
-#[derive(Default)]
-pub(crate) enum ProxyNotice {
-    #[default]
-    Hidden,
-    Showing {
-        text: String,
-        _timer: Task<()>,
-    },
-}
-
-impl ProxyNotice {
-    pub(crate) fn text(&self) -> Option<&str> {
-        match self {
-            Self::Showing { text, .. } => Some(text),
-            Self::Hidden => None,
-        }
-    }
-}
-
-/// How long the line under the list stays.
-const NOTICE: std::time::Duration = std::time::Duration::from_secs(4);
-
 /// The add / edit box.
 pub(crate) struct ProxyEditor {
     id: Option<i32>,
@@ -149,21 +124,6 @@ impl QuillApp {
     /// lands over the chat list.
     pub(super) fn proxy_list_box_shown(&self) -> bool {
         self.auth_ui.proxy_list_open && self.pane_mode() == super::app::PaneMode::Connecting
-    }
-
-    /// Say `text` under the list for a few seconds (`ProxyNotice`).
-    pub(super) fn proxy_notice(&mut self, text: impl Into<String>, cx: &mut Context<Self>) {
-        let timer = self.spawn_screen(cx, async move |this, cx| {
-            cx.background_executor().timer(NOTICE).await;
-            let _ = this.update(cx, |this, cx| {
-                this.settings.proxy.notice = ProxyNotice::Hidden;
-                cx.notify();
-            });
-        });
-        self.settings.proxy.notice = ProxyNotice::Showing {
-            text: text.into(),
-            _timer: timer,
-        };
     }
 
     pub(crate) fn fetch_proxy_list(&mut self) {
@@ -1011,6 +971,8 @@ crate::ui::shell::register_dialogs! {
 }
 
 mod build_proxy_edit_dialog;
+mod notice;
+pub(crate) use notice::ProxyNotice;
 mod build_proxy_list_dialog;
 #[cfg(test)]
 mod login_box_tests;

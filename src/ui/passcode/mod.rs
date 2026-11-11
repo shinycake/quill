@@ -7,6 +7,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+pub(crate) use stages::{PasscodeBox, SystemUnlock};
+use stages::LockState;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -62,76 +64,6 @@ impl PasscodeJob {
 
 /// How long the wrong-passcode shake runs.
 const SHAKE_MS: u64 = 420;
-
-/// Locked or not, with the number of locks so far (a locked start counts).
-/// Something parked for later records the count, and a lock in between
-/// drops it (`PasscodeUi::locked_since`), whether or not Quill is still
-/// locked when it lands.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum LockState {
-    Unlocked { locks: u64 },
-    Locked { locks: u64 },
-}
-
-impl LockState {
-    fn new(locked: bool) -> Self {
-        Self::Unlocked { locks: 0 }.set(locked)
-    }
-
-    fn locks(self) -> u64 {
-        match self {
-            Self::Unlocked { locks } | Self::Locked { locks } => locks,
-        }
-    }
-
-    /// A lock counts once, when it starts.
-    fn set(self, locked: bool) -> Self {
-        match (self, locked) {
-            (Self::Unlocked { locks }, true) => Self::Locked {
-                locks: locks.saturating_add(1),
-            },
-            (Self::Locked { locks }, false) => Self::Unlocked { locks },
-            (same, _) => same,
-        }
-    }
-}
-
-/// Touch ID / system-prompt unlock: off, or on with the master key kept
-/// while locked so the prompt can unlock again without the passcode
-/// (tdesktop: "enter your passcode before you can use Touch ID"). The key
-/// exists only inside `On`, so it cannot outlive the switch.
-pub(crate) enum SystemUnlock {
-    Off,
-    On { held_key: Option<MasterKey> },
-}
-
-impl SystemUnlock {
-    pub(crate) fn is_on(&self) -> bool {
-        matches!(self, Self::On { .. })
-    }
-
-    fn held_key(&self) -> Option<&MasterKey> {
-        match self {
-            Self::On { held_key } => held_key.as_ref(),
-            Self::Off => None,
-        }
-    }
-
-    /// Keep `key` for the next unlock; nothing is kept while the switch is off.
-    fn hold(&mut self, key: Option<MasterKey>) {
-        if let Self::On { held_key } = self {
-            *held_key = key;
-        }
-    }
-}
-
-/// The open Settings passcode box: its page and the line it shows.
-/// Closing drops it whole, so no page or error outlives the box.
-#[derive(Clone, Debug, Default)]
-pub(crate) struct PasscodeBox {
-    pub(crate) view: PasscodeView,
-    pub(crate) error: Option<String>,
-}
 
 pub(crate) struct PasscodeUi {
     /// A passcode is set (cached from `passcode.json`; refreshed after each
@@ -1048,6 +980,7 @@ pub(crate) mod lock_screen;
 mod unlock_intents;
 pub(in crate::ui) use unlock_intents::UnlockIntents;
 pub(crate) mod lock_layer;
+mod stages;
 mod system_unlock_wait;
 pub(crate) use lock_field::LockField;
 pub(in crate::ui) use lock_gate::intercept_keys_unlocked;

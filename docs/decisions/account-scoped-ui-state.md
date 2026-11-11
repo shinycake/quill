@@ -8043,3 +8043,39 @@ whose variants carry the data, with a way out of every stage.
 - **A refused refetch of a stale proxy list** lands in
   `ProxyFetch::FailedStale`: the tick does not ask again, the list stays
   busy (never planned on), and Refresh is the way out.
+
+### Sweep fixes (r2-39)
+
+Files: notifications, notify windows, os menus, passcode, peer QR, polls,
+premium UI, privacy radio rows, profile panels, profile photo sources and
+proxy. Every entry of the bundle is fixed or shown false:
+
+| id | what changed |
+|---|---|
+| 09-118, 11-031 | `ChatListUi::show_view` is the one mover of the folder tab and category. It ends the selection and a pinned drag, and the poll's "folder deleted on another device" fallback uses it too. |
+| 11-033 | `NotifyView::actions` is gone: the Reply button is derived from `hovered`, `reply` and `can_reply` when drawn. `reply` holds the field entity itself, and the manager's `Stage::Replying` is its own owner of the hide timer, fed by `ReplyOpened`. |
+| 11-054 | `MenuSync::registry` is `RegistryRead::{Never(default), Read{registry, at, writes, clients}}`. |
+| 11-051 | `PasscodeUi::panel: Option<PasscodeBox{view, error}>` replaces `open`, `view` and `error`. Closing drops it whole, so a late job error has no box to land in. |
+| 11-052 | `SystemUnlock::{Off, On{held_key}}` replaces `system_unlock` and `system_unlock_key`. The key exists only inside `On`. |
+| 11-053 | `LockGate` and `PasscodeUi` share one `Rc<Cell<LockState>>`: one flag, written by `set_locked`. |
+| 11-046 | `ToastStage::{Hidden, Showing{toast, _timer}}`: the timer task is the stage's own, so a newer toast or closing the box cancels it. The clock stays an owned `Task`. |
+| 11-047 | `PanelMotion::Closing` settles to `Idle` (`settle`, called from `qr_refresh`) and `visible(now)` reports `None` once a close has run, so a closed gifts panel holds no list. |
+| 11-048 | `OpenQr::swap` is dropped by `qr_settle` after `SWAP_MS`. |
+| 12-A007 | `PollDialog::rows: Vec<PollOptionRow{input, attach, correct}>` replaces `option_inputs`, `attach` and `quiz_correct_rows`. Removing a row removes all three. |
+| 12-A008 | `PollDialog::close: Option<PollClose>` (None is off) and `countries: Option<Vec<String>>`. Turning a switch off forgets its value. |
+| 12-A009 | `set_media_panel_mode` ends every `AwaitSticker`/`AwaitEmoji` when the panel leaves the compose mode (`end_poll_option_waits`). |
+| 12-A010 | `OptionMediaSlot::Preparing{path, read: ReadId}`: a file read answers the slot holding its `ReadId`, never the first one with the same path. |
+| 12-A018 | `GramWithdraw::Done(WithdrawOutcome)` carries the outcome in the stage (the `withdraw_outcome` slot is gone). `grams_outcome_window` names the window that takes it: the box's host, else the Grams screen's, else main when that one closed. |
+| 12-A019 | A limit toast is claimed by the window of the last press (`PaymentUi::limit_toast`, per account) and shown in that window's next frame, not at a later press. |
+| 12-A020 | `PaymentsState::select_gift` is the one way a gift panel opens or closes from the UI; it drops an Upgrade or resale form that names another gift. |
+| 12-B019 | `mutate_privacy_detail` says whether it sent; the exception picker closes only then. |
+| 12-B017 | `ProfileDialog::owner()` (kind and person) is compared when the photo picker answers, so another person's Edit contact is not mistaken for the box that asked. |
+| 12-B018 | `user_photos_request_ended` ends a user's pending gallery when the first page's request is gone, with a note. |
+| 12-B011 | `drop_profile_dialog` is the one way a profile box goes; replacing a box (`open_profile_dialog`, the birthday privacy link) forgets its `Saving` watch or its `ContactSave` answer. A saving box takes no click (`block_while_saving`). `ProfileDialog::Saving` (answers in `saves`) and `ContactSave::Saving` (answers in `dialog_answers`) stay two stages: they wait on different answer channels, each carrying its `RequestId`. |
+| 12-B014 | `GradientEditor::hsl()` is derived from the selected colour; the only stored extra is where the sliders were last dragged, valid only for that exact colour. |
+| 12-B013 | `PhotoSources::stage: SourceStage::{Closed, Emoji, Camera(CameraDraft)}` and one `close()`. `CameraStage::Starting` and `Saving` hold their tasks, so the serial is gone. |
+| 14-068 | `video_encode_failed` is the one failure transition of the video editor (tray, edit box, avatar): ready again, with its player back. |
+| 12-B005 | `ProxyNotice::{Hidden, Showing{text, _timer}}`: the line under the list hides itself. |
+| 12-B006 | `remove_proxy` is sent first; the system-proxy fallback is set only when it went out. |
+| 12-B007 | `ProxyState::{review_link, warn_link, set_auto_switch}` own the link stage and the rotation reset; the UI calls them. The box's draft stays UI data (`ProxyLinkBox`); the check stage lives in the session because its answer settles it by `RequestId`. |
+| 12-B008 | The sign-in screen's own state (`AuthUi::proxy_list_open`) holds the box; the Ready transition (`follow_auth`) ends it. The per-frame sync is gone. |
