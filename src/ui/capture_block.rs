@@ -32,7 +32,14 @@ pub(super) fn should_block(open_chat_secret: bool, viewer_chat_secret: bool) -> 
 #[must_use]
 pub(super) fn apply_sharing(window: &Window, blocked: bool) -> bool {
     #[cfg(test)]
-    SHARING_APPLIED.with(|applied| applied.borrow_mut().push(blocked));
+    {
+        // A test window has no native handle on macOS or Windows: the
+        // record is the platform here, and it takes every setting.
+        let _ = window;
+        SHARING_APPLIED.with(|applied| applied.borrow_mut().push(blocked));
+        true
+    }
+    #[cfg(not(test))]
     apply_native_sharing(window, blocked)
 }
 
@@ -43,7 +50,7 @@ thread_local! {
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(not(test), target_os = "macos"))]
 fn apply_native_sharing(window: &Window, blocked: bool) -> bool {
     use objc2_app_kit::{NSView, NSWindowSharingType};
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -64,7 +71,7 @@ fn apply_native_sharing(window: &Window, blocked: bool) -> bool {
     false
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(not(test), target_os = "windows"))]
 fn apply_native_sharing(window: &Window, blocked: bool) -> bool {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -84,7 +91,7 @@ fn apply_native_sharing(window: &Window, blocked: bool) -> bool {
     false
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(all(not(test), not(any(target_os = "macos", target_os = "windows"))))]
 fn apply_native_sharing(_window: &Window, _blocked: bool) -> bool {
     true
 }
