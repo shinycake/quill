@@ -179,7 +179,7 @@ mod tests {
         ChecklistTask {
             id,
             text: format!("task {id}"),
-            completion: done.then(|| crate::telegram::envelope::TaskCompletion {
+            completion: done.then_some(crate::telegram::envelope::TaskCompletion {
                 by: Some(MessageSender::User { user_id: 5 }),
                 date: 1_700_000_000,
             }),

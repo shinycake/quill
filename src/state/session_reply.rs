@@ -349,7 +349,7 @@ impl Session {
         let (quote, quote_entities) = match reply.quote_text().as_deref() {
             Some(text) => {
                 let (trimmed, entities) =
-                    crate::text::quote::trim_with_entities(text, &reply.quote_entities());
+                    crate::text::quote::trim_with_entities(text, reply.quote_entities());
                 if trimmed.is_empty() {
                     (None, Vec::new())
                 } else {

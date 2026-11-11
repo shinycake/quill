@@ -11,7 +11,7 @@ impl Session {
     pub(crate) fn upsert_file(&mut self, file: ParsedFile, from_file_update: bool) {
         // The file on disk changed: drop the sandbox verdicts for its path.
         if !file.local.path().is_empty() {
-            crate::local_path::invalidate_display_path(&file.local.path());
+            crate::local_path::invalidate_display_path(file.local.path());
         }
         if !from_file_update
             && self.media.files.get(&file.id.0).is_some_and(|current| {

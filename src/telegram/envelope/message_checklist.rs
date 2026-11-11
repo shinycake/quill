@@ -137,7 +137,7 @@ mod tests {
             content.list.tasks[0]
                 .completion
                 .as_ref()
-                .and_then(|done| done.by.clone()),
+                .and_then(|done| done.by),
             Some(MessageSender::User { user_id: 9 })
         );
         assert!(!content.list.tasks[1].is_done());
