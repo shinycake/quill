@@ -6784,3 +6784,46 @@ Thirty-four minor entries; each was proved against the integration branch first.
   process-wide (`next_query_token`). 13-165: tdesktop toasts the hide at
   once (the bar is optimistic here too, with `RequestRollback`), and the
   local hidden flag is already keyed by account.
+
+### Sweep fixes (is-13)
+
+Implicit-state entries: each names a struct whose stages were kept in step by
+hand. The shape is gone (one enum or `Fetch<T>` per stage), not commented.
+
+| id | result |
+|---|---|
+| 08-099 | `PinStage { Idle, Pressed{chat,y}, Dragging(PinDrag) }`: the press, the drag and its list are one value on `ChatListUi::pin`. |
+| 08-100 | `PeekPreview { Idle, Pressing{chat,started}, Open(state) }`: opening replaces the press, a release ends a press and leaves an open panel. |
+| 08-101 | Skipped: `selected` is one set; the mode is derived from it with no second field, and tdesktop leaves selection when the last row is unchecked. |
+| 07-044 | Already fixed: `SidebarTab` (the bools are gone). |
+| 08-093 | `WallpaperChoice { Keep, Installed, File, Remove }` in `ChatLookDialog`; picking one drops the others. |
+| 08-107 | `InlineMode { Closed, Open{selected, wait: Idle \| Session \| Armed{.., timer}} }` (`inline_stage.rs`). The debounce timer is owned by the stage: closing or a newer query drops it, so the token counter is gone. |
+| 08-115 | `HistoryMeasure { Seeded, Measured{width,layout,pane} }` in one shared cell; the paint probe replaces the seed whole. |
+| 10-161 | Already fixed: `MainWindowState`. |
+| 13-052 | The closed-window mailbox (`MainWindow::dialogs_closed`) is gone: the shell asks the kit layer (`has_active_dialog`) whether the dialog it showed is still there. `QuillShell::open_dialog` and the host map stay: the shell's kind is what it opened, the host map is the Asker's. |
+| 08-112 | Already fixed: `SaveTimer`. |
+| 08-147 | `ChatWindowView::closed` is gone: `closing` runs only while the app lists the view (`ChatWindows::lists_view`); the bookkeeping unlists it, so an account switch's earlier close, or a window of the same chat opened since, is not closed twice. |
+| 08-148 | `clear_calls: Option<ClearCallsBox{revoke}>`; closing drops the checkbox. |
+| 08-125, 08-159 | `ComposerUi::once: SendOnce`, written only by `with_send_once` (the silent shortcut, "Send with Effect" and the schedule step use it), never set and reset by a caller. Passing it as an argument of every send function was not needed: one scoped value cannot be left set. |
+| 08-120 | Skipped: `ban_wait` is a request pending beside any box (its warning opens only if the box that was open is still on screen), and `new_chat_for` is the target of a chat made in another dialog; neither is a stage of `open`. |
+| 08-126 | `UndoId` replaces the `Instant` used as a token; `started` stays only as the countdown's clock. All three triggers already go through `perform_request_action`. |
+| 08-130, 08-157 | Already fixed: `EditMode::replace_as_file`. |
+| 08-139 | `FieldEcho { prev, revert }`: setting the field text drops a replacement made for other text. |
+| 08-155 | `BoxStage { Opening, Open }` on the link and Code Language boxes. |
+| 08-156 | `draft_restore: Option<(ChatId, DraftTopic)>`: the slot that asked; a restore for a slot no longer open is dropped. |
+| 08-158 | `DragOver { None, Probing(paths), Ready(paths, state), Fixed(state) }`; the demo's fixed zones are a variant. |
+| 08-153 | `slow_mode_tick: Option<(ChatId, Task)>`: replacing it drops the old tick. |
+| 09-007 | `TextLimitCount { Idle, Known, Counting{key, task, last} }`. |
+| 09-008 | `ConnectStage { Connecting, NeedCredentials, Blocked(failure), Shown(auth) }` on `AuthDemo`; `ConnectUiStatus`, `ConnectionUi::status` and `demo_state` are gone. The "cycle auth" debug click moves a synthetic pane to `Shown`. |
+| 09-009 | The current note and its wake-up deadline live in `ToastQueue` with the toasts. |
+| 09-003 | `UsersState::contacts: Fetch<Vec<i64>>`: the ask goes out as `Loading`, a failed send or answer is `Failed` with Retry, a contact change drops it to `Idle`. |
+| 09-004 | `MenuFocusStage { Closed, Open{previous} }`. |
+| 09-X005 | `schedule_picker` is the popup: `Some` is open; hiding it drops the picker (the share box's own step stays). |
+| 09-X006, 09-006 | `WindowAnchor { Unsynced, Anchoring, Anchored }` with key, epoch and the landed jump. `scroll_goal` and `landing` stay separate: a reader's goal waits for older pages while a landing goes on (`reach_scroll_goal` ends the landing), so they coexist. |
+| 09-020 | `ChromeDue { Idle, Due(rows), Notifying(rows) }` in one `RefCell`. |
+| 09-018 | `CustomEmojiCard { Hidden, Asked{emoji,tap}, Shown{preview,tap} }` per window; the session's preview is only the answer. |
+| 09-011, 09-X009, 10-163 | UI half: `LinkFlow { Idle, Running{from}, Asking{invite} }` and `ResolvedLink { window, step }`. Not done: the agent-origin flag kept in `ChatsState` beside `deep_link` (the driver sets it at each flow start under `guard::injecting()`; moving it needs the driver entry points to take the origin). |
+| 09-022 | `DemoUi::next_seq(last)` numbers the stream's updates through the demo's one counter, never behind the session's. |
+| 09-032 | `GifPanel::saved: SavedGifs { Unloaded, Loading, Ready{stale}, Failed }` replaces the list, `loaded`, `loading`, `failed` and `stale`. The search flags are a second flow and stay on the baseline. |
+| 09-X016, 09-027 | `DeviceLink { Idle{notice}, Scanning, Confirm, Linking }`; the answer is applied only in `Linking`. |
+| 09-039, 11-p5-006 | `NewContactStage { Form, Sending{request,name}, NotJoined{name} }`. |

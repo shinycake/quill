@@ -16,7 +16,8 @@
 #   <Struct>.<field> [*] | <why it may outlive the chat it names>
 
 ComposerUi.shown_draft | carries its own chat and topic: a draft for another slot never matches
-ComposerUi.slow_mode_tick_chat | marks the running 1 s tick task, which exits by itself when the chat changes; resetting it would start a second task
+ComposerUi.slow_mode_tick | the running 1 s tick task and its chat; it exits by itself when the chat changes and a newer chat's tick drops it, so resetting it would start a second task
+ComposerUi.draft_restore | the slot that asked for its draft to be restored next frame; the restore runs only if that slot is still the open one
 MessageUi.swipe_reply_start | one press gesture, carries its chat; the release checks it
 HistoryUi.painted_ids | rebuilt by every paint of the history list
 HistoryUi.seen | carries its chat; read once at the next render
@@ -24,17 +25,17 @@ HistoryUi.on_screen | rebuilt by every paint of the history list
 HistoryUi.reported_visible | carries its chat: a repeat check, a new chat never matches
 HistoryUi.sponsored.spots * | rebuilt from the open chat's placed ads after every history render (sync_sponsored_spots)
 HistoryUi.ends | compared with the history synced next; a new chat's ends differ
-HistoryUi.last_highlight | compared with the session's highlight, which is the open chat's
+HistoryUi.anchor.Anchoring.landed | compared with the session's highlight, which is the open chat's; the anchor starts a new chat with none
+HistoryUi.anchor.Anchored.landed | compared with the session's highlight, which is the open chat's; the anchor starts a new chat with none
 HistoryUi.live_location_tick_chat | marks a running tick task, as slow_mode_tick_chat
 ShareUi.forward.Bar.dest | the chat the forward bar waits in; kept across chats on purpose (dismiss_forward_for_view)
 ShareUi.forward.Picking.bar | the forward bar the share box was opened over, which leaving the box returns to; it goes with the bar (dismiss_forward_for_view)
 ViewerUi.video | the media viewer's clip, which outlives a chat change (the viewer is the screen's)
 ViewerUi.pending_seek | a media-timestamp link's seek for the viewer's clip, as ViewerUi.video
-ComposerUi.send_effect_once | an effect id, not a chat's: set and cleared around one synchronous send
+ComposerUi.once.effect | an effect id, not a chat's: set only around one synchronous send (`with_send_once`)
 ComposerUi.suggest.stickers_dismissed | carries its chat and text: another chat never matches
 MessageUi.a11y.announce_first | carries its chat; read against the chat viewed
 MessageUi.rendered_sponsored | each ad carries the chat painted; the next frame reports only the open chat's
-HistoryUi.key | the chat and topic the scroller last synced for: the check that resets it on a change
 HistoryUi.row_hover.under | the row under the pointer, rebuilt by every paint and move
 HistoryUi.row_hover.painted | the rows' hitboxes, rebuilt by every paint
 HistoryUi.stream_reveal.Finishing.message | the bot reply finishing its reveal: the reveal names its chat and starts over in another
@@ -61,4 +62,4 @@ HistoryUi.reaction_fly * | carries its chat and message; drawn only on that row 
 HistoryUi.landing * | ended by the history's sync when the chat or topic shown changes (`end_landing`)
 PickerUi.media_panel * | sticker set and emoji status ids; the reaction target carries its chat and message
 ViewerUi.photo_editor * | the editor's target carries its own chat or sticker set; it is not opened from a chat's history
-MessageUi.custom_emoji_tapped | a custom emoji's id, not a chat's: the card it shows is about that emoji and its set, the same in any chat
+MessageUi.custom_emoji.Asked.emoji_id | a custom emoji's id, not a chat's: the card it shows is about that emoji and its set, the same in any chat

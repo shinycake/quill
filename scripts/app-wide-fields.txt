@@ -77,7 +77,9 @@ frame.draft_timer * | the one debounced draft timer: a token the driver on scree
 language.open * | the language box: languages are the app's
 language.writes * | language file write counters
 language.recent | recently picked languages
-auth_demo.demo_state | the synthetic mode's authorization state, next to demo_session
+auth_demo.stage | where the startup connection stands while there is no client: the process's, before any account is on screen
+auth_demo.stage.Blocked.0 | why the client could not start: the process's, before any account is on screen
+auth_demo.stage.Shown.0 | the synthetic mode's authorization state, next to demo_session
 auth_demo.demo_inputs | the synthetic mode shows its inputs
 start_files.choosing | files handed to the app at start, waiting for a chat on whichever account
 start_files.search | the chat search field of that chooser
@@ -196,7 +198,6 @@ screen_share.demo_system_audio | the screenshot demos' system sound
 main_window.handle | the main window's handle
 main_window.place * | the main window's place
 main_window.cascade | the chat window cascade count
-main_window.dialogs_closed | the main window's dialogs were closed this switch
 main_window.export_stop | the exit a Quit left behind the Stop and quit alert, which is the window's
 main_window._key_scope | the key-scope interceptor
 first_run.Welcome * | the first-run intro's player and timings, before any account

@@ -79,6 +79,7 @@ impl ToastQueue {
     /// main window). Progress chatter ([`NoteKind::Silent`]) never replaces a
     /// note the toast still shows, so "pinned" or "sending" cannot wipe an
     /// unread failure; the toast's own timer clears that one.
+    // note-host: the queue's own write; `ConnectionUi::set_note_in` passes the window the Asker named.
     pub(crate) fn set_note_in(&mut self, note: StatusNote, host: Option<ChatId>, now: Instant) {
         if note.kind() == NoteKind::Silent && self.note.is_toast() {
             return;
