@@ -130,12 +130,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                     search.sent(extra.0);
                     search.page = page.saturating_add(1);
                 }
-                Err(_) => {
-                    search.stage.send_failed(crate::gift_market::error_note(
-                        GiftMarketPurpose::SearchResale { gift_id, page },
-                        "not connected",
-                    ))
-                }
+                Err(_) => search.stage.send_failed(crate::gift_market::error_note(
+                    GiftMarketPurpose::SearchResale { gift_id, page },
+                    "not connected",
+                )),
             }
         }
         result
@@ -485,10 +483,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                     craft.candidates_stage.sent(extra.0);
                     craft.candidates_page = page.saturating_add(1);
                 }
-                Err(_) => craft.candidates_stage.send_failed(crate::gift_market::error_note(
-                    GiftMarketPurpose::GiftsForCrafting { gift_id, page },
-                    "not connected",
-                )),
+                Err(_) => craft
+                    .candidates_stage
+                    .send_failed(crate::gift_market::error_note(
+                        GiftMarketPurpose::GiftsForCrafting { gift_id, page },
+                        "not connected",
+                    )),
             }
         }
         result

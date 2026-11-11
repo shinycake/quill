@@ -1,9 +1,9 @@
 //! GIF search and saved collection controls.
 use super::*;
 use crate::ids::{ChatId, FileId, RequestId};
+use crate::state::GifSearch;
 use crate::state::RequestPurpose;
 use crate::state::StickersPurpose;
-use crate::state::{GifSearch};
 use crate::telegram::requests::{
     add_saved_animation, get_inline_query_results, remove_saved_animation, search_public_chat,
 };

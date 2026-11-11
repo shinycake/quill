@@ -232,7 +232,12 @@ fn contacts_fetched_once_for_tab() {
         )
         .unwrap();
     assert_eq!(
-        driver.session.users_state.contacts.data().map(Vec::as_slice),
+        driver
+            .session
+            .users_state
+            .contacts
+            .data()
+            .map(Vec::as_slice),
         Some([31].as_slice())
     );
     assert_eq!(driver.fetch_contacts().unwrap(), None);

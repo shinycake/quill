@@ -129,17 +129,16 @@ impl Session {
                 // A web link TDLib calls not internal (`t.me/` itself, a
                 // page it can't type) opens in the browser, as tdesktop
                 // leaves a `t.me` link it can't convert.
-                let web_fallback =
-                    matches!(
-                        pending.map(|p| p.purpose),
-                        Some(RequestPurpose::Chats(
-                            ChatsPurpose::DeepLinkInternalType { .. }
-                        ))
-                    ) && matches!(
-                        &self.chats_state.deep_link,
-                        Some(DeepLinkState::ResolvingInfo { original, .. })
-                            if crate::text::openable_http_url(original)
-                    );
+                let web_fallback = matches!(
+                    pending.map(|p| p.purpose),
+                    Some(RequestPurpose::Chats(
+                        ChatsPurpose::DeepLinkInternalType { .. }
+                    ))
+                ) && matches!(
+                    &self.chats_state.deep_link,
+                    Some(DeepLinkState::ResolvingInfo { original, .. })
+                        if crate::text::openable_http_url(original)
+                );
                 // The Premium bot's `/start` was for the link that failed
                 // (stale or not): a later link to the bot must not send it
                 // unasked. Another flow's failure leaves it alone.

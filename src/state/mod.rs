@@ -212,13 +212,13 @@ pub use media_library::{
 };
 pub use member_list::*;
 pub use ownership_types::*;
+pub use page_stage::PageStage;
 pub use photo_gallery::{PhotoActions, PhotoDelete, chat_gallery, user_gallery};
 pub use redraw::{RedrawNeed, RowsOnScreen, redraw_need};
 pub(crate) use request_errors::*;
 pub use request_purpose::*;
 pub use request_rollback::*;
 pub use requests::*;
-pub use page_stage::PageStage;
 pub use saved_types::*;
 pub use scroll_memory::*;
 pub use search_tabs_state::*;

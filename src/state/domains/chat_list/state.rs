@@ -147,6 +147,13 @@ impl ChatListState {
         )
     }
 
+    /// A refused change puts back the settings held before it.
+    pub fn restore_archive_settings(&mut self, previous: Option<ArchiveChatListSettings>) {
+        if let Some(previous) = previous {
+            self.set_archive_settings_value(previous);
+        }
+    }
+
     /// An optimistic edit (or its rollback) of the held settings. A request
     /// in flight stays in flight.
     pub fn set_archive_settings_value(&mut self, value: ArchiveChatListSettings) {

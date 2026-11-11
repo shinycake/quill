@@ -230,10 +230,7 @@ fn withdrawal_asks_without_password_then_with_it() {
     // Any other error → the password box.
     error(&mut p, "getStarWithdrawalUrl", "PASSWORD_HASH_INVALID");
     let withdraw = p.0.session.payments.earn.withdraw.clone().unwrap();
-    assert_eq!(
-        withdraw.step,
-        WithdrawStep::Password { error: None }
-    );
+    assert_eq!(withdraw.step, WithdrawStep::Password { error: None });
     p.0.submit_withdrawal_password("hunter2").unwrap();
     assert_eq!(
         p.0.session.payments.earn.withdraw.clone().unwrap().step,

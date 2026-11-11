@@ -99,8 +99,7 @@ impl QuillApp {
     /// kit Phase 6: write the requested value (was: flip the bit).
     pub(super) fn set_archive_setting(&mut self, index: usize, on: bool, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            let Some(mut settings) = live.driver.session.chat_list.archive_settings()
-            else {
+            let Some(mut settings) = live.driver.session.chat_list.archive_settings() else {
                 self.set_note(StatusNote::silent(tr(
                     keys::Q_PREFS_ARCHIVE_SETTINGS_STILL_LOADING,
                 )));
@@ -147,9 +146,7 @@ impl QuillApp {
                 this.set_archive_settings_open(false)
             });
         app.update(cx, |this, cx| {
-            let settings = this
-                .session()
-                .and_then(|s| s.chat_list.archive_settings());
+            let settings = this.session().and_then(|s| s.chat_list.archive_settings());
             let loading = this
                 .session()
                 .is_some_and(|s| s.chat_list.archive_settings_loading());

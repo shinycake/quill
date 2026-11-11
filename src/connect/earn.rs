@@ -449,7 +449,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             .and_then(|info| info.as_ref()?.affiliate_program);
         let earn = &mut self.session.payments.earn;
         earn.setup = Some(SetupPage::new(bot_user_id, program));
-        earn.effects.retain(|effect| *effect != EarnEffect::CloseSetup);
+        earn.effects
+            .retain(|effect| *effect != EarnEffect::CloseSetup);
         let _ = self.ensure_earn_app_config();
         Ok(())
     }

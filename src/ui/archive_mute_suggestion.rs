@@ -127,7 +127,8 @@ crate::ui::screenshot_demo::register_demos![
                     .actions
                     .insert(ACTION.to_string());
                 // box-host: demo
-                demo.chat_list.set_archive_settings_value(Default::default());
+                demo.chat_list
+                    .set_archive_settings_value(Default::default());
             }
         }
     ),

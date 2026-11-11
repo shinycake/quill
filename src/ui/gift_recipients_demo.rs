@@ -91,6 +91,7 @@ fn seed(sink: Arc<MemorySink>, today: &[i64]) -> Session {
         r#"{{"@type":"updateContactCloseBirthdays","close_birthday_users":[{}]}}"#,
         entries.join(",")
     ));
-    session.users_state.contacts = quill::state::fetch::Fetch::Ready(vec![ADA, GRACE, ALAN, KATHERINE, LINUS]);
+    session.users_state.contacts =
+        quill::state::fetch::Fetch::Ready(vec![ADA, GRACE, ALAN, KATHERINE, LINUS]);
     session
 }

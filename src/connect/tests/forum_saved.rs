@@ -323,7 +323,10 @@ fn tag_label_needs_premium_and_filter_searches_saved_messages() {
     assert_eq!(sent[0]["tag"]["@type"], "reactionTypeEmoji");
     // 12 characters at most, and the bar shows the name at once.
     assert!(sent[0]["label"].as_str().unwrap().chars().count() <= 12);
-    assert_eq!(f.driver.session.threads.saved.tag_list()[0].label, "A very long");
+    assert_eq!(
+        f.driver.session.threads.saved.tag_list()[0].label,
+        "A very long"
+    );
 
     // Filter by tag: searchSavedMessages over all of Saved Messages.
     f.driver.filter_saved_by_tag(tag.clone()).unwrap();

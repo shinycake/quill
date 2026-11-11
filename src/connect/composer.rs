@@ -1,8 +1,6 @@
 //! Connect driver: composer drafts and open-chat bookkeeping.
 use super::*;
-use crate::composer::{
-    DraftContent, DraftSaveStep, DraftTopic, schedule_draft_save,
-};
+use crate::composer::{DraftContent, DraftSaveStep, DraftTopic, schedule_draft_save};
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::state::RequestPurpose;
 use crate::suggested_posts::SuggestTerms;
@@ -98,13 +96,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.draft_save_token = self.draft_save_token.saturating_add(1);
                 let token = self.draft_save_token;
                 self.draft_save = DraftSave::Waiting {
-                    pending: PendingDraft {
+                    pending: Box::new(PendingDraft {
                         token,
                         chat_id,
                         topic,
                         content: stored.unwrap_or(DraftContent::Text(String::new())),
                         reply_to,
-                    },
+                    }),
                     started_ms: Some(started_ms),
                 };
                 Ok(DraftSaveOutcome::Debounced {
@@ -191,7 +189,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn keep_failed_draft(&mut self, err: ConnectSendError, pending: PendingDraft) {
         if err != ConnectSendError::InvalidRequest && self.draft_save.pending().is_none() {
             self.draft_save = DraftSave::Waiting {
-                pending,
+                pending: Box::new(pending),
                 started_ms: None,
             };
             return;

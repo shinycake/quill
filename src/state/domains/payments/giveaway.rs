@@ -29,7 +29,12 @@ pub enum GiveawayInfoStage {
 
 impl GiveawayInfoLookup {
     /// A lookup waiting for `request`.
-    pub fn new(chat_id: i64, message_id: i64, summary: GiveawaySummary, request: RequestId) -> Self {
+    pub fn new(
+        chat_id: i64,
+        message_id: i64,
+        summary: GiveawaySummary,
+        request: RequestId,
+    ) -> Self {
         Self {
             chat_id,
             message_id,
@@ -60,9 +65,9 @@ impl GiveawayInfoLookup {
     /// `pending` is this box's own lookup: settle it with `next`.
     fn settle(&mut self, pending: Option<&PendingRequest>, next: GiveawayInfoStage) -> bool {
         let ours = matches!(self.stage, GiveawayInfoStage::Loading(request)
-            if pending.is_some_and(|p| {
-                p.purpose == RequestPurpose::GetGiveawayInfo && p.id == request
-            }));
+        if pending.is_some_and(|p| {
+            p.purpose == RequestPurpose::GetGiveawayInfo && p.id == request
+        }));
         if ours {
             self.stage = next;
         }

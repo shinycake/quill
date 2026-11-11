@@ -1,9 +1,9 @@
 //! Connect driver: sticker and GIF panels.
 use super::*;
-use crate::state::{GifSearch, SavedGifs};
 use crate::ids::FileId;
 use crate::ids::RequestId;
 use crate::state::StickersPurpose;
+use crate::state::{GifSearch, SavedGifs};
 use crate::state::{RequestPurpose, StickerSearch, StickerTab};
 use crate::sticker_suggest::{SUGGEST_LIMIT, StickerSuggestMode, suggest_emoji_for};
 use crate::telegram::requests::{

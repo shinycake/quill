@@ -90,7 +90,10 @@ fn with_info(
 ) -> impl FnOnce(GiftValueLookup) -> Option<GiftValueLookup> {
     move |lookup| {
         Some(GiftValueLookup {
-            stage: info.map_or(GiftValueStage::Idle, |info| GiftValueStage::Ready { info, open }),
+            stage: info.map_or(GiftValueStage::Idle, |info| GiftValueStage::Ready {
+                info,
+                open,
+            }),
             ..lookup
         })
     }

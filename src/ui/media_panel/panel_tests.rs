@@ -163,7 +163,9 @@ fn choosing_a_category_lists_its_stickers_and_back_returns(cx: &mut TestAppConte
         assert_ne!(header(app).as_deref(), Some("Premium"));
     });
 
-    app.update(vcx, |app, cx| app.choose_sticker_category(Some(EmojiCategorySource::Premium), cx));
+    app.update(vcx, |app, cx| {
+        app.choose_sticker_category(Some(EmojiCategorySource::Premium), cx)
+    });
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert_eq!(
@@ -218,7 +220,9 @@ fn a_category_does_not_list_another_windows_search(cx: &mut TestAppContext) {
         session.stickers.stickers.searched = StickerSearch::Typed("cat".into());
     });
     open_stickers(&app, vcx);
-    app.update(vcx, |app, cx| app.choose_sticker_category(Some(EmojiCategorySource::Premium), cx));
+    app.update(vcx, |app, cx| {
+        app.choose_sticker_category(Some(EmojiCategorySource::Premium), cx)
+    });
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert_eq!(header(app).as_deref(), Some("Premium"));
@@ -268,7 +272,9 @@ fn an_animated_sticker_with_no_thumbnail_shows_its_first_frame(cx: &mut TestAppC
         ];
     });
     open_stickers(&app, vcx);
-    app.update(vcx, |app, cx| app.choose_sticker_category(Some(EmojiCategorySource::Premium), cx));
+    app.update(vcx, |app, cx| {
+        app.choose_sticker_category(Some(EmojiCategorySource::Premium), cx)
+    });
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert_eq!(found_cells(app), 2);
@@ -283,7 +289,9 @@ fn premium_stickers_are_hidden_where_premium_cannot_be_bought(cx: &mut TestAppCo
     let vcx = &mut vcx;
     app.update(vcx, |app, _| seed(app, false));
     open_stickers(&app, vcx);
-    app.update(vcx, |app, cx| app.choose_sticker_category(Some(EmojiCategorySource::Premium), cx));
+    app.update(vcx, |app, cx| {
+        app.choose_sticker_category(Some(EmojiCategorySource::Premium), cx)
+    });
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert_eq!(found_cells(app), 2, "a locked sticker is listed");

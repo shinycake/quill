@@ -22,12 +22,7 @@ impl QuillApp {
         self.open_box(DialogKind::ArchiveHint);
         // The wording depends on the account's archive settings.
         if let Some(live) = self.live.as_mut()
-            && live
-                .driver
-                .session
-                .chat_list
-                .archive_settings()
-                .is_none()
+            && live.driver.session.chat_list.archive_settings().is_none()
         {
             let _ = live.driver.fetch_archive_chat_list_settings();
         }

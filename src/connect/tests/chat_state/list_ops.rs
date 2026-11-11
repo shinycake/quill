@@ -336,13 +336,7 @@ fn cl2_archive_chat_list_settings_fetch_and_set() {
                 .unwrap(),
             )
             .unwrap();
-    assert!(
-        driver
-            .session
-            .chat_list
-            .archive_settings()
-            .is_some()
-    );
+    assert!(driver.session.chat_list.archive_settings().is_some());
     assert!(!driver.session.chat_list.archive_settings_loading());
 
     let mut next = driver

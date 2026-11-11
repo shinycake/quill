@@ -254,7 +254,9 @@ pub enum SavedGifs {
     #[default]
     NotLoaded,
     /// A fetch is out; `loaded` is whether an earlier answer is held.
-    Loading { loaded: bool },
+    Loading {
+        loaded: bool,
+    },
     Loaded,
     /// `updateSavedAnimations` arrived (another device changed the
     /// collection): refresh even if the panel was closed.

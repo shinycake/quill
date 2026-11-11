@@ -45,7 +45,8 @@ fn diamonds_toast(count: u32) -> String {
 
 impl QuillApp {
     fn close_earn_learn(&mut self, cx: &mut Context<Self>) {
-        self.earn.close_box_if(|b| matches!(b, EarnBox::Learn { .. }));
+        self.earn
+            .close_box_if(|b| matches!(b, EarnBox::Learn { .. }));
         cx.notify();
     }
 

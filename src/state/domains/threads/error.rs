@@ -48,10 +48,7 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetSavedMessagesTags { topic_id: 0 }) => {
-                self.threads
-                    .saved
-                    .tags
-                    .fail(format!("error {}", err.code));
+                self.threads.saved.tags.fail(format!("error {}", err.code));
                 self.chats_state
                     .chat_action_error
                     .push(call_request_error_line(

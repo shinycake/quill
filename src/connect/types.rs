@@ -403,7 +403,7 @@ pub(crate) enum DraftSave {
     /// its quiet window began; `None` for a save that failed to go out and
     /// waits for the next flush without a window.
     Waiting {
-        pending: PendingDraft,
+        pending: Box<PendingDraft>,
         started_ms: Option<u64>,
     },
 }
@@ -412,7 +412,7 @@ impl DraftSave {
     pub(crate) fn pending(&self) -> Option<&PendingDraft> {
         match self {
             Self::Idle => None,
-            Self::Waiting { pending, .. } => Some(pending),
+            Self::Waiting { pending, .. } => Some(pending.as_ref()),
         }
     }
 
@@ -430,7 +430,7 @@ impl DraftSave {
     pub(crate) fn take(&mut self) -> Option<PendingDraft> {
         match std::mem::take(self) {
             Self::Idle => None,
-            Self::Waiting { pending, .. } => Some(pending),
+            Self::Waiting { pending, .. } => Some(*pending),
         }
     }
 }

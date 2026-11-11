@@ -24,10 +24,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if let Some(current) = self.session.payments.hub.gift_value.as_mut()
             && current.name == lookup.name
+            && (current.reopen() || current.is_loading())
         {
-            if current.reopen() || current.is_loading() {
-                return Ok(None);
-            }
+            return Ok(None);
         }
         let extra = self.session.request(RequestPurpose::GetGiftValueInfo, None);
         let json = get_upgraded_gift_value_info(extra, &lookup.name);

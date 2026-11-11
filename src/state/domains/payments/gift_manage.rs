@@ -58,7 +58,10 @@ impl Session {
                 self.payments
                     .gifts_manage
                     .close_flow_answered_by(PaymentsPurpose::ChangeGiftCollection);
-                self.payments.hub.gift_mutation.settle(pending.map(|p| p.id.0));
+                self.payments
+                    .hub
+                    .gift_mutation
+                    .settle(pending.map(|p| p.id.0));
                 self.payments.hub.gifts_error = None;
                 self.payments.hub.gifts_stale = true;
             }
@@ -371,11 +374,17 @@ impl Session {
                     picker
                         .transfer_failed(request, format!("Couldn't transfer the gift: {reason}"));
                 }
-                self.payments.hub.gift_mutation.settle(pending.map(|p| p.id.0));
+                self.payments
+                    .hub
+                    .gift_mutation
+                    .settle(pending.map(|p| p.id.0));
             }
             PaymentsPurpose::DeleteGift => {
                 manage.deleting = None;
-                self.payments.hub.gift_mutation.settle(pending.map(|p| p.id.0));
+                self.payments
+                    .hub
+                    .gift_mutation
+                    .settle(pending.map(|p| p.id.0));
                 manage.note = Some(tr_with(
                     keys::Q_MONEY_COULD_NOT_DELETE_THE_GIFT,
                     &[("reason", &reason)],
@@ -400,7 +409,10 @@ impl Session {
                 }
             }
             _ => {
-                self.payments.hub.gift_mutation.settle(pending.map(|p| p.id.0));
+                self.payments
+                    .hub
+                    .gift_mutation
+                    .settle(pending.map(|p| p.id.0));
                 self.payments.hub.gifts_error = Some(format!("Couldn't update the gift: {reason}"));
             }
         }

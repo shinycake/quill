@@ -116,13 +116,12 @@ impl QuillApp {
                     )),
                     ..lookup
                 }),
-            "average" => {
-                self.demo_gift_value_lookup(fixture(AVERAGE))
-                    .map(|mut lookup| {
-                        lookup.reopen();
-                        lookup
-                    })
-            }
+            "average" => self
+                .demo_gift_value_lookup(fixture(AVERAGE))
+                .map(|mut lookup| {
+                    lookup.reopen();
+                    lookup
+                }),
             _ => self
                 .demo_gift_value_lookup(fixture(LAST))
                 .map(|mut lookup| {

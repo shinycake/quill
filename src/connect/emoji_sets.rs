@@ -1,7 +1,7 @@
 //! Custom emoji pack browser; independent of regular sticker picker state.
 use super::*;
-use crate::emoji::SetMutation;
 use crate::emoji::EmojiSetTab;
+use crate::emoji::SetMutation;
 use crate::ids::RequestId;
 use crate::state::RequestPurpose;
 use crate::sticker_suggest::suggest_emoji_for;

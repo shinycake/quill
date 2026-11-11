@@ -117,12 +117,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(page) => page,
             Err(err) => {
                 // The dialog is open: say why it is empty.
-                self.session
-                    .payments
-                    .hub
-                    .grams
-                    .stage
-                    .send_failed(crate::lang::tr(crate::lang::keys::Q_GRAMS_COULD_NOT_LOAD).to_string());
+                self.session.payments.hub.grams.stage.send_failed(
+                    crate::lang::tr(crate::lang::keys::Q_GRAMS_COULD_NOT_LOAD).to_string(),
+                );
                 return Err(err);
             }
         };
@@ -176,9 +173,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             Err(err) => {
                 // A tab switch or a refetch that never left ends in the
                 // error line, not in an empty list.
-                grams
-                    .stage
-                    .send_failed(crate::lang::tr(crate::lang::keys::Q_GRAMS_COULD_NOT_LOAD).to_string());
+                grams.stage.send_failed(
+                    crate::lang::tr(crate::lang::keys::Q_GRAMS_COULD_NOT_LOAD).to_string(),
+                );
                 Err(err)
             }
         }
