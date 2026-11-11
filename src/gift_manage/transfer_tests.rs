@@ -150,7 +150,8 @@ fn the_picker_walks_its_stages() {
         picker.stage,
         TransferStage::ConfirmPeer {
             user_id: 5,
-            name: "Maya".into()
+            name: "Maya".into(),
+            error: None,
         }
     );
     picker.back();

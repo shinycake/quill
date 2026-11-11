@@ -199,18 +199,46 @@ fn acquired_gifts_and_preview_failures_say_so_and_can_be_asked_again() {
 }
 
 #[test]
-fn a_giveaway_launch_in_flight_survives_reopening_the_form() {
+fn a_giveaway_launch_in_flight_stays_only_for_its_own_chat() {
     use crate::state::GiveawayLaunch;
     let launching = GiveawayLaunch::Launching {
         chat_id: 5,
         request: 9,
     };
-    assert_eq!(launching.clone().for_next_form(), launching);
+    assert_eq!(launching.clone().for_form(Some(5)), launching);
+    assert_eq!(launching.clone().for_form(Some(6)), GiveawayLaunch::Idle);
+    assert_eq!(launching.for_form(None), GiveawayLaunch::Idle);
     for seen in [
         GiveawayLaunch::Launched,
         GiveawayLaunch::Failed("x".into()),
         GiveawayLaunch::Idle,
     ] {
-        assert_eq!(seen.for_next_form(), GiveawayLaunch::Idle);
+        assert_eq!(seen.for_form(Some(5)), GiveawayLaunch::Idle);
     }
+}
+
+#[test]
+fn a_join_box_parked_for_a_bot_profile_goes_when_the_profile_closes() {
+    use crate::earn::{EarnPeer, JoinBox};
+    use crate::state::InfoPanelTarget;
+    let (mut session, _sink) = session();
+    let park = |session: &mut Session| {
+        session.payments.earn.pending_join = Some(JoinBox {
+            bot_user_id: 5,
+            info: Default::default(),
+            recipient: EarnPeer::User(1),
+            choose_recipient: true,
+            joining: false,
+        });
+    };
+    park(&mut session);
+    // The same bot's profile staying open keeps it.
+    session.set_open_info_panel(Some(InfoPanelTarget::User(5)));
+    assert!(session.payments.earn.pending_join.is_some());
+    // Another panel, or none, drops it.
+    session.set_open_info_panel(Some(InfoPanelTarget::User(6)));
+    assert!(session.payments.earn.pending_join.is_none());
+    park(&mut session);
+    session.set_open_info_panel(None);
+    assert!(session.payments.earn.pending_join.is_none());
 }

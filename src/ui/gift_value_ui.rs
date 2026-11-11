@@ -177,15 +177,30 @@ impl QuillApp {
     /// A "learn more" asked from a box that is gone (the gift box closed or
     /// another gift was picked, the resale buy box left) must not open the
     /// value box over whatever is on screen when its answer lands, and its
-    /// error does not wait under a row nobody sees. A value that is already
+    /// error does not wait under a row nobody sees. The host must show this
+    /// very gift: another gift's box does not keep it. A value that is already
     /// known stays for the next "learn more".
     pub(super) fn drop_orphaned_gift_value(&mut self) {
         let Some(session) = self.session() else {
             return;
         };
         let hub = &session.payments.hub;
-        let host_shown = hub.gift_selected.is_some()
-            || self.gift_market.top() == Some(&super::gift_market_state::MarketBox::Buy);
+        let name = hub.gift_value.as_ref().map(|lookup| lookup.name.as_str());
+        let named =
+            |gift: Option<&Collectible>| gift.is_some_and(|g| Some(g.name.as_str()) == name);
+        let host_shown = named(
+            hub.selected_gift()
+                .and_then(|g| g.gift.collectible.as_deref()),
+        ) || (self.gift_market.top()
+            == Some(&super::gift_market_state::MarketBox::Buy)
+            && named(
+                session
+                    .payments
+                    .gift_market
+                    .buy
+                    .as_ref()
+                    .map(|buy| &buy.listing.gift),
+            ));
         let pending = hub
             .gift_value
             .as_ref()

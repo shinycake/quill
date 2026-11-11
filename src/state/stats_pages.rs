@@ -320,6 +320,16 @@ impl Session {
         if let Some(InfoPanelTarget::Statistics(chat_id)) = target {
             self.groups.stats.reset(chat_id);
         }
+        // A join box parked for the recipients came from that bot's
+        // profile: once the profile is gone it must not open, unasked.
+        let earn = &mut self.payments.earn;
+        if earn
+            .pending_join
+            .as_ref()
+            .is_some_and(|join| target != Some(InfoPanelTarget::User(join.bot_user_id)))
+        {
+            earn.pending_join = None;
+        }
         self.users_state.open_info_panel = target;
     }
 

@@ -48,7 +48,12 @@ fn hub_state(
 ) -> (bool, Option<(String, String)>) {
     app.read_with(vcx, |app, _| {
         let hub = &app.session().expect("session").payments.hub;
-        (hub.premium_open, hub.auto_start.clone())
+        (
+            hub.premium_open,
+            hub.auto_start
+                .as_ref()
+                .map(|a| (a.username.clone(), a.start_ref.clone())),
+        )
     })
 }
 

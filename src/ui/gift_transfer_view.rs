@@ -69,9 +69,22 @@ pub(super) fn stage_view(app: &QuillApp, cx: &mut Context<QuillApp>) -> Option<S
     let name = picker.gift_name.clone();
     Some(match &picker.stage {
         TransferStage::Pick => pick_view(app, session, picker, gift, cx),
-        TransferStage::ConfirmPeer { user_id, name: to }
-        | TransferStage::Transferring { user_id, name: to } => {
-            confirm_peer_view(app, session, gift, &name, *user_id, to, cx)
+        TransferStage::ConfirmPeer {
+            user_id,
+            name: to,
+            error,
+        } => confirm_peer_view(
+            app,
+            session,
+            gift,
+            &name,
+            *user_id,
+            to,
+            error.as_deref(),
+            cx,
+        ),
+        TransferStage::Transferring { user_id, name: to } => {
+            confirm_peer_view(app, session, gift, &name, *user_id, to, None, cx)
         }
         TransferStage::Locked { hours } => locked_view(*hours, cx),
         TransferStage::ConfirmExport => confirm_export_view(&name, false, cx),
@@ -334,6 +347,7 @@ fn confirm_peer_view(
     gift_name: &str,
     user_id: i64,
     to: &str,
+    error: Option<&str>,
     cx: &mut Context<QuillApp>,
 ) -> StageView {
     let star_count = match gift.map(|g| g.transfer_gate(true, now_unix())) {
@@ -379,6 +393,15 @@ fn confirm_peer_view(
     let mut body = v_flex().gap_3().child(pair).child(text_block(question));
     if too_poor {
         body = body.child(balance_hint(cx, balance));
+    }
+    if let Some(reason) = error {
+        body = body.child(
+            div()
+                .id("gift-transfer-error")
+                .text_sm()
+                .text_color(cx.theme().danger)
+                .child(reason.to_string()),
+        );
     }
     if let Some(c) = collectible {
         body = body.child(

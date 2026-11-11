@@ -331,10 +331,9 @@ impl Session {
             }
             PaymentsPurpose::TransferGift => {
                 if let Some(picker) = manage.transfer_mut() {
-                    picker.transfer_failed();
+                    picker.transfer_failed(format!("Couldn't transfer the gift: {reason}"));
                 }
                 self.payments.hub.gift_mutating = false;
-                self.payments.hub.gifts_error = Some(format!("Couldn't update the gift: {reason}"));
             }
             PaymentsPurpose::DeleteGift => {
                 manage.deleting = None;

@@ -94,7 +94,12 @@ pub enum TransferStage {
     /// "Transfer {name}": the search, "Send via Blockchain" and contacts.
     Pick,
     /// "Do you want to transfer ownership of {name} to {recipient}?"
-    ConfirmPeer { user_id: i64, name: String },
+    /// `error` is why the last "Transfer" failed, shown in this dialog.
+    ConfirmPeer {
+        user_id: i64,
+        name: String,
+        error: Option<String>,
+    },
     /// "Transfer" was pressed: `transferGift` is out. Cancel and Esc wait
     /// for the answer, which brings the toast and the recipient's chat; a
     /// failure returns to the confirmation.
@@ -182,7 +187,7 @@ impl TransferPicker {
 
     /// `transferGift` went out for the contact the confirmation names.
     pub fn begin_transfer(&mut self) {
-        if let TransferStage::ConfirmPeer { user_id, name } = &self.stage {
+        if let TransferStage::ConfirmPeer { user_id, name, .. } = &self.stage {
             self.stage = TransferStage::Transferring {
                 user_id: *user_id,
                 name: name.clone(),
@@ -190,12 +195,14 @@ impl TransferPicker {
         }
     }
 
-    /// `transferGift` failed: the confirmation is back, to retry or cancel.
-    pub fn transfer_failed(&mut self) {
+    /// `transferGift` failed: the confirmation is back with the reason, to
+    /// retry or cancel.
+    pub fn transfer_failed(&mut self, reason: String) {
         if let TransferStage::Transferring { user_id, name } = &self.stage {
             self.stage = TransferStage::ConfirmPeer {
                 user_id: *user_id,
                 name: name.clone(),
+                error: Some(reason),
             };
         }
     }
@@ -206,6 +213,7 @@ impl TransferPicker {
             self.stage = TransferStage::ConfirmPeer {
                 user_id,
                 name: name.into(),
+                error: None,
             };
         }
     }

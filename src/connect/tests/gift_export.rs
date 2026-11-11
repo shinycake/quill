@@ -121,6 +121,7 @@ fn a_transfer_goes_only_to_the_contact_the_confirmation_names() {
             TransferStage::ConfirmPeer {
                 user_id,
                 name: name.into(),
+                error: None,
             },
         );
         assert!(p.0.transfer_picked_gift().is_err());
@@ -132,6 +133,7 @@ fn a_transfer_goes_only_to_the_contact_the_confirmation_names() {
         TransferStage::ConfirmPeer {
             user_id: 21,
             name: "Maya".into(),
+            error: None,
         },
     );
     let extra = p.0.transfer_picked_gift().unwrap();
@@ -420,6 +422,7 @@ fn a_second_transfer_click_sends_nothing() {
         TransferStage::ConfirmPeer {
             user_id: 21,
             name: "Maya".into(),
+            error: None,
         },
     );
     p.0.transfer_picked_gift().unwrap();
@@ -441,6 +444,7 @@ fn cancel_waits_for_the_transfer_and_the_answer_still_opens_the_chat() {
         TransferStage::ConfirmPeer {
             user_id: 21,
             name: "Maya".into(),
+            error: None,
         },
     );
     let extra = p.0.transfer_picked_gift().unwrap();
@@ -473,6 +477,7 @@ fn a_failed_transfer_returns_to_the_confirmation() {
         TransferStage::ConfirmPeer {
             user_id: 21,
             name: "Maya".into(),
+            error: None,
         },
     );
     let extra = p.0.transfer_picked_gift().unwrap();
@@ -480,9 +485,12 @@ fn a_failed_transfer_returns_to_the_confirmation() {
         &mut p,
         json!({"@type": "error", "@extra": extra.as_extra(), "code": 400, "message": "BAD"}),
     );
+    // The reason is in the confirmation, not under the dialog.
     assert!(matches!(
         stage(&p),
-        Some(TransferStage::ConfirmPeer { user_id: 21, .. })
+        Some(TransferStage::ConfirmPeer { user_id: 21, error: Some(ref reason), .. })
+            if reason.starts_with("Couldn't transfer the gift")
     ));
+    assert!(p.0.session.payments.hub.gifts_error.is_none());
     assert!(!p.0.session.payments.hub.gift_mutating);
 }

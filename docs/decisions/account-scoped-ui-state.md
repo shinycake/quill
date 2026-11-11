@@ -4111,20 +4111,29 @@ the request that asked; a stage that waits has a way out.
 - **Stages that kept a choice.** The gift transfer confirmation becomes
   `TransferStage::Transferring` once `transferGift` is out: Cancel and Esc
   wait, the answer still brings the toast and the chat, a failure returns to
-  the confirmation (10-002). `GiftMarketUi::auction_open` replaces
+  the confirmation with the reason drawn in it, not under the dialog via
+  `hub.gifts_error` (10-002). `GiftMarketUi::auction_open` replaces
   `pending_auction` and is dropped when the send box it came from closed
   (10-005). A giveaway launch in flight survives reopening the form
-  (`GiveawayLaunch::for_next_form`, 10-004). The Direct Messages box has a
+  of the chat it was started for only (`GiveawayLaunch::for_form`): another
+  chat's form starts `Idle`, so A's answer shows nothing in B's form and only
+  drops A's cached boost status (10-004; no toast for A, which tdesktop shows
+  in the form it came from). The Direct Messages box has a
   `DirectStage`: it stays open while Save is out, closes from the answer and
-  shows a refusal in itself (11-p6-002). The Star reaction box stays open
+  shows a refusal in itself; another target's save holding the shared
+  `PaidSave` slot never closes it as saved (11-p6-002). The Star reaction box stays open
   with the reason when Send is refused or cannot go out, and only closes
   when the Stars were added (11-p7-003). Files chosen for forwarding stay in
   the chooser until their chat is open (05-034, 13-036).
 - **Owner going away.** A join box parked for the recipients is dropped by the
-  earn Farewell and when the layer is left (09-X032). A "learn more" gift
+  earn Farewell, when the layer is left and when the bot profile it came
+  from closes (`set_open_info_panel`, 09-X032). A "learn more" gift
   value lookup is dropped when the gift box it was asked from is gone
-  (10-003). The Premium bot's queued `/start` is dropped by the payments
-  Farewell and when another link opens a chat (04-048).
+  or shows another gift (10-003). The Premium bot's queued `/start` (`PremiumAutoStart`) is tied to the
+  generation of the link's resolve: that resolve's error, stale or not,
+  drops it, another flow's does not; it is also dropped by the payments
+  Farewell and when another link opens a chat (04-048). The Stars history
+  fields (04-036 fold into one enum) were not converted.
 - **Failures that said nothing.** A failed collectible lookup other than a
   username that is not a collectible one posts a status note (08-118; we
   chose a note for the phone case too: the register asks for it and a dead
