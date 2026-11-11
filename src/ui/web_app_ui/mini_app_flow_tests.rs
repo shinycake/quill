@@ -282,7 +282,7 @@ fn an_account_switch_closes_the_mini_app_and_what_waits(cx: &mut TestAppContext)
             then: waiting,
             window: None,
         };
-        app.mini_apps.flow.add(awaited);
+        app.mini_apps.flow.add(quill::ids::RequestId(3), awaited);
         app.ensure_mini_app_poll(cx);
 
         app.switch_account(&quill::ids::AccountKey("other".into()), "", window, cx);

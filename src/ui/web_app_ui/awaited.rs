@@ -10,9 +10,3 @@ pub(super) struct Awaited {
     pub(super) then: PendingOpen,
     pub(super) window: Option<ChatId>,
 }
-
-impl Awaited {
-    pub(super) fn bot_id(&self) -> i64 {
-        self.then.bot_id()
-    }
-}

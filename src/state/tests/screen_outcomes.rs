@@ -65,7 +65,10 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
             request: crate::ids::RequestId(9),
             result: Ok(()),
         });
-    session.bots.web_apps.emoji_access = Some((5, true));
+    session.bots.web_apps.emoji_access = Some(crate::state::EmojiAccessAnswer {
+        request: crate::ids::RequestId(5),
+        done: true,
+    });
     session
         .bots
         .web_apps

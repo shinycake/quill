@@ -311,7 +311,10 @@ fn emoji_status_access_follows_the_switch_and_comes_back_on_failure() {
     assert_eq!(emoji_access(&h), Some(true), "put back");
     assert_eq!(
         h.driver.session.bots.web_apps.emoji_access,
-        Some((42, false))
+        Some(crate::state::EmojiAccessAnswer {
+            request: extra,
+            done: false
+        })
     );
 
     let extra = h
@@ -325,7 +328,10 @@ fn emoji_status_access_follows_the_switch_and_comes_back_on_failure() {
     assert_eq!(emoji_access(&h), Some(false));
     assert_eq!(
         h.driver.session.bots.web_apps.emoji_access,
-        Some((42, true))
+        Some(crate::state::EmojiAccessAnswer {
+            request: extra,
+            done: true
+        })
     );
 }
 
@@ -384,7 +390,7 @@ fn attachment_menu_bots_and_custom_requests_round_trip() {
         .attachment_menu_bot
         .clone()
         .unwrap()
-        .1
+        .result
         .unwrap();
     assert_eq!(bot.bot_user_id, 43);
     assert!(!bot.is_added);
@@ -402,6 +408,7 @@ fn attachment_menu_bots_and_custom_requests_round_trip() {
     assert_eq!(
         h.driver.session.bots.web_apps.attachment_menu_toggled,
         [crate::state::AttachmentToggle {
+            request: extra,
             bot_user_id: 43,
             result: Ok(true)
         }]

@@ -269,11 +269,12 @@ impl QuillApp {
             .live
             .as_mut()
             .and_then(|live| live.driver.session.bots.web_apps.emoji_access.take());
-        if let Some((bot_id, done)) = access {
-            let waiting = self.mini_apps.window.as_ref().is_some_and(|window| {
-                window.launch.bot_user_id == bot_id
-                    && matches!(window.emoji.access, AccessStage::Granting(_))
-            });
+        if let Some(answer) = access {
+            let done = answer.done;
+            let waiting =
+                self.mini_apps.window.as_ref().is_some_and(|window| {
+                    window.emoji.access == AccessStage::Granting(answer.request)
+                });
             if waiting {
                 self.with_window(|window| {
                     window.emoji.access = AccessStage::Idle;

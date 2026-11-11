@@ -68,6 +68,14 @@ pub enum WriteAccessResult {
     Denied,
 }
 
+/// The answer of one `toggleBotCanManageEmojiStatus`, by the request that
+/// asked: only the flow waiting for that request takes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmojiAccessAnswer {
+    pub request: crate::ids::RequestId,
+    pub done: bool,
+}
+
 /// The outcome of one contact-card send for a mini app's phone request.
 /// It names the `sendMessage` request it answers: only the flow that sent
 /// that request takes it, so a late answer never finishes a later one.
@@ -89,9 +97,18 @@ impl PhoneShare {
     }
 }
 
-/// The outcome of one `toggleBotIsAddedToAttachmentMenu`.
+/// The answer of one `getAttachmentMenuBot`, by the request that asked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttachBotAnswer {
+    pub request: crate::ids::RequestId,
+    pub result: Result<AttachmentMenuBot, String>,
+}
+
+/// The outcome of one `toggleBotIsAddedToAttachmentMenu`, by the request
+/// that sent it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttachmentToggle {
+    pub request: crate::ids::RequestId,
     pub bot_user_id: i64,
     /// Whether the bot is in the menu now, or why the change failed.
     pub result: Result<bool, String>,
@@ -144,18 +161,17 @@ pub struct WebApps {
     /// `updateAttachmentMenuBots`: the bots in the attachment menu.
     pub attachment_menu_bots: Vec<AttachmentMenuBot>,
     /// One-shot: `getAttachmentMenuBot` answer (for adding a bot), or a
-    /// failure message, with the bot it was asked for: the flow waiting
-    /// takes only its own bot's answer.
-    pub attachment_menu_bot: Option<(i64, Result<AttachmentMenuBot, String>)>,
+    /// failure message, with the request it answers: the flow waiting takes
+    /// only its own request's answer.
+    pub attachment_menu_bot: Option<AttachBotAnswer>,
     /// One-shot: `toggleBotIsAddedToAttachmentMenu` outcomes, oldest
-    /// first, each with the bot it answers: the flow waiting takes only its
-    /// own bot's.
+    /// first, each with the request it answers: the flow waiting takes only
+    /// its own.
     pub attachment_menu_toggled: Vec<AttachmentToggle>,
     /// One-shot: the write-access answer, with the request it answers.
     pub write_access: Option<WriteAnswer>,
-    /// One-shot: `toggleBotCanManageEmojiStatus` outcome,
-    /// `(bot_user_id, done)`.
-    pub emoji_access: Option<(i64, bool)>,
+    /// One-shot: `toggleBotCanManageEmojiStatus` outcome, by its request.
+    pub emoji_access: Option<EmojiAccessAnswer>,
     /// One-shot: `searchWebApp` answer for a `t.me/bot/app` link, the app
     /// or a failure message, with the request it answers: a second link
     /// (of the same bot too) clicked before the first answered takes only

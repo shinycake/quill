@@ -6,7 +6,7 @@ use super::{Awaited, WebAppConfirm};
 use quill::ids::RequestId;
 
 /// The launch in progress: waiting on one answer, or on the person's box.
-/// A newer launch replaces an older one; an answer for another bot is
+/// A newer launch replaces an older one; an answer of another request is
 /// dropped and the flow keeps waiting for its own.
 #[derive(Default)]
 pub(super) enum LaunchFlow {
@@ -18,10 +18,18 @@ pub(super) enum LaunchFlow {
         request: RequestId,
         awaited: Awaited,
     },
-    /// `getAttachmentMenuBot` (deep link) before the launch can go on.
-    FetchingAttachBot(Awaited),
-    /// `toggleBotIsAddedToAttachmentMenu` before the launch.
-    Adding(Awaited),
+    /// `getAttachmentMenuBot` (deep link) before the launch can go on; only
+    /// the answer of `request` goes on.
+    FetchingAttachBot {
+        request: RequestId,
+        awaited: Awaited,
+    },
+    /// `toggleBotIsAddedToAttachmentMenu` before the launch; only the
+    /// outcome of `request` goes on.
+    Adding {
+        request: RequestId,
+        awaited: Awaited,
+    },
     /// A box (terms, add to menu, remove from menu) waits for the person.
     Confirming(WebAppConfirm),
 }
@@ -31,7 +39,7 @@ impl LaunchFlow {
     pub(super) fn is_waiting(&self) -> bool {
         matches!(
             self,
-            Self::Searching { .. } | Self::FetchingAttachBot(_) | Self::Adding(_)
+            Self::Searching { .. } | Self::FetchingAttachBot { .. } | Self::Adding { .. }
         )
     }
 
@@ -72,12 +80,12 @@ impl LaunchFlow {
         *self = Self::Searching { request, awaited };
     }
 
-    pub(super) fn fetch_attach_bot(&mut self, awaited: Awaited) {
-        *self = Self::FetchingAttachBot(awaited);
+    pub(super) fn fetch_attach_bot(&mut self, request: RequestId, awaited: Awaited) {
+        *self = Self::FetchingAttachBot { request, awaited };
     }
 
-    pub(super) fn add(&mut self, awaited: Awaited) {
-        *self = Self::Adding(awaited);
+    pub(super) fn add(&mut self, request: RequestId, awaited: Awaited) {
+        *self = Self::Adding { request, awaited };
     }
 
     /// The search answer of `request`; the flow ends with it.
@@ -91,9 +99,9 @@ impl LaunchFlow {
         }
     }
 
-    pub(super) fn take_attach_bot_for(&mut self, bot_id: i64) -> Option<Awaited> {
+    pub(super) fn take_attach_bot_for(&mut self, answered: RequestId) -> Option<Awaited> {
         match std::mem::take(self) {
-            Self::FetchingAttachBot(awaited) if awaited.bot_id() == bot_id => Some(awaited),
+            Self::FetchingAttachBot { request, awaited } if request == answered => Some(awaited),
             other => {
                 *self = other;
                 None
@@ -101,9 +109,9 @@ impl LaunchFlow {
         }
     }
 
-    pub(super) fn take_add_for(&mut self, bot_id: i64) -> Option<Awaited> {
+    pub(super) fn take_add_for(&mut self, answered: RequestId) -> Option<Awaited> {
         match std::mem::take(self) {
-            Self::Adding(awaited) if awaited.bot_id() == bot_id => Some(awaited),
+            Self::Adding { request, awaited } if request == answered => Some(awaited),
             other => {
                 *self = other;
                 None
@@ -157,7 +165,10 @@ mod tests {
         flow.search(RequestId(5), waiting(7));
         assert!(flow.take_search_for(RequestId(4)).is_none());
         assert!(flow.is_waiting());
-        assert!(flow.take_attach_bot_for(7).is_none(), "wrong stage");
+        assert!(
+            flow.take_attach_bot_for(RequestId(5)).is_none(),
+            "wrong stage"
+        );
         assert!(flow.take_search_for(RequestId(5)).is_some());
         assert!(!flow.is_waiting());
     }
@@ -166,16 +177,17 @@ mod tests {
     fn a_newer_launch_replaces_the_older_wait() {
         let mut flow = LaunchFlow::default();
         flow.search(RequestId(5), waiting(7));
-        flow.add(waiting(9));
+        flow.add(RequestId(6), waiting(9));
         assert!(flow.take_search_for(RequestId(5)).is_none());
-        assert!(flow.take_add_for(9).is_some());
+        assert!(flow.take_add_for(RequestId(5)).is_none(), "another request");
+        assert!(flow.take_add_for(RequestId(6)).is_some());
     }
 
     #[test]
     fn closing_the_box_leaves_a_pending_answer() {
         let mut flow = LaunchFlow::default();
-        flow.fetch_attach_bot(waiting(7));
+        flow.fetch_attach_bot(RequestId(8), waiting(7));
         flow.clear_confirm();
-        assert!(flow.take_attach_bot_for(7).is_some());
+        assert!(flow.take_attach_bot_for(RequestId(8)).is_some());
     }
 }

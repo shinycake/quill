@@ -8048,24 +8048,41 @@ whose variants carry the data, with a way out of every stage.
 
 | Id | Fix |
 | --- | --- |
-| 05-001 | `TwofaFlow::refetch` stays set until `refresh_password_state` is sent; a refused send keeps it for the next ingest. |
+| 05-001 | The refetch mark is gone. `AuthState::password_state` is a `PasswordCache` (`Unknown`, `Fresh`, `Outdated`, `Refetching { request }`): a reset, a cancelled reset or a changed login email mark it `Outdated`; the ingest sends the refetch and moves it to `Refetching` only once the send went out (a refused send stays `Outdated` for the next ingest); the answer of any password request makes it `Fresh`; a refused refetch leaves what is shown as `Fresh` and does not ask again by itself. |
+| 05-002 | `ReviewStage::Reviewing { items: Vec<ReviewItem> }`: each session holds the `RequestId` of its own `confirmSession`/`terminateSession` (`None` until sent). An answer or error settles only its own item; a lost request settles through the error arm (`settle_lost_request`); an answer of another request, or a repeat, changes nothing. The `waiting` counter is gone. |
+| 05-003 | `AccountNotices::unconfirmed` is one `Option<UnconfirmedAlert { first, count, entries }>` replaced whole; `unconfirmed_count()` and `unconfirmed_entries()` read it. A count of 0 drops the alert; a `getActiveSessions` answer with no alert announced resolves nothing (the update that announces one asks again). |
+| 05-004 | `TwofaFlow` is one enum (`Idle`, `RecoveryCode`, `LoginEmailCode`, `Done(TwofaNotice)`): one step at a time, a step that starts or finishes replaces what the last left, and the dialog going back to its status view clears it (`clear`, `clear_notice`). `CodeWait` and the notice slot are gone. |
 | 05-013 | `InlineQueryFetch::Loading(RequestId)`: only the first-page answer or error of the request the slot holds leaves it. The request is registered before the slot is written. |
-| 05-020 | `ChatListState::folder_paging: HashMap<folder id, ListPaging>` replaces `folder_chats_exhausted`. A failed folder page lands in `Retrying`; `chat_list_tick` asks again when the wait is over; 404 ends it; a page that goes through clears the wait. |
-| 05-048 | `ConnectDriver::refresh_story_trays` keeps a poster in `tray_refresh` until its `getChatActiveStories` is sent. |
+| 05-014 | `BotsState::login_url: LoginUrlStage { Idle, Asking { request, press }, Answered { info, press } }` replaces `last_login_url_info` + `login_url_request`. Only the answer or error of the request the stage asks moves it (`httpUrl` too); a second press waits while a press is out or its answer is not taken (`is_busy`); a refused send returns it to `Idle`; the return to the screen drops an answer nobody took and keeps a press in flight. A press refused by TDLib becomes `Answered(Failed { fallback_url })`. |
+| 05-020 | `ChatListState::folder_paging: HashMap<folder id, ListPaging>` replaces `folder_chats_exhausted`. A failed folder page lands in `Retrying`; `chat_list_tick` asks again when the wait is over; 404 ends it; a page that goes through clears the wait. Leaving the folder tab (`set_chat_list_view`) calls `folder_left`: a folder nobody views stops retrying, and opening it asks at once. |
+| 05-048 | The tray refresh is asked by the ingest that queued it (`ConnectDriver::ingest` calls `refresh_story_trays`), not by frame upkeep. A poster stays in `tray_refresh` until its `getChatActiveStories` is sent; a refused send waits for the next ingest, never for every frame. |
 | 05-049, 05-050 | `LiveBursts::{Unasked, Requested(RequestId), Failed, Loaded}`. A failure is `Failed`, not asked again by the call updates of the same story; the next live story opened (`begin_live_story`) asks once more. The answer is taken only from the request the stage holds. |
-| 05-067 | Only the newest save of the inactive-session timeout and of the new-chat privacy rolls back (`*_saved_at` holds the newest request). An older save failing hands its `previous` to the newer one still in flight, so a chain of failures ends on what the server has. |
+| 05-067, 05-068 | `state::saves::{Saves, Optimistic}` replace `*_saved_at` and the `previous` carried in the request. The confirmed value and the saves in flight (each with its `RequestId`) are one value; the row shows the newest save and falls back to the next save still out, or to the confirmed value, whichever order the saves fail or land in (tests for both orders). A save that lands confirms its value and supersedes the older ones; a fetch asked after every save replaces them. `NewChatPrivacyState::Saving(Saves)` and `PrivacyData::inactive_session_ttl: Optimistic<i32>` hold them. The timeout is not saved before the server's value is known, so a refusal never restores "unknown" (loading for good). |
+| 05-084 | `PrivacyData::check_password_suggested` is gone: `Session::check_password_suggested()` reads the chat-list suggestion. A refused `HideCheckPasswordSuggestion` puts the suggestion back like `HideSuggestedAction`. |
 | 06-001 | `ThreadStatus::takes_page_of`: while `LoadingHistory(r)` only request `r`'s page or error moves the thread; a `getMessageThread` error only fails a thread still `Resolving`; a newer-page error only touches a loaded thread. |
 | 06-015 | `Session::thread_upsert` resets the window through `reset_thread_window` (which stales both ends' pages in flight) before `note_live` can replace it. |
 | 06-002 | `begin_thread` marks the pages the replaced view asked for as stale in the new view. |
-| 06-017 | `StatsState::posts` holds `PostSlot::{Ready, Missing, Failed}`. Only a not-found error is `Missing`; any other failure is `Failed` and `StatsState::reset` (the panel opens) clears it so it is asked again. |
+| 06-009 | A chat trimmed to its tail drops the finished (and failed) translations of the messages it no longer holds (`prune_message_translations`); a translation still out keeps its entry for its answer. A chat that is gone already dropped all of them. |
+| 06-017 | `StatsState::posts` holds `PostSlot::{Ready, Missing, Failed}`. Only a not-found error is `Missing`; any other failure is `Failed` (drawn as Missing in `PostLookup`, a post that cannot be shown) and `StatsState::reset` (the panel opens) clears it so it is asked again. |
+| 06-019 | `MessageStatsFetch::Loading(Option<RequestId>)` and `StoryStatsFetch::Loading(Option<RequestId>)` (`None` until the send went out): the answer or error is applied only when it is the request the fetch waits for (`waits_for`), so a retry that races an older answer cannot fill or fail the page. A reopened story whose statistics are still out waits for that request. |
 | 06-020 | A failed first page of Stories or Gifts no longer writes a zero count; the count stays unknown and `visible_tabs` keeps a tab whose page failed, with its Retry. |
 | 06-021 | `fetch_chat_media_counts` and the gallery's extra counts ask again on every open (a count still out is not asked twice). Counts shown stay until each new answer replaces its own; a failed count stays unknown. |
-| 06-037 | `WebApps::found` holds the `RequestId` and `LaunchFlow::Searching { request, awaited }` takes only that request's answer, so two links of the same bot do not take each other's. |
+| 06-025 | A Stories page without the tab's stamp (the stories page's own request) never fills or fails the gallery tab: `accept_profile`/`fail_profile` take the stamp as a `u64`. Only the gallery's own request, which carries it, answers its tab. |
+| 06-037 | `WebApps::found` holds the `RequestId` and `LaunchFlow::Searching { request, awaited }` takes only that request's answer. The attach-bot fetch and the add-to-menu toggle are matched the same way (`FetchingAttachBot { request }`, `Adding { request }`, `AttachBotAnswer`, `AttachmentToggle::request`), and so is the emoji-status grant (`EmojiAccessAnswer`). |
+| 06-038 | `WebApps::pending: Vec` is `opening: Option<WebAppPending>`: one open call in flight, replaced by a newer launch. |
+| 06-039 | The custom-method answer carries only its `RequestId` (`CustomRequestReply::request`); the `custom_requests` map is gone from the state. The window that sent it keeps `custom_calls: request -> req_id` and emits only its own answers; a closed or replaced window drops them. |
+| 06-040 | `WebApps::data_sent: Vec<DataSent { request, result }>`. The flow that sent the data records its request in `MiniApps::data_sends` (per account, with the `Farewell`); only an outcome of a request it holds is reported; the return to the screen clears the outcomes that landed while away. |
 | 13-057, 06-008 | `Translation::Failed { reason, attempts }`; the pump (`needs_translation`) asks a failed message again until `TRANSLATE_PUMP_ATTEMPTS` failures. The count rides `Pending { attempts }` across the retry. |
 | 03-A008 | `forget_screen_outcomes` also drops the mini-app one-shot answers that landed while away. |
 
-Skipped in these files: 05-002/05-003/05-004/05-084/06-038 (implicit-state
-reshapes owned by the IS bundles; `refetch` is now a mark kept until sent),
-05-014 (login-URL slot: separate reshape), 05-068 (needs `Fetch<i32>` for the
-timeout; the newest-save rule above removes the overlapping case), 06-009,
-06-019, 06-025, 06-039, 06-040 (separate, not local to the fixes above).
+Tests: `state::saves` (both failure orders), `connect/tests/privacy_data.rs`
+(newest-fails-first for the timeout and the new-chat privacy, a save before
+the server's value is known), `connect/tests/account_hygiene.rs` (refetch
+kept until sent, a refused refetch does not repeat), `state/account_notices`
+(answers matched by request, a lost request, a count of 0),
+`state/tests/bots.rs` (login press matched by request),
+`connect/tests/web_apps.rs` (data sends and custom errors per request),
+`state/tests/story_insights.rs`, `state/tests/shared_media_profile.rs`,
+`connect/tests/stories.rs` (tray refresh on ingest),
+`connect/tests/chat_list/folder_removals.rs` (leaving a folder stops the
+retry; no wall clock), `state/tests/history_prune.rs` (translations pruned).

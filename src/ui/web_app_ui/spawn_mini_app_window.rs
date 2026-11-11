@@ -287,8 +287,8 @@ impl QuillApp {
         // An answer for another bot than the flow waiting (a link clicked
         // before the first one answered) is dropped: it never drives this
         // launch, and the flow keeps waiting for its own.
-        if let Some((asked, result)) = attach_bot
-            && let Some(Awaited { then, window }) = self.mini_apps.flow.take_attach_bot_for(asked)
+        if let Some(quill::state::AttachBotAnswer { request, result }) = attach_bot
+            && let Some(Awaited { then, window }) = self.mini_apps.flow.take_attach_bot_for(request)
         {
             self.as_asked_by(window, |this| match result {
                 Ok(bot) if bot.is_added => this.start_web_app(then, cx),
@@ -308,7 +308,7 @@ impl QuillApp {
         // bot's toggle goes on waiting (its launch is not started by an
         // answer that is not its own).
         for toggle in toggled {
-            let toggled_bot = toggle.bot_user_id;
+            let toggled_request = toggle.request;
             match toggle.result {
                 Ok(added) => {
                     self.set_status_note(
@@ -322,13 +322,13 @@ impl QuillApp {
                     // Only the answer for the bot being added goes on to
                     // its launch: another app's menu change is not it.
                     if let Some(Awaited { then, window }) =
-                        self.mini_apps.flow.take_add_for(toggled_bot)
+                        self.mini_apps.flow.take_add_for(toggled_request)
                     {
                         self.as_asked_by(window, |this| this.request_web_app(then, false, cx));
                     }
                 }
                 Err(message) => {
-                    self.mini_apps.flow.take_add_for(toggled_bot);
+                    self.mini_apps.flow.take_add_for(toggled_request);
                     self.set_status_note(StatusNote::error(&message), cx);
                 }
             }

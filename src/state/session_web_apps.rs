@@ -58,11 +58,14 @@ impl Session {
             }
             BotsPayload::AttachmentMenuBot(bot) => {
                 self.keep_attach_bot_icons(std::slice::from_ref(&bot));
-                if let Some(RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot {
-                    bot_user_id,
-                })) = purpose
+                if let Some(RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot { .. })) =
+                    purpose
+                    && let Some(pending) = pending
                 {
-                    self.bots.web_apps.attachment_menu_bot = Some((bot_user_id, Ok(bot)));
+                    self.bots.web_apps.attachment_menu_bot = Some(AttachBotAnswer {
+                        request: pending.id,
+                        result: Ok(bot),
+                    });
                 }
             }
             BotsPayload::UpdateAttachmentMenuBots(bots) => {
@@ -157,23 +160,26 @@ impl Session {
                 self.bots.web_apps.write_access = pending
                     .map(|p| WriteAnswer::new(p.id, bot_user_id, WriteAccessResult::Granted));
             }
-            Some(RequestPurpose::Bots(BotsPurpose::ToggleBotEmojiStatusAccess {
-                bot_user_id,
-                ..
-            })) => {
-                self.bots.web_apps.emoji_access = Some((bot_user_id, true));
+            Some(RequestPurpose::Bots(BotsPurpose::ToggleBotEmojiStatusAccess { .. })) => {
+                self.bots.web_apps.emoji_access = pending.map(|p| EmojiAccessAnswer {
+                    request: p.id,
+                    done: true,
+                });
             }
             Some(RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu {
                 bot_user_id,
                 added,
             })) => {
-                self.bots
-                    .web_apps
-                    .attachment_menu_toggled
-                    .push(AttachmentToggle {
-                        bot_user_id,
-                        result: Ok(added),
-                    });
+                if let Some(pending) = pending {
+                    self.bots
+                        .web_apps
+                        .attachment_menu_toggled
+                        .push(AttachmentToggle {
+                            request: pending.id,
+                            bot_user_id,
+                            result: Ok(added),
+                        });
+                }
             }
             Some(RequestPurpose::SendWebAppData) => {
                 if let Some(pending) = pending {
@@ -241,11 +247,16 @@ impl Session {
                 if let Some(Some(info)) = self.bots.bot_info.get_mut(&bot_user_id) {
                     info.can_manage_emoji_status = !allowed;
                 }
-                self.bots.web_apps.emoji_access = Some((bot_user_id, false));
+                self.bots.web_apps.emoji_access = Some(EmojiAccessAnswer {
+                    request: p.id,
+                    done: false,
+                });
             }
-            RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot { bot_user_id }) => {
-                self.bots.web_apps.attachment_menu_bot =
-                    Some((bot_user_id, Err(web_app_error_text(err))));
+            RequestPurpose::Bots(BotsPurpose::GetAttachmentMenuBot { .. }) => {
+                self.bots.web_apps.attachment_menu_bot = Some(AttachBotAnswer {
+                    request: p.id,
+                    result: Err(web_app_error_text(err)),
+                });
             }
             RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu {
                 bot_user_id, ..
@@ -254,6 +265,7 @@ impl Session {
                     .web_apps
                     .attachment_menu_toggled
                     .push(AttachmentToggle {
+                        request: p.id,
                         bot_user_id,
                         result: Err(web_app_error_text(err)),
                     });
