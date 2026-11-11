@@ -219,7 +219,7 @@ impl QuillApp {
 
     /// The bots' force-reply messages for the chat this window shows arm
     /// its composer (`ui/force_reply.rs`); one for a chat no window shows
-    /// is dropped, and one for another window's chat waits for that
+    /// only dismisses its standalone keyboard, and one for another window's chat waits for that
     /// window's frame.
     fn drain_force_replies_here(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = self.session_mut() else {
@@ -229,6 +229,8 @@ impl QuillApp {
         for target in session.take_force_replies_for(open_chat) {
             if open_chat == Some(target.chat_id) {
                 self.drain_force_reply(target, window, cx);
+            } else {
+                self.dismiss_standalone_force_reply(target, cx);
             }
         }
     }

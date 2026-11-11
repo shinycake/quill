@@ -34,6 +34,8 @@ use crate::ui::user_error::user_error_for;
 #[cfg(feature = "demo-capture")]
 mod asker_tests;
 mod body;
+#[cfg(test)]
+mod box_send_tests;
 mod cover;
 #[cfg(test)]
 mod dialog_host_tests;

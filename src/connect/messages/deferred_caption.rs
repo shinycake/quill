@@ -168,10 +168,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             {
                 set_caption(&mut message.content, &deferred.previous);
             }
-            self.session
-                .messages
-                .message_action_note
-                .push("could not change the caption".into());
+            self.session.messages.message_action_note.push(
+                crate::lang::tr(crate::lang::keys::Q_MEDIA_COULD_NOT_CHANGE_THE_CAPTION).into(),
+            );
         }
     }
 }

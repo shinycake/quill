@@ -4130,7 +4130,8 @@ and 10 are widget items another fixer owns).
   keeps it (08-026).
 - **Forced replies per chat.** `ForceReplies` keeps one target per chat and
   `per_window_upkeep` drains the ones for the window's chat; a target no window
-  shows is dropped (05-215).
+  shows only has its standalone keyboard dismissed (`deleteChatReplyMarkup`),
+  as before (05-215).
 - **Failed sends are not forgotten.** A draft save that cannot be sent is kept
   as the pending draft for the next flush, typing or chat leave (02-026). A
   caption chosen for a pending upload keeps the caption it replaced, puts it
@@ -4147,9 +4148,20 @@ and 10 are widget items another fixer owns).
 - **Boxes close on the answer.** The Add-bot and Share-game boxes stay in
   `BoxSend::Sending { request }` and close on the answer (`SendWatch`, settled
   in `ingest`); an administrator's start payload goes after the promotion's
-  answer; an error leaves the box open with the reason (08-011). The Create Bot
-  dialog cannot be closed while "Creating…", so the answer always reports
-  (08-021). The Send To switch is `SendToMenu` (`Unread`, `Reading`, `Known`,
+  answer; an error leaves the box open with the reason (08-011). A send belongs
+  to the box that made it: closing the box (`close_profile_dialog`) forgets the
+  send (`SendWatch::forget`), and an answer, or the confirm button's disabled
+  state, applies only while the open box has the same kind and chat, so the next
+  box for another chat is neither held nor closed by it. The Create Bot dialog
+  can be closed while "Creating…" (the state is not reset then); `poll_bot_create`
+  carries the manager and share it needs, so the answer still toasts, opens the
+  chat and shares when the box is gone, and a failure toasts its reason
+  (08-021). `SendWatch` stages are an enum (`Waiting`, `Answered`, `Refused`),
+  not an `Option<bool>`. The sticker panel and the manager read loading from
+  `StickerPanel::lists`, not `requests.has_purpose`; the lists' data stay in
+  their own vectors (moving six differently shaped vectors inside the `Fetch`
+  was not cheap). The two English strings left in the answers ("could not
+  change the caption", "Could not load sticker categories") are lang keys. The Send To switch is `SendToMenu` (`Unread`, `Reading`, `Known`,
   `Applying { want, queued }`): the shell is read once off the UI thread and a
   click during a write waits, so the last click decides (04-087).
 - **Tests.** `connect/tests/sweep_s3_messages_1.rs` (a sender that refuses

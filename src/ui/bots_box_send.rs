@@ -38,12 +38,41 @@ pub(super) enum BoxSend {
 }
 
 impl BoxSend {
-    pub(super) fn is_sending(&self) -> bool {
-        matches!(self, Self::Sending { .. })
+    /// Whether the send was made by the box `dialog` now shows: the same
+    /// kind, for the same chat.
+    fn belongs_to(&self, dialog: Option<&ProfileDialog>) -> bool {
+        let Self::Sending { kind, chat, .. } = self else {
+            return false;
+        };
+        match (kind, dialog) {
+            (BoxKind::AddBot, Some(ProfileDialog::AddBot { target, .. }))
+            | (BoxKind::ShareGame, Some(ProfileDialog::ShareGame { target, .. })) => {
+                *target == Some(chat.0)
+            }
+            _ => false,
+        }
     }
 }
 
 impl QuillApp {
+    /// The open box waits for its own send.
+    pub(super) fn box_sending(&self) -> bool {
+        self.dialogs
+            .box_send
+            .belongs_to(self.dialogs.profile_dialog.as_ref())
+    }
+
+    /// Nothing waits for the box's send any more (the box closed or was
+    /// replaced): its answer is dropped.
+    pub(super) fn forget_box_send(&mut self) {
+        if let BoxSend::Sending { request, .. } = self.dialogs.box_send {
+            if let Some(live) = self.live.as_mut() {
+                live.driver.session.bots.sends.forget(request);
+            }
+            self.dialogs.box_send = BoxSend::Idle;
+        }
+    }
+
     /// The box's request went out: it waits for the answer.
     pub(super) fn begin_box_send(
         &mut self,
@@ -75,21 +104,20 @@ impl QuillApp {
         else {
             return;
         };
-        let box_open = matches!(
-            self.dialogs.profile_dialog,
-            Some(ProfileDialog::AddBot { .. } | ProfileDialog::ShareGame { .. })
-        );
+        if !self
+            .dialogs
+            .box_send
+            .belongs_to(self.dialogs.profile_dialog.as_ref())
+        {
+            // The box closed or another one replaced it: its answer is
+            // for nobody.
+            self.forget_box_send();
+            return;
+        }
         let outcome = self
             .live
             .as_mut()
             .and_then(|live| live.driver.session.bots.sends.take_outcome(request));
-        if !box_open {
-            // Closed meanwhile: nothing waits for it any more.
-            if outcome.is_some() {
-                self.dialogs.box_send = BoxSend::Idle;
-            }
-            return;
-        }
         let Some(done) = outcome else {
             return;
         };

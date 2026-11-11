@@ -38,6 +38,7 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn close_profile_dialog(&mut self, cx: &mut Context<Self>) {
+        self.forget_box_send();
         self.dialogs.profile_dialog = None;
         cx.notify();
     }

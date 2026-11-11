@@ -712,19 +712,7 @@ impl QuillApp {
                 );
             }
         }
-        let loading_tab = self.session().is_some_and(|session| {
-            let purpose = match panel.tab {
-                StickerTab::Installed => RequestPurpose::GetInstalledStickerSets,
-                StickerTab::Recent => RequestPurpose::GetRecentStickers,
-                StickerTab::Favorites => RequestPurpose::GetFavoriteStickers,
-                StickerTab::Trending => RequestPurpose::GetTrendingStickerSets,
-                StickerTab::Archived => RequestPurpose::GetArchivedStickerSets,
-                StickerTab::Search => RequestPurpose::SearchStickerSets,
-            };
-            session.requests.has_purpose(purpose)
-                || panel.tab == StickerTab::Search
-                    && session.requests.has_purpose(RequestPurpose::SearchStickers)
-        });
+        let loading_tab = panel.lists.of(panel.tab).is_loading();
         // Only states worth reading: loading, failure, and empty views.
         let status: Option<String> = if loading_tab || panel.set.is_loading() {
             Some(tr(keys::Q_MEDIA_LOADING_STICKERS).into())

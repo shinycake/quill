@@ -42,6 +42,16 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.apply_force_reply(target, window, cx);
+        self.dismiss_standalone_force_reply(target, cx);
+    }
+
+    /// A force-reply for a chat no window shows arms no composer, but its
+    /// standalone markup still goes away like in the open chat.
+    pub(crate) fn dismiss_standalone_force_reply(
+        &mut self,
+        target: ForceReplyTarget,
+        cx: &mut Context<Self>,
+    ) {
         let standalone = self
             .session()
             .and_then(|session| session.histories.get(&target.chat_id.0))

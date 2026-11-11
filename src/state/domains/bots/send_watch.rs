@@ -6,15 +6,22 @@ use crate::state::*;
 /// leaves its entry behind, and the oldest go first.
 const KEPT: usize = 16;
 
-/// Watched requests and how each ended: `None` while waiting, then whether
-/// it was answered without an error.
+/// Where a watched request is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SendStage {
+    Waiting,
+    Answered,
+    Refused,
+}
+
+/// Watched requests and how each ended.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct SendWatch(Vec<(RequestId, Option<bool>)>);
+pub struct SendWatch(Vec<(RequestId, SendStage)>);
 
 impl SendWatch {
     pub fn watch(&mut self, request: RequestId) {
         self.0.retain(|(id, _)| *id != request);
-        self.0.push((request, None));
+        self.0.push((request, SendStage::Waiting));
         if self.0.len() > KEPT {
             self.0.remove(0);
         }
@@ -22,9 +29,18 @@ impl SendWatch {
 
     /// The answer of `request` arrived (`ok`: without an error).
     pub fn settle(&mut self, request: RequestId, ok: bool) {
-        if let Some((_, outcome)) = self.0.iter_mut().find(|(id, _)| *id == request) {
-            *outcome = Some(ok);
+        if let Some((_, stage)) = self.0.iter_mut().find(|(id, _)| *id == request) {
+            *stage = if ok {
+                SendStage::Answered
+            } else {
+                SendStage::Refused
+            };
         }
+    }
+
+    /// Nobody waits for `request` any more (its box closed).
+    pub fn forget(&mut self, request: RequestId) {
+        self.0.retain(|(id, _)| *id != request);
     }
 
     /// How the request ended, once it did; the entry goes with it.
@@ -32,8 +48,9 @@ impl SendWatch {
         let at = self
             .0
             .iter()
-            .position(|(id, outcome)| *id == request && outcome.is_some())?;
-        self.0.remove(at).1
+            .position(|(id, stage)| *id == request && *stage != SendStage::Waiting)?;
+        let (_, stage) = self.0.remove(at);
+        Some(stage == SendStage::Answered)
     }
 }
 
@@ -49,6 +66,15 @@ mod tests {
         assert_eq!(sends.take_outcome(RequestId(1)), None, "still waiting");
         sends.settle(RequestId(1), false);
         assert_eq!(sends.take_outcome(RequestId(1)), Some(false));
+        assert_eq!(sends.take_outcome(RequestId(1)), None);
+    }
+
+    #[test]
+    fn a_forgotten_request_leaves_no_outcome() {
+        let mut sends = SendWatch::default();
+        sends.watch(RequestId(1));
+        sends.forget(RequestId(1));
+        sends.settle(RequestId(1), true);
         assert_eq!(sends.take_outcome(RequestId(1)), None);
     }
 }

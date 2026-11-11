@@ -19,7 +19,9 @@ impl Session {
                     .sticker_categories
                     .fail(call_request_error_line(
                         err,
-                        "Could not load sticker categories. Retry the action",
+                        crate::lang::tr(
+                            crate::lang::keys::Q_MEDIA_COULD_NOT_LOAD_STICKER_CATEGORIES,
+                        ),
                     ));
             }
             Some(RequestPurpose::SearchEmojis) => {

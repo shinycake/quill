@@ -430,7 +430,7 @@ impl QuillApp {
                 }
             }
             let plan = row.plan.clone();
-            let sending = self.dialogs.box_send.is_sending();
+            let sending = self.box_sending();
             let start_parameter = invite.start_parameter.clone();
             let back_invite = invite.clone();
             let footer = div()
@@ -441,7 +441,7 @@ impl QuillApp {
                         .label(confirm_label)
                         .disabled(sending)
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            if this.dialogs.box_send.is_sending() {
+                            if this.box_sending() {
                                 return;
                             }
                             if matches!(
@@ -680,7 +680,7 @@ impl QuillApp {
                 .child(quill::game_share::confirm_text(&title, is_private));
             let send_name = game_short_name.clone();
             let back_name = game_short_name;
-            let sending = self.dialogs.box_send.is_sending();
+            let sending = self.box_sending();
             let footer = div()
                 .flex()
                 .gap_2()
@@ -689,7 +689,7 @@ impl QuillApp {
                         .label(tr(keys::Q_MEDIA_SEND))
                         .disabled(sending)
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            if this.dialogs.box_send.is_sending() {
+                            if this.box_sending() {
                                 return;
                             }
                             if matches!(
