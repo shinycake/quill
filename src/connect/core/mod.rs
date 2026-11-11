@@ -413,6 +413,18 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }),
             _ => None,
         };
+        // Settings > Ask a Question: the `getSupportUser` answer names the
+        // user whose chat opens after apply.
+        let support_chat: Option<i64> = match &owned.envelope.payload {
+            EnvelopePayload::Users(UsersPayload::Me { user_id, .. }) => owned
+                .envelope
+                .extra
+                .and_then(|id| self.session.requests.purpose(id))
+                .and_then(|purpose| {
+                    (purpose == RequestPurpose::GetSupportUser).then_some(*user_id)
+                }),
+            _ => None,
+        };
         // Slice G2: capture forum/welcome/boost mutations before `apply`
         // takes the pending request. The state drops the stale cache on
         // confirmed success; the post-apply refetch reloads it now that
@@ -697,7 +709,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // Settings > Ask a Question (the support account) or a contact
         // just created by phone: open (or create) the private chat.
-        if let Some(user_id) = self.session.users_state.user_chat_to_open.take() {
+        if let Some(user_id) = support_chat {
+            let _ = self.create_private_chat_for(user_id);
+        }
+        if let Some(user_id) = self.session.users_state.new_contact.take_opening() {
             let _ = self.create_private_chat_for(user_id);
         }
         // Slice (communities backend core): resolve a just-created

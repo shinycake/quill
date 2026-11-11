@@ -101,7 +101,6 @@ pub struct UsersState {
     /// A user whose private chat the driver opens on the next ingest:
     /// the `getSupportUser` answer (Settings > Ask a Question) or a
     /// contact just created by phone (New Contact).
-    pub user_chat_to_open: Option<i64>,
     /// The New Contact box's `importContacts`: the request it waits for,
     /// then its answer (taken by the box), keyed by the import it answers
     /// so only the box that sent it applies it. Closing the box forgets
@@ -122,6 +121,9 @@ pub enum NewContact {
     Closed,
     /// `importContacts` `RequestId` is out.
     Sending(RequestId),
+    /// The phone belongs to this Telegram user: the driver opens the chat,
+    /// then the box is told (`Done` with `Joined`). Closing the box ends it.
+    Opening(RequestId, i64),
     /// The import answered; the box takes it. tdesktop's
     /// `AddContactBox::save` opens the chat when the phone belongs to a
     /// Telegram user and otherwise shows "not joined".
@@ -129,6 +131,16 @@ pub enum NewContact {
 }
 
 impl NewContact {
+    /// The chat to open for the joined phone, taken (the stage moves to
+    /// `Done` with the outcome).
+    pub fn take_opening(&mut self) -> Option<i64> {
+        let Self::Opening(request, user) = *self else {
+            return None;
+        };
+        *self = Self::Done(request, NewContactOutcome::Joined(user));
+        Some(user)
+    }
+
     /// The import in flight.
     pub fn sending(&self) -> Option<RequestId> {
         match self {
@@ -242,7 +254,6 @@ impl UsersState {
             wearable_gifts: Default::default(),
             secret_chat_states: HashMap::new(),
             secret_chat_fetch_queue: Vec::new(),
-            user_chat_to_open: None,
             new_contact: NewContact::Closed,
             open_info_panel: None,
             peer_qr: crate::peer_qr::session::PeerQrData::default(),

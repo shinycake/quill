@@ -130,7 +130,8 @@ impl Session {
                 ) {
                     self.apply_created_bot(user_id, pending);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSupportUser) {
-                    self.users_state.user_chat_to_open = Some(user_id);
+                    // The driver opens the support chat from the answer
+                    // itself (`ConnectDriver::ingest`).
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetChatOwnerAfterLeaving)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
@@ -263,13 +264,13 @@ impl Session {
                         return;
                     }
                     let user_id = user_ids.first().copied().unwrap_or_default();
-                    let outcome = if user_id != 0 {
-                        self.users_state.user_chat_to_open = Some(user_id);
-                        NewContactOutcome::Joined(user_id)
+                    // A joined phone waits for the driver to open the chat;
+                    // the box is told once that is done.
+                    self.users_state.new_contact = if user_id != 0 {
+                        NewContact::Opening(id, user_id)
                     } else {
-                        NewContactOutcome::NotJoined
+                        NewContact::Done(id, NewContactOutcome::NotJoined)
                     };
-                    self.users_state.new_contact = NewContact::Done(id, outcome);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::ImportContacts) {
                     self.users_state.contacts = Default::default();
                     self.users_state.contacts.clear_error();

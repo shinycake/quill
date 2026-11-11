@@ -98,7 +98,7 @@ fn a_phone_not_on_telegram_reports_not_joined_and_opens_nothing() {
         f.1.session.users_state.new_contact.outcome().cloned(),
         Some(NewContactOutcome::NotJoined)
     );
-    assert!(f.1.session.users_state.user_chat_to_open.is_none());
+
     assert_eq!(f.2.snapshot().len(), sent);
     cleanup(f);
 }
@@ -143,7 +143,7 @@ fn a_closed_boxs_import_opens_nothing_and_the_next_box_sends() {
             extra_of(&first)
         ),
     );
-    assert!(f.1.session.users_state.user_chat_to_open.is_none());
+
     assert!(f.1.session.users_state.new_contact.outcome().is_none());
     assert_eq!(f.2.snapshot().len(), sent, "no createPrivateChat");
     assert_eq!(f.1.session.users_state.new_contact.sending(), second);
