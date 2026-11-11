@@ -362,3 +362,52 @@ fn an_answered_type_save_moves_the_stage_on() {
         }
     ));
 }
+
+/// A Save request that is gone without an answer did not happen: the step
+/// stays with a reason, and an old refusal of the same chat and field (not
+/// this Save's request) neither moves it nor stops it.
+#[test]
+fn a_lost_type_save_request_lands_in_refused() {
+    let mut rig = Rig::new();
+    let extra = rig.create(NewChatKind::Channel, &[], None);
+    rig.answer_channel(extra);
+    let chat = ChatId(CHANNEL);
+    let lost = RequestId(987_654);
+    rig.driver.watch_new_chat_type_save(&[lost]);
+    let stage = NewChatStage::Type {
+        chat,
+        save: TypeSaveStage::Saving(vec![lost]),
+    };
+    assert!(
+        matches!(
+            rig.driver.session.settled_new_chat(&stage),
+            NewChatStage::Type {
+                save: TypeSaveStage::Refused(_),
+                ..
+            }
+        ),
+        "a request that vanished is a failed Save"
+    );
+    // An answered Save moves on even with an older refusal for the chat.
+    let edits = [crate::group_type::GroupTypeEdit::DisableAllUsernames];
+    let sent = rig.driver.save_group_type(chat, &edits, &[]).unwrap();
+    rig.driver.watch_new_chat_type_save(&sent);
+    rig.driver.session.groups.info_edit_errors.insert(
+        chat.0,
+        crate::state::GroupInfoEditError {
+            field: crate::state::GroupInfoField::Username,
+            reason: "old".into(),
+        },
+    );
+    for id in &sent {
+        rig.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, id.0));
+    }
+    let stage = NewChatStage::Type {
+        chat,
+        save: TypeSaveStage::Saving(sent),
+    };
+    assert_eq!(
+        rig.driver.session.settled_new_chat(&stage),
+        NewChatStage::Subscribers { chat }
+    );
+}

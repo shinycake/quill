@@ -20,7 +20,15 @@ impl Session {
             self.users_state.saves.failed(id, error_reason(&err));
         }
         if let Some(slot) = extra.and_then(|id| self.groups.new_chats.type_saves.get_mut(&id)) {
-            *slot = TypeSave::Failed(super::request_errors::error_reason(&err));
+            // A link problem is worded as the Edit box words it.
+            let problem = (pending.map(|p| p.purpose)
+                == Some(RequestPurpose::SetSupergroupUsername))
+            .then(|| crate::group_type::username_save_problem(err.server_type.as_deref()))
+            .flatten();
+            *slot = TypeSave::Failed(match problem {
+                Some(problem) => crate::lang::tr(problem.text()).to_string(),
+                None => super::request_errors::error_reason(&err),
+            });
         }
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::GetPaidReactionSenders

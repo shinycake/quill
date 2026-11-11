@@ -118,6 +118,13 @@ impl QuillApp {
         cx.notify();
     }
 
+    fn retry_craft_candidates(&mut self, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            let _ = live.driver.retry_craft_candidates();
+        }
+        cx.notify();
+    }
+
     fn retry_craft_listings(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.retry_craft_listings();
@@ -183,6 +190,32 @@ impl QuillApp {
                     .text_sm()
                     .text_color(muted)
                     .child(tr(keys::Q_MONEY_LOADING)),
+            );
+        } else if own_count == 0
+            && let Some(error) = craft.candidates_load.error()
+        {
+            // A failed ask is not "none to craft with": say why, and retry.
+            body = body.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().danger)
+                            .child(error.to_string()),
+                    )
+                    .child(
+                        Button::new("craft-own-retry")
+                            .label(tr(keys::Q_CHAT_RETRY))
+                            .ghost()
+                            .small()
+                            .on_click(
+                                cx.listener(|this, _, _, cx| this.retry_craft_candidates(cx)),
+                            ),
+                    ),
             );
         } else if own_count == 0 {
             body = body.child(

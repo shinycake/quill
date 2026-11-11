@@ -238,6 +238,32 @@ pub enum PasskeyAdd {
     Added,
 }
 
+/// The list a fetch in flight (or a failed one) stands on: what the screen
+/// shows meanwhile, and whether an answer made it (tdesktop `listKnown`).
+/// A re-ask keeps `Answered`, so the row stays usable while it runs and
+/// after it fails.
+#[derive(Debug, Clone)]
+pub enum Basis {
+    /// Not answered since the last change (never, or a removal or an add).
+    Unanswered(Vec<Passkey>),
+    /// The last answer.
+    Answered(Vec<Passkey>),
+}
+
+impl Basis {
+    fn list(&self) -> &[Passkey] {
+        match self {
+            Self::Unanswered(list) | Self::Answered(list) => list,
+        }
+    }
+
+    fn list_mut(&mut self) -> &mut Vec<Passkey> {
+        match self {
+            Self::Unanswered(list) | Self::Answered(list) => list,
+        }
+    }
+}
+
 /// The passkey list as last fetched. The list the screen shows stays
 /// through every stage, so it does not blank out under "Loading..." or an
 /// error line. Each stage that asked remembers when (`at`, the 5 s throttle
@@ -250,13 +276,14 @@ pub enum PasskeyList {
     /// A removal or an add made it out of date: the driver asks again at
     /// once.
     Stale(Vec<Passkey>),
-    /// `getLoginPasskeys` is on its way (tdesktop `listKnown` is false).
-    Asking { at: Instant, shown: Vec<Passkey> },
+    /// `getLoginPasskeys` is on its way (tdesktop `listKnown` is false
+    /// only when no answer is behind it).
+    Asking { at: Instant, basis: Basis },
     /// An answer arrived since the last change (tdesktop `listKnown`).
     Known { at: Instant, list: Vec<Passkey> },
     /// The ask failed (`PasskeysState::error` says why); it is tried again
     /// with the next look after the throttle.
-    Failed { at: Instant, shown: Vec<Passkey> },
+    Failed { at: Instant, basis: Basis },
 }
 
 impl PasskeyList {
@@ -265,7 +292,18 @@ impl PasskeyList {
         match self {
             Self::Unknown => &[],
             Self::Stale(list) | Self::Known { list, .. } => list,
-            Self::Asking { shown, .. } | Self::Failed { shown, .. } => shown,
+            Self::Asking { basis, .. } | Self::Failed { basis, .. } => basis.list(),
+        }
+    }
+
+    /// Whether an answer stands behind the list shown.
+    fn answered(&self) -> bool {
+        match self {
+            Self::Known { .. } => true,
+            Self::Asking { basis, .. } | Self::Failed { basis, .. } => {
+                matches!(basis, Basis::Answered(_))
+            }
+            Self::Unknown | Self::Stale(_) => false,
         }
     }
 
@@ -273,15 +311,22 @@ impl PasskeyList {
         match self {
             Self::Unknown => None,
             Self::Stale(list) | Self::Known { list, .. } => Some(list),
-            Self::Asking { shown, .. } | Self::Failed { shown, .. } => Some(shown),
+            Self::Asking { basis, .. } | Self::Failed { basis, .. } => Some(basis.list_mut()),
+        }
+    }
+
+    fn take_basis(&mut self) -> Basis {
+        match std::mem::take(self) {
+            Self::Unknown => Basis::Unanswered(Vec::new()),
+            Self::Stale(list) => Basis::Unanswered(list),
+            Self::Known { list, .. } => Basis::Answered(list),
+            Self::Asking { basis, .. } | Self::Failed { basis, .. } => basis,
         }
     }
 
     fn take_shown(&mut self) -> Vec<Passkey> {
-        match std::mem::take(self) {
-            Self::Unknown => Vec::new(),
-            Self::Stale(list) | Self::Known { list, .. } => list,
-            Self::Asking { shown, .. } | Self::Failed { shown, .. } => shown,
+        match self.take_basis() {
+            Basis::Unanswered(list) | Basis::Answered(list) => list,
         }
     }
 
@@ -344,16 +389,17 @@ impl PasskeysState {
         matches!(self.list, PasskeyList::Stale(_))
     }
 
-    /// An answer arrived since the last change (tdesktop `listKnown`).
+    /// An answer stands behind the list (tdesktop `listKnown`); a re-ask
+    /// or a failed one keeps it.
     pub fn is_known(&self) -> bool {
-        matches!(self.list, PasskeyList::Known { .. })
+        self.list.answered()
     }
 
     /// `getLoginPasskeys` went out at `now`: the list on screen stays, the
     /// last error is gone.
     pub fn list_asked(&mut self, now: Instant) {
-        let shown = self.list.take_shown();
-        self.list = PasskeyList::Asking { at: now, shown };
+        let basis = self.list.take_basis();
+        self.list = PasskeyList::Asking { at: now, basis };
         self.error = None;
     }
 
@@ -364,8 +410,8 @@ impl PasskeysState {
             return;
         }
         let at = self.list.asked_at().unwrap_or_else(Instant::now);
-        let shown = self.list.take_shown();
-        self.list = PasskeyList::Failed { at, shown };
+        let basis = self.list.take_basis();
+        self.list = PasskeyList::Failed { at, basis };
         self.error = Some(error);
     }
 

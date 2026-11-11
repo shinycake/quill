@@ -563,6 +563,42 @@ fn craft_buys_a_listing_into_a_slot() {
     assert!(f.driver.session.take_gift_market_toasts().is_empty());
 }
 
+/// A failed "your gifts" list in Select Gifts keeps its error for the box to
+/// draw, and its Retry asks the first page again.
+#[test]
+fn a_failed_craft_candidates_list_retries() {
+    let mut f = Fixture::new();
+    let primary = CraftGift::parse_received(&received(1)).unwrap();
+    f.driver.open_gift_craft(primary).unwrap();
+    assert!(f.driver.retry_craft_candidates().is_err(), "not failed yet");
+    f.answer(
+        "getGiftsForCrafting",
+        json!({"@type": "error", "code": 500, "message": "boom"}),
+    );
+    let craft = f.driver.session.payments.gift_market.craft.clone().unwrap();
+    assert!(craft.candidates_load.error().is_some() && craft.candidates.is_empty());
+    f.driver.retry_craft_candidates().unwrap();
+    assert!(
+        f.driver
+            .session
+            .payments
+            .gift_market
+            .craft
+            .as_ref()
+            .unwrap()
+            .candidates_load
+            .is_loading()
+    );
+    f.answer(
+        "getGiftsForCrafting",
+        json!({"@type": "giftsForCrafting", "total_count": 1, "gifts": [received(2)],
+            "attribute_persistence_probabilities": [], "next_offset": ""}),
+    );
+    let craft = f.driver.session.payments.gift_market.craft.clone().unwrap();
+    assert_eq!(craft.candidates.len(), 1);
+    assert!(craft.candidates_load.error().is_none());
+}
+
 /// A preview in flight is not asked twice; a failed one says so, and is
 /// asked again only by a box opening or its Retry (never from a render).
 #[test]

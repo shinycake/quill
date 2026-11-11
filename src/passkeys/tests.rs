@@ -285,3 +285,23 @@ fn reads_the_display_switch_from_the_app_config() {
         }
     );
 }
+
+#[test]
+fn a_list_asked_again_or_failed_keeps_the_row_usable() {
+    let mut state = known(vec![key("a", "x")]);
+    let now = Instant::now();
+    state.list_asked(now);
+    assert!(state.is_known(), "the answered list stands under a re-ask");
+    assert_eq!(state.row_target(), Some(RowTarget::List));
+    state.list_failed(state.generation, "offline".into());
+    assert!(state.is_known(), "and under its failure");
+    assert_eq!(state.row_target(), Some(RowTarget::List));
+    // A list that never had an answer stays loading until one comes.
+    let mut fresh = PasskeysState::default();
+    fresh.list_asked(now);
+    assert!(!fresh.is_known() && fresh.row_target().is_none());
+    // A removal forgets the answer (tdesktop forgets the list).
+    state.finish_remove("a");
+    state.list_asked(now);
+    assert!(!state.is_known());
+}

@@ -447,6 +447,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.search_resale_page(true, false)
     }
 
+    /// "Retry" of a failed "your gifts" list in Select Gifts: the first page
+    /// again.
+    pub fn retry_craft_candidates(&mut self) -> Result<RequestId, ConnectSendError> {
+        let failed = self
+            .session
+            .payments
+            .gift_market
+            .craft
+            .as_ref()
+            .is_some_and(|craft| craft.candidates_load.error().is_some());
+        if !failed {
+            return Err(ConnectSendError::InvalidRequest);
+        }
+        self.craft_candidates_page(false)
+    }
+
     /// The next page of the user's own gifts for crafting.
     pub fn load_more_craft_candidates(&mut self) -> Result<RequestId, ConnectSendError> {
         let craft = self

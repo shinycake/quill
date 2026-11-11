@@ -1,6 +1,7 @@
 //! New Group / New Channel's share of the session: each create request,
 //! the photo set once the chat exists, and how the request ended
 //! (`crate::new_chat`).
+use crate::lang::{keys, tr};
 use crate::new_chat::{CreateProgress, CreationOutcome, NewChatStage, TypeSaveStage};
 use crate::profile_photo_sources::ChatPhotoInput;
 use crate::state::*;
@@ -33,8 +34,10 @@ pub struct NewChatCreation {
 /// A request of the type step's Save, from the send to its answer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeSave {
-    /// Out, or answered without a refusal.
+    /// Out: its answer has not come.
     Sent,
+    /// Answered without a refusal.
+    Done,
     /// Refused or lost: the step stays, with TDLib's reason.
     Failed(String),
 }
@@ -43,8 +46,8 @@ pub enum TypeSave {
 pub struct NewChatState {
     pub creations: HashMap<RequestId, NewChatCreation>,
     /// The requests of the type step's latest Save (a new Save replaces
-    /// them), by request id: any refusal, a lost request included, keeps
-    /// the step from moving on as if it saved.
+    /// them), by request id: any refusal keeps the step from moving on as
+    /// if it saved. A request that is gone while still `Sent` was lost.
     pub type_saves: HashMap<RequestId, TypeSave>,
 }
 
@@ -97,18 +100,15 @@ impl Session {
                 if sent.iter().any(|id| self.requests.get(*id).is_some()) {
                     return stage.clone();
                 }
-                let refusal = self
-                    .groups
-                    .info_edit_errors
-                    .get(&chat.0)
-                    .filter(|error| error.field == GroupInfoField::Username)
-                    .map(|error| error.reason.clone())
-                    .or_else(|| {
-                        self.groups
-                            .new_chats
-                            .type_save_failure(sent)
-                            .map(str::to_string)
-                    });
+                let saves = &self.groups.new_chats.type_saves;
+                let refusal = sent.iter().find_map(|id| match saves.get(id) {
+                    Some(TypeSave::Done) => None,
+                    Some(TypeSave::Failed(reason)) => Some(reason.clone()),
+                    // Gone without an answer: the Save did not happen.
+                    Some(TypeSave::Sent) | None => {
+                        Some(tr(keys::Q_MISC_COULDNT_REACH_TELEGRAM_TRY_AGAIN).to_string())
+                    }
+                });
                 match refusal {
                     Some(reason) => NewChatStage::Type {
                         chat: *chat,
