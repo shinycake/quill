@@ -1,0 +1,3 @@
+# Timers that must run on a clock (scripts/check-owned-timers.py).
+# One per line: <rule>:<Type::function> <what ends it, and why it has no event>
+poll:run_poll_loop the shared poll loop itself (src/ui/wake_wait.rs): it rests on a quill::wake signal and ends when its pass returns None; the timer is only the gap that gives the thread back between two passes

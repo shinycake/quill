@@ -1,0 +1,2 @@
+# Purpose checks and unmatched answers that need no RequestId (scripts/check-request-match.py).
+# One per line: <rule>:<Type::function> <reason>
