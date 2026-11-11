@@ -553,3 +553,79 @@ fn phone_number_suggestion_is_hidden_with_the_phone_action() {
     );
     cleanup(f);
 }
+
+fn sessions_answer(f: &mut Fixture, days: i32) {
+    f.1.maybe_fetch_active_sessions().unwrap();
+    let fetch = last_request(f);
+    ingest(
+        f,
+        &format!(
+            r#"{{"@type":"sessions","sessions":[],"inactive_session_ttl_days":{days},"@extra":"{}"}}"#,
+            extra_of(&fetch)
+        ),
+    );
+}
+
+fn error_for(f: &mut Fixture, request: &Value) {
+    ingest(
+        f,
+        &format!(
+            r#"{{"@type":"error","code":429,"message":"FLOOD","@extra":"{}"}}"#,
+            extra_of(request)
+        ),
+    );
+}
+
+#[test]
+fn an_older_ttl_save_failing_does_not_roll_back_a_newer_one() {
+    let mut f = fixture();
+    sessions_answer(&mut f, 180);
+    f.1.set_inactive_session_ttl(30).unwrap();
+    let first = last_request(&f);
+    f.1.set_inactive_session_ttl(60).unwrap();
+    let second = last_request(&f);
+    error_for(&mut f, &first);
+    let data = &f.1.session.settings.privacy_data;
+    assert_eq!(data.inactive_session_ttl_days, Some(60));
+    // The newer save failing too goes back to what the server still has.
+    error_for(&mut f, &second);
+    assert_eq!(
+        f.1.session.settings.privacy_data.inactive_session_ttl_days,
+        Some(180)
+    );
+    cleanup(f);
+}
+
+#[test]
+fn an_older_new_chat_save_failing_does_not_roll_back_a_newer_one() {
+    let mut f = fixture();
+    f.1.fetch_new_chat_privacy().unwrap();
+    let request = last_request(&f);
+    ingest(
+        &mut f,
+        &format!(
+            r#"{{"@type":"newChatPrivacySettings","allow_new_chats_from_unknown_users":true,"incoming_paid_message_star_count":"0","@extra":"{}"}}"#,
+            extra_of(&request)
+        ),
+    );
+    f.1.set_new_chat_privacy(false).unwrap();
+    let first = last_request(&f);
+    f.1.set_new_chat_settings(crate::privacy::NewChatPrivacy {
+        allow_from_unknown: false,
+        incoming_paid_message_star_count: 40,
+    })
+    .unwrap();
+    let second = last_request(&f);
+    error_for(&mut f, &first);
+    assert!(matches!(
+        f.1.session.settings.privacy_data.new_chat,
+        Some(NewChatPrivacyState::Ready(s)) if s.incoming_paid_message_star_count == 40
+    ));
+    error_for(&mut f, &second);
+    assert!(matches!(
+        f.1.session.settings.privacy_data.new_chat,
+        Some(NewChatPrivacyState::Ready(s))
+            if s.allow_from_unknown && s.incoming_paid_message_star_count == 0
+    ));
+    cleanup(f);
+}

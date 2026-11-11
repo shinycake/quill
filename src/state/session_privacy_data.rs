@@ -53,6 +53,9 @@ pub struct PrivacyData {
     pub new_chat_saved_at: Option<RequestId>,
     /// Days of inactivity before sessions end (`getActiveSessions`).
     pub inactive_session_ttl_days: Option<i32>,
+    /// The newest `setInactiveSessionTtl`: only its failure rolls the row
+    /// back; an older save's failure hands its `previous` to it.
+    pub inactive_session_ttl_saved_at: Option<RequestId>,
     /// `ignore_sensitive_content_restrictions` as TDLib last reported it.
     pub ignore_sensitive: Option<bool>,
     /// `can_ignore_sensitive_content_restrictions`: the server lets this
@@ -282,12 +285,27 @@ impl Session {
                 previous_allow,
                 previous_stars,
             }) => {
-                // Roll the optimistic choice back to what the server had.
-                if matches!(data.new_chat, Some(NewChatPrivacyState::Ready(_))) {
-                    data.new_chat = Some(NewChatPrivacyState::Ready(NewChatPrivacy {
-                        allow_from_unknown: previous_allow,
-                        incoming_paid_message_star_count: previous_stars,
-                    }));
+                // Roll the optimistic choice back to what the server had, but
+                // only for the newest save: an older one failing under a
+                // newer save hands its value to the newer save's rollback.
+                let mine = pending.map(|p| p.id);
+                let newest = data.new_chat_saved_at;
+                if newest.is_none() || newest == mine {
+                    if matches!(data.new_chat, Some(NewChatPrivacyState::Ready(_))) {
+                        data.new_chat = Some(NewChatPrivacyState::Ready(NewChatPrivacy {
+                            allow_from_unknown: previous_allow,
+                            incoming_paid_message_star_count: previous_stars,
+                        }));
+                    }
+                } else if let Some(newest) = newest
+                    && let Some(newer) = self.requests.pending_mut(newest)
+                    && let RequestPurpose::Settings(SettingsPurpose::SetNewChatPrivacy {
+                        previous_allow: allow,
+                        previous_stars: stars,
+                    }) = &mut newer.purpose
+                {
+                    *allow = previous_allow;
+                    *stars = previous_stars;
                 }
                 data.fail(
                     PrivacyControl::NewChat,
@@ -302,8 +320,20 @@ impl Session {
             }
             RequestPurpose::Settings(SettingsPurpose::SetInactiveSessionTtl { previous }) => {
                 // Back to what the server had: `None` reads as still
-                // loading, and nothing refetches it.
-                data.inactive_session_ttl_days = previous;
+                // loading, and nothing refetches it. Only the newest save
+                // rolls back; an older one failing under it hands its
+                // value to the newer save's rollback.
+                let newest = data.inactive_session_ttl_saved_at;
+                if newest.is_none() || newest == pending.map(|p| p.id) {
+                    data.inactive_session_ttl_days = previous;
+                } else if let Some(newest) = newest
+                    && let Some(newer) = self.requests.pending_mut(newest)
+                    && let RequestPurpose::Settings(SettingsPurpose::SetInactiveSessionTtl {
+                        previous: newer_previous,
+                    }) = &mut newer.purpose
+                {
+                    *newer_previous = previous;
+                }
                 data.fail(
                     PrivacyControl::SessionTtl,
                     sessions_error_line("change the session timeout", err),

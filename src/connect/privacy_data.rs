@@ -145,6 +145,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session
             .settings
             .privacy_data
+            .inactive_session_ttl_saved_at = Some(extra);
+        self.session
+            .settings
+            .privacy_data
             .clear_error(crate::state::PrivacyControl::SessionTtl);
         Ok(extra)
     }
