@@ -3,7 +3,7 @@ use super::*;
 use crate::ids::{ChatId, RequestId};
 use crate::quick_replies as qr;
 use crate::state::fetch::Fetch;
-use crate::state::{RequestPurpose, SettingsPurpose};
+use crate::state::{QuickReplyWork, RequestPurpose, SettingsPurpose};
 
 impl<S: JsonSender> ConnectDriver<S> {
     fn quick_replies_ready(&self) -> Result<(), ConnectSendError> {
@@ -26,15 +26,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         // answer (or error) ends it.
         let is_change = purpose == RequestPurpose::Settings(SettingsPurpose::MutateQuickReplies);
         let probe = if is_change { build("") } else { String::new() };
-        if is_change {
-            let requests = &self.session.requests;
-            let state = &mut self.session.settings.quick_replies;
-            state
-                .changing
-                .retain(|request, _| requests.get(*request).is_some());
-            if state.changing.values().any(|sent| *sent == probe) {
-                return Ok(None);
-            }
+        if is_change && self.session.settings.quick_replies.is_changing(&probe) {
+            return Ok(None);
         }
         let extra = self.session.request(purpose, chat_id);
         let json = build(&extra.as_extra());
@@ -43,8 +36,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .settings
                 .quick_replies
-                .changing
-                .insert(request, probe);
+                .in_flight
+                .insert(request, QuickReplyWork::Change(probe));
         }
         Ok(Some(request))
     }
@@ -85,17 +78,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Settings(SettingsPurpose::LoadQuickReplyMessages { shortcut_id }),
             None,
             |extra| qr::load_messages_request(extra, shortcut_id),
-        );
-        if sent.is_ok() {
-            self.session.settings.quick_replies.messages.insert(
-                shortcut_id,
-                Fetch::Loading {
-                    stale: None,
-                    request: None,
-                },
-            );
+        )?;
+        if let Some(request) = sent {
+            let mut load = Fetch::Idle;
+            load.begin();
+            load.sent(request);
+            self.session
+                .settings
+                .quick_replies
+                .messages
+                .insert(shortcut_id, load);
         }
-        sent.map(|_| ())
+        Ok(())
     }
 
     /// Add a text message; the shortcut `name` is created when new.
@@ -188,16 +182,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         // A shortcut being sent to a chat is not sent there again until its
         // answer (or error) ends that request: a double tap would deliver
         // every message twice.
-        let requests = &self.session.requests;
         let state = &mut self.session.settings.quick_replies;
-        state
-            .sending
-            .retain(|request, _| requests.get(*request).is_some());
-        if state
-            .sending
-            .values()
-            .any(|key| *key == (chat_id, shortcut_id))
-        {
+        if state.is_sending(chat_id, shortcut_id) {
             return Ok(());
         }
         state.next_sending_id = state.next_sending_id.wrapping_add(1).max(1);
@@ -213,8 +199,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session
                 .settings
                 .quick_replies
-                .sending
-                .insert(request, (chat_id, shortcut_id));
+                .in_flight
+                .insert(request, QuickReplyWork::Send(chat_id, shortcut_id));
         }
         Ok(())
     }

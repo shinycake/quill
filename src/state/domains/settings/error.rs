@@ -11,7 +11,7 @@ impl Session {
         extra: Option<RequestId>,
         _seq: u64,
     ) {
-        if self.apply_quick_replies_error(err, pending.map(|p| p.purpose))
+        if self.apply_quick_replies_error(err, pending.map(|p| p.purpose), pending.map(|p| p.id))
             || self.apply_business_error(err, pending.map(|p| p.purpose))
             || self.apply_business_extra_error(err, pending.map(|p| p.purpose), extra)
             || self.apply_passkeys_error(err, pending.map(|p| (p.id, p.purpose)))

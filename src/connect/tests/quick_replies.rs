@@ -356,3 +356,47 @@ fn a_successful_request_clears_the_last_refusal() {
     );
     assert!(driver.session.settings.quick_replies.error.is_none());
 }
+
+#[test]
+fn a_change_may_be_sent_again_once_its_answer_or_error_came() {
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    let sent = |recorder: &Recorder| count_sent(recorder, "addQuickReplyShortcutMessage");
+    driver.add_quick_reply_text("hours", "Hi").unwrap();
+    let request = sent_request(&recorder, "addQuickReplyShortcutMessage");
+    let extra = request["@extra"].as_str().unwrap().to_string();
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"BAD"}}"#),
+    );
+    assert!(driver.session.settings.quick_replies.in_flight.is_empty());
+    driver.add_quick_reply_text("hours", "Hi").unwrap();
+    assert_eq!(sent(&recorder), 2, "a refused change is sent again");
+    let request = sent_request(&recorder, "addQuickReplyShortcutMessage");
+    let extra = request["@extra"].as_str().unwrap().to_string();
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
+    );
+    assert!(driver.session.settings.quick_replies.in_flight.is_empty());
+}
+
+#[test]
+fn a_message_load_answered_without_an_update_stops_waiting() {
+    let (mut driver, recorder, sink, seq) = driver_parts();
+    seed_shortcuts(&mut driver, &seq, &sink);
+    driver.ensure_quick_reply_messages(1).unwrap();
+    assert!(!driver.session.settings.quick_replies.messages_settled(1));
+    let request = sent_request(&recorder, "loadQuickReplyShortcutMessages");
+    let extra = request["@extra"].as_str().unwrap().to_string();
+    feed(
+        &mut driver,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
+    );
+    assert!(driver.session.settings.quick_replies.messages_settled(1));
+}
