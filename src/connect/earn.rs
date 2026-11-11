@@ -758,10 +758,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             choose_recipient: true,
             stage: JoinStage::Open,
         };
-        let earn = &mut self.session.payments.earn;
-        if let Some(open) = earn.recipients.park(join) {
-            earn.join_box = Some(open);
-        }
+        self.session.payments.earn.open_or_park_join(join);
         Ok(())
     }
 

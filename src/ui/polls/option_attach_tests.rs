@@ -43,8 +43,8 @@ fn a_link_is_attached_with_done_and_an_empty_one_is_refused(cx: &mut TestAppCont
         assert!(app.connection.status_note().contains("link"));
 
         let input = app.chat_ui.poll_dialog.as_ref().unwrap().attach[1]
-            .link_input
-            .clone()
+            .link_input()
+            .cloned()
             .unwrap();
         input.update(cx, |input, cx| {
             input.set_value("  https://example.com/tacos  ", window, cx)
@@ -57,7 +57,7 @@ fn a_link_is_attached_with_done_and_an_empty_one_is_refused(cx: &mut TestAppCont
             })
         );
         let dialog = app.chat_ui.poll_dialog.as_ref().unwrap();
-        assert!(dialog.attach[1].link_input.is_none());
+        assert!(dialog.attach[1].link_input().is_none());
         // The draft carries it for the second option once it has text.
         let draft = dialog.draft(cx);
         assert_eq!(
@@ -131,13 +131,16 @@ fn removing_a_row_keeps_the_media_with_its_option(cx: &mut TestAppContext) {
             let dialog = app.chat_ui.poll_dialog.as_mut().unwrap();
             dialog.attach[0].media = link("a");
             dialog.attach[2].media = link("c");
-            dialog.attach[2].menu_open = true;
+            dialog.attach[2].mode = crate::ui::dialogs::AttachMode::Menu;
         }
         app.remove_poll_option_row(1, cx);
         let dialog = app.chat_ui.poll_dialog.as_ref().unwrap();
         let media: Vec<_> = dialog.attach.iter().map(|a| a.media.clone()).collect();
         assert_eq!(media, vec![link("a"), link("c")]);
-        assert!(dialog.attach[1].menu_open, "the open menu follows its row");
+        assert!(
+            matches!(dialog.attach[1].mode, crate::ui::dialogs::AttachMode::Menu),
+            "the open menu follows its row"
+        );
         app.clear_poll_option_media(AttachTarget::Row(0), cx);
         assert_eq!(slot(app, 0), OptionMediaSlot::None);
     });
@@ -155,8 +158,8 @@ fn the_option_added_to_a_sent_poll_takes_media_too(cx: &mut TestAppContext) {
             .as_ref()
             .unwrap()
             .attach
-            .link_input
-            .clone()
+            .link_input()
+            .cloned()
             .unwrap();
         input.update(cx, |input, cx| input.set_value("example.com", window, cx));
         app.finish_poll_option_link(AttachTarget::Added, cx);

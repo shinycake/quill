@@ -41,6 +41,73 @@ impl DraftClear {
     }
 }
 
+/// The slot a composer last showed and its stored draft then.
+pub(super) type ShownDraft = (ChatId, DraftTopic, Option<ChatDraft>);
+
+/// What the composer knows of the draft it shows. Only a change to the
+/// shown draft replaces the field: text a link put in the composer survives
+/// drafts arriving for other chats. A topic or thread switch asks for the
+/// new slot's draft from code that has no window (`Restoring`); the next
+/// frame runs it, and `restore_open_draft` then records what it showed. The
+/// request carries what was shown, so a remote draft arriving meanwhile
+/// still compares against it, and a restore that does nothing (editing, a
+/// dirty draft) leaves the old value as it was.
+#[derive(Clone, Debug, Default)]
+pub(super) enum DraftLoad {
+    #[default]
+    Unshown,
+    Shown(ShownDraft),
+    Restoring {
+        before: Option<ShownDraft>,
+    },
+}
+
+impl DraftLoad {
+    /// Record what the field now shows, returning what it showed before.
+    /// A pending restore stays pending.
+    pub(super) fn replace_shown(&mut self, now: ShownDraft) -> Option<ShownDraft> {
+        match self {
+            Self::Restoring { before } => before.replace(now),
+            Self::Unshown => {
+                *self = Self::Shown(now);
+                None
+            }
+            Self::Shown(shown) => Some(std::mem::replace(shown, now)),
+        }
+    }
+
+    /// The field was filled from this slot: the request is spent.
+    pub(super) fn set_shown(&mut self, now: Option<ShownDraft>) {
+        *self = now.map_or(Self::Unshown, Self::Shown);
+    }
+
+    /// Ask for the open slot's draft on the next frame.
+    pub(super) fn request_restore(&mut self) {
+        if !matches!(self, Self::Restoring { .. }) {
+            let before = match std::mem::take(self) {
+                Self::Shown(shown) => Some(shown),
+                Self::Unshown | Self::Restoring { .. } => None,
+            };
+            *self = Self::Restoring { before };
+        }
+    }
+
+    /// Run a requested restore once: the request is spent, what was shown
+    /// before stays until the restore replaces it.
+    pub(super) fn take_restore(&mut self) -> bool {
+        match std::mem::take(self) {
+            Self::Restoring { before } => {
+                self.set_shown(before);
+                true
+            }
+            other => {
+                *self = other;
+                false
+            }
+        }
+    }
+}
+
 pub(crate) struct ComposerUi {
     /// Highlighted row of the composer's `@` suggestions.
     pub(super) mention_selected: usize,
@@ -77,16 +144,12 @@ pub(crate) struct ComposerUi {
     /// A rich draft's discard and Premium boxes and the rich paste notice
     /// (`rich_draft`).
     pub(super) rich_draft: super::rich_draft::RichDraftUi,
-    /// A topic or thread switch asked for the new slot's draft to be put
-    /// in the composer on the next frame (`restore_draft_if_pending`).
-    pub(super) draft_restore_pending: bool,
     /// The session's remote draft revision this composer last checked
     /// (`QuillApp::adopt_remote_draft`).
     pub(super) remote_draft_seen: u64,
-    /// The slot this composer last showed and its stored draft then. Only
-    /// a change to that draft replaces the field: text a link put in the
-    /// composer survives drafts arriving for other chats.
-    pub(super) shown_draft: Option<(ChatId, DraftTopic, Option<ChatDraft>)>,
+    /// The draft the field was last filled from, or asked to be filled
+    /// from.
+    pub(super) draft_load: DraftLoad,
     /// What the compose field's placeholder was last built from
     /// (`sync_composer_placeholder`): the facts and the language.
     pub(super) placeholder_shown: Option<(quill::composer::PlaceholderFacts, usize)>,
@@ -95,13 +158,11 @@ pub(crate) struct ComposerUi {
     /// Quill keeps it per session — documented divergence).
     pub(super) inline_bot_alert_shown: bool,
     /// Files being dragged over the conversation, and what they hold
-    /// (`drop_zones`).
-    pub(super) drop_paths: Vec<std::path::PathBuf>,
-    pub(super) drop_state: Option<quill::drop_modes::DragState>,
+    /// (`drop_zones`), or a demo's fixed drop-zone state (no real drag in
+    /// a screenshot).
+    pub(super) file_drag: super::drop_zones::FileDrag,
     /// The folder being zipped for "Send as archive" (`drop_zones`).
     pub(super) archive: super::drop_zones::ArchiveJob,
-    /// A demo's fixed drop-zone state (no real drag in a screenshot).
-    pub(super) drop_preview: Option<quill::drop_modes::DragState>,
     /// Phase A1: the open chat whose slow-mode countdown is ticking
     /// (`Some` exactly while the 1s tick task runs). Mirrors `voice_tick`.
     pub(super) slow_mode_tick_chat: Option<ChatId>,
@@ -128,15 +189,12 @@ impl ComposerUi {
             send_effect_once: 0,
             send_menu: Default::default(),
             rich_draft: Default::default(),
-            draft_restore_pending: false,
             remote_draft_seen: 0,
-            shown_draft: None,
+            draft_load: DraftLoad::Unshown,
             placeholder_shown: None,
             inline_bot_alert_shown: false,
-            drop_paths: Vec::new(),
-            drop_state: None,
+            file_drag: super::drop_zones::FileDrag::Idle,
             archive: Default::default(),
-            drop_preview: None,
             slow_mode_tick_chat: None,
             send_box: super::send_box_state::SendBoxUi::new(),
             text_limit: Default::default(),

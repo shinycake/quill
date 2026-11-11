@@ -103,7 +103,7 @@ impl QuillApp {
             session.settings.storage_stats =
                 quill::state::fetch::Fetch::Ready(demo_storage_stats());
             session.settings.data_storage = demo_data_storage_prefs();
-            session.settings.storage_freed = Some(54_525_952);
+            session.settings.storage_clear = quill::state::StorageClear::Freed(54_525_952);
         }
         self.open_settings(Some(quill::settings_catalog::Page::DataStorage), cx);
         self.set_note(StatusNote::silent("screenshot demo — data & storage"));

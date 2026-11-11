@@ -353,3 +353,21 @@ fn a_withdrawal_larger_than_the_balance_is_brought_down_to_it(cx: &mut TestAppCo
     });
     assert_eq!(Some(typed.parse::<i64>().unwrap_or(-1)), available);
 }
+
+#[gpui_kit::test]
+fn a_reopened_link_box_plays_its_icon_from_the_start(cx: &mut TestAppContext) {
+    use quill::earn::LinkIcon;
+    let mut link = LinkBox::new(
+        super::fixture::joined_program(),
+        quill::earn::EarnPeer::User(1),
+    );
+    assert_eq!(link.icon, LinkIcon::Unseen);
+    let first = std::time::Instant::now();
+    link.note_drawn(first);
+    link.note_drawn(first + std::time::Duration::from_secs(1));
+    assert_eq!(link.icon, LinkIcon::Playing { since: first });
+    // The same link opened again is a new box: it has not played.
+    let again = LinkBox::new(link.program.clone(), link.recipient);
+    assert_eq!(again.icon, LinkIcon::Unseen);
+    let _ = cx;
+}

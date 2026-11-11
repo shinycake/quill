@@ -92,12 +92,12 @@ impl QuillApp {
         let return_to = Some(window.window_handle());
         self.open_live_pip(player, LivePipSource::Stream { call_id }, return_to, cx);
         self.group_call_screen.window_closed_by_user = Some(call_id);
-        self.group_call_screen.stream_join = None;
+        self.group_call_screen.clear_stream_wish();
         self.group_call.stream.overlay = None;
         // The stream window goes now, out of full screen first, rather
         // than on the main window's next frame.
-        if self.group_call.window == Some(window.window_handle()) {
-            self.group_call.window = None;
+        if self.group_call.window.is(window.window_handle()) {
+            self.group_call.window = crate::ui::group_call_state::CallWindow::Closed;
             crate::ui::group_call_stream_layout::leave_stream_full(window);
             window.remove_window();
         }
@@ -301,7 +301,7 @@ impl QuillApp {
         };
         let shown_again =
             match source {
-                LivePipSource::Stream { .. } => self.group_call.window.is_some(),
+                LivePipSource::Stream { .. } => self.group_call.window.handle().is_some(),
                 LivePipSource::Story { chat_id, story_id } => {
                     self.stories.viewer.is_open()
                         && self.stories.viewer.current().is_some_and(|item| {

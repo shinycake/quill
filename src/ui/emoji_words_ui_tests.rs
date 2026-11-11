@@ -133,8 +133,8 @@ fn a_hovered_word_offers_its_emoji_and_becomes_one(cx: &mut TestAppContext) {
         let (_, items) = app
             .composer_ui
             .emoji_words
-            .hovered
-            .clone()
+            .hovered()
+            .cloned()
             .expect("hovered");
         items.into_iter().map(|i| i.glyph).collect()
     });
@@ -154,7 +154,7 @@ fn a_hovered_word_offers_its_emoji_and_becomes_one(cx: &mut TestAppContext) {
 
 fn hovered_word(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<String> {
     app.read_with(vcx, |app, _| {
-        let hovered = app.composer_ui.emoji_words.hovered.as_ref();
+        let hovered = app.composer_ui.emoji_words.hovered();
         hovered.map(|(h, _)| h.normalized.clone())
     })
 }
@@ -370,11 +370,11 @@ fn suggest_emoji_opens_the_bar_for_a_word_that_is_not_lit(cx: &mut TestAppContex
     let (pinned, glyphs) = app.read_with(vcx, |app, _| {
         let ui = &app.composer_ui.emoji_words;
         let glyphs: Vec<String> = ui
-            .hovered
-            .iter()
+            .hovered()
+            .into_iter()
             .flat_map(|(_, items)| items.iter().map(|i| i.glyph.clone()))
             .collect();
-        (ui.pinned, glyphs)
+        (ui.is_pinned(), glyphs)
     });
     assert!(pinned);
     assert_eq!(glyphs.first().map(String::as_str), Some("🍕"));
@@ -382,7 +382,9 @@ fn suggest_emoji_opens_the_bar_for_a_word_that_is_not_lit(cx: &mut TestAppContex
     app.update(vcx, |app, cx| {
         app.track_word_bar(gpui_kit::point(px(5.), px(5.)), cx)
     });
-    let open = app.read_with(vcx, |app, _| app.composer_ui.emoji_words.hovered.is_some());
+    let open = app.read_with(vcx, |app, _| {
+        app.composer_ui.emoji_words.hovered().is_some()
+    });
     assert!(open, "a bar asked for stays open");
     // It picks into the word.
     vcx.update(|window, cx| app.update(cx, |app, cx| app.pick_word_emoji(0, window, cx)));
@@ -404,7 +406,7 @@ fn turning_suggestions_off_from_the_menu_says_where_to_turn_them_on(cx: &mut Tes
     assert!(lit(&app, vcx).is_empty());
     let (hovered, note) = app.read_with(vcx, |app, _| {
         (
-            app.composer_ui.emoji_words.hovered.is_some(),
+            app.composer_ui.emoji_words.hovered().is_some(),
             app.connection.status_note().to_string(),
         )
     });
@@ -416,7 +418,7 @@ fn turning_suggestions_off_from_the_menu_says_where_to_turn_them_on(cx: &mut Tes
 /// lookup has given up.
 #[gpui_kit::test]
 fn suggest_emoji_says_so_when_the_lookup_fails(cx: &mut TestAppContext) {
-    use crate::ui::emoji_words_ui::AskedWord;
+    use crate::ui::emoji_words_ui::WordBar;
     use quill::ids::RequestId;
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
@@ -429,12 +431,12 @@ fn suggest_emoji_says_so_when_the_lookup_fails(cx: &mut TestAppContext) {
             lookups.sent(RequestId(id), "zzzz".to_string());
             lookups.failed(RequestId(id));
         }
-        app.composer_ui.emoji_words.asked = AskedWord::Waiting {
+        app.composer_ui.emoji_words.bar = WordBar::Asking {
             range: 0..4,
             word: "zzzz".to_string(),
         };
         app.answer_asked_word(cx);
-        assert_eq!(app.composer_ui.emoji_words.asked, AskedWord::Idle);
+        assert!(matches!(app.composer_ui.emoji_words.bar, WordBar::Closed));
         assert_eq!(
             app.connection.status_note().to_string(),
             tr(keys::Q_CHAT_EMOJI_WORD_LOOKUP_FAILED)
@@ -459,7 +461,7 @@ fn a_word_bar_closed_by_the_composer_does_not_leave_the_grid_open(cx: &mut TestA
     app.update(vcx, |app, _| app.chat_prefs.highlight_emoji_words = false);
     frame(vcx);
     app.read_with(vcx, |app, _| {
-        assert!(app.composer_ui.emoji_words.hovered.is_none());
+        assert!(app.composer_ui.emoji_words.hovered().is_none());
         assert!(!app.composer_ui.suggest.bar.expanded, "closed with its bar");
     });
     app.update(vcx, |app, _| app.chat_prefs.highlight_emoji_words = true);

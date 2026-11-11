@@ -727,15 +727,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.stickers.gifs.open = true;
-        if self.session.stickers.gifs.failed {
-            self.session.stickers.gifs.loaded = false;
+        self.session.stickers.gifs.saved_retry();
+        if self.session.stickers.gifs.search_failed() {
+            self.session.stickers.gifs.search_asked();
         }
-        if self.session.stickers.gifs.search_mode && self.session.stickers.gifs.search_failed {
-            self.session.stickers.gifs.search_loading = true;
-        }
-        self.session.stickers.gifs.failed = false;
         let saved = self.maybe_refresh_saved_animations()?;
-        if self.session.stickers.gifs.search_mode && self.session.stickers.gifs.search_loading {
+        if self.session.stickers.gifs.search_loading() {
             Ok(self.maybe_search_gifs(false)?.or(saved))
         } else {
             Ok(saved)
@@ -834,11 +831,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        let needs = !self.session.stickers.gifs.loaded || self.session.stickers.gifs.stale;
+        let needs = !self.session.stickers.gifs.loaded() || self.session.stickers.gifs.stale;
         if !needs {
             return Ok(None);
         }
-        self.session.stickers.gifs.loading = true;
+        self.session.stickers.gifs.saved_asked();
         self.session.stickers.gifs.stale = false;
         let extra = self
             .session
@@ -847,9 +844,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.stickers.gifs.loading = false;
-                self.session.stickers.gifs.loaded = true;
-                self.session.stickers.gifs.failed = true;
+                self.session.stickers.gifs.saved_failed();
                 Err(err)
             }
         }

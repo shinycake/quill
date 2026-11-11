@@ -28,6 +28,7 @@ mod folder_followups;
 mod folder_order;
 mod forum_column;
 mod forum_saved;
+mod gif_panel_stages;
 mod group_admin;
 mod group_bot_commands;
 mod groups;

@@ -152,14 +152,14 @@ impl QuillApp {
         self.forget_storage_sliders();
         self.settings.storage_confirm = None;
         if let Some(live) = self.live.as_mut() {
-            live.driver.session.settings.storage_freed = None;
+            live.driver.session.settings.reset_storage_freed();
             let _ = live.driver.maybe_fetch_storage_statistics();
             let _ = live.driver.fetch_auto_download_presets();
             let _ = live.driver.fetch_network_statistics();
         }
         self.privacy.extra.network_reset = Default::default();
         if let Some(demo) = self.demo_session.as_mut() {
-            demo.settings.storage_freed = None;
+            demo.settings.reset_storage_freed();
             if demo.settings.privacy_data.network.data().is_none() {
                 demo.settings.privacy_data.network =
                     quill::state::fetch::Fetch::Ready(super::data_extra::demo_network_usage());
@@ -260,6 +260,9 @@ impl QuillApp {
         self.forget_storage_sliders();
         if let Some(session) = self.session_mut() {
             session.settings.data_storage_error = None;
+            if session.settings.storage_clear.failed().is_some() {
+                session.settings.storage_clear = quill::state::StorageClear::Idle;
+            }
         }
     }
 
@@ -280,10 +283,12 @@ impl QuillApp {
         let session = self.session();
         let mut body = div().flex().flex_col().gap_4();
         // Failures surface here, never as toasts (the S3 pattern).
-        if let Some(err) = session
-            .as_ref()
-            .and_then(|s| s.settings.data_storage_error.clone())
-        {
+        if let Some(err) = session.as_ref().and_then(|s| {
+            s.settings
+                .data_storage_error
+                .clone()
+                .or_else(|| s.settings.storage_clear.failed().map(str::to_string))
+        }) {
             body = body.child(
                 div()
                     .text_xs()

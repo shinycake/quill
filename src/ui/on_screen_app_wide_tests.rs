@@ -4,7 +4,6 @@
 //! listing, and the status line a restart set.
 
 use crate::ui::app::QuillApp;
-use crate::ui::group_call_stream_layout::StreamJoinIntent;
 use crate::ui::on_screen::OnScreen;
 use crate::ui::screen_chooser_demo::DemoScreens;
 use crate::ui::screen_share_state::ScreenFor;
@@ -130,8 +129,7 @@ fn call_ids_and_video_chat_boxes_do_not_carry_over(cx: &mut TestAppContext) {
         app.call_screen.ended_at = Some((1, std::time::Instant::now()));
         app.group_call_screen.window_closed_by_user = Some(1);
         app.group_call_screen.settings_open = true;
-        app.group_call_screen.stream_join = Some((StreamJoinIntent::Call(1), None));
-        app.group_call_screen.stream_joining = Some(
+        app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
             crate::ui::group_call_state::StreamJoining::new(1, gpui_kit::Task::ready(())),
         );
         app.group_call_screen
@@ -146,7 +144,10 @@ fn call_ids_and_video_chat_boxes_do_not_carry_over(cx: &mut TestAppContext) {
         let group = &app.group_call_screen;
         assert_eq!(group.window_closed_by_user, None);
         assert!(!group.settings_open);
-        assert!(group.stream_join.is_none(), "no join waits for B's call 1");
+        assert!(
+            group.stream_wish().is_none(),
+            "no join waits for B's call 1"
+        );
         assert_eq!(group.joining_call(), None, "no Join button waits for it");
         assert_eq!(group.composer.read(cx).value().to_string(), "");
     });

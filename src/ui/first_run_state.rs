@@ -20,13 +20,12 @@ pub(super) const CARD_IN: Duration = Duration::from_millis(320);
 
 #[derive(Default)]
 pub(super) enum FirstRun {
-    /// The intro clip over the whole window, then the notice. `intro` is
-    /// `None` while the clip is `writing` out for the player (or was
-    /// skipped before it was), and when it could not open (or animations
-    /// are off): the notice then shows at once.
+    /// The intro clip over the whole window, then the notice. The clip is
+    /// `Writing` out for the player (or was skipped before it was), and
+    /// `Absent` when it could not open (or animations are off): the notice
+    /// then shows at once.
     Welcome {
-        intro: Option<VideoPlayer>,
-        writing: bool,
+        clip: Clip,
         opened_at: Instant,
         outro: Option<Outro>,
     },
@@ -36,6 +35,15 @@ pub(super) enum FirstRun {
     /// Finished, or never needed: the sign-in screen shows.
     #[default]
     Done,
+}
+
+/// The intro clip's player. `Writing` leaves on the answer (`Ready` or
+/// `Absent`); the open timeout and a skip cover a write that never answers
+/// by running the way out on black.
+pub(super) enum Clip {
+    Writing,
+    Ready(VideoPlayer),
+    Absent,
 }
 
 /// The way out of the clip, once it started.
@@ -74,8 +82,7 @@ impl IntroLook {
 impl FirstRun {
     pub(super) fn welcome(intro: Option<VideoPlayer>, now: Instant) -> Self {
         Self::Welcome {
-            intro,
-            writing: false,
+            clip: intro.map_or(Clip::Absent, Clip::Ready),
             opened_at: now,
             outro: None,
         }
@@ -85,8 +92,7 @@ impl FirstRun {
     /// [`Self::intro_written`] hands it the player.
     pub(super) fn writing_intro(now: Instant) -> Self {
         Self::Welcome {
-            intro: None,
-            writing: true,
+            clip: Clip::Writing,
             opened_at: now,
             outro: None,
         }
@@ -97,14 +103,12 @@ impl FirstRun {
     /// black without it.
     pub(super) fn intro_written(&mut self, player: Option<VideoPlayer>) {
         if let Self::Welcome {
-            intro,
-            writing: writing @ true,
+            clip: clip @ Clip::Writing,
             outro: None,
             ..
         } = self
         {
-            *writing = false;
-            *intro = player;
+            *clip = player.map_or(Clip::Absent, Clip::Ready);
         }
     }
 
@@ -113,7 +117,7 @@ impl FirstRun {
         matches!(
             self,
             Self::Welcome {
-                writing: true,
+                clip: Clip::Writing,
                 outro: None,
                 ..
             }
@@ -124,10 +128,13 @@ impl FirstRun {
     fn intro_transport(&self) -> Option<Transport> {
         match self {
             Self::Welcome {
-                intro: Some(player),
+                clip: Clip::Ready(player),
                 ..
             } => Some(player.transport()),
-            Self::Welcome { writing: true, .. } => Some(Transport {
+            Self::Welcome {
+                clip: Clip::Writing,
+                ..
+            } => Some(Transport {
                 state: PlayState::Opening,
                 position: 0.,
                 duration: None,
@@ -170,10 +177,9 @@ impl FirstRun {
             return;
         };
         let Self::Welcome {
-            intro,
+            clip,
             opened_at,
             outro,
-            ..
         } = self
         else {
             return;
@@ -181,7 +187,7 @@ impl FirstRun {
         if outro.is_none() {
             *outro = outro_start(&transport, *opened_at, now);
         }
-        if let Some(player) = intro
+        if let Clip::Ready(player) = clip
             && outro.is_some_and(|o| sunk(o, now) >= 1.)
             && player.wants_play()
         {
@@ -203,7 +209,7 @@ impl FirstRun {
     pub(super) fn intro_player(&self) -> Option<&VideoPlayer> {
         match self {
             Self::Welcome {
-                intro: Some(player),
+                clip: Clip::Ready(player),
                 ..
             } => Some(player),
             _ => None,

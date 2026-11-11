@@ -614,7 +614,7 @@ impl QuillApp {
         });
         let share = self.folders.share.as_ref().and_then(|d| match d.op {
             LinkOp::Saving(request) => Some(request),
-            LinkOp::Idle => None,
+            LinkOp::Idle | LinkOp::Failed(_) => None,
         });
         let editor = self.folders.editor.as_ref().and_then(|d| match d.load {
             FolderLoad::Saving(request) => Some(request),

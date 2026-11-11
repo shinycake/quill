@@ -188,7 +188,7 @@ impl Session {
                     && !program.url.is_empty()
                     && !program.is_disconnected
                 {
-                    earn.link_box = Some(LinkBox { program, recipient });
+                    earn.link_box = Some(LinkBox::new(program, recipient));
                     earn.recipients.drop_parked();
                 } else {
                     self.open_join_box_after_resolve(bot_user_id, recipient, choose_recipient);
@@ -214,7 +214,7 @@ impl Session {
                     }
                 }
                 if asked || earn.join_box.is_none() {
-                    earn.link_box = Some(LinkBox { program, recipient });
+                    earn.link_box = Some(LinkBox::new(program, recipient));
                 }
             }
             (EarnPayload::Connected(program), Some(EarnPurpose::Disconnect)) => {

@@ -382,12 +382,6 @@ impl QuillApp {
         }
         self.join_upkeep();
         self.earn_balances_upkeep();
-        let link_open = self.earn_state().is_some_and(|e| e.link_box.is_some());
-        match (link_open, self.earn.link_shown) {
-            (true, None) => self.earn.link_shown = Some(std::time::Instant::now()),
-            (false, Some(_)) => self.earn.link_shown = None,
-            _ => {}
-        }
     }
 
     /// The content of an earn page under the layer's top bar: the page,

@@ -65,12 +65,53 @@ impl MarketBox {
 /// The bid slider of the open bid box.
 pub(crate) struct BidSliderUi {
     pub(super) gift_id: i64,
-    pub(super) state: Entity<SliderState>,
-    /// The amount the slider (or the custom field) chose.
-    pub(super) chosen: i64,
+    state: Entity<SliderState>,
+    /// The amount the slider (or the custom field) chose. The slider shows
+    /// it on a coarser track, so the amount is kept here and only
+    /// [`Self::slider_moved`] and [`Self::choose`] write it, the second also
+    /// moving the track to match.
+    chosen: i64,
     /// The `(min, max)` the track was built for; rebuilt when a new bid
     /// moves them.
     pub(super) bounds: (i64, i64),
+}
+
+impl BidSliderUi {
+    pub(super) fn new(
+        gift_id: i64,
+        state: Entity<SliderState>,
+        chosen: i64,
+        bounds: (i64, i64),
+    ) -> Self {
+        Self {
+            gift_id,
+            state,
+            chosen,
+            bounds,
+        }
+    }
+
+    pub(super) fn chosen(&self) -> i64 {
+        self.chosen
+    }
+
+    /// The track, for the box to draw.
+    pub(super) fn track(&self) -> &Entity<SliderState> {
+        &self.state
+    }
+
+    /// The person moved the track: the amount follows it.
+    pub(super) fn slider_moved(&mut self, amount: i64) {
+        self.chosen = amount;
+    }
+
+    /// Another control chose `amount` (the custom field, the minimum-bid
+    /// block): the amount and the track move together, at `step`.
+    pub(super) fn choose(&mut self, amount: i64, step: f32, window: &mut Window, cx: &mut App) {
+        self.chosen = amount;
+        self.state
+            .update(cx, |slider, cx| slider.set_value(step, window, cx));
+    }
 }
 
 /// "Custom Amount" for a bid.

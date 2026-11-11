@@ -520,6 +520,35 @@ impl Resolve {
 pub struct LinkBox {
     pub program: ConnectedProgram,
     pub recipient: EarnPeer,
+    /// Whether the box's icon animation has started. It lives with the
+    /// box, so a box that goes away (a layer drop, another account) takes
+    /// it along and the next one plays from the start.
+    pub icon: LinkIcon,
+}
+
+/// The link icon's one-time play: waiting for the first draw, then
+/// running from the instant that draw happened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkIcon {
+    Unseen,
+    Playing { since: std::time::Instant },
+}
+
+impl LinkBox {
+    pub fn new(program: ConnectedProgram, recipient: EarnPeer) -> Self {
+        Self {
+            program,
+            recipient,
+            icon: LinkIcon::Unseen,
+        }
+    }
+
+    /// The first draw starts the play; later draws keep its start.
+    pub fn note_drawn(&mut self, now: std::time::Instant) {
+        if self.icon == LinkIcon::Unseen {
+            self.icon = LinkIcon::Playing { since: now };
+        }
+    }
 }
 
 /// The "Revoke Link" confirmation of a joined program.
@@ -543,17 +572,29 @@ pub enum Recipients {
     #[default]
     Unasked,
     /// The channel and bot lists are out; `found` is what answered so far.
+    /// `join` is a join box that opens once the recipients arrive; it goes
+    /// with the stage (a failure, the profile it came from closing).
     Loading {
         waiting: Vec<crate::ids::RequestId>,
         found: Vec<EarnPeer>,
-        /// A join box that opens once the lists answer. It goes with the
-        /// stage: a failed send, a layer left or a switch drops it.
         join: Option<JoinBox>,
     },
     Ready(Vec<EarnPeer>),
     /// A send failed. Answers of the abandoned attempt are dropped and the
     /// next ask starts over.
     Failed,
+}
+
+impl EarnState {
+    /// Open `join` now, or park it on the recipients when they are still
+    /// coming (a join box that picks a recipient needs the list).
+    pub fn open_or_park_join(&mut self, join: JoinBox) {
+        if !join.choose_recipient {
+            self.join_box = Some(join);
+        } else if let Some(open) = self.recipients.park(join) {
+            self.join_box = Some(open);
+        }
+    }
 }
 
 impl Recipients {

@@ -151,12 +151,12 @@ impl QuillApp {
     /// frame (the input needs `&mut Window`, which topic and thread
     /// switches triggered from menus don't have).
     pub(super) fn request_draft_restore(&mut self) {
-        self.composer_ui.draft_restore_pending = true;
+        self.composer_ui.draft_load.request_restore();
     }
 
     /// Frame upkeep: run a requested restore.
     pub(super) fn restore_draft_if_pending(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if std::mem::take(&mut self.composer_ui.draft_restore_pending) {
+        if self.composer_ui.draft_load.take_restore() {
             self.restore_open_draft(window, cx);
         }
     }
@@ -195,8 +195,8 @@ impl QuillApp {
         // link put there stays.
         let previous = self
             .composer_ui
-            .shown_draft
-            .replace((chat_id, topic, draft.clone()));
+            .draft_load
+            .replace_shown((chat_id, topic, draft.clone()));
         if held {
             return;
         }
@@ -331,9 +331,10 @@ impl QuillApp {
         let Some((draft, preview)) = restored else {
             return;
         };
-        self.composer_ui.shown_draft = self
+        let shown = self
             .session()
             .map(|session| (chat_id, session.open_draft_topic(chat_id), draft.clone()));
+        self.composer_ui.draft_load.set_shown(shown);
         let text = draft
             .as_ref()
             .map(|draft| draft.text.clone())

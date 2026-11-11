@@ -415,10 +415,12 @@ impl QuillApp {
                         state.stage.finish(SetStage::Idle);
                         this.switch_emoji_set(id, true, cx);
                     }
-                    Err(message) if message == "Cancelled." => {
+                    Err(quill::emoji_sets_style::download::DownloadError::Cancelled) => {
                         state.stage.finish(SetStage::Idle);
                     }
-                    Err(message) => state.stage.finish(SetStage::Failed { id, why: message }),
+                    Err(quill::emoji_sets_style::download::DownloadError::Message(why)) => {
+                        state.stage.finish(SetStage::Failed { id, why })
+                    }
                 }
                 cx.notify();
             });

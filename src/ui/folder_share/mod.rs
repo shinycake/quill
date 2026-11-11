@@ -192,8 +192,9 @@ impl QuillApp {
                 link: link.map(|l| l.invite_link),
             };
             dialog.selected = selected;
-            dialog.error = None;
-            dialog.confirm_delete = None;
+            if matches!(dialog.op, LinkOp::Failed(_)) {
+                dialog.op = LinkOp::Idle;
+            }
             dialog
                 .name_input
                 .update(cx, |input, cx| input.set_value(name, window, cx));
@@ -216,7 +217,7 @@ impl QuillApp {
         };
         let fail = |this: &mut Self, text: &str| {
             if let Some(dialog) = this.folders.share.as_mut() {
-                dialog.error = Some(text.to_string());
+                dialog.op = LinkOp::Failed(text.to_string());
             }
         };
         if name.chars().count() > LINK_NAME_MAX {
@@ -248,7 +249,7 @@ impl QuillApp {
                 // Screenshot demo: apply locally.
                 self.apply_demo_folder_link(folder_id, link.clone(), name.clone(), chat_ids);
                 if let Some(dialog) = self.folders.share.as_mut() {
-                    dialog.view = FolderShareView::List;
+                    dialog.view = FolderShareView::list();
                 }
                 Ok(None)
             }
@@ -258,7 +259,6 @@ impl QuillApp {
             Ok(Some(request)) => {
                 if let Some(dialog) = self.folders.share.as_mut() {
                     dialog.op = LinkOp::Saving(request);
-                    dialog.error = None;
                 }
             }
             Ok(None) => {}
@@ -336,12 +336,14 @@ impl QuillApp {
             }
         };
         if let Some(dialog) = self.folders.share.as_mut() {
-            dialog.confirm_delete = None;
+            if let FolderShareView::List { confirm_delete, .. } = &mut dialog.view {
+                *confirm_delete = None;
+            }
             match result {
                 Ok(Some(request)) => dialog.op = LinkOp::Saving(request),
                 Ok(None) => {}
                 Err(err) => {
-                    dialog.error = Some(user_error_for(
+                    dialog.op = LinkOp::Failed(user_error_for(
                         keys::Q_NOTES_FAILED_DELETE_FOLDER_LINK,
                         &err,
                     ));
@@ -355,10 +357,10 @@ impl QuillApp {
         cx.write_to_clipboard(ClipboardItem::new_string(link.to_string()));
         if let Some(dialog) = self.folders.share.as_mut() {
             let at = std::time::Instant::now();
-            dialog.copied = CopyMark::Copied {
+            dialog.mark_copied(CopyMark::Copied {
                 link: link.to_string(),
                 at,
-            };
+            });
             // The check mark goes back to the copy icon on its own. The
             // box is the screen's: a timer from an account switched away
             // does not touch the next account's box.
@@ -366,9 +368,9 @@ impl QuillApp {
                 cx.background_executor().timer(COPIED_MARK).await;
                 let _ = this.update(cx, |this, cx| {
                     if let Some(dialog) = this.folders.share.as_mut()
-                        && matches!(&dialog.copied, CopyMark::Copied { at: now, .. } if *now == at)
+                        && matches!(dialog.copy_mark(), CopyMark::Copied { at: now, .. } if *now == at)
                     {
-                        dialog.copied = CopyMark::Idle;
+                        dialog.mark_copied(CopyMark::Idle);
                         cx.notify();
                     }
                 });
@@ -384,7 +386,8 @@ impl QuillApp {
     /// the error shows in the box when it failed. Returns whether anything
     /// changed.
     pub(super) fn settle_folder_share(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(LinkOp::Saving(request)) = self.folders.share.as_ref().map(|d| d.op) else {
+        let Some(LinkOp::Saving(request)) = self.folders.share.as_ref().map(|d| d.op.clone())
+        else {
             return false;
         };
         let answer = self
@@ -394,18 +397,17 @@ impl QuillApp {
             return false;
         };
         if let Some(dialog) = self.folders.share.as_mut() {
-            dialog.op = LinkOp::Idle;
-            match answer {
-                quill::state::DialogAnswer::Failed(line) => dialog.error = Some(line),
+            dialog.op = match answer {
+                quill::state::DialogAnswer::Failed(line) => LinkOp::Failed(line),
                 // The limit box is up; no line on top of it.
-                quill::state::DialogAnswer::LimitHit => dialog.error = None,
+                quill::state::DialogAnswer::LimitHit => LinkOp::Idle,
                 quill::state::DialogAnswer::Done | quill::state::DialogAnswer::Checked(_) => {
                     if matches!(dialog.view, FolderShareView::Edit { .. }) {
-                        dialog.view = FolderShareView::List;
+                        dialog.view = FolderShareView::list();
                     }
-                    dialog.error = None;
+                    LinkOp::Idle
                 }
-            }
+            };
         }
         cx.notify();
         true
@@ -481,7 +483,7 @@ impl QuillApp {
                 .unwrap_or_default();
             let editing = matches!(state.view, FolderShareView::Edit { .. });
             let title = match &state.view {
-                FolderShareView::List => tr(keys::FILTERS_LINK).to_string(),
+                FolderShareView::List { .. } => tr(keys::FILTERS_LINK).to_string(),
                 FolderShareView::Edit { link: None } => {
                     tr(keys::Q_CHATLIST_NEW_INVITE_LINK).to_string()
                 }
@@ -535,7 +537,7 @@ impl QuillApp {
         let links_error = share.and_then(|share| share.links.error().map(str::to_owned));
         let chats_error = share.and_then(|share| share.chats.error().map(str::to_owned));
         let mut body = div().flex().flex_col().gap_3();
-        if let Some(error) = state.error.clone() {
+        if let Some(error) = state.op.error().map(str::to_owned) {
             body = body.child(
                 div()
                     .id("folder-share-error")
@@ -598,8 +600,11 @@ impl QuillApp {
                 short_link(&link.invite_link),
                 trn(keys::FILTERS_CHATS_COUNT, link.chat_ids.len())
             );
-            let confirming = state.confirm_delete.as_deref() == Some(url.as_str());
-            let copied = state.copied.is_copied(&url);
+            let confirming = matches!(
+                &state.view,
+                FolderShareView::List { confirm_delete: Some(ask), .. } if *ask == url
+            );
+            let copied = state.copy_mark().is_copied(&url);
             let copy_url = url.clone();
             let edit_link = link.clone();
             let ask_url = url.clone();
@@ -667,8 +672,11 @@ impl QuillApp {
                                 .tooltip(tr(keys::Q_CHATLIST_DELETE_LINK))
                                 .accessibility_label(tr(keys::Q_CHATLIST_DELETE_INVITE_LINK))
                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                    if let Some(dialog) = this.folders.share.as_mut() {
-                                        dialog.confirm_delete = Some(ask_url.clone());
+                                    if let Some(dialog) = this.folders.share.as_mut()
+                                        && let FolderShareView::List { confirm_delete, .. } =
+                                            &mut dialog.view
+                                    {
+                                        *confirm_delete = Some(ask_url.clone());
                                     }
                                     cx.notify();
                                 })),
@@ -692,8 +700,12 @@ impl QuillApp {
                                         .ghost()
                                         .small()
                                         .on_click(cx.listener(|this, _, _, cx| {
-                                            if let Some(dialog) = this.folders.share.as_mut() {
-                                                dialog.confirm_delete = None;
+                                            if let Some(dialog) = this.folders.share.as_mut()
+                                                && let FolderShareView::List {
+                                                    confirm_delete, ..
+                                                } = &mut dialog.view
+                                            {
+                                                *confirm_delete = None;
                                             }
                                             cx.notify();
                                         })),
@@ -753,7 +765,7 @@ impl QuillApp {
         let all_selected =
             !choices.is_empty() && choices.iter().all(|id| state.selected.contains(id));
         let mut body = div().flex().flex_col().gap_2();
-        if let Some(error) = state.error.clone() {
+        if let Some(error) = state.op.error().map(str::to_owned) {
             body = body.child(
                 div()
                     .id("folder-link-form-error")
@@ -859,8 +871,7 @@ impl QuillApp {
                     .ghost()
                     .on_click(cx.listener(|this, _, _, cx| {
                         if let Some(dialog) = this.folders.share.as_mut() {
-                            dialog.view = FolderShareView::List;
-                            dialog.error = None;
+                            dialog.view = FolderShareView::list();
                             dialog.op = LinkOp::Idle;
                         }
                         cx.notify();

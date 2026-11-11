@@ -169,15 +169,15 @@ fn the_bid_slider_sets_the_button(cx: &mut TestAppContext) {
         let _ = app.auction_bid_box(AUCTION_GIFT, cx);
         let slider = app.gift_market.slider.as_ref().expect("the slider");
         // It starts on the user's bid: nothing to raise.
-        assert_eq!(slider.chosen, 4_000);
-        slider.state.clone()
+        assert_eq!(slider.chosen(), 4_000);
+        slider.track().clone()
     });
     // Dragging to the end of the track raises to its maximum.
     slider.update(vcx, |_, cx| {
         cx.emit(SliderEvent::Change(SliderValue::Single(BID_SLIDER_STEPS)));
     });
     app.update_in(vcx, |app, window, cx| {
-        let chosen = app.gift_market.slider.as_ref().map_or(0, |ui| ui.chosen);
+        let chosen = app.gift_market.slider.as_ref().map_or(0, |ui| ui.chosen());
         assert_eq!(chosen, 30_000);
         let state = app
             .session()
@@ -190,7 +190,7 @@ fn the_bid_slider_sets_the_button(cx: &mut TestAppContext) {
         );
         // The minimum-bid block: one step above the current bid.
         app.set_bid_amount(AUCTION_GIFT, state.min_bid_for_me(), window, cx);
-        let chosen = app.gift_market.slider.as_ref().map_or(0, |ui| ui.chosen);
+        let chosen = app.gift_market.slider.as_ref().map_or(0, |ui| ui.chosen());
         assert_eq!(chosen, 4_050);
         assert_eq!(
             state.bid_action(chosen).label(state.my_stars()),

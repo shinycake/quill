@@ -88,6 +88,10 @@ pub struct CallsState {
     /// `createVideoChat` requests the server refused, until the UI shows
     /// them (matched by request id).
     pub failed_creates: Vec<RequestId>,
+    /// `createVideoChat` requests the server answered with the new call,
+    /// until the UI lets go of them (matched by request id), so a box that
+    /// waits on its create ends the wait on either answer.
+    pub answered_creates: Vec<RequestId>,
     /// Phase C3a: group-call ids whose full `groupCall` still needs a
     /// `getGroupCall` fetch (queued from the `createVideoChat`
     /// `groupCallId` answer). Drained by the driver.
@@ -219,6 +223,7 @@ impl CallsState {
             rtmp_start: None,
             create_join_as: None,
             failed_creates: Vec::new(),
+            answered_creates: Vec::new(),
             group_call_fetch_queue: Vec::new(),
             pending_live_story_join: None,
             call_link: None,

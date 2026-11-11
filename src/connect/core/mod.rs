@@ -832,12 +832,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.cancel_gif_search_requests();
             self.session.stickers.gifs.search_results.clear();
             self.session.stickers.gifs.search_next_offset.clear();
-            self.session.stickers.gifs.search_loading = self.session.stickers.gifs.search_mode;
+            self.session.stickers.gifs.search_asked();
         }
         if self.chats_path_active()
             && self.session.stickers.gifs.open
-            && self.session.stickers.gifs.search_mode
-            && self.session.stickers.gifs.search_loading
+            && self.session.stickers.gifs.search_loading()
         {
             self.maybe_search_gifs(false)?;
         }

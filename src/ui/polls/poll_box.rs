@@ -72,7 +72,8 @@ impl QuillApp {
                     let escape_app = body_app.clone();
                     let body = body_app.update(cx, |this, cx| {
                         let question = this.chat_ui.poll_dialog.as_mut().and_then(|dialog| {
-                            std::mem::take(&mut dialog.focus_question)
+                            dialog
+                                .take_focus_question()
                                 .then(|| dialog.question_input.clone())
                         });
                         crate::ui::dialog_focus::focus_after_mount(question, window, cx);
@@ -136,8 +137,10 @@ impl QuillApp {
 }
 
 fn keep_editing(this: &mut QuillApp, _: &mut Window, cx: &mut Context<QuillApp>) {
-    if let Some(dialog) = this.chat_ui.poll_dialog.as_mut() {
-        dialog.confirming_discard = false;
+    if let Some(dialog) = this.chat_ui.poll_dialog.as_mut()
+        && dialog.confirming_discard()
+    {
+        dialog.show_form();
     }
     cx.notify();
 }
@@ -145,7 +148,7 @@ fn keep_editing(this: &mut QuillApp, _: &mut Window, cx: &mut Context<QuillApp>)
 crate::ui::shell::register_dialogs! {
     PollDiscard => DialogSpec::new(
         2935,
-        |app| app.chat_ui.poll_dialog.as_ref().is_some_and(|d| d.confirming_discard),
+        |app| app.chat_ui.poll_dialog.as_ref().is_some_and(|d| d.confirming_discard()),
         QuillApp::build_poll_discard_dialog,
     )
     .per_window()

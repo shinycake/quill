@@ -127,7 +127,7 @@ fn esc_in_the_video_chat_window_closes_its_boxes_topmost_first(cx: &mut TestAppC
     let (app, mut vcx) = new_app(cx);
     open_boxes(&app, &mut vcx);
     vcx.run_until_parked();
-    let Some(handle) = app.read_with(&vcx, |app, _| app.group_call.window) else {
+    let Some(handle) = app.read_with(&vcx, |app, _| app.group_call.window.handle()) else {
         panic!("the video chat window opened");
     };
     let mut call = VisualTestContext::from_window(handle, cx);

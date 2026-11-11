@@ -34,9 +34,10 @@ impl Session {
                 self.settings.auto_download_answer = extra.map(AutoDownloadAnswer::Refused);
             }
             Some(RequestPurpose::OptimizeStorage) => {
-                self.settings.storage_clearing = false;
-                self.settings.data_storage_error =
-                    Some(format!("Couldn't clear the cache: {}", error_reason(err)));
+                self.settings.storage_clear = StorageClear::Failed(format!(
+                    "Couldn't clear the cache: {}",
+                    error_reason(err)
+                ));
             }
             Some(RequestPurpose::SetStorageOption) => {
                 self.settings.data_storage_error = Some(format!(

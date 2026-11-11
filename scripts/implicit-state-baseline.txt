@@ -30,7 +30,6 @@ ChecklistDraft::others_can_mark_tasks_as_done
 ChecklistSend::others_can_mark_tasks_as_done
 CheckoutView::sending
 Clip::busy
-ComposerUi::draft_restore_pending
 
 DestRow::saved
 DragSelect::pending
@@ -40,18 +39,13 @@ FastShareFacts::sent
 FieldResult::finished
 FirstRunPrefs::completed
 FooterMeta::pending
-GifPanel::failed
-GifPanel::loaded
-GifPanel::loading
-GifPanel::search_failed
-GifPanel::search_loading
 
 GiftValueLookup::loading
 GiftValueLookup::loading+error
 GiveawayInfoLookup::loading
 GiveawayInfoLookup::loading+error
 GiveawaySummary::finished
-GroupCallUi::window_opening
+
 HdrViewer::in_flight
 HeaderFacts::is_saved_messages
 HistoryState::load_failed
@@ -62,7 +56,6 @@ InlineMembersUi::admins_asked
 
 JoinedLines::started
 Latest::wake_pending
-LayerFade::closing
 LinuxState::failed
 LiveInput::failed
 LocalFileState::is_downloading_active

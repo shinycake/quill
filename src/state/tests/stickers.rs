@@ -98,6 +98,8 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { first_page: true }),
         None,
     );
+    with_purpose.stickers.gifs.search_begun("cat".into());
+    with_purpose.stickers.gifs.search_sent(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -118,6 +120,7 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { first_page: false }),
         None,
     );
+    with_purpose.stickers.gifs.search_sent(extra);
     apply_json(
         &mut with_purpose,
         &seq,

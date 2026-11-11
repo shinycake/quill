@@ -372,7 +372,7 @@ impl QuillApp {
 
         // A conference made with "Create Call Link" opens on its link.
         let link_open = call.conference.as_ref().is_some_and(|c| c.link_open);
-        let invite = ((self.group_call_boxes.invite_open || link_open)
+        let invite = ((self.group_call_boxes.invite_open() || link_open)
             && !self.account.passcode.is_locked())
         .then(|| {
             div()

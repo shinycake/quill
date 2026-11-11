@@ -169,27 +169,23 @@ impl Session {
                 }
             }
         }
-        if matches!(
-            pending.map(|p| p.purpose),
-            Some(
-                RequestPurpose::ResolveGifSearchBot
-                    | RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { .. })
-            )
-        ) {
-            self.stickers.gifs.search_failed = true;
-            self.stickers.gifs.search_loading = false;
+        match pending.map(|p| p.purpose) {
+            Some(RequestPurpose::ResolveGifSearchBot) => self.stickers.gifs.search_failed_now(),
+            Some(RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { .. })) => {
+                self.stickers
+                    .gifs
+                    .search_request_failed(pending.map(|p| p.id));
+            }
+            _ => {}
         }
         if matches!(
             pending.map(|p| p.purpose),
             Some(RequestPurpose::AddSavedAnimation | RequestPurpose::RemoveSavedAnimation)
         ) {
-            self.stickers.gifs.failed = true;
+            self.stickers.gifs.saved_mutation_failed();
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedAnimations) {
-            self.stickers.gifs.loading = false;
-            self.stickers.gifs.loaded = true;
-            self.stickers.gifs.failed = true;
-            self.stickers.gifs.stale = false;
+            self.stickers.gifs.saved_failed();
         }
     }
 }

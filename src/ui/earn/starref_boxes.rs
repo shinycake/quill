@@ -631,9 +631,16 @@ impl QuillApp {
     /// a quarter turn and settles with a small overshoot (tdesktop plays
     /// the `starref_link` animation once in `CreateLinkIcon`).
     fn link_icon_motion(&self, cx: &mut Context<Self>) -> Transformation {
-        let elapsed = self.earn.link_shown.map_or(LINK_PLAY, |since| {
-            crate::ui::motion::elapsed_since(since, Instant::now())
-        });
+        let elapsed = match self
+            .earn_state()
+            .and_then(|e| e.link_box.as_ref())
+            .map(|l| l.icon)
+        {
+            Some(LinkIcon::Playing { since }) => {
+                crate::ui::motion::elapsed_since(since, Instant::now())
+            }
+            Some(LinkIcon::Unseen) | None => LINK_PLAY,
+        };
         let t = if crate::ui::motion::interface_animations_off() {
             1.
         } else {
@@ -659,10 +666,16 @@ impl QuillApp {
                 this.close_link_box(cx);
             });
         app.update(cx, |this, cx| {
-            let Some(session) = this.session() else {
+            let Some(link) = this
+                .session()
+                .and_then(|session| session.payments.earn.link_box.clone())
+            else {
                 return dialog.on_close(on_close);
             };
-            let Some(link) = session.payments.earn.link_box.clone() else {
+            if let Some(open) = this.earn_mut().and_then(|e| e.link_box.as_mut()) {
+                open.note_drawn(Instant::now());
+            }
+            let Some(session) = this.session() else {
                 return dialog.on_close(on_close);
             };
             let bot = EarnPeer::User(link.program.bot_user_id);

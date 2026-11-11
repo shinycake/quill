@@ -74,7 +74,7 @@ pub(super) fn open_stream(
     });
     settle(main);
     let window = app
-        .read_with(main, |app, _| app.group_call.window)
+        .read_with(main, |app, _| app.group_call.window.handle())
         .expect("the stream window opens");
     let mut stream = VisualTestContext::from_window(window, cx);
     settle(&mut stream);
@@ -154,7 +154,10 @@ fn a_stream_pip_shows_the_live_badge_and_no_scrubber(cx: &mut TestAppContext) {
         let pip = view.read(cx);
         assert!(pip.is_live());
         assert!(pip.player().is_some_and(|own| own.same_as(&player)));
-        assert!(app.group_call.window.is_none(), "the stream window closed");
+        assert!(
+            app.group_call.window.handle().is_none(),
+            "the stream window closed"
+        );
         let call = app
             .session()
             .and_then(|s| s.calls.active_group_call.as_ref())
@@ -203,7 +206,7 @@ fn enlarge_goes_back_to_the_stream_window_with_the_same_player(cx: &mut TestAppC
     pip.run_until_parked();
     settle(main);
     let window = app
-        .read_with(main, |app, _| app.group_call.window)
+        .read_with(main, |app, _| app.group_call.window.handle())
         .expect("the stream window is back");
     let mut stream = VisualTestContext::from_window(window, cx);
     settle(&mut stream);
@@ -235,7 +238,10 @@ fn closing_keeps_the_call_and_lets_the_stream_go(cx: &mut TestAppContext) {
             .and_then(|s| s.calls.active_group_call.as_ref())
             .expect("the call");
         assert!(call.is_joined, "closing PiP does not leave the call");
-        assert!(app.group_call.window.is_none(), "the window stays closed");
+        assert!(
+            app.group_call.window.handle().is_none(),
+            "the window stays closed"
+        );
         assert!(app.group_call.stream.player.is_none(), "its player went");
     });
 }
@@ -275,7 +281,7 @@ fn locking_quill_closes_the_live_pip(cx: &mut TestAppContext) {
             "the lock closed the PiP, not the user"
         );
         assert!(
-            app.group_call.window.is_some(),
+            app.group_call.window.handle().is_some(),
             "the stream window comes back under the lock"
         );
     });
@@ -302,7 +308,7 @@ fn enlarge_on_another_account_closes_the_live_pip(cx: &mut TestAppContext) {
         !live_pip_open(&app, main),
         "nothing can take it back: closed"
     );
-    assert!(app.read_with(main, |app, _| app.group_call.window.is_none()));
+    assert!(app.read_with(main, |app, _| app.group_call.window.handle().is_none()));
 }
 
 #[gpui_kit::test]
@@ -344,7 +350,7 @@ fn one_sound_at_a_time_with_a_file_pip(cx: &mut TestAppContext) {
     assert!(!live_pip_open(&app, main), "the live PiP closed");
     // Another sound (a story, a voice message) closes a live PiP too.
     let mut stream_window = app
-        .read_with(main, |app, _| app.group_call.window)
+        .read_with(main, |app, _| app.group_call.window.handle())
         .map(|window| VisualTestContext::from_window(window, cx));
     if let Some(stream) = stream_window.as_mut() {
         settle(stream);
