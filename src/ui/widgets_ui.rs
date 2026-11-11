@@ -159,6 +159,8 @@ impl QuillApp {
         let change = entry.presence.leave(window, clock);
         match change {
             PresenceChange::Hid => {
+                // Off screen: no release or leave will come.
+                entry.release_pointer();
                 if let Some(runtime) = entry.lifecycle.runtime() {
                     runtime.set_visible(false);
                     runtime.trim();
@@ -251,10 +253,7 @@ impl QuillApp {
             });
             if entry.identity.as_ref() != Some(&identity) {
                 // New content: start over.
-                entry.lifecycle = Lifecycle::Idle;
-                entry.crashes = 0;
-                entry.polled = None;
-                entry.identity = Some(identity);
+                entry.replace_content(identity, initial_height(fixed_height, entry.stored.height));
             }
             let change = entry.presence.show(window, Showing { width, view });
             let came_back = change == PresenceChange::CameBack;
@@ -410,13 +409,15 @@ impl QuillApp {
                 ChatKind::Unknown => "",
             });
         let session_area = self.widgets.session.get(&key).cloned().unwrap_or_default();
-        // A frame with device pixels the window shows; 2× until one drew.
-        let scale = self.widgets.scale;
-        let dpr = if scale > 0.0 {
-            scale.clamp(1.0, 4.0)
-        } else {
-            2.0
-        };
+        // A frame with device pixels the window that shows it has: 2× until
+        // that window drew one.
+        let dpr = self
+            .widgets
+            .entries
+            .get(&key)
+            .and_then(|entry| entry.presence.owner())
+            .and_then(|window| self.widgets.scales.get(&window))
+            .map_or(2.0, |scale| scale.clamp(1.0, 4.0));
         let Some(entry) = self.widgets.entries.get_mut(&key) else {
             return;
         };
@@ -438,6 +439,7 @@ impl QuillApp {
             },
         });
         entry.queries.clear();
+        entry.release_pointer();
         entry.theme = Some((theme, background));
         entry.lifecycle = Lifecycle::Loading(Runtime::start(Launch {
             html: content.html,
@@ -553,6 +555,7 @@ impl QuillApp {
             RuntimeEvent::Stopped(reason) | RuntimeEvent::Failed(reason) => {
                 if let Some(entry) = self.widgets.entries.get_mut(&key) {
                     entry.wants_frames = false;
+                    entry.release_pointer();
                     entry.crashes = entry.crashes.saturating_add(1);
                     entry.lifecycle = if entry.frame.is_some() {
                         Lifecycle::Stopped { reason }

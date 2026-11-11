@@ -152,3 +152,15 @@ fn a_huge_blur_costs_no_more_than_the_widest_one() {
     effects::blur(&mut widest, effects::MAX_BLUR_SIGMA);
     assert_eq!(huge.data(), widest.data());
 }
+
+#[test]
+fn a_huge_canvas_read_is_refused_without_overflow() {
+    let canvases = crate::ui::widget_runtime::canvas::Canvases::default();
+    let mut out = [0u8; 16];
+    assert!(!canvases.read(1, 0, 0, i32::MAX, i32::MAX, &mut out));
+    assert!(!canvases.read(1, 0, 0, 5000, 5000, &mut out));
+    assert!(
+        canvases.read(1, 0, 0, 2, 2, &mut out),
+        "a small read still works"
+    );
+}

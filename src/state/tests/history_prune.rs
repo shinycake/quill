@@ -929,3 +929,26 @@ fn a_cache_only_delete_in_an_unknown_chat_creates_no_history() {
     let closed_after: Vec<ChatId> = session.history_pruning.closed_chats().collect();
     assert_eq!(closed_after, closed_before);
 }
+
+#[test]
+fn a_translation_job_whose_request_is_gone_fails_and_frees_its_place() {
+    let (mut session, _sink) = session();
+    let target = |message_id| TranslateTarget::Message {
+        chat_id: 1,
+        message_id,
+    };
+    let (lost, lost_request) = session.begin_translation(target(5), "en", Some(ChatId(1)));
+    let (live, _live_request) = session.begin_translation(target(6), "en", Some(ChatId(1)));
+    // The first request left without an answer (a restarted client).
+    session.requests.take(lost_request);
+    session.fail_orphaned_translations();
+    assert!(!session.messages.translate.jobs.contains_key(&lost));
+    assert!(matches!(
+        session.message_translation(ChatId(1), MessageId(5), "en"),
+        Some(Translation::Failed(_))
+    ));
+    assert!(
+        session.messages.translate.jobs.contains_key(&live),
+        "a job still asking keeps its place"
+    );
+}

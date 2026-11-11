@@ -440,6 +440,9 @@ impl QuillApp {
         let display = window.display(cx).map(|display| u64::from(display.id()));
         sticker_player::note_display(Some(chat), display, window, cx);
         self.sticker_frame_starts(cx);
+        self.widgets
+            .scales
+            .insert(Some(chat), window.scale_factor());
         self.widgets_frame_start(Some(chat), cx);
         images.update(cx, |images, cx| {
             images.begin_window_frame(draw, window, cx);

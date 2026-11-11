@@ -124,6 +124,8 @@ impl QuillApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The info card belongs to the thread that showed it.
+        self.chat_ui.thread_info_open = false;
         // The composer still belongs to the chat (or topic) the thread is
         // opened from: save it there before TDLib resolves the thread.
         self.flush_leaving_draft(cx);
@@ -238,6 +240,7 @@ impl QuillApp {
 
     /// Back to where the thread was opened from.
     pub(super) fn leave_thread_view(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.chat_ui.thread_info_open = false;
         let Some(live) = self.live.as_mut() else {
             if let Some(session) = self.demo_session.as_mut() {
                 session.close_thread();
@@ -438,8 +441,14 @@ impl QuillApp {
                             Button::new("thread-pane-retry")
                                 .label(tr(keys::Q_OPS_RETRY))
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    if let Some(live) = this.live.as_mut() {
-                                        let _ = live.driver.retry_thread();
+                                    let sent = this
+                                        .live
+                                        .as_mut()
+                                        .map(|live| live.driver.retry_thread().is_ok());
+                                    if sent == Some(false) {
+                                        this.set_note(StatusNote::error(tr(
+                                            keys::Q_OPS_COULD_NOT_OPEN_COMMENTS,
+                                        )));
                                     }
                                     cx.notify();
                                 })),

@@ -5464,3 +5464,59 @@ land and the typed form was gone.
 - **Skipped.** 13-069: `AgentUi::pick_account` already resets the activity
   filter wherever `picked` changes, with a test
   (`picking_another_account_resets_the_activity_filter`).
+
+### Sweep fixes (s4-messages-3)
+
+Thirty-four minor entries; each was proved against the integration branch first.
+
+- **Stages with an answer.** The Replies "Block" box stays as `Submitting`
+  (`RepliesBlockStage`, carrying the request id) until the answer: ok closes
+  it and queues the "blocked" note, an error gives the choices back
+  (11-p4-011). "Load full message" is one `Fetch<()>` per `ChatMessage` in
+  the session: loading from the send, removed by the answer, `Failed` by the
+  error, and the button waits while it loads (11-p4-012). A quick reply's
+  text is held as `TextSave::Sending` with its request; an answered refusal
+  puts the text and its edit back in the field (12-061). `mask_set_change_pending`
+  is keyed by set, so one Add disables its own row only (13-013).
+- **Answers matched to what asked.** A poll vote carries the option id and
+  the driver looks the index up at send time (11-p4-010). A file picked for a
+  poll option finds its slot by `OptionAttach::id`, not by row index (12-004).
+  A sticker-set editor and a selection translation say goodbye through
+  `Farewell`, so the encode stops and the job leaves the old session
+  (13-008, 13-164). The report's details field is emptied where the flow
+  ends, `close_message_report` (11-p3-008).
+- **One place for a close.** Every message-menu close goes through
+  `close_message_menu` (it also resets the reaction strip's request);
+  `scripts/single_writers.py` rejects a bare `message_ui.menu = None`
+  (11-p4-006).
+- **Lost answers.** A translation job whose request is gone fails, so it no
+  longer holds one of the 20 places (13-167); a widget public-data poll is
+  swept like the other lookups and answers "poll again" (14-057); a retry of
+  a failed thread open keeps the failed pane when it cannot be sent, and says
+  so (13-107). Mini-app requests the bridge refuses (popup, custom method,
+  clipboard read) get their failure reply with the id that asked; a request
+  id over 64 characters is refused, not cut (14-077, 14-078).
+- **Widgets.** A press or hover is released when the widget goes off screen,
+  stops, fails or restarts; new content replaces the entry's content-bound
+  part whole (`replace_content`); a widget starts at the scale of the window
+  that shows it (`WidgetsUi::scales`); canvas reads and puts check their size
+  (14-046, 14-051, 14-058, 14-056, 14-047).
+- **Notifications.** A preview that has to download plays only if it finishes
+  within `SOUND_PREVIEW_WINDOW` of the press (11-p5-023). "Mark as read"
+  waits, queued, while locked (11-p5-025). A toast replaced in the call slot
+  is dismissed first (11-p5-022, partly). A Linux toast withdrawn while its
+  `Notify` is on the bus is closed when its id lands (`Sending`), and the
+  D-Bus connection is made again after the listener ends (11-p5-026,
+  11-p5-027).
+- **Smaller.** Element ids built from message ids use wrapping arithmetic
+  (11-p4-016); the sticker creator's refusals are toasts, not silent notes
+  (13-009); Reply in Another Chat keeps the reply when an agent may not open
+  the chat (12-073); leaving or changing a thread closes its info card
+  (13-106); the manager box puts the composer panel's tab back on close
+  (13-012, the shared open flag stays); a demo session clears the translation
+  of a chat whose bar is gone (13-166).
+- **Skipped.** 12-098: the background poll already drains
+  `take_finished_rich_html_exports` per account. 14-054: query tokens are
+  process-wide (`next_query_token`). 13-165: tdesktop toasts the hide at
+  once (the bar is optimistic here too, with `RequestRollback`), and the
+  local hidden flag is already keyed by account.

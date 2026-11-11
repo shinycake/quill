@@ -132,6 +132,9 @@ impl RequestPurpose {
                 | RequestPurpose::GetSupergroupFullInfo
                 | RequestPurpose::GetBasicGroupFullInfo
                 | RequestPurpose::GetChatMember
+                // A widget's public data poll: the widget stays "asking"
+                // until it is settled, which polls again a period later.
+                | RequestPurpose::Bots(BotsPurpose::GetWidgetPublicData)
         )
     }
 }

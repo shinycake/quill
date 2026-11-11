@@ -31,7 +31,9 @@ use quill::link_policy::{OpenDecision, open_decision};
 use quill::state::{DeepLinkAction, WebAppOpenResult, WriteAccessResult};
 use quill::telegram::envelope::{AttachChatKind, AttachmentMenuBot, ChatKind, MessageSender};
 use quill::text::LinkTarget;
-use quill::web_app::bridge::{BridgeReply, ColorSpec, WebAppEvent, parse_event};
+use quill::web_app::bridge::{
+    BridgeReply, ColorSpec, WebAppEvent, parse_event, refused_request_reply,
+};
 use quill::web_app::theme::{Rgb, ThemeParams};
 use quill::web_app::{LaunchSource, MINI_APP_TERMS_URL, WebAppLaunch, menu_items, trust};
 use quill_webview_protocol::{

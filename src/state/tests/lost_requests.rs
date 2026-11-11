@@ -170,3 +170,25 @@ fn a_swept_user_action_still_says_it_failed() {
     session.settle_lost_request(pending);
     assert!(!session.messages.message_action_note.is_empty());
 }
+
+#[test]
+fn sweeping_a_widget_public_data_poll_tells_the_widget_to_poll_again() {
+    let mut session = ready_session();
+    let (chat, message) = (ChatId(5), MessageId(9));
+    session.request_for_message(
+        RequestPurpose::Bots(BotsPurpose::GetWidgetPublicData),
+        chat,
+        message,
+    );
+
+    assert!(sweep(&mut session));
+
+    assert!(session.requests.is_empty());
+    assert!(
+        matches!(
+            session.bots.widget_answers.as_slice(),
+            [crate::message_widget::WidgetAnswer::PublicData { data: None, .. }]
+        ),
+        "the answer that returns the widget to Due"
+    );
+}

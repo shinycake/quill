@@ -435,8 +435,15 @@ impl QuillApp {
             }
             HelperEvent::WebApp { event, data } => {
                 // Unknown or malformed events are dropped, as tdesktop does.
-                if let Ok(parsed) = parse_event(&event, &data) {
-                    self.handle_web_app_event(parsed, cx);
+                match parse_event(&event, &data) {
+                    Ok(parsed) => self.handle_web_app_event(parsed, cx),
+                    // A refused request still gets its answer: the page
+                    // waits for it by the id it sent.
+                    Err(_) => {
+                        if let Some(reply) = refused_request_reply(&event, &data) {
+                            self.with_window(|window| window.emit(reply));
+                        }
+                    }
                 }
             }
             HelperEvent::Shell { event } => self.handle_shell_event(event, cx),

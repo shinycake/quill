@@ -171,3 +171,51 @@ fn a_prune_that_writes_drops_the_oldest() {
     assert!(!entries.contains_key(&key(0)));
     assert_eq!(entries.len(), 2);
 }
+
+fn entry() -> WidgetEntry {
+    WidgetEntry::new(Stored::default(), 100.0)
+}
+
+/// A press whose release cannot arrive (the widget went off screen, its
+/// runtime restarted) must not turn the next moves into a drag.
+#[test]
+fn a_released_pointer_has_no_press_or_hover_left() {
+    let mut entry = entry();
+    entry.pressed = Some(0);
+    entry.hovered = true;
+    entry.hold = true;
+    entry.release_pointer();
+    assert_eq!(
+        (entry.pressed, entry.hovered, entry.hold),
+        (None, false, false)
+    );
+}
+
+/// A bot edits the message to new HTML: nothing of the old content's
+/// picture, height or press stays on the entry.
+#[test]
+fn new_content_replaces_what_was_bound_to_the_old() {
+    let identity = |html: &str| super::Identity {
+        html: html.into(),
+        is_copy: false,
+        can_send_queries: false,
+        can_send_background_queries: false,
+    };
+    let mut entry = entry();
+    entry.identity = Some(identity("old"));
+    entry.pressed = Some(0);
+    entry.polled = Some("{}".into());
+    entry.crashes = 2;
+    entry.poll = super::Poll::Asking;
+    entry.replace_content(identity("new"), 150.0);
+    assert_eq!(
+        entry.identity.as_ref().map(|i| i.html.as_str()),
+        Some("new")
+    );
+    assert!(entry.frame.is_none() && entry.polled.is_none());
+    assert_eq!(
+        (entry.height, entry.crashes, entry.pressed),
+        (150.0, 0, None)
+    );
+    assert_eq!(entry.poll, super::Poll::Off);
+}

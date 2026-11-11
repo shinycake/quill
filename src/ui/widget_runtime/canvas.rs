@@ -175,7 +175,12 @@ impl Canvases {
         let (Ok(w), Ok(h)) = (usize::try_from(w), usize::try_from(h)) else {
             return false;
         };
-        if out.len() < w * h * 4 {
+        // A widget names the size: it must fit `out` and the pixel cap.
+        let bytes = w
+            .checked_mul(h)
+            .filter(|pixels| u64::try_from(*pixels).is_ok_and(|n| n <= MAX_PIXELS))
+            .and_then(|pixels| pixels.checked_mul(4));
+        if !bytes.is_some_and(|bytes| out.len() >= bytes) {
             return false;
         }
         out.fill(0);
@@ -463,6 +468,9 @@ fn put_image(canvas: &mut Pixmap, op: &Value) {
     ) else {
         return;
     };
+    if u64::from(w) * u64::from(h) > MAX_PIXELS || rgba.len() < (w as usize) * (h as usize) * 4 {
+        return;
+    }
     let (x, y) = (g::num(op, "x") as i64, g::num(op, "y") as i64);
     let width = i64::from(canvas.width());
     let height = i64::from(canvas.height());
