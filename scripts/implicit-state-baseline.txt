@@ -10,9 +10,6 @@ AudioEngine::start_failed
 AudioEngine::start_failed+error
 AuthState::change_number_loading
 AuthState::change_number_loading+last_auth_error
-AwardMembers::done
-AwardMembers::loading
-AwardMembers::loading+error
 Backdrops::loading
 BackendStatus::failed
 BarFacts::bot_start_pending

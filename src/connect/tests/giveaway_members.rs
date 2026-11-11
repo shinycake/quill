@@ -69,7 +69,7 @@ fn members_load_a_page_at_a_time_and_a_search_asks_the_server() {
     let list = &driver.session.payments.giveaway.award_members;
     assert_eq!(list.user_ids, vec![1, 3]);
     assert_eq!(list.offset, 3);
-    assert!(!list.done);
+    assert!(!list.is_done());
     // The next page continues where the last one ended.
     driver.load_more_award_members().unwrap().unwrap();
     let next = sent_request(&recorder, "getSupergroupMembers");
@@ -84,7 +84,7 @@ fn members_load_a_page_at_a_time_and_a_search_asks_the_server() {
     );
     let list = &driver.session.payments.giveaway.award_members;
     assert_eq!(list.user_ids, vec![1, 3, 4]);
-    assert!(list.done);
+    assert!(list.is_done());
     assert_eq!(driver.load_more_award_members().unwrap(), None);
     // A typed name is searched on the server and starts the list over.
     driver.search_award_members(ChatId(-1001), " ada ").unwrap();
@@ -133,7 +133,7 @@ fn a_chat_that_is_not_a_channel_is_refused() {
             .iter()
             .all(|j| !j.contains("getSupergroupMembers"))
     );
-    assert!(!driver.session.payments.giveaway.award_members.loading);
+    assert!(!driver.session.payments.giveaway.award_members.is_loading());
 }
 
 #[test]

@@ -457,26 +457,31 @@ fn the_members_list_pages_and_drops_older_searches() {
     let mut list = AwardMembers::default();
     assert!(!list.can_load_more());
     let first = list.restart(-100, "");
-    assert!(list.loading && !list.can_load_more());
+    assert!(list.is_loading() && !list.can_load_more());
     assert!(list.accept(first, vec![1, 2, 3], 3, 5));
-    assert_eq!((list.offset, list.total, list.done), (3, 5, false));
+    assert_eq!((list.offset, list.total, list.is_done()), (3, 5, false));
     assert!(list.can_load_more());
     let page = list.begin_page();
     assert_eq!(page, first);
     assert!(list.accept(page, vec![3, 4, 5], 3, 5));
     assert_eq!(list.user_ids, vec![1, 2, 3, 4, 5]);
-    assert!(list.done && !list.can_load_more());
+    assert!(list.is_done() && !list.can_load_more());
     // A new search starts over and an answer to the old one is dropped.
     let second = list.restart(-100, "ada");
     assert_ne!(first, second);
     assert!(list.user_ids.is_empty() && list.query == "ada");
     assert!(!list.accept(first, vec![9], 1, 1));
-    assert!(list.user_ids.is_empty() && list.loading);
+    assert!(list.user_ids.is_empty() && list.is_loading());
     list.fail(second, "boom".into());
-    assert_eq!(list.error.as_deref(), Some("boom"));
-    assert!(!list.loading);
+    assert_eq!(list.error(), Some("boom"));
+    assert!(!list.is_loading());
+    // A failed page is asked for again by the next scroll.
+    assert!(list.can_load_more());
+    let retry = list.begin_page();
+    assert!(list.is_loading() && list.error().is_none());
+    assert!(list.accept(retry, vec![7], 1, 0));
     // An empty page ends the list.
     let third = list.restart(-100, "");
     assert!(list.accept(third, Vec::new(), 0, 0));
-    assert!(list.done);
+    assert!(list.is_done());
 }

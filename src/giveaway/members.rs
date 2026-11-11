@@ -9,6 +9,23 @@
 /// Members asked for per page.
 pub const MEMBERS_PAGE: i32 = 100;
 
+/// Where the members list stands. One value, so a page cannot be loading and
+/// failed at once.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum MembersStage {
+    /// No list was started.
+    #[default]
+    Idle,
+    /// A page is in flight.
+    Loading,
+    /// The last page came and the server may have more.
+    Ready,
+    /// The last page failed; the loaded part stays and a scroll asks again.
+    Failed(String),
+    /// The last page came: nothing more to ask for.
+    Done,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AwardMembers {
     pub chat_id: i64,
@@ -18,10 +35,7 @@ pub struct AwardMembers {
     /// Members received so far, the next page's offset.
     pub offset: i32,
     pub total: i32,
-    pub loading: bool,
-    /// The last page came.
-    pub done: bool,
-    pub error: Option<String>,
+    pub stage: MembersStage,
     pub generation: u64,
 }
 
@@ -33,21 +47,38 @@ impl AwardMembers {
             chat_id,
             query: query.to_string(),
             generation,
-            loading: true,
+            stage: MembersStage::Loading,
             ..Self::default()
         };
         generation
     }
 
+    /// A page is in flight.
+    pub fn is_loading(&self) -> bool {
+        self.stage == MembersStage::Loading
+    }
+
+    /// The last page failed.
+    pub fn error(&self) -> Option<&str> {
+        match &self.stage {
+            MembersStage::Failed(reason) => Some(reason),
+            _ => None,
+        }
+    }
+
+    /// The last page came: nothing more to ask for.
+    pub fn is_done(&self) -> bool {
+        self.stage == MembersStage::Done
+    }
+
     /// Another page can be asked for.
     pub fn can_load_more(&self) -> bool {
-        self.generation > 0 && !self.loading && !self.done
+        matches!(self.stage, MembersStage::Ready | MembersStage::Failed(_))
     }
 
     /// Mark the next page as asked; returns its generation.
     pub fn begin_page(&mut self) -> u64 {
-        self.loading = true;
-        self.error = None;
+        self.stage = MembersStage::Loading;
         self.generation
     }
 
@@ -59,8 +90,6 @@ impl AwardMembers {
         if generation != self.generation {
             return false;
         }
-        self.loading = false;
-        self.error = None;
         let got = received.max(0);
         for id in ids {
             if !self.user_ids.contains(&id) {
@@ -69,15 +98,19 @@ impl AwardMembers {
         }
         self.offset = self.offset.saturating_add(got);
         self.total = total;
-        self.done = got == 0 || (total > 0 && self.offset >= total);
+        let done = got == 0 || (total > 0 && self.offset >= total);
+        self.stage = if done {
+            MembersStage::Done
+        } else {
+            MembersStage::Ready
+        };
         true
     }
 
     /// A page failed; the loaded part stays.
     pub fn fail(&mut self, generation: u64, reason: String) {
         if generation == self.generation {
-            self.loading = false;
-            self.error = Some(reason);
+            self.stage = MembersStage::Failed(reason);
         }
     }
 }

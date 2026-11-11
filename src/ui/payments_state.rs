@@ -63,7 +63,6 @@ pub(crate) struct PaymentUi {
     pub(super) grams_scroll: ScrollHandle,
     /// The list length each paged dialog last asked at on its own, so a
     /// page that never arrives cannot start a request loop.
-    pub(super) giveaway_asked: super::scroll_load::Asked,
     pub(super) subs_asked: super::scroll_load::Asked,
     pub(super) stars_asked: super::scroll_load::Asked,
     pub(super) gifts_asked: super::scroll_load::Asked,
@@ -225,7 +224,6 @@ impl PaymentUi {
             stars_scroll: ScrollHandle::new(),
             gifts_scroll: ScrollHandle::new(),
             grams_scroll: ScrollHandle::new(),
-            giveaway_asked: Default::default(),
             subs_asked: Default::default(),
             stars_asked: Default::default(),
             gifts_asked: Default::default(),
