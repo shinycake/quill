@@ -275,7 +275,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.stories.available_reactions.is_some()
+        if !self.session.stories.available_reactions.can_ask()
             || self
                 .session
                 .requests
@@ -286,6 +286,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetStoryAvailableReactions, None);
+        self.session.stories.available_reactions.begin();
+        self.session.stories.available_reactions.sent(extra);
         match self
             .sender
             .send_json(&get_story_available_reactions(extra, 10))
@@ -293,6 +295,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
+                self.session.stories.available_reactions.cancel();
                 Err(err)
             }
         }

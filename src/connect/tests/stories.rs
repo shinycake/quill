@@ -522,7 +522,7 @@ fn driver_get_story_available_reactions_dedupes_and_caches() {
                 .unwrap(),
             )
             .unwrap();
-    let cached = driver.session.stories.available_reactions.clone().unwrap();
+    let cached = driver.session.stories.available_reactions.items().to_vec();
     assert_eq!(cached.len(), 1);
     assert_eq!(
         cached[0].kind,
@@ -949,5 +949,43 @@ fn driver_b14_close_friends_hide_profile_and_share() {
     assert_eq!(v["@type"], "sendMessage");
     assert_eq!(v["input_message_content"]["@type"], "inputMessageStory");
     assert_eq!(v["input_message_content"]["story_id"], 6);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn story_reaction_options_come_only_from_the_request_that_asked() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+    let payload = |extra: &str| {
+        format!(
+            r#"{{"@type":"availableReactions","@extra":"{extra}","top_reactions":[{{"@type":"availableReaction","type":{{"@type":"reactionTypeEmoji","emoji":"❤"}},"needs_premium":false}}],"recent_reactions":[],"popular_reactions":[],"allow_custom_emoji":false,"are_tags":false,"unavailability_reason":null}}"#
+        )
+    };
+    // An answer nobody asked for is not stored.
+    driver
+        .ingest(copy_and_parse(&payload("999"), &seq, &dyn_sink).unwrap())
+        .unwrap();
+    assert!(driver.session.stories.available_reactions.items().is_empty());
+    // A refused ask is failed, and the next open asks again.
+    let extra = driver.get_story_available_reactions().unwrap().unwrap();
+    driver
+        .ingest(
+            copy_and_parse(
+                &format!(r#"{{"@type":"error","@extra":"{}","code":500,"message":"BOOM"}}"#, extra.0),
+                &seq,
+                &dyn_sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert!(driver.session.stories.available_reactions.error().is_some());
+    assert!(driver.get_story_available_reactions().unwrap().is_some());
     let _ = std::fs::remove_dir_all(&dir);
 }

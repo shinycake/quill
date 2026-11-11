@@ -160,10 +160,15 @@ impl Session {
                         popular,
                         allow_custom_emoji,
                     );
-                } else {
+                } else if let Some(pending) = pending
+                    .filter(|p| p.purpose == RequestPurpose::GetStoryAvailableReactions)
+                {
                     // Phase 9.2: `getStoryAvailableReactions` answer — the
-                    // viewer picker options.
-                    self.stories.available_reactions = Some(reactions);
+                    // viewer picker options, only from the request that
+                    // asked for them.
+                    self.stories
+                        .available_reactions
+                        .answered(Some(pending.id), reactions);
                 }
             }
             StoriesPayload::StoryInteractions { interactions } => {
