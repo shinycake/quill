@@ -82,7 +82,10 @@ fn closing_the_call_window_forgets_its_panel_view(cx: &mut TestAppContext) {
         let id = app
             .session()
             .and_then(|s| s.calls.active_call.as_ref().map(|c| c.id));
-        app.call_screen.window_closed_by_user = id;
+        app.call_screen.wanted = id.map_or(
+            crate::ui::calls_state::WindowWanted::Open,
+            crate::ui::calls_state::WindowWanted::ClosedByUser,
+        );
         app.sync_call_window(cx);
     });
     frames(&mut main);
