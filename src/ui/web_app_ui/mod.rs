@@ -19,6 +19,7 @@ use super::app::QuillApp;
 use super::attach_bots::AttachMenuEntry;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
+use awaited::Awaited;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::Dialog;
@@ -38,7 +39,6 @@ use quill_webview_protocol::{
     BottomButton, HelperEvent, HostCommand, MenuItem, Popup, PopupButton, ShellEvent, decode,
     encode,
 };
-use awaited::Awaited;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::process::{Child, Command, Stdio};

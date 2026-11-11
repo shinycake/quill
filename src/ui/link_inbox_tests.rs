@@ -4,8 +4,8 @@
 //! has no `NSWindow` to hide, so whether a window is hidden comes in by
 //! hand here.
 use super::{
-    MainWindow, MainWindowState, answer_wakes, main_window_on_activation, note_main_window, raise_main_window_if,
-    take_hide_after_full_screen,
+    MainWindow, MainWindowState, answer_wakes, main_window_on_activation, note_main_window,
+    raise_main_window_if, take_hide_after_full_screen,
 };
 use crate::ui::actions::QuitApp;
 use crate::ui::app::QuillApp;
@@ -74,7 +74,7 @@ fn a_reopened_main_window_is_not_raised_after_a_plain_minimize(cx: &mut TestAppC
     let (app, mut vcx) = new_app(cx, "ready-privacy");
     let vcx = &mut vcx;
     close_main_window(vcx);
-    vcx.update(|window, cx| super::raise_main_window(window, cx));
+    vcx.update(super::raise_main_window);
     vcx.run_until_parked();
     assert_eq!(
         vcx.cx.update(|cx| cx.global::<MainWindow>().state),

@@ -7,7 +7,9 @@ use crate::ui::app::QuillApp;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::web_app_ui::helper_pipe::HelperWriter;
 use crate::ui::web_app_ui::invoice::InvoiceWatch;
-use crate::ui::web_app_ui::{Awaited, MiniAppWindow, PendingOpen, PopupPurpose, RenderAction, theme_params};
+use crate::ui::web_app_ui::{
+    Awaited, MiniAppWindow, PendingOpen, PopupPurpose, RenderAction, theme_params,
+};
 use gpui_kit::component::Root;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
 use quill::web_app::bridge::WebAppEvent;
@@ -195,7 +197,9 @@ fn an_invoice_request_opens_the_checkout_at_render_time(cx: &mut TestAppContext)
             [RenderAction::OpenInvoice { slug: "abc".into() }]
         );
         // A second action before the render does not drop the first.
-        app.mini_apps.render_actions.push(RenderAction::OpenBotChat { bot_id: 9 });
+        app.mini_apps
+            .render_actions
+            .push(RenderAction::OpenBotChat { bot_id: 9 });
         assert_eq!(app.mini_apps.render_actions.len(), 2);
     });
 }

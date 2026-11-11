@@ -227,7 +227,9 @@ impl Session {
                 self.bots.web_apps.attachment_menu_bot =
                     Some((bot_user_id, Err(web_app_error_text(err))));
             }
-            RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu { bot_user_id, .. }) => {
+            RequestPurpose::Bots(BotsPurpose::ToggleBotInAttachmentMenu {
+                bot_user_id, ..
+            }) => {
                 self.bots.web_apps.attachment_menu_toggled =
                     Some((bot_user_id, Err(web_app_error_text(err))));
             }

@@ -581,7 +581,9 @@ fn an_unreadable_last_message_is_not_a_cleared_one() {
         other => panic!("{other:?}"),
     };
     assert_eq!(
-        parse(r#"{"@type":"updateChatLastMessage","chat_id":3,"last_message":null,"positions":[]}"#),
+        parse(
+            r#"{"@type":"updateChatLastMessage","chat_id":3,"last_message":null,"positions":[]}"#
+        ),
         LastMessageUpdate::Cleared
     );
     assert_eq!(

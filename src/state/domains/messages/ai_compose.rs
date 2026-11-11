@@ -124,11 +124,18 @@ pub struct StyleEditAnswer {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StyleNotice {
     /// The style of this name was added, by this request.
-    Added { name: String, request: RequestId },
+    Added {
+        name: String,
+        request: RequestId,
+    },
     /// The style was removed by this request.
-    Removed { request: RequestId },
+    Removed {
+        request: RequestId,
+    },
     /// The style was deleted by this request.
-    Deleted { request: RequestId },
+    Deleted {
+        request: RequestId,
+    },
     Limit(StyleLimitNotice),
     Invalid,
     /// Any other error, by its type.

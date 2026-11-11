@@ -263,7 +263,10 @@ impl Session {
                 shown_show,
             } => {
                 if self.groups.supergroup_sign_messages.get(&supergroup_id) == Some(&shown_sign)
-                    && self.groups.supergroup_show_message_sender.get(&supergroup_id)
+                    && self
+                        .groups
+                        .supergroup_show_message_sender
+                        .get(&supergroup_id)
                         == Some(&shown_show)
                 {
                     restore_flag(

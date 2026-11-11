@@ -364,33 +364,33 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         match result {
-                Ok(app) => {
-                    let bot_id = then.bot_id();
-                    let verified = self
-                        .session()
-                        .and_then(|session| session.users.get(&bot_id))
-                        .is_some_and(|user| user.verification.is_verified);
-                    if app.skip_confirmation
-                        || (!app.request_write_access
-                            && !trust::needs_confirmation(
-                                &self.web_app_account(),
-                                bot_id,
-                                verified,
-                                false,
-                            ))
-                    {
-                        self.request_web_app(then, false, cx);
-                    } else {
-                        // box-host: opened by an answer; the web app search request named the window
-                        self.mini_apps.confirm = Some(WebAppConfirm::OpenTerms {
-                            then,
-                            request_write: app.request_write_access,
-                            allow_write: true,
-                        });
-                        cx.notify();
-                    }
+            Ok(app) => {
+                let bot_id = then.bot_id();
+                let verified = self
+                    .session()
+                    .and_then(|session| session.users.get(&bot_id))
+                    .is_some_and(|user| user.verification.is_verified);
+                if app.skip_confirmation
+                    || (!app.request_write_access
+                        && !trust::needs_confirmation(
+                            &self.web_app_account(),
+                            bot_id,
+                            verified,
+                            false,
+                        ))
+                {
+                    self.request_web_app(then, false, cx);
+                } else {
+                    // box-host: opened by an answer; the web app search request named the window
+                    self.mini_apps.confirm = Some(WebAppConfirm::OpenTerms {
+                        then,
+                        request_write: app.request_write_access,
+                        allow_write: true,
+                    });
+                    cx.notify();
                 }
-                Err(message) => self.set_status_note(StatusNote::error(&message), cx),
+            }
+            Err(message) => self.set_status_note(StatusNote::error(&message), cx),
         }
     }
 
@@ -606,10 +606,12 @@ impl QuillApp {
                         .and_then(|window| window.launch.chat_id)
                         .map(ChatId);
                     if !username.is_empty() {
-                        self.mini_apps.render_actions.push(RenderAction::SwitchInline {
-                            query: format!("@{username} {query}"),
-                            chat,
-                        });
+                        self.mini_apps
+                            .render_actions
+                            .push(RenderAction::SwitchInline {
+                                query: format!("@{username} {query}"),
+                                chat,
+                            });
                         self.close_mini_app_window(cx);
                         self.raise_main_window_later(cx);
                         cx.notify();

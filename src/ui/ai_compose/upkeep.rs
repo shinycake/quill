@@ -192,9 +192,7 @@ impl QuillApp {
                 Some(_) => {}
                 // The session's own lookup stage per id says whether it is
                 // out, answered or gave up; a failed lookup frees the id.
-                None if !session.stickers.emoji.custom_lookups.attempted(id) => {
-                    unresolved.push(id)
-                }
+                None if !session.stickers.emoji.custom_lookups.attempted(id) => unresolved.push(id),
                 None => {}
             }
         }

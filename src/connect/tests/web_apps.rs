@@ -149,7 +149,13 @@ fn only_the_latest_launch_asked_opens() {
     let theme = ThemeParams::light_default();
     let first = h
         .driver
-        .get_web_app_url(ChatId(5), 42, "https://bot.example/a", "Open", &theme)
+        .open_web_app(
+            ChatId(5),
+            42,
+            "https://bot.example/a",
+            LaunchSource::InlineButton,
+            &theme,
+        )
         .expect("sent");
     let second = h
         .driver
@@ -161,7 +167,7 @@ fn only_the_latest_launch_asked_opens() {
         first.as_extra()
     ));
     assert_eq!(h.driver.session.bots.web_apps.open_result, None);
-    assert_eq!(h.driver.session.bots.web_apps.dropped_launches, vec![801]);
+    assert_eq!(h.last("closeWebApp")["web_app_launch_id"], 801);
     h.ingest(&format!(
         r#"{{"@type":"webAppUrl","@extra":"{}","url":"https://bot.example/b?x","require_same_origin":false}}"#,
         second.as_extra()
