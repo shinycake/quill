@@ -50,8 +50,6 @@ pub struct MessageReportFlow {
     /// Title the previous step's `OptionRequired` carried, for the Back
     /// button to restore.
     pub previous: Vec<(String, Vec<ReportOption>)>,
-    /// The window whose dialog shows this flow (`None`: the main window).
-    pub host: Option<ChatId>,
 }
 
 /// The poll option a right-click opened the menu on, and what TDLib allows
@@ -308,15 +306,7 @@ impl Session {
             stage: MessageReportStage::Checking(request),
             trail: Vec::new(),
             previous: Vec::new(),
-            host: None,
         });
-    }
-
-    /// The window that shows the report: the one that started it.
-    pub fn host_message_report(&mut self, host: Option<ChatId>) {
-        if let Some(flow) = self.messages.message_report.as_mut() {
-            flow.host = host;
-        }
     }
 
     pub fn clear_message_report(&mut self) {

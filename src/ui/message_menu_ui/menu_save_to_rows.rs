@@ -383,7 +383,8 @@ impl QuillApp {
     ) {
         self.close_message_menu();
         // The flow is the session's: one report at a time, so it replaces
-        // the one another window hosted.
+        // the one another window showed. The box shows in this window.
+        self.open_box(DialogKind::MessageReport);
         if let Some(live) = self.live.as_mut() {
             if live
                 .driver
@@ -399,19 +400,7 @@ impl QuillApp {
                 session.request(quill::state::RequestPurpose::ReportMessages, Some(chat_id));
             session.begin_message_report(chat_id, message_ids, request);
         }
-        let host = self.windows.scope;
-        if let Some(session) = self.session_mut() {
-            session.host_message_report(host);
-        }
         cx.notify();
-    }
-
-    /// The report dialog shows in the window that hosts the session's
-    /// report flow, for as long as the flow lasts.
-    pub(in crate::ui) fn report_shown(&self) -> bool {
-        self.session()
-            .and_then(|s| s.messages.message_report.as_ref())
-            .is_some_and(|flow| flow.host == self.windows.scope)
     }
 
     pub(in crate::ui) fn close_message_report(

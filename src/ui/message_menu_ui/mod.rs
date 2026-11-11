@@ -38,7 +38,7 @@ pub(super) use super::message_menu_state::MessageMenuPage;
 pub(super) struct MessageMenuUi {
     /// The sticker set dialog (`DialogKind::StickerSet`) of this window.
     /// The report dialog is not kept here: it shows while the session's
-    /// report flow is hosted by this window ([`QuillApp::report_shown`]).
+    /// report flow exists, in the window that opened it (`open_box`).
     pub sticker_box: StickerBox,
     /// Details of a report (`reportChatResultTextRequired`).
     pub report_text: Entity<TextareaState>,
@@ -633,10 +633,12 @@ crate::ui::shell::register_dialogs! {
     /// The message menu's Report flow.
     MessageReport => DialogSpec::new(
         5600,
-        QuillApp::report_shown,
+        |app| {
+            app.session()
+                .is_some_and(|s| s.messages.message_report.is_some())
+        },
         QuillApp::build_message_report_dialog,
     )
-    .per_window()
     .close(|app, window, cx| app.close_message_report(window, cx)),
 }
 

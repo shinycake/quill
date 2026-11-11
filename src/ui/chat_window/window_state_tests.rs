@@ -272,7 +272,15 @@ fn the_report_box_follows_the_session_flow_and_leaves_the_sticker_box(cx: &mut T
             app.open_message_report(OTHER, Vec::new(), cx);
         });
         let shown_in = |app: &mut QuillApp, cx: &mut gpui_kit::Context<QuillApp>, w| {
-            app.in_window_scope(w, cx, |app, _| app.report_shown())
+            app.in_window_scope(w, cx, |app, _| {
+                let flow = app
+                    .session()
+                    .is_some_and(|s| s.messages.message_report.is_some());
+                flow && app.windows.dialog_may_show_in(
+                    crate::ui::shell::DialogKind::MessageReport,
+                    app.windows.scope,
+                )
+            })
         };
         assert_eq!(shown_in(app, cx, Some(OTHER)), Some(true));
         assert_eq!(

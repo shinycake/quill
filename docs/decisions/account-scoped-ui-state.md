@@ -6805,7 +6805,7 @@ stage, so dropping the stage cancels it.
 | 11-p2-001 | `SessionTick` (off / running task). The tick no longer stays flagged when its window is gone. |
 | 11-p2-003 | `ViewerSource::Profile(PhotoOwner)`: the owner is in the source. |
 | 11-p2-009, 11-p3-013, 11-p4-005 | `MessageMenu` (`message_menu_state.rs`): closed / open with selection, link, item, page (audience tab inside the page) and strip. Closing replaces it whole. |
-| 11-p3-006, 11-p4-007 | The report box is derived from the session's report flow (`Session::messages::message_report`, whose `host` is the window that started it; `QuillApp::report_shown`); no window keeps a flag for it and nothing resets windows by hand. Only the sticker set box is local (`StickerBox`); a report no longer replaces it, and it is still there when the report ends (test). |
+| 11-p3-006, 11-p4-007 | The report box is derived from the session's report flow (`Session::messages::message_report`) as a session-wide box: `open_message_report` names the asking window with `open_box(DialogKind::MessageReport)`, so one window shows it and nothing resets windows by hand. Only the sticker set box is local (`StickerBox`); a report no longer replaces it, and it is still there when the report ends (test). |
 | 11-p2-015 | `ChatPeek` (idle / pressing with the timer task / open): a release drops the timer instead of matching `(chat, Instant)`. |
 | 11-p3-004 | `game_scores` holds `Fetch<Vec<GameHighScore>>`; a refused request lands in `Failed`, which the panel draws with Retry (test). |
 | 11-p3-014 | `PollOptionMenu::properties` is `Fetch`; a refused lookup lands in `Failed` (test). |
