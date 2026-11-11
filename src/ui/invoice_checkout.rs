@@ -51,7 +51,7 @@ impl QuillApp {
         let sent = self.live.as_mut().map(|live| {
             let payments = &mut live.driver.session.payments;
             payments.form = None;
-            payments.validated = None;
+            payments.order_info = quill::state::OrderInfoStage::Unvalidated;
             payments.shipping_id = None;
             payments.form_paid = false;
             payments.form_loading = true;
@@ -168,6 +168,17 @@ impl QuillApp {
         let Some(draft) = self.giveaway_draft_now(cx) else {
             return;
         };
+        // Its payment is out, or done: the giveaway is not bought twice.
+        let settled = self.session().is_some_and(|s| {
+            s.payments.giveaway_paying(draft.boosted_chat_id)
+                || s.payments
+                    .giveaway
+                    .launch
+                    .is_done_for(draft.boosted_chat_id)
+        });
+        if settled {
+            return;
+        }
         let options = self
             .session()
             .map(|s| s.payments.giveaway.options.clone())

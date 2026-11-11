@@ -65,6 +65,9 @@ pub struct BotsState {
     /// poll and shows the answer in the status line (URL answers open in the
     /// OS browser).
     pub last_callback_answer: Option<CallbackAnswer>,
+    /// Inline button presses and the requests they sent
+    /// (`Session::callback_button_waiting`).
+    pub callback_presses: Vec<CallbackPress>,
     /// Mini apps (docs/decisions/codex-miniapp-webview.md): open answers,
     /// consent answers and the attachment menu bots.
     pub web_apps: WebApps,
@@ -116,6 +119,7 @@ impl BotsState {
             similar_bots: HashMap::new(),
             game_scores: HashMap::new(),
             last_callback_answer: None,
+            callback_presses: Vec::new(),
             web_apps: WebApps::default(),
             last_login_url_info: None,
             login_url_request: None,

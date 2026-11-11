@@ -160,7 +160,7 @@ impl QuillApp {
             // Deleted messages dissolve in place before they go.
             self.merge_vanishing(&mut messages);
             let (mut rows, seed) = self.build_rows(messages, Default::default(), None, &row_build);
-            if let Some(row) = self.streaming_bot_row(&seed, &row_build, cx) {
+            if let Some(row) = self.streaming_bot_row(&seed, &row_build) {
                 rows.push(row);
             }
             // kit Phase 3: sync the scroller state with the new row list.
@@ -359,6 +359,7 @@ impl QuillApp {
             _ => {}
         }
         let count = self.history.rows.len();
+        self.sync_sponsored_spots(id, cx);
         let corner_buttons = self.jump_corner_buttons(
             chat.as_ref().map_or(0, |c| c.unread_mention_count),
             chat.as_ref().map_or(0, |c| c.unread_reaction_count),
@@ -764,7 +765,10 @@ impl QuillApp {
                 .into_any_element(),
             None => element,
         };
-        div()
+        // A channel's ads follow the message they were placed after, under
+        // its row and outside the row's tracked bounds (`sponsored_spots`).
+        let sponsored = self.sponsored_under_row(row, cx);
+        let row = div()
             .relative()
             .flex()
             .flex_col()
@@ -784,8 +788,16 @@ impl QuillApp {
                     unread_divider(wide, bar_focused, bar_probe.clone(), cx)
                 }))
             })
-            .child(element)
-            .into_any_element()
+            .child(element);
+        match sponsored {
+            Some(footer) => div()
+                .flex()
+                .flex_col()
+                .child(row)
+                .child(footer)
+                .into_any_element(),
+            None => row.into_any_element(),
+        }
     }
 }
 

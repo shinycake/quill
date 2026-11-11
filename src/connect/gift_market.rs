@@ -52,7 +52,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         let market = &mut self.session.payments.gift_market;
         market.remember_title(gift_id, title);
         market.resale = Some(ResaleSearch::new(gift_id, ResaleFilter::default(), false));
-        market.buy = None;
+        // A `sendResoldGift` that is out keeps its buy: its answer
+        // belongs to it, and the new list does not change what it paid.
+        if !market.buy.as_ref().is_some_and(|buy| buy.sending) {
+            market.buy = None;
+        }
         self.search_resale_page(false, false)
     }
 
@@ -142,6 +146,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         for_craft: bool,
     ) -> Result<(), ConnectSendError> {
         let market = &self.session.payments.gift_market;
+        // A `sendResoldGift` is out: its answer belongs to this buy.
+        if market.buy.as_ref().is_some_and(|buy| buy.sending) {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         let listing = market
             .resale
             .iter()
@@ -259,13 +267,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
-    /// Places a first bid or raises one to `stars` in total. `user_id` is
-    /// who gets the gift.
+    /// Places a first bid or raises one to `stars` in total. `recipient` is
+    /// who gets the gift. A raise (`increaseGiftAuctionBid`) keeps the
+    /// bid's own owner and needs none, so a bid owned by a channel can be
+    /// raised; a new bid goes to a user only.
     pub fn bid_gift_auction(
         &mut self,
         gift_id: i64,
         stars: i64,
-        user_id: i64,
+        recipient: MessageSender,
         text: &str,
         hide_name: bool,
     ) -> Result<RequestId, ConnectSendError> {
@@ -278,7 +288,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         let add = stars.saturating_sub(mine);
         if market.bidding.is_some()
             || state.finished(now_unix())
-            || user_id <= 0
             || stars < state.min_bid_for_me()
             || stars > crate::gift_market::MAX_CUSTOM_BID
             || add <= 0
@@ -292,12 +301,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         let same_owner = state
             .my()
             .and_then(|my| my.owner.as_ref())
-            .is_none_or(|owner| *owner == MessageSender::User { user_id });
+            .is_none_or(|owner| *owner == recipient);
         let result = if mine > 0 && same_owner {
             self.send_market(GiftMarketPurpose::IncreaseBid { gift_id }, |extra| {
                 rq::increase_gift_auction_bid(extra, gift_id, stars)
             })
         } else {
+            let MessageSender::User { user_id } = recipient else {
+                return Err(ConnectSendError::InvalidRequest);
+            };
+            if user_id <= 0 {
+                return Err(ConnectSendError::InvalidRequest);
+            }
             self.send_market(GiftMarketPurpose::PlaceBid { gift_id }, |extra| {
                 rq::place_gift_auction_bid(extra, gift_id, stars, user_id, &text, hide_name)
             })
@@ -331,6 +346,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .gift_market
                 .previews
                 .contains_key(&gift_id)
+            || self
+                .session
+                .payments
+                .gift_market
+                .failed_previews
+                .contains(&gift_id)
             || self.session.requests.has_purpose(RequestPurpose::Payments(
                 PaymentsPurpose::GiftMarket(purpose),
             ))

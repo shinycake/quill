@@ -64,10 +64,10 @@ pub(crate) struct MessageUi {
     pub(super) request_locate: Option<Task<()>>,
     /// "About These Ads" box (`DialogKind::SponsoredAbout`) is open.
     pub(super) sponsored_about: Option<super::sponsored_about::SponsoredAbout>,
-    /// Sponsored message ids the footer painted last frame, with the chat
-    /// painted; reported to TDLib as viewed at the next frame start
-    /// (`report_visible_sponsored`) when that chat is still open.
-    pub(super) rendered_sponsored: std::cell::RefCell<Vec<(ChatId, i64)>>,
+    /// Sponsored message ids painted inside the history's viewport last
+    /// frame, with the chat painted; reported to TDLib as viewed at the next
+    /// frame start (`report_visible_sponsored`) when that chat is still open.
+    pub(super) rendered_sponsored: std::rc::Rc<std::cell::RefCell<Vec<(ChatId, i64)>>>,
     /// The custom emoji card already on screen (it times itself out).
     pub(super) custom_emoji_card_seen: Option<quill::state::CustomEmojiPreview>,
     /// The custom emoji last tapped in this window: its card shows here,
@@ -107,7 +107,7 @@ impl MessageUi {
             request_share: None,
             request_locate: None,
             sponsored_about: None,
-            rendered_sponsored: std::cell::RefCell::new(Vec::new()),
+            rendered_sponsored: Default::default(),
             custom_emoji_card_seen: None,
             custom_emoji_tapped: None,
             poll_voters_dialog: None,

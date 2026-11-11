@@ -10,7 +10,9 @@ use super::app::QuillApp;
 use super::owned_image::OwnedImage;
 use super::status_note::StatusNote;
 use super::widget_runtime::{Launch, Runtime, RuntimeEvent, WIDGETS};
-use super::widgets_state::{Identity, Poll, PresenceChange, Showing, WidgetEntry, WidgetStorage};
+use super::widgets_state::{
+    Identity, Noted, Poll, PresenceChange, SafeArea, Showing, WidgetEntry, WidgetStorage,
+};
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr_with};
@@ -82,8 +84,9 @@ impl QuillApp {
         }
     }
 
-    /// A widget row rendered in this pass at `width` CSS px.
-    pub(super) fn note_widget(&self, key: WidgetKey, width: f32) {
+    /// A widget row rendered in this pass at `width` CSS px, with the time
+    /// covering `safe_area` of it.
+    pub(super) fn note_widget(&self, key: WidgetKey, width: f32, safe_area: SafeArea) {
         let window = self.windows.scope;
         self.widgets
             .passes
@@ -91,7 +94,7 @@ impl QuillApp {
             .seen
             .entry(window)
             .or_default()
-            .insert(key, width);
+            .insert(key, Noted { width, safe_area });
     }
 
     /// A frame of the window `window` (`None`: the main one) starts: the
@@ -239,7 +242,7 @@ impl QuillApp {
             self.widget_left(key, window);
         }
         self.prune_hidden_widgets();
-        for (key, width) in seen {
+        for (key, Noted { width, safe_area }) in seen {
             let Some((content, outgoing)) = self.widget_message(key) else {
                 continue;
             };
@@ -288,6 +291,13 @@ impl QuillApp {
                     runtime.set_theme(theme.0.clone(), theme.1);
                     entry.theme = Some(theme.clone());
                 }
+                if entry.presence.owner() == Some(window) && entry.safe_area != safe_area {
+                    runtime.set_safe_area(safe_area.json().to_string());
+                }
+            }
+            // A runtime that starts later takes it in its options.
+            if entry.presence.owner() == Some(window) {
+                entry.safe_area = safe_area;
             }
             if came_back
                 && has_id
@@ -433,6 +443,7 @@ impl QuillApp {
             "maxHeight": quill::message_widget::MAX_HEIGHT,
             "visible": entry.presence.is_shown(),
             "locale": quill::lang::current_pack_id(),
+            "safeArea": entry.safe_area.json(),
             "theme": serde_json::from_str::<serde_json::Value>(&theme).unwrap_or_default(),
             "storage": {"local": entry.stored.local, "session": session_area},
             "data": {"chatData": content.chat_data, "publicData": entry.polled.clone().unwrap_or(content.public_data)},
@@ -888,7 +899,19 @@ impl QuillApp {
                 "header_bg_color": hex(flat(t::bg_subtle(), 1.0)),
                 "bottom_bar_bg_color": hex(flat(t::bg_subtle(), 1.0)),
             },
-            "text": {"fontSize": font, "lineHeight": 1.35},
+            // The default `<button>` is the app's primary button, as in
+            // Telegram Desktop (`--tg-button-*`); the body margin is a
+            // text bubble's padding.
+            "button": {
+                "bg": hex(flat(button, 1.0)),
+                "text": hex(flat(button_text, 1.0)),
+                "radius": format!("{}px", f32::from(gpui_kit::component::theme::ActiveTheme::theme(cx).radius).round()),
+                "padding": "8px 16px",
+                "height": "36px",
+                "pressedOpacity": 0.8,
+                "disabledOpacity": 0.5,
+            },
+            "text": {"fontSize": font, "lineHeight": 1.35, "padding": "8px 12px"},
         });
         let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
         (theme.to_string(), [byte(bg.r), byte(bg.g), byte(bg.b)])

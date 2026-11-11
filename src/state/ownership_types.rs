@@ -21,6 +21,10 @@ pub enum OwnerLookup {
 pub struct OwnershipTransfer {
     pub chat_id: i64,
     pub user_id: i64,
+    /// The viewer asked to leave once the new owner is appointed. It rides
+    /// with the transfer it was asked for, so the answer never reads
+    /// whatever box is open by then.
+    pub leave_after: bool,
 }
 
 /// The viewer's own standing in a basic group, from `updateBasicGroup`.
@@ -94,18 +98,23 @@ impl Session {
     }
 
     /// The transfer left for TDLib; clears any earlier failure.
-    pub fn begin_ownership_transfer(&mut self, chat_id: i64, user_id: i64) {
-        self.groups.ownership.transfer_in_flight = Some(OwnershipTransfer { chat_id, user_id });
+    pub fn begin_ownership_transfer(&mut self, chat_id: i64, user_id: i64, leave_after: bool) {
+        self.groups.ownership.transfer_in_flight = Some(OwnershipTransfer {
+            chat_id,
+            user_id,
+            leave_after,
+        });
         self.groups.ownership.transfer_error = None;
     }
 
     pub(crate) fn finish_ownership_transfer(&mut self, user_id: i64, chat_id: Option<i64>) {
-        let done = self
-            .groups
-            .ownership
-            .transfer_in_flight
-            .take()
-            .or_else(|| chat_id.map(|chat_id| OwnershipTransfer { chat_id, user_id }));
+        let done = self.groups.ownership.transfer_in_flight.take().or_else(|| {
+            chat_id.map(|chat_id| OwnershipTransfer {
+                chat_id,
+                user_id,
+                leave_after: false,
+            })
+        });
         self.groups.ownership.transferred = done;
         // The viewer is now a plain admin; TDLib confirms with
         // `updateChatMember`, but the cached admin list is stale already.

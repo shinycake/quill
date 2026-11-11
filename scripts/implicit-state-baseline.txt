@@ -243,8 +243,6 @@ StageFacts::type_pending
 StarPacksState::loaded
 StarPacksState::loading
 StarPacksState::loading+error
-StarsGiftState::loading
-StarsGiftState::loading+error
 State::started
 StealthFacts::requested
 Step::started
@@ -266,7 +264,6 @@ StoryManageState::pending
 StoryManageState::pending+error
 StorySearchState::loading
 StorySearchState::loading+error
-StoryViewerUi::close_friends_saving
 StoryViewersState::loading
 StoryViewersState::loading+error
 StreamFacts::transport_failed

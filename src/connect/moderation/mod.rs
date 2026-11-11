@@ -62,6 +62,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         chat_id: ChatId,
         user_id: i64,
         password: &str,
+        leave_after: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -78,7 +79,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !allowed {
             return Ok(None);
         }
-        self.session.begin_ownership_transfer(chat_id.0, user_id);
+        self.session
+            .begin_ownership_transfer(chat_id.0, user_id, leave_after);
         let extra = self.session.request(
             RequestPurpose::Groups(GroupsPurpose::TransferChatOwnership { user_id }),
             Some(chat_id),

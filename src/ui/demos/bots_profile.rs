@@ -51,6 +51,13 @@ register_demos![
         "screenshot demo — bot keyboard with a Share location button"
     )
     .setup(QuillApp::demo_bot_location_request),
+    // A bot chat with no messages yet: the "What can this bot do?" card
+    // with the bot's description, its link and /commands clickable.
+    DemoSpec::chats(
+        "ready-bot-about",
+        "screenshot demo — empty bot chat with the bot's description"
+    )
+    .setup(QuillApp::demo_bot_about),
 ];
 
 impl QuillApp {
@@ -86,6 +93,51 @@ impl QuillApp {
             {
                 session.apply(owned);
             }
+        }
+    }
+
+    fn demo_bot_about(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        let clear = r#"{"@type":"updateDeleteMessages","chat_id":21,"message_ids":[301,302],"is_permanent":true,"from_cache":false}"#;
+        let Some(session) = self.demo_session.as_mut() else {
+            return;
+        };
+        self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
+        apply_ready_bot_chat(session, &self.demo_ui.sink, &self.demo_ui.seq);
+        let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
+            self.demo_ui.sink.clone();
+        // The bot's full info again, now with a description photo.
+        let extra = session.request(
+            quill::state::RequestPurpose::GetUserFullInfo,
+            Some(quill::ids::ChatId(21)),
+        );
+        let path = crate::ui::demo::demo_media_allowlist().join("showcase/p1.jpg");
+        let file = crate::ui::demo::demo_file_json(9401, &path.to_string_lossy(), true);
+        let full_info = format!(
+            r#"{{"@type":"userFullInfo","@extra":"{}","bot_info":{{"@type":"botInfo","short_description":"A demo bot","description":"Demo Bot answers questions and shows how the info panel looks. It understands /start, /help and /ping.","photo":{{"@type":"photo","has_stickers":false,"sizes":[{{"@type":"photoSize","type":"x","photo":{file},"width":1100,"height":739,"progressive_sizes":[]}}]}},"commands":[]}}}}"#,
+            extra.0,
+        );
+        for json in [clear, full_info.as_str()] {
+            if let Some(owned) =
+                quill::telegram::client::copy_and_parse(json, &self.demo_ui.seq, &sink)
+            {
+                session.apply(owned);
+            }
+        }
+        // Offline there is no TDLib to find the entities; mark what it
+        // would.
+        if let Some(Some(info)) = session.bots.bot_info.get_mut(&21) {
+            let text = info.description.trim().to_string();
+            info.description_entities = ["/start", "/help", "/ping"]
+                .into_iter()
+                .filter_map(|command| {
+                    let start = text.find(command)?;
+                    Some(quill::text::TextEntity {
+                        utf8_start: start,
+                        utf8_end: start + command.len(),
+                        kind: quill::text::TextEntityKind::BotCommand,
+                    })
+                })
+                .collect();
         }
     }
 

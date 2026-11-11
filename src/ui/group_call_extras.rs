@@ -147,6 +147,13 @@ impl QuillApp {
         if self.group_call.global_ptt.is_active() {
             return;
         }
+        self.ptt_end_hold(cx);
+    }
+
+    /// The hold ended without a key-up (the window lost focus, the hook
+    /// stopped, restarted or lost events): drop the held state and close
+    /// the microphone it kept open.
+    fn ptt_end_hold(&mut self, cx: &mut Context<Self>) {
         if let Some(action) = self.group_call.ptt.reset()
             && self.group_call_joined()
         {
@@ -190,6 +197,7 @@ impl QuillApp {
         {
             stop.store(true, std::sync::atomic::Ordering::Relaxed);
         }
+        let started = events.is_some();
         if let Some(rx) = events {
             let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             self.group_call.global_ptt_listener_stop = Some(stop.clone());
@@ -197,6 +205,10 @@ impl QuillApp {
         }
         if want.is_none() && changed {
             let _ = self.group_call.ptt.reset();
+        } else if started || (changed && !self.group_call.global_ptt.is_active()) {
+            // A new hook knows nothing of a key the old one saw go down, and
+            // a hook that failed to start sees no release at all.
+            self.ptt_end_hold(cx);
         }
         if matches!(
             self.group_call.global_ptt.state(),
@@ -235,7 +247,13 @@ impl QuillApp {
                 let edge = match edge {
                     Ok(edge) => edge,
                     Err(RecvTimeoutError::Timeout) => continue,
-                    Err(RecvTimeoutError::Disconnected) => break,
+                    Err(RecvTimeoutError::Disconnected) => {
+                        // The hook is gone: no release will come.
+                        if !stop.load(Ordering::Relaxed) {
+                            let _ = this.update(cx, |this, cx| this.ptt_end_hold(cx));
+                        }
+                        break;
+                    }
                 };
                 if stop.load(Ordering::Relaxed) {
                     break;

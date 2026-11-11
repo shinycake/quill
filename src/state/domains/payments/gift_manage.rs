@@ -3,8 +3,8 @@
 //! lists stale and the connect driver refetches them from the server.
 use crate::earn::EarnErrorHint;
 use crate::gift_manage::{
-    ExportError, GiftListFetch, GiftManagePayload, GiftManageState, GiftTransferred, ProbeOutcome,
-    TransferPicker, TransferStage,
+    ExportError, GiftListFetch, GiftManagePayload, GiftManageState, ProbeOutcome, TransferPicker,
+    TransferStage,
 };
 use crate::lang::{keys, tr_with};
 use crate::state::*;
@@ -117,16 +117,8 @@ impl Session {
                 hub.tx_loaded = false;
                 // tdesktop `ShowGiftTransferredToast`, then the recipient's
                 // chat (`showPeerHistory`).
-                manage.transferred = match manage.transfer() {
-                    Some(TransferPicker {
-                        gift_name,
-                        stage: TransferStage::ConfirmPeer { user_id, name },
-                        ..
-                    }) => Some(GiftTransferred {
-                        gift_name: gift_name.clone(),
-                        recipient: name.clone(),
-                        user_id: *user_id,
-                    }),
+                manage.transferred = match manage.transferring.take() {
+                    Some((request, done)) if Some(request) == pending.map(|p| p.id) => Some(done),
                     _ => None,
                 };
                 manage.flow = None;

@@ -87,6 +87,7 @@ impl QuillApp {
                 // A macOS text replacement shortcut ended by this keystroke.
                 self.queue_system_text_replace(&prev, &text, window, cx);
             }
+            self.end_button_command_menu(cx);
             self.sync_composer_typing(&text);
             self.retry_failed_link_preview(&prev, &text);
             self.close_stale_rich_paste_notice(&text, window, cx);

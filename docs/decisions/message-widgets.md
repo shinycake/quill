@@ -137,6 +137,35 @@ Measured on an M-series Mac, 2026-11-09:
 - Cargo.lock: two lines. `cosmic-text` 0.19 and `tiny-skia` 0.12 were
   already in the tree and are now direct dependencies.
 
+## How a widget sits in its bubble
+
+The bubble is the widget's canvas, as Telegram's widget spec and Telegram
+Desktop's HtmlWidget have it: no padding of its own, clipped by the bubble's
+rounded corners, as wide as the message column allows. The widget's body
+margin (`--tg-text-padding`, 8px 12px) is its only inset. When nothing sits
+under the widget (no caption, no buttons, no reactions), the time goes on a
+dark pill over the bottom right corner, as on photos, and the widget gets
+that corner as `contentSafeArea` (`bottom`, `cornerRight`), updated when the
+time's width changes (edited, pinned). With a caption the time stays on the
+caption's line. A reply or forward header keeps the bubble's padding above
+the widget. The default `<button>` takes the app's primary color and radius
+through the `--tg-button-*` tokens. Demo: `ready-widgets-showcase`.
+
+## Windows: CRLF bundles (#1425)
+
+The vendored JS bundles are hashed against their bytecode and carry a
+version stamp on their first line. A Windows checkout with `core.autocrlf`
+turned their line ends into CRLF, so every widget was refused, and the
+refusal then aborted the app: the validator reported the refusal while it
+was still being built, the host thread ran that report at once, and the
+diagnostics lock it took was declared after the thread and did not exist
+yet. `.gitattributes` keeps `third_party/widgets/**` byte for byte, the lock
+is declared first (`native/patches/twidget-quill.patch`), and
+`a_refused_bundle_stops_the_widget` re-runs the test binary with CRLF
+bundles to prove the widget now stops with its pill. The `windows-widgets`
+CI job boots every corpus widget and an Intl widget on Windows, under cdb
+so a crash prints its native stack.
+
 ## Limits and what is left
 
 - No wheel or keyboard inside a widget, by design: widget profile 1 gives a
@@ -192,8 +221,8 @@ Measured on an M-series Mac, 2026-11-09:
   both fixed with tests. Rects without a key clipped everything away.
   tiny-skia's masked Source/Clear blends changed pixels outside the mask,
   which broke damage repaints and canvas `clearRect` under a clip.
-- Not verified: Windows and Linux builds (no cross toolchain here). Untested
-  there: the MSVC flags, the bcrypt/ICU link on Windows, the libm/pthread
-  link and fontconfig picks on Linux. Also not run: a live widget from a real
+- Windows: the `windows-widgets` CI job runs the painter tests and boots
+  every corpus widget plus an Intl widget (system ICU). Linux is untested:
+  the libm/pthread link and fontconfig picks. Also not run: a live widget from a real
   bot (queries, polls, `is_copy`), the CPU-budget stop on a real runaway
   widget, and chat-window edge cases.

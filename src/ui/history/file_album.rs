@@ -66,9 +66,7 @@ pub(in crate::ui) fn file_album_history_row(
                 cx,
             )),
             (MessageContent::Audio(audio), Some(seek_bar)) => Some(audio_row(
-                message.chat_id,
-                message.id,
-                message.is_outgoing,
+                message,
                 audio,
                 files,
                 downloading,

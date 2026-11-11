@@ -49,13 +49,19 @@ impl<S: JsonSender> ConnectDriver<S> {
         Ok(())
     }
 
-    /// The toast's Undo: forgets the waiting Stars and tells TDLib.
+    /// The toast's Undo: tells TDLib; the Stars leave on its answer.
     pub fn undo_paid_reaction(
         &mut self,
         chat_id: ChatId,
         message_id: MessageId,
     ) -> Result<(), ConnectSendError> {
-        if !self.session.payments.paid.undo(chat_id.0, message_id.0) {
+        if self
+            .session
+            .payments
+            .paid
+            .pending_stars(chat_id.0, message_id.0)
+            == 0
+        {
             return Ok(());
         }
         let extra = self.session.request(
@@ -65,13 +71,23 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(chat_id),
         );
         let json = remove_pending_paid_message_reactions(extra, chat_id, message_id);
-        self.send_json_request(extra, &json).map(|_| ())
+        // The Stars leave the list on TDLib's answer: a send that failed, or
+        // an error answer, leaves them waiting (and their Undo on screen).
+        if let Err(err) = self.send_json_request(extra, &json) {
+            self.session.payments.paid.note = Some("Could not undo the Stars".to_string());
+            return Err(err);
+        }
+        self.session
+            .payments
+            .paid
+            .begin_undo(chat_id.0, message_id.0, extra);
+        Ok(())
     }
 
     /// Commits every Star reaction whose Undo window is over. Returns
     /// whether anything was sent (the toast needs a redraw).
     pub fn paid_reaction_tick(&mut self, now_ms: u64) -> bool {
-        let due = self.session.payments.paid.take_due(now_ms);
+        let due = self.session.payments.paid.due(now_ms);
         let any = !due.is_empty();
         for pending in due {
             let chat_id = ChatId(pending.chat_id);
@@ -83,8 +99,13 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Some(chat_id),
             );
             let json = commit_pending_paid_message_reactions(extra, chat_id, message_id);
-            if self.send_json_request(extra, &json).is_err() {
-                self.session.payments.paid.note = Some("Stars were not sent".to_string());
+            let sent = self.send_json_request(extra, &json).is_ok();
+            let paid = &mut self.session.payments.paid;
+            if sent {
+                paid.begin_commit(pending.chat_id, pending.message_id, extra);
+            } else {
+                paid.send_failed(pending.chat_id, pending.message_id);
+                paid.note = Some("Stars were not sent".to_string());
             }
         }
         any

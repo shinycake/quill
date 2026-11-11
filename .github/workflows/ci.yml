@@ -318,6 +318,42 @@ jobs:
           cargo test -p gpui-pre-windows -p quill --lib --features quill/demo-capture --locked --
           timer_thread::tests file_picker_tests
 
+  # The message-widget runtime on Windows (docs/decisions/message-widgets.md):
+  # MSVC builds of QuickJS, litehtml and the sandbox, and Intl on the system
+  # ICU, which only Windows uses. Boots every corpus widget and paints it.
+  windows-widgets:
+    name: windows-widgets
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+      - uses: Swatinem/rust-cache@v2
+      - name: widget runtime tests (painter)
+        run: >-
+          cargo test --features demo-capture --locked --bin quill --
+          widget_runtime:: widgets_state --skip smoke_tests
+      # One at a time under the debugger, so a native crash leaves its stack.
+      - name: widget runtime tests (boot real widgets)
+        shell: pwsh
+        env:
+          CFLAGS: /Z7
+          CXXFLAGS: /Z7
+        run: |
+          $json = cargo test --features demo-capture --locked --bin quill --no-run --message-format=json
+          $exe = ($json | ForEach-Object { try { $_ | ConvertFrom-Json } catch { $null } } |
+            Where-Object { $_.executable -and $_.profile.test -and $_.target.name -eq 'quill' } |
+            Select-Object -Last 1).executable
+          $cdb = "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64\cdb.exe"
+          if (Test-Path $cdb) {
+            & $cdb -g -G -lines -c ".symfix+ ; .reload ; .ecxr ; kn 80 ; q" $exe smoke_tests --test-threads=1 --nocapture
+          } else {
+            & $exe smoke_tests --test-threads=1 --nocapture
+          }
+          exit $LASTEXITCODE
+
   # Launch smoke on Windows (docs/decisions/ci-launch-smoke.md): the real window
   # on a hosted runner without a GPU (WARP). Pushes only, not a required check.
   windows-launch-smoke:

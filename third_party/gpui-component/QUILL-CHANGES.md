@@ -63,6 +63,11 @@ from its own theme tokens and runs the parse on a background thread
 the next page while three screens are left (`docs/decisions/history-preload.md`).
 Re-apply when re-vendoring.
 
+`src/message_scroller.rs`: `MessageScrollerState::estimated_row_heights`
+passes `ListState::estimated_item_heights` through, so channel ads go between
+posts at least two screens apart (`docs/decisions/sponsored-placement.md`).
+Re-apply when re-vendoring.
+
 `src/message_scroller.rs`: `MessageScroller::with_jump_button_shown_after`
 keeps the jump-to-latest button hidden until the viewport is more than that
 distance above the last row (tdesktop `historyToDownShownAfter`, 480px), and

@@ -313,8 +313,10 @@ impl Session {
             }
             GiftMarketPurpose::OpenAuction
             | GiftMarketPurpose::CloseAuction
-            | GiftMarketPurpose::AcquiredGifts { .. }
-            | GiftMarketPurpose::UpgradePreview { .. } => {}
+            | GiftMarketPurpose::AcquiredGifts { .. } => {}
+            GiftMarketPurpose::UpgradePreview { gift_id } => {
+                market.failed_previews.insert(gift_id);
+            }
         }
     }
 

@@ -245,13 +245,24 @@ impl QuillApp {
             }
             BidAction::Place(n) | BidAction::Increase(n) => n,
         };
-        let Some(MessageSender::User { user_id }) = self.auction_recipient() else {
+        let Some(recipient) = self.auction_recipient(gift_id) else {
+            return;
+        };
+        // A raise keeps the bid's owner and needs no user; only a new bid
+        // has to go to one.
+        let owner_is_recipient = state
+            .my()
+            .and_then(|my| my.owner.as_ref())
+            .is_none_or(|owner| *owner == recipient);
+        if !matches!(recipient, MessageSender::User { .. })
+            && !(state.my_stars() > 0 && owner_is_recipient)
+        {
             self.set_note(StatusNote::info(tr(
                 keys::Q_MONEY_AUCTION_GIFTS_CAN_ONLY_BE,
             )));
             cx.notify();
             return;
-        };
+        }
         let add = stars.saturating_sub(state.my_stars());
         let poor = self
             .session()
@@ -275,7 +286,7 @@ impl QuillApp {
         let sent = match self.live.as_mut() {
             Some(live) => live
                 .driver
-                .bid_gift_auction(gift_id, stars, user_id, &text, hide)
+                .bid_gift_auction(gift_id, stars, recipient, &text, hide)
                 .is_ok(),
             None => {
                 self.set_note(StatusNote::info(tr(keys::Q_MONEY_BIDS_NEED_A_SIGNED_IN)));
