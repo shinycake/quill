@@ -35,8 +35,11 @@ impl Session {
             // error line on the overlay — never a fake success,
             // never an optimistic state change.
             Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp { op })) => {
-                self.auth_state.password_state_loading = false;
-                self.auth_state.password_op_error = Some(password_op_error_line(op, err));
+                // A late error of an older request leaves the one in flight
+                // (and its line) alone.
+                if self.auth_state.settle_password_op(pending.map(|p| p.id)) {
+                    self.auth_state.password_op_error = Some(password_op_error_line(op, err));
+                }
             }
             // The country list failed: the boxes say so and offer Retry (a
             // user action, never a frame), instead of "Loading countries"

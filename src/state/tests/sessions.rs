@@ -12,7 +12,7 @@ fn password_state_response_replaces_cache_and_clears_error() {
         }),
         None,
     );
-    session.auth_state.password_state_loading = true;
+    session.auth_state.password_op = crate::state::PasswordFlight::InFlight(extra);
     session.auth_state.password_op_error = Some("stale".into());
     apply_json(
         &mut session,
@@ -31,7 +31,10 @@ fn password_state_response_replaces_cache_and_clears_error() {
     assert_eq!(state.password_hint, "street");
     assert!(state.has_recovery_email_address);
     assert_eq!(state.pending_email_pattern, None);
-    assert!(!session.auth_state.password_state_loading);
+    assert_eq!(
+        session.auth_state.password_op,
+        crate::state::PasswordFlight::Idle
+    );
     assert!(session.auth_state.password_op_error.is_none());
 }
 
@@ -46,7 +49,10 @@ fn stray_password_state_response_is_ignored() {
         r#"{"@type":"passwordState","has_password":true,"password_hint":"","has_recovery_email_address":false,"has_passport_data":false,"recovery_email_address_code_info":null,"login_email_address_pattern":"","pending_reset_date":0}"#,
     );
     assert!(session.auth_state.password_state.is_none());
-    assert!(!session.auth_state.password_state_loading);
+    assert_eq!(
+        session.auth_state.password_op,
+        crate::state::PasswordFlight::Idle
+    );
 }
 
 #[test]
@@ -64,7 +70,7 @@ fn password_state_error_surfaces_honest_classified_line() {
             RequestPurpose::Auth(AuthPurpose::PasswordStateOp { op }),
             None,
         );
-        session.auth_state.password_state_loading = true;
+        session.auth_state.password_op = crate::state::PasswordFlight::InFlight(extra);
         apply_json(
             &mut session,
             &seq,
@@ -79,7 +85,10 @@ fn password_state_error_surfaces_honest_classified_line() {
             .password_op_error
             .expect("error line set");
         assert!(line.contains(expect), "op {op:?} code {code}: {line}");
-        assert!(!session.auth_state.password_state_loading);
+        assert_eq!(
+            session.auth_state.password_op,
+            crate::state::PasswordFlight::Idle
+        );
         assert!(session.auth_state.password_state.is_none());
     }
 }
@@ -697,4 +706,49 @@ fn a_failed_terminate_keeps_the_list_and_shows_the_error() {
     assert!(session.settings.sessions.error().is_some());
     assert!(session.settings.sessions.data().is_some());
     assert!(!session.settings.sessions.is_loading());
+}
+
+/// 05-039: an older request's late answer or error leaves the newer
+/// round trip in flight, and its error line alone.
+#[test]
+fn a_late_2fa_answer_leaves_the_newer_request_waiting() {
+    use crate::state::PasswordFlight;
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let op = |op| RequestPurpose::Auth(AuthPurpose::PasswordStateOp { op });
+    let older = session.request(op(PasswordOp::Fetch), None);
+    let newer = session.request(op(PasswordOp::SetPassword), None);
+    session.auth_state.password_op = PasswordFlight::InFlight(newer);
+    session.auth_state.password_op_error = Some("kept".into());
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":429,"message":"FLOOD_WAIT_3"}}"#,
+            older.0
+        ),
+    );
+    assert_eq!(
+        session.auth_state.password_op,
+        PasswordFlight::InFlight(newer)
+    );
+    assert_eq!(
+        session.auth_state.password_op_error.as_deref(),
+        Some("kept")
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"PASSWORD_HASH_INVALID"}}"#,
+            newer.0
+        ),
+    );
+    assert_eq!(session.auth_state.password_op, PasswordFlight::Idle);
+    assert_ne!(
+        session.auth_state.password_op_error.as_deref(),
+        Some("kept")
+    );
 }

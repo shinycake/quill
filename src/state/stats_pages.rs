@@ -346,6 +346,10 @@ impl Session {
         // A join box parked for the recipients came from that bot's
         // profile: once the profile is gone it must not open, unasked.
         let earn = &mut self.payments.earn;
+        if self.users_state.open_info_panel != target {
+            // A program being resolved belongs to the page it was asked on.
+            earn.resolve = crate::earn::Resolve::Idle;
+        }
         if earn
             .pending_join
             .as_ref()

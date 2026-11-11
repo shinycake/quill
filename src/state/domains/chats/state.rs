@@ -50,8 +50,6 @@ pub struct ChatsState {
     /// The account's default wallpaper per theme (`false` light, `true`
     /// dark), from `updateDefaultBackground` and `setDefaultBackground`.
     pub default_backgrounds: HashMap<bool, Background>,
-    /// Which theme the pending `setDefaultBackground` was for.
-    pub background_set_for_dark: bool,
     /// `chat.background` / `updateChatBackground`, by chat id.
     pub chat_backgrounds: HashMap<i64, ChatBackground>,
     /// `chat.theme` (emoji theme name) / `updateChatTheme`, by chat id.
@@ -144,7 +142,6 @@ impl ChatsState {
         Self {
             installed_backgrounds: crate::state::fetch::Fetch::Idle,
             default_backgrounds: HashMap::new(),
-            background_set_for_dark: false,
             chat_backgrounds: HashMap::new(),
             chat_theme_names: HashMap::new(),
             chat_gift_themes: HashMap::new(),

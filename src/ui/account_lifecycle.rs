@@ -338,7 +338,7 @@ impl QuillApp {
                 .as_ref()
                 .and_then(|s| s.auth_state.password_state.as_ref())
                 .is_some_and(|p| p.has_password);
-            let pw_loading = session.is_some_and(|s| s.auth_state.password_state_loading);
+            let pw_loading = session.is_some_and(|s| s.auth_state.password_state_loading());
 
             let mut body = div().flex().flex_col().gap_3();
             if let Some(line) = error {

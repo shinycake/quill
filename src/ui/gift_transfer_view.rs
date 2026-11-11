@@ -89,8 +89,8 @@ pub(super) fn stage_view(app: &QuillApp, cx: &mut Context<QuillApp>) -> Option<S
         TransferStage::Locked { hours } => locked_view(*hours, cx),
         TransferStage::ConfirmExport => confirm_export_view(&name, false, cx),
         TransferStage::Probing => confirm_export_view(&name, true, cx),
-        TransferStage::Password { sending, error } => {
-            password_view(app, session, *sending, error.as_ref(), cx)
+        TransferStage::Password { send, error } => {
+            password_view(app, session, send.is_out(), error.as_ref(), cx)
         }
         TransferStage::SecurityCheck { later } => security_check_view(*later, cx),
         TransferStage::ActionLocked => action_locked_view(cx),

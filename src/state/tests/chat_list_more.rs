@@ -606,8 +606,12 @@ fn installed_backgrounds_and_default_updates_are_cached() {
     assert!(!session.chats_state.default_backgrounds.contains_key(&false));
 
     // A set answer files under the theme it was sent for; errors surface.
-    session.chats_state.background_set_for_dark = false;
-    let extra = session.request(RequestPurpose::SetDefaultBackground, None);
+    let extra = session.request(
+        RequestPurpose::Chats(ChatsPurpose::SetDefaultBackground {
+            for_dark_theme: false,
+        }),
+        None,
+    );
     apply_json(
         &mut session,
         &seq,
@@ -907,4 +911,27 @@ fn background_share_links_land_once_and_errors_surface() {
         ),
     );
     assert!(session.chats_state.background_error.is_some());
+}
+
+/// 05-067: two sets for different themes in flight each land under their
+/// own theme, whichever answers last.
+#[test]
+fn set_default_background_answers_file_under_their_own_theme() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let purpose = |for_dark_theme| {
+        RequestPurpose::Chats(ChatsPurpose::SetDefaultBackground { for_dark_theme })
+    };
+    let light = session.request(purpose(false), None);
+    let dark = session.request(purpose(true), None);
+    let background = |id: i64, extra: RequestId| {
+        format!(
+            r#"{{"@type":"background","@extra":"{}","id":{id},"is_default":true,"is_dark":false,"name":"w","type":{{"@type":"backgroundTypeFill","fill":{{"@type":"backgroundFillSolid","color":2}}}}}}"#,
+            extra.0
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &background(10, dark));
+    apply_json(&mut session, &seq, &sink, &background(11, light));
+    assert_eq!(session.chats_state.default_backgrounds[&true].id, 10);
+    assert_eq!(session.chats_state.default_backgrounds[&false].id, 11);
 }

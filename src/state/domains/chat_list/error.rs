@@ -17,6 +17,14 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::ToggleChatIsPinned | RequestPurpose::SetPinnedChats)
         ) && self.note_premium_limit(err, pending);
+        // A limit pair that did not come is asked again at the next box,
+        // unless the server refused it.
+        if let Some(p) = pending.filter(|p| p.purpose == RequestPurpose::GetPremiumLimit) {
+            self.payments
+                .hub
+                .limits
+                .fail_ask(p.id, matches!(err.code, 400 | 403 | 404));
+        }
         // A folder request that hit a limit opens the limit box (tdesktop
         // `ShowImportError` / the `*LimitBox`es) instead of an error line.
         let folder_op = pending.and_then(|p| p.purpose.folder_op());

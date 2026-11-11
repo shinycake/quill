@@ -5972,3 +5972,59 @@ Minor entries of the messages area, proved one by one.
   (already failing on the integration branch) opened the bot's chat only after
   the start went, so a frame in between saw the user outside it and ended the
   trip; the chat is opened before the start, as in the app.
+
+### Sweep fixes (s4-payments-1)
+
+Minor entries (S4). Each was read end to end first; the ones that were
+already fixed or cannot happen are listed at the end with the reason.
+
+- **Earn / affiliate.** `JoinBox::joining` is `JoinStage` (`Open` or
+  `Joining(RequestId)`): only the answer or error of that request acts on the
+  box, and a late Connect ok fills "My Programs" but closes or covers no
+  box opened since (03-027, 05-124). A click on a program is `Resolve`
+  (`Idle` or `Asking(RequestId)`); only its answer opens a box, and leaving
+  the page (`set_open_info_panel`, the programs box closing) returns it to
+  `Idle` (03-027, 05-124). TON and Stars history pages apply and fail only
+  for the request the list waits for, like the program lists (05-123; 02-048
+  was already fixed the same way). "End program" closes its confirmation
+  only when the send went out (02-051). Earn toasts, the Fragment URL and the
+  setup page's "go back" of an account in the background are forgotten when
+  it comes back on screen, with the other drained outcomes (03-028).
+- **Suggested posts.** `SuggestBar::send` (`BarSend`) keeps the edit's bar up
+  until its send answers: the `message` answer takes it down, an error returns
+  it to `Idle`, and a second send waits (03-012). `busy` is cleared only by the
+  approve or decline's own ok or error, not by an offer update or another
+  request on the same post (06-041).
+- **Limits, labels, files.** `getPremiumLimit` asks are kept as
+  `LimitAsk::{Asked(request), Refused}`: a lost or transiently failed ask is
+  asked again, only the server's refusal stays (04-049). `PsaLabels` keeps a
+  `PsaAsk` per type; nothing is marked asked before its request exists, a
+  failed send or error returns the type to asking (three tries per pack)
+  (04-071). Files handed to Quill past the queue's size are counted and a
+  toast says how many were not added (05-033). The Remove Fee box keeps an
+  earlier save's slot (04-054). `StarAmount::label` no longer overflows on
+  `i64::MIN` (04-051).
+- **Sign-in and security.** The 2FA round trip is `PasswordFlight`
+  (`Idle` or `InFlight(RequestId)`): an older request's late answer or error
+  neither frees the newer one nor writes its error line (05-039).
+- **Chats and links.** `setDefaultBackground` carries `for_dark_theme` in its
+  purpose and files under it (05-067). A deep-link failure is stale only when
+  no stage carries its generation (05-066). A handled community add-chat
+  request is remembered until the next page is asked, so a page in flight does
+  not bring it back (05-073).
+- **Gifts.** An ok closes the flow it belongs to (`GiftFlow::answers`), not
+  whichever flow is open; a transfer's ok closes the picker that sent it
+  (05-118). The export password box is `ExportSend::{Idle, Out(RequestId)}`,
+  and the temporary password, the URL and the error act only for the request
+  it holds (05-119).
+- **Names.** The name-color palette is kept per account and the renderer
+  reads the account on screen (`set_active_account` in `put_on_screen`), so a
+  background account's `updateAccentColors` paints nothing (06-064).
+- **Skipped.** 04-054 (the slot was already matched by request, with a test;
+  only the reset on open was changed), 05-069 (`take_chat_upgrades` drains the
+  pairs every poll), 05-070 (`refuse_login_url_overlap` allows one login-url
+  request at a time and a swept request has no pending to answer), 05-071
+  (`background_answers` is keyed by request), 05-072 (a first page is not asked
+  while a page is in flight), 05-075 (outcomes of a left screen are forgotten
+  on return by design, like the other drained outcomes), 05-113 and 05-127
+  (answers already matched by request).

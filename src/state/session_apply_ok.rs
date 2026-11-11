@@ -246,7 +246,7 @@ impl Session {
         if let Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp { op })) =
             pending.map(|p| p.purpose)
         {
-            self.apply_password_op_ok(op);
+            self.apply_password_op_ok(op, pending.map(|p| p.id));
         }
         // Batch 6: a storage limit option was accepted; TDLib echoes the
         // value as `updateOption`.

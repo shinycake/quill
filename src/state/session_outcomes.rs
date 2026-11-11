@@ -13,6 +13,12 @@ impl Session {
         self.payments.verification_url = None;
         self.payments.receipt_error = None;
         self.payments.unlocked_notice = None;
+        // The earn toasts, a Fragment URL and a setup page's "go back"
+        // belong to the screen that asked.
+        let earn = &mut self.payments.earn;
+        earn.notes.clear();
+        earn.open_url = None;
+        earn.setup_closed = false;
         self.bots.last_callback_answer = None;
         // The consent box and the raw-URL fallback of a login button
         // answered while away: its request goes with its answer. A request

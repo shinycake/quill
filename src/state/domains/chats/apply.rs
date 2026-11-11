@@ -254,9 +254,9 @@ impl Session {
                 colors,
                 available_ids,
             } => {
-                // Server name-color palette (ids 7+); the renderer reads it
-                // through the process-wide table.
-                crate::telegram::name_accent::set_palette(&colors);
+                // Server name-color palette (ids 7+); the renderer reads the
+                // table of the account on screen.
+                crate::telegram::name_accent::set_palette(&self.account, &colors);
                 self.chats_state.name_accent_colors = colors;
                 self.chats_state.available_name_accent_ids = available_ids;
             }
@@ -462,13 +462,15 @@ impl Session {
             ChatsPayload::Background(background) => {
                 self.upsert_background_files(&background);
                 match pending.map(|p| p.purpose) {
-                    Some(
-                        RequestPurpose::SetDefaultBackground
-                        | RequestPurpose::SetDefaultBackgroundLocal,
-                    ) => {
+                    Some(RequestPurpose::Chats(
+                        ChatsPurpose::SetDefaultBackground { for_dark_theme }
+                        | ChatsPurpose::SetDefaultBackgroundLocal { for_dark_theme },
+                    )) => {
+                        // Filed under the theme the request was sent for,
+                        // not the one the app shows when it lands.
                         self.chats_state
                             .default_backgrounds
-                            .insert(self.chats_state.background_set_for_dark, background);
+                            .insert(for_dark_theme, background);
                         if let Some(id) = pending.map(|p| p.id) {
                             self.chats_state
                                 .background_answers

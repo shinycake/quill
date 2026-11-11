@@ -510,7 +510,7 @@ fn forgot_password_requests_a_code_then_recovers_with_a_new_password() {
             .as_deref(),
         Some("i***@example.com")
     );
-    assert!(!f.1.session.auth_state.password_state_loading);
+    assert!(!f.1.session.auth_state.password_state_loading());
 
     assert_invalid(f.1.recover_twofa_password("", "new", "hint"));
     f.1.recover_twofa_password("654321", "newpw", "new hint")
