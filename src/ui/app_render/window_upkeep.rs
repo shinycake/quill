@@ -12,6 +12,9 @@ use quill::lang::{keys, tr};
 impl QuillApp {
     /// One window's frame upkeep, with that window's state in place.
     pub(in crate::ui) fn per_window_upkeep(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The history's area is reported again by this frame's paint, if it
+        // shows one (`bubble_theme`).
+        crate::ui::bubble_theme::forget_history_area();
         // Whether a screen reader reads this window, for its history rows.
         self.slices
             .window

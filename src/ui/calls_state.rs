@@ -192,6 +192,8 @@ impl super::on_screen::Farewell for CallBoxes {
         {
             app.cancel_call_link_leave(cx);
         }
+        // The Add People box and its search go with the account's call.
+        app.end_call_add_people();
         // A confirmed link waiting for its call to end is abandoned too: it
         // must not open a join screen after switching back.
         if let Some(live) = app.live.as_mut() {
