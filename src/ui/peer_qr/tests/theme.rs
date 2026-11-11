@@ -175,11 +175,8 @@ fn the_gifts_panel_lists_your_gifts_and_saves_the_one_picked(cx: &mut TestAppCon
     let picked = demo_gift(1);
     app.read_with(vcx, |app, _| {
         let open = app.peer_qr.open.as_ref().expect("open");
-        assert_eq!(
-            open.state.gift.as_ref().map(|gift| gift.id),
-            Some(picked.id)
-        );
-        assert!(open.state.emoji.is_empty());
+        assert_eq!(open.state.gift().map(|gift| gift.id), Some(picked.id));
+        assert!(open.state.emoji().is_empty());
         assert_eq!(
             app.qr_view().and_then(|view| view.appearance.gift),
             Some(picked.id)
@@ -304,7 +301,7 @@ fn scrolling_the_gifts_grid_to_its_end_brings_the_next_page(cx: &mut TestAppCont
     app.read_with(vcx, |app, _| {
         let open = app.peer_qr.open.as_ref().expect("open");
         assert_eq!(
-            open.state.gift.as_ref().map(|gift| gift.id),
+            open.state.gift().map(|gift| gift.id),
             Some(demo_gift(29).id)
         );
     });

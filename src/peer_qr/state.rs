@@ -163,10 +163,9 @@ pub struct PeerQrBox {
     /// Tells this box's free-code answers from an earlier box's.
     pub id: u64,
     pub subject: QrSubject,
-    pub color: SwatchKey,
-    pub emoji: Vec<ThemeEmoji>,
-    /// The gift shown instead of the color and emoji.
-    pub gift: Option<Box<ThemeGift>>,
+    /// What the card shows: a color with emoji, or a gift (one value, so
+    /// a gift never has emoji and the colors panel never ringed a gift's).
+    pub shown: ThemeChoice,
     pub panel: Option<QrPanel>,
     pub free: FreeState,
     /// The peer's saved theme as last heard; `None` until it is known.
@@ -215,14 +214,25 @@ impl ThemeStage {
     }
 }
 
+/// Add the emoji, or remove it when already picked; past [`MAX_EMOJI`] the
+/// oldest goes.
+fn toggle_emoji(picks: &mut Vec<ThemeEmoji>, emoji: ThemeEmoji) {
+    if let Some(at) = picks.iter().position(|picked| *picked == emoji) {
+        picks.remove(at);
+        return;
+    }
+    if picks.len() >= MAX_EMOJI {
+        picks.remove(0);
+    }
+    picks.push(emoji);
+}
+
 impl PeerQrBox {
     pub fn new(subject: QrSubject, id: u64) -> Self {
         Self {
             id,
             subject,
-            color: SwatchKey::Default,
-            emoji: Vec::new(),
-            gift: None,
+            shown: ThemeChoice::default(),
             panel: None,
             free: FreeState::default(),
             served: None,
@@ -260,8 +270,10 @@ impl PeerQrBox {
             }
             QrAction::PickColor(key) => {
                 if styling {
-                    self.color = key;
-                    self.gift = None;
+                    self.shown = ThemeChoice::Emoji {
+                        color: key,
+                        emoji: self.emoji().to_vec(),
+                    };
                     self.picked();
                 }
             }
@@ -269,17 +281,18 @@ impl PeerQrBox {
                 if styling && !emoji.is_empty() {
                     // A gift has no emoji: the picks go on the default
                     // backdrop (tdesktop `BackdropHalf`).
-                    if self.gift.take().is_some() {
-                        self.color = SwatchKey::Default;
-                    }
-                    self.toggle_emoji(ThemeEmoji::Plain(emoji));
+                    let mut picks = self.emoji().to_vec();
+                    toggle_emoji(&mut picks, ThemeEmoji::Plain(emoji));
+                    self.shown = ThemeChoice::Emoji {
+                        color: self.color(),
+                        emoji: picks,
+                    };
                     self.picked();
                 }
             }
             QrAction::PickGift(gift) => {
                 if styling {
-                    self.emoji.clear();
-                    self.gift = Some(gift);
+                    self.shown = ThemeChoice::Gift(gift);
                     self.picked();
                 }
             }
@@ -315,27 +328,36 @@ impl PeerQrBox {
 
     /// What the box shows now.
     pub fn choice(&self) -> ThemeChoice {
-        match &self.gift {
-            Some(gift) => ThemeChoice::Gift(gift.clone()),
-            None => ThemeChoice::Emoji {
-                color: self.color,
-                emoji: self.emoji.clone(),
-            },
+        self.shown.clone()
+    }
+
+    /// The backdrop color picked; the default one while a gift shows (a
+    /// gift has its own backdrop).
+    pub fn color(&self) -> SwatchKey {
+        match &self.shown {
+            ThemeChoice::Emoji { color, .. } => *color,
+            ThemeChoice::Gift(_) => SwatchKey::Default,
+        }
+    }
+
+    /// The emoji picked; none while a gift shows.
+    pub fn emoji(&self) -> &[ThemeEmoji] {
+        match &self.shown {
+            ThemeChoice::Emoji { emoji, .. } => emoji,
+            ThemeChoice::Gift(_) => &[],
+        }
+    }
+
+    /// The gift shown instead of the color and emoji.
+    pub fn gift(&self) -> Option<&ThemeGift> {
+        match &self.shown {
+            ThemeChoice::Gift(gift) => Some(gift),
+            ThemeChoice::Emoji { .. } => None,
         }
     }
 
     fn show(&mut self, choice: ThemeChoice) {
-        match choice {
-            ThemeChoice::Emoji { color, emoji } => {
-                self.color = color;
-                self.emoji = emoji;
-                self.gift = None;
-            }
-            ThemeChoice::Gift(gift) => {
-                self.emoji.clear();
-                self.gift = Some(gift);
-            }
-        }
+        self.shown = choice;
     }
 
     /// The saved theme changed: shown unless something was picked
@@ -451,17 +473,6 @@ impl PeerQrBox {
                 }
             }
         }
-    }
-
-    fn toggle_emoji(&mut self, emoji: ThemeEmoji) {
-        if let Some(at) = self.emoji.iter().position(|picked| *picked == emoji) {
-            self.emoji.remove(at);
-            return;
-        }
-        if self.emoji.len() >= MAX_EMOJI {
-            self.emoji.remove(0);
-        }
-        self.emoji.push(emoji);
     }
 
     fn request(&mut self, what: FreeRequest, env: QrEnv) -> Vec<QrEffect> {
@@ -618,7 +629,7 @@ impl PeerQrBox {
     /// the emoji. A color whose backdrop is not offered shows the default
     /// one.
     pub fn appearance(&self, swatches: &[Swatch]) -> Appearance {
-        if let Some(gift) = &self.gift {
+        if let Some(gift) = self.gift() {
             return Appearance {
                 center: gift.center,
                 edge: gift.edge,
@@ -628,13 +639,13 @@ impl PeerQrBox {
         }
         let swatch = swatches
             .iter()
-            .find(|swatch| swatch.key == self.color)
+            .find(|swatch| swatch.key == self.color())
             .copied()
             .unwrap_or(Swatch::DEFAULT);
         Appearance {
             center: swatch.center,
             edge: swatch.edge,
-            emoji: self.emoji.clone(),
+            emoji: self.emoji().to_vec(),
             gift: None,
         }
     }
