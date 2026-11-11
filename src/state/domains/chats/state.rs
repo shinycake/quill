@@ -175,6 +175,36 @@ impl ChatsState {
         self.deep_link = None;
     }
 
+    /// The next generation for a request of the flow: answers of an older
+    /// one are dropped by comparing it.
+    pub fn next_deep_link_generation(&mut self) -> u64 {
+        self.deep_link_seq = self.deep_link_seq.wrapping_add(1);
+        self.deep_link_seq
+    }
+
+    /// The flow's step the UI acts on now. A request in flight is left in
+    /// place (`None`); an invite preview waiting for the user's answer is
+    /// copied and stays; any other terminal stage is taken, so it is
+    /// consumed once.
+    pub fn take_deep_link_step(&mut self) -> Option<DeepLinkFlow> {
+        match self.deep_link_stage()? {
+            DeepLinkState::ResolvingInfo { .. } | DeepLinkState::ResolvingChat { .. } => None,
+            DeepLinkState::InvitePreview { .. } => self.deep_link.clone(),
+            _ => self.deep_link.take(),
+        }
+    }
+
+    /// The user closed the invite box of `generation` unanswered: the flow
+    /// ends when it is still that preview.
+    pub fn cancel_deep_link_invite(&mut self, generation: u64) {
+        if matches!(
+            self.deep_link_stage(),
+            Some(DeepLinkState::InvitePreview { generation: shown, .. }) if *shown == generation
+        ) {
+            self.deep_link = None;
+        }
+    }
+
     /// The stage of the flow in progress.
     pub fn deep_link_stage(&self) -> Option<&DeepLinkState> {
         self.deep_link.as_ref().map(|flow| &flow.stage)

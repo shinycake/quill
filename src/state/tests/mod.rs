@@ -15,6 +15,7 @@ mod chat_row;
 mod common;
 mod communities;
 mod composer_placeholder;
+mod deep_link_flow;
 mod composer_targets;
 mod connection_indicator;
 mod direct_messages;

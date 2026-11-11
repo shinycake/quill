@@ -75,7 +75,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             request: None,
         };
         match self.send_json_request(extra, &get_joined_communities(extra)) {
-            Ok(extra) => Ok(Some(extra)),
+            Ok(extra) => {
+                self.session.communities.joined.sent(extra);
+                Ok(Some(extra))
+            }
             Err(err) => {
                 let stale = self.session.communities.joined.take_data();
                 self.session.communities.joined = stale.map_or(Fetch::Idle, Fetch::Ready);
@@ -146,7 +149,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             request: None,
         };
         match self.send_json_request(extra, &get_owned_bots(extra)) {
-            Ok(extra) => Ok(Some(extra)),
+            Ok(extra) => {
+                self.session.communities.owned_bots.sent(extra);
+                Ok(Some(extra))
+            }
             Err(err) => {
                 let stale = self.session.communities.owned_bots.take_data();
                 self.session.communities.owned_bots = stale.map_or(Fetch::Idle, Fetch::Ready);
@@ -241,7 +247,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 )
             },
         )?;
-        if sent.is_some() {
+        if let Some(request) = sent {
             // No page is in flight here, so what was handled so far is
             // behind this page's answer.
             self.session
@@ -257,7 +263,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             let stale = fetch.take_data();
             *fetch = Fetch::Loading {
                 stale,
-                request: None,
+                request: Some(request),
             };
         }
         Ok(sent)
@@ -374,12 +380,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             community_id,
             |extra| get_community_member_chats(extra, community_id, member),
         )?;
-        if sent.is_some() {
+        if let Some(request) = sent {
             self.session.communities.member_chats.insert(
                 (community_id, member),
                 Fetch::Loading {
                     stale: None,
-                    request: None,
+                    request: Some(request),
                 },
             );
         }
