@@ -371,8 +371,8 @@ impl QuillApp {
                     .child(
                         div().text_xs().text_color(muted).child(
                             state
-                                .error
-                                .clone()
+                                .error()
+                                .map(str::to_string)
                                 .unwrap_or_else(|| tr(keys::Q_OPS_NO_PENDING_REQUESTS).into()),
                         ),
                     )
@@ -460,7 +460,7 @@ impl QuillApp {
                     ),
             );
         }
-        if let Some(error) = state.error.clone() {
+        if let Some(error) = state.error().map(str::to_string) {
             block = block.child(div().text_xs().text_color(muted).child(error));
         }
         if state.loading() {

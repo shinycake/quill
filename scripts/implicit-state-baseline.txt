@@ -39,8 +39,6 @@ CheckoutView::sending
 Clip::busy
 ComposerUi::draft_restore_pending
 ConnectDriver::parameters_sent
-CraftSession::candidates_loaded
-CraftSession::candidates_loading
 DestRow::saved
 DragSelect::pending
 Drawn::leaving
@@ -69,9 +67,6 @@ GiftValueLookup::loading+error
 GiveawayInfoLookup::loading
 GiveawayInfoLookup::loading+error
 GiveawaySummary::finished
-GramsHub::loaded
-GramsHub::loaded+error
-GramsHub::loading
 GroupCallUi::window_opening
 HdrViewer::in_flight
 HeaderFacts::is_saved_messages
@@ -152,9 +147,6 @@ QuickRepliesState::shortcuts_requested+error
 ReceivedGift::is_saved
 Relay::started
 ResaleBuy::sending
-ResaleSearch::loaded
-ResaleSearch::loading
-ResaleSearch::loading+error
 RowForum::loaded
 RowMenuFacts::is_saved_messages
 RowState::pending

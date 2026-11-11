@@ -63,7 +63,7 @@ impl GroupsState {
 
     /// A next-page request for `key` was sent: it extends the list the
     /// latest first page filled.
-    pub(crate) fn note_member_more(&mut self, key: (i64, MemberListFilter), more: RequestId) {
+    pub fn note_member_more(&mut self, key: (i64, MemberListFilter), more: RequestId) {
         self.member_paging.entry(key).or_default().more_sent(more);
     }
 
@@ -82,7 +82,7 @@ impl GroupsState {
 
     /// The next page of `key` failed (and was the one the list waited
     /// for): the panel asks for it again at its next scroll.
-    pub(crate) fn member_more_failed(&mut self, key: (i64, MemberListFilter)) {
+    pub fn member_more_failed(&mut self, key: (i64, MemberListFilter)) {
         if let Some(paging) = self.member_paging.get_mut(&key) {
             paging.more_failed();
         }

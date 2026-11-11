@@ -119,8 +119,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(page) => page,
             Err(err) => {
                 // The dialog is open: say why it is empty.
-                self.session.payments.hub.grams.error =
-                    Some(crate::lang::tr(crate::lang::keys::Q_GRAMS_COULD_NOT_LOAD).to_string());
+                self.session.payments.hub.grams.load = crate::gift_market::PageLoad::Failed(
+                    crate::lang::tr(crate::lang::keys::Q_GRAMS_COULD_NOT_LOAD).to_string(),
+                );
                 return Err(err);
             }
         };
@@ -134,7 +135,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Next page of the current tab; `Ok(None)` = no more pages.
     pub fn fetch_more_grams(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         let grams = &self.session.payments.hub.grams;
-        if !grams.has_more() || grams.loading {
+        if !grams.has_more() || grams.load.is_loading() {
             return Ok(None);
         }
         self.fetch_grams_page(true).map(Some)
@@ -146,7 +147,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         filter: TxFilter,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         let grams = &mut self.session.payments.hub.grams;
-        if grams.filter == filter && grams.loaded {
+        if grams.filter == filter && grams.load == crate::gift_market::PageLoad::Ready {
             return Ok(None);
         }
         grams.restart(filter);
@@ -167,17 +168,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         let grams = &mut self.session.payments.hub.grams;
         match sent {
             Ok(extra) => {
-                grams.loading = true;
-                grams.error = None;
-                grams.request = extra.0;
+                grams.load.begin(extra.0, append);
                 Ok(extra)
             }
             Err(err) => {
                 // A tab switch or a refetch that never left ends in the
                 // error line, not in an empty list.
-                grams.loading = false;
-                grams.error =
-                    Some(crate::lang::tr(crate::lang::keys::Q_GRAMS_COULD_NOT_LOAD).to_string());
+                grams.load = crate::gift_market::PageLoad::Failed(
+                    crate::lang::tr(crate::lang::keys::Q_GRAMS_COULD_NOT_LOAD).to_string(),
+                );
                 Err(err)
             }
         }

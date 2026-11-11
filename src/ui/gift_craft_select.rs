@@ -177,7 +177,7 @@ impl QuillApp {
                     .child(tile),
             );
         }
-        if craft.candidates_loading && own_count == 0 {
+        if craft.candidates_load.is_loading() && own_count == 0 {
             body = body.child(
                 div()
                     .text_sm()
@@ -194,7 +194,7 @@ impl QuillApp {
         } else {
             body = body.child(own);
         }
-        if !craft.candidates_loading && !craft.candidates_offset.is_empty() {
+        if !craft.candidates_load.is_loading() && !craft.candidates_offset.is_empty() {
             body = body.child(
                 Button::new("craft-own-more")
                     .label(tr(keys::Q_MONEY_SHOW_MORE))
@@ -238,7 +238,7 @@ impl QuillApp {
                     .child(tile),
             );
         }
-        if market.loading && market.listings.is_empty() {
+        if market.load.is_loading() && market.listings.is_empty() {
             body = body.child(
                 div()
                     .text_sm()
@@ -246,7 +246,7 @@ impl QuillApp {
                     .child(tr(keys::Q_MONEY_LOADING)),
             );
         } else if market.listings.is_empty()
-            && let Some(error) = market.error.as_ref()
+            && let Some(error) = market.load.error()
         {
             // A failed search is not "none on sale": say why, and retry.
             body = body.child(
@@ -259,7 +259,7 @@ impl QuillApp {
                         div()
                             .text_sm()
                             .text_color(cx.theme().danger)
-                            .child(error.clone()),
+                            .child(error.to_string()),
                     )
                     .child(
                         Button::new("craft-sale-retry")
@@ -279,7 +279,7 @@ impl QuillApp {
         } else {
             body = body.child(sale);
         }
-        if !market.loading && market.has_more() {
+        if market.has_more() {
             body = body.child(
                 Button::new("craft-sale-more")
                     .label(tr(keys::Q_MONEY_SHOW_MORE))
