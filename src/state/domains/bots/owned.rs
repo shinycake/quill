@@ -36,6 +36,9 @@ pub struct CreateBotState {
     /// Generation of the check in flight.
     pub check_pending: Option<u64>,
     pub creating: Option<u64>,
+    /// Counts the `createBot` sends: the watcher of one create ends when a
+    /// later one starts, so it never reports the later one's answer.
+    pub starts: u64,
     /// The new bot's user id once `createBot` answered.
     pub created: Option<i64>,
     pub error: Option<String>,

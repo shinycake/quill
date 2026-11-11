@@ -16,8 +16,19 @@ pub struct PendingBotMessage {
     pub keep_on_stop: bool,
     pub content: MessageContent,
     pub expires_at_ms: u64,
-    pub stop_failed: bool,
-    pub stopped: bool,
+    /// Where Stop stands for this draft. A send of Stop (the "Stopping"
+    /// the bar shows while its request is out) leaves `Failed`.
+    pub stop: BotStopStage,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BotStopStage {
+    /// Not stopped: Stop may be pressed.
+    Running,
+    /// The last Stop was refused or failed; it may be pressed again.
+    Failed,
+    /// TDLib confirmed the stop.
+    Stopped,
 }
 
 pub struct Session {

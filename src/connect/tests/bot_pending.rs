@@ -66,7 +66,10 @@ fn bot_stream_stop_races_retention_topics_and_expiry() {
         &mut driver,
         json!({"@type":"error", "@extra":request.as_extra(), "code":500, "message":"test"}),
     );
-    assert!(driver.session.messages.pending_bot_messages[&(7, 42)].stop_failed);
+    assert_eq!(
+        driver.session.messages.pending_bot_messages[&(7, 42)].stop,
+        crate::state::BotStopStage::Failed
+    );
     let old_stop = driver
         .stop_pending_bot_message(ChatId(7), 42, i64::MAX)
         .unwrap()
@@ -83,7 +86,10 @@ fn bot_stream_stop_races_retention_topics_and_expiry() {
         .unwrap();
     ingest(&mut driver, json!({"@type":"ok", "@extra":stop.as_extra()}));
     assert!(!driver.session.messages.pending_bot_messages[&(7, 42)].can_stop);
-    assert!(driver.session.messages.pending_bot_messages[&(7, 42)].stopped);
+    assert_eq!(
+        driver.session.messages.pending_bot_messages[&(7, 42)].stop,
+        crate::state::BotStopStage::Stopped
+    );
     ingest(&mut driver, draft(12, 42, true));
     assert!(!driver.session.messages.pending_bot_messages[&(7, 42)].can_stop);
     assert!(
@@ -166,7 +172,10 @@ fn bot_stream_stop_races_retention_topics_and_expiry() {
     let mut no_stop = draft(16, 0, false);
     no_stop["can_stop"] = json!(false);
     ingest(&mut driver, no_stop);
-    assert!(!driver.session.messages.pending_bot_messages[&(7, 0)].stopped);
+    assert_ne!(
+        driver.session.messages.pending_bot_messages[&(7, 0)].stop,
+        crate::state::BotStopStage::Stopped
+    );
     assert!(
         driver
             .stop_pending_bot_message(ChatId(7), 0, 16)

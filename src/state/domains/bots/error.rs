@@ -127,7 +127,7 @@ impl Session {
                 .get_mut(&(chat_id.0, topic_id))
             && draft.draft_id == draft_id
         {
-            draft.stop_failed = true;
+            draft.stop = BotStopStage::Failed;
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetGameHighScores) {
             // Slice bots-games: a refused `getGameHighScores` closes the

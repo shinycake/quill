@@ -562,8 +562,7 @@ impl Session {
         {
             if pending.keep_on_stop {
                 pending.can_stop = false;
-                pending.stopped = true;
-                pending.stop_failed = false;
+                pending.stop = BotStopStage::Stopped;
             } else {
                 self.messages.pending_bot_messages.remove(&key);
             }

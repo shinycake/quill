@@ -443,6 +443,18 @@ mod tests {
     }
 
     #[test]
+    fn a_repeated_phrase_is_quoted_where_it_was_selected() {
+        let source = QuotableText::plain("ok. fine. ok. done");
+        let first = source.quote_for_nth("ok.", 0).expect("first");
+        let second = source.quote_for_nth("ok.", 1).expect("second");
+        assert_eq!((first.position, second.position), (0, 11));
+        // A count past the last occurrence takes the last.
+        let past = source.quote_for_nth("ok.", 7).expect("last");
+        assert_eq!(past.position, 11);
+        assert_eq!(source.quote_for("ok.").map(|q| q.position), Some(0));
+    }
+
+    #[test]
     fn a_rich_message_never_falls_back_to_its_copy_text() {
         // A block Quill cannot place: quoting its copy text would send an
         // ordinary quote of a rich message, which the schema forbids.
