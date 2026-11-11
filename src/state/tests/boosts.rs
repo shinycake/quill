@@ -36,6 +36,9 @@ fn boost_status_keeps_progress_details() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatBoostStatus, Some(ChatId(13)));
+    let fetch = session.groups.chat_boost_status.entry(13).or_default();
+    fetch.begin();
+    fetch.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -45,10 +48,10 @@ fn boost_status_keeps_progress_details() {
             extra.0
         ),
     );
-    let details = &session.groups.chat_boost_details[&13];
+    let details = session.groups.boost_status(13).expect("answered");
     assert_eq!(details.level_fraction(), 0.5);
     assert_eq!(details.boosts_to_next_level(), Some(5));
-    assert_eq!(session.groups.chat_boost_status.get(&13), Some(&(2, 15)));
+    assert_eq!(session.groups.boost_level_and_count(13), Some((2, 15)));
 }
 
 #[test]

@@ -387,13 +387,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.session
-            .groups
-            .chat_statistics
-            .insert(chat_id.0, ChatStatisticsFetch::Loading { is_dark });
         let extra = self
             .session
             .request(RequestPurpose::GetChatStatistics, Some(chat_id));
+        self.session.groups.chat_statistics.insert(
+            chat_id.0,
+            ChatStatisticsFetch::Loading {
+                request: extra,
+                is_dark,
+            },
+        );
         if let Err(err) = self
             .sender
             .send_json(&get_chat_statistics(extra, chat_id.0, is_dark))

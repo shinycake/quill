@@ -70,7 +70,7 @@ impl Rig {
             .new_chats
             .creations
             .get(&extra)
-            .and_then(|creation| creation.outcome.clone())
+            .and_then(|creation| creation.outcome().cloned())
     }
 
     fn create(

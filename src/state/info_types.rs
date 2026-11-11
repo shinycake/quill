@@ -321,6 +321,7 @@ pub enum ChatStatisticsFetch {
     },
     /// Asked for graphs in this theme.
     Loading {
+        request: RequestId,
         is_dark: bool,
     },
     /// The graphs' colors are the theme they were asked for
@@ -338,7 +339,8 @@ pub enum ChatStatisticsFetch {
 /// is the in-flight guard.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PollStatsFetch {
-    Loading,
+    /// Asked as this request: only its answer or error acts on the slot.
+    Loading(RequestId),
     Loaded(crate::telegram::envelope::StatisticalGraph),
     Failed(String),
 }
@@ -461,7 +463,8 @@ pub const INVITE_ADMIN_PAGE_SIZE: i32 = 50;
 /// Drives the edit-rights dialog's loading / error states.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdminRightsFetch {
-    Loading,
+    /// Asked as this request: only its answer or error acts on the slot.
+    Loading(RequestId),
     Loaded(ChatAdminRights),
     Failed(String),
 }
@@ -472,7 +475,8 @@ pub enum AdminRightsFetch {
 /// is outstanding.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AdminListFetch {
-    Loading,
+    /// Asked as this request: only its answer or error acts on the slot.
+    Loading(RequestId),
     Loaded(Vec<ChatAdministratorEntry>),
     Failed(String),
 }
@@ -482,7 +486,8 @@ pub enum AdminListFetch {
 /// Loading-guard convention.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SupergroupMembersFetch {
-    Loading,
+    /// Asked as this request: only its answer or error acts on the slot.
+    Loading(RequestId),
     Loaded {
         members: Vec<ParsedChatMember>,
         total_count: i32,
@@ -515,7 +520,8 @@ pub struct MemberAsk {
 /// lands in `Failed`, a failed "load more" keeps the loaded page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PollVotersFetch {
-    Loading,
+    /// Asked as this request: only its answer or error acts on the slot.
+    Loading(RequestId),
     Loaded {
         voters: Vec<MessageSender>,
         total_count: i32,

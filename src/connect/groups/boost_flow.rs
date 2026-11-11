@@ -30,8 +30,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         // The old chat's pending boost and its slots go with its box.
         self.session.groups.boost_box = Some(BoostBoxState::new(chat_id.0, !is_channel));
-        self.session.groups.chat_boost_status.remove(&chat_id.0);
-        self.session.groups.chat_boost_details.remove(&chat_id.0);
+        self.session.groups.outdate_boost_status(chat_id.0);
         self.fetch_chat_boost_status(chat_id)?;
         self.fetch_chat_boost_features(chat_id)?;
         // Only the gift lines need it, so a failure is not an error.

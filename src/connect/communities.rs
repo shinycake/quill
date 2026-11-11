@@ -241,7 +241,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 )
             },
         )?;
-        if sent.is_some() {
+        if let Some(request) = sent {
             // No page is in flight here, so what was handled so far is
             // behind this page's answer.
             self.session
@@ -254,11 +254,8 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .add_chat_requests
                 .entry(community_id)
                 .or_default();
-            let stale = fetch.take_data();
-            *fetch = Fetch::Loading {
-                stale,
-                request: None,
-            };
+            fetch.begin();
+            fetch.sent(request);
         }
         Ok(sent)
     }

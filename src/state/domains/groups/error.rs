@@ -56,6 +56,24 @@ impl Session {
         ) {
             self.note_premium_limit(err, pending);
         }
+        // A create whose dialog was closed and whose request was lost has no
+        // answer to wait for: its row goes (an answered one was settled
+        // when the answer came).
+        if let Some(pending) = pending
+            && matches!(
+                pending.purpose,
+                RequestPurpose::CreateBasicGroup
+                    | RequestPurpose::Groups(GroupsPurpose::CreateSupergroupChannel { .. })
+            )
+            && self
+                .groups
+                .new_chats
+                .creations
+                .get(&pending.id)
+                .is_some_and(|creation| creation.stage == CreationStage::Detached)
+        {
+            self.groups.new_chats.creations.remove(&pending.id);
+        }
         self.record_group_info_edit_error(err, pending);
         self.note_community_full_info_failed(pending);
         self.apply_group_type_error(err, pending);
@@ -180,14 +198,16 @@ impl Session {
             // fetch state so the statistics panel shows an honest
             // error instead of spinning forever.
             Some(RequestPurpose::GetChatStatistics) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.groups.chat_statistics.insert(
-                        chat_id.0,
-                        ChatStatisticsFetch::Failed(call_request_error_line(
-                            err,
-                            "Could not load statistics",
-                        )),
-                    );
+                // Only the request the panel waits for fails it.
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && let Some(slot) = self.groups.chat_statistics.get_mut(&chat_id.0)
+                    && matches!(slot, ChatStatisticsFetch::Loading { request, .. } if *request == pending.id)
+                {
+                    *slot = ChatStatisticsFetch::Failed(call_request_error_line(
+                        err,
+                        "Could not load statistics",
+                    ));
                 }
             }
             Some(RequestPurpose::GetStatisticalGraph) => {
@@ -229,19 +249,15 @@ impl Session {
             // A list that already holds an answer (a newer request landed
             // first) is not failed by an older request's error.
             Some(RequestPurpose::GetChatInviteLinks) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && !matches!(
-                        self.groups.invite_links.get(&chat_id.0),
-                        Some(InviteLinkFetch::Loaded(_))
-                    )
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && let Some(slot) = self.groups.invite_links.get_mut(&chat_id.0)
+                    && *slot == InviteLinkFetch::Loading(pending.id)
                 {
-                    self.groups.invite_links.insert(
-                        chat_id.0,
-                        InviteLinkFetch::Failed(call_request_error_line(
-                            err,
-                            "Could not load invite links",
-                        )),
-                    );
+                    *slot = InviteLinkFetch::Failed(call_request_error_line(
+                        err,
+                        "Could not load invite links",
+                    ));
                 }
             }
             Some(RequestPurpose::CreateChatInviteLink) => {
@@ -332,19 +348,15 @@ impl Session {
                 ));
             }
             Some(RequestPurpose::GetRevokedChatInviteLinks) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id)
-                    && !matches!(
-                        self.groups.revoked_invite_links.get(&chat_id.0),
-                        Some(InviteLinkFetch::Loaded(_))
-                    )
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && let Some(slot) = self.groups.revoked_invite_links.get_mut(&chat_id.0)
+                    && *slot == InviteLinkFetch::Loading(pending.id)
                 {
-                    self.groups.revoked_invite_links.insert(
-                        chat_id.0,
-                        InviteLinkFetch::Failed(call_request_error_line(
-                            err,
-                            "Could not load revoked links",
-                        )),
-                    );
+                    *slot = InviteLinkFetch::Failed(call_request_error_line(
+                        err,
+                        "Could not load revoked links",
+                    ));
                 }
             }
             Some(RequestPurpose::GetChatInviteLinkCounts) => {
@@ -458,14 +470,15 @@ impl Session {
             // the fetch state so the panel shows an honest error
             // instead of spinning forever.
             Some(RequestPurpose::GetChatAdministrators) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.groups.admin_lists.insert(
-                        chat_id.0,
-                        AdminListFetch::Failed(call_request_error_line(
-                            err,
-                            "Could not load administrators",
-                        )),
-                    );
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && let Some(slot) = self.groups.admin_lists.get_mut(&chat_id.0)
+                    && *slot == AdminListFetch::Loading(pending.id)
+                {
+                    *slot = AdminListFetch::Failed(call_request_error_line(
+                        err,
+                        "Could not load administrators",
+                    ));
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::SetChatMemberStatus { .. })) => {
@@ -489,14 +502,15 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetBasicGroupFullInfo) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.groups.basic_group_members.insert(
-                        chat_id.0,
-                        SupergroupMembersFetch::Failed(call_request_error_line(
-                            err,
-                            "Could not load members",
-                        )),
-                    );
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && let Some(slot) = self.groups.basic_group_members.get_mut(&chat_id.0)
+                    && matches!(slot, SupergroupMembersFetch::Loading(waiting) if *waiting == pending.id)
+                {
+                    *slot = SupergroupMembersFetch::Failed(call_request_error_line(
+                        err,
+                        "Could not load members",
+                    ));
                 }
             }
             // Slice G1: a basic-group `addChatMember` answers per
@@ -574,13 +588,28 @@ impl Session {
                 }
             }
             Some(RequestPurpose::Groups(GroupsPurpose::GetAdminRights { user_id })) => {
-                if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.groups.admin_rights.insert(
-                        (chat_id.0, user_id),
-                        AdminRightsFetch::Failed(call_request_error_line(
-                            err,
-                            "Could not load admin rights",
-                        )),
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && let Some(slot) = self.groups.admin_rights.get_mut(&(chat_id.0, user_id))
+                    && *slot == AdminRightsFetch::Loading(pending.id)
+                {
+                    *slot = AdminRightsFetch::Failed(call_request_error_line(
+                        err,
+                        "Could not load admin rights",
+                    ));
+                }
+            }
+            // The boost status asked again after a boost or a level change:
+            // only the request it waits for fails it, the held answer stays.
+            Some(RequestPurpose::GetChatBoostStatus) => {
+                if let Some(pending) = pending
+                    && let Some(chat_id) = pending.chat_id
+                    && let Some(fetch) = self.groups.chat_boost_status.get_mut(&chat_id.0)
+                {
+                    fetch.failed(
+                        Some(pending.id),
+                        call_request_error_line(err, "Could not load the boost status"),
+                        false,
                     );
                 }
             }

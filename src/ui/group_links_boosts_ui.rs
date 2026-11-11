@@ -84,21 +84,9 @@ impl QuillApp {
             .and_then(|s| s.groups.chat_boost_lists.get(&chat_id.0))
             .cloned();
         let only_gifts = list.as_ref().is_some_and(|l| l.only_gifts);
-        let level = session.and_then(|s| s.groups.chat_boost_status.get(&chat_id.0).copied());
         let mut body = div().flex().flex_col().gap_1().px_2();
         body = body.child(self.boosts_overview(chat_id, cx));
         body = body.child(self.giveaway_boosts_section(chat_id, cx));
-        if let Some((level, count)) = level.filter(|_| {
-            session.is_some_and(|s| !s.groups.chat_boost_details.contains_key(&chat_id.0))
-        }) {
-            body = body.child(div().text_sm().child(tr_with(
-                keys::Q_PEOPLE_LEVEL,
-                &[
-                    ("level", &level.to_string()),
-                    ("boost_count_title", &(boost_count_title(count)).to_string()),
-                ],
-            )));
-        }
         body = body.child(
             div()
                 .flex()

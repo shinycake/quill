@@ -244,7 +244,14 @@ fn a_prepaid_giveaway_launches_only_on_the_explicit_call() {
     let recorder = Arc::new(RecordingSender::new());
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
-    driver.session.groups.chat_boost_status.insert(-100, (1, 2));
+    driver.session.groups.set_boost_status(
+        -100,
+        crate::telegram::envelope::ParsedBoostStatus {
+            level: 1,
+            boost_count: 2,
+            ..Default::default()
+        },
+    );
 
     // A new giveaway (not prepaid) never launches.
     let paid = GiveawayDraft::new(-100, None, NOW);
@@ -283,7 +290,15 @@ fn a_prepaid_giveaway_launches_only_on_the_explicit_call() {
         GiveawayLaunch::Launched { chat_id: -100 }
     );
     // The cached boost numbers are dropped so the page asks again.
-    assert!(!driver.session.groups.chat_boost_status.contains_key(&-100));
+    assert!(
+        driver
+            .session
+            .groups
+            .chat_boost_status
+            .get(&-100)
+            .is_some_and(|fetch| fetch.is_outdated()),
+        "the page asks again"
+    );
     for ty in ["getPaymentForm", "sendPaymentForm"] {
         assert_eq!(count_sent(&recorder, ty), 0);
     }
@@ -301,8 +316,16 @@ fn a_launch_answer_for_one_chat_does_not_land_in_another_chats_form() {
         let recorder = Arc::new(RecordingSender::new());
         let seq = AtomicU64::new(0);
         let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
-        driver.session.groups.chat_boost_status.insert(-100, (1, 2));
-        driver.session.groups.chat_boost_status.insert(-200, (3, 4));
+        for (chat, level, count) in [(-100, 1, 2), (-200, 3, 4)] {
+            driver.session.groups.set_boost_status(
+                chat,
+                crate::telegram::envelope::ParsedBoostStatus {
+                    level,
+                    boost_count: count,
+                    ..Default::default()
+                },
+            );
+        }
         let extra = driver
             .launch_prepaid_giveaway(&prepaid_draft(), NOW)
             .unwrap();
@@ -324,11 +347,23 @@ fn a_launch_answer_for_one_chat_does_not_land_in_another_chats_form() {
         assert_eq!(launch.is_done_for(-100), !fail);
         assert_eq!(launch.failure_for(-100).is_some(), fail);
         assert_eq!(
-            driver.session.groups.chat_boost_status.contains_key(&-100),
-            fail,
-            "A's boost status is dropped when its launch succeeded"
+            driver
+                .session
+                .groups
+                .chat_boost_status
+                .get(&-100)
+                .is_some_and(|fetch| fetch.is_outdated()),
+            !fail,
+            "A's boost status is out of date when its launch succeeded"
         );
-        assert!(driver.session.groups.chat_boost_status.contains_key(&-200));
+        assert!(
+            driver
+                .session
+                .groups
+                .chat_boost_status
+                .get(&-200)
+                .is_some_and(|fetch| !fetch.is_outdated())
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -249,6 +249,10 @@ fn admin_list_fetch_caches() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatAdministrators, Some(ChatId(13)));
+    session
+        .groups
+        .admin_lists
+        .insert(13, AdminListFetch::Loading(extra));
 
     apply_json(
         &mut session,
@@ -321,10 +325,11 @@ fn set_chat_member_status_ok_invalidates_admin_list() {
 fn adding_members_marks_the_member_list_stale() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
+    let asked = session.request(RequestPurpose::GetBasicGroupFullInfo, Some(ChatId(13)));
     session
         .groups
         .basic_group_members
-        .insert(13, crate::state::SupergroupMembersFetch::Loading);
+        .insert(13, crate::state::SupergroupMembersFetch::Loading(asked));
     let extra = session.request(RequestPurpose::AddChatMember, Some(ChatId(13)));
     apply_json(
         &mut session,
@@ -416,7 +421,7 @@ fn an_admin_list_asked_before_a_membership_change_is_dropped() {
     session
         .groups
         .admin_lists
-        .insert(13, AdminListFetch::Loading);
+        .insert(13, AdminListFetch::Loading(asked));
     apply_json(
         &mut session,
         &seq,
@@ -445,6 +450,10 @@ fn get_admin_rights_response_caches_rights() {
         RequestPurpose::Groups(GroupsPurpose::GetAdminRights { user_id: 888 }),
         Some(ChatId(13)),
     );
+    session
+        .groups
+        .admin_rights
+        .insert((13, 888), AdminRightsFetch::Loading(extra));
     apply_json(
         &mut session,
         &seq,
@@ -507,6 +516,10 @@ fn basic_group_full_info_caches_members() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetBasicGroupFullInfo, Some(ChatId(13)));
+    session
+        .groups
+        .basic_group_members
+        .insert(13, SupergroupMembersFetch::Loading(extra));
     apply_json(
         &mut session,
         &seq,
@@ -726,6 +739,9 @@ fn g2_chat_boost_status_cached() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetChatBoostStatus, Some(ChatId(13)));
+    let fetch = session.groups.chat_boost_status.entry(13).or_default();
+    fetch.begin();
+    fetch.sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -735,7 +751,7 @@ fn g2_chat_boost_status_cached() {
             extra.0
         ),
     );
-    assert_eq!(session.groups.chat_boost_status.get(&13), Some(&(3, 42)));
+    assert_eq!(session.groups.boost_level_and_count(13), Some((3, 42)));
 }
 
 #[test]

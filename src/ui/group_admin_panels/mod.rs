@@ -41,7 +41,7 @@ impl QuillApp {
         }
         let status = self
             .session()
-            .and_then(|session| session.groups.chat_boost_status.get(&chat_id.0).copied());
+            .and_then(|session| session.groups.boost_level_and_count(chat_id.0));
         let in_flight = self.session().is_some_and(|session| {
             session
                 .requests
@@ -120,11 +120,7 @@ impl QuillApp {
     /// Slice G2: re-request the boost status (bypasses the cache).
     pub(super) fn refresh_boost_status(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            live.driver
-                .session
-                .groups
-                .chat_boost_status
-                .remove(&chat_id.0);
+            live.driver.session.groups.outdate_boost_status(chat_id.0);
             if live.driver.fetch_chat_boost_status(chat_id).is_err() {
                 self.set_note(StatusNote::error(tr(
                     keys::Q_PEOPLE_COULD_NOT_LOAD_BOOST_STATUS,

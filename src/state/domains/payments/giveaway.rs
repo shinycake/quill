@@ -253,8 +253,7 @@ impl Session {
             return;
         };
         if let Some(chat_id) = pending.chat_id {
-            self.groups.chat_boost_status.remove(&chat_id.0);
-            self.groups.chat_boost_details.remove(&chat_id.0);
+            self.groups.outdate_boost_status(chat_id.0);
         }
         if let GiveawayLaunch::Launching { chat_id, request } = self.payments.giveaway.launch
             && request != 0

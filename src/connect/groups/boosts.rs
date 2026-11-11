@@ -8,7 +8,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// the boost status of every chat whose cached status is now stale, so an
     /// open boost box, profile row or look dialog shows the new level.
     pub(crate) fn refresh_moved_boost_statuses(&mut self) {
-        for chat_id in self.session.take_moved_boost_chats() {
+        for chat_id in self.session.outdated_boost_chats() {
             let _ = self.fetch_chat_boost_status(chat_id);
         }
     }
@@ -28,11 +28,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         ) {
             return Ok(None);
         }
-        if self
-            .session
-            .groups
-            .chat_boost_status
-            .contains_key(&chat_id.0)
+        if !self.session.groups.boost_status_wanted(chat_id.0)
             || self
                 .session
                 .requests
@@ -50,6 +46,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        let fetch = self
+            .session
+            .groups
+            .chat_boost_status
+            .entry(chat_id.0)
+            .or_default();
+        fetch.begin();
+        fetch.sent(extra);
         Ok(Some(extra))
     }
 

@@ -743,7 +743,7 @@ impl QuillApp {
                     .find(|l| l.can_disable_sponsored_messages)
                     .map(|l| l.level)
             });
-        let level = session.groups.chat_boost_status.get(&chat_id).map(|s| s.0);
+        let level = session.groups.boost_level(chat_id);
         let locked = matches!((level, required), (Some(level), Some(required)) if level < required);
         let mut row = crate::ui::pressable::action_row(
             "earn-ads-off",

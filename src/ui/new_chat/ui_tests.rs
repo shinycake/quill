@@ -163,7 +163,9 @@ fn cancel_closes_the_box_while_the_create_request_is_out(cx: &mut TestAppContext
 /// the creation row), instead of leaving a hidden dialog behind.
 #[gpui_kit::test]
 fn a_made_group_takes_its_dialog_away(cx: &mut TestAppContext) {
-    use quill::new_chat::{CreateProgress, CreationOutcome, NewChatBack, NewChatStage};
+    use quill::new_chat::{
+        CreateProgress, CreationOutcome, NewChatBack, NewChatKind, NewChatStage,
+    };
     use quill::state::{NewChatCreation, RequestPurpose};
     let (app, shell, mut vcx) = open_demo(cx, "ready-new-group");
     let vcx = &mut vcx;
@@ -174,10 +176,7 @@ fn a_made_group_takes_its_dialog_away(cx: &mut TestAppContext) {
         let request = session.request(RequestPurpose::SetChatTitle, None);
         session.groups.new_chats.creations.insert(
             request,
-            NewChatCreation {
-                outcome: Some(CreationOutcome::Created(ChatId(77))),
-                ..NewChatCreation::default()
-            },
+            NewChatCreation::answered(NewChatKind::Channel, CreationOutcome::Created(ChatId(77))),
         );
         if let Some(dialog) = app.admin.create_chat_dialog.as_mut() {
             dialog.stage = NewChatStage::Creating {

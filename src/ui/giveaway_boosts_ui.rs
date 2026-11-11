@@ -37,8 +37,7 @@ impl QuillApp {
         };
         let prepaid = session
             .groups
-            .chat_boost_details
-            .get(&chat_id.0)
+            .boost_status(chat_id.0)
             .map(|status| status.prepaid_giveaways.clone())
             .unwrap_or_default();
         let multiplier = quill::giveaway::BOOSTS_PER_PREMIUM;

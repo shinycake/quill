@@ -22,7 +22,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if matches!(
             self.session.groups.admin_lists.get(&chat_id.0),
-            Some(AdminListFetch::Loading | AdminListFetch::Loaded(_))
+            Some(AdminListFetch::Loading(_) | AdminListFetch::Loaded(_))
         ) || self
             .session
             .requests
@@ -30,13 +30,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        self.session
-            .groups
-            .admin_lists
-            .insert(chat_id.0, AdminListFetch::Loading);
         let extra = self
             .session
             .request(RequestPurpose::GetChatAdministrators, Some(chat_id));
+        self.session
+            .groups
+            .admin_lists
+            .insert(chat_id.0, AdminListFetch::Loading(extra));
         if let Err(err) = self
             .sender
             .send_json(&get_chat_administrators(extra, chat_id.0))
@@ -371,7 +371,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if matches!(
             self.session.groups.admin_rights.get(&(chat_id.0, user_id)),
-            Some(AdminRightsFetch::Loading | AdminRightsFetch::Loaded(_))
+            Some(AdminRightsFetch::Loading(_) | AdminRightsFetch::Loaded(_))
         ) {
             return Ok(None);
         }
@@ -379,11 +379,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.requests.has_purpose_for_chat(purpose, chat_id) {
             return Ok(None);
         }
+        let extra = self.session.request(purpose, Some(chat_id));
         self.session
             .groups
             .admin_rights
-            .insert((chat_id.0, user_id), AdminRightsFetch::Loading);
-        let extra = self.session.request(purpose, Some(chat_id));
+            .insert((chat_id.0, user_id), AdminRightsFetch::Loading(extra));
         if let Err(err) = self
             .sender
             .send_json(&get_chat_member(extra, chat_id, user_id))
@@ -410,7 +410,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let key = (chat_id.0, user_id);
         if !matches!(
             self.session.groups.admin_rights.get(&key),
-            Some(AdminRightsFetch::Loading)
+            Some(AdminRightsFetch::Loading(_))
         ) {
             self.session.groups.admin_rights.remove(&key);
         }

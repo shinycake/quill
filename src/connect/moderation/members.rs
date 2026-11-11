@@ -38,16 +38,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         if same_query
             && (matches!(
                 self.session.groups.supergroup_members.get(&key),
-                Some(SupergroupMembersFetch::Loading | SupergroupMembersFetch::Loaded { .. })
+                Some(SupergroupMembersFetch::Loading(_) | SupergroupMembersFetch::Loaded { .. })
             ) || self.session.requests.has_purpose_for_chat(purpose, chat_id))
         {
             return Ok(None);
         }
+        let extra = self.session.request(purpose, Some(chat_id));
         self.session
             .groups
             .supergroup_members
-            .insert(key, SupergroupMembersFetch::Loading);
-        let extra = self.session.request(purpose, Some(chat_id));
+            .insert(key, SupergroupMembersFetch::Loading(extra));
         self.session.groups.note_member_first(key, extra, query);
         let filter_json = match filter {
             MemberListFilter::Recent => supergroup_members_filter_recent_json(),
@@ -106,16 +106,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         let purpose = RequestPurpose::GetBasicGroupFullInfo;
         if matches!(
             self.session.groups.basic_group_members.get(&chat_id.0),
-            Some(SupergroupMembersFetch::Loading | SupergroupMembersFetch::Loaded { .. })
+            Some(SupergroupMembersFetch::Loading(_) | SupergroupMembersFetch::Loaded { .. })
         ) || self.session.requests.has_purpose_for_chat(purpose, chat_id)
         {
             return Ok(None);
         }
+        let extra = self.session.request(purpose, Some(chat_id));
         self.session
             .groups
             .basic_group_members
-            .insert(chat_id.0, SupergroupMembersFetch::Loading);
-        let extra = self.session.request(purpose, Some(chat_id));
+            .insert(chat_id.0, SupergroupMembersFetch::Loading(extra));
         if let Err(err) = self
             .sender
             .send_json(&get_basic_group_full_info(extra, basic_group_id))

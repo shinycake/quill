@@ -2,33 +2,71 @@
 //! the photo set once the chat exists, and how the request ended
 //! (`crate::new_chat`).
 use crate::lang::{keys, tr};
-use crate::new_chat::{CreateProgress, CreationOutcome, NewChatStage, TypeSaveStage};
+use crate::new_chat::{CreateProgress, CreationOutcome, NewChatKind, NewChatStage, TypeSaveStage};
 use crate::profile_photo_sources::ChatPhotoInput;
 use crate::state::*;
 
-/// Whose create this is: the open dialog's, or one whose dialog was closed
-/// while it was out (it still finishes, but opens nothing and does not
-/// block the next dialog's Create).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum CreationAsker {
-    #[default]
-    Dialog,
-    Closed,
+/// One create request, from the send to its answer. The request stays
+/// out when its dialog is closed (TDLib cannot cancel it); that is a
+/// transition of this stage, and a request that is lost removes its row.
+#[derive(Clone, Debug, PartialEq)]
+pub enum CreationStage {
+    /// Out; the open dialog reads its answer.
+    Asked,
+    /// Out, but its dialog was closed: it still finishes, opens nothing
+    /// and does not block the next dialog's Create. Its answer is applied
+    /// and the row goes.
+    Detached,
+    /// Answered; the dialog reads it, then lets go of the row.
+    Answered(CreationOutcome),
+    /// A detached create made its chat: the photo and link are set, then
+    /// the row goes.
+    Finishing(ChatId),
 }
 
 /// One create request.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct NewChatCreation {
     /// `setChatPhoto` once the chat exists.
     pub photo: Option<ChatPhotoInput>,
     /// A group opens as soon as it exists; a channel when its last step
-    /// closes.
-    pub open_when_created: bool,
-    /// A supergroup or channel gets its primary invite link straight
-    /// away, for the type step (tdesktop `checkInviteLink`).
-    pub make_invite_link: bool,
-    pub outcome: Option<CreationOutcome>,
-    pub asker: CreationAsker,
+    /// closes. A supergroup or channel gets its primary invite link
+    /// straight away, for the type step (tdesktop `checkInviteLink`).
+    pub kind: NewChatKind,
+    pub stage: CreationStage,
+}
+
+impl NewChatCreation {
+    /// A create that just went out for the open dialog.
+    pub fn asked(kind: NewChatKind, photo: Option<ChatPhotoInput>) -> Self {
+        Self {
+            photo,
+            kind,
+            stage: CreationStage::Asked,
+        }
+    }
+
+    /// A create the dialog can read the answer of.
+    pub fn answered(kind: NewChatKind, outcome: CreationOutcome) -> Self {
+        Self {
+            photo: None,
+            kind,
+            stage: CreationStage::Answered(outcome),
+        }
+    }
+
+    /// How the create ended, once the dialog can read it.
+    pub fn outcome(&self) -> Option<&CreationOutcome> {
+        match &self.stage {
+            CreationStage::Answered(outcome) => Some(outcome),
+            _ => None,
+        }
+    }
+
+    /// Still out, with the open dialog waiting for it.
+    pub fn is_asked(&self) -> bool {
+        self.stage == CreationStage::Asked
+    }
 }
 
 /// A request of the type step's Save, from the send to its answer.
@@ -78,7 +116,7 @@ impl Session {
                     .new_chats
                     .creations
                     .get(request)
-                    .and_then(|creation| creation.outcome.clone());
+                    .and_then(|creation| creation.outcome().cloned());
                 let progress = match outcome {
                     Some(CreationOutcome::Created(chat)) => CreateProgress::Created(chat),
                     Some(CreationOutcome::Failed { failure, reason }) => {

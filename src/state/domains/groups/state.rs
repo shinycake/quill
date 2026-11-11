@@ -255,12 +255,11 @@ pub struct GroupsState {
     /// 1.8.67, line 10649): asked, answered or failed, with the pack kept
     /// beside a refetch. `Loading` is the in-flight guard.
     pub welcome_messages: HashMap<i64, crate::state::fetch::Fetch<Vec<ParsedWelcomeMessage>>>,
-    /// Slice G2: `(level, boost_count)` from `getChatBoostStatus`
-    /// (schema 1.8.67, lines 13917/6943), keyed by chat id.
-    pub chat_boost_status: HashMap<i64, (i32, i32)>,
-    /// Full `getChatBoostStatus` answer (progress to the next level,
-    /// Premium audience), keyed by chat id.
-    pub chat_boost_details: HashMap<i64, ParsedBoostStatus>,
+    /// `getChatBoostStatus` (schema 1.8.67, line 13917), keyed by chat id:
+    /// level, boost count, progress to the next level, Premium audience.
+    /// A level that moved (`updateSupergroup`) or a boost made marks the
+    /// answer `Outdated`: it stays on screen until the refetch replaces it.
+    pub chat_boost_status: HashMap<i64, crate::state::fetch::Fetch<ParsedBoostStatus>>,
     /// `getChatBoostFeatures` level tables, keyed by chat id (the table
     /// differs for channels and groups).
     pub chat_boost_features: HashMap<i64, ParsedBoostFeatures>,
@@ -294,9 +293,6 @@ pub struct GroupsState {
     /// `supergroup.boost_level` per supergroup (`updateSupergroup`), keyed by
     /// supergroup id: the last level seen, to tell when it moved.
     pub supergroup_boost_levels: HashMap<i64, i32>,
-    /// Supergroups whose boost level moved since the driver last looked; it
-    /// refetches the boost status of the ones it has cached.
-    pub boost_level_moved: Vec<i64>,
     /// The chat of each supergroup `updateNewChat` named, so a supergroup
     /// update reaches its chat without a walk over every chat.
     pub supergroup_chat_ids: HashMap<i64, i64>,
@@ -442,7 +438,6 @@ impl GroupsState {
             chat_has_welcome_messages: HashMap::new(),
             welcome_messages: HashMap::new(),
             chat_boost_status: HashMap::new(),
-            chat_boost_details: HashMap::new(),
             chat_boost_features: HashMap::new(),
             unrestrict_boost_saves: HashMap::new(),
             supergroup_size_max: 0,
@@ -453,7 +448,6 @@ impl GroupsState {
             supergroup_usernames: HashMap::new(),
             supergroup_verification: HashMap::new(),
             supergroup_boost_levels: HashMap::new(),
-            boost_level_moved: Vec::new(),
             supergroup_chat_ids: HashMap::new(),
             supergroup_member_status: HashMap::new(),
             supergroup_restrict_right: HashMap::new(),

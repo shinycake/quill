@@ -419,6 +419,10 @@ fn basic_group_manage_counts_its_admins() {
     basic_group(&mut session, &seq, &sink, CREATOR, 3);
     // The member list is kept by chat, not by basic group id.
     let extra = session.request(RequestPurpose::GetBasicGroupFullInfo, Some(ChatId(30)));
+    session
+        .groups
+        .basic_group_members
+        .insert(30, SupergroupMembersFetch::Loading(extra));
     apply_json(
         &mut session,
         &seq,

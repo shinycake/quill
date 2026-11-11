@@ -46,7 +46,14 @@ impl Session {
                 if let Some((CommunitiesPurpose::GetAddChatRequests { first_page }, community_id)) =
                     communities_purpose(pending)
                 {
-                    self.apply_add_chat_requests_page(community_id, first_page, page);
+                    if let Some(pending) = pending {
+                        self.apply_add_chat_requests_page(
+                            community_id,
+                            first_page,
+                            pending.id,
+                            page,
+                        );
+                    }
                 }
             }
             CommunitiesPayload::MemberChats(chats) => {
@@ -82,13 +89,20 @@ impl Session {
         &mut self,
         community_id: i64,
         first_page: bool,
+        request: RequestId,
         page: CommunityAddChatRequests,
     ) {
-        let fetch = self
+        // Only the page the list waits for lands: one asked before a
+        // reopen or "Add All" is dropped, so it cannot append to a new
+        // list or bring back the old cursor.
+        let Some(fetch) = self
             .communities
             .add_chat_requests
-            .entry(community_id)
-            .or_default();
+            .get_mut(&community_id)
+            .filter(|fetch| fetch.waits_for(request))
+        else {
+            return;
+        };
         let mut list = if first_page {
             AddChatRequestList::default()
         } else {
@@ -298,16 +312,11 @@ impl Session {
                 reason: error_reason(err),
             },
             CommunitiesPurpose::GetAddChatRequests { .. } => {
-                let fetch = self
-                    .communities
-                    .add_chat_requests
-                    .entry(community_id)
-                    .or_default();
-                let stale = fetch.take_data();
-                *fetch = Fetch::Failed {
-                    error: error_reason(err),
-                    stale,
-                };
+                if let Some(pending) = pending
+                    && let Some(fetch) = self.communities.add_chat_requests.get_mut(&community_id)
+                {
+                    fetch.failed(Some(pending.id), error_reason(err), false);
+                }
                 return;
             }
             CommunitiesPurpose::GetMemberChats { member } => {

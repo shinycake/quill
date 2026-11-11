@@ -4,6 +4,7 @@ mod boost_level;
 mod error;
 mod event_log;
 mod group_type;
+mod invite_answers;
 mod invite_pages;
 mod join_requests;
 mod new_chat;

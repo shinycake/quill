@@ -49,7 +49,8 @@ pub enum UsernameCheck {
 pub enum PublicChatsFetch {
     #[default]
     None,
-    Loading,
+    /// Asked as this request: only its answer or error acts on the list.
+    Loading(RequestId),
     Loaded(Vec<ChatId>),
     Failed,
 }
@@ -295,7 +296,13 @@ impl Session {
                     .is_some_and(|name| !name.is_empty())
             })
             .collect();
-        self.groups.group_type.public_chats = PublicChatsFetch::Loaded(public);
+        // Only the request the box waits for lands: an older list, answered
+        // after the box asked again, would show chats a revoke just freed.
+        if let Some(pending) = pending
+            && self.groups.group_type.public_chats == PublicChatsFetch::Loading(pending.id)
+        {
+            self.groups.group_type.public_chats = PublicChatsFetch::Loaded(public);
+        }
         true
     }
 
@@ -329,7 +336,11 @@ impl Session {
                     Some(err.premium_limit == Some(PremiumLimitKind::PublicLinks));
             }
             Some(GroupTypePurpose::GetCreatedPublicChats) => {
-                self.groups.group_type.public_chats = PublicChatsFetch::Failed;
+                if let Some(pending) = pending
+                    && self.groups.group_type.public_chats == PublicChatsFetch::Loading(pending.id)
+                {
+                    self.groups.group_type.public_chats = PublicChatsFetch::Failed;
+                }
             }
             _ => {}
         }
