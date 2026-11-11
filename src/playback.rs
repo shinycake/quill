@@ -11,18 +11,26 @@ use std::time::Instant;
 
 /// Playback position for one audio/voice track.
 ///
-/// The clock has two pieces: a frozen `base_secs` offset (the pause point,
-/// seek target, or resume point) and an optional `started_at` instant while
-/// the player is running. Elapsed time is `base + (now - started) * rate`,
+/// The clock is one [`Clock`] value: paused at a frozen offset (the pause
+/// point or seek target), or running from an offset since an instant.
+/// Elapsed time while running is `from + (now - since) * rate`,
 /// always clamped to `[0, duration]`. `rate` is the playback speed
 /// multiplier (TGX `PlaybackSpeed*`: 0.5x–2x); the player applies the same
 /// factor through its `atempo` filter so audio stays in sync.
 #[derive(Debug, Clone)]
 pub struct PlaybackClock {
     duration_secs: f64,
-    base_secs: f64,
-    started_at: Option<Instant>,
+    clock: Clock,
     rate: f64,
+}
+
+/// Where the playhead is.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Clock {
+    /// Frozen at `at` seconds.
+    Paused { at: f64 },
+    /// Advancing from `from` seconds since `since`.
+    Playing { from: f64, since: Instant },
 }
 
 /// Bounds for [`PlaybackClock::set_rate`] (TGX offers 0.5x–2x).
@@ -35,8 +43,7 @@ impl PlaybackClock {
     pub fn new(duration_secs: f64) -> Self {
         Self {
             duration_secs: duration_secs.max(0.0),
-            base_secs: 0.0,
-            started_at: None,
+            clock: Clock::Paused { at: 0.0 },
             rate: 1.0,
         }
     }
@@ -61,16 +68,20 @@ impl PlaybackClock {
     /// [`Self::set_rate`] with the time given: for a clock kept on another
     /// time source than the wall clock (the `_at` methods all take one).
     pub fn set_rate_at(&mut self, rate: f64, now: Instant) {
-        self.base_secs = self.elapsed_secs_at(now);
+        let at = self.elapsed_secs_at(now);
         self.rate = rate.clamp(PLAYBACK_RATE_MIN, PLAYBACK_RATE_MAX);
-        if self.started_at.is_some() {
-            self.started_at = Some(now);
-        }
+        self.clock = match self.clock {
+            Clock::Paused { .. } => Clock::Paused { at },
+            Clock::Playing { .. } => Clock::Playing {
+                from: at,
+                since: now,
+            },
+        };
     }
 
     /// True while the player is running (elapsed advances).
     pub fn is_playing(&self) -> bool {
-        self.started_at.is_some()
+        matches!(self.clock, Clock::Playing { .. })
     }
 
     /// Seconds elapsed, clamped to `[0, duration]`.
@@ -79,10 +90,12 @@ impl PlaybackClock {
     }
 
     pub fn elapsed_secs_at(&self, now: Instant) -> f64 {
-        let mut elapsed = self.base_secs;
-        if let Some(started) = self.started_at {
-            elapsed += now.saturating_duration_since(started).as_secs_f64() * self.rate;
-        }
+        let elapsed = match self.clock {
+            Clock::Paused { at } => at,
+            Clock::Playing { from, since } => {
+                from + now.saturating_duration_since(since).as_secs_f64() * self.rate
+            }
+        };
         elapsed.clamp(0.0, self.duration_secs)
     }
 
@@ -100,8 +113,9 @@ impl PlaybackClock {
     }
 
     pub fn pause_at(&mut self, now: Instant) {
-        self.base_secs = self.elapsed_secs_at(now);
-        self.started_at = None;
+        self.clock = Clock::Paused {
+            at: self.elapsed_secs_at(now),
+        };
     }
 
     /// Continue advancing from the frozen position.
@@ -110,8 +124,11 @@ impl PlaybackClock {
     }
 
     pub fn resume_at(&mut self, now: Instant) {
-        if self.started_at.is_none() {
-            self.started_at = Some(now);
+        if let Clock::Paused { at } = self.clock {
+            self.clock = Clock::Playing {
+                from: at,
+                since: now,
+            };
         }
     }
 
@@ -123,10 +140,14 @@ impl PlaybackClock {
     }
 
     pub fn seek_at(&mut self, secs: f64, now: Instant) {
-        self.base_secs = secs.clamp(0.0, self.duration_secs);
-        if self.started_at.is_some() {
-            self.started_at = Some(now);
-        }
+        let at = secs.clamp(0.0, self.duration_secs);
+        self.clock = match self.clock {
+            Clock::Paused { .. } => Clock::Paused { at },
+            Clock::Playing { .. } => Clock::Playing {
+                from: at,
+                since: now,
+            },
+        };
     }
 
     /// True when a running clock has reached the end of the track.

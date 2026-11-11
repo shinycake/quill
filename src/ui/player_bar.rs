@@ -300,6 +300,7 @@ impl QuillApp {
             PlaybackKind::Audio => {
                 let ids = self.playlist_audio_ids(chat);
                 let mv = Move {
+                    chat,
                     current: current.0,
                     step,
                     auto,

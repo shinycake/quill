@@ -487,7 +487,7 @@ impl Session {
         }
         // The received-gifts dialog shows each gift's sticker.
         if self.payments.hub.gifts_open {
-            for gift in &self.payments.hub.gifts {
+            for gift in self.payments.hub.gifts() {
                 if let Some(file_id) = gift
                     .gift
                     .sticker

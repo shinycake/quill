@@ -520,39 +520,52 @@ pub fn gifts_layout(gifts: &ThemeGifts) -> GiftsLayout {
 /// after the last request.
 pub const BACKDROPS_REFRESH_SECS: i64 = 3600;
 
+/// Where the backdrop list is: never asked, on its way, or answered.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BackdropsStage {
+    /// Never asked, or the last request failed (the next box asks again).
+    #[default]
+    Idle,
+    /// A request sent at this unix time is on its way.
+    Loading { at: i64 },
+    /// The list was asked for at this unix time and the answer is in.
+    Ready { at: i64 },
+}
+
 /// The server's backdrops and when they were last asked for.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Backdrops {
     pub list: Vec<ShareThemeBackdrop>,
-    pub loading: bool,
-    /// Unix time of the last request; cleared by a failure so the next
-    /// box asks again.
-    pub requested_at: Option<i64>,
+    pub stage: BackdropsStage,
 }
 
 impl Backdrops {
     /// tdesktop `backdropsValue`: ask when never asked, or an hour after
     /// the last request, and never twice at once.
     pub fn due(&self, now: i64) -> bool {
-        !self.loading
-            && self
-                .requested_at
-                .is_none_or(|at| now.saturating_sub(at) >= BACKDROPS_REFRESH_SECS)
+        match self.stage {
+            BackdropsStage::Idle => true,
+            BackdropsStage::Loading { .. } => false,
+            BackdropsStage::Ready { at } => now.saturating_sub(at) >= BACKDROPS_REFRESH_SECS,
+        }
     }
 
     pub fn start(&mut self, now: i64) {
-        self.loading = true;
-        self.requested_at = Some(now);
+        self.stage = BackdropsStage::Loading { at: now };
     }
 
     /// A refresh keeps the old list until the new one is here.
     pub fn accept(&mut self, list: Vec<ShareThemeBackdrop>) {
         self.list = list;
-        self.loading = false;
+        self.stage = match self.stage {
+            BackdropsStage::Loading { at } | BackdropsStage::Ready { at } => {
+                BackdropsStage::Ready { at }
+            }
+            BackdropsStage::Idle => BackdropsStage::Ready { at: 0 },
+        };
     }
 
     pub fn fail(&mut self) {
-        self.loading = false;
-        self.requested_at = None;
+        self.stage = BackdropsStage::Idle;
     }
 }

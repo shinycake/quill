@@ -1,7 +1,7 @@
 use super::{SendReply, message_topic_value, send_reply_value};
 use crate::ids::TopicId;
 use crate::ids::{ChatId, MessageId, RequestId};
-use crate::poll::PollOptionInput;
+use crate::poll::{PollClose, PollOptionInput};
 use serde_json::{Value, json};
 
 /// `getPollVoters` (TDLib 1.8.67, `schema/td_api.tl:12941`):
@@ -121,7 +121,7 @@ pub fn set_poll_answer(
 }
 
 /// Fields for `inputMessagePoll` (TDLib 1.8.67, `schema/td_api.tl:6193`).
-/// `description` empty = sent as null; `open_period` 0 = no auto-close.
+/// `description` empty = sent as null; no `deadline` = no auto-close.
 pub struct PollSend<'a> {
     pub question: &'a str,
     pub options: &'a [&'a str],
@@ -134,7 +134,6 @@ pub struct PollSend<'a> {
     pub shuffle_options: bool,
     pub country_codes: &'a [&'a str],
     pub poll_type: PollTypeSend<'a>,
-    pub open_period: i32,
     /// B15: `inputPollTypeRegular.allow_adding_options` — participants may
     /// suggest options (regular polls only; ignored for quizzes).
     pub allow_adding_options: bool,
@@ -142,9 +141,10 @@ pub struct PollSend<'a> {
     pub hide_results_until_closes: bool,
     /// B15: `inputMessagePoll.members_only` — subscribers only (channels).
     pub members_only: bool,
-    /// B15: `inputMessagePoll.close_date` — absolute unix deadline; 0 = none.
-    /// TDLib takes either `open_period` or `close_date`, never both.
-    pub close_date: i32,
+    /// `inputMessagePoll.open_period` (a span after the send) or B15
+    /// `close_date` (an absolute unix moment). TDLib takes one of them,
+    /// never both, so they are one value; the other schema field is sent 0.
+    pub deadline: Option<PollClose>,
     pub reply_to: Option<SendReply>,
     /// Parity slice 4: forum topic the send is addressed to (`None` = no topic).
     pub topic_id: Option<TopicId>,
@@ -290,6 +290,12 @@ pub fn send_poll(extra: RequestId, chat_id: ChatId, poll: PollSend<'_>) -> Strin
             "explanation_media": Value::Null
         }),
     };
+    let clamp = |secs: i64| secs.clamp(0, i64::from(i32::MAX)) as i32;
+    let (open_period, close_date) = match poll.deadline {
+        None => (0, 0),
+        Some(PollClose::Period(secs)) => (clamp(secs), 0),
+        Some(PollClose::Date(date)) => (0, clamp(date)),
+    };
     json!({
         "@type": "sendMessage",
         "@extra": extra.as_extra(),
@@ -324,8 +330,8 @@ pub fn send_poll(extra: RequestId, chat_id: ChatId, poll: PollSend<'_>) -> Strin
             "shuffle_options": poll.shuffle_options,
             "hide_results_until_closes": poll.hide_results_until_closes,
             "type": poll_type,
-            "open_period": poll.open_period,
-            "close_date": poll.close_date,
+            "open_period": open_period,
+            "close_date": close_date,
             "is_closed": false
         }
     })

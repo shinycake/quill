@@ -16,19 +16,13 @@ use super::*;
 pub fn begin_remove_account(app_root: &Path, key: &AccountKey) -> Result<bool, RemoveAccountError> {
     let mut removed = false;
     update_registry(app_root, |registry| {
-        if !registry.accounts.iter().any(|r| &r.key == key) {
+        if !registry.is_listed(key) {
             return Ok(false);
         }
-        if registry.accounts.len() <= 1 {
+        if registry.listed_count() <= 1 {
             return Err(RemoveAccountError::LastAccount);
         }
-        registry.accounts.retain(|r| &r.key != key);
-        if registry.active.as_ref() == Some(key) {
-            registry.active = registry.accounts.first().map(|r| r.key.clone());
-        }
-        if !registry.pending_deletes.contains(key) {
-            registry.pending_deletes.push(key.clone());
-        }
+        registry.remove_listed(key);
         removed = true;
         Ok(true)
     })?;
@@ -40,9 +34,7 @@ pub fn begin_remove_account(app_root: &Path, key: &AccountKey) -> Result<bool, R
 pub fn mark_for_deletion(app_root: &Path, keys: &[AccountKey]) -> std::io::Result<()> {
     update_registry(app_root, |registry| {
         for key in keys {
-            if !registry.pending_deletes.contains(key) {
-                registry.pending_deletes.push(key.clone());
-            }
+            registry.mark_wipe(key);
         }
         Ok(true)
     })
@@ -50,7 +42,7 @@ pub fn mark_for_deletion(app_root: &Path, keys: &[AccountKey]) -> std::io::Resul
 
 /// Folders recorded for deletion and not deleted yet.
 pub fn pending_deletes(app_root: &Path) -> Vec<AccountKey> {
-    load_registry(app_root).pending_deletes
+    load_registry(app_root).pending()
 }
 
 /// Delete `key`'s folder (`accounts/<key>`); a missing folder is fine.
@@ -81,13 +73,7 @@ pub fn delete_account_folder(app_root: &Path, key: &AccountKey) -> std::io::Resu
 
 /// `key`'s folder is gone: forget the record.
 pub fn finish_pending_delete(app_root: &Path, key: &AccountKey) -> std::io::Result<()> {
-    update_registry(app_root, |registry| {
-        if !registry.pending_deletes.contains(key) {
-            return Ok(false);
-        }
-        registry.pending_deletes.retain(|pending| pending != key);
-        Ok(true)
-    })
+    update_registry(app_root, |registry| Ok(registry.finish_pending(key)))
 }
 
 #[cfg(test)]

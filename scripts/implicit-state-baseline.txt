@@ -13,7 +13,6 @@ AuthState::change_number_loading+last_auth_error
 AwardMembers::done
 AwardMembers::loading
 AwardMembers::loading+error
-Backdrops::loading
 BackendStatus::failed
 BarFacts::bot_start_pending
 BotCreateDialog::submitted
@@ -30,7 +29,6 @@ ChatListState::archive_settings_loading
 ChatSummary::my_rights_fetched
 ChatSwipeFacts::is_saved
 ChatUi::inline_query_waiting
-ChatWindowsState::asked
 ChatbotDraft::loaded
 Checklist::others_can_mark_tasks_as_done
 ChecklistDialog::others_can_mark_tasks_as_done
@@ -53,7 +51,6 @@ EmojiStyleUi::started
 EmojiStyleUi::started+file_error
 FastShareFacts::sent
 FieldResult::finished
-FirstRunPrefs::completed
 FooterMeta::pending
 GifPanel::failed
 GifPanel::loaded
@@ -71,9 +68,6 @@ GiftValueLookup::loading+error
 GiveawayInfoLookup::loading
 GiveawayInfoLookup::loading+error
 GiveawaySummary::finished
-GramsHub::loaded
-GramsHub::loaded+error
-GramsHub::loading
 GroupCallUi::window_opening
 HdrViewer::in_flight
 HeaderFacts::is_saved_messages
@@ -139,19 +133,8 @@ PlaybackHealth::output_failed
 Playlist::loaded
 Playlist::loaded+error
 Playlist::loading
-PremiumHub::business_features_loading
-PremiumHub::gifts_loaded
-PremiumHub::gifts_loading
-PremiumHub::premium_loading
-PremiumHub::premium_stickers_asked
-PremiumHub::premium_stickers_loading
-PremiumHub::tx_loaded
-PremiumHub::tx_loaded+tx_error
-PremiumHub::tx_loading
 ProfileModal::closing
 PublicLinkRevoke::failed
-PullMachine::expand_pending
-Queued::failed
 QuickRepliesState::shortcuts_requested
 QuickRepliesState::shortcuts_requested+error
 ReceivedGift::is_saved

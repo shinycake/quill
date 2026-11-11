@@ -18,7 +18,7 @@ use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::poll::{
-    POLL_OPTIONS_MAX, POLL_OPTIONS_MIN, PollDraft, chat_allows_polls, voter_count_label,
+    POLL_OPTIONS_MAX, POLL_OPTIONS_MIN, PollClose, PollDraft, chat_allows_polls, voter_count_label,
 };
 use quill::state::{PollStatsFetch, PollVotersFetch};
 use quill::telegram::envelope::{MessageContent, MessageSender};
@@ -623,7 +623,8 @@ impl QuillApp {
             None => return,
         };
         // A custom deadline that passed while the box was open.
-        if draft.close_date > 0 && draft.close_date <= quill::local_time::now_unix() {
+        if matches!(draft.deadline, Some(PollClose::Date(date)) if date > 0 && date <= quill::local_time::now_unix())
+        {
             self.set_note(StatusNote::error(tr(keys::POLLS_CREATE_DEADLINE_EXPIRED)));
             cx.notify();
             return;

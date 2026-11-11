@@ -1,6 +1,8 @@
 //! Sticker set acceptors.
 use super::*;
 
+static NO_STICKERS: Vec<StickerItem> = Vec::new();
+
 impl Session {
     /// A sticker the panel lists (its sets, recent, favorites, found and
     /// suggested stickers, the Premium examples) by file.
@@ -11,7 +13,11 @@ impl Session {
             &self.stickers.stickers.favorites,
             &self.stickers.stickers.found_stickers,
             &self.stickers.stickers.suggestions,
-            &self.payments.hub.premium_stickers,
+            self.payments
+                .hub
+                .premium_stickers
+                .data()
+                .unwrap_or(&NO_STICKERS),
         ]
         .into_iter()
         .flatten()

@@ -48,7 +48,14 @@ fn select(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, id: &str) {
 fn ids(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Vec<String> {
     app.read_with(vcx, |app, _| {
         app.session()
-            .map(|s| s.payments.hub.gifts.iter().map(|g| g.id.clone()).collect())
+            .map(|s| {
+                s.payments
+                    .hub
+                    .gifts()
+                    .iter()
+                    .map(|g| g.id.clone())
+                    .collect()
+            })
             .unwrap_or_default()
     })
 }
@@ -84,7 +91,7 @@ fn confirming_removes_the_gift_from_the_grid_and_the_box(cx: &mut TestAppContext
     app.read_with(vcx, |app, _| {
         let hub = app.session().map(|s| &s.payments.hub);
         assert_eq!(hub.and_then(|h| h.gift_selected.clone()), None);
-        assert_eq!(hub.map(|h| h.gifts_total), Some(1));
+        assert_eq!(hub.map(|h| h.gifts_total()), Some(1));
     });
 }
 

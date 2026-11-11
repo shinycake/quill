@@ -124,11 +124,11 @@ fn keys_stay_unique_when_ids_are_empty_or_repeat() {
         })),
         true,
     );
-    let keys: Vec<&str> = hub.entries.iter().map(|tx| tx.key.as_str()).collect();
+    let keys: Vec<&str> = hub.entries().iter().map(|tx| tx.key.as_str()).collect();
     assert_eq!(keys, ["0-10", "a", "2-12", "3-10"]);
     hub.selected = Some("2-12".into());
     assert_eq!(hub.selected_tx().map(|tx| tx.gram_nano), Some(3));
-    assert!(hub.peers_dirty);
+    assert_eq!(hub.peers, super::PeerSync::Due);
 }
 
 #[test]
@@ -233,7 +233,7 @@ fn paging_appends_and_a_fresh_page_replaces() {
     assert!(!hub.shows_settings_row());
     hub.apply_page(page(), false);
     assert!(hub.shows_settings_row());
-    assert_eq!(hub.entries.len(), 11);
+    assert_eq!(hub.entries().len(), 11);
     assert!(hub.has_more());
     assert!(hub.has_in && hub.has_out && hub.shows_tabs());
     hub.apply_page(
@@ -245,12 +245,12 @@ fn paging_appends_and_a_fresh_page_replaces() {
         })),
         true,
     );
-    assert_eq!(hub.entries.len(), 12);
+    assert_eq!(hub.entries().len(), 12);
     assert!(!hub.has_more());
-    assert_eq!(hub.balance_nano, Some(1));
+    assert_eq!(hub.balance_nano(), Some(1));
     // A new tab starts over and keeps the tabs.
     hub.restart(TxFilter::Outgoing);
-    assert!(hub.entries.is_empty() && !hub.loaded);
+    assert!(hub.entries().is_empty() && !hub.page.is_ready());
     assert!(hub.shows_tabs());
     // Only incoming rows: one "All Transactions" list, no tabs.
     let mut one_way = GramsHub::default();

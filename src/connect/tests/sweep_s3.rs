@@ -38,15 +38,23 @@ fn a_send_error_later_in_the_ingest_keeps_the_captured_answer() {
 fn a_grams_peer_request_that_never_left_is_asked_again() {
     use crate::premium_hub::ton::{TonTx, TonTxKind};
     let (_dir, mut driver, sender, _sink, _seq) = toggle_driver();
-    driver.session.payments.hub.grams.entries.push(TonTx {
-        id: "t1".into(),
-        key: "t1".into(),
-        gram_nano: 1,
-        is_refund: false,
-        date: 1,
-        kind: TonTxKind::SuggestedPostPayment { chat_id: 13 },
-    });
-    driver.session.payments.hub.grams.peers_dirty = true;
+    driver
+        .session
+        .payments
+        .hub
+        .grams
+        .page
+        .list_mut()
+        .entries
+        .push(TonTx {
+            id: "t1".into(),
+            key: "t1".into(),
+            gram_nano: 1,
+            is_refund: false,
+            date: 1,
+            kind: TonTxKind::SuggestedPostPayment { chat_id: 13 },
+        });
+    driver.session.payments.hub.grams.peers = crate::premium_hub::ton::PeerSync::Due;
     sender.refuse(true);
     assert!(!driver.grams_tick(false), "nothing left");
     assert!(driver.session.payments.hub.grams.asked_chats.is_empty());

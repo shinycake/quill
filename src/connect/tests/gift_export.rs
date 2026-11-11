@@ -513,8 +513,8 @@ fn a_failed_transfer_returns_to_the_confirmation() {
         Some(TransferStage::ConfirmPeer { user_id: 21, error: Some(ref reason), .. })
             if reason.starts_with("Couldn't transfer the gift")
     ));
-    assert!(p.0.session.payments.hub.gifts_error.is_none());
-    assert!(!p.0.session.payments.hub.gift_mutating);
+    assert!(p.0.session.payments.hub.gifts_error().is_none());
+    assert!(!p.0.session.payments.hub.gift_busy());
 }
 
 /// 05-119: the answer of an export the user left (its picker closed, then

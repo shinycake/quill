@@ -278,7 +278,8 @@ fn a_jump_started_behind_the_lock_opens_nothing_and_ends(cx: &mut TestAppContext
     pull(vcx, at, 12);
     app.update(vcx, |app, cx| {
         // As a release does, then Quill locks within the wait.
-        app.history.pull.machine.begin_jump();
+        let now = app.history.pull.now();
+        app.history.pull.machine.begin_jump(now);
         app.set_locked(true, cx);
         app.pull_jump_when_ready(ChatId(14), cx);
     });

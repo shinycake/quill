@@ -105,7 +105,7 @@ fn settings_lists_my_grams_only_with_a_balance(cx: &mut TestAppContext) {
     vcx.run_until_parked();
     app.update_in(vcx, |app, _, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.hub.grams.balance_nano = Some(0);
+            session.payments.hub.grams.balance = quill::state::fetch::Fetch::Ready(0);
         }
         cx.notify();
     });
@@ -124,7 +124,7 @@ fn an_unknown_peer_shows_a_placeholder_then_a_name(cx: &mut TestAppContext) {
                 .payments
                 .hub
                 .grams
-                .entries
+                .entries()
                 .iter()
                 .find(|tx| tx.id == "tx-sale")?;
             super::peer_name(session, tx.peer()?)
@@ -242,7 +242,7 @@ fn the_withdrawal_url_opens_only_through_the_link_policy(cx: &mut TestAppContext
         let url = url.to_string();
         app.update_in(vcx, |app, _, cx| {
             if let Some(grams) = app.demo_session.as_mut().map(|s| &mut s.payments.hub.grams) {
-                grams.withdraw_url = Some(url);
+                grams.withdraw = Some(GramWithdraw::Done(url));
             }
             cx.notify();
         });
@@ -275,7 +275,10 @@ fn the_withdrawal_url_opens_only_through_the_link_policy(cx: &mut TestAppContext
     );
     let left = app.read_with(vcx, |app, _| {
         app.session()
-            .and_then(|s| s.payments.hub.grams.withdraw_url.clone())
+            .and_then(|s| match &s.payments.hub.grams.withdraw {
+                Some(GramWithdraw::Done(url)) => Some(url.clone()),
+                _ => None,
+            })
     });
     assert_eq!(left, None);
 }

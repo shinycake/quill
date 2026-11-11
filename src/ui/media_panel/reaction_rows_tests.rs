@@ -61,7 +61,7 @@ fn free_account(app: &Entity<QuillApp>, cx: &mut VisualTestContext) {
     app.update(cx, |app, cx| {
         let session = app.demo_session.as_mut().expect("demo session");
         session.payments.premium_option = Some(false);
-        session.payments.hub.premium = Some(premium_features());
+        session.payments.hub.premium = quill::state::fetch::Fetch::Ready(premium_features());
         cx.notify();
     });
     frames(cx);

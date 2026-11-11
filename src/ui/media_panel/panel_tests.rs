@@ -290,7 +290,7 @@ fn a_locked_sticker_opens_the_premium_preview_instead_of_sending(cx: &mut TestAp
     app.update(vcx, |app, _| {
         seed(app, false);
         let session = app.demo_session.as_mut().unwrap();
-        session.payments.hub.premium = Some(premium_features());
+        session.payments.hub.premium = quill::state::fetch::Fetch::Ready(premium_features());
     });
     app.update(vcx, |app, cx| {
         app.send_sticker_pick(FileId(1), "😀".into(), 512, 512, None, cx);

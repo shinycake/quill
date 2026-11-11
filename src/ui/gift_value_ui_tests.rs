@@ -246,7 +246,9 @@ fn a_lookup_for_one_gift_is_dropped_when_the_box_shows_another(cx: &mut TestAppC
             let hub = &mut session.payments.hub;
             let selected = hub.gift_selected.clone();
             if let Some(c) = hub
-                .gifts
+                .received
+                .list_mut()
+                .items
                 .iter_mut()
                 .find(|g| Some(&g.id) == selected.as_ref())
                 .and_then(|g| g.gift.collectible.as_deref_mut())

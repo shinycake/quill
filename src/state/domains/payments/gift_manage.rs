@@ -50,7 +50,7 @@ impl Session {
                     && manage.collection(manage.active_collection).is_none()
                 {
                     manage.active_collection = 0;
-                    self.payments.hub.gifts_stale = true;
+                    self.payments.hub.received.invalidate();
                 }
             }
             (GiftManagePayload::Collection(_), PaymentsPurpose::ChangeGiftCollection) => {
@@ -58,17 +58,15 @@ impl Session {
                 self.payments
                     .gifts_manage
                     .close_flow_answered_by(PaymentsPurpose::ChangeGiftCollection);
-                self.payments.hub.gift_mutating = false;
-                self.payments.hub.gifts_error = None;
-                self.payments.hub.gifts_stale = true;
+                self.payments.hub.end_gift_mutation();
+                self.payments.hub.received.invalidate();
             }
             (GiftManagePayload::Upgraded(summary), PaymentsPurpose::UpgradeGift) => {
                 let hub = &mut self.payments.hub;
-                hub.gift_mutating = false;
-                hub.gifts_error = None;
+                hub.end_gift_mutation();
                 hub.gift_selected = None;
-                hub.gifts_stale = true;
-                hub.tx_loaded = false;
+                hub.received.invalidate();
+                hub.tx.invalidate();
                 let manage = &mut self.payments.gifts_manage;
                 manage.close_flow_answered_by(PaymentsPurpose::UpgradeGift);
                 manage.note = Some(if summary.title.is_empty() {
@@ -116,16 +114,14 @@ impl Session {
         let manage = &mut self.payments.gifts_manage;
         match purpose {
             PaymentsPurpose::SetPinnedGifts => {
-                hub.gift_mutating = false;
-                hub.gifts_error = None;
-                hub.gifts_stale = true;
+                hub.end_gift_mutation();
+                hub.received.invalidate();
                 manage.note = Some("Pinned gifts updated.".into());
             }
             PaymentsPurpose::TransferGift => {
-                hub.gift_mutating = false;
-                hub.gifts_error = None;
-                hub.gifts_stale = true;
-                hub.tx_loaded = false;
+                hub.end_gift_mutation();
+                hub.received.invalidate();
+                hub.tx.invalidate();
                 // tdesktop `ShowGiftTransferredToast`, then the recipient's
                 // chat (`showPeerHistory`). Only the picker that sent this
                 // transfer closes and names its recipient; another flow
@@ -146,16 +142,14 @@ impl Session {
                 manage.note = Some("Gift transferred.".into());
             }
             PaymentsPurpose::SetGiftResalePrice => {
-                hub.gift_mutating = false;
-                hub.gifts_error = None;
-                hub.gifts_stale = true;
+                hub.end_gift_mutation();
+                hub.received.invalidate();
                 manage.close_flow_answered_by(PaymentsPurpose::SetGiftResalePrice);
                 manage.note = Some("Resale price updated.".into());
             }
             PaymentsPurpose::DeleteGiftCollection => {
-                hub.gift_mutating = false;
-                hub.gifts_error = None;
-                hub.gifts_stale = true;
+                hub.end_gift_mutation();
+                hub.received.invalidate();
                 manage.close_flow_answered_by(PaymentsPurpose::DeleteGiftCollection);
                 manage.active_collection = 0;
                 manage.collections_stale = true;
@@ -164,7 +158,7 @@ impl Session {
             PaymentsPurpose::DeleteGift => self.finish_gift_delete(),
             PaymentsPurpose::SendStarGift => {
                 // Stars were spent whichever dialog asked.
-                hub.tx_loaded = false;
+                hub.tx.invalidate();
                 let ours = manage.send.waits_for(pending);
                 if ours {
                     manage.send.request = None;
@@ -209,13 +203,13 @@ impl Session {
     pub fn finish_gift_delete(&mut self) {
         let hub = &mut self.payments.hub;
         let manage = &mut self.payments.gifts_manage;
-        hub.gift_mutating = false;
-        hub.gifts_error = None;
+        hub.end_gift_mutation();
         if let Some(id) = manage.deleting.take() {
-            let before = hub.gifts.len();
-            hub.gifts.retain(|g| g.id != id);
-            if hub.gifts.len() < before {
-                hub.gifts_total = hub.gifts_total.saturating_sub(1);
+            let list = hub.received.list_mut();
+            let before = list.items.len();
+            list.items.retain(|g| g.id != id);
+            if list.items.len() < before {
+                list.total = list.total.saturating_sub(1);
             }
             if hub.gift_selected.as_deref() == Some(id.as_str()) {
                 hub.gift_selected = None;
@@ -224,7 +218,7 @@ impl Session {
         manage.collections_stale = true;
         // The list may have been reopened while the request was out: the
         // server's list stays the source of truth.
-        hub.gifts_stale = true;
+        hub.received.invalidate();
         manage.deleted = true;
     }
 
@@ -366,11 +360,11 @@ impl Session {
                     picker
                         .transfer_failed(request, format!("Couldn't transfer the gift: {reason}"));
                 }
-                self.payments.hub.gift_mutating = false;
+                self.payments.hub.gift_mutation = crate::premium_hub::GiftMutation::Idle;
             }
             PaymentsPurpose::DeleteGift => {
                 manage.deleting = None;
-                self.payments.hub.gift_mutating = false;
+                self.payments.hub.gift_mutation = crate::premium_hub::GiftMutation::Idle;
                 manage.note = Some(tr_with(
                     keys::Q_MONEY_COULD_NOT_DELETE_THE_GIFT,
                     &[("reason", &reason)],
@@ -395,8 +389,9 @@ impl Session {
                 }
             }
             _ => {
-                self.payments.hub.gift_mutating = false;
-                self.payments.hub.gifts_error = Some(format!("Couldn't update the gift: {reason}"));
+                self.payments
+                    .hub
+                    .fail_gift_mutation(format!("Couldn't update the gift: {reason}"));
             }
         }
     }

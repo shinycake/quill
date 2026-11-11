@@ -396,7 +396,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let topic_id = self.send_topic(chat_id);
         // `validate()` above guarantees a marked option in quiz mode.
         let mut correct_option_ids: Vec<i32> = draft
-            .quiz_correct
+            .quiz_correct()
             .iter()
             .map(|index| i32::try_from(*index).unwrap_or(0))
             .collect();
@@ -423,12 +423,11 @@ impl<S: JsonSender> ConnectDriver<S> {
                 } else {
                     PollTypeSend::Regular
                 },
-                open_period: draft.open_period_secs(),
                 // B15: "Allow Adding Options" is a regular-poll flag.
                 allow_adding_options: draft.allow_adding_options && !draft.is_quiz,
                 hide_results_until_closes: draft.hide_results_until_closes,
                 members_only: draft.members_only,
-                close_date: draft.close_date.clamp(0, i64::from(i32::MAX)) as i32,
+                deadline: draft.deadline,
                 reply_to,
                 topic_id,
             },

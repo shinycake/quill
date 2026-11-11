@@ -19,10 +19,10 @@ impl Session {
                 let files = page.files.clone();
                 match purpose {
                     Some((GramsPurpose::Probe, _)) => {
-                        self.payments.hub.grams.balance_nano = Some(page.balance_nano);
+                        self.payments.hub.grams.balance.succeed(page.balance_nano);
                     }
                     Some((GramsPurpose::Page { append }, id))
-                        if id.0 == self.payments.hub.grams.request =>
+                        if self.payments.hub.grams.page.is_request(id.0) =>
                     {
                         self.remember_files(&files);
                         self.payments.hub.grams.apply_page(page, append);
@@ -55,14 +55,15 @@ impl Session {
         let grams = &mut self.payments.hub.grams;
         let peer = pending.and_then(|p| p.chat_id).map(|id| id.0);
         match purpose {
-            // The Settings row just stays hidden.
-            GramsPurpose::Probe | GramsPurpose::Revenue => {}
+            // The Settings row just stays hidden; the failed probe is
+            // asked again when the Grams screen's page answers or opens.
+            GramsPurpose::Probe => grams.balance.fail(error_reason(err)),
+            GramsPurpose::Revenue => {}
             GramsPurpose::PeerUser => grams.missing_users.extend(peer),
             GramsPurpose::PeerChat => grams.missing_chats.extend(peer),
             GramsPurpose::Page { .. } => {
-                if pending.is_some_and(|p| p.id.0 == grams.request) {
-                    grams.loading = false;
-                    grams.error = Some(error_reason(err));
+                if pending.is_some_and(|p| grams.page.is_request(p.id.0)) {
+                    grams.page.fail(error_reason(err));
                 }
             }
             GramsPurpose::WithdrawalUrl => {
@@ -80,10 +81,7 @@ impl Session {
         if !grams.withdraw.as_ref().is_some_and(|w| w.waits_for(id)) {
             return;
         }
-        grams.withdraw = None;
-        if !url.is_empty() {
-            grams.withdraw_url = Some(url);
-        }
+        grams.withdraw = (!url.is_empty()).then_some(GramWithdraw::Done(url));
     }
 
     /// A fresh `passwordState` arrived: with no password, the idle
@@ -106,8 +104,7 @@ impl Session {
             return;
         }
         if err.earn_hint == Some(EarnErrorHint::AmountTooSmall) {
-            grams.withdraw = None;
-            grams.withdraw_too_small = true;
+            grams.withdraw = Some(GramWithdraw::TooSmall);
             return;
         }
         grams.withdraw = Some(match password_check_failure(err, &error_reason(err)) {

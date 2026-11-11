@@ -57,9 +57,9 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
         ),
     );
     let grams = &driver.session.payments.hub.grams;
-    assert_eq!(grams.balance_nano, Some(750_000_000));
+    assert_eq!(grams.balance_nano(), Some(750_000_000));
     // The probe never fills the list.
-    assert!(grams.entries.is_empty() && !grams.loaded);
+    assert!(grams.entries().is_empty() && !grams.page.is_ready());
 
     driver.open_grams(false).unwrap();
     let first = sent_request(&recorder, "getTonTransactions");
@@ -86,9 +86,9 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
         ),
     );
     let grams = &driver.session.payments.hub.grams;
-    assert!(grams.open && grams.loaded && !grams.loading);
-    assert_eq!(grams.entries.len(), 11);
-    assert_eq!(grams.balance_nano, Some(12_750_000_000));
+    assert!(grams.open && grams.page.is_ready());
+    assert_eq!(grams.entries().len(), 11);
+    assert_eq!(grams.balance_nano(), Some(12_750_000_000));
     assert_eq!(
         grams.withdrawable().map(|r| r.available_nano),
         Some(5_000_000_000)
@@ -157,8 +157,8 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
             json!({"@type": "tonTransactions", "gram_amount": 1, "transactions": [], "next_offset": ""}),
         ),
     );
-    assert!(driver.session.payments.hub.grams.entries.is_empty());
-    assert!(driver.session.payments.hub.grams.loading);
+    assert!(driver.session.payments.hub.grams.entries().is_empty());
+    assert!(driver.session.payments.hub.grams.is_loading());
     // Another switch: an error for the older tab leaves the live one
     // loading.
     driver.set_grams_filter(TxFilter::Outgoing).unwrap();
@@ -171,7 +171,7 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
         ),
     );
     let grams = &driver.session.payments.hub.grams;
-    assert!(grams.loading && grams.error.is_none());
+    assert!(grams.is_loading() && grams.error().is_none());
     ingest(
         &mut driver,
         answer(
@@ -180,8 +180,8 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
         ),
     );
     let grams = &driver.session.payments.hub.grams;
-    assert!(!grams.loading);
-    assert!(grams.error.is_some());
+    assert!(!grams.is_loading());
+    assert!(grams.error().is_some());
 
     // Only reads were sent.
     for json in recorder.snapshot() {

@@ -55,7 +55,6 @@ pub(in crate::ui) fn seed_grams_session(sink: Arc<MemorySink>) -> Session {
         .map(|value| parse_ton_transactions(&value))
         .unwrap_or_default();
     let grams = &mut session.payments.hub.grams;
-    grams.probed = true;
     grams.apply_page(page, false);
     grams.revenue = Some(GramRevenue {
         available_nano: 18_500_000_000,
@@ -87,8 +86,8 @@ impl QuillApp {
             "loading-more" => {
                 self.open_grams(cx);
                 if let Some(grams) = self.grams_mut() {
-                    grams.next_offset = "more".into();
-                    grams.loading = true;
+                    grams.page.list_mut().next_offset = "more".into();
+                    grams.page.begin(0, true);
                 }
             }
             "receipt" => {

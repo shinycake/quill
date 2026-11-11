@@ -588,51 +588,64 @@ fn a_star_history_or_gifts_first_page_that_cannot_be_sent_shows_its_error() {
             .set_star_transactions_filter(crate::premium_hub::TxFilter::Outgoing)
             .is_err()
     );
-    assert!(t.driver.session.payments.hub.tx_error.is_some());
+    assert!(t.driver.session.payments.hub.tx.error().is_some());
     assert!(
         t.driver
             .open_received_gifts(crate::telegram::envelope::MessageSender::User { user_id: ME })
             .is_err()
     );
     let hub = &t.driver.session.payments.hub;
-    assert!(hub.gifts_error.is_some() && !hub.gifts_loading);
+    assert!(hub.gifts_error().is_some() && !hub.received.is_loading());
 }
 
 #[test]
-fn a_stale_gift_refetch_waits_for_a_page_in_flight_and_is_cleared_by_its_answer() {
+fn an_invalidated_gift_list_is_refetched_and_the_page_it_abandons_is_dropped() {
+    use crate::premium_hub::listing::Listing;
     let mut t = Flaky::new();
     let owner = crate::telegram::envelope::MessageSender::User { user_id: ME };
     t.driver.open_received_gifts(owner).unwrap();
-    t.driver.session.payments.hub.gifts_stale = true;
-    // The first page is still out: no second first-page request.
+    // A mutation confirmed while the first page is out: that page may
+    // predate it, so the list is asked for again.
+    t.driver.session.payments.hub.received.invalidate();
+    assert!(
+        t.driver
+            .refresh_received_gifts_if_stale()
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(t.sender.count("getReceivedGifts"), 2);
+    let page = |total: i32| json!({"@type": "receivedGifts", "total_count": total, "gifts": [], "next_offset": ""});
+    // The abandoned first page answers late and is dropped.
+    t.answer_nth("getReceivedGifts", 0, page(5));
+    assert!(t.driver.session.payments.hub.received.is_loading());
+    assert_eq!(t.driver.session.payments.hub.gifts_total(), 0);
+    t.answer_nth("getReceivedGifts", 1, page(2));
+    assert!(t.driver.session.payments.hub.received.is_ready());
+    assert_eq!(t.driver.session.payments.hub.gifts_total(), 2);
+    // A refetch whose send is refused is not retried every frame.
+    t.driver.session.payments.hub.received.invalidate();
+    t.sender.refuse(&["getReceivedGifts"]);
+    assert!(t.driver.refresh_received_gifts_if_stale().is_err());
+    assert!(matches!(
+        t.driver.session.payments.hub.received,
+        Listing::Failed { .. }
+    ));
     assert!(
         t.driver
             .refresh_received_gifts_if_stale()
             .unwrap()
             .is_none()
     );
-    assert_eq!(t.sender.count("getReceivedGifts"), 1);
-    assert!(t.driver.session.payments.hub.gifts_stale);
-    t.answer(
-        "getReceivedGifts",
-        json!({"@type": "receivedGifts", "total_count": 0, "gifts": [], "next_offset": ""}),
-    );
-    assert!(!t.driver.session.payments.hub.gifts_stale);
-    // A refetch whose send is refused is not retried every frame.
-    t.driver.session.payments.hub.gifts_stale = true;
-    t.sender.refuse(&["getReceivedGifts"]);
-    assert!(t.driver.refresh_received_gifts_if_stale().is_err());
-    assert!(!t.driver.session.payments.hub.gifts_stale);
-    assert!(t.driver.session.payments.hub.gifts_error.is_some());
+    assert!(t.driver.session.payments.hub.gifts_error().is_some());
 }
 
 #[test]
 fn reopening_the_gifts_box_keeps_the_lock_of_a_mutation_in_flight() {
     let mut t = Flaky::new();
     let owner = crate::telegram::envelope::MessageSender::User { user_id: ME };
-    t.driver.session.payments.hub.gift_mutating = true;
+    t.driver.session.payments.hub.gift_mutation = crate::premium_hub::GiftMutation::Sending;
     t.driver.open_received_gifts(owner).unwrap();
-    assert!(t.driver.session.payments.hub.gift_mutating);
+    assert!(t.driver.session.payments.hub.gift_busy());
 }
 
 #[test]

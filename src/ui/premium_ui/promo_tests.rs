@@ -55,7 +55,7 @@ fn the_clip_is_downloaded_whenever_the_premium_state_lands() {
 fn the_example_stickers_are_downloaded_whenever_their_answer_lands() {
     let mut hub = preview_of(PremiumFeature::UniqueStickers);
     assert!(preview_downloads(&hub).is_empty());
-    hub.premium_stickers = vec![sticker(5), sticker(6)];
+    hub.premium_stickers = quill::state::fetch::Fetch::Ready(vec![sticker(5), sticker(6)]);
     assert_eq!(preview_downloads(&hub), vec![(5, 16), (6, 16)]);
     // A closed dialog or another page asks for nothing.
     hub.premium_open = false;

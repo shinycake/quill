@@ -8,9 +8,11 @@
 //! (1e-9).
 #![deny(clippy::indexing_slicing)]
 
+use super::listing::Listing;
 use super::{GiftInfo, TxFilter, group_digits, parse_gift_info, parse_gift_sticker};
 use crate::ids::RequestId;
 use crate::lang::{keys, tr};
+use crate::state::fetch::Fetch;
 use crate::telegram::envelope::{MessageSender, ParsedFile, StickerContent};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
@@ -453,22 +455,36 @@ pub fn get_gram_revenue_statistics(extra: RequestId, is_dark: bool) -> String {
     .to_string()
 }
 
+/// The history rows loaded so far for the open tab.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TonList {
+    pub entries: Vec<TonTx>,
+    pub next_offset: String,
+}
+
+/// Whether a landed page's peers (users and chats the rows name) still
+/// need checking against what the session knows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PeerSync {
+    #[default]
+    Synced,
+    /// A page landed (or a peer request never left): check them on the next
+    /// tick.
+    Due,
+}
+
 /// The Grams screen and the Settings row's balance.
 #[derive(Debug, Clone, Default)]
 pub struct GramsHub {
     pub open: bool,
-    /// Known after the first answer (probe or page).
-    pub balance_nano: Option<i64>,
-    /// The Settings probe was sent this session.
-    pub probed: bool,
+    /// The balance in nano-Grams, known after the first answer: the
+    /// Settings row's probe (asked once per session; a failed probe leaves
+    /// the row hidden until a page answers) or a history page.
+    pub balance: Fetch<i64>,
     pub filter: TxFilter,
-    pub entries: Vec<TonTx>,
-    pub next_offset: String,
-    pub loaded: bool,
-    pub loading: bool,
-    pub error: Option<String>,
-    /// `@extra` of the newest page request; older answers are dropped.
-    pub request: u64,
+    /// The open tab's rows and the stage of its newest request (older
+    /// answers, the tab changed in flight, are dropped).
+    pub page: Listing<TonList>,
     /// The first All page had incoming / outgoing rows (tdesktop shows the
     /// tabs only when both directions exist).
     pub has_in: bool,
@@ -483,64 +499,72 @@ pub struct GramsHub {
     /// placeholder that never fills.
     pub missing_users: BTreeSet<i64>,
     pub missing_chats: BTreeSet<i64>,
-    /// A page landed; its peers still need checking.
-    pub peers_dirty: bool,
-    /// Collect's password box or security check, while open.
+    pub peers: PeerSync,
+    /// Collect's password box or security check while open; after the box
+    /// closes, its outcome (`Done`, `TooSmall`) waits here for the UI to
+    /// take once ([`Self::take_withdraw_outcome`]).
     pub withdraw: Option<GramWithdraw>,
-    /// Fragment's page from `getGramWithdrawalUrl`, for the UI to open
-    /// once (through the link policy).
-    pub withdraw_url: Option<String>,
-    /// `AMOUNT_TOO_SMALL` closed the box: the UI shows the toast once.
-    pub withdraw_too_small: bool,
 }
 
 impl GramsHub {
     /// tdesktop shows "My Grams" in Settings while the balance is not zero.
     pub fn shows_settings_row(&self) -> bool {
-        self.balance_nano.is_some_and(|nanos| nanos != 0)
+        self.balance_nano().is_some_and(|nanos| nanos != 0)
+    }
+
+    pub fn balance_nano(&self) -> Option<i64> {
+        self.balance.data().copied()
+    }
+
+    pub fn entries(&self) -> &[TonTx] {
+        &self.page.list().entries
+    }
+
+    pub fn is_loading(&self) -> bool {
+        self.page.is_loading()
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        self.page.error()
     }
 
     /// Reset the list for a fresh first page of `filter`.
     pub fn restart(&mut self, filter: TxFilter) {
         self.filter = filter;
-        self.entries.clear();
-        self.next_offset.clear();
-        self.loaded = false;
-        self.loading = false;
-        self.error = None;
+        self.page.reset();
         self.selected = None;
     }
 
     pub fn apply_page(&mut self, page: TonTxPage, append: bool) {
-        self.loading = false;
-        self.error = None;
-        self.loaded = true;
-        self.balance_nano = Some(page.balance_nano);
-        self.next_offset = page.next_offset;
+        self.balance.succeed(page.balance_nano);
         if !append && self.filter == TxFilter::All {
             self.has_in = page.transactions.iter().any(TonTx::is_incoming);
             self.has_out = page.transactions.iter().any(|tx| !tx.is_incoming());
         }
-        if !append {
-            self.entries.clear();
-        }
-        let mut keys: BTreeSet<String> = self.entries.iter().map(|tx| tx.key.clone()).collect();
+        let mut list = if append {
+            std::mem::take(self.page.list_mut())
+        } else {
+            TonList::default()
+        };
+        list.next_offset = page.next_offset;
+        let mut keys: BTreeSet<String> = list.entries.iter().map(|tx| tx.key.clone()).collect();
         for mut tx in page.transactions {
-            let index = self.entries.len();
+            let index = list.entries.len();
             tx.key = if tx.id.is_empty() || keys.contains(&tx.id) {
                 format!("{index}-{}", tx.date)
             } else {
                 tx.id.clone()
             };
             keys.insert(tx.key.clone());
-            self.entries.push(tx);
+            list.entries.push(tx);
         }
-        self.peers_dirty = true;
+        self.page.succeed(list);
+        self.peers = PeerSync::Due;
     }
 
     /// Peers the loaded rows name, for the resolver.
     pub fn peers(&self) -> impl Iterator<Item = MessageSender> + '_ {
-        self.entries.iter().filter_map(TonTx::peer)
+        self.entries().iter().filter_map(TonTx::peer)
     }
 
     /// Whether the All / Incoming / Outgoing tabs show.
@@ -549,18 +573,33 @@ impl GramsHub {
     }
 
     pub fn has_more(&self) -> bool {
-        !self.next_offset.is_empty()
+        !self.page.list().next_offset.is_empty()
     }
 
     pub fn selected_tx(&self) -> Option<&TonTx> {
         let key = self.selected.as_deref()?;
-        self.entries.iter().find(|tx| tx.key == key)
+        self.entries().iter().find(|tx| tx.key == key)
     }
 
     /// The withdrawal section shows while revenue is available
     /// (tdesktop `BuildCurrencyWithdrawalSection`).
     pub fn withdrawable(&self) -> Option<&GramRevenue> {
         self.revenue.as_ref().filter(|r| r.available_nano > 0)
+    }
+
+    /// The password box or security check, while one is open.
+    pub fn withdraw_box(&self) -> Option<&GramWithdraw> {
+        self.withdraw.as_ref().filter(|w| w.is_box())
+    }
+
+    /// The outcome of a closed withdrawal box (Fragment's page to open, or
+    /// "amount too small"), once.
+    pub fn take_withdraw_outcome(&mut self) -> Option<GramWithdraw> {
+        if self.withdraw.as_ref().is_some_and(|w| !w.is_box()) {
+            self.withdraw.take()
+        } else {
+            None
+        }
     }
 }
 

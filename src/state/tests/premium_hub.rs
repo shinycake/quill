@@ -20,17 +20,16 @@ fn transactions_apply_only_to_the_newest_request() {
         RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { append: false }),
         None,
     );
-    session.payments.hub.tx_request = new.0;
-    session.payments.hub.tx_loading = true;
+    session.payments.hub.tx.begin(new.0, false);
     // A slower answer to the previous filter is dropped.
     apply_json(&mut session, &seq, &sink, &tx_page(old.0, "stale"));
-    assert!(session.payments.hub.transactions.is_empty());
+    assert!(session.payments.hub.transactions().is_empty());
     apply_json(&mut session, &seq, &sink, &tx_page(new.0, "fresh"));
-    assert_eq!(session.payments.hub.transactions.len(), 1);
-    assert_eq!(session.payments.hub.transactions[0].id, "fresh");
+    assert_eq!(session.payments.hub.transactions().len(), 1);
+    assert_eq!(session.payments.hub.transactions()[0].id, "fresh");
     assert_eq!(session.payments.hub.balance.map(|b| b.stars), Some(300));
-    assert!(!session.payments.hub.tx_loading);
-    assert_eq!(session.payments.hub.tx_offset, "n");
+    assert!(!session.payments.hub.tx.is_loading());
+    assert_eq!(session.payments.hub.tx_offset(), "n");
 }
 
 #[test]
@@ -54,8 +53,7 @@ fn gifts_page_applies_and_registers_sticker_files() {
         RequestPurpose::Payments(PaymentsPurpose::GetReceivedGifts { append: false }),
         None,
     );
-    session.payments.hub.gifts_request = extra.0;
-    session.payments.hub.gifts_loading = true;
+    session.payments.hub.received.begin(extra.0, false);
     apply_json(
         &mut session,
         &seq,
@@ -65,8 +63,8 @@ fn gifts_page_applies_and_registers_sticker_files() {
             extra.0
         ),
     );
-    assert_eq!(session.payments.hub.gifts.len(), 1);
-    assert!(session.payments.hub.gifts_loaded && !session.payments.hub.gifts_loading);
+    assert_eq!(session.payments.hub.gifts().len(), 1);
+    assert!(session.payments.hub.received.is_ready());
     assert!(session.media.files.contains_key(&88));
 }
 
@@ -74,7 +72,7 @@ fn gifts_page_applies_and_registers_sticker_files() {
 fn gift_mutation_ok_marks_the_list_stale_and_errors_release_the_lock() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.payments.hub.gift_mutating = true;
+    session.payments.hub.gift_mutation = crate::premium_hub::GiftMutation::Sending;
     let extra = session.request(
         RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { saved: false }),
         None,
@@ -85,10 +83,13 @@ fn gift_mutation_ok_marks_the_list_stale_and_errors_release_the_lock() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!session.payments.hub.gift_mutating);
-    assert!(session.payments.hub.gifts_stale);
+    assert!(!session.payments.hub.gift_busy());
+    assert!(matches!(
+        session.payments.hub.received,
+        crate::premium_hub::listing::Listing::Idle(_)
+    ));
 
-    session.payments.hub.gift_mutating = true;
+    session.payments.hub.gift_mutation = crate::premium_hub::GiftMutation::Sending;
     session.payments.hub.gift_convert_confirm = Some("g1".into());
     let extra = session.request(RequestPurpose::SellGift, None);
     apply_json(
@@ -100,9 +101,9 @@ fn gift_mutation_ok_marks_the_list_stale_and_errors_release_the_lock() {
             extra.0
         ),
     );
-    assert!(!session.payments.hub.gift_mutating);
+    assert!(!session.payments.hub.gift_busy());
     assert!(session.payments.hub.gift_convert_confirm.is_none());
-    assert!(session.payments.hub.gifts_error.is_some());
+    assert!(session.payments.hub.gifts_error().is_some());
 }
 
 #[test]
@@ -142,7 +143,7 @@ fn premium_features_apply_to_their_request() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetPremiumFeatures, None);
-    session.payments.hub.premium_loading = true;
+    session.payments.hub.premium.begin();
     apply_json(
         &mut session,
         &seq,
@@ -157,11 +158,11 @@ fn premium_features_apply_to_their_request() {
             .payments
             .hub
             .premium
-            .as_ref()
+            .data()
             .map(|p| p.features.len()),
         Some(1)
     );
-    assert!(!session.payments.hub.premium_loading);
+    assert!(!session.payments.hub.premium.is_loading());
 }
 
 #[test]
@@ -170,7 +171,7 @@ fn business_features_keep_the_server_order() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetBusinessFeatures, None);
-    session.payments.hub.business_features_loading = true;
+    session.payments.hub.business_features.begin();
     apply_json(
         &mut session,
         &seq,
@@ -180,11 +181,11 @@ fn business_features_keep_the_server_order() {
             extra.0
         ),
     );
-    assert!(!session.payments.hub.business_features_loading);
+    assert!(!session.payments.hub.business_features.is_loading());
     // The emoji status row is not one tdesktop lists.
     assert_eq!(
-        session.payments.hub.business_features,
-        Some(vec![
+        session.payments.hub.business_features.data(),
+        Some(&vec![
             BusinessFeature::QuickReplies,
             BusinessFeature::Location
         ])

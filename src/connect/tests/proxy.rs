@@ -4,7 +4,7 @@ use super::super::*;
 use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::platform::MemorySecretStore;
-use crate::proxy::{PingStatus, ProxyPrefs};
+use crate::proxy::{PingStatus, ProxyFetch, ProxyPrefs};
 use crate::telegram::client::copy_and_parse;
 use crate::telegram::envelope::ConnectionState;
 use serde_json::{Value, json};
@@ -116,9 +116,7 @@ fn a_mutation_refetches_the_authoritative_list() {
         rig.driver.session.settings.proxy.enabled().map(|p| p.id),
         Some(7)
     );
-    assert!(
-        !rig.driver.session.settings.proxy.stale && !rig.driver.session.settings.proxy.mutating
-    );
+    assert!(!rig.driver.session.settings.proxy.busy());
 }
 
 #[test]
@@ -140,11 +138,13 @@ fn a_list_fetch_that_predates_a_change_does_not_clear_the_stale_mark() {
     stale["@extra"] = json!(old.0.to_string());
     rig.feed(stale);
     let proxy = &rig.driver.session.settings.proxy;
-    assert!(proxy.stale, "still waiting for the fetch after the change");
-    assert!(proxy.fetch.loading());
+    assert!(
+        proxy.fetch.loading(),
+        "still waiting for the fetch after the change"
+    );
     rig.answer("getProxies", proxies_json(&[(1, false), (2, true)]));
     let proxy = &rig.driver.session.settings.proxy;
-    assert!(!proxy.stale && !proxy.fetch.loading());
+    assert_eq!(proxy.fetch, ProxyFetch::Idle);
     assert_eq!(proxy.enabled().map(|p| p.id), Some(2));
 }
 
@@ -167,7 +167,7 @@ fn ok_acks_refetch_and_errors_surface_without_touching_the_list() {
         json!({"@type": "error", "code": 400, "message": "PROXY_NOT_FOUND"}),
     );
     let proxy = &rig.driver.session.settings.proxy;
-    assert!(!proxy.mutating);
+    assert!(!proxy.mutation.in_flight());
     assert!(
         proxy
             .error
@@ -528,17 +528,24 @@ fn without_a_carrier_host_a_web_proxy_carrier_is_refused() {
     let report = sent_request(&rig.recorder, "reportWebProxyCarrierError");
     assert_eq!(report["carrier_id"], 9);
     assert_eq!(report["error"]["@type"], "webProxyCarrierErrorUnsupported");
-    assert_eq!(rig.driver.session.settings.proxy.carrier_failed, Some(1));
+    // No host: the web proxy's row reads "not available" and it is never
+    // switched to.
+    assert!(
+        !rig.driver
+            .session
+            .settings
+            .proxy
+            .can_enable(crate::calls::proxy::ProxyKind::Web)
+    );
 
     // A temporary carrier (a ping or test) is refused without marking the proxy.
-    rig.driver.session.settings.proxy.carrier_failed = None;
     rig.feed(json!({"@type": "updateWebProxyCarrierOpened", "carrier": {
         "@type": "webProxyCarrier", "id": 10, "proxy_id": 0, "url": "https://x.example/",
         "origin": "https://x.example", "path_prefix": "/",
         "bridge_object_name": "TelegramWebProxy", "is_temporary": true}}));
     let report = sent_request(&rig.recorder, "reportWebProxyCarrierError");
     assert_eq!(report["error"]["@type"], "webProxyCarrierErrorRefused");
-    assert_eq!(rig.driver.session.settings.proxy.carrier_failed, None);
+    assert!(!rig.driver.session.settings.proxy.carriers.failed_for(0));
     assert_eq!(rig.count("reportWebProxyCarrierError"), 2);
 }
 
@@ -652,7 +659,7 @@ fn a_refused_remove_keeps_the_ping_result() {
     rig.driver.ping_listed_proxy(1).unwrap();
     rig.answer("pingProxy", json!({"@type": "seconds", "seconds": 0.0423}));
     rig.driver.disable_proxy().unwrap();
-    assert!(rig.driver.session.settings.proxy.mutating);
+    assert!(rig.driver.session.settings.proxy.mutation.in_flight());
     assert!(rig.driver.remove_proxy(1).is_err());
     assert_eq!(
         rig.driver.session.settings.proxy.pings.get(&1),

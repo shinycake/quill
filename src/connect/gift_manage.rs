@@ -16,7 +16,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     fn gifts_owner_if_mine(&self) -> Result<MessageSender, ConnectSendError> {
         let hub = &self.session.payments.hub;
         if !self.chats_path_active()
-            || hub.gift_mutating
+            || hub.gift_busy()
             || !hub.gifts_are_mine(self.session.my_user_id)
         {
             return Err(ConnectSendError::InvalidRequest);
@@ -28,7 +28,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// qualifies too (`Session::gifts_deletable`).
     fn gifts_owner_if_deletable(&self) -> Result<MessageSender, ConnectSendError> {
         let hub = &self.session.payments.hub;
-        if !self.chats_path_active() || hub.gift_mutating || !self.session.gifts_deletable() {
+        if !self.chats_path_active() || hub.gift_busy() || !self.session.gifts_deletable() {
             return Err(ConnectSendError::InvalidRequest);
         }
         hub.gifts_owner.ok_or(ConnectSendError::InvalidRequest)
@@ -54,11 +54,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::Payments(purpose), None);
-        self.session.payments.hub.gift_mutating = true;
-        self.session.payments.hub.gifts_error = None;
+        self.session.payments.hub.begin_gift_mutation();
         self.session.payments.gifts_manage.note = None;
         if let Err(err) = self.send_json_request(extra, &build(extra, owner)) {
-            self.session.payments.hub.gift_mutating = false;
+            self.session.payments.hub.gift_mutation = crate::premium_hub::GiftMutation::Idle;
             return Err(err);
         }
         Ok(extra)
@@ -78,7 +77,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.session
             .payments
             .hub
-            .gifts
+            .gifts()
             .iter()
             .find(|g| g.id == id)
             .cloned()
@@ -162,11 +161,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         manage.flow = None;
         manage.note = None;
         let hub = &mut self.session.payments.hub;
-        hub.gifts.clear();
-        hub.gifts_total = 0;
-        hub.gifts_offset.clear();
-        hub.gifts_loaded = false;
-        hub.gifts_error = None;
+        hub.received.reset();
         hub.gift_selected = None;
         hub.gift_convert_confirm = None;
         self.fetch_received_gifts_page(false).map(Some)
@@ -184,7 +179,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if manage.active_collection != 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let current = pinned_ids(&hub.gifts);
+        let current = pinned_ids(hub.gifts());
         let ids = match (
             gift.pin_gate(true, current.len(), manage.limits.pinned()),
             pinned,
@@ -258,7 +253,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         };
         // A second click while the first transfer is out sends nothing.
-        if self.session.payments.hub.gift_mutating {
+        if self.session.payments.hub.gift_busy() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let person = self
@@ -285,7 +280,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// gift of the user's own list, with nothing else in flight.
     fn export_allowed(&self, id: &str) -> Result<(), ConnectSendError> {
         if !self.chats_path_active()
-            || self.session.payments.hub.gift_mutating
+            || self.session.payments.hub.gift_busy()
             || self.own_gift(id)?.export_state(now_unix()) != ExportState::Ready
             || !self
                 .session

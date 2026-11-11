@@ -31,7 +31,7 @@ crate::ui::shell::register_dialogs! {
         3804,
         |app| {
             app.session().is_some_and(|s| {
-                s.payments.hub.grams.open && s.payments.hub.grams.withdraw.is_some()
+                s.payments.hub.grams.open && s.payments.hub.grams.withdraw_box().is_some()
             })
         },
         QuillApp::build_grams_withdraw_dialog,
@@ -53,7 +53,7 @@ pub(super) fn collect_button(cx: &mut Context<QuillApp>) -> Button {
 
 impl QuillApp {
     fn grams_withdraw(&self) -> Option<GramWithdraw> {
-        self.session()?.payments.hub.grams.withdraw.clone()
+        self.session()?.payments.hub.grams.withdraw_box().cloned()
     }
 
     fn clear_grams_withdraw_password(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -153,12 +153,13 @@ impl QuillApp {
                         .withdraw
                         .as_ref()
                         .is_some_and(GramWithdraw::can_submit);
-                (
-                    grams.withdraw_url.take(),
-                    std::mem::take(&mut grams.withdraw_too_small),
-                    showing,
-                    idle,
-                )
+                let outcome = grams.take_withdraw_outcome();
+                let (url, too_small) = match outcome {
+                    Some(GramWithdraw::Done(url)) => (Some(url), false),
+                    Some(GramWithdraw::TooSmall) => (None, true),
+                    _ => (None, false),
+                };
+                (url, too_small, showing, idle)
             }
             None => (None, false, false, false),
         };
@@ -216,6 +217,10 @@ impl QuillApp {
                     }
                     .render(session, cx),
                 ),
+                // `grams_withdraw` hands out only an open box.
+                GramWithdraw::Done(_) | GramWithdraw::TooSmall => {
+                    return dialog.on_close(on_close);
+                }
                 GramWithdraw::SecurityCheck { later } => (
                     tr(keys::Q_MONEY_SECURITY_CHECK),
                     SecurityCheck {

@@ -9,7 +9,9 @@ use gpui_kit::component::WindowExt;
 use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
-use quill::settings::{ChatWindowsState, SavedChatWindow, load_chat_windows, save_chat_windows};
+use quill::settings::{
+    ChatWindowsState, RestoreAnswer, SavedChatWindow, load_chat_windows, save_chat_windows,
+};
 
 /// Where the windows from last time stand.
 #[derive(Debug, Default)]
@@ -45,7 +47,7 @@ impl SaveTimer {
 /// The saved windows of `account` to bring back, when the answer was to
 /// restore (`None` otherwise, or when the question is still open).
 pub(super) fn to_restore(state: &ChatWindowsState, account: &str) -> Option<Vec<SavedChatWindow>> {
-    (state.asked && state.restore).then(|| state.windows_of(account))
+    (state.answer == RestoreAnswer::Yes).then(|| state.windows_of(account))
 }
 
 /// Split saved windows into those whose chat has loaded (as chat and
@@ -210,7 +212,7 @@ impl QuillApp {
                 let saved = state.windows_of(&account);
                 self.windows.restore = if saved.is_empty() {
                     Restore::Done
-                } else if !state.asked {
+                } else if state.answer == RestoreAnswer::Unasked {
                     self.offer_restore(window, cx);
                     Restore::Offered(saved)
                 } else {
@@ -308,8 +310,7 @@ mod tests {
     #[test]
     fn the_windows_come_back_only_after_a_yes_and_as_their_chats_load() {
         let mut state = ChatWindowsState {
-            asked: false,
-            restore: false,
+            answer: RestoreAnswer::Unasked,
             windows: vec![saved(1), saved(2)],
         };
         // Not asked yet, or declined: nothing comes back.

@@ -5,7 +5,7 @@ use gpui_kit::*;
 use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr, tr_with};
 use quill::poll::{
-    POLL_DEFAULT_PERIOD_SECS, POLL_OPTIONS_MIN, PollClose, PollDraft, PollOptionInput,
+    DraftOption, POLL_DEFAULT_PERIOD_SECS, POLL_OPTIONS_MIN, PollClose, PollDraft, PollOptionInput,
 };
 
 /// What an option of the new poll carries beside its text.
@@ -261,47 +261,32 @@ impl PollDialog {
     pub(crate) fn draft(&self, cx: &App) -> PollDraft {
         let value = |input: &Entity<TextareaState>| input.read(cx).value().to_string();
         // Options carry their custom emoji as composer markup.
-        let options: Vec<String> = self
+        let options: Vec<DraftOption> = self
             .option_inputs
             .iter()
-            .map(|input| crate::ui::composer_field::field_doc(input.read(cx)).to_markup())
-            .collect();
-        // Map the marked rows to their indexes among the usable
-        // (non-empty) options.
-        let usable: Vec<usize> = options
-            .iter()
             .enumerate()
-            .filter(|(_, option)| !option.trim().is_empty())
-            .map(|(index, _)| index)
-            .collect();
-        let quiz_correct = self
-            .quiz_correct_rows
-            .iter()
-            .filter_map(|row| usable.iter().position(|index| index == row))
+            .map(|(row, input)| DraftOption {
+                text: crate::ui::composer_field::field_doc(input.read(cx)).to_markup(),
+                media: self
+                    .attach
+                    .get(row)
+                    .and_then(|attach| attach.media.ready().cloned()),
+                correct: self.quiz_correct_rows.contains(&row),
+            })
             .collect();
         let country_codes = if self.limit_by_country {
             self.country_codes.clone()
         } else {
             Vec::new()
         };
-        let (open_period, close_date) = match (self.limit_duration, self.close) {
-            (true, PollClose::Period(secs)) => (secs, 0),
-            (true, PollClose::Date(date)) => (0, date),
-            (false, _) => (0, 0),
-        };
+        let deadline = self.limit_duration.then_some(self.close);
         PollDraft {
             question: value(&self.question_input),
             description: value(&self.description_input),
-            option_media: self
-                .attach
-                .iter()
-                .map(|attach| attach.media.ready().cloned())
-                .collect(),
             options,
             is_anonymous: self.is_anonymous,
             allows_multiple_answers: self.allows_multiple_answers,
             is_quiz: self.is_quiz,
-            quiz_correct,
             quiz_explanation: value(&self.explanation_input),
             allows_revoting: self.allows_revoting,
             shuffle_options: self.shuffle_options,
@@ -309,8 +294,7 @@ impl PollDialog {
             allow_adding_options: self.allow_adding_options,
             hide_results_until_closes: self.limit_duration && self.hide_results_until_closes,
             members_only: self.members_only,
-            open_period,
-            close_date,
+            deadline,
             close_max: 0,
         }
     }

@@ -26,6 +26,11 @@ pub enum GramWithdraw {
     /// tdesktop `PrePasswordErrorBox`: no password set (`later: false`) or
     /// one set too recently (`later: true`).
     SecurityCheck { later: bool },
+    /// The box closed with Fragment's page from `getGramWithdrawalUrl`, for
+    /// the UI to open once (through the link policy).
+    Done(String),
+    /// `AMOUNT_TOO_SMALL` closed the box: the UI shows the toast once.
+    TooSmall,
 }
 
 impl GramWithdraw {
@@ -49,6 +54,12 @@ impl GramWithdraw {
         }
     }
 
+    /// The password box or the security check is on screen (not an outcome
+    /// waiting to be shown).
+    pub fn is_box(&self) -> bool {
+        matches!(self, Self::Password { .. } | Self::SecurityCheck { .. })
+    }
+
     /// The request with the password is out (the buttons wait).
     pub fn sending(&self) -> bool {
         self.pending().is_some()
@@ -58,7 +69,7 @@ impl GramWithdraw {
     pub fn pending(&self) -> Option<RequestId> {
         match self {
             Self::Password { request, .. } => *request,
-            Self::SecurityCheck { .. } => None,
+            Self::SecurityCheck { .. } | Self::Done(_) | Self::TooSmall => None,
         }
     }
 

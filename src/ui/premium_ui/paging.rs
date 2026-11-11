@@ -18,16 +18,16 @@ impl QuillApp {
         };
         if !hub.stars_open
             || hub.tx_selected.is_some()
-            || (hub.tx_error.is_some() && !scrolled)
+            || (hub.tx.error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.payments.stars_scroll),
-                !hub.tx_offset.is_empty(),
-                hub.tx_loading,
+                !hub.tx_offset().is_empty(),
+                hub.tx.is_loading(),
             )
             || !self
                 .payments
                 .stars_asked
-                .allow(hub.transactions.len(), scrolled)
+                .allow(hub.transactions().len(), scrolled)
         {
             return;
         }
@@ -47,13 +47,13 @@ impl QuillApp {
         };
         if !hub.gifts_open
             || hub.gift_selected.is_some()
-            || (hub.gifts_error.is_some() && !scrolled)
+            || (hub.gifts_error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.payments.gifts_scroll),
-                !hub.gifts_offset.is_empty(),
-                hub.gifts_loading,
+                !hub.gifts_offset().is_empty(),
+                hub.received.is_loading(),
             )
-            || !self.payments.gifts_asked.allow(hub.gifts.len(), scrolled)
+            || !self.payments.gifts_asked.allow(hub.gifts().len(), scrolled)
         {
             return;
         }
@@ -73,16 +73,16 @@ impl QuillApp {
         };
         if !grams.open
             || grams.selected.is_some()
-            || (grams.error.is_some() && !scrolled)
+            || (grams.error().is_some() && !scrolled)
             || !load_due(
                 scrolled_near_end(&self.payments.grams_scroll),
                 grams.has_more(),
-                grams.loading,
+                grams.is_loading(),
             )
             || !self
                 .payments
                 .grams_asked
-                .allow(grams.entries.len(), scrolled)
+                .allow(grams.entries().len(), scrolled)
         {
             return;
         }
