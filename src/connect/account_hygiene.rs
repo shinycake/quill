@@ -38,6 +38,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn review_unconfirmed_sessions(&mut self, confirmed: bool) -> Result<(), ConnectSendError> {
         if !self.chats_path_active()
             || self.session.settings.notices.review.busy()
+            // The last review's follow-up waits for the UI to take it.
+            || self.session.settings.notices.review.outcome().is_some()
             || self.session.settings.notices.unconfirmed_entries.is_empty()
         {
             return Err(ConnectSendError::InvalidRequest);

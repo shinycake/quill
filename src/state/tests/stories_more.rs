@@ -586,8 +586,9 @@ fn code_info_answer_stores_pending_number_for_matching_request() {
         error: "stale".into(),
         code: None,
     };
-    assert!(session.auth_state.change_number.begin_send());
+    assert!(session.auth_state.change_number.can_send());
     let extra = session.request(RequestPurpose::SendPhoneNumberCode, None);
+    session.auth_state.change_number.begin_send(extra);
     apply_json(
         &mut session,
         &seq,

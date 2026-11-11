@@ -512,12 +512,14 @@ fn delete_account_error_surfaces_honestly() {
 fn code_send_error_surfaces_honestly() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.auth_state.change_number =
-        crate::state::ChangeNumber::Resending(crate::state::CodeSent {
+    let extra = session.request(RequestPurpose::SendPhoneNumberCode, None);
+    session.auth_state.change_number = crate::state::ChangeNumber::Resending {
+        request: extra,
+        code: crate::state::CodeSent {
             phone: "+15550199".into(),
             timeout: 60,
-        });
-    let extra = session.request(RequestPurpose::SendPhoneNumberCode, None);
+        },
+    };
     apply_json(
         &mut session,
         &seq,

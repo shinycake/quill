@@ -357,8 +357,11 @@ fn account_ttl_fetch_error_surfaces_honestly() {
 fn code_info_answer_ignores_unknown_extra() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.auth_state.change_number = crate::state::ChangeNumber::Sending { code: None };
     let extra = session.request(RequestPurpose::SendPhoneNumberCode, None);
+    session.auth_state.change_number = crate::state::ChangeNumber::Sending {
+        request: extra,
+        code: None,
+    };
     apply_json(
         &mut session,
         &seq,
@@ -385,13 +388,16 @@ fn check_code_ok_updates_own_phone_number() {
             ..Default::default()
         },
     );
-    session.auth_state.change_number =
-        crate::state::ChangeNumber::Checking(crate::state::CodeSent {
-            phone: "+15550199".into(),
-            timeout: 60,
-        });
     let resend_extra = session.request(RequestPurpose::ResendPhoneNumberCode, None);
     let extra = session.request(RequestPurpose::CheckPhoneNumberCode, None);
+    session.auth_state.change_number = crate::state::ChangeNumber::Checking {
+        request: extra,
+        code: crate::state::CodeSent {
+            phone: "+15550199".into(),
+            timeout: 60,
+        },
+        resend: Some(resend_extra),
+    };
     apply_json(
         &mut session,
         &seq,
@@ -423,12 +429,15 @@ fn check_code_ok_updates_own_phone_number() {
 fn code_check_error_keeps_pending_number() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.auth_state.change_number =
-        crate::state::ChangeNumber::Checking(crate::state::CodeSent {
+    let extra = session.request(RequestPurpose::CheckPhoneNumberCode, None);
+    session.auth_state.change_number = crate::state::ChangeNumber::Checking {
+        request: extra,
+        code: crate::state::CodeSent {
             phone: "+15550199".into(),
             timeout: 60,
-        });
-    let extra = session.request(RequestPurpose::CheckPhoneNumberCode, None);
+        },
+        resend: None,
+    };
     apply_json(
         &mut session,
         &seq,

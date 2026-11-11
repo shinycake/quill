@@ -30,12 +30,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         phone_number: &str,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || !self.session.auth_state.change_number.begin_send() {
+        if !self.chats_path_active() || !self.session.auth_state.change_number.can_send() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
             .request(RequestPurpose::SendPhoneNumberCode, None);
+        self.session.auth_state.change_number.begin_send(extra);
         match self
             .sender
             .send_json(&send_phone_number_code(extra, phone_number))
@@ -43,7 +44,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.auth_state.change_number.abort();
+                self.session.auth_state.change_number.abort(extra);
                 Err(err)
             }
         }
@@ -54,17 +55,18 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `change_number.timeout()` gates the UI); one change-number op at a
     /// time.
     pub fn resend_phone_number_code(&mut self) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || !self.session.auth_state.change_number.begin_resend() {
+        if !self.chats_path_active() || !self.session.auth_state.change_number.can_resend() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
             .request(RequestPurpose::ResendPhoneNumberCode, None);
+        self.session.auth_state.change_number.begin_resend(extra);
         match self.sender.send_json(&resend_phone_number_code(extra)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.auth_state.change_number.abort();
+                self.session.auth_state.change_number.abort(extra);
                 Err(err)
             }
         }
@@ -80,17 +82,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         // previous verification server-side (a stale check gets an honest
         // server refusal), and a user may verify an already-received code
         // while a resend round-trips.
-        if !self.chats_path_active() || !self.session.auth_state.change_number.begin_check() {
+        if !self.chats_path_active() || !self.session.auth_state.change_number.can_check() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self
             .session
             .request(RequestPurpose::CheckPhoneNumberCode, None);
+        self.session.auth_state.change_number.begin_check(extra);
         match self.sender.send_json(&check_phone_number_code(extra, code)) {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.auth_state.change_number.abort();
+                self.session.auth_state.change_number.abort(extra);
                 Err(err)
             }
         }

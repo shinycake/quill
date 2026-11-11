@@ -9,13 +9,13 @@ impl Session {
         &mut self,
         payload: AuthPayload,
         pending: Option<&PendingRequest>,
-        _extra: Option<RequestId>,
+        extra: Option<RequestId>,
         _seq: u64,
     ) {
         match payload {
             AuthPayload::UpdateAuthorizationState(state) => self.set_auth(state),
             AuthPayload::UpdateTermsOfService { terms } => {
-                self.settings.notices.terms = crate::state::TermsState::Offered(terms);
+                self.settings.notices.terms.offer(terms);
             }
             AuthPayload::EmailCodeInfo { pattern, .. } => {
                 // Batch 6: only our own in-flight 2FA step takes the
@@ -41,11 +41,15 @@ impl Session {
                     Some(
                         RequestPurpose::SendPhoneNumberCode | RequestPurpose::ResendPhoneNumberCode
                     )
-                ) {
-                    self.auth_state.change_number.code_sent(CodeSent {
-                        phone: phone_number,
-                        timeout,
-                    });
+                ) && let Some(request) = extra
+                {
+                    self.auth_state.change_number.code_sent(
+                        request,
+                        CodeSent {
+                            phone: phone_number,
+                            timeout,
+                        },
+                    );
                 }
             }
             // Phase C2g: `joinVideoChat` returns `text` — the tgcalls

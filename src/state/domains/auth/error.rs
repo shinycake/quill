@@ -56,16 +56,20 @@ impl Session {
             // code is still valid — the user can retry or resend.
             // A failed check likewise keeps the pending number.
             Some(RequestPurpose::SendPhoneNumberCode | RequestPurpose::ResendPhoneNumberCode) => {
-                self.auth_state.change_number.fail(
-                    sessions_error_line("send the verification code", err),
-                    false,
-                );
+                if let Some(request) = extra {
+                    self.auth_state.change_number.fail(
+                        request,
+                        sessions_error_line("send the verification code", err),
+                    );
+                }
             }
             Some(RequestPurpose::CheckPhoneNumberCode) => {
-                self.auth_state.change_number.fail(
-                    sessions_error_line("check the verification code", err),
-                    true,
-                );
+                if let Some(request) = extra {
+                    self.auth_state.change_number.fail(
+                        request,
+                        sessions_error_line("check the verification code", err),
+                    );
+                }
             }
             // TDLib answers and stays in WaitTdlibParameters, which sends no
             // update: without this the card says "Connecting" forever.

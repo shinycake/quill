@@ -276,12 +276,11 @@ impl Session {
         // after a conversion, the Stars balance.
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { .. })) => {
-                self.payments.hub.gift_mutating = false;
+                self.payments.hub.gifts_op.changed(pending.map(|p| p.id));
                 self.payments.hub.gifts_error = None;
-                self.payments.hub.gifts_stale = true;
             }
             Some(RequestPurpose::SellGift) => {
-                self.payments.hub.gift_mutating = false;
+                self.payments.hub.gifts_op.changed(pending.map(|p| p.id));
                 self.payments.hub.gifts_error = None;
                 // The panel and the box close only when they are still the
                 // sold gift's: the user may have opened another meanwhile.
@@ -290,7 +289,6 @@ impl Session {
                     self.payments.hub.gift_convert_confirm = None;
                     self.payments.hub.gift_selected = None;
                 }
-                self.payments.hub.gifts_stale = true;
                 self.payments.hub.tx_loaded = false;
             }
             _ => {}

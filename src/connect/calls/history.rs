@@ -159,6 +159,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
+        if self.session.calls.recent_calls_clearing() {
+            return Err(ConnectSendError::InvalidRequest);
+        }
         self.session.calls.recent_calls.clear();
         self.session.calls.recent_calls_offset.clear();
         self.session.calls.recent_calls_stage = RecentCalls::Idle;
@@ -205,7 +208,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     fn fetch_call_history_page(&mut self) -> Result<RequestId, ConnectSendError> {
-        if self.session.calls.recent_calls_loading() {
+        // A clear in flight keeps its stage: the list reloads after its answer.
+        if self.session.calls.recent_calls_loading() || self.session.calls.recent_calls_clearing() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let extra = self

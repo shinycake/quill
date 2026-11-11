@@ -4,6 +4,8 @@
 //! JSON only); the target number and the resend timeout are, because the
 //! code-entry step needs them.
 
+use crate::state::RequestId;
+
 /// A verification code the server sent: the target number and the seconds
 /// before a resend is allowed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,22 +14,31 @@ pub struct CodeSent {
     pub timeout: i32,
 }
 
-/// Where the change-number flow is. Every stage ends by the request's
-/// answer or error; a failed send keeps the code that was valid before it
-/// (a refused resend does not abort the existing verification).
+/// Where the change-number flow is. Every in-flight stage carries the
+/// request it waits for and takes only that request's answer or error; a
+/// failed send keeps the code that was valid before it (a refused resend
+/// does not abort the existing verification).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum ChangeNumber {
     #[default]
     Idle,
     /// `sendPhoneNumberCode` is out; `code` is the one sent before.
-    Sending { code: Option<CodeSent> },
+    Sending {
+        request: RequestId,
+        code: Option<CodeSent>,
+    },
     /// The code is sent; the user types it.
     Ready(CodeSent),
     /// `resendPhoneNumberCode` is out.
-    Resending(CodeSent),
-    /// `checkPhoneNumberCode` is out (a check may start while a resend
-    /// round-trips: the user may verify a code already received).
-    Checking(CodeSent),
+    Resending { request: RequestId, code: CodeSent },
+    /// `checkPhoneNumberCode` is out. A check may start while a resend
+    /// round-trips (the user may verify a code already received): that
+    /// resend is `resend`, and its answer or failure never ends the check.
+    Checking {
+        request: RequestId,
+        code: CodeSent,
+        resend: Option<RequestId>,
+    },
     /// The last operation failed with this honest, classified line (never
     /// the native message); the next attempt clears it.
     Failed {
@@ -40,8 +51,10 @@ impl ChangeNumber {
     fn sent(&self) -> Option<&CodeSent> {
         match self {
             Self::Idle => None,
-            Self::Sending { code } | Self::Failed { code, .. } => code.as_ref(),
-            Self::Ready(code) | Self::Resending(code) | Self::Checking(code) => Some(code),
+            Self::Sending { code, .. } | Self::Failed { code, .. } => code.as_ref(),
+            Self::Ready(code) | Self::Resending { code, .. } | Self::Checking { code, .. } => {
+                Some(code)
+            }
         }
     }
 
@@ -57,12 +70,20 @@ impl ChangeNumber {
 
     /// A send or resend round trip is in flight.
     pub fn is_sending(&self) -> bool {
-        matches!(self, Self::Sending { .. } | Self::Resending(_))
+        matches!(
+            self,
+            Self::Sending { .. }
+                | Self::Resending { .. }
+                | Self::Checking {
+                    resend: Some(_),
+                    ..
+                }
+        )
     }
 
     /// A check round trip is in flight.
     pub fn is_checking(&self) -> bool {
-        matches!(self, Self::Checking(_))
+        matches!(self, Self::Checking { .. })
     }
 
     /// The failure line of the last operation.
@@ -73,73 +94,125 @@ impl ChangeNumber {
         }
     }
 
-    /// A fresh send goes out. One change-number op at a time.
-    pub fn begin_send(&mut self) -> bool {
-        if self.is_sending() || self.is_checking() {
-            return false;
-        }
-        *self = Self::Sending {
-            code: self.sent().cloned(),
-        };
-        true
+    /// A fresh send may go out. One change-number op at a time.
+    pub fn can_send(&self) -> bool {
+        !self.is_sending() && !self.is_checking()
     }
 
-    /// A resend goes out: it needs a code already sent.
-    pub fn begin_resend(&mut self) -> bool {
-        if self.is_sending() || self.is_checking() {
-            return false;
-        }
-        let Some(code) = self.sent().cloned() else {
-            return false;
-        };
-        *self = Self::Resending(code);
-        true
+    /// A resend may go out: it needs a code already sent.
+    pub fn can_resend(&self) -> bool {
+        self.can_send() && self.sent().is_some()
     }
 
-    /// A check goes out: it needs a code already sent, and may run during
+    /// A check may go out: it needs a code already sent, and may run during
     /// a resend.
-    pub fn begin_check(&mut self) -> bool {
-        if self.is_checking() {
-            return false;
+    pub fn can_check(&self) -> bool {
+        !self.is_checking() && self.sent().is_some()
+    }
+
+    /// A fresh send went out as `request`.
+    pub fn begin_send(&mut self, request: RequestId) {
+        if self.can_send() {
+            *self = Self::Sending {
+                request,
+                code: self.sent().cloned(),
+            };
         }
-        let Some(code) = self.sent().cloned() else {
-            return false;
-        };
-        *self = Self::Checking(code);
-        true
     }
 
-    /// The request never left (a closing connection): the stage before it.
-    pub fn abort(&mut self) {
-        *self = match self.sent().cloned() {
-            Some(code) => Self::Ready(code),
-            None => Self::Idle,
-        };
+    /// A resend went out as `request`.
+    pub fn begin_resend(&mut self, request: RequestId) {
+        if self.can_resend()
+            && let Some(code) = self.sent().cloned()
+        {
+            *self = Self::Resending { request, code };
+        }
     }
 
-    /// The send, resend or check came back with `error`.
-    /// A resend that fails while a check runs leaves the check alone.
-    pub fn fail(&mut self, error: String, check: bool) {
-        if !check && self.is_checking() {
+    /// A check went out as `request`; a resend in flight stays under it.
+    pub fn begin_check(&mut self, request: RequestId) {
+        if !self.can_check() {
             return;
         }
-        *self = Self::Failed {
-            error,
-            code: self.sent().cloned(),
+        let resend = match self {
+            Self::Resending { request: asked, .. } => Some(*asked),
+            _ => None,
         };
+        if let Some(code) = self.sent().cloned() {
+            *self = Self::Checking {
+                request,
+                code,
+                resend,
+            };
+        }
     }
 
-    /// The send/resend answer: the code is out. A check in flight stays.
-    pub fn code_sent(&mut self, code: CodeSent) {
-        *self = match self {
-            Self::Checking(_) => Self::Checking(code),
-            _ => Self::Ready(code),
-        };
+    /// `request` never left (a closing connection): the stage before it.
+    pub fn abort(&mut self, request: RequestId) {
+        self.settle(request, None);
+    }
+
+    /// The send, resend or check `request` came back with `error`. An
+    /// answer of any other request is not this stage's.
+    pub fn fail(&mut self, request: RequestId, error: String) {
+        self.settle(request, Some(error));
+    }
+
+    /// The send/resend answer for `request`: the code is out. A check in
+    /// flight stays.
+    pub fn code_sent(&mut self, request: RequestId, new: CodeSent) {
+        match self {
+            Self::Sending { request: asked, .. } | Self::Resending { request: asked, .. }
+                if *asked == request =>
+            {
+                *self = Self::Ready(new);
+            }
+            Self::Checking {
+                code,
+                resend: resend @ Some(_),
+                ..
+            } if *resend == Some(request) => {
+                *code = new;
+                *resend = None;
+            }
+            _ => {}
+        }
     }
 
     /// The number changed (or the flow is over): back to the start.
     pub fn finish(&mut self) {
         *self = Self::Idle;
+    }
+
+    /// `request` ended: `error` is why it failed, `None` when it never left.
+    fn settle(&mut self, request: RequestId, error: Option<String>) {
+        let code = self.sent().cloned();
+        let resend = match self {
+            Self::Checking { resend, .. } => *resend,
+            _ => None,
+        };
+        match self {
+            Self::Sending { request: asked, .. } | Self::Resending { request: asked, .. }
+                if *asked == request => {}
+            Self::Checking {
+                resend: resend @ Some(_),
+                ..
+            } if *resend == Some(request) => {
+                // The resend under a check ends; the check goes on.
+                *resend = None;
+                return;
+            }
+            Self::Checking { request: asked, .. } if *asked == request => {}
+            _ => return,
+        }
+        *self = match error {
+            Some(error) => Self::Failed { error, code },
+            None => match (code, resend) {
+                (Some(code), Some(request)) => Self::Resending { request, code },
+                (Some(code), None) => Self::Ready(code),
+                (None, _) => Self::Idle,
+            },
+        };
     }
 }
 
@@ -154,46 +227,82 @@ mod tests {
         }
     }
 
+    const A: RequestId = RequestId(1);
+    const B: RequestId = RequestId(2);
+    const C: RequestId = RequestId(3);
+
     #[test]
     fn a_refused_resend_keeps_the_code_and_the_next_attempt_clears_the_line() {
         let mut flow = ChangeNumber::Idle;
-        assert!(flow.begin_send());
-        flow.code_sent(code());
-        assert!(flow.begin_resend());
-        assert!(!flow.begin_resend(), "one send at a time");
-        flow.fail("no".into(), false);
+        assert!(flow.can_send());
+        flow.begin_send(A);
+        flow.code_sent(A, code());
+        assert!(flow.can_resend());
+        flow.begin_resend(B);
+        assert!(!flow.can_resend(), "one send at a time");
+        flow.fail(B, "no".into());
         assert_eq!(flow.error(), Some("no"));
         assert_eq!(flow.phone(), Some("+15550199"));
-        assert!(flow.begin_resend());
+        assert!(flow.can_resend());
+        flow.begin_resend(C);
         assert_eq!(flow.error(), None);
     }
 
     #[test]
     fn a_check_runs_during_a_resend_and_survives_its_failure() {
         let mut flow = ChangeNumber::Ready(code());
-        assert!(flow.begin_resend());
-        assert!(flow.begin_check());
-        flow.fail("resend refused".into(), false);
+        flow.begin_resend(A);
+        assert!(flow.can_check());
+        flow.begin_check(B);
+        flow.fail(A, "resend refused".into());
         assert!(flow.is_checking(), "the check is what the user waits for");
-        flow.code_sent(CodeSent {
-            phone: "+15550199".into(),
-            timeout: 30,
-        });
-        assert!(flow.is_checking());
-        assert_eq!(flow.timeout(), Some(30));
-        flow.fail("bad code".into(), true);
+        assert!(!flow.is_sending(), "the refused resend is over");
+        flow.begin_resend(C);
+        assert!(!flow.can_resend(), "no resend while a check is out");
+        flow.fail(B, "bad code".into());
         assert_eq!(flow.error(), Some("bad code"));
-        assert!(flow.begin_check(), "the number stays for a retry");
+        assert!(flow.can_check(), "the number stays for a retry");
         flow.finish();
         assert_eq!(flow, ChangeNumber::Idle);
     }
 
     #[test]
+    fn a_resend_answer_during_a_check_updates_the_timeout_only() {
+        let mut flow = ChangeNumber::Ready(code());
+        flow.begin_resend(A);
+        flow.begin_check(B);
+        flow.code_sent(
+            A,
+            CodeSent {
+                phone: "+15550199".into(),
+                timeout: 30,
+            },
+        );
+        assert!(flow.is_checking());
+        assert_eq!(flow.timeout(), Some(30));
+    }
+
+    #[test]
+    fn an_answer_of_another_request_is_not_this_stages() {
+        let mut flow = ChangeNumber::Idle;
+        flow.begin_send(B);
+        flow.fail(A, "old".into());
+        flow.code_sent(A, code());
+        assert!(flow.is_sending(), "the older request cannot end the send");
+        flow.code_sent(B, code());
+        assert_eq!(flow, ChangeNumber::Ready(code()));
+        flow.begin_check(C);
+        flow.fail(A, "old".into());
+        flow.abort(B);
+        assert!(flow.is_checking());
+    }
+
+    #[test]
     fn a_send_that_never_left_goes_back() {
         let mut flow = ChangeNumber::Idle;
-        assert!(flow.begin_send());
-        flow.abort();
+        flow.begin_send(A);
+        flow.abort(A);
         assert_eq!(flow, ChangeNumber::Idle);
-        assert!(!flow.begin_resend() && !flow.begin_check(), "no code yet");
+        assert!(!flow.can_resend() && !flow.can_check(), "no code yet");
     }
 }

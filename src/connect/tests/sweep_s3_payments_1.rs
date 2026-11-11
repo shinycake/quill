@@ -603,7 +603,7 @@ fn a_stale_gift_refetch_waits_for_a_page_in_flight_and_is_cleared_by_its_answer(
     let mut t = Flaky::new();
     let owner = crate::telegram::envelope::MessageSender::User { user_id: ME };
     t.driver.open_received_gifts(owner).unwrap();
-    t.driver.session.payments.hub.gifts_stale = true;
+    t.driver.session.payments.hub.gifts_op = crate::state::fetch::ListOp::Stale;
     // The first page is still out: no second first-page request.
     assert!(
         t.driver
@@ -612,17 +612,17 @@ fn a_stale_gift_refetch_waits_for_a_page_in_flight_and_is_cleared_by_its_answer(
             .is_none()
     );
     assert_eq!(t.sender.count("getReceivedGifts"), 1);
-    assert!(t.driver.session.payments.hub.gifts_stale);
+    assert!(t.driver.session.payments.hub.gifts_op.is_stale());
     t.answer(
         "getReceivedGifts",
         json!({"@type": "receivedGifts", "total_count": 0, "gifts": [], "next_offset": ""}),
     );
-    assert!(!t.driver.session.payments.hub.gifts_stale);
+    assert!(!t.driver.session.payments.hub.gifts_op.is_stale());
     // A refetch whose send is refused is not retried every frame.
-    t.driver.session.payments.hub.gifts_stale = true;
+    t.driver.session.payments.hub.gifts_op = crate::state::fetch::ListOp::Stale;
     t.sender.refuse(&["getReceivedGifts"]);
     assert!(t.driver.refresh_received_gifts_if_stale().is_err());
-    assert!(!t.driver.session.payments.hub.gifts_stale);
+    assert!(!t.driver.session.payments.hub.gifts_op.is_stale());
     assert!(t.driver.session.payments.hub.gifts_error.is_some());
 }
 
@@ -630,9 +630,9 @@ fn a_stale_gift_refetch_waits_for_a_page_in_flight_and_is_cleared_by_its_answer(
 fn reopening_the_gifts_box_keeps_the_lock_of_a_mutation_in_flight() {
     let mut t = Flaky::new();
     let owner = crate::telegram::envelope::MessageSender::User { user_id: ME };
-    t.driver.session.payments.hub.gift_mutating = true;
+    t.driver.session.payments.hub.gifts_op = crate::state::fetch::ListOp::Mutating(crate::ids::RequestId(900));
     t.driver.open_received_gifts(owner).unwrap();
-    assert!(t.driver.session.payments.hub.gift_mutating);
+    assert!(t.driver.session.payments.hub.gifts_op.is_mutating());
 }
 
 #[test]

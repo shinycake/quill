@@ -185,45 +185,15 @@ impl QuillApp {
         render: u64,
         saved: Option<PathBuf>,
         cx: &mut Context<Self>,
-    ) -> Landed {
+    ) -> super::composer_sends::Landed {
         cx.notify();
-        let found = self.composer_sends.update(slot, |send| {
-            let attachment = send
-                .attachments
-                .iter_mut()
-                .find(|attachment| attachment.extras.photo_render() == Some(render))?;
-            let Some(saved) = &saved else {
-                attachment.extras.abandon_render();
-                // The held Send would carry the unedited photo.
-                let path = attachment.path.clone();
-                send.take_held_send();
-                return Some(Landed {
-                    held: None,
-                    path: Some(path),
-                });
-            };
-            let stem = attachment
-                .path
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .unwrap_or("photo")
-                .to_string();
-            attachment.path = saved.clone();
-            attachment.extras.land_render();
-            attachment.file_name = format!("{stem}.png");
-            attachment.kind = quill::composer::AttachmentKind::Photo;
-            let held = (!send.renders_an_edit())
-                .then(|| send.take_held_send())
-                .flatten();
-            Some(Landed {
-                held,
-                path: Some(saved.clone()),
-            })
-        });
+        let found = self
+            .composer_sends
+            .update(slot, |send| send.end_render(render, saved.as_deref()));
         match (found, saved) {
             (None, Some(saved)) => {
                 let _ = std::fs::remove_file(saved);
-                Landed::default()
+                super::composer_sends::Landed::default()
             }
             (found, None) => {
                 if found.is_some() {
@@ -241,14 +211,4 @@ impl QuillApp {
             }
         }
     }
-}
-
-/// What a finished render left in its tray.
-#[derive(Default)]
-struct Landed {
-    /// The held Send and its one-time options, once nothing in that tray
-    /// renders.
-    held: Option<(String, super::composer_sends::SendOnce)>,
-    /// The photo's file now, while it is still in the tray.
-    path: Option<PathBuf>,
 }

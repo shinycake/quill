@@ -113,6 +113,17 @@ pub enum TermsState {
 }
 
 impl TermsState {
+    /// The server pushed `terms`. The same terms already being accepted (or
+    /// failed) keep that stage: the accept in flight is not undone.
+    pub fn offer(&mut self, terms: TermsOfService) {
+        if self.terms().map(|t| t.id.as_str()) == Some(terms.id.as_str())
+            && !matches!(self, Self::None)
+        {
+            return;
+        }
+        *self = Self::Offered(terms);
+    }
+
     /// The terms the box shows.
     pub fn terms(&self) -> Option<&TermsOfService> {
         match self {
@@ -493,6 +504,28 @@ mod tests {
             device: device.into(),
             location: location.into(),
         }
+    }
+
+    fn terms(id: &str) -> TermsOfService {
+        TermsOfService {
+            id: id.into(),
+            text: "Be nice.".into(),
+            min_user_age: 0,
+            show_popup: true,
+        }
+    }
+
+    #[test]
+    fn terms_pushed_again_keep_the_accept_in_flight() {
+        let mut state = TermsState::Offered(terms("tos-1"));
+        state.begin_accept();
+        state.offer(terms("tos-1"));
+        assert!(state.is_accepting(), "no second accept is offered");
+        state.fail_accept("no");
+        state.offer(terms("tos-1"));
+        assert_eq!(state.error(), Some("no"));
+        state.offer(terms("tos-2"));
+        assert_eq!(state, TermsState::Offered(terms("tos-2")));
     }
 
     #[test]

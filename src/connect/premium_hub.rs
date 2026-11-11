@@ -119,9 +119,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         hub.gifts_error = None;
         hub.gift_selected = None;
         hub.gift_convert_confirm = None;
-        // `gift_mutating` is not reset: a toggle or sale still out keeps its
+        // `gifts_op` (Mutating) is not reset: a toggle or sale still out keeps its
         // lock until its own answer (another request would pay twice).
-        hub.gifts_stale = false;
+        hub.gifts_op.refetched();
         self.begin_gift_manage(owner);
         self.fetch_received_gifts_page(false)
     }
@@ -180,13 +180,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         let hub = &self.session.payments.hub;
         // A page already out settles first (its answer is not the refetch);
         // the list stays stale until a first page answers or fails.
-        if !hub.gifts_stale || hub.gifts_owner.is_none() || hub.gifts_loading {
+        if !hub.gifts_op.is_stale() || hub.gifts_owner.is_none() || hub.gifts_loading {
             return Ok(None);
         }
         let sent = self.fetch_received_gifts_page(false);
         if sent.is_err() {
             // Not asked again every frame: the error line says so.
-            self.session.payments.hub.gifts_stale = false;
+            self.session.payments.hub.gifts_op.refetched();
         }
         sent.map(Some)
     }
@@ -198,7 +198,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         saved: bool,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active()
-            || self.session.payments.hub.gift_mutating
+            || self.session.payments.hub.gifts_op.is_mutating()
             || !self
                 .session
                 .payments
@@ -218,11 +218,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { saved }),
             None,
         );
-        self.session.payments.hub.gift_mutating = true;
+        self.session.payments.hub.gifts_op.begin(extra);
         self.session.payments.hub.gifts_error = None;
         let json = toggle_gift_is_saved(extra, received_gift_id, saved);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.payments.hub.gift_mutating = false;
+            self.session.payments.hub.gifts_op.failed(Some(extra));
             return Err(err);
         }
         Ok(extra)
@@ -242,7 +242,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .iter()
             .any(|gift| gift.id == received_gift_id && gift.can_convert());
         if !self.chats_path_active()
-            || self.session.payments.hub.gift_mutating
+            || self.session.payments.hub.gifts_op.is_mutating()
             || !self
                 .session
                 .payments
@@ -255,11 +255,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request_for_subject(RequestPurpose::SellGift, received_gift_id);
-        self.session.payments.hub.gift_mutating = true;
+        self.session.payments.hub.gifts_op.begin(extra);
         self.session.payments.hub.gifts_error = None;
         let json = sell_gift(extra, received_gift_id);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.payments.hub.gift_mutating = false;
+            self.session.payments.hub.gifts_op.failed(Some(extra));
             return Err(err);
         }
         Ok(extra)

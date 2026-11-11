@@ -67,6 +67,16 @@ pub(super) enum TraySend {
     },
 }
 
+/// What a finished render left in its tray.
+#[derive(Default)]
+pub(super) struct Landed {
+    /// The held Send and its one-time options, once nothing in that tray
+    /// renders.
+    pub(super) held: Option<(String, SendOnce)>,
+    /// The photo's file now, while it is still in the tray.
+    pub(super) path: Option<PathBuf>,
+}
+
 /// The options a single send carries and the next does not: "Send without
 /// sound" and "Send with Effect" (`ComposerUi::send_silent_once`,
 /// `send_effect_once`). A send that waits (a paid-message confirm, a photo
@@ -123,8 +133,45 @@ impl PendingSend {
         true
     }
 
-    /// The held Send, once the last render landed.
-    pub(super) fn take_held_send(&mut self) -> Option<(String, SendOnce)> {
+    /// The render `render` of a tray photo ended: `saved` is the new file,
+    /// `None` when it failed. The held Send is released here, with the
+    /// render that ends it: it goes out once no render is left, and a
+    /// failed render drops it (it would carry the unedited photo).
+    pub(super) fn end_render(&mut self, render: u64, saved: Option<&Path>) -> Option<Landed> {
+        let attachment = self
+            .attachments
+            .iter_mut()
+            .find(|attachment| attachment.extras.photo_render() == Some(render))?;
+        let Some(saved) = saved else {
+            attachment.extras.abandon_render();
+            let path = attachment.path.clone();
+            self.send = TraySend::Idle;
+            return Some(Landed {
+                held: None,
+                path: Some(path),
+            });
+        };
+        let stem = attachment
+            .path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("photo")
+            .to_string();
+        attachment.path = saved.to_path_buf();
+        attachment.extras.land_render();
+        attachment.file_name = format!("{stem}.png");
+        attachment.kind = quill::composer::AttachmentKind::Photo;
+        let held = (!self.renders_an_edit())
+            .then(|| self.take_held_send())
+            .flatten();
+        Some(Landed {
+            held,
+            path: Some(saved.to_path_buf()),
+        })
+    }
+
+    /// What a finished render left in its tray.
+    fn take_held_send(&mut self) -> Option<(String, SendOnce)> {
         match std::mem::replace(&mut self.send, TraySend::Idle) {
             TraySend::Idle => None,
             TraySend::Held { text, once } => Some((text, once)),
