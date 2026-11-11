@@ -185,10 +185,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     MessageSender::User { user_id } => MessageSenderRef::User(user_id),
                     MessageSender::Chat { chat_id } => MessageSenderRef::Chat(chat_id),
                 });
-            let hash = crate::call_link::PendingCallLink::hash_for(
-                self.session.calls.call_link.as_ref(),
-                id,
-            );
+            let hash = self.session.calls.call_link_stage.hash_for(id);
             join_video_chat(extra, id, as_ref.as_ref(), params, hash)
         }
     }

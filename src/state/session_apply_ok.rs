@@ -59,10 +59,11 @@ impl Session {
                 self.finish_scheduling_edit(pending.and_then(|p| p.chat_id), message_id, scheduling)
             }
             Some(RequestPurpose::DeleteAllCallMessages) => {
-                self.calls.recent_calls.clear();
-                self.calls.recent_calls_offset.clear();
-                // A page in flight still lists the calls just deleted.
-                self.calls.recent_calls_stage = RecentCalls::Idle;
+                // The list starts over, a page in flight with it: it still
+                // lists the calls just deleted.
+                if let Some(pending) = pending {
+                    self.calls.recent_calls.clear_done(pending.id);
+                }
             }
             Some(RequestPurpose::DeleteChatMessagesBySender) => {
                 self.messages

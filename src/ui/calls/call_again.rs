@@ -77,10 +77,10 @@ impl QuillApp {
             return;
         };
         let calls = &session.calls;
-        let loaded = calls.recent_calls.len();
+        let loaded = calls.recent_calls.rows().len();
         if !load_due(
             scrolled_near_end(&self.call_boxes.history_scroll),
-            !calls.recent_calls_offset.is_empty(),
+            !calls.recent_calls.next_offset().is_empty(),
             calls.recent_calls_loading(),
         ) || calls.recent_calls_error() && !scrolled
             || !self.call_boxes.history_asked.allow(loaded, scrolled)
@@ -105,11 +105,11 @@ impl QuillApp {
             .session()
             .map(|session| {
                 (
-                    session.calls.recent_calls.clone(),
+                    session.calls.recent_calls.rows().to_vec(),
                     session.calls.recent_calls_loading(),
                     session.calls.recent_calls_error(),
-                    !session.calls.recent_calls_offset.is_empty(),
-                    session.calls.recent_calls_stage,
+                    !session.calls.recent_calls.next_offset().is_empty(),
+                    session.calls.recent_calls_clearing(),
                 )
             })
             .unwrap_or_default();

@@ -19,11 +19,16 @@ use quill::lang::{keys, tr};
 
 impl QuillApp {
     pub(super) fn open_clear_calls(&mut self, cx: &mut Context<Self>) {
-        let (count, stage) = self
+        let (count, clearing) = self
             .session()
-            .map(|s| (s.calls.recent_calls.len(), s.calls.recent_calls_stage))
+            .map(|s| {
+                (
+                    s.calls.recent_calls.rows().len(),
+                    s.calls.recent_calls_clearing(),
+                )
+            })
             .unwrap_or_default();
-        if !can_clear(count, stage) {
+        if !can_clear(count, clearing) {
             return;
         }
         self.chat_list.global.clear_calls = Some(Default::default());
@@ -51,7 +56,7 @@ impl QuillApp {
             }
             None => {
                 if let Some(session) = self.demo_session.as_mut() {
-                    session.calls.recent_calls.clear();
+                    session.calls.recent_calls.reset();
                 }
             }
         }

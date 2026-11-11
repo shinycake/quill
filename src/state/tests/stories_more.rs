@@ -526,7 +526,7 @@ fn call_history_pages_accumulate_and_track_offset() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::SearchCallMessages, None);
-    session.calls.recent_calls_stage = crate::state::RecentCalls::Loading { request: extra };
+    session.calls.recent_calls.page_sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -536,12 +536,12 @@ fn call_history_pages_accumulate_and_track_offset() {
             extra.0,
         ),
     );
-    assert_eq!(session.calls.recent_calls.len(), 1);
-    assert_eq!(session.calls.recent_calls_offset, "page2");
+    assert_eq!(session.calls.recent_calls.rows().len(), 1);
+    assert_eq!(session.calls.recent_calls.next_offset(), "page2");
     assert!(!session.calls.recent_calls_loading());
     assert!(!session.calls.recent_calls_error());
     let extra = session.request(RequestPurpose::SearchCallMessages, None);
-    session.calls.recent_calls_stage = crate::state::RecentCalls::Loading { request: extra };
+    session.calls.recent_calls.page_sent(extra);
     apply_json(
         &mut session,
         &seq,
@@ -551,10 +551,10 @@ fn call_history_pages_accumulate_and_track_offset() {
             extra.0,
         ),
     );
-    assert_eq!(session.calls.recent_calls.len(), 2);
-    assert_eq!(session.calls.recent_calls_offset, "");
-    assert_eq!(session.calls.recent_calls[0].id.0, 901);
-    assert_eq!(session.calls.recent_calls[1].id.0, 900);
+    assert_eq!(session.calls.recent_calls.rows().len(), 2);
+    assert_eq!(session.calls.recent_calls.next_offset(), "");
+    assert_eq!(session.calls.recent_calls.rows()[0].id.0, 901);
+    assert_eq!(session.calls.recent_calls.rows()[1].id.0, 900);
 }
 
 #[test]
@@ -941,4 +941,51 @@ fn an_account_going_away_ends_the_management_calls_on_their_way() {
         session.stories.manage.outcome(RequestId(30)),
         StoryManageOutcome::Lost
     );
+}
+
+#[test]
+fn r2_clear_all_answers_only_by_its_own_request_and_keeps_the_list_until_ok() {
+    // Sweep r2-19 (05-019): the rows, their offset and the stage are one
+    // value; a clear keeps the calls listed until its own `ok`, a refusal
+    // shows them again, and a page asked before the clear never lands.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let page = |extra: RequestId, id: i64, next: &str| {
+        format!(
+            r#"{{"@type":"foundMessages","@extra":"{}","total_count":1,"next_offset":"{next}","messages":[{{"@type":"message","id":{id},"chat_id":71,"is_outgoing":false,"date":1700000000,"content":{{"@type":"messageCall","unique_id":{id},"is_video":false,"discard_reason":{{"@type":"callDiscardReasonHungUp"}},"duration":3}}}}]}}"#,
+            extra.0
+        )
+    };
+    let first = session.request(RequestPurpose::SearchCallMessages, None);
+    session.calls.recent_calls.page_sent(first);
+    apply_json(&mut session, &seq, &sink, &page(first, 901, "more"));
+    let more = session.request(RequestPurpose::SearchCallMessages, None);
+    session.calls.recent_calls.page_sent(more);
+    let clear = session.request(RequestPurpose::DeleteAllCallMessages, None);
+    session.calls.recent_calls.clear_sent(clear);
+    apply_json(&mut session, &seq, &sink, &page(more, 900, ""));
+    assert_eq!(session.calls.recent_calls.rows().len(), 1, "dropped");
+    assert!(session.calls.recent_calls_clearing());
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"X"}}"#,
+            clear.0
+        ),
+    );
+    assert!(!session.calls.recent_calls_clearing());
+    assert_eq!(session.calls.recent_calls.rows().len(), 1);
+    assert_eq!(session.calls.recent_calls.next_offset(), "more");
+    let clear = session.request(RequestPurpose::DeleteAllCallMessages, None);
+    session.calls.recent_calls.clear_sent(clear);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, clear.0),
+    );
+    assert!(session.calls.recent_calls.rows().is_empty());
+    assert_eq!(session.calls.recent_calls.next_offset(), "");
 }

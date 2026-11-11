@@ -533,7 +533,7 @@ impl Session {
     /// stops the call's native transport.
     pub fn leave_group_call_local(&mut self) {
         self.calls.active_group_call = None;
-        self.calls.call_link = None;
+        self.calls.call_link_stage.forget_hash(None);
         self.calls.invite_results = None;
     }
 
