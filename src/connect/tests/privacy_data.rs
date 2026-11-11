@@ -133,7 +133,7 @@ fn a_refresh_keeps_the_value_and_an_older_answer_never_beats_a_save() {
     let refresh = last_request(&f);
     f.1.fetch_new_chat_privacy().unwrap();
     assert_eq!(last_request(&f), refresh);
-    assert!(matches!(new_chat_value(&f), Some(_)));
+    assert!(new_chat_value(&f).is_some());
     // A save goes out while the refresh is in flight; the refresh then
     // answers with the old server value and must not overwrite the save.
     f.1.set_new_chat_privacy(false).unwrap();
