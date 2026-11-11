@@ -79,7 +79,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             pending_typed_chat_search: None,
             outgoing_typing: None,
             outgoing_voice: None,
-            draft_save_token: 0,
             draft_save: Default::default(),
             flood_retries: Vec::new(),
             flood_attempts: HashMap::new(),

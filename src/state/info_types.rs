@@ -846,6 +846,79 @@ pub enum DeepLinkState {
     Unknown { link: String },
 }
 
+/// The deep-link flow slot: no flow, or one flow with the stage it is in and
+/// whether a step the agent UI driver injected started it. The origin is
+/// born with the flow and goes with it, so no terminal state leaves one
+/// behind and no stage can be reached without it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum DeepLinkFlow {
+    #[default]
+    Idle,
+    Active {
+        from_agent: bool,
+        state: DeepLinkState,
+    },
+}
+
+impl DeepLinkFlow {
+    /// The stage of the flow in progress.
+    pub fn state(&self) -> Option<&DeepLinkState> {
+        match self {
+            Self::Idle => None,
+            Self::Active { state, .. } => Some(state),
+        }
+    }
+
+    pub fn is_idle(&self) -> bool {
+        matches!(self, Self::Idle)
+    }
+
+    /// Whether the flow was started by an injected agent step.
+    pub fn from_agent(&self) -> bool {
+        matches!(
+            self,
+            Self::Active {
+                from_agent: true,
+                ..
+            }
+        )
+    }
+
+    /// A new flow starts in `state` with its own origin.
+    pub fn begin(&mut self, from_agent: bool, state: DeepLinkState) {
+        *self = Self::Active { from_agent, state };
+    }
+
+    /// The flow goes on in `state`, keeping its origin (a user's flow when
+    /// none runs).
+    pub fn set(&mut self, state: DeepLinkState) {
+        let from_agent = self.from_agent();
+        *self = Self::Active { from_agent, state };
+    }
+
+    /// The flow ends.
+    pub fn end(&mut self) {
+        *self = Self::Idle;
+    }
+
+    /// The stage and its origin, leaving no flow: the UI consumes a
+    /// terminal state once and puts the flow back only while it goes on.
+    pub fn take(&mut self) -> Option<(DeepLinkState, bool)> {
+        match std::mem::take(self) {
+            Self::Idle => None,
+            Self::Active { from_agent, state } => Some((state, from_agent)),
+        }
+    }
+
+    /// The flow taken by [`Self::take`] goes on unchanged.
+    pub fn restore(&mut self, taken: Option<(DeepLinkState, bool)>) {
+        *self = match taken {
+            Some((state, from_agent)) => Self::Active { from_agent, state },
+            None => Self::Idle,
+        };
+    }
+}
+
 impl DeepLinkState {
     /// The flow generation of a stage that belongs to one; answers of an
     /// older flow are dropped by comparing it.

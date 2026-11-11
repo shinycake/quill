@@ -108,7 +108,7 @@ fn a_deep_link_answer_after_the_flow_ended_is_dropped() {
     driver
         .ingest(copy_and_parse(&json, &seq, &sink).expect("parse"))
         .expect("ingest");
-    assert_eq!(driver.session.chats_state.deep_link, None);
+    assert_eq!(driver.session.chats_state.deep_link.state(), None);
 }
 
 /// Sweep 05-231: a calendar's generation never repeats after the box

@@ -117,7 +117,7 @@ fn premium_availability_follows_the_option() {
 #[test]
 fn invite_link_join_over_the_limit_opens_the_channels_box() {
     let (mut session, sink) = session();
-    session.chats_state.deep_link = Some(DeepLinkState::ResolvingChat {
+    session.chats_state.deep_link.set(DeepLinkState::ResolvingChat {
         action: DeepLinkAction::JoinInvite { hash: "h".into() },
         generation: 3,
     });
@@ -128,7 +128,7 @@ fn invite_link_join_over_the_limit_opens_the_channels_box() {
         None,
         "CHANNELS_TOO_MUCH",
     );
-    assert_eq!(session.chats_state.deep_link, None);
+    assert_eq!(session.chats_state.deep_link.state(), None);
     assert_eq!(
         session.payments.hub.limit_box,
         Some((PremiumLimitKind::Channels, 0))
@@ -141,7 +141,7 @@ fn invite_link_join_over_the_limit_opens_the_channels_box() {
 #[test]
 fn a_stale_invite_link_join_opens_no_limit_box() {
     let (mut session, sink) = session();
-    session.chats_state.deep_link = None;
+    session.chats_state.deep_link.end();
     fail(
         &mut session,
         &sink,
@@ -149,7 +149,7 @@ fn a_stale_invite_link_join_opens_no_limit_box() {
         None,
         "CHANNELS_TOO_MUCH",
     );
-    assert_eq!(session.chats_state.deep_link, None);
+    assert_eq!(session.chats_state.deep_link.state(), None);
     assert_eq!(session.payments.hub.limit_box, None);
 }
 
@@ -158,7 +158,7 @@ fn a_stale_invite_link_join_opens_no_limit_box() {
 #[test]
 fn a_join_failure_is_shown_when_the_flow_sits_at_the_preview() {
     let (mut session, sink) = session();
-    session.chats_state.deep_link = Some(DeepLinkState::InvitePreview {
+    session.chats_state.deep_link.set(DeepLinkState::InvitePreview {
         hash: "h".into(),
         title: "Club".into(),
         member_count: 3,
@@ -174,7 +174,7 @@ fn a_join_failure_is_shown_when_the_flow_sits_at_the_preview() {
         "INVITE_HASH_EXPIRED",
     );
     assert!(matches!(
-        session.chats_state.deep_link,
+        session.chats_state.deep_link.state().cloned(),
         Some(DeepLinkState::InvitePreview { .. })
     ));
     fail(
@@ -185,7 +185,7 @@ fn a_join_failure_is_shown_when_the_flow_sits_at_the_preview() {
         "INVITE_HASH_EXPIRED",
     );
     assert!(matches!(
-        session.chats_state.deep_link,
+        session.chats_state.deep_link.state().cloned(),
         Some(DeepLinkState::ShowText(_))
     ));
 }

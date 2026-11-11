@@ -365,8 +365,6 @@ pub struct ConnectDriver<S: JsonSender> {
     pub(crate) outgoing_typing: Option<OutgoingTyping>,
     /// Last `chatActionRecordingVoiceNote` (Unigram record button).
     pub(crate) outgoing_voice: Option<OutgoingTyping>,
-    /// The id of the last quiet window armed: a timer commits only its own.
-    pub(crate) draft_save_token: u64,
     /// The composer draft save waiting for its quiet window.
     pub(crate) draft_save: DraftSave,
     /// Q1: idempotent reads waiting out a 429 before being re-sent.
@@ -395,42 +393,74 @@ pub(crate) struct OutgoingTyping {
 
 /// Where the composer draft save stands (tdesktop `saveDraft`): one save
 /// waits at a time, with the clock of its quiet window.
-#[derive(Default)]
 pub(crate) enum DraftSave {
-    #[default]
-    Idle,
+    /// Nothing waits. `last_token` is the id of the last quiet window
+    /// armed, so a timer of an earlier one never commits a later save.
+    Idle { last_token: u64 },
     /// A save waits for its timer, a flush or a cancel. `started_ms` is when
-    /// its quiet window began; `None` for a save that failed to go out and
-    /// waits for the next flush without a window.
+    /// its quiet window began.
     Waiting {
         pending: Box<PendingDraft>,
-        started_ms: Option<u64>,
+        started_ms: u64,
     },
+    /// A save that failed to go out waits for the next flush, with no
+    /// quiet window.
+    Failed { pending: Box<PendingDraft> },
+}
+
+impl Default for DraftSave {
+    fn default() -> Self {
+        Self::Idle { last_token: 0 }
+    }
 }
 
 impl DraftSave {
     pub(crate) fn pending(&self) -> Option<&PendingDraft> {
         match self {
-            Self::Idle => None,
-            Self::Waiting { pending, .. } => Some(pending.as_ref()),
+            Self::Idle { .. } => None,
+            Self::Waiting { pending, .. } | Self::Failed { pending } => Some(pending.as_ref()),
         }
+    }
+
+    /// The id of the last quiet window armed.
+    fn last_token(&self) -> u64 {
+        match self {
+            Self::Idle { last_token } => *last_token,
+            Self::Waiting { pending, .. } | Self::Failed { pending } => pending.token,
+        }
+    }
+
+    /// The id the next quiet window takes.
+    pub(crate) fn next_token(&self) -> u64 {
+        self.last_token().saturating_add(1)
+    }
+
+    /// Nothing waits any more; the ids already given stay given.
+    pub(crate) fn clear(&mut self) {
+        *self = Self::Idle {
+            last_token: self.last_token(),
+        };
     }
 
     /// The quiet-window clock of the waiting save.
     pub(crate) fn clock(&self) -> DraftSaveClock {
         match self {
-            Self::Idle => DraftSaveClock::idle(),
+            Self::Idle { .. } | Self::Failed { .. } => DraftSaveClock::idle(),
             Self::Waiting { started_ms, .. } => DraftSaveClock {
-                started_ms: *started_ms,
+                started_ms: Some(*started_ms),
             },
         }
     }
 
     /// The waiting save, leaving none (and no clock).
     pub(crate) fn take(&mut self) -> Option<PendingDraft> {
-        match std::mem::take(self) {
-            Self::Idle => None,
-            Self::Waiting { pending, .. } => Some(*pending),
+        let pending = match self {
+            Self::Idle { .. } => return None,
+            Self::Waiting { pending, .. } | Self::Failed { pending } => pending.token,
+        };
+        match std::mem::replace(self, Self::Idle { last_token: pending }) {
+            Self::Waiting { pending, .. } | Self::Failed { pending } => Some(*pending),
+            Self::Idle { .. } => None,
         }
     }
 }

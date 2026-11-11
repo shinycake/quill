@@ -82,7 +82,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let stored = content.to_store(reply_to.is_some() || terms.is_some());
         let reply_to = stored.as_ref().and(reply_to);
         if self.draft_matches(chat_id, topic, stored.as_ref(), reply_to.as_ref(), terms) {
-            self.draft_save = DraftSave::Idle;
+            self.draft_save.clear();
             let existing = self.session.draft_for(chat_id, topic).cloned();
             self.session.store_composer_draft(chat_id, topic, existing);
             return Ok(DraftSaveOutcome::Skipped);
@@ -93,8 +93,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 delay_ms,
                 started_ms,
             } => {
-                self.draft_save_token = self.draft_save_token.saturating_add(1);
-                let token = self.draft_save_token;
+                let token = self.draft_save.next_token();
                 self.draft_save = DraftSave::Waiting {
                     pending: Box::new(PendingDraft {
                         token,
@@ -103,7 +102,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         content: stored.unwrap_or(DraftContent::Text(String::new())),
                         reply_to,
                     }),
-                    started_ms: Some(started_ms),
+                    started_ms,
                 };
                 Ok(DraftSaveOutcome::Debounced {
                     token,
@@ -111,17 +110,17 @@ impl<S: JsonSender> ConnectDriver<S> {
                 })
             }
             DraftSaveStep::Write => {
-                self.draft_save = DraftSave::Idle;
+                self.draft_save.clear();
                 let sent =
                     self.send_draft(chat_id, topic, stored.as_ref(), reply_to.as_ref(), terms);
                 if let Err(err) = sent {
                     // The slot stays dirty, so the draft waits for the next
                     // flush instead of being forgotten.
-                    self.draft_save_token = self.draft_save_token.saturating_add(1);
+                    let token = self.draft_save.next_token();
                     self.keep_failed_draft(
                         err,
                         PendingDraft {
-                            token: self.draft_save_token,
+                            token,
                             chat_id,
                             topic,
                             content: stored.unwrap_or(DraftContent::Text(String::new())),
@@ -188,9 +187,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// take is not kept.
     fn keep_failed_draft(&mut self, err: ConnectSendError, pending: PendingDraft) {
         if err != ConnectSendError::InvalidRequest && self.draft_save.pending().is_none() {
-            self.draft_save = DraftSave::Waiting {
+            self.draft_save = DraftSave::Failed {
                 pending: Box::new(pending),
-                started_ms: None,
             };
             return;
         }
@@ -223,7 +221,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.draft_for(chat_id, topic).is_none() {
             return Ok(None);
         }
-        self.draft_save = DraftSave::Idle;
+        self.draft_save.clear();
         self.send_draft(chat_id, topic, None, None, None).map(Some)
     }
 

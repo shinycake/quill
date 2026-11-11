@@ -44,7 +44,7 @@ fn invite_check_confirm_cancel_and_stale_answers() {
         .ingest(copy_and_parse(&preview(extra), &seq, &sink).unwrap())
         .unwrap();
     assert!(
-        matches!(driver.session.chats_state.deep_link, Some(DeepLinkState::InvitePreview {
+        matches!(driver.session.chats_state.deep_link.state().cloned(), Some(DeepLinkState::InvitePreview {
         ref title, member_count: 1248, creates_join_request: true, is_channel: true, ..
     }) if title == "Rust Community")
     );
@@ -73,7 +73,7 @@ fn invite_check_confirm_cancel_and_stale_answers() {
         )
         .unwrap();
     assert!(
-        matches!(driver.session.chats_state.deep_link, Some(DeepLinkState::ShowText(ref text)) if text.contains("Join request sent"))
+        matches!(driver.session.chats_state.deep_link.state().cloned(), Some(DeepLinkState::ShowText(ref text)) if text.contains("Join request sent"))
     );
 
     let old = driver.resolve_deep_link(action.clone()).unwrap().unwrap();
@@ -82,14 +82,14 @@ fn invite_check_confirm_cancel_and_stale_answers() {
         .ingest(copy_and_parse(&preview(old), &seq, &sink).unwrap())
         .unwrap();
     assert!(matches!(
-        driver.session.chats_state.deep_link,
+        driver.session.chats_state.deep_link.state().cloned(),
         Some(DeepLinkState::ResolvingChat { .. })
     ));
     driver
         .ingest(copy_and_parse(&preview(current), &seq, &sink).unwrap())
         .unwrap();
     // Cancel clears the retained preview; a later confirmation cannot join.
-    driver.session.chats_state.deep_link = None;
+    driver.session.chats_state.deep_link.end();
     let before = recorder.snapshot().len();
     assert_eq!(
         driver

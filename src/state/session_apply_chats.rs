@@ -146,10 +146,10 @@ impl Session {
             && let Some(DeepLinkState::ResolvingChat {
                 action,
                 generation: slot_generation,
-            }) = self.chats_state.deep_link.as_ref()
+            }) = self.chats_state.deep_link.state()
             && *slot_generation == generation
         {
-            self.chats_state.deep_link = Some(DeepLinkState::ChatReady {
+            self.chats_state.deep_link.set(DeepLinkState::ChatReady {
                 chat_id,
                 action: action.clone(),
             });

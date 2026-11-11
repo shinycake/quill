@@ -234,7 +234,7 @@ fn a_switch_ends_the_link_flow_the_account_was_running(cx: &mut TestAppContext) 
     frames(&mut vcx);
     app.update(&mut vcx, |app, _| {
         let session = app.demo_session.as_mut().expect("a demo session");
-        session.chats_state.deep_link = Some(DeepLinkState::InvitePreview {
+        session.chats_state.deep_link.begin(true, DeepLinkState::InvitePreview {
             hash: "AbCd".into(),
             title: "Book club".into(),
             member_count: 12,
@@ -242,14 +242,13 @@ fn a_switch_ends_the_link_flow_the_account_was_running(cx: &mut TestAppContext) 
             is_channel: false,
             generation: 3,
         });
-        session.chats_state.deep_link_from_agent = true;
     });
     switch(&app, &mut vcx, "other");
     frames(&mut vcx);
     app.read_with(&vcx, |app, _| {
         let session = app.session().expect("a session");
-        assert!(session.chats_state.deep_link.is_none(), "the flow ended");
-        assert!(!session.chats_state.deep_link_from_agent);
+        assert!(session.chats_state.deep_link.is_idle(), "the flow ended");
+        assert!(!session.chats_state.deep_link.from_agent());
         assert!(app.links.deep_link_invite.is_none());
     });
     switch(&app, &mut vcx, &AccountKey::primary().0);

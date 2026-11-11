@@ -124,14 +124,9 @@ pub struct ChatsState {
     pub chat_upgrades: Vec<(i64, i64)>,
     /// `parity:platform-deep-links`: the single active deep-link flow
     /// (launch link → `getDeepLinkInfo` → follow-up → open chat).
-    pub deep_link: Option<DeepLinkState>,
+    pub deep_link: crate::state::info_types::DeepLinkFlow,
     /// Generation counter for deep-link request correlation.
     pub deep_link_seq: u64,
-    /// The flow in `deep_link` was started by a step the agent UI driver
-    /// injected. Set at every start of a flow, kept while it continues,
-    /// taken by the UI at every terminal state; the UI re-checks what an
-    /// agent's flow opens (`guard::with_injecting`).
-    pub deep_link_from_agent: bool,
 }
 
 impl ChatsState {
@@ -164,9 +159,8 @@ impl ChatsState {
             available_accent_color_ids: Vec::new(),
             chat_available_reactions: HashMap::new(),
             chat_upgrades: Vec::new(),
-            deep_link: None,
+            deep_link: Default::default(),
             deep_link_seq: 0,
-            deep_link_from_agent: false,
         }
     }
 
@@ -175,7 +169,6 @@ impl ChatsState {
     /// are dropped, so switching back never reopens a Join box or a chat
     /// by itself (tdesktop ties the flow to the session's window).
     pub fn end_deep_link_flow(&mut self) {
-        self.deep_link = None;
-        self.deep_link_from_agent = false;
+        self.deep_link.end();
     }
 }

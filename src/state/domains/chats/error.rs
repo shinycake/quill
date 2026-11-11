@@ -112,7 +112,7 @@ impl Session {
                 let stale = self
                     .chats_state
                     .deep_link
-                    .as_ref()
+                    .state()
                     .and_then(DeepLinkState::generation)
                     != Some(generation);
                 // `joinChatByInviteLink` over the community limit opens the
@@ -135,7 +135,7 @@ impl Session {
                         ChatsPurpose::DeepLinkInternalType { .. }
                     ))
                 ) && matches!(
-                    &self.chats_state.deep_link,
+                    self.chats_state.deep_link.state(),
                     Some(DeepLinkState::ResolvingInfo { original, .. })
                         if crate::text::openable_http_url(original)
                 );
@@ -152,18 +152,20 @@ impl Session {
                     self.payments.hub.auto_start = None;
                 }
                 if limit_box {
-                    self.chats_state.deep_link = None;
+                    self.chats_state.deep_link.end();
                 } else if !stale && web_fallback {
-                    let url = match self.chats_state.deep_link.take() {
-                        Some(DeepLinkState::ResolvingInfo { original, .. }) => original,
-                        _ => String::new(),
+                    let (url, from_agent) = match self.chats_state.deep_link.take() {
+                        Some((DeepLinkState::ResolvingInfo { original, .. }, from_agent)) => {
+                            (original, from_agent)
+                        }
+                        _ => (String::new(), false),
                     };
-                    self.chats_state.deep_link = Some(DeepLinkState::Ui(
+                    self.chats_state.deep_link.begin(from_agent, DeepLinkState::Ui(
                         crate::deep_link_types::DeepLinkUi::Browser { url },
                     ));
                 } else if !stale {
-                    let text = deep_link_error_text(self.chats_state.deep_link.as_ref(), err.code);
-                    self.chats_state.deep_link = Some(DeepLinkState::ShowText(text));
+                    let text = deep_link_error_text(self.chats_state.deep_link.state(), err.code);
+                    self.chats_state.deep_link.set(DeepLinkState::ShowText(text));
                 }
             }
             _ => {}

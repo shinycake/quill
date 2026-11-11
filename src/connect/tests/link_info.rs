@@ -42,7 +42,7 @@ fn premium_offer_links_ask_tdlib_instead_of_searching_a_username() {
         "https://t.me/giftcode/AbC",
         "https://t.me/setlanguage/pt",
     ] {
-        driver.session.chats_state.deep_link = None;
+        driver.session.chats_state.deep_link.end();
         driver.request_deep_link_info(link).unwrap().unwrap();
         assert_eq!(sent_request(&recorder, "getInternalLinkType")["link"], link);
     }

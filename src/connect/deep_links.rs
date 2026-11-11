@@ -262,7 +262,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // window closed) gives way to the new link instead of blocking
         // every later one.
         if matches!(
-            self.session.chats_state.deep_link,
+            self.session.chats_state.deep_link.state(),
             Some(
                 DeepLinkState::ResolvingInfo { .. }
                     | DeepLinkState::ResolvingChat { .. }
@@ -271,8 +271,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         ) {
             return Ok(None);
         }
-        self.session.chats_state.deep_link = None;
-        self.session.chats_state.deep_link_from_agent = from_agent;
+        self.session.chats_state.deep_link.end();
         // Like tdesktop's `openLocalUrl`, route the link by its shape
         // locally. `getDeepLinkInfo` only knows server-side deep links
         // (it answers 404 for `resolve?domain=` and `t.me/<user>`).
@@ -282,9 +281,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !crate::deep_link_types::needs_internal_resolution(link)
             && let Some(action) = parse_deep_link_url(link)
         {
-            return self.continue_deep_link(action);
+            return self.continue_deep_link(action, from_agent);
         }
-        self.send_deep_link_lookup(link, true)
+        self.send_deep_link_lookup(link, true, from_agent)
     }
 
     /// `getDeepLinkInfo` for a link TDLib called unknown (tdesktop
@@ -292,11 +291,12 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn request_deep_link_text(
         &mut self,
         link: &str,
+        from_agent: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.send_deep_link_lookup(link, false)
+        self.send_deep_link_lookup(link, false, from_agent)
     }
 
     /// One lookup in the `ResolvingInfo` slot: `getInternalLinkType`
@@ -305,18 +305,22 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         link: &str,
         internal: bool,
+        from_agent: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         self.session.chats_state.deep_link_seq =
             self.session.chats_state.deep_link_seq.wrapping_add(1);
         let generation = self.session.chats_state.deep_link_seq;
-        self.session.chats_state.deep_link = Some(DeepLinkState::ResolvingInfo {
-            generation,
-            original: if internal {
-                link.to_string()
-            } else {
-                String::new()
+        self.session.chats_state.deep_link.begin(
+            from_agent,
+            DeepLinkState::ResolvingInfo {
+                generation,
+                original: if internal {
+                    link.to_string()
+                } else {
+                    String::new()
+                },
             },
-        });
+        );
         let (purpose, build): (_, fn(RequestId, &str) -> String) = if internal {
             (
                 RequestPurpose::Chats(ChatsPurpose::DeepLinkInternalType { generation }),
@@ -334,8 +338,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.chats_state.deep_link =
-                    Some(DeepLinkState::ShowText("Couldn't reach Telegram.".into()));
+                self.session.chats_state.deep_link.set(DeepLinkState::ShowText("Couldn't reach Telegram.".into()));
                 Err(err)
             }
         }
@@ -353,29 +356,30 @@ impl<S: JsonSender> ConnectDriver<S> {
             hash,
             generation: slot,
             ..
-        }) = self.session.chats_state.deep_link.clone()
+        }) = self.session.chats_state.deep_link.state().cloned()
         else {
             return Ok(None);
         };
         if slot != generation {
             return Ok(None);
         }
-        self.session.chats_state.deep_link_from_agent = crate::agent::ui_driver::guard::injecting();
         let extra = self.session.request(
             RequestPurpose::Chats(ChatsPurpose::DeepLinkJoin { generation }),
             None,
         );
         let json = join_chat_by_invite_link(extra, &format!("https://t.me/+{hash}"));
-        self.session.chats_state.deep_link = Some(DeepLinkState::ResolvingChat {
-            action: DeepLinkAction::JoinInvite { hash },
-            generation,
-        });
+        self.session.chats_state.deep_link.begin(
+            crate::agent::ui_driver::guard::injecting(),
+            DeepLinkState::ResolvingChat {
+                action: DeepLinkAction::JoinInvite { hash },
+                generation,
+            },
+        );
         match self.sender.send_json(&json) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.chats_state.deep_link =
-                    Some(DeepLinkState::ShowText("Couldn't reach Telegram.".into()));
+                self.session.chats_state.deep_link.set(DeepLinkState::ShowText("Couldn't reach Telegram.".into()));
                 Err(err)
             }
         }
@@ -392,18 +396,15 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         action: DeepLinkAction,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if self.chats_path_active() {
-            self.session.chats_state.deep_link_from_agent =
-                crate::agent::ui_driver::guard::injecting();
-        }
-        self.continue_deep_link(action)
+        self.continue_deep_link(action, crate::agent::ui_driver::guard::injecting())
     }
 
     /// The follow-up request of the flow in progress (an `Info` answer's
-    /// action): like [`Self::resolve_deep_link`], keeping the flow's origin.
+    /// action): like [`Self::resolve_deep_link`], with the flow's origin.
     pub fn continue_deep_link(
         &mut self,
         action: DeepLinkAction,
+        from_agent: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         // A share draft waits for the user to pick a chat: nothing to resolve.
         if !self.chats_path_active() || matches!(action, DeepLinkAction::ShareDraft { .. }) {
@@ -450,14 +451,15 @@ impl<S: JsonSender> ConnectDriver<S> {
                 get_chat(extra, ChatId::from_supergroup(*channel_id))
             }
         };
-        self.session.chats_state.deep_link =
-            Some(DeepLinkState::ResolvingChat { action, generation });
+        self.session
+            .chats_state
+            .deep_link
+            .begin(from_agent, DeepLinkState::ResolvingChat { action, generation });
         match self.sender.send_json(&json) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.chats_state.deep_link =
-                    Some(DeepLinkState::ShowText("Couldn't reach Telegram.".into()));
+                self.session.chats_state.deep_link.set(DeepLinkState::ShowText("Couldn't reach Telegram.".into()));
                 Err(err)
             }
         }

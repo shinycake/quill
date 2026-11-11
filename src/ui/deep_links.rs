@@ -96,16 +96,16 @@ impl QuillApp {
         // way to a new link: its box closes, as it is modal only in its
         // own window and a click in another must not wait for it.
         let invite_waits = matches!(
-            live.driver.session.chats_state.deep_link,
+            live.driver.session.chats_state.deep_link.state(),
             Some(DeepLinkState::InvitePreview { .. })
         );
-        if (live.driver.session.chats_state.deep_link.is_none() || invite_waits)
+        if (live.driver.session.chats_state.deep_link.is_idle() || invite_waits)
             && let Some(queued) = self
                 .pending_deep_link
                 .take_if(|queued| queued.for_screen(Some(&live.driver.session.account)))
         {
             if invite_waits {
-                live.driver.session.chats_state.deep_link = None;
+                live.driver.session.chats_state.deep_link.end();
                 self.screen.links.deep_link_invite = None;
             }
             self.screen.links.flow_window = queued.window;
@@ -114,12 +114,12 @@ impl QuillApp {
                 .request_deep_link_info_from(&queued.link, queued.by_agent);
         }
         // Consume terminal states once, retaining the invite preview until a decision.
-        let state = live.driver.session.chats_state.deep_link.take();
         // The flow's origin is taken with its state and put back only while
         // the flow goes on, so every terminal state (and no flow at all,
         // after an error or a closed box) leaves none behind.
-        let from_agent = std::mem::take(&mut live.driver.session.chats_state.deep_link_from_agent)
-            && state.is_some();
+        let taken = live.driver.session.chats_state.deep_link.take();
+        let from_agent = taken.as_ref().is_some_and(|(_, agent)| *agent);
+        let state = taken.map(|(state, _)| state);
         let from_window = self
             .screen
             .links
@@ -129,8 +129,11 @@ impl QuillApp {
         if !deep_link_step_redraws(state.as_ref(), self.screen.links.deep_link_invite.as_ref()) {
             // Nothing new (this runs on every poll): put the state back and
             // don't redraw.
-            live.driver.session.chats_state.deep_link = state;
-            live.driver.session.chats_state.deep_link_from_agent = from_agent;
+            live.driver
+                .session
+                .chats_state
+                .deep_link
+                .restore(state.map(|state| (state, from_agent)));
             self.screen.links.flow_window = from_window;
             return;
         }
@@ -138,8 +141,11 @@ impl QuillApp {
             None
             | Some(DeepLinkState::ResolvingInfo { .. })
             | Some(DeepLinkState::ResolvingChat { .. }) => {
-                live.driver.session.chats_state.deep_link = state;
-                live.driver.session.chats_state.deep_link_from_agent = from_agent;
+                live.driver
+                    .session
+                    .chats_state
+                    .deep_link
+                    .restore(state.map(|state| (state, from_agent)));
                 self.screen.links.flow_window = from_window;
             }
             Some(DeepLinkState::Info {
@@ -159,9 +165,8 @@ impl QuillApp {
                             .open_box_in(DialogKind::DeepLinkInfo, from_window);
                     }
                     (false, Some(action)) => {
-                        live.driver.session.chats_state.deep_link_from_agent = from_agent;
                         self.screen.links.flow_window = from_window;
-                        let _ = live.driver.continue_deep_link(action);
+                        let _ = live.driver.continue_deep_link(action, from_agent);
                     }
                     // Unknown link: TDLib's info text is the confirmation
                     // copy written for exactly this case.
@@ -185,7 +190,11 @@ impl QuillApp {
                         .open_box_in(DialogKind::DeepLinkInvite, from_window);
                 }
                 self.screen.links.deep_link_invite = Some(preview.clone());
-                live.driver.session.chats_state.deep_link = Some(preview);
+                live.driver
+                    .session
+                    .chats_state
+                    .deep_link
+                    .begin(false, preview);
                 self.cancel_inline_opening();
             }
             Some(DeepLinkState::ChatReady { chat_id, action }) => {
@@ -219,9 +228,8 @@ impl QuillApp {
             }
             // TDLib has no type for it: `getDeepLinkInfo` explains it.
             Some(DeepLinkState::Unknown { link }) => {
-                live.driver.session.chats_state.deep_link_from_agent = from_agent;
                 self.screen.links.flow_window = from_window;
-                let _ = live.driver.request_deep_link_text(&link);
+                let _ = live.driver.request_deep_link_text(&link, from_agent);
             }
         }
         cx.notify();
@@ -538,9 +546,9 @@ impl QuillApp {
         if let Some(DeepLinkState::InvitePreview { generation, .. }) =
             self.links.deep_link_invite.take()
             && let Some(live) = self.live.as_mut()
-            && matches!(live.driver.session.chats_state.deep_link, Some(DeepLinkState::InvitePreview { generation: slot, .. }) if slot == generation)
+            && matches!(live.driver.session.chats_state.deep_link.state(), Some(DeepLinkState::InvitePreview { generation: slot, .. }) if *slot == generation)
         {
-            live.driver.session.chats_state.deep_link = None;
+            live.driver.session.chats_state.deep_link.end();
         }
         cx.notify();
     }
