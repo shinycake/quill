@@ -70,7 +70,6 @@ QuillApp::build_rating_box::body.borrow_mut 1
 QuillApp::build_remove_fee_dialog::body.borrow_mut 1
 QuillApp::build_replies_block_dialog::body.borrow_mut 1
 QuillApp::build_request_share_dialog::body.borrow_mut 1
-QuillApp::build_restrict_dialog::body.borrow_mut 1
 QuillApp::build_rich_discard_dialog::body.borrow_mut 1
 QuillApp::build_rich_premium_choice_dialog::body.borrow_mut 1
 QuillApp::build_rtmp_start_dialog::body.borrow_mut 1

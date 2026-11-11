@@ -8917,3 +8917,22 @@ budget. Every file of the bundle was read again from the top.
 | 10-089, 10-090 | `Entry.stage` is `EntryStage { Loading, Ready { bytes }, Failed { at } }`. The thread-local maps and `SizedLoad` use `try_borrow(_mut)` through `with_cell` / `read_cell`, with the safe answer when a cell is busy. |
 | 10-026, 10-027 | The giveaway form has its own search input (`GiveawayForm.search`); the gift pickers keep `pick_search`. The members list decides from its stage in one place (`members_page_due`) and a failed page draws a Retry. |
 | 10-099, 10-100, 10-103 | `InlineMembersUi::refetch` is the one transition for stale, Retry and open. A refused administrators send records the failure the list draws with Retry; a refused next-page send of the inline results sets `more_failed`. |
+
+### Sweep fixes (r2-05b)
+
+The skips of 10-065, 12-B004 and 13-048 above did not hold (owner's file-complete order); they are fixed here.
+
+| id | what changed |
+| --- | --- |
+| 01-010 | The `take_turn` tests no longer sleep: the drop/commit and flood tests book on `State` and read the map. |
+| 01-022, 01-023 | Verified fixed by r2-05 (`BoostWork` carries the request; the note lives in the phase). |
+| 01-034, 01-036 | Verified fixed by r2-05; `plan` no longer marks a request, the driver marks it with `sent(speaker, request)` after the send went out, so a refused send needs no undo. |
+| 01-035 | `ShareLink::Fetching(RequestId)`: `answered` and `failed` take the request id and settle only the slot waiting for that id, so a revoked link's late answer cannot land on the next click's fetch. |
+| 02-003, 02-004 | Not a stored mode: the mode is derived by one function (`sends_as_files`) read by the checkbox, the next drop and the send options; the attachments' kinds are the only stored truth, and a second stored field would be two fields kept in step. |
+| 03-B003, 03-B004 | Verified fixed by r2-05. |
+| 10-059, 10-066, 10-069 | 10-059 and 10-066 verified fixed by r2-05. `LinkCheck::Typed { _timer: Task }` owns the pause before the server check; a keystroke, closing the box or the box going away drops it, so the version counter and its `ui-statics` line are gone. |
+| 10-065 | `MemberChange { request, kind }` list on `AdminUi`: an unban and the Add-special "Remove user" ban report "unbanned" / "banned" (and close the picker) when their request is answered, and the error line when it is refused (`settle_member_changes`). |
+| 10-068 | `chat_invite_link_count_unknown`: a count that is loading or failed makes Save ask again and stay open ("Invite links are still loading" / "Couldn't refresh invite links"), not read as zero. A chat whose count is never asked for (not the owner) still reads zero. |
+| 12-B001, 12-B002 | Verified fixed by r2-05. |
+| 12-B004 | `ShortcutPane { stage: PaneStage, error }`: `Editing`, `Saving { request }`, `Accepted`, `ConfirmDelete`, `Deleting { request }`. Any other action replaces `ConfirmDelete`; the shortcut's delete is `Deleting` until its own answer (list on success, the error line and the field on a refusal). A new text or edit is not taken while one is on its way. |
+| 13-047, 13-048 | 13-047 verified fixed by r2-05. `StoryOpen { Shown(viewer), Waiting { open, shown } }` replaces `StoryUi::viewer` and `ChatListUi::pending_story_open`; the viewer reads through `Deref`, and a newer press, the story arriving, a step and a close are transitions of that one value. |

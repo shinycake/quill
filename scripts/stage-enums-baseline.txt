@@ -39,7 +39,6 @@ bare:ConferenceStage::Running 1
 bare:ContactNote::Waiting 1
 bare:CreateProgress::InFlight 1
 bare:Decoding::Running 1
-bare:DeleteStep::Asked 1
 bare:DeviceLink::Opening 1
 bare:DeviceRun::Opening 1
 bare:DownloadStatus::Downloading 1
