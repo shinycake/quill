@@ -15,7 +15,7 @@
 use crate::ids::{ChatId, MessageId, RequestId};
 use crate::local_time::{CivilTime, hhmm, month_name};
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 /// Nano-Grams in one Gram cent (TDLib prices Grams in 1/100 Gram).
 const NANOS_PER_GRAM_CENT: i64 = 10_000_000;
@@ -764,14 +764,34 @@ pub struct SuggestedPostsState {
     pub bars: HashMap<i64, SuggestBar>,
     /// `updateOwnedGramCount`: the account's Grams in nano-Grams.
     pub gram_balance: Option<i64>,
-    /// One-shot errors the UI shows as toasts.
-    pub notes: Vec<String>,
-    /// Requests refused with `BALANCE_TOO_LOW`: the UI asks for a top-up
-    /// for each instead of a toast.
-    pub balance_low: Vec<SuggestedPostPurpose>,
+    /// Refused requests the UI has not shown yet, oldest first, one queue
+    /// so they come out in the order they failed. Capped at
+    /// [`MAX_FAILURES`]: past it the oldest is dropped.
+    pub failures: VecDeque<SuggestedPostFailure>,
+}
+
+/// Most unshown failures kept.
+pub const MAX_FAILURES: usize = 16;
+
+/// A request TDLib refused, as the UI shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SuggestedPostFailure {
+    /// A toast with the error line.
+    Note(String),
+    /// `BALANCE_TOO_LOW`: the UI asks for a top-up for `purpose` instead of
+    /// a toast.
+    BalanceLow(SuggestedPostPurpose),
 }
 
 impl SuggestedPostsState {
+    /// Queue `failure` for the UI, dropping the oldest past the cap.
+    pub fn push_failure(&mut self, failure: SuggestedPostFailure) {
+        if self.failures.len() >= MAX_FAILURES {
+            self.failures.pop_front();
+        }
+        self.failures.push_back(failure);
+    }
+
     pub fn bar(&self, chat_id: ChatId) -> Option<&SuggestBar> {
         self.bars.get(&chat_id.0)
     }

@@ -109,7 +109,7 @@ fn the_close_friends_save_leaves_saving_with_its_answer(cx: &mut TestAppContext)
         if let Some(session) = app.demo_session.as_deref_mut() {
             session.stories.close_friends = quill::state::CloseFriendsList::NotLoaded;
             session.stories.page_ops.begin(StoryPageOp {
-                label: "saving close friends".into(),
+                kind: quill::story_page::StoryPageOpKind::SaveCloseFriends,
                 state,
                 request: RequestId(60),
                 chat_id: None,
@@ -147,6 +147,36 @@ fn the_close_friends_save_leaves_saving_with_its_answer(cx: &mut TestAppContext)
         set_op(app, StoryPageOpState::Succeeded);
         app.tick_close_friends(cx);
         assert!(!app.stories.viewer_ui().close_friends().is_open());
+    });
+}
+
+/// The editor keeps no copy of the load: while it awaits, the session's list
+/// decides, so a list that arrives after a failed load opens the editor.
+#[gpui_kit::test]
+fn an_awaiting_close_friends_editor_follows_the_sessions_list(cx: &mut TestAppContext) {
+    use quill::state::CloseFriendsList;
+    use quill::story_extras::CloseFriendsStage;
+    let (app, mut vcx) = open_app(cx, "ready-story-viewer");
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.stories.with_viewer_ui(|open| {
+            open.show(ViewerPanel::CloseFriends(CloseFriendsStage::Awaiting))
+        });
+        if let Some(session) = app.demo_session.as_deref_mut() {
+            session.stories.close_friends = CloseFriendsList::Failed { stale: None };
+        }
+        app.tick_close_friends(cx);
+        assert_eq!(
+            *app.stories.viewer_ui().close_friends(),
+            CloseFriendsStage::Awaiting,
+            "a failed load with no list leaves the editor waiting for a retry"
+        );
+        if let Some(session) = app.demo_session.as_deref_mut() {
+            session.stories.close_friends = CloseFriendsList::Ready(vec![4]);
+        }
+        app.tick_close_friends(cx);
+        let stage = app.stories.viewer_ui().close_friends();
+        assert!(stage.edit().is_some_and(|edit| edit.contains(4)));
     });
 }
 

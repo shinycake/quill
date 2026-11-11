@@ -302,10 +302,14 @@ impl Control {
     }
 }
 
-/// A running microphone capture: the cpal stream, the encoder thread it
-/// feeds, and how many samples have been encoded.
+/// A running microphone capture: the recording clock, the cpal stream, the
+/// encoder thread it feeds, and how many samples have been encoded. Pausing
+/// and resuming move the clock, the encoder handshake and the stream in one
+/// place ([`Live::pause`], [`Live::resume`]); whether it is paused is the
+/// clock's answer.
 #[cfg(feature = "ui")]
 struct Live {
+    clock: RunClock,
     mic: crate::voice_input::MicStream,
     /// `None` from `join` means the encoder panicked.
     worker: std::thread::JoinHandle<Option<Result<u64, String>>>,
@@ -314,7 +318,51 @@ struct Live {
 }
 
 #[cfg(not(feature = "ui"))]
-struct Live;
+struct Live {
+    #[allow(dead_code)]
+    clock: RunClock,
+}
+
+impl Live {
+    /// Stop listening: the clock stops, the encoder is asked to flush and
+    /// the microphone is released.
+    fn pause(&mut self, now: Instant) {
+        if !self.clock.is_running() {
+            return;
+        }
+        self.clock.pause_at(now);
+        #[cfg(feature = "ui")]
+        {
+            self.control.ask_pause();
+            self.mic.pause();
+        }
+    }
+
+    /// Carry on recording after [`Self::pause`].
+    fn resume(&mut self, now: Instant) {
+        if self.clock.is_running() {
+            return;
+        }
+        self.clock.resume_at(now);
+        #[cfg(feature = "ui")]
+        {
+            self.control.ask_resume();
+            self.mic.play();
+        }
+    }
+
+    /// Paused, and the encoder has flushed the file so it can be played.
+    fn preview_ready(&self) -> bool {
+        #[cfg(feature = "ui")]
+        {
+            !self.clock.is_running() && self.control.stage() == Handshake::Flushed
+        }
+        #[cfg(not(feature = "ui"))]
+        {
+            !self.clock.is_running()
+        }
+    }
+}
 
 /// Seconds without a single sample before the microphone counts as dead
 /// (a refused permission can deliver nothing instead of an error).
@@ -326,7 +374,6 @@ const NO_AUDIO_SECS: u64 = 3;
 /// live waveform.
 pub struct VoiceCapture {
     pub path: PathBuf,
-    clock: RunClock,
     source: Source,
     /// Bars shown while recording (the waveform so far).
     pub bars: Vec<u8>,
@@ -340,7 +387,7 @@ enum Source {
     Live(Live),
     /// A screenshot fixture of this length: no microphone, and its file is
     /// not deleted on Cancel.
-    Fixture { seconds: i32 },
+    Fixture { seconds: i32, clock: RunClock },
     /// The microphone was closed.
     Closed,
 }
@@ -420,8 +467,8 @@ impl VoiceCapture {
         };
         Ok(Self {
             path,
-            clock: RunClock::started_at(Instant::now()),
             source: Source::Live(Live {
+                clock: RunClock::started_at(Instant::now()),
                 mic,
                 worker,
                 samples,
@@ -441,21 +488,30 @@ impl VoiceCapture {
     pub fn preview(path: PathBuf, seconds: i32, bars: Vec<u8>) -> Self {
         Self {
             path,
-            clock: RunClock::started_at(Instant::now()),
             source: Source::Fixture {
                 seconds: seconds.max(0),
+                clock: RunClock::started_at(Instant::now()),
             },
             bars,
             levels: Arc::default(),
         }
     }
 
+    /// The recording clock, while the microphone (or the fixture) is there.
+    fn clock(&self) -> Option<&RunClock> {
+        match &self.source {
+            Source::Live(live) => Some(&live.clock),
+            Source::Fixture { clock, .. } => Some(clock),
+            Source::Closed => None,
+        }
+    }
+
     pub fn elapsed_secs(&self) -> i32 {
-        if let Source::Fixture { seconds } = self.source {
+        if let Source::Fixture { seconds, .. } = self.source {
             return seconds;
         }
-        self.clock
-            .elapsed_at(Instant::now())
+        self.clock()
+            .map_or(Duration::ZERO, |clock| clock.elapsed_at(Instant::now()))
             .as_secs()
             .min(u64::from(i32::MAX as u32)) as i32
     }
@@ -464,45 +520,37 @@ impl VoiceCapture {
     /// released so the system indicator goes off; the file is made
     /// playable for a preview.
     pub fn pause(&mut self) {
-        if !self.clock.is_running() {
-            return;
-        }
-        self.clock.pause_at(Instant::now());
-        #[cfg(feature = "ui")]
-        if let Source::Live(live) = &self.source {
-            live.control.ask_pause();
-            live.mic.pause();
+        let now = Instant::now();
+        match &mut self.source {
+            Source::Live(live) => live.pause(now),
+            Source::Fixture { clock, .. } => clock.pause_at(now),
+            Source::Closed => {}
         }
     }
 
     /// Carry on recording after a [`Self::pause`].
     pub fn resume(&mut self) {
-        if self.clock.is_running() {
-            return;
-        }
-        self.clock.resume_at(Instant::now());
-        #[cfg(feature = "ui")]
-        if let Source::Live(live) = &self.source {
-            live.control.ask_resume();
-            live.mic.play();
+        let now = Instant::now();
+        match &mut self.source {
+            Source::Live(live) => live.resume(now),
+            Source::Fixture { clock, .. } => clock.resume_at(now),
+            Source::Closed => {}
         }
     }
 
     pub fn is_paused(&self) -> bool {
-        !self.clock.is_running()
+        self.clock().is_some_and(|clock| !clock.is_running())
     }
 
     /// The recording so far, once a pause has made the file playable.
     pub fn preview_path(&self) -> Option<&Path> {
-        if !self.is_paused() {
-            return None;
-        }
-        #[cfg(feature = "ui")]
-        if let Source::Live(live) = &self.source {
-            return (live.control.stage() == Handshake::Flushed).then_some(self.path.as_path());
-        }
-        // A fixture has no encoder to wait for.
-        Some(self.path.as_path())
+        let ready = match &self.source {
+            Source::Live(live) => live.preview_ready(),
+            // A fixture has no encoder to wait for.
+            Source::Fixture { clock, .. } => !clock.is_running(),
+            Source::Closed => false,
+        };
+        ready.then_some(self.path.as_path())
     }
 
     /// Refresh the live bars from the levels heard so far.
@@ -533,7 +581,7 @@ impl VoiceCapture {
             })
         });
         error.or_else(|| {
-            let idle = self.clock.elapsed_at(Instant::now()).as_secs() >= NO_AUDIO_SECS
+            let idle = live.clock.elapsed_at(Instant::now()).as_secs() >= NO_AUDIO_SECS
                 && live.samples.load(Ordering::Relaxed) == 0;
             idle.then(|| crate::media_tools::no_audio_message(false))
         })
@@ -568,18 +616,21 @@ impl VoiceCapture {
     /// left: joining the encoder waits on that and on the disk, so
     /// [`VoiceFinish::complete`] runs off the UI thread.
     pub fn close_microphone(mut self) -> VoiceFinish {
-        let wall = self.clock.elapsed_at(Instant::now());
+        let wall = self
+            .clock()
+            .map_or(Duration::ZERO, |clock| clock.elapsed_at(Instant::now()));
         let worker = self.stop_mic();
+        let ending = match (&self.source, worker) {
+            (Source::Fixture { seconds, .. }, _) => Ending::Fixture(*seconds),
+            (Source::Live(_) | Source::Closed, Some(worker)) => Ending::Encoder(worker),
+            (Source::Live(_) | Source::Closed, None) => Ending::NoEncoder,
+        };
         VoiceFinish {
             path: std::mem::take(&mut self.path),
-            fixture: match self.source {
-                Source::Fixture { seconds } => Some(seconds),
-                Source::Live(_) | Source::Closed => None,
-            },
+            ending,
             levels: self.levels.clone(),
             bars: std::mem::take(&mut self.bars),
             wall,
-            worker,
         }
     }
 
@@ -643,38 +694,50 @@ fn join_worker(_worker: Option<Worker>) -> Option<Result<u64, String>> {
 /// thread.
 pub struct VoiceFinish {
     path: PathBuf,
-    /// A screenshot fixture's length: its file is kept whatever the encoder
-    /// says.
-    fixture: Option<i32>,
+    ending: Ending,
     levels: Arc<Mutex<Vec<u8>>>,
     bars: Vec<u8>,
     wall: Duration,
-    worker: Option<Worker>,
+}
+
+/// What ends a closed capture's file.
+enum Ending {
+    /// A screenshot fixture of this length: its file is kept whatever the
+    /// encoder says.
+    Fixture(i32),
+    /// The microphone's encoder thread, to join.
+    Encoder(Worker),
+    /// There is no encoder to ask (no microphone build).
+    NoEncoder,
 }
 
 impl VoiceFinish {
     /// Join the encoder and keep the file when it holds audio.
     pub fn complete(mut self) -> Result<VoiceDraft, String> {
-        let samples = join_worker(self.worker.take());
+        let (fixture, samples) = match std::mem::replace(&mut self.ending, Ending::NoEncoder) {
+            Ending::Fixture(seconds) => (Some(seconds), None),
+            Ending::Encoder(worker) => (None, join_worker(Some(worker))),
+            Ending::NoEncoder => (None, None),
+        };
         let len = fs::metadata(&self.path).map(|m| m.len()).unwrap_or(0);
         let encoded = match samples {
             Some(Err(ref reason)) => Err(reason.clone()),
             Some(Ok(0)) => Err(crate::media_tools::no_audio_message(false)),
-            _ if self.fixture.is_some() => Ok(()),
+            _ if fixture.is_some() => Ok(()),
             _ if len == 0 || !self.path.is_file() => {
                 Err(crate::media_tools::no_audio_message(false))
             }
             _ => Ok(()),
         };
         if let Err(reason) = encoded {
-            if self.fixture.is_none() {
+            if fixture.is_none() {
                 let _ = fs::remove_file(&self.path);
             }
             return Err(reason);
         }
         // The encoded sample count is exact; the wall clock only stands in
         // for fixtures.
-        let duration_secs = match (self.fixture, samples) {
+        let duration_secs = match (fixture, samples) {
             (Some(fixed), _) => fixed,
             (None, Some(Ok(total))) => (total as f64 / 48_000.0).round() as i32,
             _ => self.wall.as_secs_f64().round() as i32,

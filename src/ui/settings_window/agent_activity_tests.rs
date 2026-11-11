@@ -65,11 +65,9 @@ fn record(summary: &str, ok: bool) {
         chat_id: 7,
         chat_title: "Ann Lee".into(),
         summary: summary.into(),
-        ok,
-        declined: false,
+        outcome: activity::Outcome::of(ok, false),
         id: 0,
         message_ids: Vec::new(),
-        undone: false,
     });
 }
 
@@ -161,11 +159,9 @@ fn record_send(account: &AccountKey) {
         chat_id: 7,
         chat_title: "Ann Lee".into(),
         summary: "hi".into(),
-        ok: true,
-        declined: false,
+        outcome: activity::Outcome::Done,
         id: 0,
         message_ids: vec![42],
-        undone: false,
     });
 }
 
@@ -248,11 +244,9 @@ fn undo_never_offers_someone_elses_message(cx: &mut TestAppContext) {
         chat_id,
         chat_title: "Chat".into(),
         summary: "hi".into(),
-        ok: true,
-        declined: false,
+        outcome: activity::Outcome::Done,
         id: 0,
         message_ids,
-        undone: false,
     };
     app.update(vcx, |app, _| {
         assert_eq!(app.agent_undo_for(&action(vec![theirs])), None);

@@ -73,7 +73,6 @@ StreamFacts::transport_failed
 Tempo::done
 Tempo::inner_done
 
-TopPerson::saved_messages
 
 
 

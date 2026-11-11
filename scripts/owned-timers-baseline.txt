@@ -51,7 +51,6 @@ poll:QuillApp::download_emoji_set 1
 poll:QuillApp::download_update 1
 poll:QuillApp::ensure_call_tick 1
 poll:QuillApp::ensure_live_location_tick 1
-poll:QuillApp::ensure_mini_app_poll 1
 poll:QuillApp::ensure_notify_clock 1
 poll:QuillApp::ensure_self_destruct_tick 1
 poll:QuillApp::ensure_slow_mode_tick 1

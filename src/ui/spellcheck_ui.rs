@@ -562,7 +562,7 @@ fn spelling_menu_items(
         return menu;
     }
     let word = text.get(range.clone()).unwrap_or_default().to_string();
-    if checker.is_correct(&word) {
+    if checker.is_correct_now(&word) {
         if checker.is_learned(&word) {
             menu = menu
                 .menu(
@@ -573,7 +573,7 @@ fn spelling_menu_items(
         }
         return menu;
     }
-    let suggestions = checker.suggestions(&word, MAX_SUGGESTIONS);
+    let suggestions = checker.suggestions_now(&word, MAX_SUGGESTIONS);
     if suggestions.is_empty() {
         menu = menu.menu_with_disabled(
             tr(keys::Q_MISC_NO_GUESSES_FOUND),

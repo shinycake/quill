@@ -441,11 +441,9 @@ impl QuillApp {
             chat_id,
             chat_title,
             summary: command_summary(command, tree),
-            ok,
-            declined: false,
+            outcome: activity::Outcome::of(ok, false),
             id: 0,
             message_ids: Vec::new(),
-            undone: false,
         });
     }
 }

@@ -46,7 +46,10 @@ impl QuillApp {
     /// answered. main-only: the story composer is the main window's overlay.
     pub(super) fn story_composer_upkeep(&mut self, cx: &mut Context<Self>) {
         match self.stories.composer.stage.clone() {
-            ComposerStage::Editing | ComposerStage::Posted | ComposerStage::Failed(_) => {}
+            ComposerStage::Closed
+            | ComposerStage::Editing
+            | ComposerStage::Posted
+            | ComposerStage::Failed(_) => {}
             // Phase 9.3: the composer sent `canPostStory` — once its own
             // answer lands, either post (eligible) or surface the reason.
             ComposerStage::Checking { request, target } => {

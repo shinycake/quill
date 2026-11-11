@@ -275,7 +275,6 @@ drawn::cache.borrow_mut 2
 edge_shade::shades.borrow_mut 1
 end_finished_fades::f.borrow_mut 1
 fade_layer::f.borrow_mut 1
-finish_dialog::body.borrow_mut 1
 finish_tracked::body.borrow_mut 1
 fit::window.borrow_mut 1
 follow_badges::active.borrow_mut 1

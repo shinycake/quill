@@ -34,7 +34,6 @@ bare:CeremonySheet::Probing 1
 bare:ChatEventLogFetch::Loading 1
 bare:Clip::Writing 1
 bare:ClipState::Opening 1
-bare:CloseFriendsStage::Loading 1
 bare:CloseProgress::Pending 1
 bare:CodeLanguageStage::Opening 1
 bare:ConferenceKey::Joining 1
@@ -65,7 +64,6 @@ bare:GiftsLayout::Loading 1
 bare:GoalNow::Waiting 1
 bare:GraphFetch::Loading 1
 bare:Health::Running 1
-bare:HelperState::Starting 1
 bare:InviteLinkCountsFetch::Loading 1
 bare:Kind::Applying 1
 bare:Leg::Pending 1

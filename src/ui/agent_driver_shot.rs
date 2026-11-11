@@ -123,11 +123,9 @@ impl QuillApp {
             } else {
                 "screenshot".to_string()
             },
-            ok: true,
-            declined: false,
+            outcome: activity::Outcome::Done,
             id: 0,
             message_ids: Vec::new(),
-            undone: false,
         });
     }
 }
