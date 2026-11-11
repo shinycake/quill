@@ -298,6 +298,40 @@ fn turning_access_off_closes_requests_and_the_consent(cx: &mut TestAppContext) {
     app.update(vcx, |app, _| app.agent_ui.consent = None);
 }
 
+/// Revoke in the connected strip is the other way access goes off (its
+/// press runs `turn_agent_access_off`; agent_presence_tests presses it):
+/// the questions end with it too. A box that is open covers the strip, so
+/// the press itself cannot be made here.
+#[gpui_kit::test]
+fn revoke_ends_the_consent_and_the_reset_question(cx: &mut TestAppContext) {
+    let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
+    let (app, shell, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    reset_for_test(&AccountKey::primary());
+    let _agent = quill::agent::activity::connect("Claude Code");
+    settle(vcx);
+    assert!(quill::agent::access::enabled());
+    app.update(vcx, |app, cx| {
+        app.agent_ui.consent = Some(crate::ui::agent_state::AllChatsConsent {
+            account: AccountKey::primary(),
+            scope: Scope::Read,
+        });
+        app.agent_ui.page.reset_confirm = true;
+        app.turn_agent_access_off(cx);
+        cx.notify();
+    });
+    settle(vcx);
+    assert!(!quill::agent::access::enabled());
+    app.update(vcx, |app, cx| app.set_agent_access(true, cx));
+    settle(vcx);
+    assert_eq!(open_kind(&shell, vcx), None, "no consent or reset box");
+    app.read_with(vcx, |app, _| {
+        assert!(app.agent_ui.consent.is_none());
+        assert!(!app.agent_ui.page.reset_confirm);
+    });
+    quill::agent::access::set_enabled(false);
+}
+
 #[gpui_kit::test]
 fn the_master_switch_ends_the_consent_and_the_reset_question(cx: &mut TestAppContext) {
     let _guard = quill::locks::lock_or_recover(&TEST_LOCK);
