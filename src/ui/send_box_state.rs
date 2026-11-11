@@ -86,6 +86,7 @@ impl<T> Reads<T> {
 /// app's too (`ComposerSends::reads`): a window that opens the same tray
 /// neither reads again nor misses the result, and a read one window
 /// started lands for all of them.
+#[derive(Default)]
 pub(crate) struct TrayReads {
     /// Sizes read from the header of tray photos by the media check's
     /// worker, once per file (`send_box_media_check.rs`).
@@ -105,20 +106,6 @@ pub(crate) struct TrayReads {
     /// (`send_box_media_check.rs`), with the job that reads each.
     pub(super) media: Reads<super::send_box_media_check::MediaCheck>,
     pub(super) media_check_jobs: u64,
-}
-
-impl Default for TrayReads {
-    fn default() -> Self {
-        Self {
-            photo_sizes: HashMap::new(),
-            sound: Reads::default(),
-            sound_jobs: 0,
-            thumbnails: Reads::default(),
-            thumbnail_jobs: 0,
-            media: Reads::default(),
-            media_check_jobs: 0,
-        }
-    }
 }
 
 impl TrayReads {
