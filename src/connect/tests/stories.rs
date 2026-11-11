@@ -951,3 +951,17 @@ fn driver_b14_close_friends_hide_profile_and_share() {
     assert_eq!(v["input_message_content"]["story_id"], 6);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_refused_tray_refresh_stays_queued_until_it_is_sent() {
+    let mut h = super::live_story::harness();
+    h.driver.session.stories.tray_refresh.insert(7);
+    h.recorder.refuse_sends(true);
+    h.driver.refresh_story_trays();
+    assert_eq!(h.sent("getChatActiveStories"), 0);
+    assert!(h.driver.session.stories.tray_refresh.contains(&7));
+    h.recorder.refuse_sends(false);
+    h.driver.refresh_story_trays();
+    assert_eq!(h.sent("getChatActiveStories"), 1);
+    assert!(h.driver.session.stories.tray_refresh.is_empty());
+}

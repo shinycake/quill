@@ -682,10 +682,10 @@ fn the_first_join_asks_for_the_star_bursts_once() {
     assert_eq!(h.sent("getCustomEmojiReactionAnimations"), 0);
     joined_answer(&mut h);
     assert_eq!(h.sent("getCustomEmojiReactionAnimations"), 1);
-    assert_eq!(
+    assert!(matches!(
         h.driver.session.stories.live_bursts,
-        crate::state::LiveBursts::Requested
-    );
+        crate::state::LiveBursts::Requested(_)
+    ));
     h.answer(
         "getCustomEmojiReactionAnimations",
         r#"{"@type":"stickers","stickers":[{"@type":"sticker","id":"77","set_id":"5","width":512,"height":512,"emoji":"✨","format":{"@type":"stickerFormatTgs"},"full_type":{"@type":"stickerFullTypeRegular","premium_animation":null},"thumbnail":null,"sticker":{"@type":"file","id":901,"size":2000,"expected_size":2000,"local":{"@type":"localFile","path":"","can_be_downloaded":true,"can_be_deleted":false,"is_downloading_active":false,"is_downloading_completed":false,"download_offset":0,"downloaded_prefix_size":0,"downloaded_size":0},"remote":{"@type":"remoteFile","id":"r","unique_id":"u","is_uploading_active":false,"is_uploading_completed":true,"uploaded_size":2000}}}]}"#,
@@ -701,7 +701,7 @@ fn the_first_join_asks_for_the_star_bursts_once() {
 }
 
 #[test]
-fn a_failed_burst_request_is_asked_again_on_the_next_join() {
+fn a_failed_burst_request_is_not_asked_again_by_the_call_updates_of_the_same_story() {
     let mut h = watching();
     joined_answer(&mut h);
     h.answer(
@@ -710,10 +710,18 @@ fn a_failed_burst_request_is_asked_again_on_the_next_join() {
     );
     assert_eq!(
         h.driver.session.stories.live_bursts,
-        crate::state::LiveBursts::Unasked
+        crate::state::LiveBursts::Failed
     );
     rejoin(&mut h);
-    assert_eq!(h.sent("getCustomEmojiReactionAnimations"), 2);
+    rejoin(&mut h);
+    assert_eq!(h.sent("getCustomEmojiReactionAnimations"), 1);
+    // The next live story opened asks once more.
+    h.driver.session.end_live_story();
+    h.driver.session.begin_live_story(7, 6, 4242);
+    assert_eq!(
+        h.driver.session.stories.live_bursts,
+        crate::state::LiveBursts::Unasked
+    );
 }
 
 /// Stars tapped on a live story commit from the poll, for an account in

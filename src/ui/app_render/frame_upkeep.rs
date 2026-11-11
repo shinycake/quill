@@ -78,10 +78,7 @@ impl QuillApp {
         // chats whose active stories should be refreshed (an own story
         // posted from another client appears in the tray this way).
         if let Some(live) = self.live.as_mut() {
-            let chats: Vec<i64> = live.driver.session.stories.tray_refresh.drain().collect();
-            for chat_id in chats {
-                let _ = live.driver.get_chat_active_stories(ChatId(chat_id));
-            }
+            live.driver.refresh_story_trays();
         }
         // The composer's Post and Save presses, each answered by its own
         // request (`story_composer_stage.rs`).

@@ -131,11 +131,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.stories.live_bursts != LiveBursts::Unasked {
             return Ok(());
         }
-        self.live_story_request(
+        let request = self.live_story_request(
             LiveStoryPurpose::GetBursts,
             get_custom_emoji_reaction_animations,
         )?;
-        self.session.stories.live_bursts = LiveBursts::Requested;
+        self.session.stories.live_bursts = LiveBursts::Requested(request);
         Ok(())
     }
 

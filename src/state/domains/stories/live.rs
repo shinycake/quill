@@ -44,7 +44,12 @@ pub enum LiveStoryPurpose {
 pub enum LiveBursts {
     #[default]
     Unasked,
-    Requested,
+    /// Asked by this request; its answer or error leaves the stage.
+    Requested(RequestId),
+    /// The request failed: not asked again until the next live story is
+    /// opened (`begin_live_story`), so a failing server is not re-asked on
+    /// every call update.
+    Failed,
     Loaded(Vec<StickerItem>),
 }
 
@@ -52,7 +57,7 @@ impl LiveBursts {
     pub fn stickers(&self) -> &[StickerItem] {
         match self {
             Self::Loaded(stickers) => stickers,
-            Self::Unasked | Self::Requested => &[],
+            Self::Unasked | Self::Requested(_) | Self::Failed => &[],
         }
     }
 }
@@ -240,6 +245,9 @@ impl Session {
             .is_some_and(|live| live.group_call_id == group_call_id)
         {
             return;
+        }
+        if self.stories.live_bursts == LiveBursts::Failed {
+            self.stories.live_bursts = LiveBursts::Unasked;
         }
         self.stories.live = Some(LiveStoryState::new(chat_id, story_id, group_call_id));
     }
@@ -450,8 +458,16 @@ impl Session {
         }
     }
 
-    pub(crate) fn set_live_bursts(&mut self, stickers: Vec<StickerItem>) {
-        self.stories.live_bursts = LiveBursts::Loaded(stickers);
+    /// The `getCustomEmojiReactionAnimations` answer of `request`.
+    pub(crate) fn set_live_bursts(
+        &mut self,
+        request: Option<RequestId>,
+        stickers: Vec<StickerItem>,
+    ) {
+        if matches!(self.stories.live_bursts, LiveBursts::Requested(asked) if Some(asked) == request)
+        {
+            self.stories.live_bursts = LiveBursts::Loaded(stickers);
+        }
     }
 
     /// A live story request failed.
@@ -463,7 +479,12 @@ impl Session {
     ) {
         let group_call_id = match purpose {
             LiveStoryPurpose::GetBursts => {
-                self.stories.live_bursts = LiveBursts::Unasked;
+                if matches!(
+                    self.stories.live_bursts,
+                    LiveBursts::Requested(asked) if Some(asked) == failed
+                ) {
+                    self.stories.live_bursts = LiveBursts::Failed;
+                }
                 return;
             }
             LiveStoryPurpose::GetStreamer { group_call_id }
