@@ -45,6 +45,19 @@ pub(super) fn apply_ready_reactions(
 }
 
 impl QuillApp {
+    /// One message menu is open at a time, across windows: the session's
+    /// audience and reaction-option slots belong to the open menu, so a
+    /// menu opened in another window closes this window's first, as a
+    /// native context menu does when focus moves.
+    pub(in crate::ui) fn close_message_menus_of_other_windows(&mut self, cx: &mut Context<Self>) {
+        let here = self.windows.scope;
+        self.in_every_window(cx, |app, _| {
+            if app.windows.scope != here {
+                app.message_ui.menu.close();
+            }
+        });
+    }
+
     /// Open the message menu and ask which reactions the message may get.
     pub(super) fn open_message_menu(
         &mut self,
@@ -52,13 +65,15 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.close_message_menus_of_other_windows(cx);
         // A reactor tab asked for by an earlier menu whose properties never
         // allowed it is not this menu's (a chip's menu sets it after this).
         if let Some(live) = self.live.as_mut() {
             live.driver.session.messages.wanted_reactor_tab = None;
         }
-        let link = self.take_right_clicked_link(menu.position);
-        let item = self.take_right_clicked_item(menu.position);
+        let (link, item) = self.take_right_press(menu.position);
+        // The whole message when the press was over no task or option.
+        let item = item.unwrap_or_default();
         // Over a poll option the menu shows the option's page.
         let page = if matches!(item, quill::composer::ReplyItem::PollOption(_)) {
             super::message_menu_state::MessageMenuPage::PollOption
