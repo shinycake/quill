@@ -8061,7 +8061,7 @@ chat_swipe_ui, chat_ui_state, chatlist_global, command_shortcuts.
 | 08-096 | `ChatSwipeFacts::is_saved` is allow-listed: it is a fact of the chat (the user's own chat cannot be muted), not a stage. Baseline lines dropped. |
 | 08-071, 08-072 | `Pick<R>` (`chat_list_pick.rs`) is one value per list: none, the pointer's row, or the keys' row over the pointer's. A mouse move hands the selection back to the pointer's row. The pointer's row in the chat list counts only while inside the items the last frame laid out. |
 | 08-073 | `search_order` and `search_bounds` are `Cell`s that are taken and put back: no `RefCell` borrow in render. |
-| 04-040 | `PinStage::Sliding` replaces `PinReorder`'s inner stage: `PinReorder` has no stage, the owner's variant says held or sliding (`PinView`). |
+| 04-040 | `PinStage::Sliding` replaces `PinReorder`'s inner stage: `PinReorder` has no stage, the owner's variant says held or sliding (`PinView`). `release` moves only a held row: one release of the button reaches the list more than once, and the later calls leave the slide (and a press) as they are. |
 | 08-067 | `MyChats { Closed, Groups, Channels }` replaces `Option<bool>`. |
 | 08-068 | `close_archive_hint` is the box's one closer; the downloads panel has `close_downloads_panel` and `toggle_downloads_panel`. `pending_close_secret_chat` carries the chat, so it is the box's value. |
 | 08-069 | Skipped: the open holds only the intent. The fetch's stage (cache, in flight, failed with its retry clock) lives in `story_fetch`, read by the story's key, which is the fetch's own identity; every exit (ready, gone, failed, a newer open, the viewer closing, the account going) clears the open. |

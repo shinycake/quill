@@ -195,8 +195,13 @@ impl PinStage {
     }
 
     /// The pointer let go: the row starts its slide. Returns the pinned
-    /// list's side and the dragged order to save; `None` when no row was held.
+    /// list's side and the dragged order to save; `None` when no row was
+    /// held, and then the stage stays as it is (one release reaches here
+    /// more than once, and a slide or a press is not this release's).
     pub(super) fn release(&mut self, now: Instant) -> Option<(bool, Vec<i64>)> {
+        if !matches!(self, Self::Dragging(_)) {
+            return None;
+        }
         let Self::Dragging(mut drag) = std::mem::take(self) else {
             return None;
         };
@@ -451,6 +456,34 @@ mod tests {
             dragging.press(6, 1.);
             assert!(dragging.drag().is_some(), "the drag or its slide stays");
         }
+    }
+
+    /// One release of the button reaches the list more than once (the row's
+    /// drop, the list's mouse-up): only the first finds a held row, and the
+    /// later ones leave the slide, and a press made during it, alone.
+    #[core::prelude::v1::test]
+    fn a_second_release_leaves_the_slide_and_a_press_alone() {
+        let now = Instant::now();
+        let ids = vec![4, 5];
+        let heights = ids.iter().map(|id| (*id, 10.)).collect();
+        let reorder = quill::pin_reorder::PinReorder::begin(ids, heights, 4, 1., now);
+        assert!(reorder.is_some());
+        if let Some(reorder) = reorder {
+            let mut pin = PinStage::Dragging(PinDrag {
+                archived: false,
+                reorder,
+                next_press: None,
+            });
+            assert!(pin.release(now).is_some(), "the held row is let go");
+            assert!(matches!(pin, PinStage::Sliding(_)));
+            pin.press(5, 12.);
+            assert_eq!(pin.release(now), None, "nothing is held any more");
+            assert!(matches!(pin, PinStage::Sliding(_)), "the slide goes on");
+            assert_eq!(pin.take_press(5), Some(12.), "its press is kept");
+        }
+        let mut pressed = PinStage::Pressed { chat: 4, y: 30. };
+        assert_eq!(pressed.release(now), None);
+        assert!(matches!(pressed, PinStage::Pressed { chat: 4, .. }));
     }
 
     #[core::prelude::v1::test]
