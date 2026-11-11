@@ -134,21 +134,29 @@ impl Session {
         {
             let key = (chat_id.0, message_id.0, option_id);
             let page_len = voters.len();
-            let merged = if offset == 0 {
-                voters
-            } else {
-                match self.messages.poll_voters.get(&key) {
-                    Some(PollVotersFetch::Loaded { voters: old, .. }) => {
-                        let mut merged = old.clone();
-                        for voter in voters {
-                            if !merged.contains(&voter) {
-                                merged.push(voter);
-                            }
+            // Only the page the entry waits for: the first page by its
+            // `Loading` request, a later one by the `more` request, and
+            // none once an update of the poll dropped the entry.
+            let asked = pending.map(|p| p.id);
+            let merged = match (offset, self.messages.poll_voters.get(&key)) {
+                (0, Some(PollVotersFetch::Loading(id))) if Some(*id) == asked => voters,
+                (
+                    1..,
+                    Some(PollVotersFetch::Loaded {
+                        voters: old,
+                        more: VotersMore::Asking(id),
+                        ..
+                    }),
+                ) if Some(*id) == asked => {
+                    let mut merged = old.clone();
+                    for voter in voters {
+                        if !merged.contains(&voter) {
+                            merged.push(voter);
                         }
-                        merged
                     }
-                    _ => voters,
+                    merged
                 }
+                _ => return,
             };
             // B4: a short page is the honest exhaustion signal —
             // `total_count` is approximate per the schema, so on a
@@ -165,6 +173,7 @@ impl Session {
                 PollVotersFetch::Loaded {
                     voters: merged,
                     total_count,
+                    more: VotersMore::Ready,
                 },
             );
         }

@@ -2,6 +2,7 @@
 //! opened at the first unread message when there is one, paged in both
 //! directions, and replaced (never patched) when a jump lands outside it.
 use super::*;
+use crate::state::fetch::Fetch;
 
 /// The edge of the history window a page request extends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,11 +44,26 @@ pub struct MentionSearch {
     pub chat_id: ChatId,
     pub query: String,
     /// Matching members (users only, excluding the current user), in
-    /// TDLib's order.
-    pub user_ids: Vec<i64>,
-    /// The in-flight `searchChatMembers`; answers for any other request
-    /// (an older query) are dropped.
-    pub request: Option<RequestId>,
+    /// TDLib's order. The in-flight `searchChatMembers` holds its request
+    /// (answers for any other, an older query, are dropped) and the
+    /// previous matches meanwhile.
+    pub members: Fetch<Vec<i64>>,
+}
+
+impl MentionSearch {
+    /// The matches to list: the answer, or the previous ones while the
+    /// new query loads.
+    pub fn user_ids(&self) -> &[i64] {
+        self.members.data().map_or(&[], Vec::as_slice)
+    }
+
+    /// The `searchChatMembers` request the search waits for.
+    pub fn asking(&self) -> Option<RequestId> {
+        match self.members {
+            Fetch::Loading { request, .. } => request,
+            _ => None,
+        }
+    }
 }
 
 impl Session {
@@ -62,18 +78,18 @@ impl Session {
             .messages
             .mention_search
             .as_mut()
-            .filter(|s| s.request == Some(request))
+            .filter(|s| s.members.waits_for(request))
         else {
             return;
         };
-        search.request = None;
-        search.user_ids = members
+        let user_ids = members
             .iter()
             .filter_map(|member| match member.member_id {
                 MessageSender::User { user_id } if Some(user_id) != me => Some(user_id),
                 _ => None,
             })
             .collect();
+        search.members.answered(Some(request), user_ids);
     }
 
     /// The `searchChatMembers` `request` failed: its search ends, so the
@@ -83,7 +99,7 @@ impl Session {
             .messages
             .mention_search
             .as_ref()
-            .is_some_and(|s| s.request == Some(request))
+            .is_some_and(|s| s.members.waits_for(request))
         {
             self.messages.mention_search = None;
         }

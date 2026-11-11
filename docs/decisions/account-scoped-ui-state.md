@@ -8628,3 +8628,45 @@ Skipped, with the reason:
   about the widget that neither `EventLogPage::chat` nor the dialog's chat id
   says. The refill runs from the window's own upkeep because setting the text
   needs the `Window`.
+
+### Sweep fixes (r2-18)
+
+Round 2, `src/state` session files. Every register-r2 entry of the 23 files is
+listed; the rest of the bundle's files hold no other entry.
+
+| id | result |
+| --- | --- |
+| 05-082 | one exhaustive match: the permission, pin-order and archive-settings arms moved into `restore_optimistic(rollback, chat_id)`; `apply_error` calls it once and the wildcard is gone |
+| 05-071, 06-013 | `SavedPage` deleted: the request of a Saved Messages page is `OlderEnd::Asking(RequestId)` in the history's own older end (`ask_older`, `settle_older`); a view left and entered again drops the old answer |
+| 05-069 | `ChatSearchState` holds `ChatSearchSurface::{Closed, Open(OpenChatSearch)}`; opening on another chat and closing replace the value whole (chat, query, phase, results, paging, sender, media, member picker); the types moved to `chat_search_types.rs` |
+| 05-070 | `SearchState::clear_results` drops a `PaidPostSearch` confirmation with the results it was asked about |
+| 05-083 | `BotStopStage::Running { can_stop }`; `PendingBotMessage::can_stop()` is derived, the second field is gone |
+| 05-074 | merged with r2-16's shape: `VenueBot::Resolving { request }` (`None` while the lookup is being sent); `venue_bot_resolved` and `venue_bot_failed` take the request and ignore any other |
+| 05-080 | Kept as `pending_attention: bool` with its allow line: a one-shot event the notifier takes (`std::mem::take` in the drain), not a stage of any request. A list of chats read only for "is it empty" was the same flag in another type, so it was not kept; the stale baseline lines are gone |
+| 05-072 | merged with r2-08's shape (02-025): `InlineQueryFetch::Loading { request }` and `InlineMore::{Idle, Asking { request }, Failed { offset }}` inside `Loaded` replace `more_failed`; answers and errors apply only to the request the slot holds (a late page of an older query no longer appends to the new list) |
+| 05-073 | `PollVotersFetch::Loading(RequestId)` and `VotersMore::Asking(RequestId)`; a late page after `updatePoll` dropped the entry is dropped |
+| 05-081 | kept: `loaded_all_participants` is TDLib's own report that the list is complete, replaced whole by every `updateGroupCall`, no request of ours in it; already allowed in `implicit-state-allow.txt`, so the duplicate baseline line is removed |
+| 05-085 | `apply_local_search_filter` goes through `begin_recents` / `begin_query` and the `accept_*` calls |
+| 05-077 | `MentionSearch::members` and `FromPicker::members` are `Fetch<Vec<_>>` (request in `Loading`, previous list as `stale`); the two `Option<RequestId>` fields are gone; a failed picker request lands in `Failed` and may be asked again |
+| 05-078 | `forget_screen_outcomes` clears `contacts_notice` |
+| 05-075 | `PingStatus::Checking(RequestId)`; `proxy_ping_requests` deleted (the same value as 04-037; the slot shows `Checking` only once the ping went out) |
+| 05-076 | kept: `proxy.error` is the user's last failure and deliberately outlives the stages (a system step or a background refetch does not wipe it: `a_system_step_succeeding_keeps_the_users_failed_change_error`), so it is a note, not part of one stage |
+| 05-079 | `ReplyTarget::Loading { request, attempts }` and `Retry { until, attempts }`: five failed asks end in `Missing`; a refused send keeps the count |
+| 06-006 | `recent_inline_bots` is `Fetch<Vec<i64>>`; the error arm lands in `Failed` and the next "@" asks again |
+| 06-012 | `date_jump_pending` deleted: `ChatSearchJump::Loading { message_id, then: JumpLanding }`; the date jump leaves with the jump stage (`clear_date_jump_ui` makes it a plain jump) |
+| 06-007 | the send-as list carries its request in `Loading`; answer and error go through `Fetch::answered` / `failed`, and an answer after the lists were dropped is ignored |
+| 06-004 | `begin_sponsored_hide` leaves a report in flight alone |
+| 06-010 | `StickerBatch::{Idle, Running, Finished}` replaces the four batch fields; `Running` holds the request of each change that went out, and only the answer of one of those counts |
+| 06-011 | kept: `archived_offset` and `trending_offset` are written after the `has_purpose` guard that allows one request at a time, so the offset read when the answer lands is the in-flight request's own |
+| 06-014 | `fail_story_report_send` leaves a flow with a request out alone |
+| 06-005 | `RowForum::topics` is `RowTopicsView::{Loading, Listed(..)}` (a view derived from the session for each row, not a stored stage); the `loaded` bool and its baseline line are gone |
+| 06-003 | `leave_open_chat` closes a thread opened from the chat left as well as one living in it |
+| 06-023 | `begin_fetch_at_day` clears the tab's query with the results it replaces |
+
+- **New (new-01).** `finish_history_around` ends a search jump that has no
+  chat to load into (`Missing`) instead of leaving "Loading message..." up.
+- **Outside the bundle's files**, the smallest changes: `session_apply_error.rs`
+  (the rollback call), `domains/*/error.rs` and `apply.rs` (the new request
+  matches), `location_picker/mod.rs`, `proxy.rs`, `info_types.rs`,
+  `sticker_gif_types.rs`, the connect drivers and the UI readers of the
+  changed fields.

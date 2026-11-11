@@ -4,8 +4,18 @@ use super::*;
 impl Session {
     /// Resolve a hit: already loaded, tombstoned/deleted, or needs `getChatHistory` around.
     pub fn begin_chat_search_jump(&mut self, message_id: MessageId) -> ChatSearchJumpNeed {
+        self.begin_jump(message_id, JumpLanding::Message)
+    }
+
+    /// The jump of [`Self::begin_chat_search_jump`], landing as `then`
+    /// once the window around `message_id` is loaded.
+    pub(crate) fn begin_jump(
+        &mut self,
+        message_id: MessageId,
+        then: JumpLanding,
+    ) -> ChatSearchJumpNeed {
         self.search.chat_search.jump_serial += 1;
-        let Some(chat_id) = self.search.chat_search.chat_id.or(self.open_chat_id()) else {
+        let Some(chat_id) = self.search.chat_search.chat_id().or(self.open_chat_id()) else {
             self.search.chat_search.jump = ChatSearchJump::Missing { message_id };
             return ChatSearchJumpNeed::Missing;
         };
@@ -19,7 +29,7 @@ impl Session {
             self.search.chat_search.jump = ChatSearchJump::Ready { message_id };
             return ChatSearchJumpNeed::AlreadyReady;
         }
-        self.search.chat_search.jump = ChatSearchJump::Loading { message_id };
+        self.search.chat_search.jump = ChatSearchJump::Loading { message_id, then };
         ChatSearchJumpNeed::LoadAround
     }
 
@@ -117,14 +127,11 @@ impl Session {
     }
 
     pub fn apply_local_search_filter(&mut self, query: &str) {
-        self.search.search.surface = if query.trim().is_empty() {
-            SearchSurface::Recents
+        if query.trim().is_empty() {
+            self.search.search.begin_recents();
         } else {
-            SearchSurface::Query
-        };
-        self.search.search.query = query.to_string();
-        self.search.search.generation = self.search.search.generation.saturating_add(1);
-        self.search.search.clear_results();
+            self.search.search.begin_query(query);
+        }
         let chat_ids: Vec<ChatId> = if query.trim().is_empty() {
             Vec::new()
         } else {

@@ -92,10 +92,10 @@ pub(super) fn forum_topics_line(
         .text_xs()
         .text_color(muted_fg)
         .when(forum.topics.is_empty(), |this| {
-            let key = if forum.loaded {
-                keys::FILTERS_NO_CHATS
-            } else {
+            let key = if forum.topics.is_loading() {
                 keys::CONTACTS_LOADING
+            } else {
+                keys::FILTERS_NO_CHATS
             };
             this.child(div().truncate().child(tr(key)))
         })

@@ -98,11 +98,13 @@ impl Session {
         {
             self.fail_library_set(set_id);
         }
-        if let Some(RequestPurpose::Stickers(StickersPurpose::ManageStickerSet {
-            set_id, ..
-        })) = pending.map(|p| p.purpose)
+        if let Some(pending) = pending
+            && matches!(
+                pending.purpose,
+                RequestPurpose::Stickers(StickersPurpose::ManageStickerSet { .. })
+            )
         {
-            self.finish_sticker_batch_item(set_id, false);
+            self.finish_sticker_batch_item(pending.id, false);
         }
         if let Some(RequestPurpose::Stickers(StickersPurpose::ManageStickerSet {
             set_id,

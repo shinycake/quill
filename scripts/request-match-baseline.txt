@@ -47,7 +47,6 @@ purpose:ConnectDriver::mask_request 1
 purpose:ConnectDriver::maybe_fetch_active_sessions 1
 purpose:ConnectDriver::maybe_fetch_connected_websites 1
 purpose:ConnectDriver::maybe_fetch_notification_sounds 1
-purpose:ConnectDriver::maybe_fetch_recent_inline_bots 1
 purpose:ConnectDriver::maybe_fetch_storage_statistics 1
 purpose:ConnectDriver::maybe_fetch_story_custom_emoji_stickers 1
 purpose:ConnectDriver::maybe_load_active_stories 1

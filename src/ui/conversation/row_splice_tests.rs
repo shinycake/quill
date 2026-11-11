@@ -1006,11 +1006,7 @@ fn the_saved_sublist_splices_like_the_open_chat(cx: &mut TestAppContext) {
     mixed_group(&app, vcx);
     let open_sublist = |session: &mut quill::state::Session, topic_id: i64| {
         let history = topic_copy(session);
-        session.threads.saved.sublist = Some(quill::state::SavedSublistView {
-            topic_id,
-            history,
-            page: quill::state::SavedPage::Idle,
-        });
+        session.threads.saved.sublist = Some(quill::state::SavedSublistView { topic_id, history });
     };
     app.update(vcx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {

@@ -16,6 +16,32 @@ fn cafe() -> Venue {
     }
 }
 
+/// The answer of a lookup that is not the one waited for (an older option
+/// value, another request) changes nothing.
+#[test]
+fn a_venue_bot_answer_of_another_request_is_dropped() {
+    let resolve = || PickerRequest::ResolveVenueBot {
+        username: "foursquare".into(),
+    };
+    let mut sharing = LocationSharing::default();
+    sharing.set_venue_bot_username("foursquare".into());
+    sharing.open(ChatId(3), None);
+    sharing.geolocated(GeoOutcome::Found(point(10., 20.)));
+    assert_eq!(sharing.next_requests(), vec![resolve()]);
+    sharing.request_sent(&resolve(), 7);
+    sharing.venue_bot_resolved(8, Some(99));
+    sharing.venue_bot_failed(8);
+    assert!(sharing.next_requests().is_empty(), "still waiting for 7");
+    sharing.venue_bot_resolved(7, Some(99));
+    assert!(matches!(
+        sharing.next_requests().first(),
+        Some(PickerRequest::Venues {
+            bot_user_id: 99,
+            ..
+        })
+    ));
+}
+
 #[test]
 fn venues_resolve_the_bot_first_then_ask_it() {
     let mut sharing = LocationSharing::default();

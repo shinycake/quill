@@ -17,7 +17,6 @@ pub enum ShutdownPhase {
 #[derive(Debug, Clone)]
 pub struct PendingBotMessage {
     pub draft_id: i64,
-    pub can_stop: bool,
     pub keep_on_stop: bool,
     pub content: MessageContent,
     pub expires_at_ms: u64,

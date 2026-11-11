@@ -12,7 +12,6 @@ bare:Attempt::Sending 1
 bare:Audience::Loading 1
 bare:BackgroundStatus::Connecting 1
 bare:BotLink::Loading 1
-bare:BotStopStage::Running 1
 bare:BoxStage::Opening 1
 bare:CalendarPaging::Loading 1
 bare:CallEnd::Running 1
@@ -106,7 +105,6 @@ bare:Playback::Waiting 1
 bare:Poll::Asking 1
 bare:PollPage::Opening 1
 bare:PollStatsFetch::Loading 1
-bare:PollVotersFetch::Loading 1
 bare:ProfileAddress::Loading 1
 bare:PublicChatsFetch::Loading 1
 bare:Refire::Running 1
@@ -179,7 +177,6 @@ unkeyed:CameraStage::Saving 1
 unkeyed:Cancellation::InFlight 1
 unkeyed:Capture::Waiting 1
 unkeyed:CardState::Loading 1
-unkeyed:ChatSearchJump::Loading 1
 unkeyed:ChatSearchPaging::Loading 1
 unkeyed:ChatStatisticsFetch::Loading 1
 unkeyed:ComposerReplyFetch::Loading 1

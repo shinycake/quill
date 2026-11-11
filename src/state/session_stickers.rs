@@ -34,21 +34,10 @@ impl Session {
             })
     }
 
-    pub(crate) fn finish_sticker_batch_item(&mut self, set_id: i64, success: bool) {
-        if let Some(index) = self
-            .stickers
-            .stickers
-            .batch_pending
-            .iter()
-            .position(|id| *id == set_id)
-        {
-            self.stickers.stickers.batch_pending.remove(index);
-            if success {
-                self.stickers.stickers.batch_completed += 1;
-            } else {
-                self.stickers.stickers.batch_failed += 1;
-            }
-        }
+    /// A sticker set change answered: the batch counts it when the request
+    /// is one of its own.
+    pub(crate) fn finish_sticker_batch_item(&mut self, request: RequestId, success: bool) {
+        self.stickers.stickers.batch.finish_item(request, success);
     }
 
     /// The box's change of the viewed set went out.

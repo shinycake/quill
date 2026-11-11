@@ -63,8 +63,11 @@ fn outcomes_that_landed_in_the_background_are_not_drained_later() {
         },
     };
 
+    session.users_state.contacts_notice = Some("Contacts imported.".into());
+
     session.forget_screen_outcomes();
 
+    assert!(session.users_state.contacts_notice.is_none());
     assert!(session.payments.receipt_error.is_none());
     assert!(session.payments.unlocked_notice.is_none());
     assert!(session.messages.send_permission_error.is_empty());

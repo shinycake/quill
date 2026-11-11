@@ -1,8 +1,8 @@
 # Bools that name a stage word but are not a stage (scripts/check-implicit-state.py).
 # One per line: Struct::field <reason>
+SettingsState::pending_attention a one-shot dock-bounce event the notifier drains with take (notify_accounts.rs), not a stage of any request
 State::frame_requested mirrors the C qw_state struct field by field (repr(C)); it is a per-poll flag from the native side, not a stage Quill keeps
 
-SettingsState::pending_attention a one-shot dock-bounce event the notifier drains with take (notify_accounts.rs), not a stage of any request
 ActiveGroupCall::loaded_all_participants TDLib's groupCall.loaded_all_participants: the server's own report that the participant list is complete, mirrored as is
 ActiveGroupCall::loaded_all_participants+screen_share_error TDLib's groupCall.loaded_all_participants beside the screen share's last failure: independent
 

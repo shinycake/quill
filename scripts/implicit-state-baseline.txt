@@ -1,7 +1,6 @@
 
 # Implicit-state debt (scripts/check-implicit-state.py). Only remove lines.
 
-ActiveGroupCall::loaded_all_participants
 AppearancePrefs::ignore_battery_saving
 
 
@@ -17,21 +16,16 @@ DestRow::saved
 DragSelect::pending
 Drawn::leaving
 
-DestRow::saved
-DragSelect::pending
-Drawn::leaving
 FooterMeta::pending
 
 GiveawaySummary::finished
 
 
-GiveawaySummary::finished
 HeaderFacts::is_saved_messages
 
 
 LiveInput::failed
 
-LiveInput::failed
 Lookup::fade_started
 Lookup::pending
 
@@ -50,19 +44,12 @@ PasswordBox::sending+error
 PlaybackHealth::output_failed
 
 
-RowForum::loaded
 RowState::pending
 
 
-RowForum::loaded
-RowState::pending
-SettingsState::pending_attention
 
-SettingsState::pending_attention
 
-SettingsState::pending_attention
 
-SettingsState::pending_attention
 
 
 

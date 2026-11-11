@@ -859,7 +859,7 @@ impl QuillApp {
             .as_ref()
             .filter(|search| Some(search.chat_id) == session.open_chat_id())
         {
-            for user in search.user_ids.iter().filter_map(|id| session.user(*id)) {
+            for user in search.user_ids().iter().filter_map(|id| session.user(*id)) {
                 if !items.iter().any(|(id, _, _)| *id == user.id) {
                     items.push((user.id, user.display_name(), user.username.clone()));
                 }

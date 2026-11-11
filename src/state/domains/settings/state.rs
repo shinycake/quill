@@ -265,7 +265,8 @@ pub struct SettingsState {
     /// A notification-worthy message arrived: the UI bounces the Dock icon /
     /// flashes the taskbar (when the user wants it and the OS is not in
     /// Do Not Disturb). Set independently of the "Desktop notifications"
-    /// switch, like tdesktop's alert.
+    /// switch, like tdesktop's alert. An event the notifier takes, not a
+    /// stage: nothing is asked and nothing answers it.
     pub pending_attention: bool,
     /// TDLib option `disable_contact_registered_notifications`: the inverse
     /// of tdesktop's "Contact joined Telegram" event switch.

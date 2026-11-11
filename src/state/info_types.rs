@@ -536,12 +536,27 @@ pub struct MemberAsk {
 /// lands in `Failed`, a failed "load more" keeps the loaded page.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PollVotersFetch {
-    Loading,
+    /// The first page is out as this request; only its answer or error
+    /// leaves the stage (an update of the poll drops the entry, and the
+    /// late answer with it).
+    Loading(RequestId),
     Loaded {
         voters: Vec<MessageSender>,
         total_count: i32,
+        more: VotersMore,
     },
     Failed(String),
+}
+
+/// The next page of a loaded voters list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VotersMore {
+    /// The next page can be asked.
+    Ready,
+    /// The next page is out as this request; an answer to any other, or
+    /// after the list was dropped, is dropped. Its error leaves the loaded
+    /// page retryable.
+    Asking(RequestId),
 }
 
 /// Bots slice: fetch state for the single active inline query

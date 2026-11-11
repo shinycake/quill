@@ -79,19 +79,19 @@ fn bot_stream_stop_races_retention_topics_and_expiry() {
         &mut driver,
         json!({"@type":"ok", "@extra":old_stop.as_extra()}),
     );
-    assert!(driver.session.messages.pending_bot_messages[&(7, 42)].can_stop); // Older draft ACK cannot stop this one.
+    assert!(driver.session.messages.pending_bot_messages[&(7, 42)].can_stop()); // Older draft ACK cannot stop this one.
     let stop = driver
         .stop_pending_bot_message(ChatId(7), 42, 12)
         .unwrap()
         .unwrap();
     ingest(&mut driver, json!({"@type":"ok", "@extra":stop.as_extra()}));
-    assert!(!driver.session.messages.pending_bot_messages[&(7, 42)].can_stop);
+    assert!(!driver.session.messages.pending_bot_messages[&(7, 42)].can_stop());
     assert_eq!(
         driver.session.messages.pending_bot_messages[&(7, 42)].stop,
         crate::state::BotStopStage::Stopped
     );
     ingest(&mut driver, draft(12, 42, true));
-    assert!(!driver.session.messages.pending_bot_messages[&(7, 42)].can_stop);
+    assert!(!driver.session.messages.pending_bot_messages[&(7, 42)].can_stop());
     assert!(
         driver
             .stop_pending_bot_message(ChatId(7), 42, 12)

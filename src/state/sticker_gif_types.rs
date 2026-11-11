@@ -151,6 +151,111 @@ impl StickerLists {
     }
 }
 
+/// A batch of sticker set changes: each set's `changeStickerSet` answers on
+/// its own, and a batch is not atomic. The confirmed results are what the
+/// stage keeps; a new batch replaces the finished one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum StickerBatch {
+    #[default]
+    Idle,
+    /// Changes are out as the requests in `pending` (with the set each
+    /// changes); the answer or error of one of them moves its set to
+    /// `completed` or `failed`, and no other request does.
+    Running {
+        total: usize,
+        completed: usize,
+        failed: usize,
+        pending: Vec<(i64, RequestId)>,
+    },
+    /// Every set answered.
+    Finished {
+        total: usize,
+        completed: usize,
+        failed: usize,
+    },
+}
+
+impl StickerBatch {
+    /// A batch over `total` sets, of which `sent` went out as these
+    /// requests; the rest could not be sent and count as failed.
+    pub fn begin(total: usize, sent: Vec<(i64, RequestId)>) -> Self {
+        let failed = total.saturating_sub(sent.len());
+        if sent.is_empty() {
+            return Self::Finished {
+                total,
+                completed: 0,
+                failed,
+            };
+        }
+        Self::Running {
+            total,
+            completed: 0,
+            failed,
+            pending: sent,
+        }
+    }
+
+    /// `request` answered (`success`) or failed; a request the batch does
+    /// not wait for changes nothing.
+    pub fn finish_item(&mut self, request: RequestId, success: bool) {
+        let Self::Running {
+            total,
+            completed,
+            failed,
+            pending,
+        } = self
+        else {
+            return;
+        };
+        let before = pending.len();
+        pending.retain(|(_, asked)| *asked != request);
+        if pending.len() == before {
+            return;
+        }
+        if success {
+            *completed += 1;
+        } else {
+            *failed += 1;
+        }
+        if pending.is_empty() {
+            *self = Self::Finished {
+                total: *total,
+                completed: *completed,
+                failed: *failed,
+            };
+        }
+    }
+
+    pub fn total(&self) -> usize {
+        match self {
+            Self::Idle => 0,
+            Self::Running { total, .. } | Self::Finished { total, .. } => *total,
+        }
+    }
+
+    pub fn completed(&self) -> usize {
+        match self {
+            Self::Idle => 0,
+            Self::Running { completed, .. } | Self::Finished { completed, .. } => *completed,
+        }
+    }
+
+    pub fn failed(&self) -> usize {
+        match self {
+            Self::Idle => 0,
+            Self::Running { failed, .. } | Self::Finished { failed, .. } => *failed,
+        }
+    }
+
+    /// The sets still waited for.
+    pub fn pending(&self) -> Vec<i64> {
+        match self {
+            Self::Running { pending, .. } => pending.iter().map(|(set_id, _)| *set_id).collect(),
+            _ => Vec::new(),
+        }
+    }
+}
+
 /// Composer sticker panel (Unigram `StickerDrawerViewModel` installed regular sets).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StickerPanel {
@@ -168,10 +273,8 @@ pub struct StickerPanel {
     /// Each list tab's own fetch: a failure of one list shows on that tab
     /// only, and a failed mutation is a note, not a list failure.
     pub lists: StickerLists,
-    pub batch_total: usize,
-    pub batch_completed: usize,
-    pub batch_failed: usize,
-    pub batch_pending: Vec<i64>,
+    /// The batch of set changes (install / archive many) and how far it got.
+    pub batch: StickerBatch,
     /// Slice S8: trending sets (`getTrendingStickerSets`) + premium-row flag.
     pub trending: Vec<StickerSetInfo>,
     pub trending_total: usize,

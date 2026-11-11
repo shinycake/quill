@@ -110,11 +110,11 @@ fn a_search_answer_lands_in_the_window_that_asked() {
         !session.search.chat_search.is_open(),
         "the main window's search stayed shut"
     );
-    assert!(session.search.chat_search.hits.is_empty());
+    assert!(session.search.chat_search.hits().is_empty());
     let hits = session.with_view(Some(ChatId(7)), |session| {
         (
-            session.search.chat_search.status,
-            session.search.chat_search.hits.len(),
+            session.search.chat_search.status(),
+            session.search.chat_search.hits().len(),
         )
     });
     assert_eq!(
@@ -142,10 +142,10 @@ fn a_search_answer_for_a_closed_window_lands_in_no_view() {
 
     apply_json(&mut session, &seq, &sink, &found_json(extra));
     assert!(
-        session.search.chat_search.hits.is_empty(),
+        session.search.chat_search.hits().is_empty(),
         "the closed window's hits did not land in the main window's search"
     );
-    assert_eq!(session.search.chat_search.status, SearchStatus::Searching);
+    assert_eq!(session.search.chat_search.status(), SearchStatus::Searching);
 }
 
 #[test]
@@ -211,16 +211,16 @@ fn an_answer_for_one_window_lands_there_while_another_window_is_in_place() {
         "Carol's view stayed in place"
     );
     assert_eq!(session.open_chat_id(), Some(ChatId(9)));
-    assert_eq!(session.search.chat_search.status, SearchStatus::Searching);
+    assert_eq!(session.search.chat_search.status(), SearchStatus::Searching);
     assert!(
-        session.search.chat_search.hits.is_empty(),
+        session.search.chat_search.hits().is_empty(),
         "Carol's search kept its own state"
     );
     assert!(session.enter_view(None));
     let hits = session.with_view(Some(ChatId(7)), |session| {
         (
-            session.search.chat_search.status,
-            session.search.chat_search.hits.len(),
+            session.search.chat_search.status(),
+            session.search.chat_search.hits().len(),
         )
     });
     assert_eq!(
@@ -301,4 +301,20 @@ fn an_answer_for_a_closed_window_leaves_the_main_view_in_place() {
             .and_then(|pending| pending.asked_in.chat()),
         None
     );
+}
+
+/// r2-18 06-003: the comment thread of a channel post lives in the
+/// discussion chat but was opened from the channel; the main window leaving
+/// the channel closes it too.
+#[test]
+fn leaving_the_origin_chat_closes_its_comment_thread() {
+    let (mut session, _sink) = session();
+    session.open_chat(ChatId(5));
+    session.begin_thread(ChatId(5), MessageId(3));
+    if let Some(thread) = session.threads.thread.as_mut() {
+        thread.chat_id = ChatId(9);
+        thread.thread_id = 77;
+    }
+    assert_eq!(session.leave_open_chat(), Some(ChatId(5)));
+    assert!(session.threads.thread.is_none());
 }

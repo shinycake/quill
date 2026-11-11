@@ -65,6 +65,7 @@ mod business_bot_bar;
 mod call_types;
 mod chat_activity;
 mod chat_order;
+mod chat_search_types;
 mod chat_types;
 mod composer_link_preview;
 mod composer_targets;
@@ -199,6 +200,7 @@ pub use acks::{Answer, RequestAcks};
 pub use bot_stop::BotStopStage;
 pub use call_types::*;
 pub use chat_activity::*;
+pub use chat_search_types::*;
 pub use chat_types::*;
 pub use composer_link_preview::*;
 pub use composer_targets::{ComposerReplyFetch, ReplyFetches};
@@ -262,7 +264,9 @@ pub use session_reply::{
 pub use session_reply_keyboard::*;
 pub use session_saved::{SAVED_PAGE, SAVED_TOPICS_PAGE};
 pub use session_share::{SearchPart, ShareSearch};
-pub use session_subsection_tabs::{BotTopics, ROW_TOPIC_COUNT, RowForum, RowTopic, TopicBadge};
+pub use session_subsection_tabs::{
+    BotTopics, ROW_TOPIC_COUNT, RowForum, RowTopic, RowTopicsView, TopicBadge,
+};
 pub use session_translate::*;
 pub use shared_media_meta::*;
 pub use shared_media_months::*;

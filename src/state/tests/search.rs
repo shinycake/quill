@@ -452,10 +452,13 @@ fn chat_search_happy_empty_stale_and_jump() {
             extra.0
         ),
     );
-    assert_eq!(session.search.chat_search.status, SearchStatus::Ready);
-    assert_eq!(session.search.chat_search.hits.len(), 2);
-    assert_eq!(session.search.chat_search.selected, Some(0));
-    assert_eq!(session.search.chat_search.hits[0].preview, "CANARY_CHAT_hi");
+    assert_eq!(session.search.chat_search.status(), SearchStatus::Ready);
+    assert_eq!(session.search.chat_search.hits().len(), 2);
+    assert_eq!(session.search.chat_search.selected(), Some(0));
+    assert_eq!(
+        session.search.chat_search.hits()[0].preview,
+        "CANARY_CHAT_hi"
+    );
     assert_eq!(
         session.begin_chat_search_jump(MessageId(101)),
         ChatSearchJumpNeed::AlreadyReady
@@ -504,7 +507,7 @@ fn chat_search_happy_empty_stale_and_jump() {
             empty_extra.0
         ),
     );
-    assert_eq!(session.search.chat_search.status, SearchStatus::Empty);
+    assert_eq!(session.search.chat_search.status(), SearchStatus::Empty);
 
     let stale = session.search.chat_search.begin_query("old");
     let stale_extra =
@@ -521,8 +524,8 @@ fn chat_search_happy_empty_stale_and_jump() {
             stale_extra.0
         ),
     );
-    assert_eq!(session.search.chat_search.status, SearchStatus::Searching);
-    assert!(session.search.chat_search.hits.is_empty());
+    assert_eq!(session.search.chat_search.status(), SearchStatus::Searching);
+    assert!(session.search.chat_search.hits().is_empty());
     apply_json(
         &mut session,
         &seq,
@@ -532,9 +535,9 @@ fn chat_search_happy_empty_stale_and_jump() {
             fresh_extra.0
         ),
     );
-    assert_eq!(session.search.chat_search.status, SearchStatus::Failed);
+    assert_eq!(session.search.chat_search.status(), SearchStatus::Failed);
     session.close_chat_search();
-    assert_eq!(session.search.chat_search.status, SearchStatus::Closed);
+    assert_eq!(session.search.chat_search.status(), SearchStatus::Closed);
     assert!(session.histories.get(&11).unwrap().contains(MessageId(90)));
     assert!(!sink.rendered().contains("CANARY_CHAT"));
 }
@@ -563,25 +566,31 @@ fn chat_search_jump_missing_deleted_and_inaccessible() {
         &sink,
         r#"{"@type":"updateDeleteMessages","chat_id":11,"message_ids":[70],"is_permanent":true,"from_cache":false}"#,
     );
-    session.search.chat_search.hits.push(SearchMessageHit {
-        sender: None,
-        chat_id: ChatId(11),
-        message_id: MessageId(70),
-        preview: "gone".into(),
-        is_outgoing: false,
-        content: crate::telegram::envelope::MessageContent::Text("gone".into()),
-        author_signature: None,
-        reply_to: None,
-        forward_info: None,
-        extras: Default::default(),
-        interaction_info: None,
-        is_pinned: false,
-        media_album_id: 0,
-        reply_markup: None,
-        self_destruct: None,
-        auto_delete: None,
-        date: 0,
-    });
+    session
+        .search
+        .chat_search
+        .open_mut()
+        .unwrap()
+        .hits
+        .push(SearchMessageHit {
+            sender: None,
+            chat_id: ChatId(11),
+            message_id: MessageId(70),
+            preview: "gone".into(),
+            is_outgoing: false,
+            content: crate::telegram::envelope::MessageContent::Text("gone".into()),
+            author_signature: None,
+            reply_to: None,
+            forward_info: None,
+            extras: Default::default(),
+            interaction_info: None,
+            is_pinned: false,
+            media_album_id: 0,
+            reply_markup: None,
+            self_destruct: None,
+            auto_delete: None,
+            date: 0,
+        });
     assert_eq!(
         session.begin_chat_search_jump(MessageId(70)),
         ChatSearchJumpNeed::Missing
@@ -593,25 +602,31 @@ fn chat_search_jump_missing_deleted_and_inaccessible() {
         }
     );
 
-    session.search.chat_search.hits.push(SearchMessageHit {
-        sender: None,
-        chat_id: ChatId(11),
-        message_id: MessageId(80),
-        preview: "ghost".into(),
-        is_outgoing: false,
-        content: crate::telegram::envelope::MessageContent::Text("ghost".into()),
-        author_signature: None,
-        reply_to: None,
-        forward_info: None,
-        extras: Default::default(),
-        interaction_info: None,
-        is_pinned: false,
-        media_album_id: 0,
-        reply_markup: None,
-        self_destruct: None,
-        auto_delete: None,
-        date: 0,
-    });
+    session
+        .search
+        .chat_search
+        .open_mut()
+        .unwrap()
+        .hits
+        .push(SearchMessageHit {
+            sender: None,
+            chat_id: ChatId(11),
+            message_id: MessageId(80),
+            preview: "ghost".into(),
+            is_outgoing: false,
+            content: crate::telegram::envelope::MessageContent::Text("ghost".into()),
+            author_signature: None,
+            reply_to: None,
+            forward_info: None,
+            extras: Default::default(),
+            interaction_info: None,
+            is_pinned: false,
+            media_album_id: 0,
+            reply_markup: None,
+            self_destruct: None,
+            auto_delete: None,
+            date: 0,
+        });
     assert_eq!(
         session.begin_chat_search_jump(MessageId(80)),
         ChatSearchJumpNeed::LoadAround
@@ -987,4 +1002,285 @@ fn the_demo_local_filter_settles_its_status() {
     assert_eq!(session.search.search.status(), SearchStatus::Idle);
     session.close_search();
     assert_eq!(session.search.search.status(), SearchStatus::Closed);
+}
+
+fn inline_request(session: &mut Session, first_page: bool) -> RequestId {
+    session.request(
+        RequestPurpose::Bots(BotsPurpose::GetInlineQueryResults {
+            chat_id: ChatId(1),
+            bot_user_id: 77,
+            first_page,
+        }),
+        Some(ChatId(1)),
+    )
+}
+
+fn inline_page_json(extra: RequestId, id: &str) -> String {
+    format!(
+        r#"{{"@type":"inlineQueryResults","@extra":"{}","inline_query_id":"9","button":null,"results":[{{"@type":"inlineQueryResultArticle","id":"{id}","title":"T"}}],"next_offset":"25"}}"#,
+        extra.0
+    )
+}
+
+/// r2-18 05-072: the first page lands only through the request the slot
+/// waits for. The answer and the error of an older query leave a newer
+/// query's `Loading` alone, in either order.
+#[test]
+fn a_late_first_page_of_an_older_query_does_not_fill_the_new_slot() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let old = inline_request(&mut session, true);
+    let new = inline_request(&mut session, true);
+    session.bots.inline_query = Some(InlineQuerySlot {
+        chat_id: ChatId(1),
+        bot_user_id: 77,
+        query: "dogs".to_string(),
+        fetch: InlineQueryFetch::Loading { request: new },
+    });
+    apply_json(&mut session, &seq, &sink, &inline_page_json(old, "old"));
+    assert_eq!(
+        session.bots.inline_query.as_ref().map(|slot| &slot.fetch),
+        Some(&InlineQueryFetch::Loading { request: new })
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"INTERNAL"}}"#,
+            old.0
+        ),
+    );
+    assert_eq!(
+        session.bots.inline_query.as_ref().map(|slot| &slot.fetch),
+        Some(&InlineQueryFetch::Loading { request: new })
+    );
+    apply_json(&mut session, &seq, &sink, &inline_page_json(new, "new"));
+    assert!(matches!(
+        session.bots.inline_query.as_ref().map(|slot| &slot.fetch),
+        Some(InlineQueryFetch::Loaded { results, .. }) if results.len() == 1 && results[0].id == "new"
+    ));
+}
+
+/// r2-18 05-072: a next page asked for the previous query does not append
+/// to the list of the query that replaced it.
+#[test]
+fn a_late_next_page_of_an_older_query_is_dropped() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    loaded_inline_slot(&mut session, Vec::new());
+    let stale_more = inline_request(&mut session, false);
+    let fresh = inline_request(&mut session, true);
+    session.bots.inline_query = Some(InlineQuerySlot {
+        chat_id: ChatId(1),
+        bot_user_id: 77,
+        query: "dogs".to_string(),
+        fetch: InlineQueryFetch::Loading { request: fresh },
+    });
+    apply_json(&mut session, &seq, &sink, &inline_page_json(fresh, "dog"));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &inline_page_json(stale_more, "cat"),
+    );
+    let Some(InlineQuerySlot {
+        fetch: InlineQueryFetch::Loaded { results, more, .. },
+        ..
+    }) = &session.bots.inline_query
+    else {
+        panic!("slot not loaded");
+    };
+    assert_eq!(
+        results.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+        vec!["dog"]
+    );
+    assert_eq!(*more, InlineMore::Idle);
+}
+
+fn voters_request(session: &mut Session, offset: i32) -> RequestId {
+    session.request(
+        RequestPurpose::Messages(MessagesPurpose::GetPollVoters {
+            chat_id: ChatId(1),
+            message_id: MessageId(5),
+            option_id: 0,
+            offset,
+        }),
+        Some(ChatId(1)),
+    )
+}
+
+fn voters_json(extra: RequestId, ids: &[i64]) -> String {
+    let senders: Vec<String> = ids
+        .iter()
+        .map(|id| format!(r#"{{"voter_id":{{"@type":"messageSenderUser","user_id":{id}}}}}"#))
+        .collect();
+    format!(
+        r#"{{"@type":"pollVoters","@extra":"{}","total_count":{},"voters":[{}]}}"#,
+        extra.0,
+        ids.len(),
+        senders.join(",")
+    )
+}
+
+/// r2-18 05-073: a voters page that was out when an update of the poll
+/// dropped the cached pages does not become the whole list.
+#[test]
+fn a_late_voters_page_after_an_update_does_not_become_the_list() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let key = (1, 5, 0);
+    let first = voters_request(&mut session, 0);
+    session
+        .messages
+        .poll_voters
+        .insert(key, PollVotersFetch::Loading(first));
+    apply_json(&mut session, &seq, &sink, &voters_json(first, &[1, 2]));
+    let more = voters_request(&mut session, 2);
+    let Some(PollVotersFetch::Loaded { more: slot, .. }) =
+        session.messages.poll_voters.get_mut(&key)
+    else {
+        panic!("first page not loaded");
+    };
+    *slot = VotersMore::Asking(more);
+    // `updatePoll` drops the cached pages.
+    session.messages.poll_voters.clear();
+    apply_json(&mut session, &seq, &sink, &voters_json(more, &[3]));
+    assert!(session.messages.poll_voters.is_empty());
+}
+
+/// r2-18 05-073: the first page lands by its request, and a page-next
+/// error keeps the loaded list retryable.
+#[test]
+fn voters_pages_land_by_request_and_a_next_page_error_stays_retryable() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let key = (1, 5, 0);
+    let first = voters_request(&mut session, 0);
+    let other = voters_request(&mut session, 0);
+    session
+        .messages
+        .poll_voters
+        .insert(key, PollVotersFetch::Loading(first));
+    apply_json(&mut session, &seq, &sink, &voters_json(other, &[9]));
+    assert_eq!(
+        session.messages.poll_voters.get(&key),
+        Some(&PollVotersFetch::Loading(first)),
+        "another request's page is dropped"
+    );
+    apply_json(&mut session, &seq, &sink, &voters_json(first, &[1, 2]));
+    let more = voters_request(&mut session, 2);
+    let Some(PollVotersFetch::Loaded { more: slot, .. }) =
+        session.messages.poll_voters.get_mut(&key)
+    else {
+        panic!("first page not loaded");
+    };
+    *slot = VotersMore::Asking(more);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"INTERNAL"}}"#,
+            more.0
+        ),
+    );
+    assert!(matches!(
+        session.messages.poll_voters.get(&key),
+        Some(PollVotersFetch::Loaded { voters, more: VotersMore::Ready, .. }) if voters.len() == 2
+    ));
+}
+
+/// r2-18 05-069: the in-chat search bar is one value: closing it, or opening
+/// it on another chat, replaces what it held (sender, media tab, member
+/// picker, results) instead of resetting fields one by one.
+#[test]
+fn the_in_chat_search_bar_is_replaced_whole_on_close_and_on_another_chat() {
+    let (mut session, _sink) = session();
+    let search = &mut session.search.chat_search;
+    assert_eq!(search.status(), SearchStatus::Closed);
+    search.open_for(ChatId(1));
+    search.set_sender(Some(MessageSender::User { user_id: 5 }));
+    search.set_media(crate::search_filters::SearchMediaKind::Files);
+    search.set_from_picker(Some(FromPicker::default()));
+    search.begin_query("cats");
+    search.accept_hits(Vec::new(), 0, MessageId(0), false);
+    assert_eq!(search.status(), SearchStatus::Empty);
+    // The same chat again is not a new search.
+    search.open_for(ChatId(1));
+    assert_eq!(search.query(), "cats");
+    // Another chat starts a fresh one.
+    search.open_for(ChatId(2));
+    assert_eq!(search.chat_id(), Some(ChatId(2)));
+    assert_eq!(search.status(), SearchStatus::Idle);
+    assert!(search.sender().is_none() && search.from_picker().is_none());
+    assert_eq!(search.media(), crate::search_filters::SearchMediaKind::All);
+    search.set_sender(Some(MessageSender::User { user_id: 6 }));
+    let generation = search.generation;
+    search.close();
+    assert!(!search.is_open() && search.chat_id().is_none());
+    assert!(search.sender().is_none() && !search.has_criteria());
+    assert!(search.generation > generation, "late answers are dropped");
+    // Nothing writes into a closed bar.
+    search.set_sender(Some(MessageSender::User { user_id: 7 }));
+    search.begin_query("late");
+    assert_eq!(search.status(), SearchStatus::Closed);
+    assert!(search.query().is_empty());
+}
+
+/// r2-18 05-085: the demo's local filter goes through the search's own
+/// transitions, so it starts a generation and drops a typed query waiting.
+#[test]
+fn the_local_global_filter_starts_a_new_generation() {
+    let (mut session, _sink) = session();
+    session.search.search.open_field();
+    let before = session.search.search.generation;
+    session.search.search.typed.arm("old".to_string());
+    session.apply_local_search_filter("cats");
+    assert!(session.search.search.generation > before);
+    assert!(session.search.search.typed.armed().is_none());
+    assert_eq!(session.search.search.query, "cats");
+    assert!(session.search.search.is_open());
+    session.apply_local_search_filter("  ");
+    assert!(session.search.search.is_recents());
+    assert!(session.search.search.query.is_empty());
+}
+
+/// r2-18 06-012: the date jump waiting for its window is part of the jump
+/// stage; when its chat goes it becomes a plain jump in that stage, with no
+/// second value to clear.
+#[test]
+fn a_date_jump_waiting_for_its_window_lives_in_the_jump_stage() {
+    use crate::state::DateJumpMode;
+    let (mut session, _sink) = session();
+    session.open_chat(ChatId(5));
+    let need = session.begin_date_jump(MessageId(50), DateJumpMode::Next);
+    assert_eq!(need, ChatSearchJumpNeed::LoadAround);
+    assert_eq!(
+        session.search.chat_search.jump,
+        ChatSearchJump::Loading {
+            message_id: MessageId(50),
+            then: JumpLanding::Date {
+                chat_id: ChatId(5),
+                mode: DateJumpMode::Next
+            }
+        }
+    );
+    // Another chat's pieces go: this jump stays.
+    session.clear_date_jump_ui(Some(ChatId(9)));
+    assert!(matches!(
+        session.search.chat_search.jump,
+        ChatSearchJump::Loading {
+            then: JumpLanding::Date { .. },
+            ..
+        }
+    ));
+    session.clear_date_jump_ui(Some(ChatId(5)));
+    assert_eq!(
+        session.search.chat_search.jump,
+        ChatSearchJump::Loading {
+            message_id: MessageId(50),
+            then: JumpLanding::Message
+        }
+    );
 }
