@@ -23,11 +23,12 @@
 
 use crate::agent::tools::{td_policy, td_request};
 use serde_json::Value;
-use std::cell::RefCell;
+use std::cell::Cell;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum Mode {
     /// The input being handled came from the user.
+    #[default]
     Idle,
     /// The input being handled came from the driver.
     Injecting,
@@ -36,6 +37,7 @@ enum Mode {
 /// Everything the guard knows on this thread, as one value: whether input
 /// is being injected, what was refused meanwhile, and the commands that
 /// are open.
+#[derive(Default)]
 struct Guard {
     mode: Mode,
     refusals: Vec<String>,
@@ -47,8 +49,8 @@ struct Guard {
 }
 
 thread_local! {
-    static GUARD: RefCell<Guard> = const {
-        RefCell::new(Guard {
+    static GUARD: Cell<Guard> = const {
+        Cell::new(Guard {
             mode: Mode::Idle,
             refusals: Vec::new(),
             step: None,
@@ -59,7 +61,14 @@ thread_local! {
 
 /// Runs `f` on this thread's guard; `f` calls nothing else.
 fn on_guard<R>(f: impl FnOnce(&mut Guard) -> R) -> R {
-    GUARD.with(|guard| f(&mut guard.borrow_mut()))
+    GUARD.with(|cell| {
+        // Taken out while `f` runs, so a nested call sees a fresh guard
+        // rather than a borrow that panics.
+        let mut guard = cell.take();
+        let result = f(&mut guard);
+        cell.set(guard);
+        result
+    })
 }
 
 /// An input command between its first step and its answer. While one is

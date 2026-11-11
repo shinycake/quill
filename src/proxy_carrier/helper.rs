@@ -772,7 +772,10 @@ fn read_events(
     // The helper exited without saying why. Only a missing web view
     // library is `Unsupported` (TDLib then stops asking); a crash, a kill
     // or anything else is `Terminated`, and TDLib tries again.
-    let missing_library = shared.stage.get() == CarrierStage::Starting
+    let missing_library = matches!(
+        shared.stage.get(),
+        CarrierStage::Starting | CarrierStage::Closing
+    )
         && shared.exit_status(EXIT_WAIT).is_some_and(loader_failure);
     let error = if missing_library {
         capability.set(false);

@@ -229,6 +229,9 @@ impl QuillApp {
         let Some(preview) = self.ai_compose.preview.as_mut() else {
             return;
         };
+        if preview.examples.loading() {
+            return;
+        }
         let token = fresh_token();
         let Some(number) = preview.examples.start_next(token, Instant::now()) else {
             return;

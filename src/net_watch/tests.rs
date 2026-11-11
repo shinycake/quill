@@ -1,4 +1,4 @@
-use super::link::Link;
+use super::link::{Gateway, Link};
 use super::{Hop, NO_SUCH_IP_VERSION, OFFLINE_LOOK_EVERY, Path, Route, Tracker};
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -9,8 +9,7 @@ const WIFI: Hop = Hop {
     local: HOME,
     link: Link {
         interface: 2,
-        gateway: Some(ROUTER),
-        gateway_hardware: Some(HOME_ROUTER),
+        gateway: Gateway::Resolved(ROUTER, HOME_ROUTER),
     },
 };
 const HOME_ROUTER: [u8; 6] = [0x02, 0, 0, 0, 0, 0x01];
@@ -18,8 +17,7 @@ const CAFE: Hop = Hop {
     local: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 7)),
     link: Link {
         interface: 2,
-        gateway: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))),
-        gateway_hardware: None,
+        gateway: Gateway::Unresolved(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))),
     },
 };
 
@@ -88,7 +86,7 @@ fn a_new_network_that_gives_the_same_address_moves_the_epoch() {
     let mut tracker = Tracker::new(on(Path::Via(WIFI), Path::NoRoute));
     let other_router = Hop {
         link: Link {
-            gateway: Some(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 254))),
+            gateway: Gateway::Unresolved(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 254))),
             ..WIFI.link
         },
         ..WIFI
@@ -154,7 +152,7 @@ fn a_router_on_the_same_address_with_another_link_address_moves_the_epoch() {
     let mut tracker = Tracker::new(on(Path::Via(WIFI), Path::NoRoute));
     let with = |gateway_hardware| Hop {
         link: Link {
-            gateway_hardware,
+            gateway: Gateway::new(Some(ROUTER), gateway_hardware),
             ..WIFI.link
         },
         ..WIFI
@@ -187,7 +185,7 @@ fn a_new_router_on_the_same_address_is_looked_up_at_once_and_only_once() {
     let unresolved = on(
         Path::Via(Hop {
             link: Link {
-                gateway_hardware: None,
+                gateway: Gateway::Unresolved(ROUTER),
                 ..WIFI.link
             },
             ..WIFI

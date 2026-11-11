@@ -54,23 +54,34 @@ struct Hop {
     link: link::Link,
 }
 
+impl Hop {
+    /// Whether this hop is `then` with the gateway's hardware address not
+    /// resolved yet, so `then`'s address stands for it.
+    fn carries(self, then: Self) -> bool {
+        match (self.link.gateway, then.link.gateway) {
+            (link::Gateway::Unresolved(ip), link::Gateway::Resolved(then_ip, _)) => {
+                ip == then_ip
+                    && Hop {
+                        link: link::Link {
+                            gateway: self.link.gateway,
+                            ..then.link
+                        },
+                        ..then
+                    } == self
+            }
+            _ => false,
+        }
+    }
+}
+
 impl Path {
     /// `self`, keeping the gateway's link-layer address from `before` when
     /// the system has not resolved it yet: an entry the cache dropped, or
     /// one not learned yet, is no new network. A different address is.
     fn settled(self, before: Self) -> Self {
         match (self, before) {
-            (Self::Via(mut now), Self::Via(then))
-                if now.link.gateway_hardware.is_none()
-                    && Hop {
-                        link: link::Link {
-                            gateway_hardware: None,
-                            ..then.link
-                        },
-                        ..then
-                    } == now =>
-            {
-                now.link.gateway_hardware = then.link.gateway_hardware;
+            (Self::Via(mut now), Self::Via(then)) if now.carries(then) => {
+                now.link.gateway = then.link.gateway;
                 Self::Via(now)
             }
             _ => self,
@@ -82,11 +93,7 @@ impl Path {
     /// same address is not seen.
     fn carried(self, before: Self) -> Option<IpAddr> {
         match (self, before) {
-            (Self::Via(now), Self::Via(then))
-                if now.link.gateway_hardware.is_none() && then.link.gateway_hardware.is_some() =>
-            {
-                now.link.gateway.filter(|_| self.settled(before) != self)
-            }
+            (Self::Via(now), Self::Via(then)) if now.carries(then) => now.link.gateway.ip(),
             _ => None,
         }
     }
@@ -133,7 +140,9 @@ impl Route {
         [self.v4, self.v6]
             .into_iter()
             .find_map(|path| match path {
-                Path::Via(hop) if hop.link.gateway == Some(gateway) => Some(hop.link.interface),
+                Path::Via(hop) if hop.link.gateway.ip() == Some(gateway) => {
+                    Some(hop.link.interface)
+                }
                 _ => None,
             })
             .unwrap_or(0)
@@ -144,7 +153,7 @@ impl Route {
         [self.v4, self.v6]
             .into_iter()
             .filter_map(|path| match path {
-                Path::Via(hop) => hop.link.gateway,
+                Path::Via(hop) => hop.link.gateway.ip(),
                 _ => None,
             })
     }

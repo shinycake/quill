@@ -161,8 +161,7 @@ mod linux {
                 local: ip(2).into(),
                 link: Link {
                     interface: link,
-                    gateway: Some(ip(9).into()),
-                    gateway_hardware,
+                    gateway: super::super::link::Gateway::new(Some(ip(9).into()), gateway_hardware),
                 },
             })
         };

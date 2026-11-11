@@ -88,6 +88,12 @@ enum Page {
     BridgeUp,
     /// The page's own script posted but has not set `onmessage`.
     Talking,
+    /// The page posted before the bridge said hello (a late message from
+    /// the document before); it still needs the hello to count as bridged.
+    TalkingUnbridged,
+    /// `onmessage` was announced before the bridge said hello; deliveries
+    /// wait for the hello, which promotes this to `Listening`.
+    ListeningUnbridged,
     /// `onmessage` is a function: deliveries may go, one in flight at a time.
     Listening { in_flight: Option<InFlight> },
 }
@@ -96,7 +102,13 @@ impl Page {
     /// The page's own script did something in this document; before that
     /// the bridge's own hello says nothing about the page.
     fn started(&self) -> bool {
-        matches!(self, Self::Talking | Self::Listening { .. })
+        matches!(
+            self,
+            Self::Talking
+                | Self::TalkingUnbridged
+                | Self::ListeningUnbridged
+                | Self::Listening { .. }
+        )
     }
 }
 
@@ -176,14 +188,19 @@ impl Relay {
         self.last_heard = now;
         match message {
             PageMessage::Hello => {
-                if matches!(self.document.page, Page::Silent) {
-                    self.document.page = Page::BridgeUp;
-                }
+                self.document.page = match self.document.page {
+                    Page::Silent => Page::BridgeUp,
+                    Page::TalkingUnbridged => Page::Talking,
+                    Page::ListeningUnbridged => Page::Listening { in_flight: None },
+                    _ => return Ok(()),
+                };
             }
             PageMessage::Receiving => {
-                if !matches!(self.document.page, Page::Listening { .. }) {
-                    self.document.page = Page::Listening { in_flight: None };
-                }
+                self.document.page = match self.document.page {
+                    Page::BridgeUp | Page::Talking => Page::Listening { in_flight: None },
+                    Page::Silent | Page::TalkingUnbridged => Page::ListeningUnbridged,
+                    _ => return Ok(()),
+                };
             }
             PageMessage::Ack(sequence) => match &mut self.document.page {
                 Page::Listening { in_flight } if in_flight_is(in_flight, *sequence) => {
@@ -193,8 +210,10 @@ impl Relay {
                 _ => return Err(()),
             },
             PageMessage::Binary(_) | PageMessage::Text(_) => {
-                if matches!(self.document.page, Page::Silent | Page::BridgeUp) {
-                    self.document.page = Page::Talking;
+                match self.document.page {
+                    Page::Silent => self.document.page = Page::TalkingUnbridged,
+                    Page::BridgeUp => self.document.page = Page::Talking,
+                    _ => {}
                 }
                 self.posted = true;
             }
@@ -384,6 +403,20 @@ mod tests {
         relay.load_started(now);
         assert!(!relay.started(), "a reload starts the document over");
         assert_eq!(relay.next(now), None);
+        relay.heard(&PageMessage::Hello, now).unwrap();
+        assert_eq!(relay.next(now), None, "a hello alone does not listen");
+    }
+
+    #[test]
+    fn a_late_receiving_waits_for_the_new_documents_hello() {
+        let now = Instant::now();
+        let mut relay = ready(now);
+        assert!(relay.queue("AAAA".into()));
+        relay.load_started(now);
+        relay.heard(&PageMessage::Receiving, now).unwrap();
+        assert_eq!(relay.next(now), None, "no delivery before the hello");
+        relay.heard(&PageMessage::Hello, now).unwrap();
+        assert_eq!(relay.next(now), Some((1, "AAAA".into())));
     }
 
     #[test]
