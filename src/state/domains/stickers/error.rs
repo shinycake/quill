@@ -113,6 +113,14 @@ impl Session {
             self.stickers.emoji.mutation_failed = true;
             self.stickers.emoji.mutating_set = None;
         }
+        // Suggestions that waited for the installed sets stop waiting: the
+        // next emoji typed asks again.
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetInstalledStickerSets)
+            && self.stickers.stickers.suggest_waiting_for_sets
+        {
+            self.stickers.stickers.suggest_waiting_for_sets = false;
+            self.stickers.stickers.suggest_for = None;
+        }
         let emoji_purpose = pending.map(|p| p.purpose);
         if emoji_purpose == Some(RequestPurpose::SetEmojiStatus) {
             self.stickers.emoji.pending_status_emoji = None;

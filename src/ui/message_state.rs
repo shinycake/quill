@@ -13,6 +13,9 @@ pub(crate) struct MessageUi {
     /// Message text selected when the message menu opened, if the
     /// selection lies in that message (Quote & Reply, Copy Selected Text).
     pub(super) menu_selection: Option<String>,
+    /// Which occurrence of `menu_selection` in the message the selection
+    /// started at (0 for the first); where Quote & Reply points.
+    pub(super) menu_selection_nth: usize,
     /// Page, report and sticker-set dialogs of the message menu's extras.
     pub(super) menu_ui: super::message_menu_ui::MessageMenuUi,
     /// The link the open message menu was opened over.
@@ -87,6 +90,7 @@ impl MessageUi {
         Self {
             menu: None,
             menu_selection: None,
+            menu_selection_nth: 0,
             menu_ui: super::message_menu_ui::MessageMenuUi::new(window, cx),
             menu_link: None,
             right_clicked_link: None,

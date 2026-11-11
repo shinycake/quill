@@ -85,7 +85,17 @@ pub struct RowFx {
 struct Entry {
     online: Toggle,
     badge: Toggle,
+    /// The last frame that drew the row.
+    seen: Instant,
 }
+
+/// A row not drawn for this long (scrolled away) is new again when it
+/// returns: it snaps to what it shows now instead of animating from what it
+/// showed back then.
+const OUT_OF_SIGHT: Duration = Duration::from_secs(1);
+
+/// Entries kept before the ones out of sight are dropped.
+const KEPT: usize = 512;
 
 /// Per-chat animation state for the visible rows.
 #[derive(Debug, Default)]
@@ -105,10 +115,20 @@ impl RowFxMap {
         animate: bool,
         now: Instant,
     ) -> RowFx {
-        let entry = self.rows.entry(chat).or_insert_with(|| Entry {
+        if self.rows.len() >= KEPT && !self.rows.contains_key(&chat) {
+            self.rows
+                .retain(|_, entry| now.saturating_duration_since(entry.seen) < OUT_OF_SIGHT);
+        }
+        let fresh = || Entry {
             online: Toggle::snapped(online),
             badge: Toggle::snapped(badge),
-        });
+            seen: now,
+        };
+        let entry = self.rows.entry(chat).or_insert_with(fresh);
+        if now.saturating_duration_since(entry.seen) >= OUT_OF_SIGHT {
+            *entry = fresh();
+        }
+        entry.seen = now;
         let online_value = entry.online.set(online, animate, now);
         // Falling edge: snap, the badge row has no exit animation.
         let badge_animate = animate && badge;
@@ -182,6 +202,27 @@ mod tests {
         let gone = map.observe(1, false, false, true, t1 + Duration::from_millis(80));
         assert_eq!(gone.badge, 0.);
         assert!(!gone.animating);
+    }
+
+    #[test]
+    fn a_row_that_left_the_screen_snaps_when_it_returns() {
+        let mut map = RowFxMap::default();
+        let t0 = Instant::now();
+        map.observe(1, false, false, true, t0);
+        // Scrolled away while the contact came online; back a while later.
+        let back = map.observe(1, true, true, true, t0 + Duration::from_secs(30));
+        assert_eq!((back.online, back.badge, back.animating), (1., 1., false));
+    }
+
+    #[test]
+    fn rows_out_of_sight_are_dropped_past_the_cap() {
+        let mut map = RowFxMap::default();
+        let t0 = Instant::now();
+        for chat in 0..super::KEPT as i64 {
+            map.observe(chat, false, false, true, t0);
+        }
+        map.observe(-1, false, false, true, t0 + Duration::from_secs(30));
+        assert_eq!(map.rows.len(), 1);
     }
 
     #[test]

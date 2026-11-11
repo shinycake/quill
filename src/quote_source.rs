@@ -136,6 +136,14 @@ impl QuotableText {
     /// message it may run over several quotable texts, separated by line
     /// feeds; each becomes its own `RichText`. The first occurrence wins.
     pub fn quote_for(&self, selected: &str) -> Option<QuoteSelection> {
+        self.quote_for_nth(selected, 0)
+    }
+
+    /// [`Self::quote_for`] for the `nth` occurrence of `selected` (counted
+    /// from 0) when the same text stands more than once in the message: the
+    /// one the user selected. A count past the last occurrence takes the
+    /// last.
+    pub fn quote_for_nth(&self, selected: &str, nth: usize) -> Option<QuoteSelection> {
         if selected.is_empty() {
             return None;
         }
@@ -145,7 +153,13 @@ impl QuotableText {
             .map(|node| node.text.as_str())
             .collect::<Vec<_>>()
             .join("\n");
-        let start = joined.find(selected)?;
+        let mut starts = joined.match_indices(selected).map(|(at, _)| at);
+        let first = starts.next()?;
+        let start = if nth == 0 {
+            first
+        } else {
+            starts.take(nth).last().unwrap_or(first)
+        };
         let end = start + selected.len();
         let mut quote = QuoteSelection::plain(selected, 0);
         let mut first = true;

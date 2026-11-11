@@ -40,6 +40,10 @@ struct WindowSelected {
     /// offset): their fallback text replaces the placeholders in the
     /// copied string.
     emoji: std::collections::BTreeMap<(u64, usize), String>,
+    /// The text before the selection's start in the first painted text it
+    /// touches, with that text's document order: what tells the second
+    /// "ok." of a message from the first.
+    before: Option<(u64, String)>,
 }
 
 /// Runs `f` on the selection record of `window`, dropping the records of
@@ -661,6 +665,39 @@ impl Element for SelectableRichText {
         {
             with_selected(window, cx, |selected| selected.message = Some(message));
         }
+        let order = self.document_order;
+        let starts_at = (!foreign)
+            .then(|| {
+                projection
+                    .ranges()
+                    .iter()
+                    .flatten()
+                    .find(|range| !range.is_empty())
+                    .map(|range| range.start)
+            })
+            .flatten();
+        let before = starts_at.map(|start| {
+            let shown = self.text.get(..start).unwrap_or_default();
+            match &self.source {
+                Some(map) => map
+                    .source_of(&self.text, 0..start)
+                    .unwrap_or_else(|| shown.to_string()),
+                None => shown.to_string(),
+            }
+        });
+        with_selected(window, cx, |selected| {
+            let earlier = selected
+                .before
+                .as_ref()
+                .is_some_and(|(held, _)| *held < order);
+            match before {
+                Some(before) if !earlier => selected.before = Some((order, before)),
+                None if selected.before.as_ref().is_some_and(|(held, _)| *held == order) => {
+                    selected.before = None;
+                }
+                _ => {}
+            }
+        });
         if let Some(map) = self.source.take() {
             let (text, ranges) = (self.text.clone(), projection.ranges().to_vec());
             handle.copy_with(
@@ -674,7 +711,6 @@ impl Element for SelectableRichText {
                 cx,
             );
         }
-        let order = self.document_order;
         let picked = selected_fallbacks(&self.emoji, projection.ranges());
         with_selected(window, cx, |selected| {
             if self.emoji.is_empty() && selected.emoji.is_empty() {
@@ -907,6 +943,23 @@ pub(super) fn selected_message_text(
         return None;
     }
     Some((message, text.to_string()))
+}
+
+/// Which occurrence of `selected` in its message the window's selection
+/// starts at (counted from 0), for a quote of text that repeats.
+pub(super) fn selected_occurrence(window: &mut Window, cx: &mut App, selected: &str) -> usize {
+    with_selected(window, cx, |held| {
+        held.before.as_ref().map_or(0, |(_, before)| {
+            before
+                .char_indices()
+                .filter(|(at, _)| {
+                    before
+                        .get(*at..)
+                        .is_some_and(|rest| !selected.is_empty() && rest.starts_with(selected))
+                })
+                .count()
+        })
+    })
 }
 
 /// Marks the scrolling region that selectable message text lives in, so a

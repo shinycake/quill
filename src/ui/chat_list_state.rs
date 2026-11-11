@@ -27,6 +27,9 @@ pub(crate) struct ChatListUi {
     /// kit Phase 3: chat-list virtualization — the flat item list the
     /// `VirtualList` renders (main rows + archive section).
     pub(super) items: Vec<ChatListItem>,
+    /// Chat-row online-dot and unread-badge animation state: the account
+    /// on screen's, replaced with it.
+    pub(super) row_fx: std::cell::RefCell<quill::row_fx::RowFxMap>,
     /// Folder tag chip names the rows of `items` draw, built with them.
     pub(super) folder_tags: Rc<super::chat_row::FolderTagContext>,
     /// Chat-row swipe gesture state (`quill::chat_swipe`).
@@ -98,6 +101,7 @@ impl ChatListUi {
             // kit Phase 3: chat list + message history virtualization.
             scroll: VirtualListScrollHandle::new(),
             items: Vec::new(),
+            row_fx: Default::default(),
             folder_tags: Default::default(),
             swipe: Default::default(),
             menu: None,

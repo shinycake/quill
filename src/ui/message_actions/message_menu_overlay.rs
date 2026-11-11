@@ -122,6 +122,7 @@ impl QuillApp {
         // Over a text selection, Reply quotes it and Copy copies it
         // (Telegram Desktop: "Quote & Reply", "Copy Selected Text").
         let selection = self.message_ui.menu_selection.clone();
+        let selection_nth = self.message_ui.menu_selection_nth;
         let content = effective_content(&message.content, message.ephemeral.as_ref());
         // Over a checklist task, Reply becomes "Reply to Task".
         if can_reply && !self.menu_replies_to_task(content) {
@@ -141,7 +142,13 @@ impl QuillApp {
                 {
                     match quote.as_deref() {
                         Some(quote) => {
-                            this.begin_quote_reply(chat_id, message_id, quote, window, cx)
+                            this.begin_quote_reply(
+                                chat_id,
+                                message_id,
+                                (quote, selection_nth),
+                                window,
+                                cx,
+                            )
                         }
                         None => this.begin_reply_from_message(chat_id, message_id, window, cx),
                     }

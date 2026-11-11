@@ -188,7 +188,7 @@ pub use call_types::*;
 pub use chat_activity::*;
 pub use chat_types::*;
 pub use composer_link_preview::*;
-pub use composer_targets::ComposerReplyFetch;
+pub use composer_targets::{ComposerReplyFetch, ReplyFetches};
 pub use conference::*;
 pub use conference_add_people::*;
 pub use conference_invite::*;
