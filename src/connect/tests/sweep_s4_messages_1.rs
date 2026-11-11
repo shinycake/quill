@@ -260,10 +260,10 @@ fn an_attachment_menu_answer_names_its_bot() {
 #[test]
 fn typing_moves_with_the_topic_and_the_cancel_goes_where_the_action_went() {
     let mut t = Flaky::new();
-    t.feed(json!({"@type":"updateNewChat","chat":{"id":-100_7,"title":"Forum",
+    t.feed(json!({"@type":"updateNewChat","chat":{"id":-1_007,"title":"Forum",
         "type":{"@type":"chatTypeSupergroup","supergroup_id":107,"is_channel":false},
         "unread_count":0,"permissions":{"@type":"chatPermissions","can_send_basic_messages":true}}}));
-    t.driver.select_chat(ChatId(-100_7)).unwrap();
+    t.driver.select_chat(ChatId(-1_007)).unwrap();
     t.driver.session.open_topic = Some(5);
     t.driver.sync_outgoing_typing("hi", false, 1_000).unwrap();
     // Another topic of the same chat, inside the 4 s interval.

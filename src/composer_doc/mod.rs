@@ -260,11 +260,11 @@ impl ComposerDoc {
         for span in std::mem::take(&mut self.spans) {
             if span.tag == ComposerTag::Quote {
                 let prev = last_quote.and_then(|at| joined.get_mut(at));
-                if let Some(prev) = prev {
-                    if text.get(prev.range.end..span.range.start) == Some("\n") {
-                        prev.range.end = span.range.end;
-                        continue;
-                    }
+                if let Some(prev) = prev
+                    && text.get(prev.range.end..span.range.start) == Some("\n")
+                {
+                    prev.range.end = span.range.end;
+                    continue;
                 }
                 last_quote = Some(joined.len());
             }
