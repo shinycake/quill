@@ -524,9 +524,8 @@ impl TransportMachine {
         self.buffered = merge_ranges(status.buffered.clone());
         self.has_sound = status.has_sound;
         if self.state() == PlayState::Opening {
-            if flow.is_none() {
-                return None;
-            }
+            // Still not open: nothing more to take in.
+            flow?;
             self.position = status.position.max(0.0);
             self.pulled_at = now;
             self.set_state(if self.wants_play() {
