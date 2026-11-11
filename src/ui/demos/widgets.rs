@@ -13,7 +13,7 @@ register_demos![
     // Tabs, a canvas bar chart and a theme-following card, in one chat.
     DemoSpec::chats("ready-widgets", "screenshot demo — message widgets")
         .setup(QuillApp::demo_ready_widgets),
-    // Widgets as bots send them: an animated game, a weather card, a
+    // Widgets as bots send them: an animated game, two weather cards, a
     // product card and a widget without CSS under its caption.
     DemoSpec::chats(
         "ready-widgets-showcase",
@@ -45,9 +45,12 @@ const WIDGETS: [(i64, bool, &str, &str); 3] = [
 ];
 
 /// The showcase's widgets, as [`WIDGETS`].
-const SHOWCASE: [(i64, bool, &str, &str); 4] = [
+const SHOWCASE: [(i64, bool, &str, &str); 5] = [
     (130, false, "", include_str!("widgets/game.html")),
     (131, false, "", include_str!("widgets/weather.html")),
+    // Its background is on an inner card, as many bots write it: it must
+    // still reach the bubble's bottom edge under the time.
+    (134, false, "", include_str!("widgets/weather-card.html")),
     (132, false, "", include_str!("widgets/product.html")),
     (
         133,

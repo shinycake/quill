@@ -163,7 +163,6 @@ fn apply(
             }
         }
         Inbox::Data(data) => native.set_data(&data),
-        Inbox::SafeArea(area) => native.set_safe_area(&area),
         Inbox::Width(width) => native.set_width(width),
         Inbox::Respond { token, outcome } => {
             native.respond(token, outcome.as_deref().map_err(|code| *code))

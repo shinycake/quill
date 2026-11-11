@@ -229,8 +229,6 @@ pub(super) struct WidgetEntry {
     pub queries: HashMap<u64, u64>,
     /// The theme and bubble color the runtime has, to send only changes.
     pub theme: Option<(String, [u8; 3])>,
-    /// The band the owner's time covers, as the runtime has it.
-    pub safe_area: SafeArea,
 }
 
 impl WidgetEntry {
@@ -256,7 +254,6 @@ impl WidgetEntry {
             selection: String::new(),
             queries: HashMap::new(),
             theme: None,
-            safe_area: SafeArea::default(),
         }
     }
 
@@ -275,31 +272,11 @@ impl WidgetEntry {
     }
 }
 
-/// The band Quill's time takes over a widget's bottom corner, CSS px
-/// (the widget's `contentSafeAreaInset`): all zero when the time sits
-/// under the widget instead.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub(crate) struct SafeArea {
-    pub bottom: f32,
-    pub corner_right: f32,
-}
-
-impl SafeArea {
-    /// `{top, right, bottom, left, cornerLeft, cornerRight}` for the runtime.
-    pub(super) fn json(self) -> serde_json::Value {
-        serde_json::json!({
-            "top": 0, "right": 0, "left": 0, "cornerLeft": 0,
-            "bottom": self.bottom, "cornerRight": self.corner_right,
-        })
-    }
-}
-
 /// How a window's pass drew one widget.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(super) struct Noted {
     /// The card width, CSS px.
     pub width: f32,
-    pub safe_area: SafeArea,
 }
 
 /// What the history passes of this frame drew, per window.

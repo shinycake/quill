@@ -5,6 +5,9 @@
 //! The card fills the bubble edge to edge and takes the bubble's rounded
 //! corners, as a photo does; the time sits on a pill over its bottom
 //! corner unless a caption or other rows follow it ([`time_over_widget`]).
+//! No band is kept clear under the pill: a widget whose background stops
+//! above a band leaves a strip of bubble under it, and Telegram's own apps
+//! draw widgets to the bubble's bottom edge with the time over them.
 //! The mouse over it goes to the runtime (`widgets_ui.rs`); the wheel
 //! scrolls the history, and a right-click opens the message menu unless
 //! the widget holds the press for a menu of its own.
@@ -13,7 +16,6 @@
 use super::app::QuillApp;
 use super::message_media::MediaCorners;
 use super::widget_runtime::Input;
-use super::widgets_state::SafeArea;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -77,26 +79,6 @@ pub(in crate::ui) fn widget_width(
     )))
 }
 
-/// The band the time pill takes over a widget (`media_footer_pill`): its
-/// height plus the inset under it, and its width plus the inset beside it.
-fn time_safe_area(message: &HistoryMessage) -> SafeArea {
-    use super::synthetic::{MEDIA_PILL_HEIGHT, MEDIA_PILL_INSET, MEDIA_PILL_PAD_X};
-    if !time_over_widget(message, false) {
-        return SafeArea::default();
-    }
-    let mut footer = f32::from(super::synthetic::footer_reserve(message.is_outgoing));
-    if message.extras.edit_date > 0 || message.extras.import_info.is_some() {
-        footer += 44.0;
-    }
-    if message.is_pinned {
-        footer += 20.0;
-    }
-    SafeArea {
-        bottom: MEDIA_PILL_HEIGHT + MEDIA_PILL_INSET,
-        corner_right: footer + 2.0 * MEDIA_PILL_PAD_X + MEDIA_PILL_INSET,
-    }
-}
-
 impl QuillApp {
     /// The card of the widget message `message` in a bubble that leaves it
     /// at most `room` CSS px; `None` for other messages.
@@ -114,7 +96,7 @@ impl QuillApp {
             message_id: message.id,
         };
         let width = Self::widget_card_width(content, room);
-        self.note_widget(key, width, time_safe_area(message));
+        self.note_widget(key, width);
         let entry = self.widgets.entries.get(&key);
         let id = message.id.0 as u64;
         let look = match entry {

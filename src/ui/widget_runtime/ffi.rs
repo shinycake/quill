@@ -84,7 +84,6 @@ unsafe extern "C" {
     fn qw_set_visible(widget: *mut Widget, visible: bool);
     fn qw_set_theme(widget: *mut Widget, theme: *const c_char, len: usize);
     fn qw_set_data(widget: *mut Widget, data: *const c_char, len: usize);
-    fn qw_set_safe_area(widget: *mut Widget, area: *const c_char, len: usize);
     fn qw_set_width(widget: *mut Widget, width: f64);
     fn qw_respond(widget: *mut Widget, token: u64, failure: i32, result: *const c_char, len: usize);
     fn qw_pointer(
@@ -247,9 +246,6 @@ impl Native {
     }
     pub fn set_data(&mut self, data: &str) {
         self.with_text(data, qw_set_data);
-    }
-    pub fn set_safe_area(&mut self, area: &str) {
-        self.with_text(area, qw_set_safe_area);
     }
     pub fn set_width(&mut self, width: f64) {
         // SAFETY: a live widget.

@@ -144,9 +144,13 @@ Desktop's HtmlWidget have it: no padding of its own, clipped by the bubble's
 rounded corners, as wide as the message column allows. The widget's body
 margin (`--tg-text-padding`, 8px 12px) is its only inset. When nothing sits
 under the widget (no caption, no buttons, no reactions), the time goes on a
-dark pill over the bottom right corner, as on photos, and the widget gets
-that corner as `contentSafeArea` (`bottom`, `cornerRight`), updated when the
-time's width changes (edited, pinned). With a caption the time stays on the
+dark pill over the bottom right corner, as on photos, and the widget keeps
+the whole bubble: Quill reports no `contentSafeArea` band. With a band, the
+default styles pad the body by it, so a widget whose background sits on an
+inner element left a strip of bare bubble under the pill (owner, 2026-11-10:
+"widgets take up all of the message"). Telegram's own apps draw widgets to the
+bottom edge with the time over them, and the spec already tells widgets to
+put nothing tappable under the time. With a caption the time stays on the
 caption's line. A reply or forward header keeps the bubble's padding above
 the widget. The default `<button>` takes the app's primary color and radius
 through the `--tg-button-*` tokens. Demo: `ready-widgets-showcase`.
