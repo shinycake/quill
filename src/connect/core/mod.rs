@@ -3,6 +3,7 @@ use super::composer::ai_rich_draft_note;
 use super::*;
 use crate::credentials::TelegramCredentials;
 use crate::ids::{ChatId, ChatMessage, MessageId, RequestId};
+use crate::state::{AiAnswer, AiResult};
 use crate::state::{
     ComposerLinkPreview, InstantViewPage, LinkPreviewFetch, RequestPurpose, Session, ShutdownPhase,
 };
@@ -260,8 +261,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // chat id rides `PendingRequest::chat_id` (the purposes are unit
         // variants); the UI drains `Session::ai_composer_text` into the
         // composer draft.
-        let ai_text_answer: Option<(Option<ChatId>, ChatId, String)> = match &owned.envelope.payload
-        {
+        let ai_text_answer: Option<AiAnswer> = match &owned.envelope.payload {
             EnvelopePayload::Messages(MessagesPayload::AiCompose(
                 AiComposePayload::FixedText { text, .. },
             ))
@@ -276,9 +276,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                     )
                 })
                 .and_then(|pending| {
-                    pending
-                        .chat_id
-                        .map(|chat_id| (pending.asked_in.chat(), chat_id, text.clone()))
+                    pending.chat_id.map(|chat| AiAnswer {
+                        request: pending.id,
+                        window: pending.asked_in.chat(),
+                        chat,
+                        result: AiResult::Text(text.clone()),
+                    })
                 }),
             _ => None,
         };
@@ -288,28 +291,30 @@ impl<S: JsonSender> ConnectDriver<S> {
         // the pending request. Same drain contract as the text answers.
         // The UI serializes the blocks back to editor markup; the note
         // records which method answered.
-        let ai_rich_answer: Option<(Option<ChatId>, ChatId, RichMessageContent, &'static str)> =
-            match &owned.envelope.payload {
-                EnvelopePayload::Messages(MessagesPayload::RichMessage { rich }) => owned
-                    .envelope
-                    .extra
-                    .and_then(|id| self.session.requests.get(id))
-                    .filter(|pending| {
-                        matches!(
-                            pending.purpose,
-                            RequestPurpose::ComposeRichMessageWithAi
-                                | RequestPurpose::CreateRichMessageWithAi
-                                | RequestPurpose::FixRichMessageWithAi
-                        )
+        let ai_rich_answer: Option<AiAnswer> = match &owned.envelope.payload {
+            EnvelopePayload::Messages(MessagesPayload::RichMessage { rich }) => owned
+                .envelope
+                .extra
+                .and_then(|id| self.session.requests.get(id))
+                .filter(|pending| {
+                    matches!(
+                        pending.purpose,
+                        RequestPurpose::ComposeRichMessageWithAi
+                            | RequestPurpose::CreateRichMessageWithAi
+                            | RequestPurpose::FixRichMessageWithAi
+                    )
+                })
+                .and_then(|pending| {
+                    let note = ai_rich_draft_note(pending.purpose);
+                    pending.chat_id.map(|chat| AiAnswer {
+                        request: pending.id,
+                        window: pending.asked_in.chat(),
+                        chat,
+                        result: AiResult::Blocks(rich.clone(), note),
                     })
-                    .and_then(|pending| {
-                        let note = ai_rich_draft_note(pending.purpose);
-                        pending
-                            .chat_id
-                            .map(|chat_id| (pending.asked_in.chat(), chat_id, rich.clone(), note))
-                    }),
-                _ => None,
-            };
+                }),
+            _ => None,
+        };
         // M1 fix-up: capture the `getMessageProperties` answer for the
         // "Share link" gate before `apply` takes the pending request.
         let link_gate: Option<(ChatId, MessageId, bool)> = match &owned.envelope.payload {
@@ -553,12 +558,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Slice msg-richtext-ai-tools: stash AI answers for the composer
         // drain. A late answer for a chat the user has since left is
         // dropped by the UI (chat-id check), never applied blindly.
-        if let Some((window, chat_id, text)) = ai_text_answer {
-            self.session.messages.ai_composer_text = Some((window, chat_id, text));
-        }
-        if let Some((window, chat_id, rich, note)) = ai_rich_answer {
-            self.session.messages.ai_composer_blocks = Some((window, chat_id, rich, note));
-        }
+        self.session
+            .messages
+            .ai_answers
+            .extend(ai_text_answer.into_iter().chain(ai_rich_answer));
         // A5: stash the `checkChatUsername` verdict for the
         // edit-profile dialog.
         if let Some((request, result)) = username_check_answer {

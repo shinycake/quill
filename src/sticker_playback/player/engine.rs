@@ -74,7 +74,9 @@ pub(super) enum Stage {
     /// thread running).
     Opening,
     /// Opener thread `opener` is decoding it.
-    Decoding { opener: usize },
+    Decoding {
+        opener: usize,
+    },
     /// Open, and no worker is on it.
     Ready(ClipInfo),
     /// Open, and a worker is drawing frame `index`.
@@ -802,7 +804,10 @@ impl State {
 
     /// The next clip for an opener to decode, with its id and what stops
     /// it.
-    pub(super) fn next_decode(&mut self, opener: usize) -> Option<(ClipKey, u64, DecodeAll, Cancel)> {
+    pub(super) fn next_decode(
+        &mut self,
+        opener: usize,
+    ) -> Option<(ClipKey, u64, DecodeAll, Cancel)> {
         if self.workers_decode {
             return None;
         }

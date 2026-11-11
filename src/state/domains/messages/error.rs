@@ -313,6 +313,16 @@ impl Session {
                 | RequestPurpose::CreateRichMessageWithAi
                 | RequestPurpose::FixRichMessageWithAi,
             ) => {
+                if let Some(pending) = pending
+                    && let Some(chat) = pending.chat_id
+                {
+                    self.messages.ai_answers.push(AiAnswer {
+                        request: pending.id,
+                        window: pending.asked_in.chat(),
+                        chat,
+                        result: AiResult::Failed,
+                    });
+                }
                 self.messages.ai_error.push(match err.class {
                     ErrorClass::AiComposeFloodPremium => {
                         "AI limit reached — Telegram Premium is required for more requests"

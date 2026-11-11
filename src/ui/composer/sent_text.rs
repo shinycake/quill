@@ -38,8 +38,10 @@ impl SentText {
 pub(in crate::ui) enum AiAsk {
     #[default]
     Idle,
-    /// Asked about this markup; the answer applies while the field holds it.
-    Asked { markup: String },
+    /// Asked about this markup under `request`; that request's answer
+    /// applies while the field holds the markup, and its error ends the
+    /// ask. Any other request's answer is stale.
+    Asked { request: RequestId, markup: String },
 }
 
 impl QuillApp {
