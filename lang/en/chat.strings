@@ -275,6 +275,7 @@
 "qll_chat_downloading_1_file" = "Downloading 1 file…";
 "qll_chat_downloading_choose_save_again_when" = "Downloading… choose Save again when it finishes";
 "qll_chat_downloading_choose_save_as_again" = "Downloading… choose Save As again when it finishes";
+"qll_chat_could_not_start_the_download" = "Couldn't start the download";
 "qll_chat_downloading_files#one" = "downloading {count} file…";
 "qll_chat_downloading_files#other" = "downloading {count} files…";
 "qll_chat_drop_a_single_file_to" = "Drop a single file to replace the attachment.";

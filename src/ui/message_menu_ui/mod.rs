@@ -405,13 +405,17 @@ impl QuillApp {
             });
         let Some(target) = target else { return };
         let Some((_, path)) = self.menu_media_local(chat_id, message_id) else {
-            // Start the download so a second try finds the file.
-            if let Some(live) = self.live.as_mut() {
-                let _ = live.driver.ensure_media_files(&[target.file_id]);
-            }
-            self.set_note(StatusNote::silent(tr(
-                keys::Q_CHAT_DOWNLOADING_CHOOSE_SAVE_AS_AGAIN,
-            )));
+            // Start the download so a second try finds the file; a refused
+            // send says so instead of promising one.
+            let asked = self
+                .live
+                .as_mut()
+                .is_none_or(|live| live.driver.ensure_media_files(&[target.file_id]).is_ok());
+            self.set_note(if asked {
+                StatusNote::silent(tr(keys::Q_CHAT_DOWNLOADING_CHOOSE_SAVE_AS_AGAIN))
+            } else {
+                StatusNote::error(tr(keys::Q_CHAT_COULD_NOT_START_THE_DOWNLOAD))
+            });
             cx.notify();
             return;
         };

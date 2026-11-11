@@ -30,7 +30,6 @@ DragSelect::pending
 Drawn::leaving
 FastShareFacts::sent
 FieldResult::finished
-FooterMeta::pending
 
 GiveawaySummary::finished
 

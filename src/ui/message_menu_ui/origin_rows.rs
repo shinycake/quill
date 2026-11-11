@@ -130,8 +130,20 @@ impl QuillApp {
             move |this, _, cx| {
                 this.close_message_menu();
                 if let Some(session) = this.origin_session_mut() {
-                    session.users_state.replies_block = Some(block.clone());
-                    this.open_box(DialogKind::BlockFromReplies);
+                    // A block already out is not replaced: its answer
+                    // would find another target.
+                    let submitting = session.users_state.replies_block.as_ref().is_some_and(
+                        |open| {
+                            matches!(
+                                open.stage,
+                                quill::message_menu_origin::RepliesBlockStage::Submitting(_)
+                            )
+                        },
+                    );
+                    if !submitting {
+                        session.users_state.replies_block = Some(block.clone());
+                        this.open_box(DialogKind::BlockFromReplies);
+                    }
                 }
                 cx.notify();
             },
