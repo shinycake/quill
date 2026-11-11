@@ -26,7 +26,6 @@ CallSummary::busy
 CallUi::window_opening
 CameraDraft::starting
 Ceremony::finished
-ChatListState::archive_settings_loading
 ChatSummary::my_rights_fetched
 ChatSwipeFacts::is_saved
 ChatUi::inline_query_waiting
