@@ -44,6 +44,31 @@ impl Fixture {
         f
     }
 
+    /// Forum 16 in a chat window of its own while the main window shows
+    /// chat 7.
+    fn forum_in_window() -> Self {
+        let store = MemorySecretStore::new();
+        let (dir, prepared) = prepared_tmp(&store);
+        let sink = Arc::new(MemorySink::new());
+        let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+        let recorder = Arc::new(RecordingSender::new());
+        let seq = AtomicU64::new(0);
+        let driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
+        let mut f = Self {
+            driver,
+            recorder,
+            dyn_sink,
+            seq,
+            dir,
+        };
+        f.ingest(r#"{"@type":"updateNewChat","chat":{"id":16,"title":"Forum","type":{"@type":"chatTypeSupergroup","supergroup_id":16,"is_channel":false},"unread_count":0}}"#);
+        f.ingest(r#"{"@type":"updateSupergroup","supergroup":{"@type":"supergroup","id":16,"is_forum":true,"status":{"@type":"chatMemberStatusMember"}}}"#);
+        f.ingest(r#"{"@type":"updateNewChat","chat":{"id":7,"title":"Alice","type":{"@type":"chatTypePrivate","user_id":7},"unread_count":0}}"#);
+        f.driver.select_chat(ChatId(7)).unwrap();
+        f.driver.open_chat_window(ChatId(16)).unwrap();
+        f
+    }
+
     fn ingest(&mut self, json: &str) {
         self.driver
             .ingest(copy_and_parse(json, &self.seq, &self.dyn_sink).unwrap())
@@ -162,4 +187,27 @@ fn retry_after_a_failed_jump_asks_for_the_first_page_again() {
     assert!(f.driver.session.topic_history_loading(ChatId(16), 3));
     f.answer_page(&(951..=1000).rev().collect::<Vec<_>>(), 951);
     assert_eq!(f.topic().newest_loaded_id(), Some(MessageId(1000)));
+}
+
+/// A topic opened in a chat window pages that window's chat and topic: the
+/// session's open chat and topic are the view in place, which is the
+/// window's while its work runs (`with_window_chat`), never the main
+/// window's.
+#[test]
+fn a_topic_in_a_chat_window_pages_that_windows_chat() {
+    let mut f = Fixture::forum_in_window();
+    let selected = f
+        .driver
+        .with_window_chat(ChatId(16), |driver| driver.select_topic(3));
+    assert!(selected.unwrap().is_some());
+    let request = f.last_search();
+    assert_eq!(request["chat_id"], 16);
+    assert_eq!(request["topic_id"]["forum_topic_id"], 3);
+    // The main window's view is untouched.
+    assert_eq!(f.driver.session.open_chat, Some(ChatId(7)));
+    assert_eq!(f.driver.session.open_topic, None);
+    let older = f
+        .driver
+        .with_window_chat(ChatId(16), |driver| driver.fetch_topic_history());
+    assert!(older.is_ok());
 }

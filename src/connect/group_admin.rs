@@ -239,6 +239,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             // request: the chat stays protected until TDLib says otherwise.
             return Ok(Some(extra));
         }
+        let previous_disabled_at = self.session.groups.private_sharing.disabled_at(chat_id);
         if private {
             self.session
                 .groups
@@ -251,6 +252,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             pending.rollback = Some(RequestRollback::ProtectedContent {
                 chat_id: chat_id.0,
                 previous,
+                previous_disabled_at,
             });
         }
         Ok(Some(extra))

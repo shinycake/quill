@@ -22,8 +22,6 @@ BarFacts::bot_start_pending
 BotCreateDialog::submitted
 BotEditTexts::load_failed
 BotEditTexts::load_failed+error
-BusinessExtraState::chat_links_requested
-BusinessExtraState::connected_bot_requested
 BusinessSettingsState::time_zones_requested
 BusinessSettingsState::time_zones_requested+error
 CallSnap::connecting

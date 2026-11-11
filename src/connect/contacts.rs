@@ -57,6 +57,26 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         user_id: i64,
     ) -> Result<Option<RequestId>, ConnectSendError> {
+        self.session
+            .users_state
+            .user_full_infos
+            .forget_failure(&user_id);
+        self.send_user_full_info(user_id)
+    }
+
+    /// The ask a render makes for a user's full info: once, and not again
+    /// after it failed (`fetch_user_full_info` is the retry).
+    pub fn ensure_user_full_info(
+        &mut self,
+        user_id: i64,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        if self.session.users_state.user_full_infos.failed(&user_id) {
+            return Ok(None);
+        }
+        self.send_user_full_info(user_id)
+    }
+
+    fn send_user_full_info(&mut self, user_id: i64) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }

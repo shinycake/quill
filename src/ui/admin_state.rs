@@ -6,6 +6,13 @@ use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::ids::ChatId;
 
+/// The recent-actions search box and whose stored query it shows: it is
+/// refilled whenever the open log's chat is another one.
+pub(crate) struct EventLogSearch {
+    pub(super) input: Entity<TextareaState>,
+    pub(super) shows: Option<ChatId>,
+}
+
 pub(crate) struct AdminUi {
     /// The New Link / Edit Link box (`invite_link_box/`).
     pub(super) invite_link_box: Option<super::invite_link_box::InviteLinkBox>,
@@ -32,7 +39,7 @@ pub(crate) struct AdminUi {
     pub(super) forum_manage_dialog: Option<ForumManageDialog>,
     /// Slice G2: event-log search input for the info panel's
     /// "Recent actions" section (created lazily when the panel opens).
-    pub(super) event_log_search: Option<Entity<TextareaState>>,
+    pub(super) event_log_search: Option<EventLogSearch>,
     /// The recent-actions list (oldest event first, newest at the bottom):
     /// earlier events load when it is scrolled to its top.
     pub(super) event_log_list: ListState,
@@ -43,7 +50,7 @@ pub(crate) struct AdminUi {
     /// The list reports its scrolling to the app (set up once).
     pub(super) event_log_hooked: bool,
     /// The list length an automatic "load earlier" was last asked for.
-    pub(super) event_log_autoload: std::cell::Cell<usize>,
+    pub(super) event_log_autoload: std::cell::Cell<Option<(ChatId, usize)>>,
     /// The chat whose recent-actions poll is running (one timer task).
     pub(super) event_log_poll: Option<ChatId>,
     /// B7: group / channel settings dialog (topics, history, reactions,
@@ -102,7 +109,7 @@ impl AdminUi {
             event_log_ids: std::cell::RefCell::new(Vec::new()),
             event_log_keystroke: 0,
             event_log_hooked: false,
-            event_log_autoload: std::cell::Cell::new(0),
+            event_log_autoload: std::cell::Cell::new(None),
             event_log_poll: None,
             group_settings_dialog: None,
             join_requests_dialog: None,

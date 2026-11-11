@@ -10,6 +10,14 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// call is refused with `Ok(None)`. The response is `communityId`
     /// (the update `updateCommunity` is guaranteed to arrive first); the
     /// ingest chain resolves the id into `getCommunityFullInfo`.
+    /// A `createCommunity` for this chat is out (a second Create is that
+    /// one, not a lost chat).
+    pub fn community_create_out(&self, chat_id: ChatId) -> bool {
+        self.session
+            .requests
+            .has_purpose_for_chat(RequestPurpose::CreateCommunity, chat_id)
+    }
+
     pub fn create_community(
         &mut self,
         chat_id: ChatId,

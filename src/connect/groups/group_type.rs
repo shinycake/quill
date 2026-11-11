@@ -3,7 +3,9 @@
 //! freeing a link, and the save of the box's choice.
 use super::*;
 use crate::group_type::GroupTypeEdit;
-use crate::state::{EditAfterUpgrade, GroupTypePurpose, PublicChatsFetch, PublicLinkRevoke};
+use crate::state::{
+    EditAfterUpgrade, GroupTypePurpose, PublicChatsFetch, PublicLinkRevoke, UsernameCheck,
+};
 use crate::telegram::requests::{
     check_chat_username, check_created_public_chats_limit, disable_all_supergroup_usernames,
     reorder_supergroup_active_usernames, set_supergroup_username,
@@ -34,14 +36,18 @@ impl<S: JsonSender> ConnectDriver<S> {
         let state = &mut self.session.groups.group_type;
         state.check_generation = state.check_generation.wrapping_add(1);
         let generation = state.check_generation;
-        state.check_pending = Some((chat_id, username.to_string()));
-        state.check_failed = None;
         let extra = self.session.request(
             purpose(GroupTypePurpose::CheckChatUsername { generation }),
             Some(chat_id),
         );
-        self.send_json_request(extra, &check_chat_username(extra, ChatId(target), username))
-            .map(Some)
+        self.send_json_request(extra, &check_chat_username(extra, ChatId(target), username))?;
+        // Only a check that went out is "in flight": a failed send leaves
+        // the field as it was, with no answer to wait for.
+        self.session.groups.group_type.check = UsernameCheck::Checking {
+            chat_id,
+            username: username.to_string(),
+        };
+        Ok(Some(extra))
     }
 
     /// `checkCreatedPublicChatsLimit`, asked when a private chat's Type box
@@ -112,19 +118,30 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::SetSupergroupUsername, Some(chat_id));
         self.send_json_request(clear, &set_supergroup_username(clear, supergroup_id, ""))?;
+        // The first request is out: record it before the second goes, so a
+        // failed second send still ends in a settled revoke (the note and a
+        // fresh list) instead of a link cleared with nothing to say so.
+        self.session.groups.group_type.revoke = Some(PublicLinkRevoke {
+            chat_id,
+            requests: vec![clear],
+            failed: false,
+        });
         let disable = self.session.request(
             purpose(GroupTypePurpose::DisableAllUsernames),
             Some(chat_id),
         );
-        self.send_json_request(
+        if let Err(err) = self.send_json_request(
             disable,
             &disable_all_supergroup_usernames(disable, supergroup_id),
-        )?;
-        self.session.groups.group_type.revoke = Some(PublicLinkRevoke {
-            chat_id,
-            requests: vec![clear, disable],
-            failed: false,
-        });
+        ) {
+            if let Some(revoke) = self.session.groups.group_type.revoke.as_mut() {
+                revoke.failed = true;
+            }
+            return Err(err);
+        }
+        if let Some(revoke) = self.session.groups.group_type.revoke.as_mut() {
+            revoke.requests.push(disable);
+        }
         Ok(Some(clear))
     }
 
@@ -252,10 +269,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !ok {
             return;
         }
-        let Some(new) = self.session.upgraded_chat_for(edit.old) else {
-            return;
-        };
-        if self.save_group_type(new, &edit.kind, &edit.info).is_err() {
+        // The edits were queued for a chat that now has no id to send them
+        // to (the answer named none): say so, as for a failed send, instead
+        // of dropping them after the box closed as saved.
+        let saved = self
+            .session
+            .upgraded_chat_for(edit.old)
+            .is_some_and(|new| self.save_group_type(new, &edit.kind, &edit.info).is_ok());
+        if !saved {
             self.session.chats_state.chat_action_error =
                 Some("the group was upgraded, but its link could not be saved".to_string());
         }

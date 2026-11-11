@@ -335,6 +335,17 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
     }
 
+    /// An invitation that came in while you were in a call, or too old to
+    /// ring, or rang out unanswered, is declined (tdesktop
+    /// `declineIncomingConferenceInvites`).
+    pub(crate) fn send_conference_declines(&mut self) {
+        for (chat_id, message_id) in
+            std::mem::take(&mut self.session.calls.conference_invite_declines)
+        {
+            let _ = self.decline_group_call_invitation(chat_id.0, message_id.0);
+        }
+    }
+
     /// After every update: a conference made from a 1:1 call, once it has
     /// its link, ends the 1:1 call with it and invites the people picked
     /// (tdesktop `startedConferenceReady`: `finishConferenceInvitations`,
@@ -342,13 +353,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `callDiscardReasonUpgradeToGroupCall`, joins by the link
     /// (`finishByMigration`).
     pub(crate) fn maybe_continue_conference(&mut self) -> Result<(), ConnectSendError> {
-        // An invitation that came in while you were in a call, or too old
-        // to ring, is declined (tdesktop `declineIncomingConferenceInvites`).
-        for (chat_id, message_id) in
-            std::mem::take(&mut self.session.calls.conference_invite_declines)
-        {
-            let _ = self.decline_group_call_invitation(chat_id.0, message_id.0);
-        }
+        self.send_conference_declines();
         // Following the other side into its conference: a join that
         // can't go out, or fails later (`error.rs`), ends the 1:1 call as
         // failed, with its end screen (tdesktop `finishByMigration`).

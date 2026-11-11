@@ -186,3 +186,81 @@ fn delete_on_the_removed_list_makes_the_user_left_not_a_member() {
     assert_eq!(request["member_id"]["user_id"], 5);
     assert_eq!(request["status"]["@type"], "chatMemberStatusLeft");
 }
+
+/// Round 2, 167: a save while an earlier setChatPermissions is out is sent
+/// too, and if both are refused the box shows the permissions from before
+/// the first, not the ones the first showed.
+#[test]
+fn a_second_save_while_one_is_out_is_sent_and_rolls_back_to_the_original() {
+    let mut rig = Rig::new();
+    rig.owned_supergroup();
+    let original = current(&rig);
+    let first = toggle(original, Permission::SendText, false);
+    let second = toggle(first, Permission::Videos, false);
+    let a = rig.driver.set_chat_permissions(ChatId(13), &first).unwrap();
+    let b = rig
+        .driver
+        .set_chat_permissions(ChatId(13), &second)
+        .unwrap();
+    assert!(a.is_some() && b.is_some(), "the second is not dropped");
+    assert_eq!(rig.sent("setChatPermissions").len(), 2);
+    assert_eq!(current(&rig), second);
+    for extra in [a, b].into_iter().flatten() {
+        rig.ingest(&format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"X"}}"#,
+            extra.0
+        ));
+    }
+    assert_eq!(current(&rig), original);
+}
+
+/// Round 2, 167: the first save is accepted (TDLib sends
+/// `updateChatPermissions` for it) and the second refused: the box shows
+/// the first's permissions, which the server has, not the original.
+#[test]
+fn a_refused_second_save_restores_what_the_accepted_first_saved() {
+    let mut rig = Rig::new();
+    rig.owned_supergroup();
+    let original = current(&rig);
+    let first = toggle(original, Permission::SendText, false);
+    let second = toggle(first, Permission::Videos, false);
+    let a = rig.driver.set_chat_permissions(ChatId(13), &first).unwrap();
+    let b = rig
+        .driver
+        .set_chat_permissions(ChatId(13), &second)
+        .unwrap();
+    let (Some(a), Some(b)) = (a, b) else {
+        panic!("both saves are sent");
+    };
+    rig.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, a.0));
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":400,"message":"X"}}"#,
+        b.0
+    ));
+    assert_eq!(current(&rig), first);
+}
+
+/// The first refused while the second is out: the second decides.
+#[test]
+fn an_accepted_second_save_stands_after_a_refused_first() {
+    let mut rig = Rig::new();
+    rig.owned_supergroup();
+    let original = current(&rig);
+    let first = toggle(original, Permission::SendText, false);
+    let second = toggle(first, Permission::Videos, false);
+    let a = rig.driver.set_chat_permissions(ChatId(13), &first).unwrap();
+    let b = rig
+        .driver
+        .set_chat_permissions(ChatId(13), &second)
+        .unwrap();
+    let (Some(a), Some(b)) = (a, b) else {
+        panic!("both saves are sent");
+    };
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":400,"message":"X"}}"#,
+        a.0
+    ));
+    assert_eq!(current(&rig), second, "the later save is still out");
+    rig.ingest(&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, b.0));
+    assert_eq!(current(&rig), second);
+}

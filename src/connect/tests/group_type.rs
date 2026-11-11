@@ -93,7 +93,10 @@ fn only_the_newest_check_counts() {
     assert_eq!(sent.len(), 2);
     assert_eq!(sent[0]["chat_id"], 13);
     rig.answer(old, "checkChatUsernameResultOk");
-    assert_eq!(rig.driver.session.groups.group_type.check, None);
+    assert!(!matches!(
+        rig.driver.session.groups.group_type.check,
+        crate::state::UsernameCheck::Verdict(_)
+    ));
     rig.answer(new, "checkChatUsernameResultUsernameOccupied");
     assert_eq!(
         rig.driver
@@ -127,7 +130,10 @@ fn a_failed_check_is_recorded_until_the_next_one() {
     let session = &rig.driver.session;
     assert!(session.group_username_check_failed(ChatId(13), "quillchat"));
     assert!(!session.group_username_check_failed(ChatId(13), "quillchats"));
-    assert_eq!(session.groups.group_type.check_pending, None);
+    assert!(matches!(
+        session.groups.group_type.check,
+        crate::state::UsernameCheck::Failed { .. }
+    ));
     rig.driver
         .check_group_username(ChatId(13), "quillchat")
         .unwrap();
@@ -283,4 +289,53 @@ fn a_failed_revoke_ends_so_the_box_can_revoke_again() {
     // The box is usable again: a second Revoke goes out.
     assert!(rig.driver.revoke_public_link(ChatId(13)).unwrap().is_some());
     assert_eq!(rig.sent("setSupergroupUsername").len(), 2);
+}
+
+/// Round 12, 016: the second send of a revoke failing leaves the first out
+/// with a revoke recorded, so its answer settles it with the note and a
+/// fresh list instead of leaving a cleared link nobody reports.
+#[test]
+fn a_half_sent_revoke_is_recorded_and_settles() {
+    let mut rig = Rig::new();
+    rig.driver.session.groups.group_type.public_limit_reached = Some(true);
+    rig.recorder.refuse(Some("disableAllSupergroupUsernames"));
+    assert!(rig.driver.revoke_public_link(ChatId(13)).is_err());
+    rig.recorder.refuse(None);
+    let revoke = rig.driver.session.groups.group_type.revoke.clone().unwrap();
+    assert_eq!(revoke.requests.len(), 1);
+    rig.answer(revoke.requests[0], "ok");
+    let state = &rig.driver.session.groups.group_type;
+    assert_eq!(state.revoke, None);
+    assert!(rig.driver.session.chats_state.chat_action_error.is_some());
+    assert_eq!(state.public_chats, crate::state::PublicChatsFetch::None);
+}
+
+/// Round 2, 120: a check that could not be sent is not "Checking...".
+#[test]
+fn a_check_that_could_not_be_sent_is_not_in_flight() {
+    let mut rig = Rig::new();
+    rig.recorder.refuse(Some("checkChatUsername"));
+    assert!(
+        rig.driver
+            .check_group_username(ChatId(13), "quillchat")
+            .is_err()
+    );
+    assert_eq!(
+        rig.driver.session.groups.group_type.check,
+        crate::state::UsernameCheck::Idle
+    );
+}
+
+/// Round 2, 121: queued edits that find no upgraded chat are reported, not
+/// dropped.
+#[test]
+fn queued_edits_without_an_upgraded_chat_are_reported() {
+    let mut rig = Rig::new();
+    let edit = crate::state::EditAfterUpgrade {
+        old: ChatId(30),
+        info: Vec::new(),
+        kind: Vec::new(),
+    };
+    rig.driver.run_edit_after_upgrade(edit, true);
+    assert!(rig.driver.session.chats_state.chat_action_error.is_some());
 }

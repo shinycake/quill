@@ -646,3 +646,38 @@ fn reopening_during_a_search_shows_the_full_list_not_the_search() {
     };
     assert_eq!(list.total_count, 2);
 }
+
+/// Round 10, 042: a fetch that cannot be sent leaves a failed entry (drawn
+/// with its Retry), not nothing, which a page draws as a spinner.
+#[test]
+fn a_fetch_that_cannot_be_sent_is_a_failed_page_with_a_retry() {
+    use crate::state::{AdminListFetch, JoinRequestFetch};
+    let mut rig = Rig::new(false, ADMIN);
+    rig.recorder.refuse(Some("getChatInviteLinks"));
+    assert!(rig.driver.fetch_chat_invite_links(ChatId(13)).is_err());
+    assert!(matches!(
+        rig.driver.session.groups.invite_links.get(&13),
+        Some(InviteLinkFetch::Failed(_))
+    ));
+    rig.recorder.refuse(Some("getChatJoinRequests"));
+    assert!(rig.driver.fetch_chat_join_requests(ChatId(13)).is_err());
+    assert!(matches!(
+        rig.driver.session.groups.join_requests.get(&13),
+        Some(JoinRequestFetch::Failed(_))
+    ));
+    let mut rig = Rig::new(false, CREATOR);
+    rig.recorder.refuse(Some("getChatAdministrators"));
+    assert!(rig.driver.fetch_chat_administrators(ChatId(13)).is_err());
+    assert!(matches!(
+        rig.driver.session.groups.admin_lists.get(&13),
+        Some(AdminListFetch::Failed(_))
+    ));
+    // Retry (refresh) sends again once the client is back.
+    rig.recorder.refuse(None);
+    assert!(
+        rig.driver
+            .refresh_chat_administrators(ChatId(13))
+            .unwrap()
+            .is_some()
+    );
+}

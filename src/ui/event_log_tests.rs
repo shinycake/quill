@@ -175,3 +175,57 @@ fn the_box_for_another_chat_replaces_the_invite_pages(cx: &mut TestAppContext) {
         assert!(!dialog.revoked_open && dialog.details_link.is_none());
     });
 }
+
+/// Recent actions of another group shows that group's own query, not the
+/// text typed in the previous one's box, however the page was reached.
+#[gpui_kit::test]
+fn the_search_box_follows_the_chat_whose_log_is_open(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let other = ChatId(CHANNEL.0 + 1);
+    app.update_in(&mut vcx, |app, window, cx| {
+        let shown = |app: &QuillApp, cx: &gpui_kit::App| {
+            app.admin
+                .event_log_search
+                .as_ref()
+                .map(|search| search.input.read(cx).value().to_string())
+        };
+        app.ensure_event_log_search(window, cx);
+        app.open_group_settings_view(CHANNEL, GroupSettingsView::RecentActions, cx);
+        app.event_log_search_upkeep(window, cx);
+        // "foo" is typed in this group's box.
+        if let Some(search) = app.admin.event_log_search.as_ref() {
+            search
+                .input
+                .update(cx, |state, cx| state.set_value("foo", window, cx));
+        }
+        if let Some(session) = app.session_mut() {
+            session
+                .groups
+                .event_log_queries
+                .insert(CHANNEL.0, "foo".to_string());
+        }
+        assert_eq!(shown(app, cx).as_deref(), Some("foo"));
+        // Another group's box (Manage > Recent actions): its own, empty query.
+        app.close_group_settings_dialog(cx);
+        app.open_group_settings_view(other, GroupSettingsView::RecentActions, cx);
+        app.event_log_search_upkeep(window, cx);
+        assert_eq!(shown(app, cx).as_deref(), Some(""));
+        // Back to the first: its stored query comes back.
+        app.close_group_settings_dialog(cx);
+        app.open_group_settings_view(CHANNEL, GroupSettingsView::RecentActions, cx);
+        app.event_log_search_upkeep(window, cx);
+        assert_eq!(shown(app, cx).as_deref(), Some("foo"));
+    });
+}
+
+/// The "load older events" mark is per chat and goes when the list starts
+/// over, so a page of the same length asks again.
+#[gpui_kit::test]
+fn the_older_events_mark_is_cleared_when_the_list_starts_over(cx: &mut TestAppContext) {
+    let (app, vcx) = new_app(cx);
+    app.read_with(&vcx, |app, _| {
+        app.admin.event_log_autoload.set(Some((CHANNEL, 3)));
+        app.event_log_reset_list();
+        assert_eq!(app.admin.event_log_autoload.get(), None);
+    });
+}

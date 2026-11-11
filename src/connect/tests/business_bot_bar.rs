@@ -71,3 +71,74 @@ fn bar_loads_updates_toggles_and_removes() {
     );
     assert!(driver.session.business_bot_bar(ChatId(501)).is_none());
 }
+
+#[test]
+fn refused_pause_and_remove_put_the_bar_back() {
+    let store = MemorySecretStore::new();
+    let (_dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let seq = AtomicU64::new(0);
+    let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
+    let feed = |driver: &mut ConnectDriver<_>, json: &str| {
+        driver
+            .ingest(copy_and_parse(json, &seq, &sink).unwrap())
+            .unwrap();
+    };
+    let refuse = |driver: &mut ConnectDriver<_>, extra: crate::ids::RequestId| {
+        feed(
+            driver,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"X"}}"#,
+                extra.0
+            ),
+        );
+    };
+    feed(&mut driver, CHAT);
+
+    let extra = driver
+        .toggle_business_bot_paused(ChatId(501), true)
+        .unwrap()
+        .unwrap();
+    assert!(
+        driver
+            .session
+            .business_bot_bar(ChatId(501))
+            .unwrap()
+            .is_paused
+    );
+    refuse(&mut driver, extra);
+    assert!(
+        !driver
+            .session
+            .business_bot_bar(ChatId(501))
+            .unwrap()
+            .is_paused
+    );
+
+    let extra = driver
+        .remove_business_bot_from_chat(ChatId(501))
+        .unwrap()
+        .unwrap();
+    assert!(driver.session.business_bot_bar(ChatId(501)).is_none());
+    refuse(&mut driver, extra);
+    assert!(driver.session.business_bot_bar(ChatId(501)).is_some());
+
+    // A newer server update is not overwritten by the late refusal.
+    let extra = driver
+        .toggle_business_bot_paused(ChatId(501), true)
+        .unwrap()
+        .unwrap();
+    feed(
+        &mut driver,
+        r#"{"@type":"updateChatBusinessBotManageBar","chat_id":501,"business_bot_manage_bar":{"@type":"businessBotManageBar","bot_user_id":900,"manage_url":"u","is_bot_paused":false,"can_bot_reply":false}}"#,
+    );
+    refuse(&mut driver, extra);
+    assert!(
+        !driver
+            .session
+            .business_bot_bar(ChatId(501))
+            .unwrap()
+            .can_reply
+    );
+}

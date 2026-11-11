@@ -16,6 +16,9 @@ impl Session {
         if let Some(id) = extra {
             self.users_state.saves.failed(id, error_reason(&err));
         }
+        if let Some(slot) = extra.and_then(|id| self.groups.new_chats.type_saves.get_mut(&id)) {
+            *slot = TypeSave::Failed(super::request_errors::error_reason(&err));
+        }
         if matches!(
             pending.map(|p| p.purpose),
             Some(
@@ -44,8 +47,16 @@ impl Session {
             Some(RequestRollback::ChatPermissions {
                 previous,
                 previous_can_send,
+                ..
             }) => {
+                // A save still out after this one decides what the box
+                // shows (its rollback holds the same values, or this
+                // chain's last confirmed ones).
                 if let Some(chat_id) = pending.and_then(|p| p.chat_id)
+                    && self
+                        .requests
+                        .pending_extra_for(RequestPurpose::SetChatPermissions, Some(chat_id))
+                        .is_none()
                     && let Some(chat) = self.chats.get_mut(&chat_id.0)
                 {
                     chat.permissions = previous;
@@ -138,8 +149,15 @@ impl Session {
                 toggle,
                 previous,
             }) => self.restore_group_toggle(supergroup_id, toggle, previous),
-            Some(RequestRollback::ProtectedContent { chat_id, previous }) => {
+            Some(RequestRollback::ProtectedContent {
+                chat_id,
+                previous,
+                previous_disabled_at,
+            }) => {
                 self.set_chat_protected(chat_id, previous);
+                self.groups
+                    .private_sharing
+                    .restore_disabled(ChatId(chat_id), previous_disabled_at);
             }
             Some(RequestRollback::DefaultReaction { previous }) => {
                 self.stickers.default_reaction = previous;
@@ -195,7 +213,9 @@ impl Session {
             }
             Some(
                 rollback @ (RequestRollback::ForumTopicMute { .. }
-                | RequestRollback::PollVote { .. }),
+                | RequestRollback::PollVote { .. }
+                | RequestRollback::BusinessBotBar { .. }
+                | RequestRollback::ChatLinkDelete { .. }),
             ) => self.restore_optimistic(rollback),
             None => {}
         }

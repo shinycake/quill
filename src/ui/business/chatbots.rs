@@ -93,7 +93,18 @@ impl QuillApp {
 
     fn server_bot(&self) -> Option<Option<ConnectedBot>> {
         self.session()
-            .and_then(|s| s.settings.business_extra.connected_bot.clone())
+            .and_then(|s| s.settings.business_extra.connected_bot.data().cloned())
+    }
+
+    /// Why the connected bot did not load, while its request is failed.
+    pub(super) fn business_bot_error(&self) -> Option<String> {
+        self.session().and_then(|s| {
+            s.settings
+                .business_extra
+                .connected_bot
+                .error()
+                .map(str::to_string)
+        })
     }
 
     /// Take the connected bot into the draft once TDLib reported it.
@@ -141,9 +152,10 @@ impl QuillApp {
         if !draft.loaded {
             self.fill_chatbot_draft(&mut draft);
         }
-        let failed = self
-            .session()
-            .is_none_or(|s| !s.settings.business_extra.connected_bot_requested);
+        let failed = self.session().is_none_or(|s| {
+            !s.settings.business_extra.connected_bot.is_loading()
+                && s.settings.business_extra.connected_bot.data().is_none()
+        });
         let done = draft.loaded || failed;
         if let Some(d) = self.business_mut() {
             d.chatbot = Some(draft);
@@ -371,12 +383,36 @@ impl QuillApp {
             .gap_3()
             .child(div().text_sm().text_color(muted).child(about()));
         if !loaded {
-            return body.child(
-                div()
-                    .text_sm()
-                    .text_color(muted)
-                    .child(tr(keys::Q_MEDIA_LOADING)),
-            );
+            return match self.business_bot_error() {
+                // The request failed: say so, with a Retry, instead of
+                // "Loading…" with nothing on its way.
+                Some(error) => body.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .items_start()
+                        .gap_2()
+                        .child(div().text_sm().text_color(muted).child(error))
+                        .child(
+                            Button::new("business-bot-retry")
+                                .label(tr(keys::Q_CHAT_RETRY))
+                                .small()
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    if let Some(live) = this.live.as_mut() {
+                                        let _ = live.driver.retry_connected_bot();
+                                    }
+                                    this.business_bot_watch(window, cx);
+                                    cx.notify();
+                                })),
+                        ),
+                ),
+                None => body.child(
+                    div()
+                        .text_sm()
+                        .text_color(muted)
+                        .child(tr(keys::Q_MEDIA_LOADING)),
+                ),
+            };
         }
         if let Some(warning) = warning {
             body = body.child(

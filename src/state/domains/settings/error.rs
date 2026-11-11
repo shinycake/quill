@@ -8,12 +8,12 @@ impl Session {
         &mut self,
         err: &TdError,
         pending: Option<&PendingRequest>,
-        _extra: Option<RequestId>,
+        extra: Option<RequestId>,
         _seq: u64,
     ) {
         if self.apply_quick_replies_error(err, pending.map(|p| p.purpose))
             || self.apply_business_error(err, pending.map(|p| p.purpose))
-            || self.apply_business_extra_error(err, pending.map(|p| p.purpose))
+            || self.apply_business_extra_error(err, pending.map(|p| p.purpose), extra)
             || self.apply_passkeys_error(err, pending.map(|p| (p.id, p.purpose)))
             || self.apply_tone_upload_error(err, pending.map(|p| p.purpose))
         {

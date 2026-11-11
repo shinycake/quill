@@ -6,11 +6,15 @@ use super::*;
 /// the error arm below restores it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RequestRollback {
-    /// `setChatPermissions`: the chat's previous permission block and
-    /// `can_send_basic_messages`.
+    /// `setChatPermissions`: the permission block and
+    /// `can_send_basic_messages` a refusal puts back (what the server has
+    /// once the saves ahead of this one are settled), and the block this
+    /// save sent, which a later save's rollback takes over when this one
+    /// succeeds.
     ChatPermissions {
         previous: Option<ChatPermissions>,
         previous_can_send: bool,
+        sent: ChatPermissions,
     },
     /// `toggleSupergroupJoinByRequest`: the previous join-by-request flag
     /// (`None` = unknown, treated as disabled).
@@ -49,10 +53,29 @@ pub enum RequestRollback {
         previous: Option<bool>,
     },
     /// B7: `toggleChatHasProtectedContent`: the previous flag.
-    ProtectedContent { chat_id: i64, previous: bool },
+    /// `previous_disabled_at` is the "you disabled sharing" record the
+    /// request replaced (private chats only).
+    ProtectedContent {
+        chat_id: i64,
+        previous: bool,
+        previous_disabled_at: Option<i64>,
+    },
     /// `setDefaultReactionType`: the quick reaction shown before the choice.
     DefaultReaction {
         previous: Option<crate::state::ReactionChoice>,
+    },
+    /// `deleteBusinessChatLink`: the row dropped at once and where it was.
+    ChatLinkDelete {
+        index: usize,
+        row: crate::business_chat_links::ChatLink,
+    },
+    /// Pause, resume or remove of the business bot (`previous` is the bar
+    /// before, `shown` the one drawn instead; `None` = no bar). Restored
+    /// only while the bar still shows `shown`.
+    BusinessBotBar {
+        chat_id: i64,
+        previous: Option<crate::business_bot_bar::BusinessBotManageBar>,
+        shown: Option<crate::business_bot_bar::BusinessBotManageBar>,
     },
     /// B7: `setChatAvailableReactions`: the previous setting.
     AvailableReactions {
@@ -131,6 +154,23 @@ impl Session {
                     &previous,
                     Some(&shown),
                 );
+            }
+            RequestRollback::BusinessBotBar {
+                chat_id,
+                previous,
+                shown,
+            } => {
+                if self.chats_state.business_bot_bars.get(&chat_id) == shown.as_ref() {
+                    self.set_business_bot_bar(chat_id, previous);
+                }
+            }
+            RequestRollback::ChatLinkDelete { index, row } => {
+                let links = &mut self.settings.business_extra.chat_links;
+                if let Some(list) = links.data_mut()
+                    && !list.iter().any(|l| l.link == row.link)
+                {
+                    list.insert(index.min(list.len()), row);
+                }
             }
             _ => {}
         }

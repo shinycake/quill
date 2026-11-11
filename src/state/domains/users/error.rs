@@ -42,6 +42,19 @@ impl Session {
                 self.users_state.profile_edit_error =
                     Some(format!("Profile update failed: {}", error_reason(err)));
             }
+            Some(RequestPurpose::GetUserFullInfo) => {
+                let user = pending.and_then(|p| {
+                    p.user_id.or_else(|| {
+                        p.chat_id
+                            .and_then(|chat_id| self.private_chat_user_id(chat_id))
+                    })
+                });
+                if let Some(user) = user {
+                    self.users_state
+                        .user_full_infos
+                        .fail(user, error_reason(err));
+                }
+            }
             Some(RequestPurpose::GetProfilePhotoEmojiIcons) => {
                 self.users_state.profile_photo_emoji_icons_failed = true;
             }
