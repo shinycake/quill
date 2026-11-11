@@ -570,7 +570,7 @@ impl QuillApp {
                 forwards.total,
                 &forwards.forwards,
                 forwards.loading(),
-                forwards.error.clone(),
+                forwards.error().map(str::to_string),
                 more,
                 cx,
             ));

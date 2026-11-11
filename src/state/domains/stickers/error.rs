@@ -116,10 +116,12 @@ impl Session {
         // Suggestions that waited for the installed sets stop waiting: the
         // next emoji typed asks again.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetInstalledStickerSets)
-            && self.stickers.stickers.suggest_waiting_for_sets
+            && self.stickers.stickers.suggest_for.waiting_for_sets()
         {
-            self.stickers.stickers.suggest_waiting_for_sets = false;
-            self.stickers.stickers.suggest_for = None;
+            self.stickers.stickers.suggest_for = SuggestFor::Nothing;
+        }
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::GetGreetingStickers) {
+            self.stickers.stickers.greeting.fail(sessions_error_line("load the hello stickers", err));
         }
         let emoji_purpose = pending.map(|p| p.purpose);
         if emoji_purpose == Some(RequestPurpose::GetInstalledEmojiSets) {
@@ -172,20 +174,16 @@ impl Session {
                     | RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { .. })
             )
         ) {
-            self.stickers.gifs.search_failed = true;
-            self.stickers.gifs.search_loading = false;
+            self.stickers.gifs.search.fail();
         }
         if matches!(
             pending.map(|p| p.purpose),
             Some(RequestPurpose::AddSavedAnimation | RequestPurpose::RemoveSavedAnimation)
         ) {
-            self.stickers.gifs.failed = true;
+            self.stickers.gifs.saved.mutation_failed();
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSavedAnimations) {
-            self.stickers.gifs.loading = false;
-            self.stickers.gifs.loaded = true;
-            self.stickers.gifs.failed = true;
-            self.stickers.gifs.stale = false;
+            self.stickers.gifs.saved.fail();
         }
     }
 }

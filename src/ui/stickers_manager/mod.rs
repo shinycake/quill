@@ -102,7 +102,7 @@ impl QuillApp {
                     ManagerTab::Archived => &panel.lists.archived,
                 };
                 let loading =
-                    list.is_loading() || tab == ManagerTab::Installed && !panel.installed_loaded;
+                    list.is_loading() || tab == ManagerTab::Installed && !panel.installed_loaded();
                 (
                     tab,
                     panel.sets.clone(),

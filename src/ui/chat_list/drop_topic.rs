@@ -184,10 +184,7 @@ impl QuillApp {
         };
         waiting.load_failed
             || self.session().is_some_and(|session| {
-                session
-                    .threads
-                    .forum_topics_failed
-                    .contains(&waiting.chat_id.0)
+                session.threads.forum_topics.failed(&waiting.chat_id.0)
             })
     }
 

@@ -117,11 +117,10 @@ fn suggestions_waiting_for_the_sets_stop_waiting_when_the_sets_fail() {
     let mut t = Flaky::new();
     t.driver.session.settings.media_prefs.sticker_suggest_mode = StickerSuggestMode::InstalledOnly;
     t.driver.update_sticker_suggestions("😀").unwrap();
-    assert!(t.driver.session.stickers.stickers.suggest_waiting_for_sets);
+    assert!(t.driver.session.stickers.stickers.suggest_for.waiting_for_sets());
     t.fail("getInstalledStickerSets", "boom");
     let stickers = &t.driver.session.stickers.stickers;
-    assert!(!stickers.suggest_waiting_for_sets);
-    assert!(stickers.suggest_for.is_none());
+    assert!(stickers.suggest_for.is_nothing());
     assert!(t.driver.composer_suggestions_idle("plain text"));
 }
 

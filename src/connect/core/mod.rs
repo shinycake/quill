@@ -832,12 +832,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.cancel_gif_search_requests();
             self.session.stickers.gifs.search_results.clear();
             self.session.stickers.gifs.search_next_offset.clear();
-            self.session.stickers.gifs.search_loading = self.session.stickers.gifs.search_mode;
+            self.session.stickers.gifs.search.begin();
         }
         if self.chats_path_active()
             && self.session.stickers.gifs.open
-            && self.session.stickers.gifs.search_mode
-            && self.session.stickers.gifs.search_loading
+            && self.session.stickers.gifs.search.loading()
         {
             self.maybe_search_gifs(false)?;
         }
@@ -849,8 +848,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             );
         }
         if installed_stickers_answer
-            && self.session.stickers.stickers.suggest_waiting_for_sets
-            && let Some(emoji) = self.session.stickers.stickers.suggest_for.take()
+            && let crate::state::SuggestFor::WaitingForSets(emoji) =
+                std::mem::take(&mut self.session.stickers.stickers.suggest_for)
         {
             self.update_sticker_suggestions(&emoji)?;
         }

@@ -349,7 +349,7 @@ impl Session {
                 }
             }
             self.stickers.stickers.sets.clear();
-            self.stickers.stickers.installed_loaded = false;
+            self.stickers.stickers.lists.installed = crate::state::fetch::Fetch::Idle;
             self.stickers.stickers.archived.clear();
             self.stickers.stickers.archived_has_more = false;
             self.stickers.stickers.archived_next_offset = 0;
@@ -370,8 +370,7 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::AddSavedAnimation | RequestPurpose::RemoveSavedAnimation)
         ) {
-            self.stickers.gifs.animations.clear();
-            self.stickers.gifs.loaded = false;
+            self.stickers.gifs.saved.reset();
         }
         // Phase C3a: a successful `leaveGroupCall` /
         // `endGroupCall` drops the tracked call (the `ok`

@@ -98,7 +98,7 @@ impl Session {
 
     pub fn accept_installed_sticker_sets(&mut self, sets: Vec<StickerSetInfo>) {
         self.stickers.stickers.sets = sets;
-        self.stickers.stickers.installed_loaded = true;
+        self.stickers.stickers.lists.installed.succeed(());
         if self.stickers.stickers.tab != StickerTab::Installed {
             return;
         }
@@ -179,8 +179,7 @@ impl Session {
     /// Slice S12: drop the composer sticker suggestions.
     pub fn clear_sticker_suggestions(&mut self) {
         self.stickers.stickers.suggestions.clear();
-        self.stickers.stickers.suggest_for = None;
-        self.stickers.stickers.suggest_waiting_for_sets = false;
+        self.stickers.stickers.suggest_for = SuggestFor::Nothing;
     }
 
     /// Slice S12: store a `searchStickers` answer issued for the
@@ -216,7 +215,7 @@ impl Session {
     /// cache so the panel refetches the authoritative list instead of
     /// showing a stale order.
     pub fn invalidate_installed_sticker_sets(&mut self) {
-        self.stickers.stickers.installed_loaded = false;
+        self.stickers.stickers.lists.installed = crate::state::fetch::Fetch::Idle;
         self.stickers.stickers.sets.clear();
         self.stickers.stickers.selected_set_id = None;
         self.stickers.stickers.set = StickerSetStage::Idle;
@@ -259,11 +258,7 @@ impl Session {
     }
 
     pub fn accept_saved_animations(&mut self, animations: Vec<AnimationItem>) {
-        self.stickers.gifs.loading = false;
-        self.stickers.gifs.failed = false;
-        self.stickers.gifs.stale = false;
-        self.stickers.gifs.animations = animations;
-        self.stickers.gifs.loaded = true;
+        self.stickers.gifs.saved.accept(animations);
     }
 
     /// Slice S9: store a GIF-search `inlineQueryResults` page. A first page
@@ -277,8 +272,7 @@ impl Session {
         next_offset: String,
         first_page: bool,
     ) {
-        self.stickers.gifs.search_loading = false;
-        self.stickers.gifs.search_failed = false;
+        self.stickers.gifs.search.ready();
         if first_page {
             self.stickers.gifs.search_results = animations;
         } else {

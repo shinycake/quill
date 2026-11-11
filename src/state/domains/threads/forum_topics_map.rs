@@ -2,36 +2,85 @@
 //! as its topics change, so the badge reads one number per forum instead
 //! of walking every topic.
 use crate::state::*;
-use std::ops::Deref;
+
+/// One forum's topic list: loaded (with its counted unread), or the load
+/// failed. A forum with neither has no entry; it is asked for.
+#[derive(Debug)]
+enum TopicList {
+    Loaded { topics: Vec<ForumTopic>, unread: i32 },
+    Failed,
+}
 
 #[derive(Debug, Default)]
 pub struct ForumTopicsMap {
-    topics: HashMap<i64, Vec<ForumTopic>>,
-    unread: HashMap<i64, i32>,
-}
-
-impl Deref for ForumTopicsMap {
-    type Target = HashMap<i64, Vec<ForumTopic>>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.topics
-    }
+    lists: HashMap<i64, TopicList>,
 }
 
 impl ForumTopicsMap {
-    pub fn insert(&mut self, chat_id: i64, topics: Vec<ForumTopic>) -> Option<Vec<ForumTopic>> {
-        self.unread.insert(chat_id, counted_unread(&topics));
-        self.topics.insert(chat_id, topics)
+    /// The loaded topics of `chat_id`.
+    pub fn get(&self, chat_id: &i64) -> Option<&Vec<ForumTopic>> {
+        match self.lists.get(chat_id)? {
+            TopicList::Loaded { topics, .. } => Some(topics),
+            TopicList::Failed => None,
+        }
     }
 
+    pub fn contains_key(&self, chat_id: &i64) -> bool {
+        self.get(chat_id).is_some()
+    }
+
+    /// Every forum's loaded topics.
+    pub fn values(&self) -> impl Iterator<Item = &Vec<ForumTopic>> {
+        self.lists.values().filter_map(|list| match list {
+            TopicList::Loaded { topics, .. } => Some(topics),
+            TopicList::Failed => None,
+        })
+    }
+
+    /// The forums with loaded topics.
+    pub fn keys(&self) -> impl Iterator<Item = &i64> {
+        self.lists.iter().filter_map(|(chat_id, list)| match list {
+            TopicList::Loaded { .. } => Some(chat_id),
+            TopicList::Failed => None,
+        })
+    }
+
+    /// Whether the topics of `chat_id` could not be loaded: its rows read
+    /// "No chats" and do not ask again.
+    pub fn failed(&self, chat_id: &i64) -> bool {
+        matches!(self.lists.get(chat_id), Some(TopicList::Failed))
+    }
+
+    /// The load of `chat_id` failed. Loaded topics stay.
+    pub fn fail(&mut self, chat_id: i64) {
+        self.lists.entry(chat_id).or_insert(TopicList::Failed);
+    }
+
+    /// Forget a failure so the forum is asked for again.
+    pub fn clear_failure(&mut self, chat_id: &i64) {
+        if self.failed(chat_id) {
+            self.lists.remove(chat_id);
+        }
+    }
+
+    pub fn insert(&mut self, chat_id: i64, topics: Vec<ForumTopic>) -> Option<Vec<ForumTopic>> {
+        let unread = counted_unread(&topics);
+        match self.lists.insert(chat_id, TopicList::Loaded { topics, unread }) {
+            Some(TopicList::Loaded { topics, .. }) => Some(topics),
+            _ => None,
+        }
+    }
+
+    /// Forget the forum's topics and any failure.
     pub fn remove(&mut self, chat_id: &i64) -> Option<Vec<ForumTopic>> {
-        self.unread.remove(chat_id);
-        self.topics.remove(chat_id)
+        match self.lists.remove(chat_id) {
+            Some(TopicList::Loaded { topics, .. }) => Some(topics),
+            _ => None,
+        }
     }
 
     pub fn clear(&mut self) {
-        self.unread.clear();
-        self.topics.clear();
+        self.lists.clear();
     }
 
     /// Change `chat_id`'s loaded topics; `None` when none are loaded.
@@ -40,9 +89,11 @@ impl ForumTopicsMap {
         chat_id: i64,
         change: impl FnOnce(&mut Vec<ForumTopic>) -> R,
     ) -> Option<R> {
-        let topics = self.topics.get_mut(&chat_id)?;
+        let Some(TopicList::Loaded { topics, unread }) = self.lists.get_mut(&chat_id) else {
+            return None;
+        };
         let result = change(topics);
-        self.unread.insert(chat_id, counted_unread(topics));
+        *unread = counted_unread(topics);
         Some(result)
     }
 
@@ -64,7 +115,10 @@ impl ForumTopicsMap {
 
     /// The sum of [`topic_unread_count`] over `chat_id`'s loaded topics.
     pub fn unread(&self, chat_id: i64) -> i32 {
-        self.unread.get(&chat_id).copied().unwrap_or(0)
+        match self.lists.get(&chat_id) {
+            Some(TopicList::Loaded { unread, .. }) => *unread,
+            _ => 0,
+        }
     }
 }
 

@@ -42,7 +42,7 @@ impl QuillApp {
             .when_some(
                 self.shared_media_grid
                     .list_scroll(tab, PageKey::of(state_chat, state)),
-                |list, (scroll, _)| list.track_scroll(scroll),
+                |list, scroll| list.track_scroll(scroll),
             )
             .py_1();
         if let Some(bar) = self.shared_media_date_bar(tab, cx) {
@@ -151,11 +151,26 @@ impl QuillApp {
                 row.into_any_element()
             });
         }
-        if state.loading_more {
+        if state.loading_more() {
             list = list.child(loading_row(
                 ("shared-media-loading", tab.index() as u64),
                 cx,
             ));
+        } else if let Some(error) = state.more_error() {
+            list = list.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .py_2()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(error.to_string()),
+                    )
+                    .child(self.shared_media_load_more(tab, cx)),
+            );
         }
         list.on_scroll(watch_scroll(cx, Self::shared_media_more))
             .into_any_element()
@@ -163,7 +178,7 @@ impl QuillApp {
 
     /// The next page of the open list tab, once it is scrolled near its end
     /// or does not fill the panel. A failed page is not retried on its own.
-    fn shared_media_more(&mut self, cx: &mut Context<Self>, scrolled: bool) {
+    fn shared_media_more(&mut self, cx: &mut Context<Self>, _scrolled: bool) {
         // Paging needs a live connection; a demo session has nothing to ask.
         if self.live.is_none() {
             return;
@@ -175,19 +190,18 @@ impl QuillApp {
         let Some(state) = media.tab_at(tab) else {
             return;
         };
-        let Some((scroll, asked)) = self
+        let Some(scroll) = self
             .shared_media_grid
             .list_scroll(tab, PageKey::of(media.chat_id, state))
         else {
             return;
         };
-        if !media.open
+        if !media.open()
             || !load_due(
                 scrolled_near_end(scroll),
                 state.can_load_more(),
-                state.loading_more,
+                state.loading_more(),
             )
-            || !asked.allow(state.items.len(), scrolled)
         {
             return;
         }

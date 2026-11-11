@@ -165,7 +165,6 @@ pub struct StickerPanel {
     pub stickers: Vec<StickerItem>,
     /// The selected set's `getStickerSet`: asked, answered or failed.
     pub set: StickerSetStage,
-    pub installed_loaded: bool,
     /// Each list tab's own fetch: a failure of one list shows on that tab
     /// only, and a failed mutation is a note, not a list failure.
     pub lists: StickerLists,
@@ -182,9 +181,9 @@ pub struct StickerPanel {
     /// `updateRecentStickers` / `updateFavoriteStickers` /
     /// `updateTrendingStickerSets` arrived (another device changed them):
     /// refetch the loaded list.
-    /// `getGreetingStickers`: hello stickers for empty private chats.
-    pub greeting: Vec<StickerItem>,
-    pub greeting_loaded: bool,
+    /// `getGreetingStickers`: hello stickers for empty private chats, asked
+    /// once per session (a failure does not retry on every frame).
+    pub greeting: Fetch<Vec<StickerItem>>,
     /// `getAttachedStickerSets` answered: the sets (first opens in the
     /// sticker set dialog; `None` inside: the media has none).
     pub attached_answer: Option<Option<i64>>,
@@ -211,29 +210,23 @@ pub struct StickerPanel {
     /// (`searchStickers` answers under `SuggestStickers`). `suggest_for`
     /// is the emoji they were requested for.
     pub suggestions: Vec<StickerItem>,
-    pub suggest_for: Option<String>,
-    pub suggest_waiting_for_sets: bool,
+    pub suggest_for: SuggestFor,
 }
 
 /// Saved GIFs (`getSavedAnimations`). tdesktop Gifs tab / Unigram animation drawer.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GifPanel {
     pub open: bool,
-    pub animations: Vec<AnimationItem>,
-    pub loaded: bool,
-    pub search_mode: bool,
-    pub search_loading: bool,
-    pub search_failed: bool,
+    /// The saved GIFs (`getSavedAnimations`) and where their fetch stands.
+    pub saved: GifSaved,
+    /// The GIF search: off (the saved tab), asking, answered or failed.
+    pub search: GifSearchStage,
     pub search_query: String,
     /// The chat of the window that asked (the inline query's chat); paging
     /// keeps it.
     pub search_chat: Option<crate::ids::ChatId>,
     pub search_bot_username: String,
     pub search_bot_user_id: Option<i64>,
-    pub loading: bool,
-    pub failed: bool,
-    /// `updateSavedAnimations` arrived; refresh even if the panel was closed.
-    pub stale: bool,
     /// Slice S9: GIF search via the animation search bot
     /// (`getInlineQueryResults`; schema 1.8.67, lines 6483, 13019).
     /// First page replaces; later pages append, deduped by file id.
@@ -249,6 +242,194 @@ pub struct GifPanel {
     /// The searches answered lately, so a window's GIF tab shows its own
     /// search while another window's is the one in `search_results`.
     pub searches_kept: GifSearches,
+}
+
+/// The saved GIFs and where their fetch stands. The list stays held
+/// through every stage, so the tab does not blank under a refetch or a
+/// failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GifSaved {
+    /// Never fetched, or dropped so the next open fetches again.
+    Unloaded(Vec<AnimationItem>),
+    /// The first `getSavedAnimations` is out.
+    Loading(Vec<AnimationItem>),
+    /// The latest answer.
+    Ready(Vec<AnimationItem>),
+    /// `updateSavedAnimations` arrived: refetch, even if the panel is closed.
+    Stale(Vec<AnimationItem>),
+    /// A refetch of a loaded list is out.
+    Refreshing(Vec<AnimationItem>),
+    /// The fetch (or a save / remove) failed; the next open asks again.
+    Failed(Vec<AnimationItem>),
+}
+
+impl Default for GifSaved {
+    fn default() -> Self {
+        Self::Unloaded(Vec::new())
+    }
+}
+
+impl GifSaved {
+    pub fn items(&self) -> &[AnimationItem] {
+        match self {
+            Self::Unloaded(items)
+            | Self::Loading(items)
+            | Self::Ready(items)
+            | Self::Stale(items)
+            | Self::Refreshing(items)
+            | Self::Failed(items) => items,
+        }
+    }
+
+    fn take_items(&mut self) -> Vec<AnimationItem> {
+        match std::mem::take(self) {
+            Self::Unloaded(items)
+            | Self::Loading(items)
+            | Self::Ready(items)
+            | Self::Stale(items)
+            | Self::Refreshing(items)
+            | Self::Failed(items) => items,
+        }
+    }
+
+    pub fn items_mut(&mut self) -> &mut Vec<AnimationItem> {
+        match self {
+            Self::Unloaded(items)
+            | Self::Loading(items)
+            | Self::Ready(items)
+            | Self::Stale(items)
+            | Self::Refreshing(items)
+            | Self::Failed(items) => items,
+        }
+    }
+
+    /// The list holds an answer (even one a refetch is replacing, or a
+    /// failure left in place).
+    pub fn loaded(&self) -> bool {
+        !matches!(self, Self::Unloaded(_) | Self::Loading(_))
+    }
+
+    pub fn loading(&self) -> bool {
+        matches!(self, Self::Loading(_) | Self::Refreshing(_))
+    }
+
+    pub fn failed(&self) -> bool {
+        matches!(self, Self::Failed(_))
+    }
+
+    pub fn stale(&self) -> bool {
+        matches!(self, Self::Stale(_))
+    }
+
+    /// The driver should ask: not loaded, or changed elsewhere.
+    pub fn wanted(&self) -> bool {
+        matches!(self, Self::Unloaded(_) | Self::Stale(_))
+    }
+
+    /// `getSavedAnimations` went out.
+    pub fn begin(&mut self) {
+        *self = match std::mem::take(self) {
+            Self::Unloaded(items) | Self::Loading(items) => Self::Loading(items),
+            Self::Ready(items)
+            | Self::Stale(items)
+            | Self::Refreshing(items)
+            | Self::Failed(items) => Self::Refreshing(items),
+        };
+    }
+
+    /// The answer.
+    pub fn accept(&mut self, items: Vec<AnimationItem>) {
+        *self = Self::Ready(items);
+    }
+
+    /// The fetch failed or never left; the list stays held.
+    pub fn fail(&mut self) {
+        *self = Self::Failed(self.take_items());
+    }
+
+    /// A save or remove failed: the list shows the failure, unless a fetch
+    /// is out (its answer settles the list).
+    pub fn mutation_failed(&mut self) {
+        if !self.loading() {
+            self.fail();
+        }
+    }
+
+    /// `updateSavedAnimations`: what is held, or what a fetch still out
+    /// will answer, is out of date. The driver cancels that fetch and asks
+    /// again.
+    pub fn mark_stale(&mut self) {
+        if !matches!(self, Self::Unloaded(_)) {
+            *self = Self::Stale(self.take_items());
+        }
+    }
+
+    /// Ask again at the next open, keeping the list on screen.
+    pub fn unload(&mut self) {
+        *self = match std::mem::take(self) {
+            Self::Refreshing(items) | Self::Loading(items) => Self::Loading(items),
+            Self::Unloaded(items)
+            | Self::Ready(items)
+            | Self::Stale(items)
+            | Self::Failed(items) => Self::Unloaded(items),
+        };
+    }
+
+    /// A save or remove succeeded: the held list is wrong, drop it. A fetch
+    /// still out may predate the change; the driver cancels it and asks again.
+    pub fn reset(&mut self) {
+        *self = Self::Unloaded(Vec::new());
+    }
+}
+
+/// Where the GIF search stands. Its query, results and paging live in the
+/// panel; the stage says whether the search tab is showing and asking.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GifSearchStage {
+    /// The saved tab shows.
+    #[default]
+    Off,
+    /// A page (or the search bot) is being asked for.
+    Loading,
+    /// The latest page answered.
+    Ready,
+    /// The bot could not be found, or a page failed.
+    Failed,
+}
+
+impl GifSearchStage {
+    pub fn is_on(self) -> bool {
+        self != Self::Off
+    }
+
+    pub fn loading(self) -> bool {
+        self == Self::Loading
+    }
+
+    pub fn failed(self) -> bool {
+        self == Self::Failed
+    }
+
+    /// A page is being asked for; no effect when the search is off.
+    pub fn begin(&mut self) {
+        if self.is_on() {
+            *self = Self::Loading;
+        }
+    }
+
+    /// A page answered.
+    pub fn ready(&mut self) {
+        if self.is_on() {
+            *self = Self::Ready;
+        }
+    }
+
+    /// The search failed.
+    pub fn fail(&mut self) {
+        if self.is_on() {
+            *self = Self::Failed;
+        }
+    }
 }
 
 /// GIF searches answered lately, by query: each window's GIF tab asks for
@@ -289,10 +470,10 @@ impl GifSearches {
 
 impl GifPanel {
     pub fn visible_animations(&self) -> &[AnimationItem] {
-        if self.search_mode {
+        if self.search.is_on() {
             &self.search_results
         } else {
-            &self.animations
+            self.saved.items()
         }
     }
 
@@ -301,7 +482,43 @@ impl GifPanel {
     }
 }
 
+/// The emoji the composer sticker suggestions are for, and whether they
+/// wait for the installed sets (`InstalledOnly` filters by them).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum SuggestFor {
+    #[default]
+    Nothing,
+    /// `getInstalledStickerSets` is out; the emoji is asked when it lands.
+    WaitingForSets(String),
+    /// `searchStickers` for this emoji went out or answered.
+    Asked(String),
+}
+
+impl SuggestFor {
+    /// The emoji the suggestions are for.
+    pub fn emoji(&self) -> Option<&str> {
+        match self {
+            Self::Nothing => None,
+            Self::WaitingForSets(emoji) | Self::Asked(emoji) => Some(emoji),
+        }
+    }
+
+    pub fn is_nothing(&self) -> bool {
+        matches!(self, Self::Nothing)
+    }
+
+    pub fn waiting_for_sets(&self) -> bool {
+        matches!(self, Self::WaitingForSets(_))
+    }
+}
+
 impl StickerPanel {
+    /// The installed sets are held (also while a refetch runs or after one
+    /// failed): nothing waits on them.
+    pub fn installed_loaded(&self) -> bool {
+        self.lists.installed.data().is_some()
+    }
+
     pub fn visible_stickers(&self) -> &[StickerItem] {
         match self.tab {
             StickerTab::Installed | StickerTab::Trending => &self.stickers,

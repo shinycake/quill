@@ -173,14 +173,59 @@ impl SharedMediaTab {
 /// Slice media-shared-gallery: per-tab fetch state. The renderer keys "still
 /// loading" / "empty" / "failed" off this enum — it never shows the empty
 /// state while a fetch is in flight.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum SharedMediaTabStatus {
     #[default]
     Idle,
     Loading,
-    Ready,
+    /// The first page is in; `more` is where the next page stands.
+    Ready { more: NextPage },
     Empty,
-    Failed,
+    /// The first page failed, with the line the tab shows.
+    Failed(String),
+}
+
+/// Where the page after a tab's loaded ones stands.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum NextPage {
+    /// Nothing is out (there may be no more pages).
+    #[default]
+    Idle,
+    /// An older page is in flight (the viewer pages toward the end of the
+    /// list and asks for more).
+    Loading,
+    /// The older page failed: the list shows a retry row, and nothing asks
+    /// again on its own.
+    Failed(String),
+}
+
+impl SharedMediaTabStatus {
+    /// The first page loaded.
+    pub fn ready() -> Self {
+        Self::Ready {
+            more: NextPage::Idle,
+        }
+    }
+
+    pub fn is_idle(&self) -> bool {
+        matches!(self, Self::Idle)
+    }
+
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading)
+    }
+
+    pub fn is_ready(&self) -> bool {
+        matches!(self, Self::Ready { .. })
+    }
+
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Self::Empty)
+    }
+
+    pub fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed(_))
+    }
 }
 
 /// One gallery row: enough to label the item and jump to its message.
@@ -306,13 +351,9 @@ pub struct SharedMediaTabState {
     /// Newest first, as `searchChatMessages` returns them.
     pub items: Vec<SharedMediaItem>,
     pub total_count: i32,
-    pub error: String,
     /// `foundChatMessages.next_from_message_id` of the last page; `0` once
     /// the oldest message has been reached.
     pub next_from: MessageId,
-    /// An older page is in flight (the viewer pages toward the end of the
-    /// list and asks for more).
-    pub loading_more: bool,
     /// Local day number the list starts at after a calendar jump; `None`
     /// for the newest media.
     pub anchor_day: Option<i64>,
@@ -333,20 +374,93 @@ impl SharedMediaTabState {
         self.status = SharedMediaTabStatus::Idle;
         self.items.clear();
         self.total_count = 0;
-        self.error.clear();
         self.next_from = MessageId(0);
-        self.loading_more = false;
         self.anchor_day = None;
         self.next_offset.clear();
         self.has_more = false;
         self.query.clear();
     }
 
-    /// Whether an older page exists and none is in flight.
+    /// The failed first page's line; empty otherwise.
+    pub fn error(&self) -> &str {
+        match &self.status {
+            SharedMediaTabStatus::Failed(error) => error,
+            _ => "",
+        }
+    }
+
+    /// An older page is in flight.
+    pub fn loading_more(&self) -> bool {
+        matches!(
+            self.status,
+            SharedMediaTabStatus::Ready {
+                more: NextPage::Loading
+            }
+        )
+    }
+
+    /// The failed older page's line, while the list shows its retry row.
+    pub fn more_error(&self) -> Option<&str> {
+        match &self.status {
+            SharedMediaTabStatus::Ready {
+                more: NextPage::Failed(error),
+            } => Some(error),
+            _ => None,
+        }
+    }
+
+    /// Whether an older page exists and nothing asks for it: the scroll asks
+    /// for it on its own. A failed page waits for the retry row.
     pub fn can_load_more(&self) -> bool {
-        self.status == SharedMediaTabStatus::Ready
-            && !self.loading_more
-            && (self.next_from.0 != 0 || self.has_more)
+        matches!(
+            self.status,
+            SharedMediaTabStatus::Ready {
+                more: NextPage::Idle
+            }
+        ) && self.has_next_page()
+    }
+
+    /// Whether the tab offers its next page: the scroll asks on its own
+    /// when `can_load_more`; after a failure the "Load more" control asks.
+    pub fn more_askable(&self) -> bool {
+        matches!(
+            self.status,
+            SharedMediaTabStatus::Ready {
+                more: NextPage::Idle | NextPage::Failed(_)
+            }
+        ) && self.has_next_page()
+    }
+
+    fn has_next_page(&self) -> bool {
+        self.next_from.0 != 0 || self.has_more
+    }
+
+    /// An older page is asked for: scrolled to, or the retry row pressed.
+    /// `false` when there is none or one is in flight.
+    pub(crate) fn start_more(&mut self) -> bool {
+        let askable = self.more_askable();
+        if askable {
+            self.status = SharedMediaTabStatus::Ready {
+                more: NextPage::Loading,
+            };
+        }
+        askable
+    }
+
+    /// The older page in flight failed. No effect when none is.
+    pub(crate) fn fail_more_page(&mut self, error: String) {
+        if let SharedMediaTabStatus::Ready { more } = &mut self.status
+            && *more == NextPage::Loading
+        {
+            *more = NextPage::Failed(error);
+        }
+    }
+
+    /// The older page landed or was superseded: the next one may be asked.
+    pub(crate) fn end_more(&mut self) {
+        if let SharedMediaTabStatus::Ready { more } = &mut self.status {
+            *more = NextPage::Idle;
+        }
     }
 }
 
@@ -355,7 +469,7 @@ impl SharedMediaTabState {
 /// `foundChatMessages` answers drop; a new fetch restamps only its own tab.
 #[derive(Debug, Clone, Default)]
 pub struct SharedMediaState {
-    pub open: bool,
+    /// The chat the gallery is open for; `None` while it is closed.
     pub chat_id: Option<ChatId>,
     pub active_tab: SharedMediaTab,
     pub tabs: [SharedMediaTabState; SharedMediaTab::COUNT],
@@ -372,6 +486,11 @@ pub struct SharedMediaState {
 }
 
 impl SharedMediaState {
+    /// Whether the gallery is open (for [`Self::chat_id`]).
+    pub fn open(&self) -> bool {
+        self.chat_id.is_some()
+    }
+
     /// The state of `tab`, `None` only if `tabs` is shorter than the enum.
     pub fn tab_at(&self, tab: SharedMediaTab) -> Option<&SharedMediaTabState> {
         self.tabs.get(tab.index())
@@ -394,10 +513,9 @@ impl SharedMediaState {
     /// Like [`Self::open_for`], opening on `initial` (the profile's main
     /// tab) when the gallery is not already open for this chat.
     pub fn open_for_tab(&mut self, chat_id: ChatId, initial: SharedMediaTab) -> SharedMediaTab {
-        if self.open && self.chat_id == Some(chat_id) {
+        if self.chat_id == Some(chat_id) {
             return self.active_tab;
         }
-        self.open = true;
         self.chat_id = Some(chat_id);
         self.playlist_user = None;
         // With Photos and Videos split there is no Media tab.
@@ -429,8 +547,7 @@ impl SharedMediaState {
     /// Whether `generation` is the stamp `tab` waits on in the gallery open
     /// for `chat_id`.
     pub(crate) fn accepts(&self, chat_id: ChatId, tab: SharedMediaTab, generation: u64) -> bool {
-        self.open
-            && self.chat_id == Some(chat_id)
+        self.chat_id == Some(chat_id)
             && self
                 .tab_at(tab)
                 .is_some_and(|state| state.generation == generation)
@@ -438,7 +555,6 @@ impl SharedMediaState {
 
     pub fn close(&mut self) {
         self.playlist_user = None;
-        self.open = false;
         self.chat_id = None;
         self.selection.clear();
         self.restamp_all_tabs();
@@ -451,7 +567,7 @@ impl SharedMediaState {
         self.selection.clear();
         self.tabs
             .get(tab.index())
-            .is_some_and(|t| t.status == SharedMediaTabStatus::Idle)
+            .is_some_and(|t| t.status.is_idle())
     }
 
     /// Mark the tab loading and restamp it; the caller stamps the returned
@@ -463,7 +579,6 @@ impl SharedMediaState {
         let state = self.tab_state(tab);
         state.status = SharedMediaTabStatus::Loading;
         state.anchor_day = None;
-        state.loading_more = false;
         state.generation = stamp;
         stamp
     }
@@ -490,12 +605,10 @@ impl SharedMediaState {
         state.items = items;
         state.total_count = total_count;
         state.next_from = next_from;
-        state.loading_more = false;
-        state.error.clear();
         state.status = if state.items.is_empty() {
             SharedMediaTabStatus::Empty
         } else {
-            SharedMediaTabStatus::Ready
+            SharedMediaTabStatus::ready()
         };
     }
 
@@ -506,10 +619,9 @@ impl SharedMediaState {
     pub fn begin_fetch_more(&mut self, tab: SharedMediaTab) -> Option<(u64, MessageId)> {
         let state = self.tab_state(tab);
         let generation = state.generation;
-        if !state.can_load_more() {
+        if !state.start_more() {
             return None;
         }
-        state.loading_more = true;
         Some((generation, state.next_from))
     }
 
@@ -528,7 +640,7 @@ impl SharedMediaState {
             return;
         }
         let state = self.tab_state(tab);
-        state.loading_more = false;
+        state.end_more();
         let before = state.items.len();
         for item in items {
             if !state
@@ -545,12 +657,18 @@ impl SharedMediaState {
         state.next_from = if grew { next_from } else { MessageId(0) };
     }
 
-    /// An older page failed: allow a retry on the next request.
-    pub fn fail_more(&mut self, chat_id: ChatId, tab: SharedMediaTab, generation: u64) {
+    /// An older page failed: the list shows a retry row, which asks again.
+    pub fn fail_more(
+        &mut self,
+        chat_id: ChatId,
+        tab: SharedMediaTab,
+        generation: u64,
+        error: String,
+    ) {
         if !self.accepts(chat_id, tab, generation) {
             return;
         }
-        self.tab_state(tab).loading_more = false;
+        self.tab_state(tab).fail_more_page(error);
     }
 
     pub fn fail(&mut self, chat_id: ChatId, tab: SharedMediaTab, generation: u64, error: String) {
@@ -560,8 +678,6 @@ impl SharedMediaState {
         let state = self.tab_state(tab);
         state.items.clear();
         state.total_count = 0;
-        state.error = error;
-        state.loading_more = false;
-        state.status = SharedMediaTabStatus::Failed;
+        state.status = SharedMediaTabStatus::Failed(error);
     }
 }

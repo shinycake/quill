@@ -92,7 +92,7 @@ impl Session {
     pub fn open_shared_media_calendar(&mut self, now: i64) -> Option<&HistoryCalendar> {
         let gallery = &self.media.shared_media;
         let (chat_id, tab) = (
-            gallery.chat_id.filter(|_| gallery.open)?,
+            gallery.chat_id?,
             gallery.active_tab,
         );
         let media = calendar_media(tab)?;

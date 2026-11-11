@@ -15,7 +15,7 @@ use quill::connect::SEARCH_DEBOUNCE;
 use quill::lang::{Key, keys, tr};
 use quill::state::SharedMediaTab;
 
-use super::shared_media_search_state::{SearchKey, SharedMediaSearchUi};
+use super::shared_media_search_state::SearchKey;
 
 /// tdesktop `lng_media_*_empty_search` for the searchable tabs.
 fn search_empty_key(tab: SharedMediaTab) -> Option<Key> {
@@ -37,6 +37,7 @@ impl QuillApp {
         if !self.session()?.shared_media_search_shown(tab) {
             return None;
         }
+        let input = self.media_search.input()?;
         let muted = cx.theme().muted_foreground;
         Some(
             div()
@@ -47,7 +48,7 @@ impl QuillApp {
                 .border_b_1()
                 .border_color(cx.theme().border)
                 .child(
-                    Input::new(&self.media_search.input)
+                    Input::new(input)
                         .small()
                         .cleanable(true)
                         .prefix(
@@ -89,26 +90,29 @@ impl QuillApp {
         let Some(key) = self.shared_media_search_key() else {
             return;
         };
-        if self.media_search.key != Some(key) {
+        if self.media_search.key() != Some(key) {
             return;
         }
-        self.media_search.keystroke = self.media_search.keystroke.wrapping_add(1);
-        let keystroke = self.media_search.keystroke;
         let text = text.trim().to_string();
         if text.is_empty() || self.live.is_none() {
+            if let Some(field) = self.media_search.field_mut() {
+                field.debounce = None;
+            }
             self.search_shared_media_now(key, &text, cx);
             return;
         }
-        self.spawn_scoped(cx, async move |this, cx| {
+        let waiting = self.spawn_scoped(cx, async move |this, cx| {
             cx.background_executor().timer(SEARCH_DEBOUNCE).await;
             this.update(cx, |this, cx| {
-                if this.media_search.keystroke == keystroke && this.media_search.key == Some(key) {
+                if this.media_search.key() == Some(key) {
                     this.search_shared_media_now(key, &text, cx);
                 }
             })
             .ok();
-        })
-        .detach();
+        });
+        if let Some(field) = self.media_search.field_mut() {
+            field.debounce = Some(waiting);
+        }
     }
 
     fn search_shared_media_now(&mut self, key: SearchKey, text: &str, cx: &mut Context<Self>) {
@@ -128,7 +132,7 @@ impl QuillApp {
     fn shared_media_search_key(&self) -> Option<SearchKey> {
         let gallery = &self.session()?.media.shared_media;
         let chat_id = gallery.chat_id?;
-        (gallery.open && gallery.active_tab.searchable()).then_some((chat_id, gallery.active_tab))
+        (gallery.open() && gallery.active_tab.searchable()).then_some((chat_id, gallery.active_tab))
     }
 
     /// Called as the shell lays out. A field made for another chat or
@@ -141,21 +145,17 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let key = self.shared_media_search_key();
-        if self.media_search.key == key {
+        if self.media_search.key() == key {
             return;
         }
-        self.media_search.keystroke = self.media_search.keystroke.wrapping_add(1);
         // The user was typing in the old field: carry the cursor to the new
         // one, so a tab change from elsewhere does not strand the keyboard
         // on an input that is no longer drawn.
         let was_typing = self
             .media_search
-            .input
-            .read(cx)
-            .focus_handle(cx)
-            .is_focused(window);
-        self.media_search.input = SharedMediaSearchUi::fresh_input(window, cx);
-        self.media_search.key = key;
+            .input()
+            .is_some_and(|input| input.read(cx).focus_handle(cx).is_focused(window));
+        self.media_search.reopen(key, window, cx);
         // Only a field that is drawn takes the cursor, and focus moves after
         // the frame (render itself only swaps the field).
         let drawn = key.is_some_and(|(_, tab)| {
@@ -163,10 +163,11 @@ impl QuillApp {
                 .is_some_and(|session| session.shared_media_search_shown(tab))
         });
         if was_typing && drawn {
-            let input = self.media_search.input.clone();
-            window.defer(cx, move |window, cx| {
-                input.update(cx, |input, cx| input.focus(window, cx));
-            });
+            if let Some(input) = self.media_search.input().cloned() {
+                window.defer(cx, move |window, cx| {
+                    input.update(cx, |input, cx| input.focus(window, cx));
+                });
+            }
         }
     }
 }

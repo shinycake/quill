@@ -52,26 +52,43 @@ pub struct PublicForwardsList {
     pub forwards: Vec<crate::telegram::envelope::PublicForwardView>,
     pub total: i32,
     pub next_offset: String,
+    /// Where the next page stands.
+    page: ForwardsPage,
+}
+
+/// The page of public forwards after the loaded ones.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+enum ForwardsPage {
+    #[default]
+    Idle,
     /// The page on its way: only its answer lands here, so a page asked
     /// for a post shown before cannot join this post's list.
-    asking: Option<RequestId>,
-    pub error: Option<String>,
+    Loading(RequestId),
+    /// The page failed; the next ask clears the line.
+    Failed(String),
 }
 
 impl PublicForwardsList {
     /// A page is on its way.
     pub fn loading(&self) -> bool {
-        self.asking.is_some()
+        matches!(self.page, ForwardsPage::Loading(_))
+    }
+
+    /// The failed page's line.
+    pub fn error(&self) -> Option<&str> {
+        match &self.page {
+            ForwardsPage::Failed(error) => Some(error),
+            _ => None,
+        }
     }
 
     /// Whether `request` is the page this list is waiting for.
     pub(crate) fn asked(&self, request: RequestId) -> bool {
-        self.asking == Some(request)
+        self.page == ForwardsPage::Loading(request)
     }
 
     fn accept(&mut self, view: PublicForwardsView) {
-        self.asking = None;
-        self.error = None;
+        self.page = ForwardsPage::Idle;
         self.total = view.total_count;
         self.next_offset = view.next_offset;
         self.forwards.extend(view.forwards);
@@ -237,8 +254,7 @@ impl StatsState {
 
     pub(crate) fn forwards_requested(&mut self, chat_id: i64, message_id: i64, request: RequestId) {
         if let Some(state) = self.message_mut(chat_id, message_id) {
-            state.forwards.asking = Some(request);
-            state.forwards.error = None;
+            state.forwards.page = ForwardsPage::Loading(request);
         }
     }
 
@@ -283,8 +299,7 @@ impl StatsState {
         if let Some(state) = self.message_mut(chat_id, message_id)
             && state.forwards.asked(request)
         {
-            state.forwards.asking = None;
-            state.forwards.error = Some(error);
+            state.forwards.page = ForwardsPage::Failed(error);
         }
     }
 

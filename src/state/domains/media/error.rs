@@ -85,7 +85,12 @@ impl Session {
             pending.map(|p| p.purpose)
             && let Some(chat_id) = pending.and_then(|p| p.chat_id)
         {
-            self.media.shared_media.fail_more(chat_id, tab, generation);
+            self.media.shared_media.fail_more(
+                chat_id,
+                tab,
+                generation,
+                call_request_error_line(err, "Could not load more media"),
+            );
         }
     }
 }

@@ -3,7 +3,7 @@
 use super::*;
 use crate::ids::ChatId;
 use crate::state::{
-    MediaPurpose, RequestPurpose, SharedMediaTab, SharedMediaTabStatus, UsersPurpose,
+    MediaPurpose, RequestPurpose, SharedMediaTab, UsersPurpose,
 };
 use crate::telegram::envelope::{ChatKind, MessageSender};
 use crate::telegram::requests::{
@@ -51,7 +51,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .shared_media
                 .tabs
                 .get(tab.index())
-                .is_some_and(|state| state.status == SharedMediaTabStatus::Idle);
+                .is_some_and(|state| state.status.is_idle());
             if tab.available_in(&kind) && idle {
                 // A failed send leaves that tab hidden; the others still load.
                 let _ = self.fetch_profile_tab(tab, false);

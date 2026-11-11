@@ -55,11 +55,6 @@ FastShareFacts::sent
 FieldResult::finished
 FirstRunPrefs::completed
 FooterMeta::pending
-GifPanel::failed
-GifPanel::loaded
-GifPanel::loading
-GifPanel::search_failed
-GifPanel::search_loading
 GiftCodeLookup::loading
 GiftCodeLookup::loading+error
 GiftManageState::collections_loading
@@ -180,8 +175,6 @@ SettingsState::saved_sounds_loaded
 SettingsState::saved_sounds_stale
 SettingsState::storage_limits_seed_sent
 SettingsState::storage_stats_loading
-SharedMediaTabState::loading_more
-SharedMediaTabState::loading_more+error
 Shown::waiting_for_input
 SignInUi::tick_armed
 SignInUi::tick_armed+error_clock
@@ -193,9 +186,6 @@ StarPacksState::loading
 StarPacksState::loading+error
 State::started
 Step::started
-StickerPanel::greeting_loaded
-StickerPanel::installed_loaded
-StickerPanel::suggest_waiting_for_sets
 StickerSetView::files_requested
 StorageScroll::pending
 StreamFacts::transport_failed

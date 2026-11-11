@@ -378,7 +378,7 @@ fn forum_rows_follow_display_as_forum() {
     );
     let row = session.chat_row_forum(ChatId(16)).expect("a forum row");
     assert!(!row.loaded && row.topics.is_empty());
-    session.threads.forum_topics_failed.insert(16);
+    session.threads.forum_topics.fail(16);
     assert!(session.chat_row_forum(ChatId(16)).expect("row").loaded);
 }
 

@@ -177,7 +177,7 @@ impl SharedMediaState {
     ) -> bool {
         match generation {
             Some(generation) => self.accepts(chat_id, tab, generation),
-            None => self.open && self.chat_id == Some(chat_id),
+            None => self.chat_id == Some(chat_id),
         }
     }
 
@@ -217,8 +217,6 @@ impl SharedMediaState {
         let stamp = self.next_generation();
         let state = self.tab_state(tab);
         state.status = SharedMediaTabStatus::Loading;
-        state.error.clear();
-        state.loading_more = false;
         state.generation = stamp;
         stamp
     }
@@ -228,10 +226,9 @@ impl SharedMediaState {
     /// already loading.
     pub fn begin_profile_more(&mut self, tab: SharedMediaTab) -> Option<u64> {
         let state = self.tab_state(tab);
-        if !state.can_load_more() {
+        if !state.start_more() {
             return None;
         }
-        state.loading_more = true;
         Some(state.generation)
     }
 
@@ -255,19 +252,19 @@ impl SharedMediaState {
             append,
         } = page;
         let state = self.tab_state(tab);
+        let before = state.items.len();
         if append {
             state.items.extend(items);
         } else {
             state.items = items;
         }
         state.total_count = total_count.max(state.items.len() as i32);
-        state.has_more = has_more;
-        state.loading_more = false;
-        state.error.clear();
+        // A page with nothing new cannot make progress: stop asking.
+        state.has_more = has_more && !(append && state.items.len() == before);
         state.status = if state.items.is_empty() {
             SharedMediaTabStatus::Empty
         } else {
-            SharedMediaTabStatus::Ready
+            SharedMediaTabStatus::ready()
         };
         true
     }
@@ -286,14 +283,13 @@ impl SharedMediaState {
             return false;
         }
         let state = self.tab_state(tab);
-        state.loading_more = false;
-        if state.status == SharedMediaTabStatus::Ready {
+        if state.status.is_ready() {
+            state.fail_more_page(error);
             return false;
         }
         state.items.clear();
         state.total_count = 0;
-        state.error = error;
-        state.status = SharedMediaTabStatus::Failed;
+        state.status = SharedMediaTabStatus::Failed(error);
         true
     }
 }
@@ -754,10 +750,7 @@ mod tests {
                 append: false,
             },
         );
-        assert_eq!(
-            gallery.tabs[tab.index()].status,
-            SharedMediaTabStatus::Ready
-        );
+        assert!(gallery.tabs[tab.index()].status.is_ready());
         assert!(gallery.begin_profile_more(tab).is_some());
         assert!(gallery.begin_profile_more(tab).is_none());
         gallery.accept_profile(
@@ -775,10 +768,7 @@ mod tests {
         assert!(!gallery.tabs[tab.index()].can_load_more());
         // A late failure keeps the list; another chat's answer is ignored.
         gallery.fail_profile(ChatId(1), tab, None, "boom".into());
-        assert_eq!(
-            gallery.tabs[tab.index()].status,
-            SharedMediaTabStatus::Ready
-        );
+        assert!(gallery.tabs[tab.index()].status.is_ready());
         gallery.accept_profile(
             ChatId(2),
             tab,

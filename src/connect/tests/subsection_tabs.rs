@@ -390,7 +390,7 @@ fn forums_in_a_list_load_their_topics_when_they_appear() {
             fetches[0]["@extra"].as_str().unwrap()
         ),
     );
-    assert!(driver.session.threads.forum_topics_failed.contains(&id(61)));
+    assert!(driver.session.threads.forum_topics.failed(&id(61)));
     ingest(&mut driver, &forum(61));
     assert_eq!(sent(&recorder, "getForumTopics").len(), 1);
     // A forum that is in no chat list is not preloaded; once it enters one it is.

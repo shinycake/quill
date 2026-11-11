@@ -252,7 +252,7 @@ impl QuillApp {
                 .iter()
                 .any(|set| set.id == target.set_id),
             favorite: (target.kind == MediaKind::Sticker
-                && (session.stickers.stickers.installed_loaded
+                && (session.stickers.stickers.installed_loaded()
                     || !session.stickers.stickers.favorites.is_empty()))
             .then(|| {
                 session
@@ -262,11 +262,12 @@ impl QuillApp {
                     .iter()
                     .any(|s| s.file_id == target.file_id)
             }),
-            gif_saved: session.stickers.gifs.loaded.then(|| {
+            gif_saved: session.stickers.gifs.saved.loaded().then(|| {
                 session
                     .stickers
                     .gifs
-                    .animations
+                    .saved
+                    .items()
                     .iter()
                     .any(|item| item.file_id == target.file_id)
             }),

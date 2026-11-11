@@ -43,7 +43,7 @@ impl QuillApp {
         let rows = Rc::new(grid_rows(
             &month_sections(&state.items),
             layout.per_row,
-            state.can_load_more(),
+            state.more_askable(),
         ));
         let sizes: Rc<Vec<ItemSize<Pixels>>> = Rc::new(
             rows.iter()

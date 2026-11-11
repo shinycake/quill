@@ -473,13 +473,10 @@ impl Session {
             .reply_targets
             .retain(|&(chat, _), _| chat != chat_id.0);
         let translate = &mut self.messages.translate;
+        // An answer still on its way finds no entry, so it brings none back.
         translate
             .messages
             .retain(|(chat, _, _), _| *chat != chat_id.0);
-        // An answer still on its way would bring one back.
-        translate.jobs.retain(|_, job| {
-            !matches!(job.target, TranslateTarget::Message { chat_id: chat, .. } if chat == chat_id.0)
-        });
         self.forget_sponsored_messages(chat_id);
         self.messages.poll_messages.retain(|_, rows| {
             rows.retain(|&(chat, _)| chat != chat_id.0);

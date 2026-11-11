@@ -120,7 +120,7 @@ impl QuillApp {
         ];
         let stickers = &mut session.stickers.stickers;
         stickers.sets = installed;
-        stickers.installed_loaded = true;
+        stickers.lists.installed.succeed(());
         stickers.trending_total = trending.len();
         stickers.trending_next_offset = trending.len();
         stickers.trending = trending;

@@ -275,7 +275,7 @@ impl Session {
         let jump = topics.first().filter(|t| t.unread).map(|t| t.id);
         Some(RowForum {
             loaded: self.threads.forum_topics.contains_key(&chat_id.0)
-                || self.threads.forum_topics_failed.contains(&chat_id.0),
+                || self.threads.forum_topics.failed(&chat_id.0),
             unread_topics: i32::try_from(shown).unwrap_or(i32::MAX),
             badge_muted,
             jump,

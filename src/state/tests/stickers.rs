@@ -146,7 +146,8 @@ fn s9_gif_backend_purpose_gated_dispatch() {
 
     // An addSavedAnimation `ok` clears the saved-GIF cache so it
     // refetches the server-confirmed list.
-    with_purpose.stickers.gifs.animations = with_purpose.stickers.gifs.search_results.clone();
+    let found = with_purpose.stickers.gifs.search_results.clone();
+    with_purpose.stickers.gifs.saved.accept(found);
     let extra = with_purpose.request(RequestPurpose::AddSavedAnimation, None);
     apply_json(
         &mut with_purpose,
@@ -154,10 +155,11 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.stickers.gifs.animations.is_empty());
+    assert!(with_purpose.stickers.gifs.saved.items().is_empty());
 
     // A removeSavedAnimation `ok` invalidates the same way.
-    with_purpose.stickers.gifs.animations = with_purpose.stickers.gifs.search_results.clone();
+    let found = with_purpose.stickers.gifs.search_results.clone();
+    with_purpose.stickers.gifs.saved.accept(found);
     let extra = with_purpose.request(RequestPurpose::RemoveSavedAnimation, None);
     apply_json(
         &mut with_purpose,
@@ -165,7 +167,7 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.stickers.gifs.animations.is_empty());
+    assert!(with_purpose.stickers.gifs.saved.items().is_empty());
 
     // updateAnimationSearchParameters stores provider + emojis.
     apply_json(
@@ -292,14 +294,14 @@ fn gif_panel_downloads_stills_then_preview_loops_then_unpreviewed_clips() {
         minithumbnail: None,
         thumb_still: still,
     };
-    session.stickers.gifs.animations = vec![
+    session.stickers.gifs.saved = GifSaved::Ready(vec![
         // An MP4 preview loop: the loop plays, the GIF itself waits.
         gif(1, Some(11), false),
         // A still JPEG and no loop: the GIF itself plays.
         gif(2, Some(12), true),
         // Nothing but the GIF.
         gif(3, None, true),
-    ];
+    ]);
     // A closed panel fetches nothing.
     assert!(session.gif_panel_file_ids_to_download().is_empty());
     session.stickers.gifs.open = true;
@@ -390,4 +392,25 @@ fn a_failed_refetch_keeps_the_shown_sticker_set() {
     session.stickers.sticker_set_view = Some(StickerSetView::loading(5));
     session.fail_sticker_set_view(5);
     assert_eq!(stage(&session), Some(StickerSetViewStage::Failed));
+}
+
+#[test]
+fn a_failed_greeting_fetch_leaves_loading_and_is_not_asked_again() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    session.stickers.stickers.greeting.begin();
+    let extra = session.request(RequestPurpose::GetGreetingStickers, None);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":500,"message":"boom"}}"#,
+            extra.0
+        ),
+    );
+    let greeting = &session.stickers.stickers.greeting;
+    assert!(!greeting.is_loading());
+    assert!(greeting.error().is_some());
+    assert!(!greeting.is_idle(), "one attempt per session");
 }

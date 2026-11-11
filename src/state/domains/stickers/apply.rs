@@ -158,8 +158,7 @@ impl Session {
                     self.payments.hub.premium_stickers = stickers;
                     self.payments.hub.premium_stickers_loading = false;
                 } else if purpose == Some(RequestPurpose::GetGreetingStickers) {
-                    self.stickers.stickers.greeting = stickers;
-                    self.stickers.stickers.greeting_loaded = true;
+                    self.stickers.stickers.greeting.succeed(stickers);
                 } else if purpose == Some(RequestPurpose::GetCustomEmojiStickers) {
                     // Slice S10: bare `stickers` land in the emoji panel (see emoji.rs).
                     self.accept_custom_emoji_stickers(stickers);
@@ -294,7 +293,7 @@ impl Session {
                 }
             }
             StickersPayload::UpdateSavedAnimations { .. } => {
-                self.stickers.gifs.stale = true;
+                self.stickers.gifs.saved.mark_stale();
             }
             // Slice S9: `updateAnimationSearchParameters` (schema 1.8.67,
             // line 11064) — server-pushed; store the provider name and the
