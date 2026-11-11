@@ -55,7 +55,7 @@ impl Session {
     pub fn can_share_to(chat: &ChatSummary) -> bool {
         chat.supported()
             && (!chat.is_channel()
-                || chat.my_member_status.is_none()
+                || chat.member_status().is_none()
                 || chat.channel_admin_can_post())
     }
 

@@ -38,7 +38,8 @@ impl Session {
                 // A late error of an older request leaves the one in flight
                 // (and its line) alone.
                 if self.auth_state.settle_password_op(pending.map(|p| p.id)) {
-                    self.auth_state.password_op_error = Some(password_op_error_line(op, err));
+                    self.auth_state.password_op =
+                        PasswordFlight::Failed(password_op_error_line(op, err));
                 }
             }
             // The country list failed: the boxes say so and offer Retry (a
@@ -57,14 +58,16 @@ impl Session {
             // code is still valid — the user can retry or resend.
             // A failed check likewise keeps the pending number.
             Some(RequestPurpose::SendPhoneNumberCode | RequestPurpose::ResendPhoneNumberCode) => {
-                self.auth_state.change_number_loading = false;
-                self.auth_state.change_number_error =
-                    Some(sessions_error_line("send the verification code", err));
+                self.auth_state.change_number.send_failed(
+                    pending.map(|p| p.id),
+                    sessions_error_line("send the verification code", err),
+                );
             }
             Some(RequestPurpose::CheckPhoneNumberCode) => {
-                self.auth_state.change_number_checking = false;
-                self.auth_state.change_number_error =
-                    Some(sessions_error_line("check the verification code", err));
+                self.auth_state.change_number.check_failed(
+                    pending.map(|p| p.id),
+                    sessions_error_line("check the verification code", err),
+                );
             }
             // TDLib answers and stays in WaitTdlibParameters, which sends no
             // update: without this the card says "Connecting" forever.

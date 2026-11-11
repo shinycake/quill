@@ -388,7 +388,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let still_in = !matches!(
-            chat.my_member_status,
+            chat.member_status(),
             Some(ChannelMemberStatus::Left | ChannelMemberStatus::Banned)
         );
         let entry = exit_entry(&chat.kind, still_in)?;

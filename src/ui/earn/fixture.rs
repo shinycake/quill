@@ -151,7 +151,7 @@ pub(in crate::ui) fn seed_channel_monetization(
     );
     apply(session, sink, seq, &[full_info]);
     if let Some(chat) = session.chats.get_mut(&DEMO_CHANNEL) {
-        chat.my_member_status = Some(ChannelMemberStatus::Creator);
+        chat.assume_member_status(Some(ChannelMemberStatus::Creator));
     }
     let peer = EarnPeer::Chat(DEMO_CHANNEL);
     let mut page = EarnPage::new(peer, EarnScreen::Monetization);

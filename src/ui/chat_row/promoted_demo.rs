@@ -80,7 +80,7 @@ impl QuillApp {
             .store(seq.load(Ordering::SeqCst), Ordering::SeqCst);
         for id in [91, 92] {
             if let Some(chat) = session.chats.get_mut(&id) {
-                chat.my_member_status = Some(ChannelMemberStatus::Left);
+                chat.assume_member_status(Some(ChannelMemberStatus::Left));
             }
         }
         let labels = &mut session.chat_list.psa_labels;

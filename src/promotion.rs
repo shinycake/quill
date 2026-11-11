@@ -82,7 +82,7 @@ pub fn top_promotion<'a>(session: &'a Session, chat: &ChatSummary) -> Option<&'a
     }
     let applies = match chat.kind {
         ChatKind::Supergroup { .. } => !matches!(
-            chat.my_member_status,
+            chat.member_status(),
             Some(
                 ChannelMemberStatus::Creator
                     | ChannelMemberStatus::Administrator
@@ -447,11 +447,11 @@ mod tests {
         put(&mut s, 1, channel);
         assert!(applies(&s, 1), "a channel the account is not in");
         if let Some(chat) = s.chats.get_mut(&1) {
-            chat.my_member_status = Some(ChannelMemberStatus::Member);
+            chat.assume_member_status(Some(ChannelMemberStatus::Member));
         }
         assert!(!applies(&s, 1), "a joined channel");
         if let Some(chat) = s.chats.get_mut(&1) {
-            chat.my_member_status = Some(ChannelMemberStatus::Left);
+            chat.assume_member_status(Some(ChannelMemberStatus::Left));
             chat.is_pinned = true;
         }
         assert!(!applies(&s, 1), "a pinned chat");

@@ -117,7 +117,7 @@ fn a_chat_without_write_rights_offers_no_reply(cx: &mut TestAppContext) {
             supergroup_id: 1,
             is_channel: true,
         };
-        chat.my_member_status = None;
+        chat.assume_member_status(None);
         cx.notify();
     });
     open(&app, vcx, 8903);

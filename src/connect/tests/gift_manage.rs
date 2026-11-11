@@ -578,10 +578,20 @@ fn a_channel_creator_can_delete_its_gift_and_an_admin_cannot() {
                 "type": {"@type": "chatTypeSupergroup", "supergroup_id": -id - 1_000_000_000_000_i64, "is_channel": true}}}),
         );
     }
-    p.0.session.chats.get_mut(&-1001).unwrap().my_member_status =
-        Some(crate::telegram::envelope::ChannelMemberStatus::Creator);
-    p.0.session.chats.get_mut(&-1002).unwrap().my_member_status =
-        Some(crate::telegram::envelope::ChannelMemberStatus::Administrator);
+    p.0.session
+        .chats
+        .get_mut(&-1001)
+        .unwrap()
+        .assume_member_status(Some(
+            crate::telegram::envelope::ChannelMemberStatus::Creator,
+        ));
+    p.0.session
+        .chats
+        .get_mut(&-1002)
+        .unwrap()
+        .assume_member_status(Some(
+            crate::telegram::envelope::ChannelMemberStatus::Administrator,
+        ));
     p.0.session.payments.hub.gifts_owner = Some(MessageSender::Chat { chat_id: -1002 });
     p.0.session.payments.hub.received.list_mut().items = vec![
         crate::premium_hub::parse_received_gift(&regular("a", json!({"can_be_deleted": true})))

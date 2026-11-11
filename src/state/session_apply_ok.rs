@@ -187,19 +187,14 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::CheckPhoneNumberCode)
         ) {
-            if let Some(target) = self.auth_state.change_number_phone.clone()
+            // The flow is over, whatever send or resend is still out (its
+            // answers are dropped below).
+            if let Some(target) = self.auth_state.change_number.finish()
                 && let Some(my_id) = self.my_user_id
                 && let Some(me) = self.users.get_mut(&my_id)
             {
                 me.phone_number = target;
             }
-            self.auth_state.change_number_phone = None;
-            self.auth_state.change_number_timeout = None;
-            self.auth_state.change_number_checking = false;
-            // The send/resend answers are dropped below, so nothing else
-            // would clear this.
-            self.auth_state.change_number_loading = false;
-            self.auth_state.change_number_error = None;
             // A8: drop any stale in-flight send/resend purposes —
             // a late resend answer must not resurrect the
             // completed flow (re-write phone/timeout or park a

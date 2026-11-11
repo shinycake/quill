@@ -289,7 +289,7 @@ impl Session {
     /// The chat was left and is in no list: its history has no use.
     fn chat_is_gone(&self, chat_id: ChatId) -> bool {
         self.chats.get(&chat_id.0).is_some_and(|chat| {
-            chat.my_member_status == Some(ChannelMemberStatus::Left)
+            chat.member_status() == Some(ChannelMemberStatus::Left)
                 && !chat.in_main_list
                 && !chat.in_archive
         })

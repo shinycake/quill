@@ -774,7 +774,7 @@ impl Session {
         let Some(chat) = self.chats.get(&chat_id.0) else {
             return false;
         };
-        if chat.my_member_status == Some(ChannelMemberStatus::Creator) {
+        if chat.member_status() == Some(ChannelMemberStatus::Creator) {
             return true;
         }
         match chat.kind {

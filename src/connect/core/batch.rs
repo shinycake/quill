@@ -8,8 +8,6 @@ use crate::telegram::envelope::{
 /// What a poll batch postponed.
 #[derive(Debug, Default)]
 pub(crate) struct BatchState {
-    /// Between `begin_batch` and `end_batch`.
-    open: bool,
     /// An envelope was applied since the open chat's custom emoji were
     /// last looked at.
     emoji_dirty: bool,
@@ -47,7 +45,6 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// work that `end_batch` does once (chat-list sorting, resolving the
     /// open chat's custom emoji).
     pub fn begin_batch(&mut self) {
-        self.batch.open = true;
         self.session.begin_update_batch();
     }
 
@@ -70,7 +67,6 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// Finish the batch started by `begin_batch`.
     pub fn end_batch(&mut self) -> Result<(), ConnectSendError> {
-        self.batch.open = false;
         self.session.end_update_batch();
         if std::mem::take(&mut self.batch.views_dirty) {
             self.run_shown_views()?;
@@ -87,14 +83,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `end_batch` for an account not on screen: nothing shows its chats,
     /// so the passes for them wait for the first batch once it is shown.
     pub fn end_offscreen_batch(&mut self) {
-        self.batch.open = false;
         self.session.end_update_batch();
     }
 
     /// After an envelope that may show a new custom emoji: resolve and download the open chat's custom
     /// emoji now, or once at the end of the batch.
     pub(super) fn sync_open_chat_custom_emoji(&mut self) -> Result<(), ConnectSendError> {
-        if self.batch.open {
+        if self.session.in_update_batch() {
             self.batch.emoji_dirty = true;
             return Ok(());
         }
@@ -104,7 +99,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// After an envelope that changed the shown chats' messages: view them
     /// and fetch their reply targets now, or once at the end of the batch.
     pub(super) fn sync_shown_views(&mut self) -> Result<(), ConnectSendError> {
-        if self.batch.open {
+        if self.session.in_update_batch() {
             self.batch.views_dirty = true;
             return Ok(());
         }
@@ -114,7 +109,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// After an envelope that may change what the shown chats need
     /// downloaded: ask for it now, or once at the end of the batch.
     pub(super) fn sync_shown_media(&mut self) -> Result<(), ConnectSendError> {
-        if self.batch.open {
+        if self.session.in_update_batch() {
             self.batch.media_dirty = true;
             return Ok(());
         }

@@ -52,7 +52,11 @@ fn own_paid_channel(app: &mut QuillApp, allowed: bool) {
             ..quill::state::SupergroupFullInfoData::default()
         },
     );
-    session.chats.get_mut(&13).unwrap().my_member_status = Some(ChannelMemberStatus::Creator);
+    session
+        .chats
+        .get_mut(&13)
+        .unwrap()
+        .assume_member_status(Some(ChannelMemberStatus::Creator));
 }
 
 fn tray(app: &mut QuillApp, files: &[(&str, AttachmentKind)]) {

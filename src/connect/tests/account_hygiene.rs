@@ -499,7 +499,13 @@ fn wrong_recovery_email_code_reports_without_changing_state() {
         &f.3,
         &format!(r#"{{"@type":"error","code":400,"message":"CODE_INVALID","@extra":"{extra}"}}"#),
     );
-    let line = f.1.session.auth_state.password_op_error.clone().unwrap();
+    let line =
+        f.1.session
+            .auth_state
+            .password_op
+            .error()
+            .unwrap()
+            .to_string();
     assert!(line.contains("confirm the recovery email"), "{line}");
     assert!(line.contains("wrong or has expired"), "{line}");
     assert!(

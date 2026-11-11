@@ -6,8 +6,6 @@ Assembly::started
 AudioEngine::failed
 AudioEngine::start_failed
 AudioEngine::start_failed+error
-AuthState::change_number_loading
-AuthState::change_number_loading+last_auth_error
 AwardMembers::done
 AwardMembers::loading
 AwardMembers::loading+error
@@ -24,7 +22,6 @@ CallUi::window_opening
 CameraDraft::starting
 Ceremony::finished
 ChatListState::archive_settings_loading
-ChatSummary::my_rights_fetched
 ChatSwipeFacts::is_saved
 ChatUi::inline_query_waiting
 ChatbotDraft::loaded

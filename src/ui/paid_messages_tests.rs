@@ -243,7 +243,11 @@ fn only_the_owner_of_a_channel_sees_direct_messages(cx: &mut TestAppContext) {
         );
         // Not the owner: no box opens from the row's action.
         assert!(!session.chat_is_owner(ChatId(13)));
-        session.chats.get_mut(&13).unwrap().my_member_status = Some(ChannelMemberStatus::Creator);
+        session
+            .chats
+            .get_mut(&13)
+            .unwrap()
+            .assume_member_status(Some(ChannelMemberStatus::Creator));
         app.open_direct_messages(ChatId(13), cx);
         let boxed = app.paid_messages.direct.as_ref().expect("opens");
         assert!(!boxed.enabled);
@@ -272,7 +276,11 @@ fn the_direct_messages_box_takes_the_price_when_it_arrives(cx: &mut TestAppConte
                 ..quill::state::SupergroupFullInfoData::default()
             },
         );
-        session.chats.get_mut(&13).unwrap().my_member_status = Some(ChannelMemberStatus::Creator);
+        session
+            .chats
+            .get_mut(&13)
+            .unwrap()
+            .assume_member_status(Some(ChannelMemberStatus::Creator));
         app.open_direct_messages(ChatId(13), cx);
         let boxed = app.paid_messages.direct.as_ref().expect("opens");
         assert!(boxed.enabled);
@@ -302,7 +310,11 @@ fn another_targets_save_does_not_close_the_direct_messages_box(cx: &mut TestAppC
     let vcx = &mut vcx;
     app.update_in(vcx, |app, window, cx| {
         let session = app.demo_session.as_mut().unwrap();
-        session.chats.get_mut(&13).unwrap().my_member_status = Some(ChannelMemberStatus::Creator);
+        session
+            .chats
+            .get_mut(&13)
+            .unwrap()
+            .assume_member_status(Some(ChannelMemberStatus::Creator));
         let supergroup = session.chat_supergroup(ChatId(13)).expect("demo channel");
         session.groups.supergroup_full_infos.insert(
             supergroup,

@@ -60,7 +60,7 @@ fn a_batch_without_order_changes_leaves_the_order_alone() {
     session.begin_update_batch();
     session.end_update_batch();
     assert_eq!(session.main_order, before);
-    assert!(!session.chat_order_sync.dirty);
+    assert!(!session.in_update_batch());
 }
 
 #[test]

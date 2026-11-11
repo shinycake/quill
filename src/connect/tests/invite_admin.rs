@@ -49,12 +49,12 @@ impl Rig {
         // record the probe result directly.
         if is_channel && let Some(chat) = rig.driver.session.chats.get_mut(&13) {
             if status == CREATOR {
-                chat.my_member_status = Some(ChannelMemberStatus::Creator);
+                chat.assume_member_status(Some(ChannelMemberStatus::Creator));
             } else if status == ADMIN {
-                chat.my_member_status = Some(ChannelMemberStatus::Administrator);
+                chat.assume_member_status(Some(ChannelMemberStatus::Administrator));
                 chat.set_admin_can_invite_users(Some(true));
             } else {
-                chat.my_member_status = Some(ChannelMemberStatus::Member);
+                chat.assume_member_status(Some(ChannelMemberStatus::Member));
             }
         }
         rig

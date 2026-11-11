@@ -16,8 +16,9 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             let chat = if channel { 13 } else { 11 };
             if channel && let Some(chat) = session.chats.get_mut(&13) {
-                chat.my_member_status =
-                    Some(quill::telegram::envelope::ChannelMemberStatus::Creator);
+                chat.assume_member_status(Some(
+                    quill::telegram::envelope::ChannelMemberStatus::Creator,
+                ));
             }
             session.open_chat(quill::ids::ChatId(chat));
         }

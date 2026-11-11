@@ -70,7 +70,7 @@ impl Session {
     pub fn chat_not_joined(&self, chat_id: ChatId) -> bool {
         self.chats.get(&chat_id.0).is_some_and(|chat| {
             matches!(
-                chat.my_member_status,
+                chat.member_status(),
                 Some(ChannelMemberStatus::Left | ChannelMemberStatus::Banned)
             )
         })

@@ -97,7 +97,7 @@ fn replay_channel_membership_and_join_leave() {
     let chat = session.chats.get(&13).unwrap();
     // Composer hidden in channels (admin posting is 2.3).
     assert!(!chat.can_post());
-    assert_eq!(chat.my_member_status, None);
+    assert_eq!(chat.member_status(), None);
 
     let me_extra = session.request(RequestPurpose::GetMe, None);
     let member_extra = session.request(RequestPurpose::GetChatMember, Some(chat_id));
@@ -115,7 +115,7 @@ fn replay_channel_membership_and_join_leave() {
     );
     assert_eq!(session.my_user_id, Some(777));
     let chat = session.chats.get(&13).unwrap();
-    assert_eq!(chat.my_member_status, Some(ChannelMemberStatus::Left));
+    assert_eq!(chat.member_status(), Some(ChannelMemberStatus::Left));
 
     // joinChat → success flips to Member optimistically.
     let join_extra = session.request(RequestPurpose::JoinChat, Some(chat_id));
@@ -129,7 +129,7 @@ fn replay_channel_membership_and_join_leave() {
         )],
     );
     assert_eq!(
-        session.chats.get(&13).unwrap().my_member_status,
+        session.chats.get(&13).unwrap().member_status(),
         Some(ChannelMemberStatus::Member)
     );
 
@@ -145,10 +145,10 @@ fn replay_channel_membership_and_join_leave() {
     );
     let chat = session.chats.get(&13).unwrap();
     assert_eq!(
-        chat.my_member_status,
+        chat.member_status(),
         Some(ChannelMemberStatus::Administrator)
     );
-    assert!(chat.my_member_status.unwrap().is_admin());
+    assert!(chat.member_status().unwrap().is_admin());
     assert!(chat.can_post());
 
     // leaveChat → ok flips to Left optimistically.
@@ -160,7 +160,7 @@ fn replay_channel_membership_and_join_leave() {
         &[&format!(r#"{{"@type":"ok","@extra":"{}"}}"#, leave_extra.0)],
     );
     assert_eq!(
-        session.chats.get(&13).unwrap().my_member_status,
+        session.chats.get(&13).unwrap().member_status(),
         Some(ChannelMemberStatus::Left)
     );
 }
@@ -199,7 +199,7 @@ fn replay_join_chat_non_success_keeps_status() {
             &[&format!(r#"{{"@type":"{}","@extra":"{}"}}"#, ctor, extra.0)],
         );
         assert_eq!(
-            session.chats.get(&13).unwrap().my_member_status,
+            session.chats.get(&13).unwrap().member_status(),
             Some(ChannelMemberStatus::Left),
             "{ctor} must not flip status"
         );
@@ -214,7 +214,7 @@ fn replay_join_chat_non_success_keeps_status() {
         ],
     );
     assert_eq!(
-        session.chats.get(&13).unwrap().my_member_status,
+        session.chats.get(&13).unwrap().member_status(),
         Some(ChannelMemberStatus::Left)
     );
 }
@@ -258,10 +258,12 @@ fn replay_channel_admin_sees_composer() {
     );
     let chat = session.chats.get(&13).unwrap();
     assert_eq!(
-        chat.my_member_status,
+        chat.member_status(),
         Some(ChannelMemberStatus::Administrator)
     );
-    assert_eq!(chat.my_admin_can_post_messages, Some(true));
+    assert!(
+        matches!(chat.my_member, quill::state::OwnMember::Administrator(rights) if rights.post_messages == Some(true))
+    );
     assert!(chat.can_post());
 
     // A channel post sent through the normal pipeline still renders.
@@ -316,7 +318,7 @@ fn replay_channel_non_admin_composer_hidden() {
         )],
     );
     let chat = session.chats.get(&13).unwrap();
-    assert_eq!(chat.my_member_status, Some(ChannelMemberStatus::Member));
+    assert_eq!(chat.member_status(), Some(ChannelMemberStatus::Member));
     assert!(!chat.can_post());
 
     // Administrator with the posting right revoked: composer hidden too.
@@ -332,10 +334,12 @@ fn replay_channel_non_admin_composer_hidden() {
     );
     let chat = session.chats.get(&13).unwrap();
     assert_eq!(
-        chat.my_member_status,
+        chat.member_status(),
         Some(ChannelMemberStatus::Administrator)
     );
-    assert_eq!(chat.my_admin_can_post_messages, Some(false));
+    assert!(
+        matches!(chat.my_member, quill::state::OwnMember::Administrator(rights) if rights.post_messages == Some(false))
+    );
     assert!(!chat.can_post());
 }
 
@@ -378,7 +382,7 @@ fn replay_channel_admin_status_change_flips_composer() {
     apply_all_seq(&mut session, &sink, &seq, &[&promote(&admin_rights(true))]);
     let chat = session.chats.get(&13).unwrap();
     assert_eq!(
-        chat.my_member_status,
+        chat.member_status(),
         Some(ChannelMemberStatus::Administrator)
     );
     assert!(chat.can_post());
@@ -386,7 +390,9 @@ fn replay_channel_admin_status_change_flips_composer() {
     // Right revoked server-side: composer hides again.
     apply_all_seq(&mut session, &sink, &seq, &[&promote(&admin_rights(false))]);
     let chat = session.chats.get(&13).unwrap();
-    assert_eq!(chat.my_admin_can_post_messages, Some(false));
+    assert!(
+        matches!(chat.my_member, quill::state::OwnMember::Administrator(rights) if rights.post_messages == Some(false))
+    );
     assert!(!chat.can_post());
 
     // Left the channel: still hidden.
@@ -397,7 +403,7 @@ fn replay_channel_admin_status_change_flips_composer() {
         &[&promote(r#"{"@type":"chatMemberStatusLeft"}"#)],
     );
     assert_eq!(
-        session.chats.get(&13).unwrap().my_member_status,
+        session.chats.get(&13).unwrap().member_status(),
         Some(ChannelMemberStatus::Left)
     );
     assert!(!session.chats.get(&13).unwrap().can_post());
@@ -410,7 +416,7 @@ fn replay_channel_admin_status_change_flips_composer() {
         &[&promote(r#"{"@type":"chatMemberStatusCreator"}"#)],
     );
     let chat = session.chats.get(&13).unwrap();
-    assert_eq!(chat.my_member_status, Some(ChannelMemberStatus::Creator));
+    assert_eq!(chat.member_status(), Some(ChannelMemberStatus::Creator));
     assert!(chat.can_post());
 }
 
@@ -438,7 +444,7 @@ fn replay_non_member_channel_resolves_left_without_get_chat_member() {
         ],
     );
     let chat = session.chats.get(&chat_id.0).unwrap();
-    assert_eq!(chat.my_member_status, Some(ChannelMemberStatus::Left));
+    assert_eq!(chat.member_status(), Some(ChannelMemberStatus::Left));
     assert!(!chat.can_post());
 
     // A failing getChatMember must not undo the resolved state.
@@ -457,7 +463,7 @@ fn replay_non_member_channel_resolves_left_without_get_chat_member() {
         ],
     );
     assert_eq!(
-        session.chats.get(&chat_id.0).unwrap().my_member_status,
+        session.chats.get(&chat_id.0).unwrap().member_status(),
         Some(ChannelMemberStatus::Left)
     );
 
@@ -471,7 +477,7 @@ fn replay_non_member_channel_resolves_left_without_get_chat_member() {
         ],
     );
     assert_eq!(
-        session.chats.get(&chat_id.0).unwrap().my_member_status,
+        session.chats.get(&chat_id.0).unwrap().member_status(),
         Some(ChannelMemberStatus::Member)
     );
 }
@@ -495,10 +501,7 @@ fn replay_non_member_channel_get_supergroup_resolves_left() {
             r#"{"@type":"updateNewChat","chat":{"id":-1001006503122,"title":"Durov's Channel","type":{"@type":"chatTypeSupergroup","supergroup_id":1006503122,"is_channel":true},"unread_count":0}}"#,
         ],
     );
-    assert_eq!(
-        session.chats.get(&chat_id.0).unwrap().my_member_status,
-        None
-    );
+    assert_eq!(session.chats.get(&chat_id.0).unwrap().member_status(), None);
     let sg_extra = session.request(RequestPurpose::GetSupergroup, Some(chat_id));
     apply_all_seq(
         &mut session,
@@ -510,7 +513,7 @@ fn replay_non_member_channel_get_supergroup_resolves_left() {
         )],
     );
     assert_eq!(
-        session.chats.get(&chat_id.0).unwrap().my_member_status,
+        session.chats.get(&chat_id.0).unwrap().member_status(),
         Some(ChannelMemberStatus::Left)
     );
 }

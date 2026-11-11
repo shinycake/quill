@@ -24,9 +24,7 @@ impl Session {
                 if let Some(RequestPurpose::Auth(AuthPurpose::PasswordStateOp { op })) =
                     pending.map(|p| p.purpose)
                 {
-                    if self.auth_state.settle_password_op(pending.map(|p| p.id)) {
-                        self.auth_state.password_op_error = None;
-                    }
+                    if self.auth_state.settle_password_op(pending.map(|p| p.id)) {}
                     self.apply_email_code_info(op, pattern);
                 }
             }
@@ -45,10 +43,11 @@ impl Session {
                         RequestPurpose::SendPhoneNumberCode | RequestPurpose::ResendPhoneNumberCode
                     )
                 ) {
-                    self.auth_state.change_number_phone = Some(phone_number);
-                    self.auth_state.change_number_timeout = Some(timeout);
-                    self.auth_state.change_number_loading = false;
-                    self.auth_state.change_number_error = None;
+                    self.auth_state.change_number.code_sent(
+                        pending.map(|p| p.id),
+                        phone_number,
+                        timeout,
+                    );
                 }
             }
             // Phase C2g: `joinVideoChat` returns `text` — the tgcalls

@@ -331,7 +331,7 @@ impl QuillApp {
         if !chat.is_channel() {
             return None;
         }
-        let status = chat.my_member_status;
+        let status = chat.member_status();
         let muted = chat.is_muted();
         let footer = div()
             .p_3()

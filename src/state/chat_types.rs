@@ -147,64 +147,15 @@ pub struct ChatSummary {
     pub sender_actions: Vec<super::chat_activity::SenderAction>,
     /// `chat.draft_message` text draft. Voice/rich drafts are not stored.
     pub draft: Option<ChatDraft>,
-    /// Own `chatMemberStatus*` in a broadcast channel (`getChatMember` /
-    /// `updateChatMember`). `None` until the first fetch completes; drives the
-    /// composer gate and the join/leave affordance.
-    pub my_member_status: Option<ChannelMemberStatus>,
-    /// `rights.can_post_messages` from `chatMemberStatusAdministrator`
-    /// (TDLib 1.8.67). `Some` only when the status is Administrator and the
-    /// rights block parsed; `None` means "no explicit restriction" — a bare
-    /// admin still posts.
-    pub my_admin_can_post_messages: Option<bool>,
-    /// Phase D3a: `rights.can_invite_users` from
-    /// `chatMemberStatusAdministrator` (TDLib 1.8.67,
-    /// `chatAdministratorRights`, schema line 1092). `Some` only when the
-    /// status is Administrator and the rights block parsed; `None` for
-    /// every other status or an absent rights block. Gates the invite-link
-    /// / join-request management UI.
-    pub my_admin_can_invite_users: Option<bool>,
-    /// Slice G2: `rights.can_change_info` from
-    /// `chatMemberStatusAdministrator` (TDLib 1.8.67,
-    /// `chatAdministratorRights`, schema line 1092). `Some` only when the
-    /// status is Administrator and the rights block parsed; `None` for
-    /// every other status or an absent rights block. Gates
-    /// `toggleSupergroupSignMessages` in channels (schema line 15175).
-    pub my_admin_can_change_info: Option<bool>,
-    /// Slice G2: `rights.can_send_welcome_messages` from
-    /// `chatMemberStatusAdministrator` (TDLib 1.8.67,
-    /// `chatAdministratorRights`, schema line 1090). `Some` only when the
-    /// status is Administrator and the rights block parsed. Gates
-    /// welcome-message management in channels.
-    pub my_admin_can_send_welcome_messages: Option<bool>,
-    /// Phase D3b: `rights.can_promote_members` from
-    /// `chatMemberStatusAdministrator` (TDLib 1.8.67,
-    /// `chatAdministratorRights`, schema line 1092). `Some` only when the
-    /// status is Administrator and the rights block parsed; `None` for
-    /// every other status or an absent rights block. Gates admin
-    /// management (promote / demote / edit rights).
-    pub my_admin_can_promote_members: Option<bool>,
-    /// Slice G1: `rights.can_restrict_members` from
-    /// `chatMemberStatusAdministrator` (TDLib 1.8.67,
-    /// `chatAdministratorRights`, schema line 1092). `Some` only when the
-    /// status is Administrator and the rights block parsed; `None` for
-    /// every other status or an absent rights block. Gates member
-    /// restriction / banning (`setChatMemberStatus` with a restricted or
-    /// banned status requires this right, schema lines 13586-13587).
-    pub my_admin_can_restrict_members: Option<bool>,
-    /// MED1: `rights.can_pin_messages` from
-    /// `chatMemberStatusAdministrator` (TDLib 1.8.67,
-    /// `chatAdministratorRights`, schema line 1092). `Some` only when the
-    /// status is Administrator and the rights block parsed; `None` for
-    /// every other status or an absent rights block. Gates album pin /
-    /// unpin (`pinChatMessage`, schema line 13559).
-    pub my_admin_can_pin_messages: Option<bool>,
+    /// Own `chatMemberStatus*` (`getChatMember` / `updateChatMember`), with
+    /// the administrator rights that belong to it. Read through
+    /// [`Self::member_status`]; unknown until the first fetch completes,
+    /// it drives the composer gate and the join/leave affordance.
+    pub my_member: OwnMember,
     /// Own `chatMemberStatusRestricted` rights and end date, from
-    /// `getChatMember(me)` / `updateChatMember`. `None` when the viewer is
-    /// not restricted or nothing was fetched yet.
-    pub my_restriction: Option<crate::telegram::envelope::MemberRestriction>,
-    /// Own member record arrived at least once, so a missing restriction
-    /// means "not restricted" rather than "unknown".
-    pub my_rights_fetched: bool,
+    /// `getChatMember(me)` / `updateChatMember`: unknown until the own
+    /// member record arrived, then restricted or not.
+    pub my_restriction: OwnRestriction,
     /// Phase 5.1: `supergroup.is_forum` (TDLib 1.8.67). `None` until
     /// `updateSupergroup` / the `getSupergroup` response resolves it; only
     /// meaningful for non-channel supergroups.
@@ -284,6 +235,70 @@ pub struct VideoChatInfo {
     pub default_participant_id: Option<MessageSender>,
 }
 
+/// The administrator rights of the viewer's own membership
+/// (`chatAdministratorRights`, TDLib 1.8.67, schema line 1092). Each is
+/// `Some` only when the rights block parsed; `None` means the right is not
+/// stated, and a bare administrator still posts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AdminRights {
+    /// `can_post_messages`.
+    pub post_messages: Option<bool>,
+    /// `can_invite_users`: gates invite-link and join-request management.
+    pub invite_users: Option<bool>,
+    /// `can_change_info`: gates `toggleSupergroupSignMessages` in channels.
+    pub change_info: Option<bool>,
+    /// `can_send_welcome_messages`: gates welcome-message management.
+    pub send_welcome_messages: Option<bool>,
+    /// `can_promote_members`: gates admin management.
+    pub promote_members: Option<bool>,
+    /// `can_restrict_members`: gates restricting and banning members.
+    pub restrict_members: Option<bool>,
+    /// `can_pin_messages`: gates album pin and unpin.
+    pub pin_messages: Option<bool>,
+}
+
+/// The viewer's own `chatMemberStatus*`. Administrator rights exist only
+/// for an administrator: a change of status drops them with the old one.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum OwnMember {
+    /// Not fetched yet.
+    #[default]
+    Unknown,
+    /// Any status but administrator.
+    Other(ChannelMemberStatus),
+    Administrator(AdminRights),
+}
+
+impl OwnMember {
+    /// The membership for `status` with `rights` (kept only for an
+    /// administrator).
+    pub fn of(status: Option<ChannelMemberStatus>, rights: AdminRights) -> Self {
+        match status {
+            None => Self::Unknown,
+            Some(ChannelMemberStatus::Administrator) => Self::Administrator(rights),
+            Some(other) => Self::Other(other),
+        }
+    }
+
+    pub fn status(&self) -> Option<ChannelMemberStatus> {
+        match self {
+            Self::Unknown => None,
+            Self::Other(status) => Some(*status),
+            Self::Administrator(_) => Some(ChannelMemberStatus::Administrator),
+        }
+    }
+}
+
+/// The viewer's own restriction in a chat.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum OwnRestriction {
+    /// The own member record has not arrived (or no probe was made).
+    #[default]
+    Unknown,
+    NotRestricted,
+    Restricted(crate::telegram::envelope::MemberRestriction),
+}
+
 impl ChatSummary {
     /// Delivery state of the last message when it is outgoing: read once
     /// the peer's read cursor reaches it.
@@ -338,12 +353,44 @@ impl ChatSummary {
     /// `rights.can_post_messages` is explicitly false. Unknown/absent
     /// membership (or any other status) keeps the composer hidden.
     pub fn channel_admin_can_post(&self) -> bool {
-        match self.my_member_status {
-            Some(ChannelMemberStatus::Creator) => true,
-            Some(ChannelMemberStatus::Administrator) => {
-                self.my_admin_can_post_messages.unwrap_or(true)
-            }
+        match &self.my_member {
+            OwnMember::Other(ChannelMemberStatus::Creator) => true,
+            OwnMember::Administrator(rights) => rights.post_messages.unwrap_or(true),
             _ => false,
+        }
+    }
+
+    /// The viewer's own membership status; `None` until it is fetched.
+    pub fn member_status(&self) -> Option<ChannelMemberStatus> {
+        self.my_member.status()
+    }
+
+    /// Record a status with no administrator rights read (an
+    /// administrator "posts" and holds no explicit right).
+    pub fn assume_member_status(&mut self, status: Option<ChannelMemberStatus>) {
+        self.my_member = OwnMember::of(status, AdminRights::default());
+    }
+
+    /// The viewer's own restriction; `None` when not restricted or not
+    /// fetched yet ([`Self::rights_fetched`] tells them apart).
+    pub fn restriction(&self) -> Option<crate::telegram::envelope::MemberRestriction> {
+        match self.my_restriction {
+            OwnRestriction::Restricted(restriction) => Some(restriction),
+            OwnRestriction::Unknown | OwnRestriction::NotRestricted => None,
+        }
+    }
+
+    /// Own member record arrived at least once, so a missing restriction
+    /// means "not restricted" rather than "unknown".
+    pub fn rights_fetched(&self) -> bool {
+        self.my_restriction != OwnRestriction::Unknown
+    }
+
+    /// The probe found no member record (not a member, no access): there is
+    /// no personal restriction to find.
+    pub fn note_no_member_record(&mut self) {
+        if self.my_restriction == OwnRestriction::Unknown {
+            self.my_restriction = OwnRestriction::NotRestricted;
         }
     }
 
@@ -356,9 +403,15 @@ impl ChatSummary {
         status: ChannelMemberStatus,
         admin_can_post_messages: Option<bool>,
     ) -> bool {
-        let changed = self.my_member_status != Some(status);
-        self.my_member_status = Some(status);
-        self.my_admin_can_post_messages = admin_can_post_messages;
+        let changed = self.member_status() != Some(status);
+        // A new status drops the rights of the old one whole.
+        self.my_member = OwnMember::of(
+            Some(status),
+            AdminRights {
+                post_messages: admin_can_post_messages,
+                ..AdminRights::default()
+            },
+        );
         changed
     }
 
@@ -367,11 +420,9 @@ impl ChatSummary {
     /// needs the explicit `can_invite_users` right. An absent rights block
     /// keeps the gate closed rather than fabricating a right.
     pub fn can_invite_users(&self) -> bool {
-        match self.my_member_status {
-            Some(ChannelMemberStatus::Creator) => true,
-            Some(ChannelMemberStatus::Administrator) => {
-                self.my_admin_can_invite_users.unwrap_or(false)
-            }
+        match &self.my_member {
+            OwnMember::Other(ChannelMemberStatus::Creator) => true,
+            OwnMember::Administrator(rights) => rights.invite_users.unwrap_or(false),
             _ => false,
         }
     }
@@ -379,24 +430,26 @@ impl ChatSummary {
     /// Phase D3a: record `rights.can_invite_users` (`None` for non-admin
     /// statuses or an absent rights block).
     pub fn set_admin_can_invite_users(&mut self, can_invite_users: Option<bool>) {
-        self.my_admin_can_invite_users = can_invite_users;
+        if let OwnMember::Administrator(rights) = &mut self.my_member {
+            rights.invite_users = can_invite_users;
+        }
     }
 
     /// Slice G2: record `rights.can_change_info` (`None` for non-admin
     /// statuses or an absent rights block).
     pub fn set_admin_can_change_info(&mut self, can_change_info: Option<bool>) {
-        self.my_admin_can_change_info = can_change_info;
+        if let OwnMember::Administrator(rights) = &mut self.my_member {
+            rights.change_info = can_change_info;
+        }
     }
 
     /// Slice G2: whether the current user may change this chat's info.
     /// The creator always can; an administrator needs the explicit
     /// `can_change_info` right.
     pub fn can_change_info(&self) -> bool {
-        match self.my_member_status {
-            Some(ChannelMemberStatus::Creator) => true,
-            Some(ChannelMemberStatus::Administrator) => {
-                self.my_admin_can_change_info.unwrap_or(false)
-            }
+        match &self.my_member {
+            OwnMember::Other(ChannelMemberStatus::Creator) => true,
+            OwnMember::Administrator(rights) => rights.change_info.unwrap_or(false),
             _ => false,
         }
     }
@@ -404,18 +457,18 @@ impl ChatSummary {
     /// Slice G2: record `rights.can_send_welcome_messages` (`None` for
     /// non-admin statuses or an absent rights block).
     pub fn set_admin_can_send_welcome_messages(&mut self, can_send: Option<bool>) {
-        self.my_admin_can_send_welcome_messages = can_send;
+        if let OwnMember::Administrator(rights) = &mut self.my_member {
+            rights.send_welcome_messages = can_send;
+        }
     }
 
     /// Slice G2: whether the current user may manage this chat's welcome
     /// messages. The creator always can; an administrator needs the
     /// explicit `can_send_welcome_messages` right.
     pub fn can_send_welcome_messages(&self) -> bool {
-        match self.my_member_status {
-            Some(ChannelMemberStatus::Creator) => true,
-            Some(ChannelMemberStatus::Administrator) => {
-                self.my_admin_can_send_welcome_messages.unwrap_or(false)
-            }
+        match &self.my_member {
+            OwnMember::Other(ChannelMemberStatus::Creator) => true,
+            OwnMember::Administrator(rights) => rights.send_welcome_messages.unwrap_or(false),
             _ => false,
         }
     }
@@ -426,11 +479,9 @@ impl ChatSummary {
     /// explicit `can_promote_members` right. An absent rights block keeps
     /// the gate closed rather than fabricating a right.
     pub fn can_manage_admins(&self) -> bool {
-        match self.my_member_status {
-            Some(ChannelMemberStatus::Creator) => true,
-            Some(ChannelMemberStatus::Administrator) => {
-                self.my_admin_can_promote_members.unwrap_or(false)
-            }
+        match &self.my_member {
+            OwnMember::Other(ChannelMemberStatus::Creator) => true,
+            OwnMember::Administrator(rights) => rights.promote_members.unwrap_or(false),
             _ => false,
         }
     }
@@ -444,7 +495,7 @@ impl ChatSummary {
     /// administrator qualifies. Unknown status keeps the gate closed.
     pub fn is_admin_or_creator(&self) -> bool {
         matches!(
-            self.my_member_status,
+            self.member_status(),
             Some(ChannelMemberStatus::Creator | ChannelMemberStatus::Administrator)
         )
     }
@@ -452,7 +503,9 @@ impl ChatSummary {
     /// Phase D3b: record `rights.can_promote_members` (`None` for
     /// non-admin statuses or an absent rights block).
     pub fn set_admin_can_promote_members(&mut self, can_promote_members: Option<bool>) {
-        self.my_admin_can_promote_members = can_promote_members;
+        if let OwnMember::Administrator(rights) = &mut self.my_member {
+            rights.promote_members = can_promote_members;
+        }
     }
 
     /// Slice G1: whether the current user may restrict or ban this chat's
@@ -462,11 +515,9 @@ impl ChatSummary {
     /// needs the explicit right. Unknown status or an absent rights block
     /// keeps the gate closed.
     pub fn can_restrict_members(&self) -> bool {
-        match self.my_member_status {
-            Some(ChannelMemberStatus::Creator) => true,
-            Some(ChannelMemberStatus::Administrator) => {
-                self.my_admin_can_restrict_members.unwrap_or(false)
-            }
+        match &self.my_member {
+            OwnMember::Other(ChannelMemberStatus::Creator) => true,
+            OwnMember::Administrator(rights) => rights.restrict_members.unwrap_or(false),
             _ => false,
         }
     }
@@ -474,7 +525,9 @@ impl ChatSummary {
     /// Slice G1: record `rights.can_restrict_members` (`None` for
     /// non-admin statuses or an absent rights block).
     pub fn set_admin_can_restrict_members(&mut self, can_restrict_members: Option<bool>) {
-        self.my_admin_can_restrict_members = can_restrict_members;
+        if let OwnMember::Administrator(rights) = &mut self.my_member {
+            rights.restrict_members = can_restrict_members;
+        }
     }
 
     /// MED1: whether the current user may pin messages in this chat
@@ -489,11 +542,9 @@ impl ChatSummary {
         use crate::telegram::envelope::ChatKind;
         match &self.kind {
             ChatKind::Private { .. } | ChatKind::Secret { .. } => true,
-            _ => match self.my_member_status {
-                Some(ChannelMemberStatus::Creator) => true,
-                Some(ChannelMemberStatus::Administrator) => {
-                    self.my_admin_can_pin_messages.unwrap_or(false)
-                }
+            _ => match &self.my_member {
+                OwnMember::Other(ChannelMemberStatus::Creator) => true,
+                OwnMember::Administrator(rights) => rights.pin_messages.unwrap_or(false),
                 _ => self
                     .permissions
                     .as_ref()
@@ -507,14 +558,18 @@ impl ChatSummary {
         &mut self,
         restriction: Option<crate::telegram::envelope::MemberRestriction>,
     ) {
-        self.my_restriction = restriction;
-        self.my_rights_fetched = true;
+        self.my_restriction = match restriction {
+            Some(restriction) => OwnRestriction::Restricted(restriction),
+            None => OwnRestriction::NotRestricted,
+        };
     }
 
     /// MED1: record `rights.can_pin_messages` (`None` for non-admin
     /// statuses or an absent rights block).
     pub fn set_admin_can_pin_messages(&mut self, can_pin_messages: Option<bool>) {
-        self.my_admin_can_pin_messages = can_pin_messages;
+        if let OwnMember::Administrator(rights) = &mut self.my_member {
+            rights.pin_messages = can_pin_messages;
+        }
     }
 
     pub fn is_forum_chat(&self) -> bool {

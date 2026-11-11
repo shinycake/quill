@@ -146,9 +146,7 @@ fn in_conference(harness: &mut Harness, unique_id: i64) {
         unique_id,
         conference: Some(ConferenceCall {
             input: None,
-            upgrade: None,
-            migrated_from: None,
-            link_open: false,
+            stage: crate::state::ConferenceStage::Running,
         }),
         ..ActiveGroupCall::fresh(555)
     });

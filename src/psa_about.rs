@@ -306,7 +306,7 @@ mod tests {
             supergroup_id: id,
             is_channel: true,
         };
-        chat.my_member_status = Some(ChannelMemberStatus::Left);
+        chat.assume_member_status(Some(ChannelMemberStatus::Left));
         s.chats.insert(id, chat);
         s.chat_list.promoted_chats.insert(
             id,
@@ -358,7 +358,7 @@ mod tests {
         s.open_chat(ChatId(9));
         assert!(!visible(&s));
         if let Some(chat) = s.chats.get_mut(&5) {
-            chat.my_member_status = Some(ChannelMemberStatus::Member);
+            chat.assume_member_status(Some(ChannelMemberStatus::Member));
         }
         s.open_chat(ChatId(5));
         assert!(!visible(&s), "useTopPromotion");

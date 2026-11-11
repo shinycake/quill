@@ -41,7 +41,7 @@ impl Session {
             // Not a member (or no access): there is no personal
             // restriction to find, and the probe must not repeat.
             if let Some(chat) = self.chats.get_mut(&chat_id.0) {
-                chat.my_rights_fetched = true;
+                chat.note_no_member_record();
             }
         }
         // Too many communities or public links open the limit box (tdesktop

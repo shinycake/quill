@@ -22,7 +22,9 @@ fn open_requested() -> bool {
 /// Open the demo channel as its owner, so the composer and poll show.
 pub(super) fn open_demo_channel(session: &mut quill::state::Session) {
     if let Some(chat) = session.chats.get_mut(&13) {
-        chat.my_member_status = Some(quill::telegram::envelope::ChannelMemberStatus::Creator);
+        chat.assume_member_status(Some(
+            quill::telegram::envelope::ChannelMemberStatus::Creator,
+        ));
     }
     session.open_chat(quill::ids::ChatId(13));
 }
