@@ -103,7 +103,7 @@ impl QuillApp {
     ) {
         let settled = self
             .session()
-            .is_none_or(|session| !session.settings.data_storage.seeded.is_in_flight());
+            .is_none_or(|session| !session.settings.auto_download_presets.is_loading());
         let scroll = &mut self.settings.storage_scroll;
         let offset = scroll.page.offset().y;
         let user_moved = match &scroll.stage {
@@ -323,7 +323,9 @@ impl QuillApp {
         let prefs = session.as_ref().map(|s| &s.settings.data_storage);
         let mut downloads: Vec<AnyElement> = Vec::new();
         if !prefs.is_some_and(|p| p.seeded.is_seeded()) {
-            let loading = prefs.is_some_and(|p| p.seeded.is_in_flight());
+            let loading = session
+                .as_ref()
+                .is_some_and(|s| s.settings.auto_download_presets.is_loading());
             downloads.push(
                 self.setting_spot(
                     &[

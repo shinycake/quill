@@ -83,7 +83,7 @@ fn without_a_bot_the_invoice_link_asks_for_the_payment_form() {
 
 #[test]
 fn a_collectible_lookup_sends_the_item_type_and_keeps_the_answer_or_the_failure() {
-    use crate::collectible_info::CollectibleLookup;
+    use crate::collectible_info::LookupSpec;
     let store = MemorySecretStore::new();
     let (_dir, prepared) = prepared_tmp(&store);
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
@@ -92,7 +92,7 @@ fn a_collectible_lookup_sends_the_item_type_and_keeps_the_answer_or_the_failure(
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
 
     driver
-        .request_collectible_info(CollectibleLookup::new(
+        .request_collectible_info(LookupSpec::new(
             "durov",
             "Pavel",
             Some(ChatId(5)),
@@ -123,7 +123,7 @@ fn a_collectible_lookup_sends_the_item_type_and_keeps_the_answer_or_the_failure(
 
     // A lookup TDLib refuses keeps the reason for the UI.
     driver
-        .request_collectible_info(CollectibleLookup::new("someone", "S", None, String::new()))
+        .request_collectible_info(LookupSpec::new("someone", "S", None, String::new()))
         .unwrap();
     let request = sent_request(&recorder, "getCollectibleItemInfo");
     let error = json!({
@@ -165,7 +165,7 @@ fn failed_premium_sticker_examples_are_asked_again() {
 
 #[test]
 fn a_collectible_answer_of_a_replaced_lookup_is_not_taken_by_the_new_one() {
-    use crate::collectible_info::CollectibleLookup;
+    use crate::collectible_info::LookupSpec;
     let store = MemorySecretStore::new();
     let (_dir, prepared) = prepared_tmp(&store);
     let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
@@ -174,11 +174,11 @@ fn a_collectible_answer_of_a_replaced_lookup_is_not_taken_by_the_new_one() {
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
 
     driver
-        .request_collectible_info(CollectibleLookup::new("first", "A", None, String::new()))
+        .request_collectible_info(LookupSpec::new("first", "A", None, String::new()))
         .unwrap();
     let first = sent_request(&recorder, "getCollectibleItemInfo");
     driver
-        .request_collectible_info(CollectibleLookup::new("second", "B", None, String::new()))
+        .request_collectible_info(LookupSpec::new("second", "B", None, String::new()))
         .unwrap();
 
     let late = json!({

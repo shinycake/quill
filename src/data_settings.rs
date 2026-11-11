@@ -223,28 +223,22 @@ pub fn size_cap_label(bytes: i64) -> String {
     }
 }
 
-/// How far a value TDLib has no getter for got in being learned: not at
-/// all, asked and waiting, or known. It persists as the bool the account
-/// folder always held (`true` = known), so an interrupted ask is asked
-/// again on the next run.
+/// Whether a value TDLib has no getter for was learned. It persists as the
+/// bool the account folder always held (`true` = known), so an interrupted
+/// ask is asked again on the next run. The ask itself is not a variant: its
+/// stage is the request's own (`Settings::auto_download_presets` for the
+/// presets), so a refusal or a lost answer cannot leave it stuck here.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "bool", into = "bool")]
 pub enum Seed {
     #[default]
     Unseeded,
-    /// The request is in flight: its answer seeds the value, its error
-    /// returns to `Unseeded`.
-    InFlight,
     Seeded,
 }
 
 impl Seed {
     pub fn is_seeded(self) -> bool {
         self == Self::Seeded
-    }
-
-    pub fn is_in_flight(self) -> bool {
-        self == Self::InFlight
     }
 }
 
@@ -521,13 +515,8 @@ mod tests {
         old["storage_limits_seeded"] = serde_json::json!(true);
         let seeded: DataStoragePrefs = serde_json::from_value(old).expect("an old file loads");
         assert!(seeded.seeded.is_seeded() && seeded.storage_limits_seeded.is_seeded());
-        // A request in flight is never written as known.
-        let prefs = DataStoragePrefs {
-            seeded: Seed::InFlight,
-            ..Default::default()
-        };
-        let json = serde_json::to_value(&prefs).expect("serializes");
+        let json = serde_json::to_value(DataStoragePrefs::default()).expect("serializes");
         assert_eq!(json["seeded"], serde_json::json!(false));
-        assert!(Seed::from(true).is_seeded() && !Seed::from(false).is_in_flight());
+        assert!(Seed::from(true).is_seeded() && !Seed::from(false).is_seeded());
     }
 }

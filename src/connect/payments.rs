@@ -305,7 +305,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// its lookup is running (tdesktop `resolveCollectible`).
     pub fn request_collectible_info(
         &mut self,
-        mut lookup: crate::collectible_info::CollectibleLookup,
+        spec: crate::collectible_info::LookupSpec,
     ) -> Result<Option<RequestId>, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
@@ -316,16 +316,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             .hub
             .collectible
             .as_ref()
-            .is_some_and(|open| open.is_loading() && open.entity == lookup.entity);
+            .is_some_and(|open| open.is_loading() && open.entity == spec.entity);
         if running {
             return Ok(None);
         }
-        let (kind, entity) = (lookup.kind, lookup.entity.clone());
+        let (kind, entity) = (spec.kind, spec.entity.clone());
         let extra = self
             .session
             .request(RequestPurpose::GetCollectibleInfo, None);
-        lookup.stage = crate::collectible_info::LookupStage::Loading(extra);
-        self.session.payments.hub.collectible = Some(lookup);
+        self.session.payments.hub.collectible =
+            Some(spec.into_lookup(crate::collectible_info::LookupStage::Loading(extra)));
         let json = crate::telegram::requests::get_collectible_item_info(extra, kind, &entity);
         if let Err(err) = self.send_json_request(extra, &json) {
             self.session.payments.hub.collectible = None;

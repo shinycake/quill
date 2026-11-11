@@ -20,8 +20,8 @@ use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::collectible_info::{
-    CollectibleKind, CollectibleLookup, copy_label, crypto_text, fiat_text, format_entity,
-    info_prefix, title_parts, word_range,
+    CollectibleKind, CollectibleLookup, LookupSpec, copy_label, crypto_text, fiat_text,
+    format_entity, info_prefix, title_parts, word_range,
 };
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
@@ -41,7 +41,7 @@ impl QuillApp {
         copy_text: String,
         cx: &mut Context<Self>,
     ) {
-        let lookup = CollectibleLookup::new(entity, owner_name, owner_chat, copy_text);
+        let lookup = LookupSpec::new(entity, owner_name, owner_chat, copy_text);
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.request_collectible_info(lookup);
         }
