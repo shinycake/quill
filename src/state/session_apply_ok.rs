@@ -563,6 +563,11 @@ impl Session {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::LoadChats) => self.chat_list.main_paging.page_ok(),
             Some(RequestPurpose::LoadArchiveChats) => self.chat_list.archive_paging.page_ok(),
+            Some(RequestPurpose::LoadFolderChats) => {
+                if let Some(folder_id) = pending.and_then(|p| p.folder_id) {
+                    self.chat_list.folder_page_ok(folder_id);
+                }
+            }
             _ => {}
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::DeleteChatFolder)
@@ -573,7 +578,7 @@ impl Session {
             // source of truth and will confirm.
             self.chat_list.chat_folders.retain(|f| f.id != folder_id);
             self.chat_list.folder_specs.remove(&folder_id);
-            self.chat_list.folder_chats_exhausted.remove(&folder_id);
+            self.chat_list.folder_paging.remove(&folder_id);
         }
         if pending.map(|p| p.purpose) == Some(RequestPurpose::ProcessChatFolderNewChats)
             && let Some(folder_id) = pending.and_then(|p| p.folder_id)

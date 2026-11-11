@@ -240,13 +240,13 @@ impl Session {
             }
             _ => {}
         }
-        // Parity slice: folder `loadChats` paging ends the same way
-        // as the main list — a 404 marks that folder exhausted.
+        // Parity slice: folder `loadChats` paging ends the same way as the
+        // main list — a 404 marks that folder exhausted, anything else
+        // waits and asks again.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::LoadFolderChats)
-            && err.code == 404
             && let Some(folder_id) = pending.and_then(|p| p.folder_id)
         {
-            self.chat_list.folder_chats_exhausted.insert(folder_id);
+            self.chat_list.folder_page_failed(folder_id, err.code, now);
         }
         // Slice CL: failed preview-history fetch — mark the peek
         // preview so it shows an error instead of a spinner.

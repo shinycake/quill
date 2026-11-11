@@ -108,7 +108,7 @@ fn driver_load_folder_chats_pages_chat_list_folder() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.chat_list.folder_chats_exhausted.contains(&2));
+    assert!(driver.session.chat_list.folder_paging_of(2).is_exhausted());
     assert_eq!(
         driver.maybe_load_folder_chats(2).unwrap(),
         None,
