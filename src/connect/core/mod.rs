@@ -278,7 +278,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .and_then(|pending| {
                     pending
                         .chat_id
-                        .map(|chat_id| (pending.window, chat_id, text.clone()))
+                        .map(|chat_id| (pending.asked_in.chat(), chat_id, text.clone()))
                 }),
             _ => None,
         };
@@ -306,7 +306,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                         let note = ai_rich_draft_note(pending.purpose);
                         pending
                             .chat_id
-                            .map(|chat_id| (pending.window, chat_id, rich.clone(), note))
+                            .map(|chat_id| (pending.asked_in.chat(), chat_id, rich.clone(), note))
                     }),
                 _ => None,
             };
@@ -406,6 +406,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 }),
             _ => None,
         };
+        let support_chat = self.support_chat_answer(&owned.envelope);
         // Slice G2: capture forum/welcome/boost mutations before `apply`
         // takes the pending request. The state drops the stale cache on
         // confirmed success; the post-apply refetch reloads it now that
@@ -693,11 +694,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if let Some(chat_id) = created_chat {
             let _ = self.select_chat(chat_id);
         }
-        // Settings > Ask a Question (the support account) or a contact
-        // just created by phone: open (or create) the private chat.
-        if let Some(user_id) = self.session.users_state.user_chat_to_open.take() {
-            let _ = self.create_private_chat_for(user_id);
-        }
+        self.open_chats_named_by_answers(support_chat);
         // Slice (communities backend core): resolve a just-created
         // community id into its full-info pack. `let _` on purpose: the
         // community is already in the model; a failed send must not

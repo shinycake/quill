@@ -153,10 +153,10 @@ impl QuillApp {
                 let plan = self.live.as_ref().map(|live| {
                     let session = &live.driver.session;
                     (
-                        session.open_chat,
+                        session.open_chat_id(),
                         session.view_generation,
                         session
-                            .open_chat
+                            .open_chat_id()
                             .and_then(|id| session.chats.get(&id.0).map(|chat| chat.supported())),
                     )
                 });
@@ -386,7 +386,7 @@ impl QuillApp {
                     // Phase A1: the slow-mode gate applies to the demo
                     // session too (fixture-driven countdown, no live
                     // Telegram).
-                    let demo_chat = self.demo_session.as_ref().and_then(|s| s.open_chat);
+                    let demo_chat = self.demo_session.as_ref().and_then(|s| s.open_chat_id());
                     if demo_chat.is_some_and(|chat_id| self.slow_mode_blocked(chat_id, cx)) {
                         return;
                     }
@@ -438,7 +438,8 @@ impl QuillApp {
                     }
                     self.finish_pending_send();
                     self.chat_ui.set_reply(None);
-                    if let Some(chat_id) = self.demo_session.as_ref().and_then(|s| s.open_chat) {
+                    if let Some(chat_id) = self.demo_session.as_ref().and_then(|s| s.open_chat_id())
+                    {
                         self.forget_local_draft(chat_id);
                     }
                     self.composer
@@ -478,9 +479,9 @@ impl QuillApp {
         };
         let session = &live.driver.session;
         let (open_chat, supported) = (
-            session.open_chat,
+            session.open_chat_id(),
             session
-                .open_chat
+                .open_chat_id()
                 .and_then(|id| session.chats.get(&id.0).map(|chat| chat.supported())),
         );
         // Premium gate (`premiumFeatureRichMessages`): the editor can only
@@ -792,7 +793,7 @@ impl QuillApp {
             Some(session) => session,
             None => return false,
         };
-        let Some(open) = session.open_chat else {
+        let Some(open) = session.open_chat_id() else {
             return false;
         };
         let is_private = session
@@ -857,7 +858,7 @@ impl QuillApp {
             .messages
             .mention_search
             .as_ref()
-            .filter(|search| Some(search.chat_id) == session.open_chat)
+            .filter(|search| Some(search.chat_id) == session.open_chat_id())
         {
             for user in search.user_ids.iter().filter_map(|id| session.user(*id)) {
                 if !items.iter().any(|(id, _, _)| *id == user.id) {

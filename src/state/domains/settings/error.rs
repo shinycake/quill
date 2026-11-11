@@ -27,7 +27,7 @@ impl Session {
             // Slice S4: Data & Storage request failures surface
             // on the screen (the S3 pattern) — never as toasts.
             Some(RequestPurpose::Settings(SettingsPurpose::SetAutoDownloadSettings { .. })) => {
-                self.settings.data_storage_error = Some(format!(
+                self.settings.data_storage_save.fail(format!(
                     "Couldn't save auto-download settings: {}",
                     error_reason(err)
                 ));
@@ -40,7 +40,7 @@ impl Session {
                 ));
             }
             Some(RequestPurpose::SetStorageOption) => {
-                self.settings.data_storage_error = Some(format!(
+                self.settings.data_storage_save.fail(format!(
                     "Couldn't save the storage limits: {}",
                     error_reason(err)
                 ));
@@ -70,7 +70,7 @@ impl Session {
                 if self.settings.data_storage.seeded.is_in_flight() {
                     self.settings.data_storage.seeded = crate::data_settings::Seed::Unseeded;
                 }
-                self.settings.data_storage_error = Some(format!(
+                self.settings.auto_download_presets.fail(format!(
                     "Couldn't load auto-download settings: {}",
                     error_reason(err)
                 ));
@@ -101,20 +101,15 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetReadDatePrivacy) => {
-                if pending
-                    .is_some_and(|p| self.settings.read_date_stage == ReadDateStage::Getting(p.id))
-                {
-                    self.settings.read_date_stage = ReadDateStage::Failed;
+                if let Some(pending) = pending {
+                    self.settings.read_date.request_failed(pending.id);
                 }
             }
             Some(RequestPurpose::SetReadDatePrivacy) => {
-                if pending
-                    .is_some_and(|p| self.settings.read_date_stage == ReadDateStage::Setting(p.id))
-                {
-                    self.settings.read_date_stage = ReadDateStage::Failed;
-                    // The optimistic value is dropped; the next
-                    // fetch restores the truth.
-                    self.settings.read_date_show = None;
+                // The optimistic value is dropped; the next fetch restores
+                // the truth.
+                if let Some(pending) = pending {
+                    self.settings.read_date.request_failed(pending.id);
                 }
             }
             Some(RequestPurpose::Settings(SettingsPurpose::GetBlockedSenders {
@@ -154,7 +149,8 @@ impl Session {
             // flood state worsens; retry is user-driven via the
             // Refresh button. The old cache stays visible.
             Some(RequestPurpose::ConfirmDeviceLogin) => {
-                self.settings.device_login_result = Some(crate::auth::DeviceLoginResult::Failed);
+                self.settings.device_login =
+                    DeviceLogin::Done(crate::auth::DeviceLoginResult::Failed);
                 self.settings.sessions_op.failed(pending.map(|p| p.id));
                 self.settings
                     .sessions
@@ -250,10 +246,17 @@ impl Session {
                     .account_delete
                     .fail(sessions_error_line("update the account", err));
             }
+            // A refused saved-sound list is not asked for again by itself;
+            // the next change of the list does.
+            Some(RequestPurpose::GetSavedNotificationSounds) => {
+                self.settings
+                    .saved_sounds
+                    .fail(sessions_error_line("load the saved sounds", err));
+            }
             // Slice A4: a failed websites fetch or disconnect
-            // clears the in-flight flags and parks the honest,
+            // parks the honest,
             // classified error line on the overlay.
-            // A failed stale-refetch also clears `websites_stale`
+            // A failed refetch also ends the refetch need
             // (mirroring A3's sessions arm): otherwise the next
             // ingest retries the fetch and flood state worsens;
             // retry is user-driven via the Refresh button. The old

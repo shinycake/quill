@@ -559,7 +559,7 @@ impl QuillApp {
             return;
         }
         let fresh = !self.session().is_some_and(|s| {
-            s.search.chat_search.is_open() && s.search.chat_search.chat_id == s.open_chat
+            s.search.chat_search.is_open() && s.search.chat_search.chat_id == s.open_chat_id()
         });
         let opened = if let Some(live) = self.live.as_mut() {
             match live.driver.open_chat_search() {

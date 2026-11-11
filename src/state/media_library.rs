@@ -11,13 +11,82 @@ use crate::telegram::envelope::{
 /// At most this many `getStickerSet` requests for the library in flight.
 pub const MAX_LIBRARY_LOADS: usize = 4;
 
+/// Where one set's contents stand (no entry: not asked for).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SetLoad {
+    /// `getStickerSet` went out as this request.
+    Loading(RequestId),
+    Ready(Vec<StickerItem>),
+    /// The load failed this session (not retried automatically; the panel
+    /// opening again asks anew).
+    Failed,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct MediaLibrary {
-    /// Loaded set contents, keyed by set id.
-    pub set_stickers: HashMap<i64, Vec<StickerItem>>,
-    pub loading: HashSet<i64>,
-    /// Sets whose load failed this session (not retried automatically).
-    pub failed: HashSet<i64>,
+    sets: HashMap<i64, SetLoad>,
+}
+
+impl MediaLibrary {
+    /// The loaded contents of a set.
+    pub fn get(&self, set_id: &i64) -> Option<&Vec<StickerItem>> {
+        match self.sets.get(set_id) {
+            Some(SetLoad::Ready(items)) => Some(items),
+            _ => None,
+        }
+    }
+
+    pub fn contains_key(&self, set_id: &i64) -> bool {
+        self.get(set_id).is_some()
+    }
+
+    /// The contents of every loaded set.
+    pub fn values(&self) -> impl Iterator<Item = &Vec<StickerItem>> {
+        self.sets.values().filter_map(|load| match load {
+            SetLoad::Ready(items) => Some(items),
+            _ => None,
+        })
+    }
+
+    /// The set arrived (or is shown from elsewhere).
+    pub fn insert(&mut self, set_id: i64, items: Vec<StickerItem>) {
+        self.sets.insert(set_id, SetLoad::Ready(items));
+    }
+
+    /// The set's contents go: it loads again when wanted.
+    pub fn remove(&mut self, set_id: &i64) {
+        self.sets.remove(set_id);
+    }
+
+    /// Whether the set's load failed.
+    pub fn is_failed(&self, set_id: i64) -> bool {
+        self.sets.get(&set_id) == Some(&SetLoad::Failed)
+    }
+
+    /// `getStickerSet` for the set went out as `request`.
+    pub fn begin_load(&mut self, set_id: i64, request: RequestId) {
+        self.sets.insert(set_id, SetLoad::Loading(request));
+    }
+
+    /// The load failed (a set that is not loading keeps what it has).
+    pub fn fail(&mut self, set_id: i64) {
+        if matches!(self.sets.get(&set_id), Some(SetLoad::Loading(_))) {
+            self.sets.insert(set_id, SetLoad::Failed);
+        }
+    }
+
+    /// Failed sets are asked for again: the panel opened, or the
+    /// connection came back.
+    pub fn forget_failures(&mut self) {
+        self.sets.retain(|_, load| *load != SetLoad::Failed);
+    }
+
+    fn loading_count(&self) -> usize {
+        self.sets
+            .values()
+            .filter(|load| matches!(load, SetLoad::Loading(_)))
+            .count()
+    }
 }
 
 /// One reaction the picker can offer.
@@ -72,9 +141,9 @@ pub struct MessageReactionOptions {
     pub allow_custom_emoji: bool,
     /// Offered reactions TDLib marks `needs_premium` for this account.
     pub premium_locked: Vec<ReactionChoice>,
-    /// This message's picker offers the Star reaction (its own flow,
+    /// The picker also offers the Star reaction (its own flow,
     /// `paid_reaction`).
-    pub offers_paid: bool,
+    pub paid_offered: bool,
 }
 
 /// Where the open message menu's reaction options stand. tdesktop reads
@@ -116,6 +185,12 @@ impl MessageReactionsState {
     ) -> Option<&MessageReactionOptions> {
         self.ready()
             .filter(|o| o.chat_id == chat_id && o.message_id == message_id)
+    }
+
+    /// The picker of this message offers the Star reaction.
+    pub fn paid_offered_for(&self, chat_id: ChatId, message_id: MessageId) -> bool {
+        self.ready_for(chat_id, message_id)
+            .is_some_and(|options| options.paid_offered)
     }
 
     pub fn is_loading_for(&self, chat_id: ChatId, message_id: MessageId) -> bool {
@@ -165,35 +240,24 @@ impl MessageReactionOptions {
 
 impl Session {
     pub(crate) fn accept_library_set(&mut self, set_id: i64, stickers: Vec<StickerItem>) {
-        self.media.media_library.loading.remove(&set_id);
-        self.media.media_library.failed.remove(&set_id);
-        self.media
-            .media_library
-            .set_stickers
-            .insert(set_id, stickers);
+        self.media.media_library.insert(set_id, stickers);
     }
 
     pub(crate) fn fail_library_set(&mut self, set_id: i64) {
-        self.media.media_library.loading.remove(&set_id);
-        self.media.media_library.failed.insert(set_id);
+        self.media.media_library.fail(set_id);
     }
 
     /// Installed sets (regular, then custom emoji) whose contents aren't
     /// loaded, loading or failed, among `wanted`, capped by the free
     /// in-flight slots.
     pub fn library_sets_to_load(&self, wanted: &[i64]) -> Vec<i64> {
-        let free = MAX_LIBRARY_LOADS.saturating_sub(self.media.media_library.loading.len());
+        let free = MAX_LIBRARY_LOADS.saturating_sub(self.media.media_library.loading_count());
         let mut out = Vec::new();
         for id in wanted {
             if out.len() >= free {
                 break;
             }
-            if *id != 0
-                && !self.media.media_library.set_stickers.contains_key(id)
-                && !self.media.media_library.loading.contains(id)
-                && !self.media.media_library.failed.contains(id)
-                && !out.contains(id)
-            {
+            if *id != 0 && !self.media.media_library.sets.contains_key(id) && !out.contains(id) {
                 out.push(*id);
             }
         }
@@ -247,7 +311,7 @@ impl Session {
             popular: convert(popular),
             allow_custom_emoji,
             premium_locked,
-            offers_paid: paid_offered,
+            paid_offered,
         };
         // tdesktop adds the paid reaction to `recent` when paid is enabled
         // (data_message_reactions.cpp), so an offer of Stars alone still
@@ -267,7 +331,7 @@ impl Session {
         self.stickers
             .message_reaction_options
             .ready_for(chat_id, message_id)
-            .is_some_and(|options| options.offers_paid)
+            .is_some_and(|options| options.paid_offered)
     }
 
     /// The message menu closed: nothing is asked for, and an answer still on

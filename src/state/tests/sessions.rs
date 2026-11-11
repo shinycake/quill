@@ -282,6 +282,45 @@ fn terminate_session_error_surfaces_honestly() {
 }
 
 #[test]
+fn a_failed_write_keeps_the_refetch_that_went_stale_meanwhile() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request(
+        RequestPurpose::Settings(SettingsPurpose::TerminateSession { session_id: 22 }),
+        None,
+    );
+    session.settings.sessions_op.begin(extra);
+    // Another device logs in while the write is out.
+    session.settings.sessions_op.mark_stale();
+    assert!(session.settings.sessions_op.is_mutating());
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"SESSION_REVOKED"}}"#,
+            extra.0
+        ),
+    );
+    assert!(!session.settings.sessions_op.is_mutating());
+    assert!(session.settings.sessions_op.is_stale());
+}
+
+#[test]
+fn a_failed_website_write_keeps_the_refetch_that_went_stale_meanwhile() {
+    let mut edit = crate::state::ListEdit::Idle;
+    edit.begin_write();
+    edit.mark_stale();
+    edit.write_failed();
+    assert!(edit.needs_refetch());
+    // With nothing stale, a failed write goes back to idle.
+    edit.refetched();
+    edit.begin_write();
+    edit.write_failed();
+    assert_eq!(edit, crate::state::ListEdit::Idle);
+}
+
+#[test]
 fn sessions_fetch_error_clears_loading() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);

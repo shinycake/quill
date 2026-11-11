@@ -24,7 +24,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let in_main = self.session.open_chat == Some(chat_id);
+        let in_main = self.session.open_chat_id() == Some(chat_id);
         if self.session.open_window_chat(chat_id)
             && !in_main
             && let Err(err) = self.send_open_chat(chat_id)
@@ -87,7 +87,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .search
                 .chat_search
                 .chat_id
-                .or(driver.session.open_chat);
+                .or(driver.session.open_chat_id());
             if shown != Some(jump.chat_id) {
                 return Ok(None);
             }
@@ -103,7 +103,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.close_window_chat(chat_id) {
             return Ok(());
         }
-        if self.session.open_chat == Some(chat_id) || !self.chats_path_active() {
+        if self.session.open_chat_id() == Some(chat_id) || !self.chats_path_active() {
             return Ok(());
         }
         let extra = self
@@ -117,7 +117,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// section stack when the active chat moves to its own window). The
     /// chat is closed in TDLib unless a window still shows it.
     pub fn deselect_chat(&mut self) -> Result<(), ConnectSendError> {
-        if self.session.open_chat.is_none() {
+        if self.session.open_chat_id().is_none() {
             return Ok(());
         }
         // Text noted within the save's quiet second goes out now: nothing

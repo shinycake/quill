@@ -78,7 +78,7 @@ impl QuillApp {
         }
         match variant.as_str() {
             "gone" => {
-                session.stories.missing.insert((LEO, 99));
+                session.stories.story_fetch.gone((LEO, 99));
                 self.open_story_viewer(ChatId(LEO), 99, StoryOpenScope::Link, cx);
             }
             "own" | "own-viewers" | "own-viewers-loading" => {

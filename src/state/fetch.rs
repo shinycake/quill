@@ -16,13 +16,16 @@ pub enum ListOp {
     Idle,
     /// A change is in flight under this request; its controls stay disabled.
     Mutating(crate::ids::RequestId),
+    /// A change is in flight and something else moved the list meanwhile:
+    /// the list is fetched again whether the change lands or is refused.
+    MutatingStale(crate::ids::RequestId),
     /// The list is kept for display and fetched again before it is trusted.
     Stale,
 }
 
 impl ListOp {
     pub fn is_mutating(self) -> bool {
-        matches!(self, Self::Mutating(_))
+        matches!(self, Self::Mutating(_) | Self::MutatingStale(_))
     }
 
     pub fn is_stale(self) -> bool {
@@ -31,7 +34,10 @@ impl ListOp {
 
     /// A change goes out under `request`.
     pub fn begin(&mut self, request: crate::ids::RequestId) {
-        *self = Self::Mutating(request);
+        *self = match *self {
+            Self::Stale | Self::MutatingStale(_) => Self::MutatingStale(request),
+            _ => Self::Mutating(request),
+        };
     }
 
     /// `request` came back with a refusal, or never left: the change did
@@ -39,8 +45,12 @@ impl ListOp {
     /// that names no request (its entry is gone) frees the list, or it
     /// would stay locked for good.
     pub fn failed(&mut self, request: Option<crate::ids::RequestId>) {
-        if matches!(*self, Self::Mutating(waiting) if request.is_none_or(|id| id == waiting)) {
-            *self = Self::Idle;
+        match *self {
+            Self::Mutating(waiting) if request.is_none_or(|id| id == waiting) => *self = Self::Idle,
+            Self::MutatingStale(waiting) if request.is_none_or(|id| id == waiting) => {
+                *self = Self::Stale;
+            }
+            _ => {}
         }
     }
 
@@ -49,7 +59,11 @@ impl ListOp {
     /// lands.
     pub fn changed(&mut self, request: Option<crate::ids::RequestId>) {
         match *self {
-            Self::Mutating(waiting) if request.is_some_and(|id| id != waiting) => {}
+            Self::Mutating(waiting) | Self::MutatingStale(waiting)
+                if request.is_some_and(|id| id != waiting) =>
+            {
+                *self = Self::MutatingStale(waiting);
+            }
             _ => *self = Self::Stale,
         }
     }
@@ -57,8 +71,10 @@ impl ListOp {
     /// Something else moved the list (not a change of ours): fetch it
     /// again, unless a change is in flight (its landing marks the list).
     pub fn mark_stale(&mut self) {
-        if *self == Self::Idle {
-            *self = Self::Stale;
+        match *self {
+            Self::Idle => *self = Self::Stale,
+            Self::Mutating(request) => *self = Self::MutatingStale(request),
+            Self::Stale | Self::MutatingStale(_) => {}
         }
     }
 
@@ -189,6 +205,12 @@ impl<T> Fetch<T> {
             Self::Outdated(_) => Self::Outdated(Some(make())),
             Self::Idle | Self::Ready(_) => Self::Ready(make()),
         };
+    }
+
+    /// Whether a request should go out now: never asked, or a refetch is
+    /// owed. A request in flight, an answer and a failure wait.
+    pub fn wants_fetch(&self) -> bool {
+        matches!(self, Self::Idle | Self::Outdated(_))
     }
 
     /// A request goes out. The last answer stays visible, the last error is

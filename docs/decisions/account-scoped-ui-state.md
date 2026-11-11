@@ -7535,6 +7535,122 @@ Two bools stay with a reason in `scripts/implicit-state-allow.txt`:
   lands after an answer keeps the old answer and asks again), the `Paged`
   lists of search, shared media, playlists and stats.
 
+### Sweep fixes (is-10)
+
+Forty-two implicit-state entries. A fix means the shape is gone: one enum per
+stage, every stage with a way out (the answer, the error, a cancel, the owner
+going away), and the baseline line of each converted field dropped.
+
+- **Settings** (05-140, 05-141, 04-047). Each fetched resource is one
+  `Fetch<T>`: storage statistics, account TTL (also the `setAccountTtl` and
+  `deleteAccount` in flight, so the surfaces disable while the value loads),
+  connected websites, default auto-delete, the auto-download presets and the
+  cache clear (`Fetch<i64>`: in flight, the bytes freed, or why it failed).
+  `data_storage_error` was one slot shared by five requests; it is gone, each
+  request keeps its own failure (`data_storage_error()` joins them for the
+  screen). A write against a list is `ListEdit { Idle, InFlight { refetch },
+  Refetch }` (the sessions and websites lists, with the "refetch on the next
+  ingest" need: a list that went stale while a write was out stays owed
+  when the write fails), a `setAccountTtl` or `deleteAccount` waits only
+  for another such write, not for a `getAccountTtl` in flight, the device link is `DeviceLogin { Idle, InFlight, Done(result) }`
+  taken once, and the read-date setting is `ReadDate { Unknown, Getting,
+  Known, Setting, Failed }`, so the value and the request that owns it are
+  one value.
+- **Stickers** (05-150, 05-151, 05-152, 05-153, 05-154, 05-238, 09-079). The
+  set box's edits are `StickerSetEdits { Idle, InFlight, NeedsRefresh,
+  Deleted }`; `files_requested` moved into the `Ready` stage of the set view
+  (a refreshed set starts unasked). The emoji panel's install is
+  `EmojiMutation`, the status picker's action `EmojiStatusStage`, and the
+  tab a search returns to is part of `EmojiSetTab::Search { back }`, so the
+  picker no longer keeps a second field in step. The GIF panel has
+  `saved` and `search` as `Fetch<Vec<_>>`; a refetch owed (an
+  `updateSavedAnimations`, a save or remove) is `Fetch::Stale`, a variant of
+  its own (the answer shows, no request is out), asked once the panel is
+  open, and a failed list waits for the panel to reopen; the saved
+  notification sounds use `Stale` the same way. The masks panel keeps the
+  integration branch's shape (`Fetch` per list, `MasksWanted`, a `Fetch`
+  per set); the manager's commit is a queue of `CommitStep`s. The status
+  picker's `EmojiStatusStage::Changing` carries a line that arrives while
+  the change is out (a failed list fetch, a refused send) and shows it
+  when the change ends.
+- **Stories** (05-164, 05-165, 05-260, 05-282). `ActiveStoriesPaging` is
+  `Idle | Waiting | Exhausted` (a late failure no longer turns an
+  exhausted list back into a wait), the picker's custom emoji fetch is
+  `CustomEmojiFetch { Idle, Backoff }` (an answer ends the failure count),
+  and one `StoryFetches` map holds where each story's `getStory` stands
+  (`Asked { wait } | Gone | Retry`; an ask after a wait is `Asked` and
+  carries the wait, so the next failure still doubles it), replacing the
+  asked set, the gone set and the retry map.
+- **Threads and users** (05-170, 05-171, 05-173, 05-174, 05-175, 05-271). The
+  direct-messages topics keep `TopicsLoad { Asked | Failed | Exhausted }` per
+  chat (a failed first page counts as not loaded: opening the chat asks
+  again, an update about the chat does not); the forum topic lists are one
+  `Fetch<Vec<ForumTopic>>` per chat in `ForumTopicsMap` (`forum_row` is
+  gone; a failed refetch keeps the topics); contacts are `Fetch<Vec<i64>>`;
+  the New Contact box's import is `NewContact { Closed, Sending, Opening,
+  Done }` (`Opening` carries the joined user until the driver opens the
+  chat, so `user_chat_to_open` is gone; the support chat opens from its
+  own answer); the three emoji icon lists and the wearable gifts are
+  `Fetch`es (an empty answer is now an answer, not "not loaded").
+- **History** (05-176, 05-179, 05-180, 05-241). A window's two ends are
+  `WindowLoad { older: Open | Failed | Complete, newer: Open | Failed |
+  Exhausted }`, replaced whole with the window. The `viewMessages`
+  bookkeeping is one `ViewBook`: a stage per message (`Due | InFlight(request)
+  | Done`) and whether rows were reported, so a trimmed message leaves every
+  stage at once. The dropped-history memos carry their own order. Closed chats and
+  topics are one `Retention { Releasing, Closed }` per key in `Retained`
+  (the order lives in the value), replacing the LRU list and the release
+  queue, so a chat is never both queued and ranked. A history page carries
+  the window epoch it was asked for (`PendingRequest::window_epoch`), so a
+  page for a replaced window reads as stale without a session-wide id set.
+- **Session** (05-189, 05-190, 05-211, 05-212, 05-216, 05-224, 05-237, 05-239,
+  05-245, 05-259, 05-273). A set's library load is `SetLoad { Loading(request)
+  | Ready | Failed }`; the picker's Star offer lives in the reaction options;
+  Stop on a streaming bot reply is `BotStopStage::Stopping(request)` (the bar
+  no longer reads the request table), and an error settles only the Stop it
+  answers; the window a request was asked in is one `AskingView` (the
+  window and its opening); `getRepliedMessage` registers its request and its
+  `Loading(request)` row together; the "boosts to bypass restrictions" save
+  carries its request, and an older answer does not settle a newer save; the
+  report flow's steps are one list; the next page of a reactions tab is
+  `Audience::Paging`; forwards are `Forwards` (one flight per destination and
+  a queue of outcomes, bounded, so two forwards finishing before the UI
+  polls both show, and a log-out clears the queued flights too); the main
+  window shows one `OpenView { Closed, Chat, Topic }`, so a topic cannot
+  outlive its chat (a chat window's `SessionView` carries the same
+  value); a group call the user left is `GroupCallRejoin::Left` (it
+  replaces `left_group_call` and the `need_rejoin` copy, ends any rejoin in
+  flight and is ended by TDLib's not-joined update); shown notifications
+  are `NotifyShown { Shown | ClearDue }` per chat.
+- **Skipped.** 05-166: `CloseFriendsList` already matches the load to its
+  request, and the sent list rides the request (tested in `stories_more.rs`).
+  05-167: `extras_requested` is gone, the three extras are `Fetch`es.
+  05-181: the unread bar (`unread_anchor`) and the read hold
+  (`opened_with_unread`) are separate in tdesktop too (`_unreadBarView` and
+  `_firstUnreadView`) and take all four combinations. 05-213: the optional
+  key fields of `PendingRequest` are written once at registration and never
+  change; they are keys, not a stage. 05-252: the privacy counter is gone
+  (`privacy_asks` derives loading and failed). Left as they are:
+  `HistoryPruning::holds` (the UI's claim, replaced whole at every update
+  by `set_history_holds`: an input, not a stage of a history) and
+  `keep_all` (set once by the screenshot demos for the whole session).
+  05-151 and 05-152, the `open` of the masks panel and of the stickers
+  manager: both are session-held dialogs that the farewell closes
+  (`close_mask_sets`, `close_stickers_manager`; `scripts/session-dialogs.txt`
+  lists `MaskSets`), the screen's own flag for the manager is
+  `settings.sticker_settings_open`, and the core driver reads the session's
+  copy to decide what to download, which it cannot do from the UI's
+  `OnScreen`. They are written only by the open/close calls
+  (`set_dialog_open`, `set_sticker_manager_open`).
+
+- **Merged with the integration branch.** Bundles merged earlier converted
+  the same fields. The integration forms stay for sessions, websites and gifts
+  (`ListOp`), the login stages, the GIF panel and the emoji packs; this
+  bundle's `Fetch::Stale` became `Fetch::Outdated`, and its `OpenView`,
+  `DeviceLogin`, saved-sound `Fetch`, media-library set stages and
+  Data & Storage save stage are kept. `ListOp::MutatingStale` keeps a refetch
+  that went stale while a change was out, also when that change is refused.
+
 ### Sweep fixes (is-01)
 
 Implicit-state entries: each names a struct whose stages were kept in step by

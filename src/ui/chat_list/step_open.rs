@@ -46,7 +46,7 @@ impl QuillApp {
                 _ => None,
             })
             .collect();
-        let open = self.session().and_then(|s| s.open_chat);
+        let open = self.session().and_then(|s| s.open_chat_id());
         let current = open.and_then(|open| chats.iter().position(|(_, id)| *id == open));
         let Some(&(item, id)) =
             step_target(chats.len(), current, step).and_then(|next| chats.get(next))

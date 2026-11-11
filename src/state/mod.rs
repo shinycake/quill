@@ -73,9 +73,11 @@ pub(crate) mod debounce;
 mod domains;
 pub mod fetch;
 mod folder_order_cache;
+mod forwards;
 mod group_call_stage;
 mod history_calendar;
 mod history_prune;
+mod history_retention;
 mod history_trim;
 mod history_types;
 mod info_types;
@@ -83,6 +85,8 @@ mod logout_notes;
 mod map_thumbs;
 mod media_library;
 mod member_list;
+mod notify_shown;
+mod open_view;
 pub mod optimistic;
 mod ownership_types;
 pub mod paged;
@@ -127,6 +131,7 @@ mod sponsored_types;
 mod submit;
 mod topic_history;
 mod unread_revision;
+mod view_book;
 pub use session_forum::{FORUM_COLUMN_COLLAPSE_BELOW, FORUM_COLUMN_WIDTH, ForumColumn};
 mod session_forward;
 mod session_group_admin;
@@ -199,6 +204,7 @@ pub use conference::*;
 pub use conference_add_people::*;
 pub use conference_invite::*;
 pub use domains::*;
+pub use forwards::Forwards;
 pub use group_call_stage::{GroupScreenShare, GroupTransport};
 pub use history_calendar::*;
 pub use history_prune::*;
@@ -214,6 +220,8 @@ pub use media_library::{
     MAX_LIBRARY_LOADS, MediaLibrary, MessageReactionOptions, MessageReactionsState, ReactionChoice,
 };
 pub use member_list::*;
+pub use notify_shown::{NotifyShown, ShownNotifications};
+pub use open_view::OpenView;
 pub use ownership_types::*;
 pub use photo_gallery::{PhotoActions, PhotoDelete, chat_gallery, user_gallery};
 pub use redraw::{RedrawNeed, RowsOnScreen, redraw_need};
@@ -237,7 +245,7 @@ pub(crate) use session_history_window::WindowEdge;
 pub use session_links_boosts::*;
 pub use session_message_menu::{
     Audience, CustomEmojiPreview, MessageAudience, MessageReportFlow, MessageReportStage,
-    PollOptionMenu, SetChange, SetChangeStage, StickerSetView, StickerSetViewStage,
+    PollOptionMenu, SetChange, SetChangeStage, SetFiles, StickerSetView, StickerSetViewStage,
     poll_option_key, reaction_filter_key,
 };
 pub use session_message_story::{
@@ -271,6 +279,7 @@ pub use submit::{Submit, SubmitView};
 pub use thread_types::*;
 pub use topic_history::*;
 pub use updates_sync::*;
+pub use view_book::{Reported, ViewBook, ViewStage};
 pub use web_app_types::*;
 
 #[cfg(test)]

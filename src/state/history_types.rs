@@ -525,45 +525,55 @@ pub enum ReaderPosition {
     },
 }
 
+/// The older end of a window: more to load, a failed load, or the start of
+/// the chat. A failed end waits for a retry, a window reset or a message
+/// landing instead of asking again on every render.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum OlderLoad {
+    #[default]
+    Open,
+    /// The window's page load failed or timed out (error answer or the
+    /// pending-request sweep) while the window is empty: the UI shows
+    /// "Couldn't load messages · Retry" instead of the skeleton.
+    Failed,
+    /// The first message of the chat is loaded.
+    Complete,
+}
+
+/// The newer end of a window.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum NewerLoad {
+    #[default]
+    Open,
+    /// A newer-page request failed; stop auto-loading until the window is
+    /// reset, so a persistent error can't re-send on every render.
+    Failed,
+    /// TDLib answered a newer page from the window's newest message with
+    /// nothing newer while the chat's latest known message was newer (it
+    /// is not visible to us). While no newer message is known and the
+    /// window still reaches `newest`, it counts as reaching the latest, so
+    /// the pane does not ask for the same page again.
+    Exhausted { latest: i64, newest: i64 },
+}
+
+/// Both ends of a history window; replaced whole with the window.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WindowLoad {
+    pub older: OlderLoad,
+    pub newer: NewerLoad,
+}
+
 #[derive(Debug, Default)]
 pub struct HistoryState {
     pub messages: HistoryMessages,
     pub tombstones: HashSet<i64>,
-    pub loaded_complete: bool,
+    /// How far loading at each end of the window got.
+    pub window: WindowLoad,
     pub view_generation: ViewGeneration,
-    /// Message ids TDLib has accepted for `viewMessages` this open generation.
-    pub viewed: HashSet<i64>,
-    /// In-flight `viewMessages` ids, by the request that sent them: an
-    /// answer settles the ids of its own request only (`commit_viewed`,
-    /// `abort_viewing`), whatever else is in flight, and a re-open of the
-    /// chat drops them all, so an answer from before it settles nothing.
-    pub viewing: HashMap<RequestId, BTreeSet<i64>>,
-    /// Ids the UI reported as shown (`ConnectDriver::view_messages`) that
-    /// have not been sent to `viewMessages` yet.
-    pub visible: BTreeSet<i64>,
-    /// The UI has reported visible rows this open generation; from then on
-    /// only reported rows are viewed (before that, only the newest row).
-    pub visible_reported: bool,
-    /// The rows of the UI's latest report: what is on screen now. A row
-    /// here that gets a new unread reaction is viewed again, which reads
-    /// the reaction (tdesktop `HistoryInner::paintEvent` →
-    /// `markContentsRead` for a shown `hasUnreadReaction` item).
-    pub on_screen: BTreeSet<i64>,
-    /// TDLib answered a newer page from the window's newest message with
-    /// nothing newer while the chat's latest known message was newer (it
-    /// is not visible to us): `(latest, newest)`. While no newer message is
-    /// known and the window still reaches `newest`, it counts as reaching
-    /// the latest, so the pane does not ask for the same page again.
-    pub newer_exhausted: Option<(i64, i64)>,
-    /// A newer-page request failed; stop auto-loading until the window is
-    /// reset, so a persistent error can't re-send on every render.
-    pub newer_failed: bool,
-    /// The window's page load failed or timed out (error answer or the
-    /// pending-request sweep) while the window is empty: the UI shows
-    /// "Couldn't load messages · Retry" instead of the skeleton. Cleared by
-    /// `ConnectDriver::retry_history`, a window reset, or any message
-    /// landing in the window.
-    pub load_failed: bool,
+    /// Which messages TDLib accepted for `viewMessages` this open
+    /// generation, which are on their way (each answer settles the ids of
+    /// its own request only), and which the UI reported as shown.
+    pub views: ViewBook,
     /// The chat's last read incoming message when it was opened with unread
     /// messages: the window loads around it and the UI draws the "Unread
     /// messages" divider after it. Cleared by jumping to the latest.
@@ -585,17 +595,78 @@ pub struct HistoryState {
 }
 
 impl HistoryState {
-    /// `id` is in a `viewMessages` still on its way.
-    pub fn is_viewing(&self, id: i64) -> bool {
-        self.viewing.values().any(|ids| ids.contains(&id))
+    /// The first message of the chat is in the window.
+    pub fn loaded_complete(&self) -> bool {
+        self.window.older == OlderLoad::Complete
     }
 
-    /// Let go of `id` in every `viewMessages` on its way: it is read, or
-    /// due again.
-    pub(crate) fn forget_viewing(&mut self, id: i64) {
-        for ids in self.viewing.values_mut() {
-            ids.remove(&id);
+    /// The window reaches the first message (`true`) or no longer does.
+    pub fn set_loaded_complete(&mut self, complete: bool) {
+        self.window.older = match (complete, self.window.older) {
+            (true, _) => OlderLoad::Complete,
+            (false, OlderLoad::Complete) => OlderLoad::Open,
+            (false, other) => other,
+        };
+    }
+
+    /// The window's page load failed while the window is empty.
+    pub fn load_failed(&self) -> bool {
+        self.window.older == OlderLoad::Failed
+    }
+
+    /// The older end failed to load (a complete window has nothing to
+    /// load, so it stays complete).
+    pub fn fail_load(&mut self) {
+        if self.window.older == OlderLoad::Open {
+            self.window.older = OlderLoad::Failed;
         }
+    }
+
+    /// Ask again: a retry, or a message landed.
+    pub fn clear_load_failed(&mut self) {
+        if self.window.older == OlderLoad::Failed {
+            self.window.older = OlderLoad::Open;
+        }
+    }
+
+    /// A newer-page request failed and auto-loading stopped.
+    pub fn newer_failed(&self) -> bool {
+        self.window.newer == NewerLoad::Failed
+    }
+
+    /// A newer page failed: stop auto-loading until the window is reset.
+    pub fn fail_newer(&mut self) {
+        self.window.newer = NewerLoad::Failed;
+    }
+
+    /// Auto-loading of newer pages may go on.
+    pub fn clear_newer_failed(&mut self) {
+        if self.window.newer == NewerLoad::Failed {
+            self.window.newer = NewerLoad::Open;
+        }
+    }
+
+    /// `(latest, newest)` of the answer that found nothing newer.
+    pub fn newer_exhausted(&self) -> Option<(i64, i64)> {
+        match self.window.newer {
+            NewerLoad::Exhausted { latest, newest } => Some((latest, newest)),
+            _ => None,
+        }
+    }
+
+    /// A newer page found nothing newer than `newest` while the chat's
+    /// latest known message is `latest`.
+    pub fn set_newer_exhausted(&mut self, exhausted: Option<(i64, i64)>) {
+        self.window.newer = match exhausted {
+            Some((latest, newest)) => NewerLoad::Exhausted { latest, newest },
+            None if matches!(self.window.newer, NewerLoad::Exhausted { .. }) => NewerLoad::Open,
+            None => self.window.newer,
+        };
+    }
+
+    /// `id` is in a `viewMessages` still on its way.
+    pub fn is_viewing(&self, id: i64) -> bool {
+        self.views.is_viewing(id)
     }
 
     pub fn ordered(&self) -> Vec<&HistoryMessage> {
@@ -617,7 +688,7 @@ impl HistoryState {
             return false;
         };
         let exhausted = self
-            .newer_exhausted
+            .newer_exhausted()
             .is_some_and(|(at_latest, at_newest)| latest <= at_latest && newest >= at_newest);
         !exhausted && newest < latest && !self.contains(MessageId(latest))
     }
@@ -668,12 +739,9 @@ impl HistoryState {
     /// chat. Tombstones and `viewMessages` bookkeeping stay.
     pub(crate) fn reset_window(&mut self) {
         self.messages.clear();
-        self.loaded_complete = false;
-        self.newer_failed = false;
-        self.load_failed = false;
-        // The latch belongs to the window it was learned in; a new window
-        // asks TDLib again.
-        self.newer_exhausted = None;
+        // What the ends learned belongs to the window it was learned in (a
+        // failed page, the newer latch); a new window asks TDLib again.
+        self.window = WindowLoad::default();
         self.reader = ReaderPosition::Tail;
         self.window_epoch = self.window_epoch.wrapping_add(1);
     }
@@ -689,7 +757,7 @@ impl HistoryState {
             self.latest_seen = self.latest_seen.max(message.id.0);
         }
         self.messages.insert(message.id.0, message);
-        self.load_failed = false;
+        self.clear_load_failed();
     }
 
     /// The message the "Unread messages" bar sits above: the first

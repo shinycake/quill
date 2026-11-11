@@ -136,12 +136,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         // Joining it again: its joined updates count once more.
-        if self.session.calls.left_group_call == Some(group_call_id) {
-            self.session.calls.left_group_call = None;
-        }
         // A join starts over: a transport error left by the last time in
         // the call is not this join's failure.
         if let Some(call) = self.session.calls.active_group_call.as_mut() {
+            call.rejoin.leave_over();
             call.transport.clear_error();
         }
         self.decline_ringing_invite(None);
@@ -436,7 +434,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(request);
         }
         // Explicit user intent starts the attempts over.
-        if manual && rejoin != GroupCallRejoin::Idle {
+        if manual && !matches!(rejoin, GroupCallRejoin::Idle | GroupCallRejoin::Left) {
             rejoin = GroupCallRejoin::Wanted { attempts: 0 };
         }
         let Some(attempt) = rejoin.next_attempt() else {
@@ -588,7 +586,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.calls.left_group_call = Some(group_call_id);
+        if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
+            call.rejoin.leave();
+        }
         self.session.calls.invite_results = None;
         // Phase C2g: tear the native group transport down eagerly; the
         // pump's before/after backstop covers server-driven ends.
@@ -648,7 +648,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.calls.left_group_call = Some(group_call_id);
+        if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
+            call.rejoin.leave();
+        }
         self.session.calls.invite_results = None;
         // Phase C2g: same native teardown as leaving; the server-driven
         // end also lands via the pump backstop.

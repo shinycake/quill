@@ -36,7 +36,7 @@ impl QuillApp {
         let session = self.session();
         session
             .as_ref()
-            .and_then(|s| s.open_chat)
+            .and_then(|s| s.open_chat_id())
             .and_then(|id| session.as_ref()?.chats.get(&id.0))
             .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }))
     }
@@ -114,7 +114,7 @@ impl QuillApp {
     /// `&mut self` the tick needs.
     pub(super) fn ensure_self_destruct_tick(&mut self, cx: &mut Context<Self>) {
         let now_ms = unix_ms_now();
-        let Some(chat_id) = self.session().and_then(|session| session.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|session| session.open_chat_id()) else {
             return;
         };
         // A running tick keeps itself alive: no need to scan the history
@@ -139,7 +139,8 @@ impl QuillApp {
                 let cont = this
                     .update(cx, |this, cx| {
                         let now_ms = unix_ms_now();
-                        let still_open = this.session().and_then(|s| s.open_chat) == Some(chat_id);
+                        let still_open =
+                            this.session().and_then(|s| s.open_chat_id()) == Some(chat_id);
                         let still_live = this.session().is_some_and(|session| {
                             session.open_chat_has_live_self_destruct(now_ms)
                         });
@@ -210,7 +211,7 @@ impl QuillApp {
     /// the open chat is a secret chat with a known peer.
     pub(super) fn secret_notif_label(session: Option<&Session>) -> Option<String> {
         let session = session?;
-        let open = session.open_chat?;
+        let open = session.open_chat_id()?;
         let chat = session.chats.get(&open.0)?;
         let ChatKind::Secret { user_id, .. } = &chat.kind else {
             return None;
@@ -315,7 +316,7 @@ impl QuillApp {
     /// shows then).
     pub(super) fn secret_composer_note(&self) -> Option<String> {
         let session = self.session()?;
-        let open = session.open_chat?;
+        let open = session.open_chat_id()?;
         let chat = session.chats.get(&open.0)?;
         let ChatKind::Secret { user_id, .. } = &chat.kind else {
             return None;

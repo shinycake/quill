@@ -213,10 +213,10 @@ impl Session {
                 // Back online: stories that failed while offline are asked
                 // for again at once.
                 if state == ConnectionState::Ready && self.connection != ConnectionState::Ready {
-                    self.stories.story_retry.clear();
+                    self.stories.story_fetch.forget_retries();
                     self.threads.saved.retry_after_reconnect();
                     // So do sticker and emoji sets whose load failed.
-                    self.media.media_library.failed.clear();
+                    self.media.media_library.forget_failures();
                 }
                 self.connection = state;
             }

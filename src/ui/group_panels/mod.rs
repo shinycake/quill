@@ -119,7 +119,7 @@ impl QuillApp {
                 InfoPanelTarget::Statistics(_)
                     | InfoPanelTarget::Community(_)
                     | InfoPanelTarget::Earn(_)
-            ) && let Some(chat_id) = live.driver.session.open_chat
+            ) && let Some(chat_id) = live.driver.session.open_chat_id()
             {
                 let _ = live.driver.fetch_chat_media_counts(chat_id);
             }
@@ -282,7 +282,7 @@ impl QuillApp {
         // peer only when the panel is that chat's own (not a group
         // member's profile opened from a sender avatar).
         let counts = session
-            .open_chat
+            .open_chat_id()
             .filter(|chat_id| {
                 let open = self.shown_info_target();
                 session.chat_info_target(*chat_id) == open

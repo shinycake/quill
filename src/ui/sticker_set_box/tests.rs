@@ -360,7 +360,7 @@ fn a_video_sticker_adapts_through_the_video_editor(cx: &mut TestAppContext) {
         .read_with(vcx, |app, _| {
             app.demo_session
                 .as_ref()
-                .and_then(|s| s.media.media_library.set_stickers.get(&78))
+                .and_then(|s| s.media.media_library.get(&78))
                 .and_then(|stickers| stickers.first().cloned())
         })
         .expect("a demo sticker");
@@ -467,7 +467,7 @@ fn a_still_sticker_decodes_off_the_ui_thread_before_the_editor_opens(cx: &mut Te
         .read_with(vcx, |app, _| {
             app.demo_session
                 .as_ref()
-                .and_then(|s| s.media.media_library.set_stickers.get(&78))
+                .and_then(|s| s.media.media_library.get(&78))
                 .and_then(|stickers| stickers.first().cloned())
         })
         .expect("a demo sticker");
@@ -503,7 +503,7 @@ fn adapt_pick(
         .read_with(vcx, |app, _| {
             app.demo_session
                 .as_ref()
-                .and_then(|s| s.media.media_library.set_stickers.get(&78).cloned())
+                .and_then(|s| s.media.media_library.get(&78).cloned())
         })
         .expect("demo stickers")
         .into_iter()
@@ -660,7 +660,7 @@ fn a_chosen_video_still_downloading_opens_the_editor_when_it_arrives(cx: &mut Te
         .read_with(vcx, |app, _| {
             app.demo_session
                 .as_ref()
-                .and_then(|s| s.media.media_library.set_stickers.get(&78))
+                .and_then(|s| s.media.media_library.get(&78))
                 .and_then(|stickers| stickers.first().map(|item| item.file_id))
         })
         .expect("a demo sticker");

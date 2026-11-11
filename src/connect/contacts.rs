@@ -124,7 +124,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         let Some(user_id) = self
             .session
-            .open_chat
+            .open_chat_id()
             .and_then(|chat_id| self.session.private_chat_user_id(chat_id))
         else {
             return Ok(());
@@ -333,7 +333,7 @@ impl<S: JsonSender> ConnectDriver<S> {
 
     /// The New Contact box (tdesktop `AddContactBox::save` with no user):
     /// `importContacts` with the one phone contact. The answer lands in
-    /// `UsersState::new_contact_outcome`, and a phone on Telegram opens the
+    /// `UsersState::new_contact`, and a phone on Telegram opens the
     /// chat. `Ok(None)` while one is in flight.
     pub fn add_contact_by_phone(
         &mut self,
@@ -345,10 +345,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::AddContactByPhone;
-        if self.session.users_state.new_contact_request.is_some() {
+        if self.session.users_state.new_contact.sending().is_some() {
             return Ok(None);
         }
-        self.session.users_state.new_contact_outcome = None;
+        self.session.users_state.new_contact = crate::state::NewContact::Closed;
         let contact = ImportedContact {
             phone_number: phone_number.to_string(),
             first_name: first_name.to_string(),
@@ -363,15 +363,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.session.users_state.new_contact_request = Some(extra);
+        self.session.users_state.new_contact = crate::state::NewContact::Sending(extra);
         Ok(Some(extra))
     }
 
     /// The New Contact box closed: the import it sent opens no chat when
     /// it lands, and the next box may send its own.
     pub fn forget_new_contact(&mut self) {
-        self.session.users_state.new_contact_request = None;
-        self.session.users_state.new_contact_outcome = None;
+        self.session.users_state.new_contact = crate::state::NewContact::Closed;
     }
 
     /// Slice A6: "Delete synced contacts" (TGX

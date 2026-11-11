@@ -102,7 +102,7 @@ impl QuillApp {
     pub(in crate::ui) fn open_scheduled_dialog(&mut self, cx: &mut Context<Self>) {
         self.chat_ui.hide_schedule_popup();
         if let Some(live) = self.live.as_mut()
-            && let Some(chat_id) = live.driver.session.open_chat
+            && let Some(chat_id) = live.driver.session.open_chat_id()
         {
             match live.driver.get_chat_scheduled_messages(chat_id) {
                 Ok(_) => self.set_note(StatusNote::silent(tr(
@@ -128,7 +128,7 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        let Some(chat_id) = live.driver.session.open_chat else {
+        let Some(chat_id) = live.driver.session.open_chat_id() else {
             return;
         };
         match live.driver.delete_scheduled_message(chat_id, message_id) {
@@ -492,7 +492,7 @@ impl QuillApp {
                 keys::Q_CHAT_TYPE_SOMETHING_FIRST_THE_AI,
             )));
         } else if let Some(live) = self.live.as_mut()
-            && let Some(chat_id) = live.driver.session.open_chat
+            && let Some(chat_id) = live.driver.session.open_chat_id()
         {
             let sent = send(live, chat_id, &text);
             if sent.is_ok() {

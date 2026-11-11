@@ -78,7 +78,7 @@ impl Session {
     /// the bytes through `key_fingerprint::key_hash_pixels` and render
     /// pixel colors only — raw bytes never leave `Session`.
     pub fn open_ready_secret_chat_for_user(&self, user_id: i64) -> Option<&ParsedSecretChat> {
-        let open = self.open_chat?;
+        let open = self.open_chat_id()?;
         let chat = self.chats.get(&open.0)?;
         let ChatKind::Secret {
             secret_chat_id,
@@ -885,7 +885,7 @@ impl Session {
     /// any message with a still-live `self_destruct_in` countdown — drives
     /// the 1-second render tick that keeps the timer badges fresh.
     pub fn open_chat_has_live_self_destruct(&self, now_ms: u64) -> bool {
-        let Some(open) = self.open_chat else {
+        let Some(open) = self.open_chat_id() else {
             return false;
         };
         self.histories.get(&open.0).is_some_and(|history| {
@@ -903,7 +903,7 @@ impl Session {
     /// current (`ensure_live_location_tick`), at the pace the labels
     /// change rather than every frame.
     pub fn open_chat_live_location_refresh(&self, now: i64) -> Option<u32> {
-        let open = self.open_chat?;
+        let open = self.open_chat_id()?;
         self.histories
             .get(&open.0)?
             .messages

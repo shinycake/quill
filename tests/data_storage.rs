@@ -70,7 +70,7 @@ fn set_auto_download_settings_ok_applies_confirmed_settings() {
     );
     assert!(session.settings.data_storage.seeded.is_seeded());
     assert!(session.settings.data_storage_dirty);
-    assert!(session.settings.data_storage_error.is_none());
+    assert!(session.settings.data_storage_error().is_none());
 }
 
 /// Slice S4: a `setAutoDownloadSettings` TDLib error surfaces on
@@ -100,7 +100,11 @@ fn set_auto_download_settings_error_surfaces_without_applying() {
             extra.0,
         ),
     );
-    let err = session.settings.data_storage_error.expect("error surfaced");
+    let err = session
+        .settings
+        .data_storage_error()
+        .expect("error surfaced")
+        .to_owned();
     assert!(
         err.starts_with("Couldn't save auto-download settings:"),
         "{err}"

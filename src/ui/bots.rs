@@ -490,7 +490,7 @@ impl QuillApp {
     /// line 11640). Returns `None` for non-bot chats.
     pub(super) fn bot_info_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        session.bot_user_id_for_chat(session.open_chat?)?;
+        session.bot_user_id_for_chat(session.open_chat_id()?)?;
         self.bot_info_panel_body(cx)
     }
 
@@ -501,7 +501,7 @@ impl QuillApp {
     #[inline(never)]
     fn bot_info_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let open = session.open_chat?;
+        let open = session.open_chat_id()?;
         let bot_id = session.bot_user_id_for_chat(open)?;
         let info: BotInfo = session.bot_info_for_chat(open)?.clone();
         let start_param = session.bots.bot_start_params.get(&open.0).cloned();
@@ -788,7 +788,7 @@ impl QuillApp {
     /// (`HistoryWidget::updateCmdStartShown`); a second press hides it.
     pub(super) fn bot_menu_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let open = session.open_chat?;
+        let open = session.open_chat_id()?;
         let info = session.bot_info_for_chat(open)?;
         let url = info
             .menu_button

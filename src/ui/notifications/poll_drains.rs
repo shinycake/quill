@@ -21,7 +21,7 @@ impl QuillApp {
         if let Some(result) = self
             .live
             .as_mut()
-            .and_then(|live| live.driver.session.messages.last_forward.take())
+            .and_then(|live| live.driver.session.messages.forwards.take_result())
         {
             self.present_forward_answer(result, cx);
             progressed = true;

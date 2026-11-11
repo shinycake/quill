@@ -33,7 +33,7 @@ fn a_poll_batch_resolves_open_chat_custom_emoji_once() {
             .filter(|request| request.contains("getCustomEmojiStickers"))
             .count()
     };
-    driver.session.open_chat = Some(ChatId(4));
+    driver.session.open = crate::state::OpenView::of(Some(ChatId(4)));
     driver.begin_batch();
     ingest(&mut driver, text_with_emoji(9, 12345));
     ingest(&mut driver, text_with_emoji(10, 12346));
@@ -75,7 +75,7 @@ fn a_batch_of_file_and_presence_updates_leaves_custom_emoji_alone() {
     };
     // The message lands while its chat is closed; the chat opens after.
     ingest(&mut driver, text_with_emoji(9, 12345));
-    driver.session.open_chat = Some(ChatId(4));
+    driver.session.open = crate::state::OpenView::of(Some(ChatId(4)));
     driver.begin_batch();
     ingest(
         &mut driver,
@@ -265,7 +265,7 @@ fn a_refused_custom_emoji_file_downloads_once_its_transfer_stops() {
             premium_animation: None,
         },
     );
-    driver.session.open_chat = Some(ChatId(4));
+    driver.session.open = crate::state::OpenView::of(Some(ChatId(4)));
     ingest(&mut driver, &emoji_file(88, true));
     driver.begin_batch();
     ingest(&mut driver, &text_with_emoji(9, 12345).to_string());
@@ -465,7 +465,8 @@ fn a_photo_in_a_chat_window_downloads_like_one_in_the_main_window() {
     );
     driver.open_chat_window(ChatId(7)).unwrap();
     assert_eq!(
-        driver.session.open_chat, None,
+        driver.session.open_chat_id(),
+        None,
         "the main window shows nothing"
     );
     ingest(&mut driver, &photo_message(20, 7, 1, 2));

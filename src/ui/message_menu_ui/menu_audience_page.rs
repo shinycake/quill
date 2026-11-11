@@ -205,7 +205,6 @@ impl QuillApp {
                 .filtered
                 .get(&quill::state::reaction_filter_key(reaction)),
         };
-        let tab_filter = tab.as_ref().map_or(0, quill::state::reaction_filter_key);
         if let Some(page) = tab_state.and_then(|state| state.ready())
             && !page.reactions.is_empty()
         {
@@ -227,7 +226,7 @@ impl QuillApp {
                 ));
             }
             if !page.next_offset.is_empty() {
-                let loading = audience.more_loading.contains(&tab_filter);
+                let loading = tab_state.is_some_and(|state| state.is_paging());
                 let more_tab = tab.clone();
                 let hover = cx.theme().accent;
                 rows.push((

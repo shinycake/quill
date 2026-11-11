@@ -384,7 +384,7 @@ impl QuillApp {
     /// The bot's menu button (`botMenuButton.url`).
     pub(super) fn open_bot_menu_web_app(&mut self, url: &str, cx: &mut Context<Self>) {
         let Some((chat_id, bot_id)) = self.session().and_then(|session| {
-            let chat_id = session.open_chat?;
+            let chat_id = session.open_chat_id()?;
             Some((chat_id, session.bot_user_id_for_chat(chat_id)?))
         }) else {
             self.set_status_note(
@@ -488,7 +488,7 @@ impl QuillApp {
 
     /// An attachment menu bot from the paperclip menu, in the open chat.
     pub(super) fn open_attachment_menu_bot(&mut self, bot_id: i64, cx: &mut Context<Self>) {
-        let Some(chat_id) = self.session().and_then(|session| session.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|session| session.open_chat_id()) else {
             return;
         };
         self.start_web_app(PendingOpen::Attach { chat_id, bot_id }, cx);
@@ -499,7 +499,7 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return Vec::new();
         };
-        let Some(chat_id) = session.open_chat else {
+        let Some(chat_id) = session.open_chat_id() else {
             return Vec::new();
         };
         let Some(chat) = session.chats.get(&chat_id.0) else {
@@ -591,7 +591,7 @@ impl QuillApp {
                 // The current chat, as tdesktop's `targetChatCurrent`.
                 let target = self
                     .session()
-                    .and_then(|session| session.open_chat)
+                    .and_then(|session| session.open_chat_id())
                     .unwrap_or(chat_id);
                 let sent = self
                     .live

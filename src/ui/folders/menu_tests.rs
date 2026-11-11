@@ -75,7 +75,7 @@ fn the_folder_box_keeps_its_chat_when_another_opens(cx: &mut TestAppContext) {
     });
     frames(vcx);
     assert_eq!(
-        app.read_with(vcx, |app, _| app.session().and_then(|s| s.open_chat)),
+        app.read_with(vcx, |app, _| app.session().and_then(|s| s.open_chat_id())),
         Some(second)
     );
     assert!(

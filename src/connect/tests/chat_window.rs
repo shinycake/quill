@@ -104,7 +104,7 @@ fn an_account_going_to_the_background_trims_the_chat_it_showed() {
     assert_eq!(h.history(ALICE).messages.len(), 80);
 
     h.driver.leave_for_background().unwrap();
-    assert_eq!(h.driver.session.open_chat, None);
+    assert_eq!(h.driver.session.open_chat_id(), None);
     assert_eq!(h.sent("closeChat", ALICE).len(), 1);
     assert_eq!(
         h.history(ALICE).messages.len(),
@@ -122,7 +122,7 @@ fn a_window_chat_opens_and_pages_beside_the_main_chat() {
 
     let window_page = h.driver.open_chat_window(BOB).unwrap().expect("first page");
     assert_eq!(
-        h.driver.session.open_chat,
+        h.driver.session.open_chat_id(),
         Some(ALICE),
         "the main window keeps its chat"
     );
@@ -213,7 +213,7 @@ fn moving_the_active_chat_to_a_window_leaves_the_main_window_empty() {
     h.driver.select_chat(BOB).unwrap();
     h.driver.open_chat_window(BOB).unwrap();
     h.driver.deselect_chat().unwrap();
-    assert_eq!(h.driver.session.open_chat, None);
+    assert_eq!(h.driver.session.open_chat_id(), None);
     assert!(
         h.sent("closeChat", BOB).is_empty(),
         "the window still shows it"
@@ -221,7 +221,7 @@ fn moving_the_active_chat_to_a_window_leaves_the_main_window_empty() {
     assert!(h.driver.session.chat_is_shown(BOB));
     // Nothing to deselect twice.
     h.driver.deselect_chat().unwrap();
-    assert_eq!(h.driver.session.open_chat, None);
+    assert_eq!(h.driver.session.open_chat_id(), None);
 }
 
 #[test]
@@ -271,7 +271,7 @@ fn a_chat_that_is_not_shown_cannot_page() {
 fn a_window_chat_runs_the_open_chat_follow_ups_without_moving_the_main_view() {
     let mut h = Harness::two_chats();
     h.driver.select_chat(ALICE).unwrap();
-    h.driver.session.open_topic = Some(5);
+    h.driver.session.open = h.driver.session.open.with_topic(5);
     h.driver.open_chat_window(BOB).unwrap();
     // The follow-ups ran for Bob (its pinned message was asked for) with
     // the main window's view untouched.
@@ -280,16 +280,19 @@ fn a_window_chat_runs_the_open_chat_follow_ups_without_moving_the_main_view() {
         1,
         "pinned messages asked for"
     );
-    assert_eq!(h.driver.session.open_chat, Some(ALICE));
-    assert_eq!(h.driver.session.open_topic, Some(5));
+    assert_eq!(h.driver.session.open_chat_id(), Some(ALICE));
+    assert_eq!(h.driver.session.open_forum_topic(), Some(5));
     // Inside `with_window_chat` the window's chat is the open one, with a
     // plain view (no topic); outside, the main window's view is back.
     let seen = h.driver.with_window_chat(BOB, |driver| {
-        (driver.session.open_chat, driver.session.open_topic)
+        (
+            driver.session.open_chat_id(),
+            driver.session.open_forum_topic(),
+        )
     });
     assert_eq!(seen, (Some(BOB), None));
-    assert_eq!(h.driver.session.open_chat, Some(ALICE));
-    assert_eq!(h.driver.session.open_topic, Some(5));
+    assert_eq!(h.driver.session.open_chat_id(), Some(ALICE));
+    assert_eq!(h.driver.session.open_forum_topic(), Some(5));
 }
 
 /// A channel in a chat window waits for `getMe` to learn its own
@@ -535,7 +538,7 @@ fn a_failed_close_still_leaves_the_chat_the_main_window_cleared() {
     );
     let closed = broken.deselect_chat();
     assert!(closed.is_err(), "the failure is still reported");
-    assert_eq!(broken.session.open_chat, None);
+    assert_eq!(broken.session.open_chat_id(), None);
     assert!(!broken.session.chat_is_shown(BOB));
 }
 

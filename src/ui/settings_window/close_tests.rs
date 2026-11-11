@@ -52,7 +52,7 @@ fn frames(vcx: &mut VisualTestContext) {
 
 fn other_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> ChatId {
     app.read_with(vcx, |app, _| {
-        let open = app.session().and_then(|s| s.open_chat);
+        let open = app.session().and_then(|s| s.open_chat_id());
         app.session()
             .and_then(|s| {
                 s.chats

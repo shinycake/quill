@@ -52,7 +52,9 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return false;
         };
-        if session.open_chat.is_none() || self.recording_active() || self.chat_ui.rich.editor_open()
+        if session.open_chat_id().is_none()
+            || self.recording_active()
+            || self.chat_ui.rich.editor_open()
         {
             return false;
         }

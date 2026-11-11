@@ -17,7 +17,7 @@ fn a_send_error_later_in_the_ingest_keeps_the_captured_answer() {
     driver
         .ingest(copy_and_parse(chat, &seq, &sink).expect("parse"))
         .expect("chat");
-    driver.session.open_chat = Some(crate::ids::ChatId(-1001));
+    driver.session.open = crate::state::OpenView::of(Some(crate::ids::ChatId(-1001)));
     sender.refuse(true);
     let json = format!(
         r#"{{"@type":"checkChatUsernameResultOk","@extra":"{}"}}"#,
@@ -120,7 +120,7 @@ fn a_deep_link_answer_after_the_flow_ended_is_dropped() {
 #[test]
 fn a_reopened_calendar_has_a_new_generation() {
     let (_dir, mut driver, _sender, _sink, _seq) = toggle_driver();
-    driver.session.open_chat = Some(crate::ids::ChatId(5));
+    driver.session.open = crate::state::OpenView::of(Some(crate::ids::ChatId(5)));
     let first = driver
         .session
         .open_history_calendar(0)

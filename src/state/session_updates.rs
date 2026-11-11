@@ -44,13 +44,12 @@ impl Session {
             self.media.download_extras.clear();
             self.search.search.close();
             self.search.chat_search.close();
-            self.messages.forward_flights.clear();
             self.chats_state.chat_message_sender.clear();
             self.chats_state.send_as_options.clear();
             self.messages.share_search = ShareSearch::default();
             self.calls.add_people_search = ShareSearch::default();
             self.calls.invite_results = None;
-            self.messages.last_forward = None;
+            self.messages.forwards.clear();
         }
         if matches!(state, AuthorizationState::LoggingOut) {
             self.settle_account_requests();
@@ -58,7 +57,7 @@ impl Session {
             self.calls.invite_results = None;
             self.search.search.close();
             self.search.chat_search.close();
-            self.messages.forward_flights.clear();
+            self.messages.forwards.forget_flights();
         }
         if matches!(state, AuthorizationState::Closing) {
             self.shutdown = ShutdownPhase::WaitingClosed;

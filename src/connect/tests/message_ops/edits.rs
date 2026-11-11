@@ -373,8 +373,8 @@ fn driver_forward_messages_shape_and_dest_result() {
     let result = driver
         .session
         .messages
-        .last_forward
-        .as_ref()
+        .forwards
+        .latest_result()
         .expect("forward result");
     assert_eq!(result.dest_title, "Bob");
     assert_eq!(result.forwarded_ids, vec![MessageId(80), MessageId(81)]);

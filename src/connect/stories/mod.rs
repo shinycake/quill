@@ -67,7 +67,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let mut sent = false;
         for list in [StoryListView::Main, StoryListView::Archive] {
             let paging = self.session.stories.paging(list);
-            if paging.retry.is_some() && paging.may_load(now) {
+            if paging.retry().is_some() && paging.may_load(now) {
                 sent |= matches!(self.maybe_load_active_stories(list), Ok(Some(_)));
             }
         }
@@ -216,8 +216,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<Option<RequestId>, ConnectSendError> {
         self.session
             .stories
-            .story_retry
-            .remove(&(chat_id.0, story_id));
+            .story_fetch
+            .forget_retry((chat_id.0, story_id));
         self.get_story(chat_id, story_id)
     }
 

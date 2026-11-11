@@ -192,7 +192,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let leaving = calls
             .active_group_call
             .as_ref()
-            .is_some_and(|call| calls.left_group_call == Some(call.id));
+            .is_some_and(|call| call.rejoin.is_left());
         hanging_up || leaving
     }
 

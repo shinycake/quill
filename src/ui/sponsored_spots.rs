@@ -48,7 +48,7 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return Vec::new();
         };
-        let Some(chat_id) = session.open_chat else {
+        let Some(chat_id) = session.open_chat_id() else {
             return Vec::new();
         };
         let Some(entry) = session.messages.sponsored.get(&chat_id.0) else {
@@ -243,7 +243,7 @@ impl QuillApp {
         let placed = self
             .session()
             .and_then(|s| {
-                s.open_chat
+                s.open_chat_id()
                     .and_then(|chat| s.messages.sponsored.get(&chat.0))
             })
             .map_or(0, |entry| entry.placed.len());
@@ -297,9 +297,9 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return false;
         };
-        session.open_chat.is_some()
-            && self.viewed_chat() == session.open_chat
-            && session.open_topic.is_none()
+        session.open_chat_id().is_some()
+            && self.viewed_chat() == session.open_chat_id()
+            && session.open_forum_topic().is_none()
             && !self.thread_active()
             && session.threads.saved.sublist.is_none()
             && session.threads.saved.tag_search.is_none()

@@ -168,7 +168,7 @@ impl QuillApp {
             if let Some(result) = self
                 .demo_session
                 .as_mut()
-                .and_then(|session| session.messages.last_forward.take())
+                .and_then(|session| session.messages.forwards.take_result())
             {
                 self.present_forward_result(result, cx);
             }
@@ -244,7 +244,7 @@ impl QuillApp {
         };
         !self.chat_ui.is_editing()
             && self.forward_draft().is_some()
-            && self.session().and_then(|s| s.open_chat) == Some(dest)
+            && self.session().and_then(|s| s.open_chat_id()) == Some(dest)
     }
 
     /// Composer Send with the forward bar up: the typed text goes first as a
@@ -306,7 +306,7 @@ impl QuillApp {
             if let Some(result) = self
                 .demo_session
                 .as_mut()
-                .and_then(|session| session.messages.last_forward.take())
+                .and_then(|session| session.messages.forwards.take_result())
             {
                 self.present_forward_result(result, cx);
             }

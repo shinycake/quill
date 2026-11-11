@@ -227,7 +227,7 @@ impl Session {
             return;
         };
         self.chat_list.psa_about.toast = Toast::Hidden;
-        if self.open_chat == Some(chat_id) {
+        if self.open_chat_id() == Some(chat_id) {
             self.show_about_if_due(chat_id, now);
         }
     }
@@ -330,7 +330,7 @@ mod tests {
     fn visible(s: &Session) -> bool {
         s.chat_list
             .psa_about
-            .visible(s.open_chat, Instant::now())
+            .visible(s.open_chat_id(), Instant::now())
             .is_some()
     }
 
@@ -408,7 +408,7 @@ mod tests {
         let mut s = session_with_promoted(5);
         s.open_chat(ChatId(5));
         let about = &s.chat_list.psa_about;
-        let open = s.open_chat;
+        let open = s.open_chat_id();
         assert!(about.visible(open, Instant::now()).is_some());
         let later = Instant::now() + Duration::from_secs(9);
         assert!(about.visible(open, later).is_none());

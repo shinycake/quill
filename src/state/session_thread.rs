@@ -8,8 +8,8 @@ impl Session {
     pub fn begin_thread(&mut self, chat_id: ChatId, message_id: MessageId) {
         let mut view = ThreadView::resolving(chat_id, message_id);
         // A thread opened from inside a forum topic keeps that topic.
-        if self.open_chat == Some(chat_id) && self.chat_has_topics(chat_id) {
-            view.forum_topic_id = self.open_topic;
+        if self.open_chat_id() == Some(chat_id) && self.chat_has_topics(chat_id) {
+            view.forum_topic_id = self.open_forum_topic();
         }
         self.threads.thread = Some(view);
         self.view_generation.bump();
@@ -36,7 +36,7 @@ impl Session {
         self.threads.thread.as_ref().is_some_and(|thread| {
             matches!(thread.status, ThreadStatus::Failed(_))
                 || self
-                    .open_chat
+                    .open_chat_id()
                     .and_then(|chat| self.thread_for_chat(chat))
                     .is_none()
         })
@@ -68,7 +68,7 @@ impl Session {
         for message in &info.messages {
             self.remember_files(&message.files);
         }
-        let open_chat = self.open_chat;
+        let open_chat = self.open_chat_id();
         let Some(thread) = self.threads.thread.as_mut() else {
             return;
         };
@@ -387,10 +387,7 @@ impl Session {
     /// reported rows is read.
     pub(crate) fn prepare_thread_marks(&mut self, chat_id: ChatId) {
         let history = self.histories.entry(chat_id.0).or_default();
-        history.viewed.clear();
-        history.viewing.clear();
-        history.visible.clear();
-        history.visible_reported = true;
+        history.views.restart_reported();
         history.end_unread_open();
     }
 }

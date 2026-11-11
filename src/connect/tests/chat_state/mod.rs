@@ -101,7 +101,7 @@ fn forum_flow_topics_then_topic_history() {
     );
     // Selecting the topic fetches per-topic history.
     driver.select_topic(2).unwrap();
-    assert_eq!(driver.session.open_topic, Some(2));
+    assert_eq!(driver.session.open_forum_topic(), Some(2));
     let sent = recorder.snapshot();
     let search_json = sent
         .iter()
@@ -141,7 +141,7 @@ fn forum_flow_topics_then_topic_history() {
     assert!(history.messages.contains_key(&50));
     // Back to the topic list.
     driver.deselect_topic();
-    assert_eq!(driver.session.open_topic, None);
+    assert_eq!(driver.session.open_forum_topic(), None);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -208,10 +208,14 @@ fn a_refused_open_chat_leaves_the_chat_unopened_so_a_retry_sends_it() {
     ready_private_chat(&mut driver, &seq, &dyn_sink);
     sender.set_fail_open_chat(true);
     assert!(driver.select_chat(ChatId(7)).is_err());
-    assert_eq!(driver.session.open_chat, None, "not open without openChat");
+    assert_eq!(
+        driver.session.open_chat_id(),
+        None,
+        "not open without openChat"
+    );
     sender.set_fail_open_chat(false);
     driver.select_chat(ChatId(7)).expect("retry");
-    assert_eq!(driver.session.open_chat, Some(ChatId(7)));
+    assert_eq!(driver.session.open_chat_id(), Some(ChatId(7)));
     let opens = sender
         .snapshot()
         .iter()

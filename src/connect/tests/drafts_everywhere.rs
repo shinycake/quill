@@ -411,7 +411,7 @@ fn a_comments_thread_drafts_with_message_topic_thread() {
         ),
     );
     f.driver.switch_to_thread_chat().unwrap();
-    assert_eq!(f.driver.session.open_chat, Some(ChatId(14)));
+    assert_eq!(f.driver.session.open_chat_id(), Some(ChatId(14)));
     assert_eq!(
         f.driver.session.open_draft_topic(ChatId(14)),
         DraftTopic::Thread(501)

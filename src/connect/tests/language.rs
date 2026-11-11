@@ -476,7 +476,7 @@ fn the_about_box_waits_for_the_saved_flags_and_saves_without_overwriting() {
             .session
             .chat_list
             .psa_about
-            .visible(f.driver.session.open_chat, Instant::now())
+            .visible(f.driver.session.open_chat_id(), Instant::now())
             .is_some()
     };
     assert!(!shown(&f), "the saved flags are not in yet");

@@ -450,7 +450,7 @@ fn archived_sticker_paging_and_restore_ignore_pre_mutation_fetches() {
         )
         .unwrap();
     assert!(driver.session.stickers.stickers.archived_has_more);
-    assert!(driver.session.open_chat.is_none());
+    assert!(driver.session.open_chat_id().is_none());
     let preview = driver.select_sticker_set(1).unwrap().unwrap();
     driver.ingest(copy_and_parse(&json!({"@type":"stickerSet","@extra":preview.as_extra(),"id":"1","stickers":[{"@type":"sticker","id":"900","set_id":"1","emoji":"😀","format":{"@type":"stickerFormatWebp"},"sticker":{"@type":"file","id":901,"local":{"@type":"localFile","can_be_downloaded":true},"remote":{"@type":"remoteFile"}}}]}).to_string(),&seq,&sink).unwrap()).unwrap();
     assert_eq!(sent_request(&recorder, "downloadFile")["file_id"], 901);

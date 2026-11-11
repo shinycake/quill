@@ -165,7 +165,7 @@ impl Session {
             self.remember_files(&message.files);
             self.upsert_message(message.clone(), message.id.0 < 0);
         }
-        let flight = self.messages.take_forward_flight(pending.id);
+        let flight = self.messages.forwards.finish(pending.id);
         let dest_chat_id = flight
             .as_ref()
             .map(|f| f.dest_chat_id)
@@ -176,7 +176,7 @@ impl Session {
             .get(&dest_chat_id.0)
             .map(|chat| chat.title.clone())
             .unwrap_or_else(|| format!("chat {}", dest_chat_id.0));
-        self.messages.last_forward = Some(ForwardResult {
+        self.messages.forwards.push_result(ForwardResult {
             dest_chat_id,
             dest_title,
             from_chat_id: flight.as_ref().map(|f| f.from_chat_id).unwrap_or(ChatId(0)),

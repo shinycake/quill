@@ -164,7 +164,7 @@ fn viewer_open(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
 }
 
 fn open_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<ChatId> {
-    app.update(vcx, |app, _| app.session().and_then(|s| s.open_chat))
+    app.update(vcx, |app, _| app.session().and_then(|s| s.open_chat_id()))
 }
 
 /// A point on the video tile of the own album (message 812 of chat 11):

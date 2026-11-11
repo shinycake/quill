@@ -63,7 +63,7 @@ impl QuillApp {
         };
         if !session.settings.media_prefs.autoplay_gifs
             || session.settings.media_prefs.data_saver
-            || session.open_chat != Some(row.message.chat_id)
+            || session.open_chat_id() != Some(row.message.chat_id)
             || self
                 .playback
                 .autoplayed_gifs
@@ -157,7 +157,7 @@ impl QuillApp {
         mime: String,
         cx: &mut Context<Self>,
     ) {
-        let open_chat = self.session().and_then(|session| session.open_chat);
+        let open_chat = self.session().and_then(|session| session.open_chat_id());
         if let Some(chat) = open_chat {
             self.playback
                 .autoplayed_gifs
@@ -184,7 +184,7 @@ impl QuillApp {
         demand: Demand,
         cx: &mut Context<Self>,
     ) {
-        let Some(chat_id) = self.session().and_then(|session| session.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|session| session.open_chat_id()) else {
             return;
         };
         let window = self.windows.scope;
@@ -192,7 +192,7 @@ impl QuillApp {
     }
 
     fn play_gif_file(&mut self, message_id: MessageId, file_id: FileId, cx: &mut Context<Self>) {
-        let Some(chat_id) = self.session().and_then(|session| session.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|session| session.open_chat_id()) else {
             return;
         };
         let path = self.session().and_then(|session| {
@@ -278,7 +278,7 @@ impl QuillApp {
                     if let Some(decode) = this.playback.gif_decodes.get_mut(&key) {
                         decode.first = Some(clip.clone());
                     }
-                    if this.session().and_then(|session| session.open_chat) == Some(chat_id) {
+                    if this.session().and_then(|session| session.open_chat_id()) == Some(chat_id) {
                         this.gif_started(chat_id, message_id, clip, cx);
                     }
                 });
@@ -308,7 +308,7 @@ impl QuillApp {
     fn open_chat_animation(&self, message_id: MessageId) -> bool {
         self.session().is_some_and(|session| {
             session
-                .open_chat
+                .open_chat_id()
                 .and_then(|chat| session.histories.get(&chat.0))
                 .and_then(|history| history.messages.get(&message_id.0))
                 .is_some_and(|message| matches!(message.content, MessageContent::Animation(_)))
@@ -320,7 +320,7 @@ impl QuillApp {
     fn gif_decode_edge(&self, message_id: MessageId, cx: &mut Context<Self>) -> u32 {
         let scale = self.players.inline_videos.scale();
         let message = self.session().and_then(|session| {
-            let chat = session.open_chat?;
+            let chat = session.open_chat_id()?;
             session.histories.get(&chat.0)?.messages.get(&message_id.0)
         });
         let (width, height, caption) = match message {
@@ -374,7 +374,8 @@ impl QuillApp {
         self.playback.gif_decodes.remove(&key);
         // Playing is the open chat's: the same id in another chat is not
         // this decode's row.
-        let in_open_chat = self.session().and_then(|session| session.open_chat) == Some(key.chat);
+        let in_open_chat =
+            self.session().and_then(|session| session.open_chat_id()) == Some(key.chat);
         if !in_open_chat || !self.gif_playing(key.chat, message_id) {
             // Stopped or replaced meanwhile.
             return;

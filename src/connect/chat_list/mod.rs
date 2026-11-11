@@ -53,7 +53,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.open_chat == Some(chat_id) {
+        if self.session.open_chat_id() == Some(chat_id) {
             // Re-selecting the open chat leaves its reply thread.
             if self.session.threads.thread.is_some() {
                 self.session.close_thread();
@@ -118,6 +118,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.maybe_fetch_supergroup_profile(chat_id)?;
         self.maybe_fetch_supergroup_full_info_for_header(chat_id)?;
         self.maybe_fetch_forum_topics(chat_id)?;
+        self.retry_direct_topics_on_open(chat_id);
         Ok(())
     }
 

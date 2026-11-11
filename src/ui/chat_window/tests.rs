@@ -105,7 +105,7 @@ impl Harness {
     pub(super) fn open_chat(&self, cx: &mut TestAppContext) -> Option<ChatId> {
         self.settle(cx);
         self.app
-            .read_with(cx, |app, _| app.session().and_then(|s| s.open_chat))
+            .read_with(cx, |app, _| app.session().and_then(|s| s.open_chat_id()))
     }
 
     fn window_chats(&self, cx: &mut TestAppContext) -> Vec<ChatId> {
@@ -388,7 +388,7 @@ fn a_chat_picked_inside_a_chat_window_opens_in_the_main_window(cx: &mut TestAppC
     assert_eq!(h.window_chats(cx), vec![OTHER], "the window kept its chat");
     let window_view = h.app.update(cx, |app, cx| {
         app.in_window_scope(Some(OTHER), cx, |app, _| {
-            app.session().and_then(|session| session.open_chat)
+            app.session().and_then(|session| session.open_chat_id())
         })
     });
     assert_eq!(window_view, Some(Some(OTHER)));

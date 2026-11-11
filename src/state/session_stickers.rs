@@ -22,7 +22,7 @@ impl Session {
                 .into_iter()
                 .flatten(),
         )
-        .chain(self.media.media_library.set_stickers.values().flatten())
+        .chain(self.media.media_library.values().flatten())
         .find(|sticker| sticker.file_id == file_id)
     }
 

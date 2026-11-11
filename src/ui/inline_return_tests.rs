@@ -28,7 +28,7 @@ fn open(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
     app.update(&mut vcx, |app, _| {
         let session = app.demo_session.as_mut().expect("a demo session");
         let first = session.chats.keys().min().copied().expect("a chat");
-        session.open_chat = Some(ChatId(first));
+        session.open = quill::state::OpenView::of(Some(ChatId(first)));
     });
     (app, vcx)
 }
@@ -139,7 +139,7 @@ fn an_old_bot_message_loaded_after_the_start_does_not_bring_the_user_back(cx: &m
     let (app, mut vcx) = open(cx);
     let (origin, bot_chat, bot_id) = app.read_with(&vcx, |app, _| {
         let session = app.session().expect("demo session");
-        let origin = session.open_chat.expect("an open chat");
+        let origin = session.open_chat_id().expect("an open chat");
         // The lowest id, so the pick does not depend on the map's order.
         let (chat, user) = session
             .chats
@@ -160,7 +160,8 @@ fn an_old_bot_message_loaded_after_the_start_does_not_bring_the_user_back(cx: &m
         app.begin_inline_return(bot_id, "somebot", "param");
         // The user lands in the bot's chat with the start: a frame between
         // the steps must not find the trip outside the bot's chat.
-        app.demo_session.as_mut().expect("a demo session").open_chat = Some(ChatId(bot_chat));
+        app.demo_session.as_mut().expect("a demo session").open =
+            quill::state::OpenView::of(Some(ChatId(bot_chat)));
         assert!(
             app.take_inline_start(ChatId(bot_chat), cx),
             "the start goes"

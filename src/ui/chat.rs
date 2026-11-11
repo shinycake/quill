@@ -21,7 +21,7 @@ impl QuillApp {
 
     /// Phase A1: slow-mode wait for the currently open chat, if any.
     pub(super) fn slow_mode_wait_secs(&self) -> Option<u64> {
-        let chat_id = self.session()?.open_chat?;
+        let chat_id = self.session()?.open_chat_id()?;
         self.slow_mode_wait_secs_for(chat_id)
     }
 
@@ -83,7 +83,7 @@ impl QuillApp {
     pub(super) fn ensure_slow_mode_tick(&mut self, cx: &mut Context<Self>) {
         let Some(chat_id) = self
             .session()
-            .and_then(|session| session.open_chat)
+            .and_then(|session| session.open_chat_id())
             .filter(|id| self.slow_mode_wait_secs_for(*id).is_some())
         else {
             return;
@@ -96,7 +96,8 @@ impl QuillApp {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
                 let cont = this
                     .update(cx, |this, cx| {
-                        let still_open = this.session().and_then(|s| s.open_chat) == Some(chat_id);
+                        let still_open =
+                            this.session().and_then(|s| s.open_chat_id()) == Some(chat_id);
                         let still_gated = this.slow_mode_wait_secs_for(chat_id).is_some();
                         if still_open {
                             this.notify_tick(super::app_slice::SliceKind::Composer, cx);

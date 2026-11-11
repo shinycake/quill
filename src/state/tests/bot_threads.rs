@@ -27,7 +27,7 @@ fn a_send_from_all_starts_a_thread_unless_the_reply_is_in_one() {
     assert!(session.send_starts_bot_thread(ChatId(41), Some(MessageId(8))));
     // The reply's thread takes the message.
     assert!(!session.send_starts_bot_thread(ChatId(41), Some(MessageId(7))));
-    session.open_topic = Some(3);
+    session.open = session.open.with_topic(3);
     assert!(!session.send_starts_bot_thread(ChatId(41), None));
 }
 

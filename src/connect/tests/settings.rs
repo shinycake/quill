@@ -92,26 +92,30 @@ fn a_sound_whose_download_cannot_be_sent_is_not_left_waiting() {
             .unwrap(),
         )
         .unwrap();
-    driver.session.settings.saved_notification_sounds = vec![NotificationSound {
-        id: 7,
-        duration: 1,
-        date: 0,
-        title: "Chime".into(),
-        data: String::new(),
-        sound: ParsedFile {
-            id: FileId(31),
-            size: 10,
-            expected_size: 10,
-            uploading: false,
-            local: crate::telegram::envelope::LocalFileState {
-                path: String::new(),
-                can_be_downloaded: true,
-                is_downloading_active: false,
-                is_downloading_completed: false,
-                downloaded_size: 0,
+    driver
+        .session
+        .settings
+        .saved_sounds
+        .succeed(vec![NotificationSound {
+            id: 7,
+            duration: 1,
+            date: 0,
+            title: "Chime".into(),
+            data: String::new(),
+            sound: ParsedFile {
+                id: FileId(31),
+                size: 10,
+                expected_size: 10,
+                uploading: false,
+                local: crate::telegram::envelope::LocalFileState {
+                    path: String::new(),
+                    can_be_downloaded: true,
+                    is_downloading_active: false,
+                    is_downloading_completed: false,
+                    downloaded_size: 0,
+                },
             },
-        },
-    }];
+        }]);
     let resolved = driver.resolve_notification_sound(NotificationSoundKind::Custom(7));
     assert!(matches!(resolved, SoundResolution::Pending));
     assert!(driver.session.settings.pending_sound_downloads.is_empty());
@@ -759,7 +763,10 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         ))
         .unwrap();
     assert!(driver.session.settings.sessions_op.is_mutating());
-    assert_eq!(driver.session.settings.device_login_result, None);
+    assert_eq!(
+        driver.session.settings.device_login,
+        crate::state::DeviceLogin::InFlight
+    );
     driver
         .ingest(response(
             request,
@@ -767,8 +774,8 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         ))
         .unwrap();
     assert_eq!(
-        driver.session.settings.device_login_result,
-        Some(crate::auth::DeviceLoginResult::Linked)
+        driver.session.settings.device_login,
+        crate::state::DeviceLogin::Done(crate::auth::DeviceLoginResult::Linked)
     );
     assert!(!driver.session.settings.sessions_op.is_mutating());
     assert!(
@@ -783,8 +790,8 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         let request = driver.confirm_device_login(link).unwrap();
         driver.ingest(response(request, body)).unwrap();
         assert_eq!(
-            driver.session.settings.device_login_result,
-            Some(crate::auth::DeviceLoginResult::Failed)
+            driver.session.settings.device_login,
+            crate::state::DeviceLogin::Done(crate::auth::DeviceLoginResult::Failed)
         );
         assert!(!driver.session.settings.sessions_op.is_mutating());
     }
@@ -796,8 +803,8 @@ fn device_login_qr_requires_confirmation_and_correlated_native_acceptance() {
         ))
         .unwrap();
     assert_eq!(
-        driver.session.settings.device_login_result,
-        Some(crate::auth::DeviceLoginResult::PasswordRequired)
+        driver.session.settings.device_login,
+        crate::state::DeviceLogin::Done(crate::auth::DeviceLoginResult::PasswordRequired)
     );
     driver.session.auth = crate::telegram::envelope::AuthorizationState::WaitPhoneNumber;
     assert!(driver.confirm_device_login(link).is_err());
@@ -894,5 +901,23 @@ fn default_auto_delete_fetch_and_set() {
         driver.session.settings.default_auto_delete.data().copied(),
         Some(604_800)
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_account_ttl_write_goes_out_while_the_read_is_in_flight_but_not_beside_another_write() {
+    let (dir, mut driver, recorder, _sink, _dyn_sink, _seq) = sessions_driver();
+    driver.get_account_ttl().expect("send").expect("request id");
+    assert!(driver.session.settings.account_ttl.is_loading());
+    // The read does not block the write.
+    let sent = recorder.snapshot().len();
+    driver.set_account_ttl(180).expect("the write is sent");
+    let snapshot = recorder.snapshot();
+    assert_eq!(snapshot.len(), sent + 1);
+    assert!(snapshot[sent].contains("\"@type\":\"setAccountTtl\""));
+    // One write at a time.
+    assert_invalid(driver.set_account_ttl(365));
+    assert_invalid(driver.delete_account("", ""));
+    assert_eq!(recorder.snapshot().len(), sent + 1);
     let _ = std::fs::remove_dir_all(&dir);
 }

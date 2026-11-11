@@ -41,7 +41,7 @@ impl ViewJump {
     ) -> Option<Self> {
         let pending = pending?;
         Some(Self {
-            window: pending.window,
+            window: pending.asked_in.chat(),
             chat_id: pending.chat_id?,
             message_id,
             mode,

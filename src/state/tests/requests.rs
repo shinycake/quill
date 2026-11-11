@@ -479,9 +479,17 @@ fn opening_a_chat_clears_viewed_ids_for_that_generation() {
     let seq = AtomicU64::new(0);
     session.open_chat(ChatId(1));
     session.mark_viewed(ChatId(1), &[MessageId(5)]);
-    assert!(session.histories.get(&1).unwrap().viewed.contains(&5));
+    assert!(session.histories.get(&1).unwrap().views.is_viewed(5));
     session.open_chat(ChatId(1));
-    assert!(session.histories.get(&1).unwrap().viewed.is_empty());
+    assert!(
+        session
+            .histories
+            .get(&1)
+            .unwrap()
+            .views
+            .done_ids()
+            .is_empty()
+    );
     apply_json(
         &mut session,
         &seq,
@@ -543,14 +551,14 @@ fn update_chat_photo_swaps_and_clears() {
 fn topic_selection_state() {
     let (mut session, _sink) = session();
     session.open_chat(ChatId(16));
-    assert_eq!(session.open_topic, None);
+    assert_eq!(session.open_forum_topic(), None);
     session.select_topic(ChatId(16), 2);
-    assert_eq!(session.open_topic, Some(2));
+    assert_eq!(session.open_forum_topic(), Some(2));
     session.deselect_topic();
-    assert_eq!(session.open_topic, None);
+    assert_eq!(session.open_forum_topic(), None);
     session.select_topic(ChatId(16), 2);
     session.open_chat(ChatId(17));
-    assert_eq!(session.open_topic, None);
+    assert_eq!(session.open_forum_topic(), None);
 }
 
 #[test]

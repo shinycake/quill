@@ -258,6 +258,7 @@ impl Session {
                             is_emoji: is_custom_emoji,
                             is_owned,
                             stickers,
+                            files: SetFiles::Unasked,
                         },
                     );
                 } else if let Some(RequestPurpose::Stickers(StickersPurpose::CustomEmojiPack {

@@ -154,8 +154,11 @@ impl QuillApp {
 
     /// Whether the open chat shows a loaded thread.
     pub(super) fn thread_active(&self) -> bool {
-        self.session()
-            .is_some_and(|s| s.open_chat.and_then(|c| s.thread_for_chat(c)).is_some())
+        self.session().is_some_and(|s| {
+            s.open_chat_id()
+                .and_then(|c| s.thread_for_chat(c))
+                .is_some()
+        })
     }
 
     /// Per-frame thread bookkeeping, run from `render` (it needs the
@@ -180,7 +183,7 @@ impl QuillApp {
             if let Some(thread) = live.driver.session.threads.thread.as_ref() {
                 let topic = match thread.status.needs_chat_switch() {
                     true => None,
-                    false => live.driver.session.open_topic,
+                    false => live.driver.session.open_forum_topic(),
                 };
                 self.screen.history.scroll_memory.forget((
                     thread.chat_id.0,
@@ -335,7 +338,7 @@ impl QuillApp {
     /// scrolls to it.
     pub(super) fn thread_root_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let thread = session.thread_for_chat(session.open_chat?)?;
+        let thread = session.thread_for_chat(session.open_chat_id()?)?;
         let root = thread.root_message()?;
         let title = if thread.is_comments() {
             tr(keys::Q_OPS_ORIGINAL_POST)

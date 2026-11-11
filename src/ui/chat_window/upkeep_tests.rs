@@ -92,7 +92,7 @@ fn a_topic_switch_in_a_forum_window_leaves_the_old_topics_text(cx: &mut TestAppC
     });
     draw(chat_window, cx);
     let (text, topic) = read(&h, Some(FORUM_CHAT), cx, |app, cx| {
-        let topic = app.session().and_then(|session| session.open_topic);
+        let topic = app.session().and_then(|session| session.open_forum_topic());
         (app.composer.read(cx).value().to_string(), topic)
     });
     assert_eq!(topic, Some(RELEASES_TOPIC));

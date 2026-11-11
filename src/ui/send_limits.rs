@@ -34,7 +34,7 @@ impl QuillApp {
     /// The open chat's rights, `None` without a chat.
     fn open_send_rights(&self) -> Option<SendRights> {
         let session = self.session()?;
-        let chat = session.chats.get(&session.open_chat?.0)?;
+        let chat = session.chats.get(&session.open_chat_id()?.0)?;
         Some(SendRights::for_chat(session, chat, now_unix()))
     }
 
@@ -42,7 +42,7 @@ impl QuillApp {
     /// send nothing here (tdesktop's `TextErrorSendRestriction`).
     pub(super) fn composer_restriction(&self) -> Option<String> {
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         let replying = self
             .chat_ui
             .reply()

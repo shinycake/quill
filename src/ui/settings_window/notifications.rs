@@ -51,7 +51,7 @@ impl QuillApp {
         self.ensure_notification_volume_slider(cx);
         let saved_sounds: Vec<NotificationSound> = self
             .session()
-            .map(|s| s.settings.saved_notification_sounds.clone())
+            .map(|s| s.settings.saved_notification_sounds().to_vec())
             .unwrap_or_default();
         let view = self.notify_view_section(cx);
         let options = self.notify_options_section(cx);

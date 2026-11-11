@@ -558,7 +558,7 @@ mod tests {
     }
 
     fn open_chat(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> ChatId {
-        app.read_with(cx, |app, _| app.session().and_then(|s| s.open_chat))
+        app.read_with(cx, |app, _| app.session().and_then(|s| s.open_chat_id()))
             .expect("the demo opens a chat")
     }
 

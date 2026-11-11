@@ -163,7 +163,12 @@ fn all_accounts_off_drops_background_notifications_but_still_withdraws() {
     let mut account = Background::new("off");
     account.ready_with_chat(7, false);
     account.incoming(7, 11, "hi");
-    account.driver.session.settings.pending_notification_clears = vec![ChatId(9)];
+    account
+        .driver
+        .session
+        .settings
+        .notified
+        .force_clear(ChatId(9));
     let drain = drain_background(&mut account.driver.session, false);
     assert!(drain.notifications.is_empty());
     assert!(!drain.attention);

@@ -173,7 +173,7 @@ impl QuillApp {
         if items.is_empty() || !session.my_is_premium() {
             return items;
         }
-        let library = &session.media.media_library.set_stickers;
+        let library = &session.media.media_library;
         let sets: Vec<&[StickerItem]> = session
             .stickers
             .emoji
@@ -195,7 +195,7 @@ impl QuillApp {
     /// rebuilt when this moves.
     pub(super) fn custom_sets_loaded(&self) -> usize {
         self.session().map_or(0, |session| {
-            let library = &session.media.media_library.set_stickers;
+            let library = &session.media.media_library;
             session
                 .stickers
                 .emoji

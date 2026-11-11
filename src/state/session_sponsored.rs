@@ -113,10 +113,10 @@ impl Session {
     /// How the open chat's ads enter its history. `None` without a fetched
     /// list, after ads were hidden, and in topic views.
     pub fn open_sponsored_layout(&self) -> Option<SponsoredLayout> {
-        if self.messages.sponsored_hidden || self.open_topic.is_some() {
+        if self.messages.sponsored_hidden || self.open_forum_topic().is_some() {
             return None;
         }
-        let entry = self.messages.sponsored.get(&self.open_chat?.0)?;
+        let entry = self.messages.sponsored.get(&self.open_chat_id()?.0)?;
         Some(match u32::try_from(entry.messages_between) {
             Ok(between) if between > 0 => SponsoredLayout::BetweenPosts(between),
             _ => SponsoredLayout::AppendAtEnd,
@@ -133,7 +133,7 @@ impl Session {
             return Vec::new();
         }
         let Some(entry) = self
-            .open_chat
+            .open_chat_id()
             .and_then(|chat| self.messages.sponsored.get(&chat.0))
         else {
             return Vec::new();
@@ -161,7 +161,7 @@ impl Session {
     /// The next ad of the open chat's list that is not in its history yet
     /// (tdesktop: the first entry without an item).
     fn next_unplaced_sponsored(&self) -> Option<i64> {
-        let entry = self.messages.sponsored.get(&self.open_chat?.0)?;
+        let entry = self.messages.sponsored.get(&self.open_chat_id()?.0)?;
         entry.messages.iter().map(|ad| ad.message_id).find(|id| {
             !entry.dismissed.contains(id) && !entry.placed.iter().any(|spot| spot.ad_id == *id)
         })
@@ -176,7 +176,7 @@ impl Session {
         if self.open_sponsored_layout() != Some(SponsoredLayout::AppendAtEnd) {
             return false;
         }
-        let Some(chat_id) = self.open_chat else {
+        let Some(chat_id) = self.open_chat_id() else {
             return false;
         };
         if self.history_has_newer(chat_id) || !self.sponsored_list_fresh(chat_id, now) {
@@ -201,7 +201,7 @@ impl Session {
             return false;
         };
         let Some(entry) = self
-            .open_chat
+            .open_chat_id()
             .and_then(|chat| self.messages.sponsored.get_mut(&chat.0))
         else {
             return false;
@@ -215,7 +215,7 @@ impl Session {
     /// message the chat opened at. The flag says whether an ad is placed
     /// already. `None` when no ad is left to place or nothing is unread.
     pub fn sponsored_inject_start(&self) -> Option<(MessageId, bool)> {
-        let chat_id = self.open_chat?;
+        let chat_id = self.open_chat_id()?;
         if !matches!(
             self.open_sponsored_layout(),
             Some(SponsoredLayout::BetweenPosts(_))
@@ -247,7 +247,7 @@ impl Session {
     /// media still downloading). The bottom of the history is not its end
     /// yet, so the pull to the next channel waits.
     pub fn sponsored_unshown_at_end(&self, chat_id: ChatId, now: std::time::Instant) -> bool {
-        if self.open_chat != Some(chat_id)
+        if self.open_chat_id() != Some(chat_id)
             || self.open_sponsored_layout() != Some(SponsoredLayout::AppendAtEnd)
             || !self.sponsored_list_fresh(chat_id, now)
         {
@@ -288,7 +288,7 @@ impl Session {
     /// and back never sends a second `viewMessages`. Ids that are not in the
     /// fetched list of an open chat are ignored.
     pub fn take_sponsored_views(&mut self, chat_id: ChatId, shown: &[i64]) -> Vec<i64> {
-        if self.open_chat != Some(chat_id) {
+        if self.open_chat_id() != Some(chat_id) {
             return Vec::new();
         }
         let Some(entry) = self.messages.sponsored.get_mut(&chat_id.0) else {
@@ -357,7 +357,7 @@ impl Session {
     /// Sponsored rows for the open chat in TDLib's response order. Empty for
     /// gated chats without a fetch and for chats that never had one.
     pub fn open_sponsored_rows(&self) -> Vec<&SponsoredMessage> {
-        let Some(chat_id) = self.open_chat else {
+        let Some(chat_id) = self.open_chat_id() else {
             return Vec::new();
         };
         self.messages

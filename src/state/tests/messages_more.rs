@@ -62,7 +62,7 @@ fn forward_messages_result_upserts_dest_and_labels_origin() {
             .all(|c| c.supported())
     );
     let extra = session.request(RequestPurpose::ForwardMessages, Some(ChatId(12)));
-    session.messages.forward_flights.push(ForwardFlight {
+    session.messages.forwards.begin(ForwardFlight {
         extra,
         dest_chat_id: ChatId(12),
         from_chat_id: ChatId(11),
@@ -80,8 +80,8 @@ fn forward_messages_result_upserts_dest_and_labels_origin() {
     );
     let result = session
         .messages
-        .last_forward
-        .as_ref()
+        .forwards
+        .latest_result()
         .expect("forward result");
     assert_eq!(result.dest_chat_id, ChatId(12));
     assert_eq!(result.dest_title, "Bob");
@@ -209,7 +209,7 @@ fn message_is_pinned_update_and_newest_pinned() {
         &sink,
         r#"{"@type":"updateNewMessage","message":{"id":101,"chat_id":11,"is_outgoing":false,"is_pinned":true,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"Hello from injected JSON.","entities":[]}}}}"#,
     );
-    session.open_chat = Some(ChatId(11));
+    session.open = crate::state::OpenView::of(Some(ChatId(11)));
     let pinned = session
         .histories
         .get(&11)
@@ -802,7 +802,7 @@ fn waiting_force_reply_in_unshown_chat_is_not_ready() {
     assert!(!session.bots.pending_force_replies.is_empty());
     assert!(!session.force_reply_ready());
     // Shown and loaded: a render has something to hand out.
-    session.open_chat = Some(ChatId(21));
+    session.open = crate::state::OpenView::of(Some(ChatId(21)));
     assert!(session.force_reply_ready());
 }
 
@@ -886,4 +886,75 @@ fn force_replies_of_two_chats_in_one_batch_both_wait_for_their_windows() {
             message_id: MessageId(402),
         })
     );
+}
+
+/// Two forwards that finish before the UI polls each keep their outcome.
+#[test]
+fn forward_outcomes_queue_until_the_ui_takes_them() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let mut asked = Vec::new();
+    for dest in [12, 13] {
+        let extra = session.request(RequestPurpose::ForwardMessages, Some(ChatId(dest)));
+        session.messages.forwards.begin(ForwardFlight {
+            extra,
+            dest_chat_id: ChatId(dest),
+            from_chat_id: ChatId(11),
+            from_topic: Default::default(),
+            requested: 1,
+        });
+        asked.push(extra);
+    }
+    for extra in &asked {
+        apply_json(
+            &mut session,
+            &seq,
+            &sink,
+            &format!(
+                r#"{{"@type":"error","@extra":"{}","code":400,"message":"x"}}"#,
+                extra.0
+            ),
+        );
+    }
+    assert!(!session.messages.forwards.in_flight());
+    let dests: Vec<_> = std::iter::from_fn(|| session.messages.forwards.take_result())
+        .map(|result| result.dest_chat_id)
+        .collect();
+    assert_eq!(dests, [ChatId(12), ChatId(13)]);
+}
+
+/// The next page of a reactions tab is part of the tab's stage: it pages,
+/// appends when it answers, and a failed page leaves the list as it was.
+#[test]
+fn a_reactions_tab_pages_and_keeps_its_list_when_the_next_page_fails() {
+    use crate::telegram::envelope::AddedReactionsPage;
+    let (mut session, _sink) = session();
+    let (chat, message) = (ChatId(5), MessageId(9));
+    session.begin_message_audience(chat, message);
+    let page = |offset: &str| AddedReactionsPage {
+        total_count: 3,
+        reactions: Vec::new(),
+        next_offset: offset.to_string(),
+    };
+    session.accept_added_reactions(chat, message, 0, false, page("2"));
+    session.audience_tab_loading_more(chat, message, 0);
+    let audience = session.messages.message_audience.as_ref().unwrap();
+    assert!(audience.reactions.is_paging());
+    assert_eq!(audience.reactions.ready().unwrap().next_offset, "2");
+    session.fail_audience(RequestPurpose::Messages(
+        MessagesPurpose::GetMessageAddedReactions {
+            chat_id: chat,
+            message_id: message,
+            filter: 0,
+            append: true,
+        },
+    ));
+    let audience = session.messages.message_audience.as_ref().unwrap();
+    assert!(!audience.reactions.is_paging(), "the failure ends the page");
+    assert_eq!(audience.reactions.ready().unwrap().next_offset, "2");
+    session.audience_tab_loading_more(chat, message, 0);
+    session.accept_added_reactions(chat, message, 0, true, page(""));
+    let audience = session.messages.message_audience.as_ref().unwrap();
+    assert!(!audience.reactions.is_paging());
+    assert!(audience.reactions.ready().unwrap().next_offset.is_empty());
 }

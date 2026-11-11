@@ -30,11 +30,11 @@ impl QuillApp {
     pub(super) fn open_chat_id(&self) -> Option<ChatId> {
         self.live
             .as_ref()
-            .and_then(|live| live.driver.session.open_chat)
+            .and_then(|live| live.driver.session.open_chat_id())
             .or_else(|| {
                 self.demo_session
                     .as_ref()
-                    .and_then(|session| session.open_chat)
+                    .and_then(|session| session.open_chat_id())
             })
     }
 
@@ -58,7 +58,7 @@ impl QuillApp {
     /// with no chat open.
     pub(in crate::ui) fn open_conversation(&self) -> Option<quill::ids::ConversationKey> {
         let session = self.session()?;
-        Some(session.open_conversation(session.open_chat?))
+        Some(session.open_conversation(session.open_chat_id()?))
     }
 
     pub(super) fn note_open_draft(&mut self, delayed: bool, cx: &mut Context<Self>) {

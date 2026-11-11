@@ -33,7 +33,7 @@ const TILE_W: f32 = 132.0;
 impl QuillApp {
     /// Open the dialog for the open chat's user or channel.
     pub(super) fn open_send_gift_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let chat = self.session().and_then(|s| s.open_chat);
+        let chat = self.session().and_then(|s| s.open_chat_id());
         self.open_send_gift_in(chat, window, cx);
     }
 

@@ -50,7 +50,7 @@ impl QuillApp {
             return false;
         };
         session
-            .open_chat
+            .open_chat_id()
             .and_then(|id| session.chats.get(&id.0))
             .is_some_and(|chat| {
                 chat.can_post() && can_create_checklist(chat, session.my_is_premium())
@@ -148,7 +148,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        let Some(chat_id) = self.session().and_then(|s| s.open_chat) else {
+        let Some(chat_id) = self.session().and_then(|s| s.open_chat_id()) else {
             self.set_note(StatusNote::silent(tr(keys::Q_MEDIA_SELECT_A_CHAT_TO_SEND)));
             cx.notify();
             return;

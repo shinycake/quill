@@ -32,7 +32,7 @@ impl Session {
             SettingsPayload::UpdateActiveNotifications { chat_ids } => {
                 // Notifications of a previous launch: remember the chats so
                 // a later read clears them too.
-                self.settings.shown_notification_chats.extend(chat_ids);
+                self.settings.notified.mark_active(chat_ids);
             }
             // Phase C2i: `getUserPrivacySettingRules` answer — map the
             // rule list to the simple Everybody / Contacts / Nobody
@@ -98,10 +98,8 @@ impl Session {
             SettingsPayload::ReadDatePrivacySettings { show_read_date } => {
                 if let Some(pending) = pending
                     && pending.purpose == RequestPurpose::GetReadDatePrivacy
-                    && self.settings.read_date_stage == ReadDateStage::Getting(pending.id)
                 {
-                    self.settings.read_date_show = Some(show_read_date);
-                    self.settings.read_date_stage = ReadDateStage::Idle;
+                    self.settings.read_date.got(pending.id, show_read_date);
                 }
             }
             // Slice S3: `messageSenders` answer — one blocked-senders
@@ -159,9 +157,7 @@ impl Session {
                     self.settings
                         .sound_file_ids
                         .retain(|_, sound_id| live_ids.contains(sound_id));
-                    self.settings.saved_notification_sounds = sounds;
-                    self.settings.saved_sounds_loaded = true;
-                    self.settings.saved_sounds_stale = false;
+                    self.settings.saved_sounds.succeed(sounds);
                 }
             }
             SettingsPayload::UpdateSavedNotificationSounds { .. } => {
@@ -205,7 +201,7 @@ impl Session {
                         .data_storage
                         .seed_from_presets(low, medium, high);
                     self.settings.data_storage_dirty = true;
-                    self.settings.data_storage_error = None;
+                    self.settings.auto_download_presets.succeed(());
                 }
             }
             SettingsPayload::UpdateUnconfirmedSession { session, count } => {
@@ -246,7 +242,7 @@ impl Session {
             }
             SettingsPayload::DeviceLoginResult { result } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::ConfirmDeviceLogin) {
-                    self.settings.device_login_result = Some(result);
+                    self.settings.device_login = DeviceLogin::Done(result);
                     if result != crate::auth::DeviceLoginResult::Failed {
                         self.settings.sessions_op.changed(pending.map(|p| p.id));
                         self.settings.sessions.clear_error();

@@ -223,7 +223,7 @@ fn push_custom_packs(
         } else {
             set.title.clone().into()
         };
-        let items = session.media.media_library.set_stickers.get(&set.id);
+        let items = session.media.media_library.get(&set.id);
         let cells: Vec<PanelCell> = match (items, matches) {
             (Some(items), matches) => items
                 .iter()
@@ -373,7 +373,7 @@ impl QuillApp {
     pub(super) fn panel_item(&self, source: StickerSource, ix: usize) -> Option<&StickerItem> {
         let session = self.session()?;
         match source {
-            StickerSource::Set(id) => session.media.media_library.set_stickers.get(&id)?.get(ix),
+            StickerSource::Set(id) => session.media.media_library.get(&id)?.get(ix),
             StickerSource::Recent => session.stickers.stickers.recent.get(ix),
             StickerSource::Favorites => session.stickers.stickers.favorites.get(ix),
             StickerSource::Found => session.stickers.stickers.found_stickers.get(ix),
@@ -689,7 +689,7 @@ impl QuillApp {
                 label: title,
                 set_id: Some(set.id),
             });
-            match session.media.media_library.set_stickers.get(&set.id) {
+            match session.media.media_library.get(&set.id) {
                 Some(items) => push_grid(
                     &mut rows,
                     (0..items.len())

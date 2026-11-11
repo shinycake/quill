@@ -87,7 +87,7 @@ fn paging_back_far_trims_the_newest_end_and_marks_has_newer() {
         session.history_has_newer(ChatId(CHAT)),
         "newest end trimmed => newer pages exist"
     );
-    assert!(!history.loaded_complete);
+    assert!(!history.loaded_complete());
     // The reader's end (oldest) is intact; the window is contiguous.
     let oldest = history.oldest_id().unwrap().0;
     let newest = history.newest_id().unwrap().0;
@@ -130,7 +130,7 @@ fn paging_forward_after_a_trim_pages_the_tail_back_in_and_trims_the_old_end() {
     let history = &session.histories[&CHAT];
     assert_eq!(history.messages.len(), HISTORY_WINDOW_TRIM_TO);
     assert!(history.oldest_id().unwrap().0 > oldest_before);
-    assert!(!history.loaded_complete, "older pages exist again");
+    assert!(!history.loaded_complete(), "older pages exist again");
 }
 
 #[test]
@@ -173,6 +173,48 @@ fn jumping_back_to_latest_refetches_after_a_trim() {
     let history = &session.histories[&CHAT];
     assert_eq!(history.newest_id(), Some(MessageId(5000)));
     assert!(!session.history_has_newer(ChatId(CHAT)));
+}
+
+#[test]
+fn a_page_asked_for_a_replaced_window_is_dropped_and_forgotten() {
+    let (mut session, seq, sink) = opened_at_tail();
+    let stale = session.request_for_message(RequestPurpose::GetHistory, ChatId(CHAT), MessageId(0));
+    assert!(session.history_page_in_flight(
+        ChatId(CHAT),
+        crate::state::session_history_window::WindowEdge::First
+    ));
+    session.reset_history_window(ChatId(CHAT));
+    // The old page no longer holds back the page the new window needs.
+    assert!(!session.history_page_in_flight(
+        ChatId(CHAT),
+        crate::state::session_history_window::WindowEdge::First
+    ));
+    let fresh = session.request_for_message(RequestPurpose::GetHistory, ChatId(CHAT), MessageId(0));
+    assert!(session.history_page_in_flight(
+        ChatId(CHAT),
+        crate::state::session_history_window::WindowEdge::First
+    ));
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &page_json(stale.0, (4951..=5000).rev()),
+    );
+    assert!(
+        session.histories[&CHAT].messages.is_empty(),
+        "the old page is dropped"
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &page_json(fresh.0, (4951..=5000).rev()),
+    );
+    assert_eq!(
+        session.histories[&CHAT].newest_id(),
+        Some(MessageId(5000)),
+        "the page asked after the reset lands"
+    );
 }
 
 #[test]

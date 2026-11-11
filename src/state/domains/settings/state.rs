@@ -4,27 +4,193 @@
 use crate::state::fetch::Fetch;
 use crate::state::*;
 
-/// The read-date privacy round-trip. A get and a set are told apart, so
-/// a get answered after a set went out never overwrites the set value:
-/// only the answer to the request named here lands.
+/// The read-date privacy setting (`show_read_date`) and its round trip.
+/// A get and a set are told apart, so a get answered after a set went out
+/// never overwrites the set value: only the answer to the request named
+/// here lands.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum ReadDateStage {
-    /// Nothing in flight; the last request (if any) succeeded.
+pub enum ReadDate {
+    /// Never fetched.
     #[default]
-    Idle,
-    /// `getReadDatePrivacySettings` is in flight.
-    Getting(RequestId),
-    /// `setReadDatePrivacySettings` is in flight; `read_date_show` holds
-    /// the value it sent.
-    Setting(RequestId),
-    /// The last get or set failed.
-    Failed,
+    Unknown,
+    /// `getReadDatePrivacySettings` is in flight; `known` is the value
+    /// held meanwhile.
+    Getting {
+        request: RequestId,
+        known: Option<bool>,
+    },
+    /// The server's value.
+    Known(bool),
+    /// `setReadDatePrivacySettings` is in flight; `show` is the value it
+    /// sent, shown at once.
+    Setting { request: RequestId, show: bool },
+    /// The last get or set failed. A failed get keeps `known`; a failed
+    /// set drops the optimistic value (the next fetch restores the truth).
+    Failed { known: Option<bool> },
 }
 
-impl ReadDateStage {
+impl ReadDate {
+    /// The value to show, if one is held.
+    pub fn show(self) -> Option<bool> {
+        match self {
+            Self::Known(show) | Self::Setting { show, .. } => Some(show),
+            Self::Getting { known, .. } | Self::Failed { known } => known,
+            Self::Unknown => None,
+        }
+    }
+
     /// A get or set is in flight.
     pub fn in_flight(self) -> bool {
-        matches!(self, Self::Getting(_) | Self::Setting(_))
+        matches!(self, Self::Getting { .. } | Self::Setting { .. })
+    }
+
+    /// A set is in flight (a get must not be sent over it).
+    pub fn setting(self) -> bool {
+        matches!(self, Self::Setting { .. })
+    }
+
+    /// A get went out as `request`.
+    pub fn start_get(&mut self, request: RequestId) {
+        *self = Self::Getting {
+            request,
+            known: self.show(),
+        };
+    }
+
+    /// A set went out as `request`.
+    pub fn start_set(&mut self, request: RequestId, show: bool) {
+        *self = Self::Setting { request, show };
+    }
+
+    /// A send was refused: nothing is in flight for it. A request already
+    /// out stays.
+    pub fn send_refused(&mut self) {
+        if !self.in_flight() {
+            *self = Self::Failed { known: self.show() };
+        }
+    }
+
+    /// The get `request` answered.
+    pub fn got(&mut self, request: RequestId, show: bool) {
+        if matches!(*self, Self::Getting { request: r, .. } if r == request) {
+            *self = Self::Known(show);
+        }
+    }
+
+    /// The set `request` was confirmed.
+    pub fn set_confirmed(&mut self, request: RequestId) {
+        if let Self::Setting { request: r, show } = *self
+            && r == request
+        {
+            *self = Self::Known(show);
+        }
+    }
+
+    /// `request` failed (a get keeps the value, a set drops it).
+    pub fn request_failed(&mut self, request: RequestId) {
+        match *self {
+            Self::Getting { request: r, known } if r == request => {
+                *self = Self::Failed { known };
+            }
+            Self::Setting { request: r, .. } if r == request => {
+                *self = Self::Failed { known: None };
+            }
+            _ => {}
+        }
+    }
+}
+
+/// A write against a fetched list (sessions, connected websites).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ListEdit {
+    /// No write in flight and the list is current.
+    #[default]
+    Idle,
+    /// A write is in flight: its buttons stay disabled. `refetch` is set
+    /// when the list went stale before or while the write was out, so a
+    /// failed write still leaves the refetch owed.
+    InFlight { refetch: bool },
+    /// A write succeeded: the cache stays visible and is refetched from
+    /// the authoritative answer on the next ingest (never an optimistic
+    /// change). Also set when an update says the list changed elsewhere.
+    Refetch,
+}
+
+impl ListEdit {
+    pub fn in_flight(self) -> bool {
+        matches!(self, Self::InFlight { .. })
+    }
+
+    /// The list is out of date and should be asked for again.
+    pub fn needs_refetch(self) -> bool {
+        self == Self::Refetch
+    }
+
+    /// A write went out. A refetch owed before it stays owed.
+    pub fn begin_write(&mut self) {
+        *self = Self::InFlight {
+            refetch: matches!(self, Self::Refetch | Self::InFlight { refetch: true }),
+        };
+    }
+
+    /// The write succeeded: the list is refetched from the answer.
+    pub fn write_succeeded(&mut self) {
+        *self = Self::Refetch;
+    }
+
+    /// The write failed or never left: back to where the list stood, so a
+    /// refetch owed meanwhile is still asked for.
+    pub fn write_failed(&mut self) {
+        *self = match *self {
+            Self::InFlight { refetch: true } | Self::Refetch => Self::Refetch,
+            _ => Self::Idle,
+        };
+    }
+
+    /// The refetch answered or failed: the list is current again (or the
+    /// user refreshes by hand). A write in flight stays in flight.
+    pub fn refetched(&mut self) {
+        if *self == Self::Refetch {
+            *self = Self::Idle;
+        }
+    }
+
+    /// Something changed elsewhere: ask again. A write that is out keeps
+    /// the need, so its failure does not forget it.
+    pub fn mark_stale(&mut self) {
+        match self {
+            Self::Idle => *self = Self::Refetch,
+            Self::InFlight { refetch } => *refetch = true,
+            Self::Refetch => {}
+        }
+    }
+}
+
+/// The device-link round trip (`confirmQrCodeAuthentication`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DeviceLogin {
+    #[default]
+    Idle,
+    /// The confirmation is in flight.
+    InFlight,
+    /// It ended; the screen takes the result once.
+    Done(crate::auth::DeviceLoginResult),
+}
+
+impl DeviceLogin {
+    pub fn in_flight(self) -> bool {
+        self == Self::InFlight
+    }
+
+    /// The result, once: the stage returns to `Idle`.
+    pub fn take_result(&mut self) -> Option<crate::auth::DeviceLoginResult> {
+        match *self {
+            Self::Done(result) => {
+                *self = Self::Idle;
+                Some(result)
+            }
+            _ => None,
+        }
     }
 }
 
@@ -92,9 +258,6 @@ pub struct SettingsState {
     /// Phase 8.1: notifications decided by the reducer, drained by the UI for
     /// OS dispatch. Same-chat bursts coalesce into one entry ("N new messages").
     pub pending_notifications: Vec<QueuedNotification>,
-    /// Chats whose OS notification should be withdrawn (read elsewhere or
-    /// removed by TDLib); drained by the UI, which dismisses the toast.
-    pub pending_notification_clears: Vec<ChatId>,
     /// A notification-worthy message arrived: the UI bounces the Dock icon /
     /// flashes the taskbar (when the user wants it and the OS is not in
     /// Do Not Disturb). Set independently of the "Desktop notifications"
@@ -104,20 +267,22 @@ pub struct SettingsState {
     /// of tdesktop's "Contact joined Telegram" event switch.
     pub disable_contact_registered_notifications: bool,
     /// Chats with an OS notification we showed (or TDLib reports active
-    /// from a previous launch); only these produce a clear.
-    pub shown_notification_chats: std::collections::HashSet<ChatId>,
-    /// `getDefaultMessageAutoDeleteTime` cache, seconds (0 = off): in
-    /// flight for a fetch or a write, answered, or failed with the honest
-    /// one-line failure of the last request (the cached value stays).
+    /// from a previous launch), and those whose toast the UI withdraws
+    /// (read elsewhere or removed by TDLib; drained by the UI, which
+    /// dismisses the toast). Only shown chats produce a clear.
+    pub notified: ShownNotifications,
+    /// `getDefaultMessageAutoDeleteTime` (seconds, 0 = off): the fetch or
+    /// write in flight, the cached value, or the honest one-line failure
+    /// of the last request.
     pub default_auto_delete: Fetch<i32>,
     /// Parity slice: `getSavedNotificationSounds` cache (titles / durations
     /// for the sound picker; `sound` files download on demand).
-    pub saved_notification_sounds: Vec<NotificationSound>,
-    /// Parity slice: the saved-sound list has been fetched at least once.
-    pub saved_sounds_loaded: bool,
-    /// Parity slice: `updateSavedNotificationSounds` arrived since the last
-    /// fetch — the driver refetches on the next ingest.
-    pub saved_sounds_stale: bool,
+    ///
+    /// `Stale` means the list changed since the last fetch
+    /// (`updateSavedNotificationSounds`, an upload, a removal): the driver
+    /// refetches on the next ingest. A failed fetch
+    /// waits for the next change.
+    pub saved_sounds: Fetch<Vec<NotificationSound>>,
     /// "Upload Sound": the file in flight, or how it ended until the
     /// screen has reacted.
     pub tone_upload: crate::tone_upload::ToneUpload,
@@ -148,10 +313,7 @@ pub struct SettingsState {
     /// Phase S2: cached `getStorageStatistics` answer (aggregated by file
     /// type, TGX `TGStorageStats` style); drives the storage-usage overlay,
     /// including the "Secret media and files" category.
-    /// A `getStorageStatistics` round trip in flight is `Loading`; its
-    /// error leaves `Failed` (the overlay draws it, the next open asks
-    /// again).
-    pub storage_stats: crate::state::fetch::Fetch<StorageStats>,
+    pub storage_stats: Fetch<StorageStats>,
     /// Slice S4: per-network auto-download settings, the local source of
     /// truth (TDLib has no getter for the current values). Loaded from
     /// `data_storage.json` at session setup; seeded once from
@@ -163,7 +325,12 @@ pub struct SettingsState {
     pub data_storage_dirty: bool,
     /// Slice S4: last Data & Storage failure, shown on the screen
     /// (failures surface there, never as toasts — the S3 pattern).
-    pub data_storage_error: Option<String>,
+    /// Slice S4: the `getAutoDownloadSettingsPresets` round trip: in
+    /// flight, or why it failed (`Ready` once the answer seeded the prefs).
+    pub auto_download_presets: Fetch<()>,
+    /// Slice S4: how the last `setAutoDownloadSettings` / storage-limit
+    /// save went; a failure shows on the screen (never as a toast).
+    pub data_storage_save: Fetch<()>,
     /// Batch 6: the `optimizeStorage` round trip and its result.
     pub storage_clear: StorageClear,
     /// Batch 6: the local storage limits TDLib reports (`updateOption`).
@@ -188,7 +355,9 @@ pub struct SettingsState {
     /// refetched from the authoritative answer on the next ingest (the
     /// `saved_sounds_stale` pattern); never an optimistic delete.
     pub sessions_op: crate::state::fetch::ListOp,
-    pub device_login_result: Option<crate::auth::DeviceLoginResult>,
+    /// The device-link (`confirmQrCodeAuthentication`) round trip and how
+    /// it ended until the screen has reacted.
+    pub device_login: DeviceLogin,
     /// Slice A7: cached `getAccountTtl` answer, in days — drives the
     /// self-destruct-if-away picker (UI half ships post-Phase-9).
     /// A `getAccountTtl` or `setAccountTtl` round trip is in flight, the
@@ -236,10 +405,8 @@ pub struct SettingsState {
     /// after a fetch was attempted — absent means never requested.
     pub privacy: HashMap<PrivacySettingKey, PrivacyKeyState>,
     /// Slice S3: `readDatePrivacySettings.show_read_date` (schema 1.8.67,
-    /// :9026) — `None` while never fetched.
-    pub read_date_show: Option<bool>,
-    /// Which read-date request is in flight, or how the last one ended.
-    pub read_date_stage: ReadDateStage,
+    /// :9026) with the request in flight, or how the last one ended.
+    pub read_date: ReadDate,
     /// Slice S3: blocked user ids from `getBlockedMessageSenders`
     /// (schema 1.8.67, :14505); idle while never fetched.
     /// A blocked-senders page in flight or a failed get/set shows in the
@@ -387,14 +554,11 @@ impl SettingsState {
             inapp_sounds_enabled: true,
             desktop_notifications: true,
             pending_notifications: Vec::new(),
-            pending_notification_clears: Vec::new(),
             pending_attention: false,
             disable_contact_registered_notifications: false,
-            shown_notification_chats: std::collections::HashSet::new(),
+            notified: ShownNotifications::default(),
             default_auto_delete: Fetch::Idle,
-            saved_notification_sounds: Vec::new(),
-            saved_sounds_loaded: false,
-            saved_sounds_stale: false,
+            saved_sounds: Fetch::Idle,
             tone_upload: crate::tone_upload::ToneUpload::Idle,
             scope_notification_settings: HashMap::new(),
             notification_exceptions: HashMap::new(),
@@ -402,18 +566,19 @@ impl SettingsState {
             reaction_notification_settings: None,
             scope_saves: Default::default(),
             reaction_saves: Default::default(),
-            storage_stats: Default::default(),
+            storage_stats: Fetch::Idle,
             data_storage: DataStoragePrefs::default(),
             data_storage_dirty: false,
             auto_download_answer: None,
-            data_storage_error: None,
+            auto_download_presets: Fetch::Idle,
+            data_storage_save: Fetch::Idle,
             storage_clear: StorageClear::Idle,
             storage_limits: Default::default(),
             privacy_data: Default::default(),
             notices: AccountNotices::default(),
             sessions: Fetch::Idle,
             sessions_op: Default::default(),
-            device_login_result: None,
+            device_login: DeviceLogin::Idle,
             account_ttl: Fetch::Idle,
             account_delete: Fetch::Idle,
             connected_websites: Fetch::Idle,
@@ -423,8 +588,7 @@ impl SettingsState {
             pending_sound_downloads: HashSet::new(),
             pending_sound_plays: Vec::new(),
             privacy: HashMap::new(),
-            read_date_show: None,
-            read_date_stage: ReadDateStage::Idle,
+            read_date: ReadDate::Unknown,
             blocked_senders: Fetch::Idle,
             blocked_total: 0,
             blocked_generation: 0,
@@ -456,6 +620,26 @@ fn dedup_ids(mut list: Vec<i64>, more: Vec<i64>) -> Vec<i64> {
 }
 
 impl SettingsState {
+    /// The device link is out: the sessions buttons stay disabled (a
+    /// terminate in flight is `sessions_op`).
+    pub fn sessions_busy(&self) -> bool {
+        self.sessions_op.is_mutating() || self.device_login.in_flight()
+    }
+
+    /// The Data & Storage failure line: the presets fetch, the cache clear
+    /// or the last save, each from its own stage.
+    pub fn data_storage_error(&self) -> Option<&str> {
+        self.auto_download_presets
+            .error()
+            .or_else(|| self.storage_clear.failed())
+            .or_else(|| self.data_storage_save.error())
+    }
+
+    /// The saved notification sounds held.
+    pub fn saved_notification_sounds(&self) -> &[NotificationSound] {
+        self.saved_sounds.data().map_or(&[], Vec::as_slice)
+    }
+
     /// The "freed" line goes when the screen is reopened; a clear still on
     /// its way is not forgotten.
     pub fn reset_storage_freed(&mut self) {

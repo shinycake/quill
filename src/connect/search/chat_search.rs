@@ -22,7 +22,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Ok(false);
         };
         // Reopening the gallery for the same chat keeps the already-fetched
@@ -308,7 +308,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .search
             .chat_search
             .chat_id
-            .or(self.session.open_chat)
+            .or(self.session.open_chat_id())
         else {
             return Err(ConnectSendError::InvalidRequest);
         };
@@ -357,7 +357,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .search
             .chat_search
             .chat_id
-            .or(self.session.open_chat)
+            .or(self.session.open_chat_id())
         else {
             return Err(ConnectSendError::InvalidRequest);
         };
@@ -483,7 +483,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // The jump runs in the view in place: it must be the chat the box
         // was opened for (a box left over from a view that is gone has
         // nothing to jump in).
-        if self.session.open_chat != Some(calendar.chat_id) {
+        if self.session.open_chat_id() != Some(calendar.chat_id) {
             return Ok(None);
         }
         if let Some(day) = calendar.day(day_number) {
@@ -530,7 +530,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .search
             .chat_search
             .chat_id
-            .or(self.session.open_chat)
+            .or(self.session.open_chat_id())
         else {
             return Err(ConnectSendError::InvalidRequest);
         };
@@ -594,7 +594,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .search
                     .chat_search
                     .chat_id
-                    .or(self.session.open_chat)
+                    .or(self.session.open_chat_id())
                 {
                     self.session.reset_history_window(chat_id);
                 }
@@ -652,7 +652,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         message_id: MessageId,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         let extra = self.session.request_history_around(chat_id, message_id);

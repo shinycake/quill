@@ -29,7 +29,7 @@ fn two_chats() -> Session {
             ),
         );
     }
-    session.open_chat = Some(ChatId(11));
+    session.open = crate::state::OpenView::of(Some(ChatId(11)));
     session
 }
 
@@ -103,7 +103,7 @@ fn chat_row_updates_of_other_chats_only_touch_the_chat_list() {
 #[test]
 fn the_comment_thread_counts_as_shown() {
     let mut session = two_chats();
-    session.open_chat = Some(ChatId(12));
+    session.open = crate::state::OpenView::of(Some(ChatId(12)));
     let mut thread = ThreadView::resolving(ChatId(12), MessageId(1));
     thread.chat_id = ChatId(77);
     thread.status = ThreadStatus::Ready;
@@ -217,11 +217,11 @@ fn chat_list_grades_follow_the_open_chat() {
     };
     assert_eq!(need(&session, &read(12)), RedrawNeed::ChatList);
     // The user opens Bob's chat: the same update now redraws at once.
-    session.open_chat = Some(ChatId(12));
+    session.open = crate::state::OpenView::of(Some(ChatId(12)));
     assert_eq!(need(&session, &read(12)), RedrawNeed::Now);
     assert_eq!(need(&session, &read(11)), RedrawNeed::ChatList);
     // No chat open: only the chat list shows chats.
-    session.open_chat = None;
+    session.open = crate::state::OpenView::of(None);
     assert_eq!(need(&session, &read(11)), RedrawNeed::ChatList);
     assert_eq!(need(&session, &status(11, OFFLINE)), RedrawNeed::ChatList);
 }
@@ -330,7 +330,7 @@ fn group_records_and_online_counts_redraw_now_for_the_open_group() {
     };
     assert_eq!(need(&session, &supergroup(100)), RedrawNeed::Later);
     assert_eq!(need(&session, &online(-100100)), RedrawNeed::Later);
-    session.open_chat = Some(ChatId(-100100));
+    session.open = crate::state::OpenView::of(Some(ChatId(-100100)));
     assert_eq!(need(&session, &supergroup(100)), RedrawNeed::Now);
     assert_eq!(need(&session, &supergroup(101)), RedrawNeed::Later);
     assert_eq!(need(&session, &online(-100100)), RedrawNeed::Now);
@@ -480,7 +480,7 @@ fn web_proxy_relay_traffic_never_redraws() {
 #[test]
 fn a_chat_window_redraws_for_its_own_chat() {
     let mut session = two_chats();
-    session.open_chat = None;
+    session.open = crate::state::OpenView::of(None);
     session.open_window_chat(ChatId(12));
     let typing = r#"{"@type":"updateChatAction","chat_id":12,"topic_id":null,"sender_id":{"@type":"messageSenderUser","user_id":12},"action":{"@type":"chatActionTyping"}}"#;
     let read_out =
@@ -493,7 +493,7 @@ fn a_chat_window_redraws_for_its_own_chat() {
     assert_eq!(need(&session, &new_message(11)), RedrawNeed::ChatList);
     // The same while the window's own view is in place: the main
     // window's chat still counts.
-    session.open_chat = Some(ChatId(11));
+    session.open = crate::state::OpenView::of(Some(ChatId(11)));
     assert!(session.enter_view(Some(ChatId(12))));
     assert_eq!(need(&session, &new_message(11)), RedrawNeed::Now);
     assert_eq!(need(&session, &new_message(12)), RedrawNeed::Now);

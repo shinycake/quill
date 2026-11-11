@@ -29,7 +29,7 @@ impl Session {
     /// (no thread open), unless the reply target already sits in a thread
     /// (that thread takes the message).
     pub fn send_starts_bot_thread(&self, chat_id: ChatId, reply_to: Option<MessageId>) -> bool {
-        self.open_topic.is_none()
+        self.open_forum_topic().is_none()
             && self
                 .bot_topics(chat_id)
                 .is_some_and(|bot| bot.allows_users_to_create_topics)
@@ -43,7 +43,7 @@ impl Session {
     /// parameter waits (tdesktop `AboutView::refresh`). It takes the date
     /// of the newest message so no date header comes before it.
     pub fn new_bot_thread_row(&self, chat_id: ChatId) -> Option<HistoryMessage> {
-        if self.open_topic.is_some()
+        if self.open_forum_topic().is_some()
             || self.bots.bot_start_params.contains_key(&chat_id.0)
             || !self
                 .bot_topics(chat_id)

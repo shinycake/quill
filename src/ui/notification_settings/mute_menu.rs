@@ -36,7 +36,7 @@ impl QuillApp {
     /// with the box. A chat opened under it (a notification click, another
     /// window) does not retarget it.
     pub(in crate::ui) fn open_mute_menu(&mut self, cx: &mut Context<Self>) {
-        let chat = self.session().and_then(|session| session.open_chat);
+        let chat = self.session().and_then(|session| session.open_chat_id());
         self.notify.mute_box = Some(MuteBox {
             chat,
             section: MuteSection::Collapsed,
@@ -141,7 +141,7 @@ impl QuillApp {
         let story_sound_label = self.story_sound_label(&chat_settings);
         let saved_sounds: Vec<NotificationSound> = session
             .as_ref()
-            .map(|s| s.settings.saved_notification_sounds.clone())
+            .map(|s| s.settings.saved_notification_sounds().to_vec())
             .unwrap_or_default();
         let status = tr_with(
             keys::Q_PREFS_SOUND_PREVIEWS,

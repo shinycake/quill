@@ -177,7 +177,7 @@ fn sent_texts(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Vec<String>
         let Some(session) = app.session() else {
             return Vec::new();
         };
-        let Some(chat) = session.open_chat else {
+        let Some(chat) = session.open_chat_id() else {
             return Vec::new();
         };
         session

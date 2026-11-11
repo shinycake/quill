@@ -38,7 +38,7 @@ impl QuillApp {
             if self.demo_session.is_none() {
                 return MenuSend::Unavailable;
             }
-            let chat_id = self.demo_session.as_ref().and_then(|s| s.open_chat);
+            let chat_id = self.demo_session.as_ref().and_then(|s| s.open_chat_id());
             if chat_id.is_some_and(|chat| self.slow_mode_blocked(chat, cx)) {
                 return MenuSend::Refused;
             }

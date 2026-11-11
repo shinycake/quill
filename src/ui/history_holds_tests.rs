@@ -112,7 +112,7 @@ fn an_ad_being_reported_holds_its_chat(cx: &mut TestAppContext) {
     let ad = app.read_with(vcx, |app, _| {
         let session = app.session()?;
         let ad = session.open_sponsored_rows().first()?.message_id;
-        Some((session.open_chat?, ad))
+        Some((session.open_chat_id()?, ad))
     });
     let (chat, ad) = ad.expect("the demo shows an ad");
     assert!(held(&app, vcx).is_empty());

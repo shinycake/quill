@@ -793,8 +793,8 @@ impl QuillApp {
         let Some((chat, topic, start)) = SLIDE.get() else {
             return 0.;
         };
-        let shown =
-            self.open_chat_id() == Some(chat) && self.session().and_then(|s| s.open_topic) == topic;
+        let shown = self.open_chat_id() == Some(chat)
+            && self.session().and_then(|s| s.open_forum_topic()) == topic;
         let t = start.elapsed().as_secs_f32() * 1000. / SLIDE_MS;
         if !shown || t >= 1. {
             SLIDE.set(None);

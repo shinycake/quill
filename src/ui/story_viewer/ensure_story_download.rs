@@ -81,8 +81,8 @@ impl QuillApp {
     /// when the story, the ids it needs or the stickers known changed, and
     /// that fact is recorded only after the fetch succeeded, so a failed
     /// fetch is retried on the next tick. A TDLib error answer counts as a
-    /// failure too (`StoriesState::custom_emoji_failures` is part of the
-    /// record), and the retry waits out `custom_emoji_retry`. Returns
+    /// failure too (`StoriesState::custom_emoji_fetch` is part of the
+    /// record), and the retry waits out its backoff. Returns
     /// whether a fetch ran.
     pub(in crate::ui) fn warm_story_custom_emoji(&mut self) -> bool {
         self.warm_story_custom_emoji_with(std::time::Instant::now(), |app, ids| {
@@ -105,7 +105,7 @@ impl QuillApp {
         let (known, failures, waiting) = self.session().map_or((0, 0, false), |s| {
             (
                 s.stories.custom_emoji_stickers.len(),
-                s.stories.custom_emoji_failures,
+                s.stories.custom_emoji_fetch.failures(),
                 s.stories.custom_emoji_fetch_waiting(now),
             )
         });

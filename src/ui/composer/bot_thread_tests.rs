@@ -102,7 +102,7 @@ fn a_send_from_all_opens_a_new_thread_with_the_message(cx: &mut TestAppContext) 
     send(&app, &mut vcx, "Plan a weekend in Lisbon");
     app.read_with(&vcx, |app, cx| {
         let session = app.session().unwrap();
-        let topic = session.open_topic.expect("the new thread is open");
+        let topic = session.open_forum_topic().expect("the new thread is open");
         assert!(topic > 3, "a new thread, not one of the old ones");
         let made = session.threads.forum_topics.get(&BOT.0).unwrap();
         let made = made.iter().find(|t| t.forum_topic_id == topic).unwrap();

@@ -56,7 +56,7 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return false;
         };
-        let Some(chat_id) = session.open_chat else {
+        let Some(chat_id) = session.open_chat_id() else {
             return false;
         };
         let Some(target) = session.fast_button_target(chat_id) else {

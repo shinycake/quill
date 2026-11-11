@@ -6,7 +6,11 @@ impl Session {
     /// Phase 5.1: enter a forum topic's view. Returns the topic's cached
     /// info, if the chat's topic list is already loaded.
     pub fn select_topic(&mut self, chat_id: ChatId, forum_topic_id: i32) -> Option<ForumTopic> {
-        let previous = self.open_topic.replace(forum_topic_id);
+        let previous = self.open.topic();
+        self.open = OpenView::Topic {
+            chat: chat_id,
+            topic: forum_topic_id,
+        };
         self.reclaim_topic_history(chat_id, forum_topic_id);
         if let Some(previous) = previous.filter(|previous| *previous != forum_topic_id) {
             self.release_topic_history(chat_id, previous);
@@ -19,8 +23,7 @@ impl Session {
         // (`messageSourceForumTopicHistory`), which is what moves the
         // topic's own read position in TDLib.
         if let Some(history) = self.histories.get_mut(&chat_id.0) {
-            history.viewed.clear();
-            history.visible.clear();
+            history.views.forget_settled();
         }
         self.open_topic_info(chat_id)
     }
@@ -30,7 +33,7 @@ impl Session {
     /// window's width in pixels; `peek_chats` is the user's "show the chat
     /// list again" choice on a narrow window.
     pub fn forum_column(&self, window_width: f32, peek_chats: bool) -> ForumColumn {
-        let Some(chat_id) = self.open_chat else {
+        let Some(chat_id) = self.open_chat_id() else {
             return ForumColumn::Hidden;
         };
         let is_forum = self
@@ -54,9 +57,9 @@ impl Session {
 
     /// Phase 5.1: leave the topic view, back to the forum's topic list.
     pub fn deselect_topic(&mut self) {
-        let previous = self.open_topic.take();
-        if let (Some(chat_id), Some(previous)) = (self.open_chat, previous) {
-            self.release_topic_history(chat_id, previous);
+        if let OpenView::Topic { chat, topic } = self.open {
+            self.open = OpenView::Chat { chat };
+            self.release_topic_history(chat, topic);
         }
         self.close_topic_thread_unless(None);
         self.view_generation.bump();
@@ -77,7 +80,7 @@ impl Session {
 
     /// Phase 5.1: cached info for the open topic, if any.
     pub fn open_topic_info(&self, chat_id: ChatId) -> Option<ForumTopic> {
-        let topic_id = self.open_topic?;
+        let topic_id = self.open_forum_topic()?;
         self.threads
             .forum_topics
             .get(&chat_id.0)?

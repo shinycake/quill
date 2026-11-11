@@ -216,7 +216,7 @@ impl QuillApp {
         }
         // tdesktop `canWriteMessage()`.
         let Some(edit) = self.session().and_then(|s| {
-            let chat = s.open_chat?;
+            let chat = s.open_chat_id()?;
             s.chats.get(&chat.0)?.can_post().then_some(())?;
             s.last_editable_message(chat)
         }) else {

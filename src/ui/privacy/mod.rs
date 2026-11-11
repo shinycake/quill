@@ -812,7 +812,7 @@ pub(crate) fn apply_ready_privacy(session: &mut Session, sink: &Arc<MemorySink>,
     session.settings.privacy_data.ignore_sensitive = Some(false);
     session.settings.privacy_data.check_password_suggested = true;
     session.settings.privacy_data.inactive_session_ttl_days = Some(180);
-    session.settings.read_date_show = Some(true);
+    session.settings.read_date = quill::state::ReadDate::Known(true);
     // box-host: demo
     session.chat_list.edit_archive_settings(Some(
         quill::telegram::requests::ArchiveChatListSettings {

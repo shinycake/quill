@@ -35,7 +35,7 @@ fn window_view(
                     | ChatSearchJump::Missing { message_id } => Some(message_id),
                     _ => None,
                 };
-                Some((session.open_chat, jump))
+                Some((session.open_chat_id(), jump))
             })
         })
         .flatten()
@@ -155,10 +155,10 @@ fn a_topic_chip_for_a_forum_with_its_own_window_opens_the_topic_there(cx: &mut T
     });
     let topics = h.app.update(cx, |app, cx| {
         let window = app.in_window_scope(Some(FORUM_CHAT), cx, |app, _| {
-            app.session().and_then(|session| session.open_topic)
+            app.session().and_then(|session| session.open_forum_topic())
         });
         let main = app.in_window_scope(None, cx, |app, _| {
-            app.session().and_then(|session| session.open_topic)
+            app.session().and_then(|session| session.open_forum_topic())
         });
         (window.flatten(), main.flatten())
     });

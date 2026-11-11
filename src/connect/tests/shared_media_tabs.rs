@@ -40,7 +40,7 @@ fn opening_the_gallery_asks_for_counts_and_the_profile_tabs_of_a_user() {
             .ingest(copy_and_parse(json, &seq, &sink).unwrap())
             .unwrap();
     }
-    driver.session.open_chat = Some(ChatId(7));
+    driver.session.open = crate::state::OpenView::of(Some(ChatId(7)));
     let before = recorder.snapshot().len();
     assert!(driver.open_shared_media().unwrap());
     let sent = types_sent(&recorder)[before..].to_vec();
@@ -75,7 +75,7 @@ fn opening_the_gallery_asks_for_counts_and_the_profile_tabs_of_a_user() {
 
     // A group has no stories or gifts.
     driver.close_shared_media();
-    driver.session.open_chat = Some(ChatId(-5));
+    driver.session.open = crate::state::OpenView::of(Some(ChatId(-5)));
     let before = recorder.snapshot().len();
     assert!(driver.open_shared_media().unwrap());
     let sent = types_sent(&recorder)[before..].to_vec();
@@ -102,7 +102,7 @@ fn splitting_media_fetches_the_tab_it_moves_to() {
             .unwrap(),
         )
         .unwrap();
-    driver.session.open_chat = Some(ChatId(7));
+    driver.session.open = crate::state::OpenView::of(Some(ChatId(7)));
     driver.open_shared_media().unwrap();
     let before = recorder.snapshot().len();
     driver.set_shared_media_split(true).unwrap();
@@ -200,7 +200,7 @@ fn a_failed_stories_tab_ends_its_loading() {
     driver
         .ingest(copy_and_parse(chat, &seq, &sink).unwrap())
         .unwrap();
-    driver.session.open_chat = Some(ChatId(7));
+    driver.session.open = crate::state::OpenView::of(Some(ChatId(7)));
     driver.open_shared_media().unwrap();
     let request = sent_request(&recorder, "getChatPostedToChatPageStories");
     let failed = format!(

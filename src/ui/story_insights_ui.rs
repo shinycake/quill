@@ -672,7 +672,7 @@ impl QuillApp {
     /// Rows of the open reply thread's info card.
     pub(super) fn thread_info_card(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let thread = session.thread_for_chat(session.open_chat?)?;
+        let thread = session.thread_for_chat(session.open_chat_id()?)?;
         let root = thread.root_message();
         let started_by = root
             .and_then(|m| m.sender.as_ref())

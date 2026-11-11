@@ -210,7 +210,7 @@ impl Session {
         {
             *self.settings.data_storage.for_network_mut(network) = settings;
             self.settings.data_storage.seeded = crate::data_settings::Seed::Seeded;
-            self.settings.data_storage_error = None;
+            self.settings.data_storage_save.succeed(());
             self.settings.data_storage_dirty = true;
             self.settings.auto_download_answer = extra.map(AutoDownloadAnswer::Saved);
         }
@@ -246,7 +246,7 @@ impl Session {
             pending.map(|p| p.purpose),
             Some(RequestPurpose::SetStorageOption)
         ) {
-            self.settings.data_storage_error = None;
+            self.settings.data_storage_save.succeed(());
         }
         // Slice A4: a `disconnectWebsite` /
         // `disconnectAllWebsites` succeeded — same stale pattern
@@ -551,9 +551,8 @@ impl Session {
         // handled in the error arm below.
         if let Some(pending) = pending
             && pending.purpose == RequestPurpose::SetReadDatePrivacy
-            && self.settings.read_date_stage == ReadDateStage::Setting(pending.id)
         {
-            self.settings.read_date_stage = ReadDateStage::Idle;
+            self.settings.read_date.set_confirmed(pending.id);
         }
         // `resetAllNotificationSettings` needs nothing here: TDLib sends
         // `updateScopeNotificationSettings` for each scope it reset before

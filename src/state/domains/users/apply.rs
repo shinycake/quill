@@ -134,7 +134,8 @@ impl Session {
                 ) {
                     self.apply_created_bot(user_id, pending);
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSupportUser) {
-                    self.users_state.user_chat_to_open = Some(user_id);
+                    // The driver opens the support chat from the answer
+                    // itself (`ConnectDriver::ingest`).
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetChatOwnerAfterLeaving)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)
@@ -259,19 +260,20 @@ impl Session {
                     // phone is on Telegram (open the chat), 0 means not.
                     self.users_state.contacts = crate::state::fetch::Fetch::Idle;
                     // A box closed before its answer opens nothing.
-                    let id = pending.map(|p| p.id);
-                    if id.is_none() || self.users_state.new_contact_request != id {
+                    let Some(id) = pending.map(|p| p.id) else {
+                        return;
+                    };
+                    if self.users_state.new_contact.sending() != Some(id) {
                         return;
                     }
-                    self.users_state.new_contact_request = None;
                     let user_id = user_ids.first().copied().unwrap_or_default();
-                    let outcome = if user_id != 0 {
-                        self.users_state.user_chat_to_open = Some(user_id);
-                        NewContactOutcome::Joined(user_id)
+                    // A joined phone waits for the driver to open the chat;
+                    // the box is told once that is done.
+                    self.users_state.new_contact = if user_id != 0 {
+                        NewContact::Opening(id, user_id)
                     } else {
-                        NewContactOutcome::NotJoined
+                        NewContact::Done(id, NewContactOutcome::NotJoined)
                     };
-                    self.users_state.new_contact_outcome = pending.map(|p| (p.id, outcome));
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::ImportContacts) {
                     self.users_state.contacts = crate::state::fetch::Fetch::Idle;
                     self.users_state.contacts_notice = Some("Contacts imported.".to_string());

@@ -42,7 +42,7 @@ impl QuillApp {
     fn open_chat_takes_paid_media(&self) -> bool {
         self.session().is_some_and(|session| {
             session
-                .open_chat
+                .open_chat_id()
                 .is_some_and(|chat| session_allows_paid_media(session, chat))
         })
     }
@@ -265,7 +265,7 @@ impl QuillApp {
         let cover_ok = !animation
             && self.session().is_some_and(|session| {
                 session
-                    .open_chat
+                    .open_chat_id()
                     .is_some_and(|chat| session_allows_cover(session, chat))
             });
         if cover_ok {

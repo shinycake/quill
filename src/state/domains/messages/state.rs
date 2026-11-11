@@ -140,16 +140,11 @@ pub struct MessagesState {
     /// its rows. Entries can be stale; `apply_update_poll` re-checks and
     /// prunes them.
     pub(crate) poll_messages: HashMap<i64, HashSet<(i64, i64)>>,
-    /// In-flight `forwardMessages` (dest / source / requested count), in
-    /// the order they were sent: the share box sends to several chats at
-    /// once. A flight leaves with its answer or its error
-    /// ([`MessagesState::take_forward_flight`]), or when the account
-    /// leaves.
-    pub forward_flights: Vec<ForwardFlight>,
+    /// In-flight `forwardMessages` (dest / source / requested count) and
+    /// the outcomes the dest picker's success surface has not shown yet.
+    pub forwards: Forwards,
     /// Share box search (local `searchChats` + `searchChatsOnServer`).
     pub share_search: ShareSearch,
-    /// Last `forwardMessages` outcome for the dest picker success surface.
-    pub last_forward: Option<ForwardResult>,
     /// Each chat's pinned messages, newest first, as last fetched
     /// (`RequestPurpose::GetPinnedMessages`). Absent or not answered yet,
     /// the pinned bar falls back to pinned rows in loaded history; a failed
@@ -203,15 +198,6 @@ impl MessagesState {
         self.pinned_messages.get(&chat_id)?.data()
     }
 
-    /// The `forwardMessages` flight answered by (or failed for) `extra`.
-    pub(crate) fn take_forward_flight(&mut self, extra: RequestId) -> Option<ForwardFlight> {
-        let index = self
-            .forward_flights
-            .iter()
-            .position(|flight| flight.extra == extra)?;
-        Some(self.forward_flights.remove(index))
-    }
-
     pub(crate) fn new() -> Self {
         Self {
             mention_search: None,
@@ -247,9 +233,8 @@ impl MessagesState {
             pending_bot_messages: HashMap::new(),
             pending_bot_period_secs: 30,
             poll_messages: HashMap::new(),
-            forward_flights: Vec::new(),
+            forwards: Forwards::default(),
             share_search: ShareSearch::default(),
-            last_forward: None,
             pinned_messages: HashMap::new(),
             unread_jump: None,
             poll_voters: HashMap::new(),

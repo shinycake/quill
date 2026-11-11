@@ -15,7 +15,7 @@ impl QuillApp {
         chat_id: ChatId,
         explicit: Option<MessageId>,
     ) -> HistoryOpen {
-        let reselect = self.session().and_then(|s| s.open_chat) == Some(chat_id);
+        let reselect = self.session().and_then(|s| s.open_chat_id()) == Some(chat_id);
         if reselect && explicit.is_none() {
             return HistoryOpen::Default;
         }
@@ -32,7 +32,7 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return;
         };
-        let Some(chat) = session.open_chat else {
+        let Some(chat) = session.open_chat_id() else {
             return;
         };
         // Not landed yet (tdesktop answers "to the unread" before

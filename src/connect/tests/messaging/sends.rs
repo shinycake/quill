@@ -310,7 +310,7 @@ fn history_paging_keeps_going_on_short_pages_and_stops_without_progress() {
     assert_eq!(first["from_message_id"], 0);
     // TDLib's usual first answer: just the last message.
     ingest(&mut driver, page(first["@extra"].as_str().unwrap(), &[300]));
-    assert!(!driver.session.histories[&7].loaded_complete);
+    assert!(!driver.session.histories[&7].loaded_complete());
     driver
         .fetch_history()
         .unwrap()
@@ -321,13 +321,13 @@ fn history_paging_keeps_going_on_short_pages_and_stops_without_progress() {
         &mut driver,
         page(second["@extra"].as_str().unwrap(), &[300, 200, 100]),
     );
-    assert!(!driver.session.histories[&7].loaded_complete);
+    assert!(!driver.session.histories[&7].loaded_complete());
     driver.fetch_history().unwrap().expect("progress pages on");
     let third = sent_request(&recorder, "getChatHistory");
     assert_eq!(third["from_message_id"], 100);
     // Only the boundary message again: nothing older exists.
     ingest(&mut driver, page(third["@extra"].as_str().unwrap(), &[100]));
-    assert!(driver.session.histories[&7].loaded_complete);
+    assert!(driver.session.histories[&7].loaded_complete());
     assert_eq!(driver.fetch_history().unwrap(), None);
     let _ = std::fs::remove_dir_all(&dir);
 }

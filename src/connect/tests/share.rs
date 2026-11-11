@@ -84,8 +84,8 @@ fn forwarding_to_two_chats_keeps_both_results_and_options() {
     let first = driver
         .session
         .messages
-        .last_forward
-        .take()
+        .forwards
+        .take_result()
         .expect("bob result");
     assert_eq!(first.dest_title, "Bob");
     assert_eq!(first.from_chat_id, ChatId(7));
@@ -93,12 +93,12 @@ fn forwarding_to_two_chats_keeps_both_results_and_options() {
     let second = driver
         .session
         .messages
-        .last_forward
-        .take()
+        .forwards
+        .take_result()
         .expect("cy result");
     assert_eq!(second.dest_title, "Cy");
     assert_eq!(second.from_chat_id, ChatId(7));
-    assert!(driver.session.messages.forward_flights.is_empty());
+    assert!(!driver.session.messages.forwards.in_flight());
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -330,7 +330,7 @@ fn a_forward_goes_to_the_topic_its_draft_picked_and_not_to_the_open_one() {
             .unwrap();
     driver.select_chat(ChatId(8)).unwrap();
     // Another topic is open when Send runs.
-    driver.session.open_topic = Some(6);
+    driver.session.open = driver.session.open.with_topic(6);
     draft.topic_id = Some(5);
     driver
         .forward_messages_with_options(ChatId(8), &draft, &SendOptions::default())

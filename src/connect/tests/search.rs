@@ -124,7 +124,7 @@ fn driver_search_happy_empty_error_and_select() {
         )
         .unwrap();
     assert_eq!(driver.session.search.search.status(), SearchStatus::Closed);
-    assert_eq!(driver.session.open_chat, Some(ChatId(7)));
+    assert_eq!(driver.session.open_chat_id(), Some(ChatId(7)));
     // The hit opens in context: a window loads around it (highlighted)
     // instead of the lone hit being spliced into the history.
     assert_eq!(
@@ -512,7 +512,7 @@ fn driver_chat_search_debounce_jump_empty_and_close() {
         driver.session.search.chat_search.status,
         SearchStatus::Closed
     );
-    assert_eq!(driver.session.open_chat, Some(ChatId(7)));
+    assert_eq!(driver.session.open_chat_id(), Some(ChatId(7)));
     assert!(
         driver
             .session

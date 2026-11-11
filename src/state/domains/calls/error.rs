@@ -221,10 +221,10 @@ impl Session {
                 }
             }
             // The live story's own leave (its slot is already gone, and it
-            // never sets `left_group_call`): nothing to show on the call.
+            // never leaves the call): nothing to show on the call.
             Some(RequestPurpose::Calls(CallsPurpose::LeaveGroupCall { group_call_id }))
                 if !self.calls.is_current_group_call(group_call_id)
-                    && self.calls.left_group_call != Some(group_call_id) => {}
+                    && !self.calls.group_call_left(group_call_id) => {}
             // Phase C2g: a failed screen-sharing handshake must
             // not leave the call stuck "sharing" — clear the
             // pending/active flags and surface an honest error.

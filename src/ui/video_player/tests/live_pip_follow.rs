@@ -192,8 +192,10 @@ fn a_left_feed_closes_the_pip_once_the_call_is_left(cx: &mut TestAppContext) {
     let pip = &mut pip;
     let _old = leave_stream_feed(&app, main);
     app.update_in(main, |app, _, cx| {
-        if let Some(session) = app.demo_session.as_mut() {
-            session.calls.left_group_call = Some(CALL);
+        if let Some(session) = app.demo_session.as_mut()
+            && let Some(call) = session.calls.group_call_mut(CALL)
+        {
+            call.rejoin.leave();
         }
         cx.notify();
     });

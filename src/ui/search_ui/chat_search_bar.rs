@@ -415,7 +415,7 @@ impl QuillApp {
                 return;
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            if let Some(prev) = session.open_chat
+            if let Some(prev) = session.open_chat_id()
                 && prev != chat_id
             {
                 let topic = session.open_draft_topic(prev);
@@ -470,7 +470,7 @@ impl QuillApp {
                 return;
             }
         } else if let Some(session) = self.demo_session.as_mut() {
-            if let Some(prev) = session.open_chat
+            if let Some(prev) = session.open_chat_id()
                 && prev != chat_id
             {
                 let topic = session.open_draft_topic(prev);
@@ -607,7 +607,7 @@ impl QuillApp {
         let filters = session.search.search.filters;
         let tab = SearchTab::of(&filters);
         let query = session.search.search.query.trim().to_string();
-        let has_chat = session.open_chat.is_some();
+        let has_chat = session.open_chat_id().is_some();
         let strip = self.search_tab_strip(tab, cx);
         // The strip and the chips name no chat: the UI driver keeps them
         // inside the results list (`redact::CONTROLS`).

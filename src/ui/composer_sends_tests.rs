@@ -97,7 +97,7 @@ fn assert_nothing_chosen(app: &QuillApp, path: &str) {
 }
 
 fn open_chat(app: &QuillApp) -> Option<ChatId> {
-    app.session().and_then(|session| session.open_chat)
+    app.session().and_then(|session| session.open_chat_id())
 }
 
 #[gpui_kit::test]

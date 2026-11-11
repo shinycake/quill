@@ -601,7 +601,7 @@ impl QuillApp {
 
     /// The chat the history in place shows.
     fn vanish_chat_shown(&self) -> Option<ChatId> {
-        self.session().and_then(|session| session.open_chat)
+        self.session().and_then(|session| session.open_chat_id())
     }
 
     fn vanish_clock_now(&self) -> Instant {

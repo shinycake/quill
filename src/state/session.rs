@@ -42,10 +42,6 @@ pub struct Session {
     pub histories: HashMap<i64, HistoryState>,
     /// Which closed chats and topics keep a history tail (`history_prune.rs`).
     pub history_pruning: HistoryPruning,
-    /// History page requests issued for a window that has since been
-    /// replaced (`reset_history_window`): their answers are dropped so an
-    /// old page can't land in the new window and fake contiguity.
-    pub(crate) stale_history_requests: HashSet<u64>,
     /// Bumped for every applied TDLib envelope and every optimistic unread
     /// change: views that cache derived state (history rows, badges) rebuild.
     pub revision: u64,
@@ -61,8 +57,11 @@ pub struct Session {
     /// Groups and channels: members, admins, rights, invite links, join requests, boosts, communities, event logs.
     /// Declared in `src/state/domains/groups/state.rs`.
     pub groups: Box<GroupsState>,
-    pub open_chat: Option<ChatId>,
-    /// Chats shown in a window of their own (`parity:platform-new-window`), with each window's view; they stay open in TDLib and page their history while `open_chat` changes.
+    /// What the main window shows: no chat, a chat, or a forum topic of it
+    /// (`open_chat_id()` / `open_forum_topic()`). Leaving the chat leaves the
+    /// topic; opening another chat drops it.
+    pub open: OpenView,
+    /// Chats shown in a window of their own (`parity:platform-new-window`), with each window's view; they stay open in TDLib and page their history while the open chat changes.
     pub window_chats: WindowViews,
     /// The window chats whose window is the active one: their messages are read on arrival, so they do not notify.
     pub active_window_chats: std::collections::BTreeSet<ChatId>,
@@ -85,9 +84,6 @@ pub struct Session {
     /// One-to-one calls, group calls, recent calls and call privacy.
     /// Declared in `src/state/domains/calls/state.rs`.
     pub calls: Box<CallsState>,
-    /// Phase 5.1: selected forum topic (`forum_topic_id`) of the open chat.
-    /// `None` = topic list (or a non-forum chat). Reset by `open_chat`.
-    pub open_topic: Option<i32>,
     /// Forum topics, comment threads and Saved Messages.
     /// Declared in `src/state/domains/threads/state.rs`.
     pub threads: Box<ThreadsState>,

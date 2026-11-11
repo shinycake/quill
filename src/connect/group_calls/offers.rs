@@ -120,12 +120,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .story_stream
                     .as_ref()
                     .is_some_and(|call| call.id == id);
-                calls.left_group_call != Some(id)
+                !calls.group_call_left(id)
                     && (story || calls.active_call.is_none())
                     && calls.group_call(id).is_some_and(|call| !call.is_joined)
             }
             OfferSend::Rejoin { .. } => {
-                calls.left_group_call != Some(id) && calls.group_call(id).is_some()
+                !calls.group_call_left(id) && calls.group_call(id).is_some()
             }
             OfferSend::Conference => calls
                 .pending_conference

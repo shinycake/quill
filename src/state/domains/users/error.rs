@@ -169,10 +169,11 @@ impl Session {
             }
             Some(RequestPurpose::AddContactByPhone) => {
                 let id = pending.map(|p| p.id);
-                if id.is_some() && self.users_state.new_contact_request == id {
-                    self.users_state.new_contact_request = None;
-                    self.users_state.new_contact_outcome =
-                        pending.map(|p| (p.id, NewContactOutcome::Failed(err.code)));
+                if let Some(id) = id
+                    && self.users_state.new_contact.sending() == Some(id)
+                {
+                    self.users_state.new_contact =
+                        NewContact::Done(id, NewContactOutcome::Failed(err.code));
                 }
             }
             Some(RequestPurpose::ClearImportedContacts) => {

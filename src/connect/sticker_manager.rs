@@ -101,12 +101,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .stickers
             .manager
             .commits
-            .push_back(ManagerCommit {
+            .push_back(ManagerCommit::new(
                 masks,
-                removals: removed.into_iter().filter(|id| *id > 0).collect(),
+                removed.into_iter().filter(|id| *id > 0),
                 order,
-                sent: None,
-            });
+            ));
         self.advance_manager_commit()
     }
 

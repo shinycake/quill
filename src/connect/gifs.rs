@@ -126,7 +126,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .stickers
             .gifs
             .search_chat
-            .or(self.session.open_chat)
+            .or(self.session.open_chat_id())
             .unwrap_or(ChatId(0));
         self.session.stickers.gifs.search_asked();
         self.session.stickers.gifs.search_offset = offset.clone();

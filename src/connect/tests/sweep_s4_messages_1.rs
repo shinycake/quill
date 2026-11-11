@@ -170,7 +170,7 @@ fn a_sticker_set_edit_answer_ends_only_its_own_edit_and_every_toast_shows() {
     let second = rename(session);
     t.feed(json!({"@type":"ok","@extra":first.as_extra()}));
     let view = t.driver.session.stickers.sticker_set_view.as_ref().unwrap();
-    assert_eq!(view.edits.in_flight, [second]);
+    assert_eq!(view.edits.in_flight(), [second]);
     // An answer of an edit made under an earlier box ends none of these.
     t.feed(json!({"@type":"ok","@extra":RequestId(9_999).as_extra()}));
     let view = t.driver.session.stickers.sticker_set_view.as_ref().unwrap();
@@ -264,10 +264,10 @@ fn typing_moves_with_the_topic_and_the_cancel_goes_where_the_action_went() {
         "type":{"@type":"chatTypeSupergroup","supergroup_id":107,"is_channel":false},
         "unread_count":0,"permissions":{"@type":"chatPermissions","can_send_basic_messages":true}}}));
     t.driver.select_chat(ChatId(-1_007)).unwrap();
-    t.driver.session.open_topic = Some(5);
+    t.driver.session.open = t.driver.session.open.with_topic(5);
     t.driver.sync_outgoing_typing("hi", false, 1_000).unwrap();
     // Another topic of the same chat, inside the 4 s interval.
-    t.driver.session.open_topic = Some(6);
+    t.driver.session.open = t.driver.session.open.with_topic(6);
     t.driver.sync_outgoing_typing("hi", false, 1_500).unwrap();
     let actions: Vec<(String, i64)> = t
         .sender
@@ -306,8 +306,12 @@ fn a_stop_pressed_again_after_a_failure_leaves_the_failed_stage() {
     t.fail("stopPendingMessage", "boom");
     let stage = |t: &Flaky| t.driver.session.messages.pending_bot_messages[&(7, 0)].stop;
     assert_eq!(stage(&t), BotStopStage::Failed);
-    t.driver.stop_pending_bot_message(ChatId(7), 0, 12).unwrap();
-    assert_eq!(stage(&t), BotStopStage::Running);
+    let again = t
+        .driver
+        .stop_pending_bot_message(ChatId(7), 0, 12)
+        .unwrap()
+        .expect("sent");
+    assert_eq!(stage(&t), BotStopStage::Stopping(again));
 }
 
 #[test]

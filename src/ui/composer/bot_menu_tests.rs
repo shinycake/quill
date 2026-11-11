@@ -75,7 +75,7 @@ fn composer_text(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> String {
 fn last_sent(app: &Entity<QuillApp>, cx: &mut VisualTestContext) -> Option<String> {
     app.read_with(cx, |app, _| {
         let session = app.session()?;
-        let history = session.histories.get(&session.open_chat?.0)?;
+        let history = session.histories.get(&session.open_chat_id()?.0)?;
         history
             .messages
             .values()

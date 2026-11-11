@@ -564,8 +564,8 @@ fn view_messages_tdlib_error_releases_in_flight_ids() {
     );
     assert!(!session.requests.has_purpose(RequestPurpose::ViewMessages));
     assert_eq!(session.message_ids_to_view(ChatId(1)), vec![MessageId(5)]);
-    assert!(session.histories.get(&1).unwrap().viewing.is_empty());
-    assert!(!session.histories.get(&1).unwrap().viewed.contains(&5));
+    assert!(!session.histories.get(&1).unwrap().is_viewing(5));
+    assert!(!session.histories.get(&1).unwrap().views.is_viewed(5));
     assert!(!sink.rendered().contains("CANARY_VIEW_FAIL"));
 
     let extra = session.request(RequestPurpose::ViewMessages, Some(ChatId(1)));
@@ -577,8 +577,8 @@ fn view_messages_tdlib_error_releases_in_flight_ids() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
     assert!(session.message_ids_to_view(ChatId(1)).is_empty());
-    assert!(session.histories.get(&1).unwrap().viewed.contains(&5));
-    assert!(session.histories.get(&1).unwrap().viewing.is_empty());
+    assert!(session.histories.get(&1).unwrap().views.is_viewed(5));
+    assert!(!session.histories.get(&1).unwrap().is_viewing(5));
 }
 
 #[test]
@@ -860,8 +860,8 @@ fn a_view_answer_settles_only_its_own_request() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, first.0),
     );
     let history = session.histories.get(&1).unwrap();
-    assert!(history.viewed.contains(&4));
-    assert!(!history.viewed.contains(&5), "the second is still out");
+    assert!(history.views.is_viewed(4));
+    assert!(!history.views.is_viewed(5), "the second is still out");
     assert!(history.is_viewing(5));
     apply_json(
         &mut session,
@@ -873,7 +873,7 @@ fn a_view_answer_settles_only_its_own_request() {
         ),
     );
     let history = session.histories.get(&1).unwrap();
-    assert!(!history.viewed.contains(&5));
+    assert!(!history.views.is_viewed(5));
     assert_eq!(
         session.message_ids_to_view(ChatId(1)),
         vec![MessageId(5)],
@@ -906,6 +906,6 @@ fn a_view_answer_from_before_a_reopen_settles_nothing() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, old.0),
     );
     let history = session.histories.get(&1).unwrap();
-    assert!(!history.viewed.contains(&5), "the old answer is not ours");
+    assert!(!history.views.is_viewed(5), "the old answer is not ours");
     assert!(history.is_viewing(5));
 }

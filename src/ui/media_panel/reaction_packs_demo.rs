@@ -55,7 +55,7 @@ impl QuillApp {
                 cover_files: Vec::new(),
                 is_viewed: true,
             });
-            session.media.media_library.set_stickers.insert(id, items);
+            session.media.media_library.insert(id, items);
         }
         self.open_reaction_selector(chat_id, message_id, point(px(420.), px(160.)), window, cx);
     }

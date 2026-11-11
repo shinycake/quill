@@ -204,8 +204,8 @@ fn a_topic_in_a_chat_window_pages_that_windows_chat() {
     assert_eq!(request["chat_id"], 16);
     assert_eq!(request["topic_id"]["forum_topic_id"], 3);
     // The main window's view is untouched.
-    assert_eq!(f.driver.session.open_chat, Some(ChatId(7)));
-    assert_eq!(f.driver.session.open_topic, None);
+    assert_eq!(f.driver.session.open_chat_id(), Some(ChatId(7)));
+    assert_eq!(f.driver.session.open_forum_topic(), None);
     let older = f
         .driver
         .with_window_chat(ChatId(16), |driver| driver.fetch_topic_history());

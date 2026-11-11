@@ -180,12 +180,8 @@ impl QuillApp {
         let Some(waiting) = self.chat_list.drop_topic.as_ref() else {
             return false;
         };
-        self.session().is_some_and(|session| {
-            session
-                .threads
-                .forum_topics_failed
-                .contains(&waiting.chat_id.0)
-        })
+        self.session()
+            .is_some_and(|session| session.threads.forum_topics_failed(waiting.chat_id.0))
     }
 
     fn close_drop_topic(&mut self, cx: &mut Context<Self>) {
@@ -284,20 +280,20 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> bool {
         self.select_listed_chat(chat_id, window, cx);
-        if self.session().and_then(|s| s.open_chat) != Some(chat_id) {
+        if self.session().and_then(|s| s.open_chat_id()) != Some(chat_id) {
             self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_OPEN_TOPIC)));
             return false;
         }
         match topic {
             Some(topic) => {
                 self.select_topic_ui(topic, cx);
-                if self.session().and_then(|s| s.open_topic) != Some(topic) {
+                if self.session().and_then(|s| s.open_forum_topic()) != Some(topic) {
                     self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_OPEN_TOPIC)));
                     return false;
                 }
             }
             None => {
-                if self.session().and_then(|s| s.open_topic).is_some() {
+                if self.session().and_then(|s| s.open_forum_topic()).is_some() {
                     self.deselect_topic_ui(cx);
                 }
             }

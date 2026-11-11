@@ -413,7 +413,8 @@ impl QuillApp {
 
     /// The open forum topic of the content being built now.
     pub(super) fn viewed_topic(&self) -> Option<i32> {
-        self.session().and_then(|session| session.open_topic)
+        self.session()
+            .and_then(|session| session.open_forum_topic())
     }
 
     /// Whether the menus offer "Open in new window" for `chat`. Telegram

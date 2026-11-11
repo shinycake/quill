@@ -201,7 +201,7 @@ impl QuillApp {
     /// they pay the account with the Remove Fee button.
     pub(super) fn paid_messages_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         let title = session.chats.get(&chat_id.0)?.title.clone();
         // A channel's direct messages say the price in the empty chat's card
         // and the field's placeholder, as tdesktop does.

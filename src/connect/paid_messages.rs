@@ -137,7 +137,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         self.load_paid_trust();
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Ok(());
         };
         let Some(user_id) = self.session.private_chat_user_id(chat_id) else {

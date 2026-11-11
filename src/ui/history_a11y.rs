@@ -294,7 +294,7 @@ impl QuillApp {
         }
         if extend {
             // Shift+Up / Down: grow the selection from the focused message.
-            let chat = self.session().and_then(|s| s.open_chat)?;
+            let chat = self.session().and_then(|s| s.open_chat_id())?;
             if self.chat_ui.focus.is_bar() {
                 self.chat_ui.focus = A11yFocus::None;
             }

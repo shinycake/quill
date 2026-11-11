@@ -120,7 +120,7 @@ impl QuillApp {
     /// history.
     pub(super) fn saved_mode(&self) -> Option<SavedMode> {
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         if !session.is_saved_messages(chat_id) {
             return None;
         }
@@ -356,7 +356,7 @@ impl QuillApp {
         let Some(live) = self.live.as_mut() else {
             return;
         };
-        let Some(chat_id) = live.driver.session.open_chat else {
+        let Some(chat_id) = live.driver.session.open_chat_id() else {
             return;
         };
         if !live.driver.session.is_saved_messages(chat_id) {
@@ -589,7 +589,7 @@ impl QuillApp {
     }
 
     fn confirm_delete_saved_sublist(&mut self, topic_id: i64, cx: &mut Context<Self>) {
-        if self.session().and_then(|s| s.open_chat).is_none() {
+        if self.session().and_then(|s| s.open_chat_id()).is_none() {
             return;
         }
         self.open_group_confirm(
@@ -603,7 +603,7 @@ impl QuillApp {
     /// The tags bar above the messages: "All" plus one chip per tag.
     pub(super) fn saved_tags_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        if !session.is_saved_messages(session.open_chat?) {
+        if !session.is_saved_messages(session.open_chat_id()?) {
             return None;
         }
         self.saved_tags_bar_body(cx)
@@ -616,7 +616,7 @@ impl QuillApp {
     #[inline(never)]
     fn saved_tags_bar_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         if !session.is_saved_messages(chat_id) || self.saved_mode() == Some(SavedMode::Sublists) {
             return None;
         }

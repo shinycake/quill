@@ -549,7 +549,7 @@ impl QuillApp {
                         this.close_kit_dialog_if_done(DialogKind::MessageReport, window, cx);
                     }))
             };
-            let back_button = (!flow.trail.is_empty()).then(|| {
+            let back_button = (!flow.steps.is_empty()).then(|| {
                 Button::new("message-report-back")
                     .label(tr(keys::Q_CHAT_BACK))
                     .ghost()
@@ -615,7 +615,7 @@ impl QuillApp {
                 }
                 MessageReportStage::TextRequired { is_optional, .. } => {
                     let is_optional = *is_optional;
-                    if let Some(reason) = flow.trail.last() {
+                    if let Some(reason) = flow.steps.last().map(|step| &step.chosen) {
                         body = body.child(
                             div()
                                 .text_sm()

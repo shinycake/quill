@@ -35,7 +35,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 extras.push(extra);
             }
         }
-        if let Some(chat_id) = self.session.open_chat {
+        if let Some(chat_id) = self.session.open_chat_id() {
             self.download_chat_look_files(chat_id.0, false);
         }
         let ids = self.session.thumb_file_ids_to_download();
@@ -82,7 +82,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// answered file then downloads like a photo thumbnail.
     fn maybe_request_map_thumbs(&mut self) -> Result<Vec<RequestId>, ConnectSendError> {
         let mut extras = Vec::new();
-        if let Some(open) = self.session.open_chat {
+        if let Some(open) = self.session.open_chat_id() {
             self.session.media.map_thumbs.retry_failed_outside(open);
         }
         for (key, chat_id) in self.session.map_thumbs_to_request() {
@@ -120,7 +120,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Ok(Vec::new());
         }
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Ok(Vec::new());
         };
         let ids = self.session.auto_download_media_file_ids();

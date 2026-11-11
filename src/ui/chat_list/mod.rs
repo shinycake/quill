@@ -221,9 +221,9 @@ impl QuillApp {
         let reselect = !thread_switch
             && open_at.is_none()
             && !self.thread_active()
-            && self
-                .session()
-                .is_some_and(|s| s.open_chat == Some(chat_id) && s.open_topic.is_none());
+            && self.session().is_some_and(|s| {
+                s.open_chat_id() == Some(chat_id) && s.open_forum_topic().is_none()
+            });
         let open = self.chat_open_at(chat_id, open_at);
         if let Some(live) = self.live.as_mut() {
             let driver = &mut live.driver;

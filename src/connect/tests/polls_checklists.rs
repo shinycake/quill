@@ -223,7 +223,7 @@ fn unread_poll_votes_badge_jump_and_read_all() {
         5
     );
 
-    driver.session.open_chat = Some(ChatId(7));
+    driver.session.open = crate::state::OpenView::of(Some(ChatId(7)));
     driver
         .jump_to_unread_marker(UnreadJumpKind::PollVote)
         .unwrap();

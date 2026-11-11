@@ -113,7 +113,7 @@ fn cached_candidates(app: &QuillApp, session: &Session, query: &str) -> Rc<Vec<T
         return Rc::new(candidates(session, query));
     };
     if let Some(hit) = cache.as_ref().filter(|c| {
-        c.revision == session.revision && c.query == query && c.open_chat == session.open_chat
+        c.revision == session.revision && c.query == query && c.open_chat == session.open_chat_id()
     }) {
         return hit.people.clone();
     }
@@ -121,7 +121,7 @@ fn cached_candidates(app: &QuillApp, session: &Session, query: &str) -> Rc<Vec<T
     *cache = Some(CandidateCache {
         revision: session.revision,
         query: query.to_string(),
-        open_chat: session.open_chat,
+        open_chat: session.open_chat_id(),
         people: people.clone(),
     });
     people
@@ -135,7 +135,7 @@ pub(super) fn candidates(session: &Session, query: &str) -> Vec<TransferCandidat
     let is_bot = |id: i64| session.users.get(&id).is_some_and(|u| u.is_bot);
     let contacts = session.contact_rows();
     let open_user = session
-        .open_chat
+        .open_chat_id()
         .and_then(|id| session.chats.get(&id.0))
         .and_then(|chat| match chat.kind {
             ChatKind::Private { user_id } => session.users.get(&user_id.0),

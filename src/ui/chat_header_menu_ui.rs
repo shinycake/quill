@@ -18,7 +18,7 @@ use quill::ton_wallet::WalletSurface;
 impl QuillApp {
     pub(super) fn chat_navigation_menu(&self, cx: &mut Context<Self>) -> AnyElement {
         let session = self.session();
-        let chat = session.and_then(|s| s.open_chat.and_then(|id| s.chats.get(&id.0)));
+        let chat = session.and_then(|s| s.open_chat_id().and_then(|id| s.chats.get(&id.0)));
         let muted = chat.is_some_and(|c| c.is_muted());
         let archived = chat.is_some_and(|c| c.in_archive);
         let live = self.live.is_some();
@@ -59,7 +59,7 @@ impl QuillApp {
             }
             (chat?.is_forum_chat()
                 && !session.subsection_tabs_used_for(id)
-                && session.open_topic.is_none())
+                && session.open_forum_topic().is_none())
             .then_some(if as_topics {
                 tr(keys::Q_CHAT_VIEW_AS_MESSAGES)
             } else {
@@ -151,7 +151,7 @@ impl QuillApp {
                             // a link) or the account switched while the
                             // popup was up: its entries are not for this one.
                             if this.screen_epoch() != epoch
-                                || this.session().and_then(|s| s.open_chat) != Some(chat_id)
+                                || this.session().and_then(|s| s.open_chat_id()) != Some(chat_id)
                             {
                                 return;
                             }

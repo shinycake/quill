@@ -464,8 +464,8 @@ fn replay_forward_messages_result_and_attribution() {
     let extra = session.request(RequestPurpose::ForwardMessages, Some(quill::ids::ChatId(8)));
     session
         .messages
-        .forward_flights
-        .push(quill::state::ForwardFlight {
+        .forwards
+        .begin(quill::state::ForwardFlight {
             extra,
             dest_chat_id: quill::ids::ChatId(8),
             from_chat_id: quill::ids::ChatId(7),
@@ -483,8 +483,8 @@ fn replay_forward_messages_result_and_attribution() {
     );
     let result = session
         .messages
-        .last_forward
-        .as_ref()
+        .forwards
+        .latest_result()
         .expect("forward result");
     assert_eq!(result.dest_title, "Bob");
     assert_eq!(result.forwarded_ids, vec![quill::ids::MessageId(80)]);
@@ -585,7 +585,7 @@ fn replay_pin_and_unpin_message_is_pinned() {
             r#"{"@type":"updateNewMessage","message":{"id":50,"chat_id":7,"is_outgoing":false,"is_pinned":false,"content":{"@type":"messageText","text":{"@type":"formattedText","text":"hello already here","entities":[]}}}}"#,
         ],
     );
-    session.open_chat = Some(quill::ids::ChatId(7));
+    session.open = quill::state::OpenView::of(Some(quill::ids::ChatId(7)));
     assert!(session.open_chat_pinned_message().is_none());
     let extra = session.request(RequestPurpose::PinChatMessage, Some(quill::ids::ChatId(7)));
     apply_all_seq(

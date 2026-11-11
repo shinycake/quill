@@ -21,24 +21,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         for (chat_id, message_id) in self.session.reply_fetch_candidates() {
-            let extra = self.session.request(
-                RequestPurpose::GetRepliedMessage {
-                    chat_id,
-                    message_id,
-                },
-                Some(chat_id),
-            );
+            let extra = self.session.begin_reply_fetch(chat_id, message_id);
             if let Err(err) = self
                 .sender
                 .send_json(&get_replied_message(extra, chat_id, message_id))
             {
-                self.session.requests.take(extra);
+                self.session.cancel_reply_fetch(extra);
                 return Err(err);
             }
-            self.session.messages.reply_targets.insert(
-                (chat_id.0, message_id.0),
-                crate::state::ReplyTarget::Loading,
-            );
         }
         // The stories replied to: their picture fills the strip. `get_story`
         // skips cached and in-flight ones and those waiting out a failure,
@@ -48,8 +38,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             if self.get_story(chat_id, story_id)?.is_some() {
                 self.session
                     .stories
-                    .reply_attempted
-                    .insert((chat_id.0, story_id));
+                    .story_fetch
+                    .asked((chat_id.0, story_id));
             }
         }
         Ok(())
@@ -335,7 +325,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `ingest` jumps to it; viewing the row then reads it and TDLib
     /// lowers the chat's counter (`updateChatUnread*Count`).
     pub fn jump_to_unread_marker(&mut self, kind: UnreadJumpKind) -> Result<(), ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         if !self.chats_path_active() {
@@ -368,7 +358,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         kind: UnreadJumpKind,
     ) -> Result<(), ConnectSendError> {
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         self.read_all_chat_unread_markers(chat_id, kind)
@@ -561,7 +551,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if pending.purpose != RequestPurpose::GetWebPageInstantView {
             return None;
         }
-        let window = pending.window;
+        let window = pending.asked_in.chat();
         let messages = &mut self.session.messages;
         let ask = messages.instant_view_requests.remove(&id)?;
         window

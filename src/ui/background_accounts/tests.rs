@@ -184,7 +184,7 @@ fn closed_chat(session: &quill::state::Session) -> ChatId {
     *session
         .main_order
         .iter()
-        .find(|chat| Some(**chat) != session.open_chat)
+        .find(|chat| Some(**chat) != session.open_chat_id())
         .expect("demo chats")
 }
 
@@ -241,7 +241,7 @@ fn a_pending_open_opens_the_chat_once_its_account_is_on_screen(cx: &mut TestAppC
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
         assert!(app.background.pending_open.is_none());
-        assert_eq!(app.session().and_then(|s| s.open_chat), Some(chat_id));
+        assert_eq!(app.session().and_then(|s| s.open_chat_id()), Some(chat_id));
     });
 }
 
@@ -270,7 +270,7 @@ fn a_pending_open_for_another_account_or_too_late_is_dropped(cx: &mut TestAppCon
         vcx.run_until_parked();
         app.read_with(&vcx, |app, _| {
             assert!(app.background.pending_open.is_none());
-            assert_ne!(app.session().and_then(|s| s.open_chat), Some(chat_id));
+            assert_ne!(app.session().and_then(|s| s.open_chat_id()), Some(chat_id));
         });
     }
 }
@@ -317,7 +317,7 @@ fn a_click_on_the_account_on_screen_takes_the_usual_path(cx: &mut TestAppContext
     });
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
-        assert_eq!(app.session().and_then(|s| s.open_chat), Some(chat_id));
+        assert_eq!(app.session().and_then(|s| s.open_chat_id()), Some(chat_id));
     });
 }
 
@@ -360,7 +360,7 @@ fn a_click_after_an_account_switch_runs_on_the_account_it_was_shown_for(cx: &mut
         let session = app.session().unwrap();
         assert_eq!(session.account, other_account());
         assert_ne!(
-            session.open_chat,
+            session.open_chat_id(),
             Some(chat_id),
             "never opened on the account switched to"
         );

@@ -418,6 +418,7 @@ impl QuillApp {
                     is_emoji,
                     is_owned,
                     stickers,
+                    ..
                 } => {
                     let set_id = view.set_id;
                     let kind = SetKind::of(is_emoji);

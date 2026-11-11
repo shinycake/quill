@@ -911,7 +911,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         self.close_chat_preview(cx);
-        let open = self.session().and_then(|session| session.open_chat);
+        let open = self.session().and_then(|session| session.open_chat_id());
         match go_to_target(open, chat_id, message_id) {
             GoToTarget::OtherChat {
                 chat_id,

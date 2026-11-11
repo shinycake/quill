@@ -81,11 +81,13 @@ fn drop_file_on(vcx: &mut VisualTestContext, chat: u64) {
 }
 
 fn open_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<ChatId> {
-    app.update(vcx, |app, _| app.session().and_then(|s| s.open_chat))
+    app.update(vcx, |app, _| app.session().and_then(|s| s.open_chat_id()))
 }
 
 fn open_topic(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<i32> {
-    app.update(vcx, |app, _| app.session().and_then(|s| s.open_topic))
+    app.update(vcx, |app, _| {
+        app.session().and_then(|s| s.open_forum_topic())
+    })
 }
 
 fn attached(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> usize {

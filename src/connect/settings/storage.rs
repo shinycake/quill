@@ -70,13 +70,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request(RequestPurpose::GetAutoDownloadSettingsPresets, None);
+        self.session.settings.auto_download_presets.begin();
         if let Err(err) = self
             .sender
             .send_json(&get_auto_download_settings_presets(extra))
         {
             self.session.requests.take(extra);
-            self.session.settings.data_storage_error =
-                Some("Couldn't load auto-download settings.".to_string());
+            self.session
+                .settings
+                .auto_download_presets
+                .fail("Couldn't load auto-download settings.");
             return Err(err);
         }
         self.session.settings.data_storage.seeded = Seed::InFlight;
@@ -109,8 +112,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         let payload = set_auto_download_settings(extra, settings.to_json(), network.td_type());
         if let Err(err) = self.sender.send_json(&payload) {
             self.session.requests.take(extra);
-            self.session.settings.data_storage_error =
-                Some("Couldn't save auto-download settings.".to_string());
+            self.session
+                .settings
+                .data_storage_save
+                .fail("Couldn't save auto-download settings.");
             return Err(err);
         }
         Ok(extra)
@@ -201,8 +206,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             };
             if let Err(err) = self.sender.send_json(&json) {
                 self.session.requests.take(extra);
-                self.session.settings.data_storage_error =
-                    Some("Couldn't save the storage limits.".to_string());
+                self.session
+                    .settings
+                    .data_storage_save
+                    .fail("Couldn't save the storage limits.");
                 first_error.get_or_insert(err);
             }
         }

@@ -79,7 +79,7 @@ impl QuillApp {
             self.autoscroll_stop(cx);
             return;
         }
-        let Some(chat) = self.session().and_then(|s| s.open_chat) else {
+        let Some(chat) = self.session().and_then(|s| s.open_chat_id()) else {
             return;
         };
         let now = Instant::now();
@@ -150,7 +150,7 @@ impl QuillApp {
         window_active: bool,
         cx: &mut Context<Self>,
     ) -> Option<(Point<Pixels>, f32)> {
-        let open = self.session().and_then(|s| s.open_chat).map(|id| id.0);
+        let open = self.session().and_then(|s| s.open_chat_id()).map(|id| id.0);
         let active = self.history.autoscroll.active.as_mut()?;
         if !window_active || open != Some(active.chat) {
             self.history.autoscroll.active = None;

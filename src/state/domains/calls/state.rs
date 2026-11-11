@@ -124,10 +124,6 @@ pub struct CallsState {
     /// A call link that arrived while a call is on: the question to leave
     /// it, the wait for it to end, then what the offer found.
     pub call_link_stage: crate::call_link::CallLinkStage,
-    /// The group call just left with `leaveGroupCall`, until TDLib says
-    /// it is no longer joined: a late joined update for it must not take
-    /// the slot back.
-    pub left_group_call: Option<i32>,
     /// A conference call being joined or created, until its answer names
     /// the call (`crate::state::conference`).
     pub pending_conference: Option<PendingConference>,
@@ -194,6 +190,13 @@ impl CallsState {
             .find(|call| call.id == id)
     }
 
+    /// The group call `id` was just left (`leaveGroupCall`) and TDLib has
+    /// not yet said it is no longer joined.
+    pub fn group_call_left(&self, id: i32) -> bool {
+        self.group_call(id)
+            .is_some_and(|call| call.rejoin.is_left())
+    }
+
     pub fn group_call_mut(&mut self, id: i32) -> Option<&mut ActiveGroupCall> {
         [self.active_group_call.as_mut(), self.story_stream.as_mut()]
             .into_iter()
@@ -246,7 +249,6 @@ impl CallsState {
             pending_live_story_join: None,
             call_link: None,
             call_link_stage: crate::call_link::CallLinkStage::Idle,
-            left_group_call: None,
             pending_conference: None,
             call_upgrade: None,
             conference_invite: None,

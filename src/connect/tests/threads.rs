@@ -97,7 +97,7 @@ fn comments_thread_open_load_send_and_close() {
         .switch_to_thread_chat()
         .unwrap()
         .expect("history page requested");
-    assert_eq!(driver.session.open_chat, Some(ChatId(14)));
+    assert_eq!(driver.session.open_chat_id(), Some(ChatId(14)));
     assert_eq!(requests_of(&recorder, "closeChat").len(), 1);
     assert_eq!(
         requests_of(&recorder, "openChat").last().unwrap()["chat_id"],
@@ -204,7 +204,7 @@ fn comments_thread_open_load_send_and_close() {
     assert_eq!(driver.close_thread(), Some(ChatId(13)));
     assert!(driver.session.threads.thread.is_none());
     driver.select_chat(ChatId(13)).unwrap();
-    assert_eq!(driver.session.open_chat, Some(ChatId(13)));
+    assert_eq!(driver.session.open_chat_id(), Some(ChatId(13)));
     let _ = std::fs::remove_dir_all(&dir);
 }
 

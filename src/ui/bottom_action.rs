@@ -32,7 +32,7 @@ impl QuillApp {
         let bot = session.bot_user_id_for_chat(chat.id);
         let history = session.histories.get(&chat.id.0);
         let empty_history = history
-            .is_some_and(|history| history.loaded_complete && history.messages.is_empty())
+            .is_some_and(|history| history.loaded_complete() && history.messages.is_empty())
             && chat.last_message.is_none();
         BarFacts {
             blocked: peer.is_some() && chat.blocked,
@@ -55,10 +55,10 @@ impl QuillApp {
     /// Channel Join and Mute stay with the channel footer.
     pub(super) fn bottom_action(&self) -> Option<BottomBar> {
         let session = self.session()?;
-        if session.open_topic.is_some() {
+        if session.open_forum_topic().is_some() {
             return None;
         }
-        let chat = session.chats.get(&session.open_chat?.0)?;
+        let chat = session.chats.get(&session.open_chat_id()?.0)?;
         match bottom_bar(&self.bottom_bar_facts(session, chat))? {
             bar @ (BottomBar::Unblock { .. }
             | BottomBar::Start
@@ -71,7 +71,7 @@ impl QuillApp {
 
     pub(super) fn bottom_action_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let bar = self.bottom_action()?;
-        let chat_id = self.session()?.open_chat?;
+        let chat_id = self.session()?.open_chat_id()?;
         // `{name} only accepts messages from contacts and Premium users.`
         let sentence = (bar == BottomBar::PremiumRequired)
             .then(|| {

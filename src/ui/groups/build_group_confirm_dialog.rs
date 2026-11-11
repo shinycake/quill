@@ -313,7 +313,7 @@ impl QuillApp {
     /// behavior (composer hidden).
     pub(in crate::ui) fn channel_footer(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        if !session.chats.get(&session.open_chat?.0)?.is_channel() {
+        if !session.chats.get(&session.open_chat_id()?.0)?.is_channel() {
             return None;
         }
         self.channel_footer_body(cx)
@@ -326,7 +326,7 @@ impl QuillApp {
     #[inline(never)]
     fn channel_footer_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        let open = session.open_chat?;
+        let open = session.open_chat_id()?;
         let chat = session.chats.get(&open.0)?;
         if !chat.is_channel() {
             return None;

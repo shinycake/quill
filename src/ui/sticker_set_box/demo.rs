@@ -54,11 +54,7 @@ impl QuillApp {
                 item.set_id = 78;
                 stickers.push(item);
             }
-            session
-                .media
-                .media_library
-                .set_stickers
-                .insert(78, stickers.clone());
+            session.media.media_library.insert(78, stickers.clone());
             session
                 .stickers
                 .stickers
@@ -83,8 +79,8 @@ impl QuillApp {
                 is_emoji: false,
                 is_owned: true,
                 stickers,
+                files: quill::state::SetFiles::Asked,
             };
-            view.files_requested = true;
             session.stickers.sticker_set_view = Some(view);
         }
         self.message_ui.menu_ui.show_sticker_set();

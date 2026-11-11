@@ -42,11 +42,11 @@ impl QuillApp {
             width,
             rail: self.folder_rail_width(),
             list_width: f32::from(self.frame.sidebar_width),
-            chat_open: session.is_some_and(|s| s.open_chat.is_some()),
+            chat_open: session.is_some_and(|s| s.open_chat_id().is_some()),
             forum: session.map_or(ForumColumn::Hidden, |s| {
                 s.forum_column(width, self.history.forum_column.peeking())
             }),
-            topic_open: session.is_some_and(|s| s.open_topic.is_some()),
+            topic_open: session.is_some_and(|s| s.open_forum_topic().is_some()),
             panels: side_panels_width(self.drawn_panels()),
             docked: if self.pane_mode() == PaneMode::Ready {
                 self.frame.sidebar.docked(Instant::now())
@@ -143,7 +143,7 @@ impl QuillApp {
         let input = self.shell_input();
         let layout = shell_layout(input);
         self.seed_history_width(chat_pane_width(input, &layout));
-        let open = self.session().and_then(|s| s.open_chat);
+        let open = self.session().and_then(|s| s.open_chat_id());
         let list = layout.list.and_then(|list| {
             let column = if self.pane_mode() == PaneMode::Ready {
                 self.docked_sidebar(&layout)?

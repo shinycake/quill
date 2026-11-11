@@ -111,7 +111,10 @@ impl QuillApp {
         let Some(session) = self.session() else {
             return false;
         };
-        let Some(chat) = session.open_chat.and_then(|id| session.chats.get(&id.0)) else {
+        let Some(chat) = session
+            .open_chat_id()
+            .and_then(|id| session.chats.get(&id.0))
+        else {
             return false;
         };
         chat.can_post() && self.send_denial(SendKind::Stickers).is_none()
@@ -170,7 +173,7 @@ impl QuillApp {
             return PickerContents::default();
         };
         let panel = &session.stickers.stickers;
-        let library = &session.media.media_library.set_stickers;
+        let library = &session.media.media_library;
         let sections: Vec<StickerSection<'_>> = panel
             .sets
             .iter()

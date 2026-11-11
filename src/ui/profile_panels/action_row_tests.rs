@@ -209,7 +209,7 @@ fn only_a_channel_keeps_a_leave_row(cx: &mut TestAppContext) {
 fn auto_delete_opens_for_the_profiles_chat_without_opening_it(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_demo(cx, "ready-profile-user");
     let vcx = &mut vcx;
-    let shown_chat = app.read_with(vcx, |app, _| app.session().and_then(|s| s.open_chat));
+    let shown_chat = app.read_with(vcx, |app, _| app.session().and_then(|s| s.open_chat_id()));
     let target = super::action_row::ProfileTarget {
         kind: quill::profile_actions::ProfilePeerKind::User { is_bot: false },
         chat: Some(ChatId(PROFILE_GROUP)),
@@ -226,6 +226,6 @@ fn auto_delete_opens_for_the_profiles_chat_without_opening_it(cx: &mut TestAppCo
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert_eq!(app.notify.ttl_picker, Some(ChatId(PROFILE_GROUP)));
-        assert_eq!(app.session().and_then(|s| s.open_chat), shown_chat);
+        assert_eq!(app.session().and_then(|s| s.open_chat_id()), shown_chat);
     });
 }

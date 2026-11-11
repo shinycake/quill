@@ -127,7 +127,7 @@ impl QuillApp {
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
             apply_ready_forward(session, &self.demo_ui.sink, &self.demo_ui.seq);
-            self.share.forward_result = session.messages.last_forward.clone();
+            self.share.forward_result = session.messages.forwards.latest_result().cloned();
         }
         if let Some(mut draft) =
             ForwardDraft::from_message(ChatId(11), quill::ids::TopicId::None, MessageId(101), false)

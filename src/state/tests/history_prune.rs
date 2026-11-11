@@ -96,7 +96,7 @@ fn closing_a_chat_trims_it_to_a_tail_and_reopening_keeps_it() {
     let history = &session.histories[&7];
     assert_eq!(history.newest_id(), Some(MessageId(200)));
     assert_eq!(history.oldest_id(), Some(MessageId(141)));
-    assert!(!history.loaded_complete, "older rows page back in");
+    assert!(!history.loaded_complete(), "older rows page back in");
     assert!(is_closed_tail(&session, 7));
     switch(&mut session, 7);
     assert_eq!(len(&session, 7), CLOSED_TAIL_KEEP, "shown from the tail");
@@ -487,7 +487,9 @@ fn releasing_several_topics_is_deterministic() {
 fn entries_made_outside_the_lru_join_it_and_stay_bounded() {
     let (mut session, _sink) = session();
     for chat in 1..=(CLOSED_CHATS_MAX as i64 + 10) {
-        session.history_entry(ChatId(chat)).loaded_complete = true;
+        session
+            .history_entry(ChatId(chat))
+            .set_loaded_complete(true);
     }
     assert_eq!(session.histories.len(), CLOSED_CHATS_MAX);
     // The shown chat's entry is not part of the LRU.
@@ -550,7 +552,7 @@ fn a_late_page_for_a_closed_topic_stays_inside_the_topic_bound() {
     assert_eq!(session.threads.topic_histories.len(), CLOSED_TOPICS_MAX);
     // The open topic's entry is not part of the LRU.
     session.open_chat(ChatId(7));
-    session.open_topic = Some(900);
+    session.open = session.open.with_topic(900);
     session.topic_history_entry(ChatId(7), 900);
     assert_eq!(session.threads.topic_histories.len(), CLOSED_TOPICS_MAX + 1);
 }

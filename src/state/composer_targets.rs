@@ -129,7 +129,7 @@ impl Session {
                     .and_then(|thread| thread.history.messages.get(&message_id.0))
             })
             .or_else(|| {
-                let topic = self.open_topic?;
+                let topic = self.open_forum_topic()?;
                 self.threads
                     .topic_histories
                     .get(&(chat_id.0, topic))

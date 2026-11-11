@@ -46,7 +46,7 @@ fn message_menu_closes_when_its_message_is_removed(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     let (chat, message) = app.read_with(vcx, |app, _| {
         let session = app.session().expect("demo session");
-        let open = session.open_chat.expect("the demo opens a chat");
+        let open = session.open_chat_id().expect("the demo opens a chat");
         let history = session.histories.get(&open.0).expect("history");
         let id = *history.messages.keys().next().expect("a message");
         (open, MessageId(id))
@@ -77,7 +77,7 @@ fn chat_menu_closes_when_its_chat_is_removed(cx: &mut TestAppContext) {
     let vcx = &mut vcx;
     let chat = app.read_with(vcx, |app, _| {
         let session = app.session().expect("demo session");
-        let open = session.open_chat.expect("the demo opens a chat");
+        let open = session.open_chat_id().expect("the demo opens a chat");
         session
             .chats
             .keys()
@@ -104,7 +104,7 @@ fn chat_menu_closes_when_its_chat_is_removed(cx: &mut TestAppContext) {
 fn other_chat(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> (ChatId, ChatId) {
     app.read_with(vcx, |app, _| {
         let session = app.session().expect("demo session");
-        let open = session.open_chat.expect("the demo opens a chat");
+        let open = session.open_chat_id().expect("the demo opens a chat");
         let other = session
             .chats
             .keys()

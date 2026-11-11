@@ -125,7 +125,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         else {
             return Ok(None);
         };
-        if self.session.open_chat != Some(chat_id) {
+        if self.session.open_chat_id() != Some(chat_id) {
             return Ok(None);
         }
         self.begin_thread_reading(chat_id)
@@ -315,7 +315,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn close_thread(&mut self) -> Option<ChatId> {
         let thread = self.session.close_thread()?;
         (thread.chat_id != thread.origin_chat_id
-            && self.session.open_chat == Some(thread.chat_id)
+            && self.session.open_chat_id() == Some(thread.chat_id)
             && self.session.chats.contains_key(&thread.origin_chat_id.0))
         .then_some(thread.origin_chat_id)
     }

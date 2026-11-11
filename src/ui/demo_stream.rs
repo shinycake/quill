@@ -55,7 +55,7 @@ impl QuillApp {
         let Some(session) = self.demo_session.as_mut() else {
             return;
         };
-        let open = session.open_chat;
+        let open = session.open_chat_id();
         if step.is_multiple_of(2)
             && stream_into_open_chat()
             && let Some(json) = open.and_then(|chat| open_chat_update(session, chat, step / 2))

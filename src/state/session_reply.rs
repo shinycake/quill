@@ -9,8 +9,8 @@ use crate::ids::UserId;
 /// `HistoryItem::requestReply`). Keyed by the *replying* message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReplyTarget {
-    /// `getRepliedMessage` sent, answer pending.
-    Loading,
+    /// `getRepliedMessage` sent as this request, answer pending.
+    Loading(RequestId),
     /// The answer: the replied message (own chat or another one).
     Loaded(Box<HistoryMessage>),
     /// TDLib said it does not exist (deleted, or no access).
@@ -589,6 +589,33 @@ impl Session {
         );
     }
 
+    /// `getRepliedMessage` for the row `(chat_id, message_id)`: the request
+    /// is registered and the row marked loading in one step, so the two
+    /// never disagree. The caller sends it, and calls
+    /// [`Self::cancel_reply_fetch`] when the send is refused.
+    pub fn begin_reply_fetch(&mut self, chat_id: ChatId, message_id: MessageId) -> RequestId {
+        let request = self.request(
+            RequestPurpose::GetRepliedMessage {
+                chat_id,
+                message_id,
+            },
+            Some(chat_id),
+        );
+        self.messages
+            .reply_targets
+            .insert((chat_id.0, message_id.0), ReplyTarget::Loading(request));
+        request
+    }
+
+    /// The request of [`Self::begin_reply_fetch`] never left: the row is
+    /// asked for again later.
+    pub fn cancel_reply_fetch(&mut self, request: RequestId) {
+        self.requests.take(request);
+        self.messages
+            .reply_targets
+            .retain(|_, target| *target != ReplyTarget::Loading(request));
+    }
+
     /// Keep at most [`MAX_REPLY_TARGETS_OUTSIDE_WINDOW`] of `chat_id`'s
     /// reply targets outside its loaded windows (the main history, its
     /// topics and the open thread), nearest first.
@@ -694,7 +721,10 @@ impl Session {
                 )));
             }
         }
-        if let Some(history) = self.open_chat.and_then(|chat| self.histories.get(&chat.0)) {
+        if let Some(history) = self
+            .open_chat_id()
+            .and_then(|chat| self.histories.get(&chat.0))
+        {
             for message in history.messages.values() {
                 if let Some(content) = message
                     .reply_to
@@ -741,13 +771,13 @@ impl Session {
             .map(|reply| (reply.chat_id, reply.story_id))
             .filter(|(chat, story)| {
                 !self.stories.stories.contains_key(&(chat.0, *story))
-                    && !self.stories.reply_attempted.contains(&(chat.0, *story))
+                    && !self.stories.story_fetch.is_asked((chat.0, *story))
             })
             .collect();
         wanted.extend(self.message_story_candidates());
         wanted.retain(|(chat, story)| {
             let key = (chat.0, *story);
-            !self.stories.missing.contains(&key) && !self.stories.story_fetch_waiting(key, now)
+            !self.stories.story_fetch.is_gone(key) && !self.stories.story_fetch_waiting(key, now)
         });
         wanted.sort_by_key(|(chat, story)| (chat.0, *story));
         wanted.dedup();
@@ -757,7 +787,10 @@ impl Session {
 
     /// Custom emoji behind the reply strips of the open chat.
     pub fn reply_background_emoji_ids(&self) -> Vec<i64> {
-        let Some(history) = self.open_chat.and_then(|chat| self.histories.get(&chat.0)) else {
+        let Some(history) = self
+            .open_chat_id()
+            .and_then(|chat| self.histories.get(&chat.0))
+        else {
             return Vec::new();
         };
         history

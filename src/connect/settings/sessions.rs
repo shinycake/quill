@@ -1,5 +1,6 @@
 //! Connect driver: device login, active sessions, account TTL, auto-delete and connected websites.
 use super::*;
+use crate::state::DeviceLogin;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Authorize only a validated scan after explicit user confirmation.
@@ -16,7 +17,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let id = self
             .session
             .request(RequestPurpose::ConfirmDeviceLogin, None);
-        self.session.settings.device_login_result = None;
+        self.session.settings.device_login = DeviceLogin::InFlight;
         self.session.settings.sessions_op.begin(id);
         self.session.settings.sessions.clear_error();
         let request = zeroize::Zeroizing::new(
@@ -24,6 +25,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         );
         if let Err(error) = self.sender.send_json(&request) {
             self.session.requests.take(id);
+            self.session.settings.device_login = DeviceLogin::Idle;
             self.session.settings.sessions_op.failed(Some(id));
             return Err(error);
         }
@@ -146,7 +148,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         reason: &str,
         password: &str,
     ) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.account_busy() {
+        if !self.chats_path_active() || self.session.account_ttl_write_pending() {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.settings.account_ttl.clear_error();
@@ -245,7 +247,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// mutation at a time; the confirmed days land from the
     /// authoritative `ok` (never an optimistic write).
     pub fn set_account_ttl(&mut self, days: i32) -> Result<RequestId, ConnectSendError> {
-        if !self.chats_path_active() || self.session.settings.account_busy() {
+        if !self.chats_path_active() || self.session.account_ttl_write_pending() {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.settings.account_delete.clear_error();

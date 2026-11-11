@@ -21,7 +21,7 @@ impl Session {
         reply_to: Option<MessageId>,
     ) -> Option<TopicPlaceholder> {
         if !self.chats.get(&chat_id.0)?.is_forum_chat()
-            || self.open_topic.is_some()
+            || self.open_forum_topic().is_some()
             || self.thread_for_chat(chat_id).is_some()
         {
             return None;
@@ -70,7 +70,7 @@ impl Session {
     /// Whether the chat is a bot that makes its own topics, with none open:
     /// the field asks for an "Off-thread message".
     pub fn bot_chat_off_thread(&self, chat_id: ChatId) -> bool {
-        self.open_topic.is_none()
+        self.open_forum_topic().is_none()
             && self
                 .bot_topics(chat_id)
                 .is_some_and(|bot| !bot.allows_users_to_create_topics)

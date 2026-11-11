@@ -26,8 +26,8 @@ pub(super) fn apply_ready_forward(session: &mut Session, sink: &Arc<MemorySink>,
     let extra = session.request(RequestPurpose::ForwardMessages, Some(ChatId(12)));
     session
         .messages
-        .forward_flights
-        .push(quill::state::ForwardFlight {
+        .forwards
+        .begin(quill::state::ForwardFlight {
             extra,
             dest_chat_id: ChatId(12),
             from_chat_id: ChatId(11),

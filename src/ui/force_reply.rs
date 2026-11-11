@@ -91,7 +91,7 @@ impl QuillApp {
     /// selector covers a draft armed before this slice's logic existed.
     pub(in crate::ui) fn open_chat_force_reply(&self) -> Option<(ChatId, MessageId, String)> {
         let session = self.session()?;
-        let chat_id = session.open_chat?;
+        let chat_id = session.open_chat_id()?;
         let history = session.histories.get(&chat_id.0)?;
         let pending = self.chat_ui.reply()?;
         let force_reply_placeholder = |message_id: MessageId| {

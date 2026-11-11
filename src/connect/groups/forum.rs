@@ -45,7 +45,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             // A send that never left fails the load like an error answer:
             // the same set the topic views read.
-            self.session.threads.forum_topics_failed.insert(chat_id.0);
+            self.session
+                .threads
+                .forum_topics
+                .fail(chat_id.0, "could not send the request");
             return Err(err);
         }
         Ok(())
@@ -94,8 +97,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(());
         }
-        // A new try clears the last failure; this one's answer sets it again.
-        self.session.threads.forum_topics_failed.remove(&chat_id.0);
         let extra = self
             .session
             .request(RequestPurpose::GetForumTopics, Some(chat_id));
@@ -111,9 +112,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             // A send that never left fails the load like an error answer:
             // the same set the topic views read.
-            self.session.threads.forum_topics_failed.insert(chat_id.0);
+            self.session
+                .threads
+                .forum_topics
+                .fail(chat_id.0, "could not send the request");
             return Err(err);
         }
+        self.session.threads.forum_topics.begin(chat_id.0);
         Ok(())
     }
 
@@ -127,7 +132,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         // A topic already in the loaded list is selectable whatever the
@@ -157,10 +162,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let Some(chat_id) = self.session.open_chat else {
+        let Some(chat_id) = self.session.open_chat_id() else {
             return Err(ConnectSendError::InvalidRequest);
         };
-        let Some(forum_topic_id) = self.session.open_topic else {
+        let Some(forum_topic_id) = self.session.open_forum_topic() else {
             return Err(ConnectSendError::InvalidRequest);
         };
         let key = (chat_id.0, forum_topic_id);
@@ -227,7 +232,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// and request the first page again.
     pub fn retry_topic_history(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
         if let (Some(chat_id), Some(forum_topic_id)) =
-            (self.session.open_chat, self.session.open_topic)
+            (self.session.open_chat_id(), self.session.open_forum_topic())
         {
             self.session
                 .clear_topic_load_failed(chat_id, forum_topic_id);

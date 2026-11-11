@@ -127,7 +127,7 @@ fn the_new_sound_joins_the_list_and_is_reported_once() {
     let ids: Vec<i64> = driver
         .session
         .settings
-        .saved_notification_sounds
+        .saved_notification_sounds()
         .iter()
         .map(|sound| sound.id)
         .collect();
@@ -177,7 +177,7 @@ fn deleting_a_saved_sound_sends_its_id_and_refetches() {
         "removeSavedNotificationSound",
         r#"{"@type":"ok"}"#,
     );
-    assert!(driver.session.settings.saved_sounds_stale);
+    assert!(driver.session.settings.saved_sounds.is_loading());
     assert!(driver.remove_notification_tone(0).is_err());
 }
 
@@ -185,7 +185,7 @@ fn deleting_a_saved_sound_sends_its_id_and_refetches() {
 fn a_refused_delete_says_so_and_reads_the_list_again() {
     let (mut driver, recorder, sink, seq) = driver();
     driver.remove_notification_tone(900).unwrap();
-    assert!(!driver.session.settings.saved_sounds_stale);
+    assert!(!driver.session.saved_sounds_owed());
     answer(
         &mut driver,
         &recorder,
@@ -194,7 +194,7 @@ fn a_refused_delete_says_so_and_reads_the_list_again() {
         "removeSavedNotificationSound",
         r#"{"@type":"error","code":400,"message":"NOTIFICATION_SOUND_NOT_FOUND"}"#,
     );
-    assert!(driver.session.settings.saved_sounds_stale);
+    assert!(driver.session.settings.saved_sounds.is_loading());
     assert_eq!(
         driver.session.chats_state.chat_action_error.last(),
         Some(crate::lang::tr(crate::lang::keys::Q_TONE_DELETE_FAILED))
