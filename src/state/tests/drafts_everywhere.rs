@@ -515,6 +515,30 @@ fn a_sent_message_clears_the_slot_it_went_to() {
 }
 
 #[test]
+fn a_failed_send_names_the_slot_whose_draft_clear_is_dropped() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    new_chat(
+        &mut session,
+        &seq,
+        &sink,
+        9,
+        r#"{"@type":"chatTypeSupergroup","supergroup_id":9,"is_channel":false}"#,
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateMessageSendFailed","old_message_id":-1,"message":{"id":10,"chat_id":9,"is_outgoing":true,"topic_id":{"@type":"messageTopicForum","forum_topic_id":3},"sending_state":{"@type":"messageSendingStateFailed","can_retry":true},"content":{"@type":"messageText","text":{"@type":"formattedText","text":"x","entities":[]}}},"error":{"code":500}}"#,
+    );
+    assert_eq!(
+        session.messages.failed_sends,
+        vec![(ChatId(9), DraftTopic::Forum(3))]
+    );
+    assert!(session.messages.draft_clears.is_empty());
+}
+
+#[test]
 fn chat_level_drafts_still_apply_and_respect_the_dirty_slot() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);

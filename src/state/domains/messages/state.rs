@@ -172,6 +172,9 @@ pub struct MessagesState {
     /// Send succeeded in this (chat, topic); UI clears the server draft
     /// if the composer is still empty.
     pub draft_clears: Vec<(ChatId, DraftTopic)>,
+    /// Send failed in this (chat, topic): a draft clear that waited on its
+    /// ack is dropped, the draft stays.
+    pub failed_sends: Vec<(ChatId, DraftTopic)>,
     /// Captions chosen for media messages that are still being sent; each
     /// goes out as an edit once the message has its real id.
     pub deferred_captions: Vec<crate::composer::DeferredCaption>,
@@ -242,6 +245,7 @@ impl MessagesState {
             draft_dirty: HashSet::new(),
             remote_draft_revision: 0,
             draft_clears: Vec::new(),
+            failed_sends: Vec::new(),
             deferred_captions: Vec::new(),
             sponsored: HashMap::new(),
             sponsored_hidden: false,

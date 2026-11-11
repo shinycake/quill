@@ -232,6 +232,7 @@ impl QuillApp {
         self.background.local = LocalData::Wiping;
         // A connection being prepared must not open now.
         self.connect.generation += 1;
+        self.auth_demo.stage.cancel_connecting();
         self.close_screen_client(cx);
         self.stop_background_accounts(cx);
         self.delete_after_close(
@@ -335,7 +336,7 @@ impl QuillApp {
                     .as_ref()
                     .is_some_and(|live| &live.driver.session.account == key)
         };
-        if background.screen_preparing > 0 || keys.iter().any(open) {
+        if background.screen_workers.running() || keys.iter().any(open) {
             CloseWait::Wait
         } else {
             CloseWait::Go

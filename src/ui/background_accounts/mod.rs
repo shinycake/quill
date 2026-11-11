@@ -117,7 +117,7 @@ pub(crate) struct BackgroundAccounts {
     /// are done).
     prepare: prepare::PrepareSet,
     /// `start_connection` preparations still running on a worker.
-    pub(super) screen_preparing: u32,
+    pub(super) screen_workers: crate::ui::connect_ui::ScreenWorkers,
     /// Bumped by `stop_background_accounts`: starts in flight and the poll
     /// loop of an older generation end.
     generation: u64,
@@ -152,7 +152,7 @@ impl BackgroundAccounts {
         Self {
             clients: Vec::new(),
             prepare: prepare::PrepareSet::default(),
-            screen_preparing: 0,
+            screen_workers: Default::default(),
             generation: 0,
             poll: None,
             clicks: Arc::new(Mutex::new(Vec::new())),

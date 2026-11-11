@@ -428,6 +428,7 @@ mod groups_welcome;
 mod history;
 mod history_anchor;
 mod history_preload_tests;
+mod inline_bot_state;
 mod inline_grid;
 mod inline_members;
 mod inline_members_state;

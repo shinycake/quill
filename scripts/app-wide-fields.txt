@@ -79,6 +79,7 @@ language.open * | the language box: languages are the app's
 language.writes * | language file write counters
 language.recent | recently picked languages
 auth_demo.stage | where the startup connection stands while there is no client: the process's, before any account is on screen
+auth_demo.stage.Connecting._task | the startup connection's task, owned by the stage: the process's, before any account is on screen
 auth_demo.stage.Blocked.0 | why the client could not start: the process's, before any account is on screen
 auth_demo.stage.Shown.0 | the synthetic mode's authorization state, next to demo_session
 auth_demo.demo_inputs | the synthetic mode shows its inputs
@@ -123,7 +124,7 @@ calls.window | the call window, opened and closed by the sync with the session o
 calls.raised_for | the ringing call id whose call window was raised once; calls are process-wide (one call at a time across accounts)
 calls.sounds * | the call sound output and the loop playing; what a call has already played is the screen's (`call_screen.sound_marks`)
 background.clients * | the accounts running in the background, each with its key: the ids inside are that client's
-background.screen_preparing | how many screen clients are being prepared
+background.screen_workers | the workers preparing a screen client, each held by its own claim: the process's, before any account is on screen
 background.generation | which background start may land
 background.poll | the background poll task; dropping it ends the loop
 background.prepare | the accounts whose database key is being read, by key, and the workers still running

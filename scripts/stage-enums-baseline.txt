@@ -40,7 +40,6 @@ bare:CodeLanguageStage::Opening 1
 bare:CollectionsFetch::Loading 1
 bare:ConferenceKey::Joining 1
 bare:ConferenceStage::Running 1
-bare:ConnectStage::Connecting 1
 bare:ContactNote::Waiting 1
 bare:CreateProgress::InFlight 1
 bare:Decoding::Running 1

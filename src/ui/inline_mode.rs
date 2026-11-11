@@ -191,7 +191,7 @@ impl QuillApp {
         // TGX: the first inline use in a secret chat shows the privacy
         // alert before any query is sent. The banner renders while the
         // stash is set; confirming re-syncs (the text is already there).
-        if self.open_chat_is_secret() && !self.composer_ui.inline_bot_alert_shown {
+        if self.open_chat_is_secret() && !self.screen.inline_bot.is_confirmed() {
             if !self.chat_ui.bot_alert.is_pending() {
                 self.chat_ui.bot_alert = BotAlert::Typed;
             }

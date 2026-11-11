@@ -844,3 +844,49 @@ fn a_background_accounts_failed_preparation_does_not_toast_the_screen(cx: &mut T
         );
     });
 }
+
+/// 09-003: a Send held for a photo edit goes with that render, and a tray
+/// that lost the rendering photo never lets a later render revive it.
+#[test]
+fn a_held_send_holds_only_while_its_render_runs() {
+    use crate::ui::composer_sends::{PendingSend, SendOnce};
+    let mut send = PendingSend::default();
+    send.attachments.push(photo("held-a.png"));
+    send.attachments[0].extras.begin_render(7);
+    assert!(send.hold_send("caption".into(), SendOnce::default()));
+    assert!(send.send_is_held());
+    let landed = send
+        .end_render(7, Some(std::path::Path::new("/tmp/held-a-edited.png")))
+        .expect("the render is in the tray");
+    assert_eq!(
+        landed.held.map(|(text, _)| text),
+        Some("caption".to_string()),
+        "the last render lands the held send"
+    );
+    assert!(!send.send_is_held());
+
+    // The rendering photo is removed: nothing holds, and the entry can go.
+    let mut send = PendingSend::default();
+    send.attachments.push(photo("held-b.png"));
+    send.attachments[0].extras.begin_render(8);
+    assert!(send.hold_send("gone".into(), SendOnce::default()));
+    send.attachments.clear();
+    assert!(!send.send_is_held());
+    // A render started later is not the one the Send waited on.
+    send.attachments.push(photo("held-c.png"));
+    send.attachments[0].extras.begin_render(9);
+    assert!(!send.send_is_held(), "no revival by another render");
+}
+
+/// A failed render drops the Send held on it: the unedited photo never goes.
+#[test]
+fn a_failed_render_drops_the_held_send() {
+    use crate::ui::composer_sends::{PendingSend, SendOnce};
+    let mut send = PendingSend::default();
+    send.attachments.push(photo("held-d.png"));
+    send.attachments[0].extras.begin_render(3);
+    assert!(send.hold_send("text".into(), SendOnce::default()));
+    let landed = send.end_render(3, None).expect("the render is in the tray");
+    assert!(landed.held.is_none());
+    assert!(!send.send_is_held());
+}
