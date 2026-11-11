@@ -96,6 +96,8 @@ pub(super) struct EmojiStyleUi {
     /// Sets whose pack is installed.
     ready: HashSet<EmojiSetId>,
     stage: SetStage,
+    /// The latest write of the choice; the next one waits for it.
+    save_task: Option<Task<()>>,
     /// Reading the saved choice at startup.
     startup_task: Option<Task<()>>,
     /// "Install from file…": the task, and why the last file was refused.
@@ -285,10 +287,17 @@ impl QuillApp {
                     // The choice is saved off the UI thread, and only by the
                     // switch still in place: an older one never writes over
                     // a newer choice.
-                    cx.background_spawn(async move {
+                    // Saves run one after another, in the order the
+                    // switches were applied, so a quick A then B never
+                    // ends with A on disk.
+                    let state = &mut this.preferences.emoji_style;
+                    let earlier = state.save_task.take();
+                    state.save_task = Some(cx.background_spawn(async move {
+                        if let Some(earlier) = earlier {
+                            earlier.await;
+                        }
                         let _ = save_current(&saved_root, id);
-                    })
-                    .detach();
+                    }));
                     this.apply_emoji_state(loaded, cx);
                 } else if after_download {
                     // A pack that was just installed and still does not load
@@ -336,7 +345,13 @@ impl QuillApp {
                 cx.background_executor()
                     .timer(Duration::from_millis(120))
                     .await;
-                let _ = this.update(cx, |_, cx| cx.notify());
+                // Progress is drawn only by the open box: a download that
+                // goes on behind a closed one redraws nothing.
+                let _ = this.update(cx, |this, cx| {
+                    if this.preferences.emoji_style.open {
+                        cx.notify();
+                    }
+                });
             }
             let result = worker.await;
             let _ = this.update(cx, |this, cx| {

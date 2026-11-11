@@ -5464,3 +5464,75 @@ land and the typed form was gone.
 - **Skipped.** 13-069: `AgentUi::pick_account` already resets the activity
   filter wherever `picked` changes, with a test
   (`picking_another_account_resets_the_activity_filter`).
+
+### Sweep fixes (s4-messages-2)
+
+Minor entries of the messages area, proved one by one.
+
+- **Sends and the composer.** The reader's saved scroll and the recent
+  hashtags are noted by `note_message_leaving`, called where a send has
+  passed every refusal (slow mode, rights, size, the paid box) and goes out,
+  not when Send is pressed (08-137). Delete confirm dissolves the message
+  only when the delete went out (08-138). A bot's Restart after Unblock
+  sends `/start` only when the unblock request went out (08-010). The
+  attach picker's answer waits for the unlock instead of filling the tray
+  while locked (08-141).
+- **Composer boxes are the chat's.** The link, date and Code Language boxes
+  are fields of `ChatUi`, so a chat or topic change replaces them and Save
+  cannot apply a range to another chat's draft (08-140, 08-154). "Send as a
+  document" for an edit's replacement file is a field of the edit
+  (`EditMode::replace_as_file`), so it ends with the edit and another edit
+  starts without it (02-092).
+- **ChatUi of a closed chat.** `sync_chat_ui` replaces the value when the
+  reducer closed the chat (removed, left), so reopening it brings no old
+  bars (08-106).
+- **Menus and keys.** `open_submenu` reads the chat list's and the
+  community's menus only in the main window, so an arrow key in a chat
+  window's message menu does not close the main window's submenu
+  (09-X004). The reactor tab a chip's menu asked for is dropped when the
+  next menu opens, so it cannot outlive its menu (11-p3-010). Copy Option
+  Link and Delete Item say when the request could not be sent (11-p3-012).
+  Save to Saved Messages tells a connected account whose id or draft is
+  missing from the demo (11-p3-009). A failed reactor tab or viewer list is
+  drawn with a Retry row (11-p3-011; `menu_audience_page.rs` is split out).
+- **Boxes and links.** The wallpaper file picker's answer applies only to
+  the chat look box that asked (`LookTarget`, 08-097). An Add-bot or
+  Share-game link does not replace an open profile box (Edit Contact,
+  Birthday ...) and says to close it first (08-013).
+- **Join requests.** "Show more" is disabled while a page is on its way
+  and a send that cannot go out is a status note (08-060).
+- **History.** `scroll_view_probe` resets with `scroll_top_probe` when the
+  history key changes (09-005).
+- **Emoji.** Closing the emoji packs box bumps the search keystroke, so a
+  search waiting on its pause does not go out (09-078, 09-X039; the field is
+  already cleared on open). Download progress notifies only while the
+  Choose emoji set box is open (09-X044). Saves of the chosen set run in a
+  chain, in the order the switches were applied (09-088).
+- **Inline mode.** A failed first page is asked again by the next composer
+  event instead of counting as fresh (10-117); closing the results panel
+  bumps the query token (10-118). A sleeping inline player whose file no
+  longer opens becomes `Rest::Stuck` and keeps its still, so no sweep opens
+  it again (10-128).
+- **Message effects.** The badge, replay and waiting registries are emptied
+  when `OnScreen` is replaced (`EffectNotes` guard), so an account switch
+  leaves no entry that could match another account's message (11-p2-016,
+  03-096).
+- **Skipped.** 08-136: a rich send's flag is dropped on its refusal
+  (`apply_sent_text_answer`) and a voice or round video's is set only after
+  the send went out; what is left is a later async send failure, which
+  cannot be tied to the flag without a request-to-message map, and dropping
+  it by slot would resurrect the drafts of later sends. 09-X011: tdesktop's
+  `HistoryWidget::newItemAdded` scrolls to the end for any new outgoing item
+  of the open history, not only for the view that sent it. 09-X007: the
+  dismissed set would need a home every window's view reads; online,
+  `deleteChatReplyMarkup` reaches every window's session through TDLib.
+  10-131: the mark at the attempt is what stops a file outside the sandbox
+  from being tried (and noted) every frame; a download wait plays through
+  the intent. 10-129: `forget` already drops `on_demand` with the players;
+  the other window's scale only sizes the decode. 10-120: the Started stage
+  ends when the user leaves the bot's chat, and the scan is over the loaded
+  messages only. 11-p2-011: already fixed by f86e9e7c (`MenuActions` keyed
+  by chat and message). 11-p2-010: the reaction options and the paid offer
+  are keyed by chat and message, and each menu opens by asking its own, so
+  a stale value never applies to another message. 11-p3-003: already
+  `EffectLookup` with `forget_dropped` (a lost answer is asked again).
