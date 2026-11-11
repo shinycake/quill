@@ -374,16 +374,7 @@ impl QuillApp {
                 }
             });
         }
-        let sticker = greeting_pick(
-            session
-                .stickers
-                .stickers
-                .greeting
-                .data()
-                .map_or(&[][..], Vec::as_slice),
-            chat.id.0,
-        )?
-        .clone();
+        let sticker = greeting_pick(session.stickers.stickers.greeting.data()?, chat.id.0)?.clone();
         if let Some(file) = sticker.display_file_id()
             && let Some(live) = self.live.as_mut()
         {

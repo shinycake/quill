@@ -52,31 +52,27 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.message_ui.menu = Some(menu);
         // A reactor tab asked for by an earlier menu whose properties never
         // allowed it is not this menu's (a chip's menu sets it after this).
         if let Some(live) = self.live.as_mut() {
             live.driver.session.messages.wanted_reactor_tab = None;
         }
-        self.message_ui.menu_ui.page = super::message_menu_ui::MessageMenuPage::Main;
-        self.message_ui.menu_link = self.take_right_clicked_link(menu.position);
-        self.message_ui.menu_item = self.take_right_clicked_item(menu.position);
+        let link = self.take_right_clicked_link(menu.position);
+        let item = self.take_right_clicked_item(menu.position);
         // Over a poll option the menu shows the option's page.
-        if matches!(
-            self.message_ui.menu_item,
-            quill::composer::ReplyItem::PollOption(_)
-        ) {
-            self.message_ui.menu_ui.page = super::message_menu_ui::MessageMenuPage::PollOption;
-        }
+        let page = if matches!(item, quill::composer::ReplyItem::PollOption(_)) {
+            super::message_menu_state::MessageMenuPage::PollOption
+        } else {
+            super::message_menu_state::MessageMenuPage::Main
+        };
         self.chat_ui.link_tooltip = None;
         // A right-click keeps the text selection; the menu then acts on it
         // (Telegram Desktop's Quote & Reply, Copy Selected Text).
-        self.message_ui.menu_selection_nth = 0;
-        self.message_ui.menu_selection = super::selectable_text::selected_message_text(window, cx)
+        let mut nth = 0;
+        let selected_text = super::selectable_text::selected_message_text(window, cx)
             .filter(|(key, _)| *key == (menu.chat_id.0, menu.message_id.0 as u64))
             .map(|(_, text)| {
-                self.message_ui.menu_selection_nth =
-                    super::selectable_text::selected_occurrence(window, cx, text.trim());
+                nth = super::selectable_text::selected_occurrence(window, cx, text.trim());
                 text
             })
             // A widget's selection lives in its runtime (`widgets_ui.rs`).
@@ -87,7 +83,16 @@ impl QuillApp {
                 };
                 self.widget_selection(key).map(str::to_owned)
             });
-        self.message_ui.reactions_expanded = false;
+        self.message_ui.menu =
+            super::message_menu_state::MessageMenu::Open(super::message_menu_state::OpenMenu {
+                at: menu,
+                selection: selected_text
+                    .map(|text| super::message_menu_state::MenuSelection { text, nth }),
+                link,
+                item,
+                page,
+                reactions_expanded: false,
+            });
         if let Some(live) = self.live.as_mut() {
             let _ = live
                 .driver
@@ -96,9 +101,8 @@ impl QuillApp {
                 .driver
                 .fetch_message_menu_actions(menu.chat_id, menu.message_id);
             // A poll option has its own menu facts.
-            if let quill::composer::ReplyItem::PollOption(option_id) =
-                &self.screen.message_ui.menu_item
-            {
+            let menu_item = self.screen.message_ui.menu.item();
+            if let quill::composer::ReplyItem::PollOption(option_id) = &menu_item {
                 let _ = live.driver.fetch_poll_option_properties(
                     menu.chat_id,
                     menu.message_id,
@@ -129,7 +133,7 @@ impl QuillApp {
                     let _ = live.driver.fetch_sticker_menu_facts();
                 }
                 Some(quill::telegram::envelope::MessageContent::Animation(_))
-                    if !live.driver.session.stickers.gifs.saved.loaded() =>
+                    if !live.driver.session.stickers.gifs.loaded() =>
                 {
                     let _ = live.driver.show_saved_gifs();
                 }
@@ -167,7 +171,7 @@ impl QuillApp {
     /// window's own message menu, and in the main window the chat menu.
     pub(super) fn close_context_menus(&mut self, cx: &mut Context<Self>) -> bool {
         let chat_menu = !self.windows.in_window() && self.chat_list.menu.is_some();
-        if self.message_ui.menu.is_none() && !chat_menu {
+        if !self.message_ui.menu.is_open() && !chat_menu {
             return false;
         }
         self.close_message_menu();
@@ -573,7 +577,7 @@ impl QuillApp {
             .flex_col()
             .px_1()
             .py_1();
-        if !self.message_ui.reactions_expanded {
+        if !self.message_ui.menu.reactions_expanded() {
             let mut row = div().flex().items_center().gap(px(2.));
             for (ix, choice) in options.top.iter().take(7).enumerate() {
                 let chosen = message.chosen_reaction(choice);
@@ -618,7 +622,7 @@ impl QuillApp {
                                         .ready_for(chat_id, message_id)
                                 })
                                 .is_some_and(|o| o.allow_custom_emoji);
-                            let position = this.message_ui.menu.map(|menu| menu.position);
+                            let position = this.message_ui.menu.at().map(|menu| menu.position);
                             match position {
                                 Some(position) if custom => {
                                     this.open_reaction_selector(
@@ -626,7 +630,7 @@ impl QuillApp {
                                     );
                                 }
                                 _ => {
-                                    this.message_ui.reactions_expanded = true;
+                                    this.message_ui.menu.expand_reactions();
                                     cx.notify();
                                 }
                             }

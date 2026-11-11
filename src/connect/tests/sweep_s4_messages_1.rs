@@ -219,8 +219,8 @@ fn a_mask_list_asked_before_a_change_does_not_land_after_it() {
         {"@type":"stickerSetInfo","id":"3","size":1,"is_installed":true}]}),
     );
     let masks = &t.driver.session.stickers.masks;
-    assert!(!masks.installed_loaded);
-    assert!(masks.installed.is_empty());
+    assert!(masks.installed.is_idle());
+    assert!(masks.installed.items().is_empty());
 }
 
 #[test]
@@ -360,19 +360,21 @@ fn the_reply_bar_copy_shows_an_edit_and_the_oldest_copy_is_the_one_dropped() {
 }
 
 #[test]
-fn each_create_gets_its_own_start_number_and_a_reset_keeps_the_count() {
+fn each_create_gets_its_own_generation_and_a_reset_never_reuses_one() {
     let mut t = Flaky::new();
-    let starts = |t: &Flaky| t.driver.session.bots.owned.create.starts;
-    let before = starts(&t);
+    let generation = |t: &Flaky| t.driver.session.bots.owned.create.generation;
+    let before = generation(&t);
     t.driver
-        .create_managed_bot(900, "A", "a_bot", false)
+        .create_managed_bot(900, "A", "a_bot", false, None)
         .unwrap();
-    let first = starts(&t);
+    let first = generation(&t);
     assert_eq!(first, before + 1);
     t.driver
-        .create_managed_bot(900, "B", "b_bot", false)
+        .create_managed_bot(900, "B", "b_bot", false, None)
         .unwrap();
-    assert_eq!(starts(&t), first + 1);
+    assert_eq!(generation(&t), first + 1);
+    // The older create's answer finds a newer submission and drops.
     t.driver.reset_create_bot();
-    assert_eq!(starts(&t), first + 1);
+    assert_eq!(generation(&t), first + 2);
+    assert!(!t.driver.session.bots.owned.create.creating());
 }

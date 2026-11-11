@@ -27,33 +27,129 @@ struct Toast {
 #[derive(Clone, Debug)]
 struct Showing {
     toast: Toast,
-    /// Time left when the timer last stopped (or the full duration).
-    remaining: Duration,
-    /// Set while the timer runs; `None` while hovered.
-    running_since: Option<Instant>,
+    timer: Timer,
+}
+
+/// The visible toast's time: running, or stopped while hovered.
+#[derive(Clone, Copy, Debug)]
+enum Timer {
+    /// Ticking since `since`, with `left` left at that moment.
+    Running { left: Duration, since: Instant },
+    /// Stopped with `left` left.
+    Paused { left: Duration },
+}
+
+/// Whether the pointer is over the toast slot.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Pointer {
+    #[default]
+    Away,
+    Over,
 }
 
 impl Showing {
     fn left(&self, now: Instant) -> Duration {
-        match self.running_since {
-            Some(since) => self
-                .remaining
-                .saturating_sub(now.saturating_duration_since(since)),
-            None => self.remaining,
+        match self.timer {
+            Timer::Running { left, since } => {
+                left.saturating_sub(now.saturating_duration_since(since))
+            }
+            Timer::Paused { left } => left,
         }
     }
 }
 
+/// The current status note, the toasts it feeds and the wake-up scheduled
+/// for the visible one: one value, so a note, its toast and its timer end
+/// together.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ToastQueue {
+    /// The current note. Every write names its kind through
+    /// [`Self::set_note_in`], so a toast never depends on the words.
+    note: StatusNote,
+    /// The deadline a wake-up is already scheduled for.
+    wake: Option<Instant>,
     showing: Option<Showing>,
     waiting: VecDeque<Toast>,
-    /// The pointer is over the toast slot: the next toast starts paused too,
+    /// The pointer over the toast slot: the next toast starts paused too,
     /// since the pointer has not left.
-    hovered: bool,
+    pointer: Pointer,
 }
 
 impl ToastQueue {
+    /// A queue whose current note is `note` and nothing toasts.
+    pub(crate) fn with_note(note: StatusNote) -> Self {
+        Self {
+            note,
+            ..Self::default()
+        }
+    }
+
+    /// The current note.
+    pub(crate) fn note(&self) -> &StatusNote {
+        &self.note
+    }
+
+    /// Replaces the current note, toasting in the window `host` (`None`: the
+    /// main window). Progress chatter ([`NoteKind::Silent`]) never replaces a
+    /// note the toast still shows, so "pinned" or "sending" cannot wipe an
+    /// unread failure; the toast's own timer clears that one.
+    // note-host: the queue's own write; `ConnectionUi::set_note_in` passes the window the Asker named.
+    pub(crate) fn set_note_in(&mut self, note: StatusNote, host: Option<ChatId>, now: Instant) {
+        if note.kind() == NoteKind::Silent && self.note.is_toast() {
+            return;
+        }
+        self.push_in(note.clone(), host, now);
+        self.note = note;
+    }
+
+    /// Drops the current note and its toasts.
+    pub(crate) fn clear_note(&mut self) {
+        *self = Self {
+            wake: self.wake,
+            ..Self::default()
+        };
+    }
+
+    /// Drops queued toasts without touching the current note: the footer
+    /// line shows that note while there is no session.
+    pub(crate) fn drop_toasts(&mut self) {
+        *self = Self::with_note(std::mem::take(&mut self.note));
+    }
+
+    /// Advances the timers to `now`, and drops the current note once its
+    /// toast is over so the same message set again shows again.
+    pub(crate) fn advance(&mut self, now: Instant) {
+        self.tick(now);
+        if self.note.is_toast() && !self.holds(&self.note) {
+            self.note = StatusNote::default();
+        }
+    }
+
+    /// The deadline a new wake-up must be scheduled for, if the visible
+    /// toast's has moved since the last one.
+    pub(crate) fn rewake(&mut self, now: Instant) -> Option<Instant> {
+        let deadline = self.deadline(now);
+        if deadline == self.wake {
+            return None;
+        }
+        self.wake = deadline;
+        deadline
+    }
+
+    /// The wake-up for `deadline` fired.
+    pub(crate) fn woke(&mut self, deadline: Instant) {
+        if self.wake == Some(deadline) {
+            self.wake = None;
+        }
+    }
+
+    /// A click on the toast: it goes, the next one comes, and its timer's
+    /// wake-up is no longer wanted.
+    pub(crate) fn dismiss_by_click(&mut self, now: Instant) {
+        self.dismiss(now);
+        self.wake = None;
+    }
+
     /// Queues a note for the main window.
     #[cfg(test)]
     pub(crate) fn push(&mut self, note: StatusNote, now: Instant) {
@@ -74,10 +170,14 @@ impl ToastQueue {
             return;
         };
         if showing.toast == toast {
-            showing.remaining = toast.note.toast_duration();
-            if showing.running_since.is_some() {
-                showing.running_since = Some(now);
-            }
+            let full = toast.note.toast_duration();
+            showing.timer = match showing.timer {
+                Timer::Running { .. } => Timer::Running {
+                    left: full,
+                    since: now,
+                },
+                Timer::Paused { .. } => Timer::Paused { left: full },
+            };
             return;
         }
         if self.waiting.back() == Some(&toast) {
@@ -143,7 +243,7 @@ impl ToastQueue {
         self.showing = None;
         match self.waiting.pop_front() {
             Some(next) => self.show(next, now),
-            None => self.hovered = false,
+            None => self.pointer = Pointer::Away,
         }
     }
 
@@ -155,13 +255,15 @@ impl ToastQueue {
         let Some(showing) = self.showing.as_mut() else {
             return;
         };
-        self.hovered = hovered;
-        match (hovered, showing.running_since) {
-            (true, Some(_)) => {
-                showing.remaining = showing.left(now);
-                showing.running_since = None;
-            }
-            (false, None) => showing.running_since = Some(now),
+        self.pointer = if hovered {
+            Pointer::Over
+        } else {
+            Pointer::Away
+        };
+        let left = showing.left(now);
+        match (hovered, showing.timer) {
+            (true, Timer::Running { .. }) => showing.timer = Timer::Paused { left },
+            (false, Timer::Paused { .. }) => showing.timer = Timer::Running { left, since: now },
             _ => {}
         }
     }
@@ -170,11 +272,11 @@ impl ToastQueue {
     /// none, or its window went): a hover that never ends would pause it for
     /// good and queue every later toast behind it.
     pub(crate) fn pointer_gone(&mut self, now: Instant) {
-        self.hovered = false;
+        self.pointer = Pointer::Away;
         if let Some(showing) = self.showing.as_mut()
-            && showing.running_since.is_none()
+            && let Timer::Paused { left } = showing.timer
         {
-            showing.running_since = Some(now);
+            showing.timer = Timer::Running { left, since: now };
         }
     }
 
@@ -191,7 +293,9 @@ impl ToastQueue {
     /// When the visible toast ends, or `None` while paused or empty.
     pub(crate) fn deadline(&self, now: Instant) -> Option<Instant> {
         let showing = self.showing.as_ref()?;
-        showing.running_since?;
+        let Timer::Running { .. } = showing.timer else {
+            return None;
+        };
         let left = showing.left(now);
         if left.is_zero() {
             return None;
@@ -211,9 +315,12 @@ impl ToastQueue {
     }
 
     fn show(&mut self, toast: Toast, now: Instant) {
+        let left = toast.note.toast_duration();
         self.showing = Some(Showing {
-            remaining: toast.note.toast_duration(),
-            running_since: (!self.hovered).then_some(now),
+            timer: match self.pointer {
+                Pointer::Away => Timer::Running { left, since: now },
+                Pointer::Over => Timer::Paused { left },
+            },
             toast,
         });
     }
@@ -418,5 +525,43 @@ mod tests {
         let mut queue = ToastQueue::default();
         queue.push(StatusNote::info("Copied"), t0);
         assert_eq!(queue.deadline(secs(t0, 60)), None);
+    }
+
+    #[test]
+    fn the_note_its_toast_and_its_wake_end_together() {
+        let t0 = Instant::now();
+        let mut queue = ToastQueue::default();
+        queue.set_note_in(StatusNote::error("boom"), None, t0);
+        assert_eq!(queue.note().text(), "boom");
+        // A wake-up is wanted once for the visible toast's deadline.
+        let deadline = queue.rewake(t0);
+        assert!(deadline.is_some());
+        assert_eq!(queue.rewake(t0), None, "already scheduled");
+        // Progress chatter does not replace a note its toast still shows.
+        queue.set_note_in(StatusNote::silent("sending"), None, t0);
+        assert_eq!(queue.note().text(), "boom");
+        // The toast's time is up: the note goes with it, and so does the wake.
+        queue.advance(secs(t0, 60));
+        assert!(queue.note().text().is_empty());
+        assert_eq!(queue.rewake(secs(t0, 60)), None);
+        // A click sends the toast and its wake-up away at once.
+        queue.set_note_in(StatusNote::error("again"), None, secs(t0, 61));
+        let later = queue.rewake(secs(t0, 61));
+        assert!(later.is_some());
+        queue.dismiss_by_click(secs(t0, 62));
+        assert_eq!(queue.visible(), None);
+        queue.woke(later.expect("a wake"));
+    }
+
+    #[test]
+    fn dropping_toasts_keeps_the_note_the_footer_shows() {
+        let t0 = Instant::now();
+        let mut queue = ToastQueue::default();
+        queue.set_note_in(StatusNote::error("boom"), None, t0);
+        queue.drop_toasts();
+        assert_eq!(queue.note().text(), "boom");
+        assert_eq!(queue.visible(), None);
+        queue.clear_note();
+        assert!(queue.note().text().is_empty());
     }
 }

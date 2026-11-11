@@ -69,7 +69,10 @@ fn a_paused_track_ticks_only_when_something_could_change(cx: &mut TestAppContext
     let vcx = &mut vcx;
     app.update(vcx, |app, cx| app.spawn_playback_tick(cx));
     assert!(
-        app.read_with(vcx, |app, _| app.playback.tick),
+        app.read_with(vcx, |app, _| matches!(
+            app.playback.tick,
+            crate::ui::playback_state::PlaybackTick::Running { .. }
+        )),
         "the tick runs"
     );
     passes_over(vcx, 2).assert_passes(7, 10, "in 2 s playing");

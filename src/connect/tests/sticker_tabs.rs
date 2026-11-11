@@ -734,7 +734,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
     let mut driver = ready_driver(&recorder, prepared, &sink, &seq);
     let saved = driver.open_gif_panel().unwrap().unwrap();
     driver.search_gifs("before bot option", None).unwrap();
-    assert!(driver.session.stickers.gifs.search.failed());
+    assert!(driver.session.stickers.gifs.search_failed());
     driver
         .ingest(
             copy_and_parse(
@@ -746,8 +746,8 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.gifs.saved.loaded());
-    assert!(driver.session.stickers.gifs.search.failed()); // Saved loading must not hide a search failure.
+    assert!(driver.session.stickers.gifs.loaded());
+    assert!(driver.session.stickers.gifs.search_failed()); // Saved loading must not hide a search failure.
     driver.ingest(copy_and_parse(&json!({"@type":"updateOption","name":"animation_search_bot_username","value":{"@type":"optionValueString","value":"gif"}}).to_string(),&seq,&sink).unwrap()).unwrap();
     let count_saved = || {
         recorder
@@ -842,7 +842,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(!driver.session.stickers.gifs.saved.loaded());
+    assert!(!driver.session.stickers.gifs.loaded());
     driver
         .ingest(
             copy_and_parse(
@@ -866,8 +866,8 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert_eq!(driver.session.stickers.gifs.saved.items().len(), 1);
-    assert!(driver.session.stickers.gifs.saved.failed());
+    assert_eq!(driver.session.stickers.gifs.animations.len(), 1);
+    assert!(driver.session.stickers.gifs.failed());
     let remove = driver.set_gif_saved(FileId(9), false).unwrap().unwrap();
     driver
         .ingest(
@@ -905,7 +905,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.gifs.saved.stale());
+    assert!(driver.session.stickers.gifs.stale);
     assert!(driver.open_gif_panel().unwrap().is_some());
     let failed_fetch = sent_request(&recorder, "getSavedAnimations")["@extra"].clone();
     driver
@@ -919,7 +919,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.gifs.saved.failed());
+    assert!(driver.session.stickers.gifs.failed());
     let count = count_saved();
     driver
         .ingest(
@@ -958,7 +958,7 @@ fn gif_search_pages_and_saved_mutations_use_current_confirmed_state() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.stickers.gifs.saved.items().is_empty());
+    assert!(driver.session.stickers.gifs.animations.is_empty());
     driver.search_gifs("", None).unwrap();
     let old_page = sent_request(&recorder, "getInlineQueryResults")["@extra"].clone();
     driver.ingest(copy_and_parse(&json!({"@type":"updateOption","name":"animation_search_bot_username","value":{"@type":"optionValueString","value":"othergif"}}).to_string(),&seq,&sink).unwrap()).unwrap();

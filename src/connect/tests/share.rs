@@ -98,8 +98,7 @@ fn forwarding_to_two_chats_keeps_both_results_and_options() {
         .expect("cy result");
     assert_eq!(second.dest_title, "Cy");
     assert_eq!(second.from_chat_id, ChatId(7));
-    assert!(driver.session.messages.queued_forward_flights.is_empty());
-    assert!(driver.session.messages.in_flight_forward.is_none());
+    assert!(driver.session.messages.forward_flights.is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }
 

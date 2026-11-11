@@ -195,7 +195,7 @@ impl QuillApp {
                         &entities,
                         (call_id, message.message_id as u64),
                         false,
-                        &self.message_ui.spoiler_revealed,
+                        &self.message_ui.revealed,
                         px(TEXT_SIZE),
                         &emoji,
                         cx,

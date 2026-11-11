@@ -249,7 +249,7 @@ impl QuillApp {
         }
         let step = buy.step;
         let is_self = buy.recipient.is_self;
-        let sending = buy.sending;
+        let sending = buy.sending();
         let action = match (step, price) {
             (_, None) => Button::new("resale-buy-next")
                 .label(tr(keys::Q_MONEY_NOT_FOR_SALE))

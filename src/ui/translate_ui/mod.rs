@@ -28,7 +28,7 @@ use quill::translate::{
     offer_language, replace_content_text, search_languages, tracking_enabled, translatable_content,
 };
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -88,9 +88,6 @@ pub(super) struct TranslateDialog {
     /// The request the box waits on: a selection's `translateText` job.
     pub(super) ask: TranslateAsk,
     pub(super) original_expanded: bool,
-    /// Chooser opened from the bar menu: close it after a pick instead of
-    /// returning to the box.
-    pub(super) close_after_choose: bool,
     pub(super) note: Option<String>,
     pub(super) search: Entity<TextareaState>,
     _search_subscription: Subscription,
@@ -322,7 +319,6 @@ impl QuillApp {
             to,
             ask: TranslateAsk::Idle,
             original_expanded: false,
-            close_after_choose: false,
             note: None,
             search,
             _search_subscription: subscription,
@@ -408,10 +404,8 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A chooser with no box under it (no source) closes after a pick.
         self.new_translate_dialog(TranslateView::ChooseTo, None, to, window, cx);
-        if let Some(dialog) = self.translate.dialog.as_mut() {
-            dialog.close_after_choose = true;
-        }
         cx.notify();
     }
 
@@ -479,7 +473,7 @@ impl QuillApp {
             return;
         };
         dialog.to = code;
-        if dialog.close_after_choose {
+        if dialog.view == TranslateView::ChooseTo && dialog.source.is_none() {
             self.translate.dialog = None;
         } else {
             dialog.view = TranslateView::Box;
@@ -657,7 +651,7 @@ impl QuillApp {
             .is_some_and(|s| s.chat_has_protected_content(chat_id));
         let long = original.chars().count() > LONG_ORIGINAL || original.contains('\n');
         let collapsed = long && !dialog.original_expanded;
-        let seen: HashSet<(i64, u64, u64, bool)> = HashSet::new();
+        let seen = crate::ui::message_text::revealed::Revealed::default();
         let no_emoji = HashMap::new();
 
         let mut original_box =

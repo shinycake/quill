@@ -15,20 +15,33 @@ use quill::platform::SecretStore;
 use quill::telegram::envelope::AuthorizationState;
 use std::sync::Arc;
 
-/// Startup connect classification for the status bar (no secrets).
-#[derive(Clone, PartialEq, Eq)]
-pub enum ConnectUiStatus {
+/// Where the startup connection stands while there is no client to ask
+/// (no secrets): one value, so the pane and the authorization card it draws
+/// cannot disagree.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConnectStage {
+    /// The client is being prepared and opened.
+    Connecting,
+    /// No API credentials: the synthetic pane.
     NeedCredentials,
-    Blocked,
-    /// Synthetic WaitPhoneNumber surface for screenshot proof (no live TDLib).
-    DemoWaitPhone,
-    /// Synthetic WaitCode surface for screenshot proof (no live TDLib).
-    DemoWaitCode,
-    /// Synthetic WaitPassword surface for screenshot proof (no live TDLib).
-    DemoWaitPassword,
-    /// Injected Ready + main chat list (no live Telegram).
-    DemoReadyChats,
-    Live,
+    /// The client could not start: the card says why, with Retry.
+    Blocked(StartupFailure),
+    /// An authorization state shown by the card: a screenshot demo's
+    /// injected surface (no live TDLib), or the state a client left.
+    Shown(AuthorizationState),
+}
+
+impl ConnectStage {
+    /// The authorization state the card draws while no client or demo
+    /// session answers for it.
+    pub fn auth(&self) -> AuthorizationState {
+        match self {
+            Self::Connecting => AuthorizationState::WaitTdlibParameters,
+            Self::NeedCredentials => AuthorizationState::WaitPhoneNumber,
+            Self::Blocked(failure) => AuthorizationState::StartupFailed(failure.clone()),
+            Self::Shown(auth) => auth.clone(),
+        }
+    }
 }
 
 /// A first connection's preparation: the folders the startup sweep deleted
@@ -129,8 +142,7 @@ impl super::app::QuillApp {
         self.connect.generation += 1;
         let generation = self.connect.generation;
         let credentials = self.credentials.clone();
-        self.connection.status = ConnectUiStatus::Live;
-        self.auth_demo.demo_state = AuthorizationState::WaitTdlibParameters;
+        self.auth_demo.stage = ConnectStage::Connecting;
         self.set_note(StatusNote::silent(tr(keys::Q_MISC_CONNECTING_TO_TELEGRAM)));
         // The first connection of the run first deletes folders an earlier
         // run left for deletion (it quit before their clients had closed).
@@ -196,9 +208,8 @@ impl super::app::QuillApp {
                             // Its old client's close can't be confirmed in
                             // this run: never open the database again, and
                             // say so instead of staying on Connecting.
-                            this.auth_demo.demo_state =
-                                AuthorizationState::StartupFailed(StartupFailure::CloseUnconfirmed);
-                            this.connection.status = ConnectUiStatus::Blocked;
+                            this.auth_demo.stage =
+                                ConnectStage::Blocked(StartupFailure::CloseUnconfirmed);
                             this.connection.clear_note();
                             cx.notify();
                             return false;
@@ -274,13 +285,11 @@ impl super::app::QuillApp {
             Err(blocker) => match blocker.startup_failure() {
                 Some(failure) => {
                     eprintln!("quill: no client: {}", blocker.user_message());
-                    self.auth_demo.demo_state = AuthorizationState::StartupFailed(failure);
-                    self.connection.status = ConnectUiStatus::Blocked;
+                    self.auth_demo.stage = ConnectStage::Blocked(failure);
                     self.connection.clear_note();
                 }
                 None => {
-                    self.auth_demo.demo_state = AuthorizationState::WaitPhoneNumber;
-                    self.connection.status = ConnectUiStatus::NeedCredentials;
+                    self.auth_demo.stage = ConnectStage::NeedCredentials;
                     self.set_note(StatusNote::error(blocker.user_message()));
                 }
             },

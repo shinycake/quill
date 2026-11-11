@@ -76,7 +76,7 @@ pub(super) fn sponsored_message_row(
     files: &quill::state::FileMap,
     downloading: &quill::state::DownloadIntents,
     media_roots: &[PathBuf],
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &crate::ui::message_text::revealed::Revealed,
     // Settings → Appearance: font size + bubble/plain style.
     look: BubbleLook,
     cx: &mut Context<QuillApp>,
@@ -338,7 +338,7 @@ impl QuillApp {
         let report = session
             .messages
             .sponsored_report
-            .picking()
+            .flight()
             .cloned()
             .filter(|flight| spot.report && flight.chat_id == chat_id);
         let outcome = session
@@ -422,7 +422,7 @@ impl QuillApp {
                 files,
                 downloading,
                 &media_roots,
-                &self.message_ui.spoiler_revealed,
+                &self.message_ui.revealed,
                 look,
                 cx,
             );
@@ -583,7 +583,7 @@ impl QuillApp {
     pub(super) fn pick_sponsored_report_option(&mut self, option_id: &str, cx: &mut Context<Self>) {
         let Some(flight) = self
             .session()
-            .and_then(|s| s.messages.sponsored_report.picking().cloned())
+            .and_then(|s| s.messages.sponsored_report.flight().cloned())
         else {
             return;
         };

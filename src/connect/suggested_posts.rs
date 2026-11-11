@@ -88,7 +88,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .suggested_posts
             .bars
             .get(&chat_id.0)
-            .is_some_and(|bar| bar.send.is_sending())
+            .is_some_and(|bar| bar.send().is_sending())
         {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -116,7 +116,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .bars
                 .get_mut(&chat_id.0)
         {
-            bar.send = BarSend::Sending(request);
+            bar.set_send(BarSend::Sending(request));
         }
         result
     }

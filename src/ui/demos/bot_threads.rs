@@ -6,6 +6,7 @@
 
 use crate::ui::app::QuillApp;
 use crate::ui::bots::apply_ready_bot_chat;
+use crate::ui::composer_sends::SendOnce;
 use crate::ui::screenshot_demo::{DemoSpec, register_demos};
 use gpui_kit::*;
 use quill::ids::ChatId;
@@ -62,6 +63,6 @@ impl QuillApp {
         let text = "Plan a weekend in Lisbon";
         self.composer
             .update(cx, |input, cx| input.set_value(text, window, cx));
-        self.submit_composer(text.to_string(), window, cx);
+        self.submit_composer(text.to_string(), SendOnce::default(), window, cx);
     }
 }

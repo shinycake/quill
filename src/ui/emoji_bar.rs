@@ -461,7 +461,7 @@ impl QuillApp {
             },
             Some(_) => return None,
             None => {
-                let (_, items) = self.composer_ui.emoji_words.hovered.as_ref()?;
+                let (_, items) = self.composer_ui.emoji_words.hovered()?;
                 BarSpec {
                     id: "word-emoji",
                     items,

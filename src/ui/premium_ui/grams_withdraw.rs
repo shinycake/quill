@@ -11,7 +11,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use crate::ui::app::QuillApp;
-use crate::ui::fragment_password::{PasswordBox, SecurityCheck, keep_password_field};
+use crate::ui::fragment_password::{PasswordBox, SecurityCheck, Showing};
 use crate::ui::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
@@ -144,7 +144,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (url, too_small, showing, idle) = match self.grams_mut() {
+        let (url, too_small, field) = match self.grams_mut() {
             Some(grams) => {
                 let showing =
                     grams.open && matches!(grams.withdraw, Some(GramWithdraw::Password { .. }));
@@ -153,23 +153,23 @@ impl QuillApp {
                         .withdraw
                         .as_ref()
                         .is_some_and(GramWithdraw::can_submit);
+                let field = match (showing, idle) {
+                    (false, _) => Showing::Off,
+                    (true, true) => Showing::Idle,
+                    (true, false) => Showing::Sending,
+                };
                 (
                     grams.withdraw_url.take(),
                     std::mem::take(&mut grams.withdraw_too_small),
-                    showing,
-                    idle,
+                    field,
                 )
             }
-            None => (None, false, false, false),
+            None => (None, false, Showing::Off),
         };
-        keep_password_field(
-            &self.screen.payments.grams_withdraw_password,
-            &mut self.screen.payments.grams_withdraw_password_focused,
-            showing,
-            idle,
-            window,
-            cx,
-        );
+        self.screen
+            .payments
+            .grams_withdraw_password
+            .keep(field, window, cx);
         if let Some(url) = url {
             self.open_fragment_url(&url, cx);
             cx.notify();

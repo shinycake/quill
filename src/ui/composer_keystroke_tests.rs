@@ -61,7 +61,7 @@ fn a_keystroke_leaves_the_text_the_previous_text_and_the_draft_in_step(cx: &mut 
         assert_eq!(composer_text(&app, vcx), expected);
         let (prev, draft) = app.read_with(vcx, |app, _| {
             (
-                app.composer_ui.prev_text.clone(),
+                app.composer_ui.echo.prev().clone(),
                 app.session()
                     .and_then(|session| session.draft_for(OPEN, Default::default()))
                     .map(|draft| draft.text().to_string()),
@@ -95,7 +95,7 @@ fn an_emoji_keystroke_keeps_the_text_and_the_previous_text_in_step(cx: &mut Test
     focus_composer(&app, vcx);
     vcx.simulate_input("ok \u{1f600}");
     assert_eq!(composer_text(&app, vcx), "ok \u{1f600}");
-    let prev = app.read_with(vcx, |app, _| app.composer_ui.prev_text.clone());
+    let prev = app.read_with(vcx, |app, _| app.composer_ui.echo.prev().clone());
     assert_eq!(prev, "ok \u{1f600}");
 }
 
@@ -114,7 +114,7 @@ fn a_spell_check_result_redraws_only_the_composer(cx: &mut TestAppContext) {
     vcx.update(|window, cx| window.draw(cx).clear(cx));
     let underlined = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
         app.read_with(vcx, |app, _| {
-            !app.composer_ui.spelling.misspellings.is_empty()
+            !app.composer_ui.spelling.underlines.found.is_empty()
         })
     };
     assert!(!underlined(&app, vcx), "the check waits for the pause");

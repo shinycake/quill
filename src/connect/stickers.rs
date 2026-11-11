@@ -95,17 +95,19 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// B11: the hello stickers an empty private chat offers
     /// (`getGreetingStickers`), asked once per session.
     pub fn fetch_greeting_stickers(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
-        // One attempt per session: a failure must not retry on every frame.
+        // One attempt per session: asked only from `Idle`, so a failure
+        // does not retry on every frame.
         if !self.session.stickers.stickers.greeting.is_idle() {
             return Ok(None);
         }
         let sent = self.sticker_request(RequestPurpose::GetGreetingStickers, |id| {
             crate::telegram::requests::get_greeting_stickers(id)
         });
-        match &sent {
+        // The answer or the error leaves `Loading`; a request that never
+        // went out leaves it here.
+        match sent {
             Ok(Some(_)) => self.session.stickers.stickers.greeting.begin(),
-            Ok(None) => {}
-            Err(_) => self
+            _ => self
                 .session
                 .stickers
                 .stickers
@@ -731,14 +733,12 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         self.session.stickers.gifs.open = true;
-        if self.session.stickers.gifs.saved.failed() {
-            self.session.stickers.gifs.saved.unload();
-        }
-        if self.session.stickers.gifs.search.failed() {
-            self.session.stickers.gifs.search.begin();
+        self.session.stickers.gifs.saved_retry();
+        if self.session.stickers.gifs.search_failed() {
+            self.session.stickers.gifs.search_asked();
         }
         let saved = self.maybe_refresh_saved_animations()?;
-        if self.session.stickers.gifs.search.loading() {
+        if self.session.stickers.gifs.search_loading() {
             Ok(self.maybe_search_gifs(false)?.or(saved))
         } else {
             Ok(saved)
@@ -766,8 +766,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             stickers.trending_stale,
         );
         let emoji = &mut self.session.stickers.emoji;
-        emoji.trending_stale &= emoji.open && emoji.tab == crate::emoji::EmojiSetTab::Trending;
-        let emoji_trending = emoji.trending_stale;
+        // An update of the shown trending tab left its list `Idle`.
+        let emoji_trending = emoji.open
+            && emoji.tab == crate::emoji::EmojiSetTab::Trending
+            && emoji.lists.trending.is_idle();
         let reactions = self.session.stickers.reaction_options_stale;
         if !self.chats_path_active() {
             return Ok(());
@@ -803,7 +805,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if emoji_trending {
             self.select_emoji_set_tab(crate::emoji::EmojiSetTab::Trending)?;
-            self.session.stickers.emoji.trending_stale = false;
         }
         if reactions {
             // With no picker open there is nothing to refetch.
@@ -836,10 +837,12 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        if !self.session.stickers.gifs.saved.wanted() {
+        let needs = !self.session.stickers.gifs.loaded() || self.session.stickers.gifs.stale;
+        if !needs {
             return Ok(None);
         }
-        self.session.stickers.gifs.saved.begin();
+        self.session.stickers.gifs.saved_asked();
+        self.session.stickers.gifs.stale = false;
         let extra = self
             .session
             .request(RequestPurpose::GetSavedAnimations, None);
@@ -847,7 +850,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.stickers.gifs.saved.fail();
+                self.session.stickers.gifs.saved_failed();
                 Err(err)
             }
         }

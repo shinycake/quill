@@ -117,7 +117,7 @@ fn get_contacts_accepts_matching_response() {
     );
     assert!(session.contacts_settled());
     assert_eq!(
-        session.users_state.contacts.as_deref(),
+        session.users_state.contacts.data().map(Vec::as_slice),
         Some([31, 32, 33].as_slice())
     );
     // User 33 never arrived via `updateUser` → no row yet.
@@ -146,7 +146,7 @@ fn get_contacts_error_surfaces_retry() {
             extra.0
         ),
     );
-    assert!(session.users_state.contacts_error);
+    assert!(session.users_state.contacts.error().is_some());
     assert!(session.contacts_settled());
 }
 
@@ -217,7 +217,7 @@ fn add_contact_ok_invalidates_contacts() {
             list_extra.0
         ),
     );
-    assert!(session.users_state.contacts.is_some());
+    assert!(session.users_state.contacts.data().is_some());
     let add_extra = session.request_for_user(RequestPurpose::AddContact, 55);
     apply_json(
         &mut session,
@@ -225,7 +225,7 @@ fn add_contact_ok_invalidates_contacts() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, add_extra.0),
     );
-    assert!(session.users_state.contacts.is_none());
+    assert!(session.users_state.contacts.data().is_none());
 }
 
 #[test]
@@ -235,7 +235,7 @@ fn a6_imported_contacts_response_invalidates_and_notices() {
     // invalidates the list and records the notice.
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.users_state.contacts = Some(vec![31]);
+    session.users_state.contacts = crate::state::fetch::Fetch::Ready(vec![31]);
     let extra = session.request(RequestPurpose::ImportContacts, None);
     apply_json(
         &mut session,
@@ -246,7 +246,7 @@ fn a6_imported_contacts_response_invalidates_and_notices() {
             extra.0
         ),
     );
-    assert!(session.users_state.contacts.is_none());
+    assert!(session.users_state.contacts.data().is_none());
     assert_eq!(
         session.users_state.contacts_notice.as_deref(),
         Some("Contacts imported.")
@@ -267,7 +267,7 @@ fn a6_remove_contact_ok_clears_cached_is_contact() {
         r#"{"@type":"updateUser","user":{"id":31,"first_name":"Ada","last_name":"Lovelace","phone_number":"+15550101031","status":{"@type":"userStatusRecently"},"is_contact":true,"type":{"@type":"userTypeRegular"}}}"#,
     );
     assert!(session.users.get(&31).expect("user").is_contact);
-    session.users_state.contacts = Some(vec![31]);
+    session.users_state.contacts = crate::state::fetch::Fetch::Ready(vec![31]);
     let extra = session.request_for_user(RequestPurpose::RemoveContact, 31);
     apply_json(
         &mut session,
@@ -275,7 +275,7 @@ fn a6_remove_contact_ok_clears_cached_is_contact() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(session.users_state.contacts.is_none());
+    assert!(session.users_state.contacts.data().is_none());
     assert!(!session.users.get(&31).expect("user").is_contact);
     assert_eq!(
         session.users_state.contacts_notice.as_deref(),
@@ -400,7 +400,7 @@ fn failed_color_requests_surface_the_error_and_icons_flag() {
             extra.0
         ),
     );
-    assert!(session.users_state.background_emoji_icons_failed);
+    assert!(session.users_state.background_emoji_icons.error().is_some());
 }
 
 #[test]

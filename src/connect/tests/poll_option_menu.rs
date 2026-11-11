@@ -63,7 +63,7 @@ fn deleting_an_option_waits_for_the_properties() {
         ),
     );
     let menu = driver.session.messages.poll_option_menu.clone().unwrap();
-    assert!(menu.properties.is_some_and(|p| p.can_be_replied));
+    assert!(menu.properties.data().is_some_and(|p| p.can_be_replied));
     assert_eq!(driver.delete_poll_option(chat, message, "a").unwrap(), None);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -234,7 +234,7 @@ fn a_late_answer_for_another_option_is_dropped() {
     ingest(&mut driver, &seq, &dyn_sink, &answer(for_a, true, true));
     let menu = driver.session.messages.poll_option_menu.clone().unwrap();
     assert_eq!(menu.option_id, "b");
-    assert_eq!(menu.properties, None, "A's answer is not B's");
+    assert!(menu.properties.data().is_none(), "A's answer is not B's");
     let before = recorder.snapshot().len();
     assert_eq!(driver.delete_poll_option(chat, message, "b").unwrap(), None);
     assert_eq!(driver.delete_poll_option(chat, message, "a").unwrap(), None);
@@ -273,5 +273,32 @@ fn the_option_link_is_asked_only_when_allowed() {
     let request = last_json(&recorder);
     assert_eq!(request["@type"], "getMessageLink");
     assert_eq!(request["poll_option_id"], "a");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_refused_properties_lookup_leaves_loading() {
+    let (dir, mut driver, _recorder, _sink, dyn_sink, seq) = poll_driver();
+    ingest(&mut driver, &seq, &dyn_sink, POLL);
+    let (chat, message) = (ChatId(7), MessageId(120));
+    let extra = driver
+        .fetch_poll_option_properties(chat, message, "a")
+        .unwrap();
+    let menu = driver.session.messages.poll_option_menu.clone().unwrap();
+    assert!(menu.properties.is_loading());
+    ingest(
+        &mut driver,
+        &seq,
+        &dyn_sink,
+        &format!(
+            r#"{{"@type":"error","@extra":"{}","code":400,"message":"MESSAGE_ID_INVALID"}}"#,
+            extra.0
+        ),
+    );
+    let menu = driver.session.messages.poll_option_menu.clone().unwrap();
+    assert!(
+        menu.properties.error().is_some() && !menu.properties.is_loading(),
+        "the page stops waiting"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

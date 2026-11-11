@@ -172,6 +172,12 @@ impl LocationPicker {
         self.venues.search_location.is_some()
     }
 
+    /// The search field is open (tdesktop `venuesSearchChanged` got a
+    /// query, not `None`). The UI's field exists exactly while this holds.
+    pub fn search_open(&self) -> bool {
+        self.venues.search_query.is_some()
+    }
+
     pub fn search_shown(&self) -> bool {
         self.venues.search_shown
     }

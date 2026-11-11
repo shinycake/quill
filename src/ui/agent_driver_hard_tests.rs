@@ -145,7 +145,7 @@ fn menu_routes_to_hard_surfaces_refuse_while_injecting(cx: &mut TestAppContext) 
         assert!(!app.account_boxes.lifecycle.open, "log out");
         assert!(!app.account.accounts.open, "accounts");
         assert!(!app.account.passcode.open, "passcode");
-        assert!(!app.twofa.open, "two-step verification");
+        assert!(!app.twofa.is_open(), "two-step verification");
         assert!(!app.account.passcode.is_locked(), "lock");
     });
 

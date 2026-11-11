@@ -93,14 +93,53 @@ struct Key {
     line_height: u32,
 }
 
+/// What the cache keeps of a paragraph at one width: its layout and the
+/// heap it holds, or only the size.
+enum Layout {
+    SizeOnly,
+    Held {
+        paragraph: Rc<BidiParagraph>,
+        /// The heap the layout holds, counted when it was laid out
+        /// ([`BidiParagraph::heap_size`]).
+        bytes: usize,
+    },
+}
+
+impl Layout {
+    fn held(paragraph: Rc<BidiParagraph>) -> Self {
+        let bytes = paragraph.heap_size();
+        Self::Held { paragraph, bytes }
+    }
+
+    fn is_held(&self) -> bool {
+        matches!(self, Self::Held { .. })
+    }
+
+    fn is_size_only(&self) -> bool {
+        !self.is_held()
+    }
+
+    fn paragraph(&self) -> Option<Rc<BidiParagraph>> {
+        match self {
+            Self::Held { paragraph, .. } => Some(paragraph.clone()),
+            Self::SizeOnly => None,
+        }
+    }
+
+    /// The heap held; none for a size alone.
+    fn bytes(&self) -> usize {
+        match self {
+            Self::Held { bytes, .. } => *bytes,
+            Self::SizeOnly => 0,
+        }
+    }
+}
+
 /// The paragraph at one wrap width.
 struct Width {
     wrap: Option<u32>,
     size: Size<Pixels>,
-    paragraph: Option<Rc<BidiParagraph>>,
-    /// The heap the layout holds, counted when it was laid out
-    /// ([`BidiParagraph::heap_size`]).
-    bytes: usize,
+    layout: Layout,
     /// The clock at its last draw, 0 if never drawn.
     drawn: u64,
     used: u64,
@@ -138,7 +177,7 @@ impl Entry {
         let natural = self.natural();
         for width in &mut self.widths {
             if width.drawn == 0 && unwrapped(width.wrap, natural) && wider(width.wrap, window) {
-                width.paragraph = None;
+                width.layout = Layout::SizeOnly;
             }
         }
     }
@@ -230,13 +269,13 @@ impl Pool {
     fn trim_widths(&mut self, start: u64, budget: usize) {
         let held = self.count(|_| true);
         self.widths = held;
-        let size_only = |w: &Width| w.paragraph.is_none();
+        let size_only = |w: &Width| w.layout.is_size_only();
         let ages = self.ages(start, size_only);
         if let Some(cutoff) = excess(held, budget).and_then(|excess| cutoff(excess, ages)) {
             for entry in self.entries.values_mut() {
                 entry
                     .widths
-                    .retain(|w| w.paragraph.is_some() || w.used > cutoff);
+                    .retain(|w| w.layout.is_held() || w.used > cutoff);
             }
             self.entries.retain(|_, e| !e.widths.is_empty());
             self.widths = self.count(|_| true);
@@ -247,14 +286,14 @@ impl Pool {
     fn recount(&mut self) {
         (self.laid_out, self.bytes) = self
             .laid_out_widths()
-            .fold((0, 0), |(n, bytes), w| (n + 1, bytes + w.bytes));
+            .fold((0, 0), |(n, bytes), w| (n + 1, bytes + w.layout.bytes()));
     }
 
     fn laid_out_widths(&self) -> impl Iterator<Item = &Width> {
         self.entries
             .values()
             .flat_map(|e| &e.widths)
-            .filter(|w| w.paragraph.is_some())
+            .filter(|w| w.layout.is_held())
     }
 
     fn count(&self, which: impl Fn(&Width) -> bool) -> usize {
@@ -291,7 +330,7 @@ fn trim_layouts(pools: &mut [&mut Pool], start: u64, budget: Budget) {
         ages.extend(
             pool.laid_out_widths()
                 .filter(|w| w.used <= start)
-                .map(|w| (w.used, w.bytes)),
+                .map(|w| (w.used, w.layout.bytes())),
         );
     }
     if layouts <= budget.layouts && bytes <= budget.bytes {
@@ -309,7 +348,7 @@ fn trim_layouts(pools: &mut [&mut Pool], start: u64, budget: Budget) {
     for pool in pools.iter_mut() {
         for width in pool.entries.values_mut().flat_map(|e| &mut e.widths) {
             if width.used <= cutoff {
-                width.paragraph = None;
+                width.layout = Layout::SizeOnly;
             }
         }
         pool.recount();
@@ -582,8 +621,7 @@ fn measured(
         cache.laid_out(key, one_line, bytes).add(Width {
             wrap,
             size,
-            paragraph,
-            bytes,
+            layout: paragraph.map_or(Layout::SizeOnly, Layout::held),
             drawn: 0,
             used: now,
         });
@@ -607,7 +645,7 @@ fn drawn(
             .entries
             .get_mut(&key)?
             .width(wrap, now)?;
-        let paragraph = width.paragraph.clone()?;
+        let paragraph = width.layout.paragraph()?;
         width.drawn = now;
         Some(paragraph)
     });
@@ -627,15 +665,13 @@ fn drawn(
             // since): the size may have changed too.
             Some(width) => {
                 width.size = paragraph.size();
-                width.paragraph = Some(paragraph.clone());
-                width.bytes = bytes;
+                width.layout = Layout::held(paragraph.clone());
                 width.drawn = now;
             }
             None => entry.add(Width {
                 wrap,
                 size: paragraph.size(),
-                paragraph: Some(paragraph.clone()),
-                bytes,
+                layout: Layout::held(paragraph.clone()),
                 drawn: now,
                 used: now,
             }),
@@ -668,11 +704,7 @@ pub(super) fn held_in_tests(one_line: bool) -> Held {
         let mut cache = cache.borrow_mut();
         let mut held = Held::default();
         for entry in cache.pool(one_line).entries.values() {
-            let laid_out = entry
-                .widths
-                .iter()
-                .filter(|w| w.paragraph.is_some())
-                .count();
+            let laid_out = entry.widths.iter().filter(|w| w.layout.is_held()).count();
             if entry.widths.iter().any(|w| w.drawn > 0) {
                 held.drawn += 1;
                 held.laid_out += laid_out;
@@ -684,7 +716,7 @@ pub(super) fn held_in_tests(one_line: bool) -> Held {
             held.unwrapped_undrawn += entry
                 .widths
                 .iter()
-                .filter(|w| w.paragraph.is_some() && w.drawn == 0 && unwrapped(w.wrap, natural))
+                .filter(|w| w.layout.is_held() && w.drawn == 0 && unwrapped(w.wrap, natural))
                 .count();
         }
         held

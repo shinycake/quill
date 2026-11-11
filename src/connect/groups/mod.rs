@@ -2,7 +2,7 @@
 use super::*;
 use crate::ids::{ChatId, MessageId, RequestId, TopicId};
 use crate::lang::{Key, keys, tr};
-use crate::state::{ChatStatisticsFetch, RequestPurpose, RequestRollback, WelcomeMessagesFetch};
+use crate::state::{ChatStatisticsFetch, RequestPurpose, RequestRollback};
 use crate::state::{GroupsPurpose, ThreadsPurpose, WindowEnd};
 use crate::telegram::envelope::{ChatKind, ParsedCommunity};
 use crate::telegram::requests::{
@@ -50,7 +50,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                     as fn(RequestId) -> String,
             ),
         ] {
-            if self.session.requests.has_purpose(purpose) {
+            let fetch = if purpose == RequestPurpose::GetInstalledStickerSets {
+                &mut self.session.stickers.stickers.lists.installed
+            } else {
+                &mut self.session.stickers.emoji.lists.installed
+            };
+            if fetch.is_loading() {
                 continue;
             }
             let extra = self.session.request(purpose, None);
@@ -58,6 +63,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                 self.session.requests.take(extra);
                 return Err(err);
             }
+            let fetch = if purpose == RequestPurpose::GetInstalledStickerSets {
+                &mut self.session.stickers.stickers.lists.installed
+            } else {
+                &mut self.session.stickers.emoji.lists.installed
+            };
+            fetch.begin();
         }
         Ok(())
     }

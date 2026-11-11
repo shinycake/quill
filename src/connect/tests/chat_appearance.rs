@@ -110,9 +110,15 @@ fn opening_refreshes_the_level_and_loads_choices_once() {
         sent_request(&recorder, "getChatBoostFeatures")["is_channel"],
         true
     );
-    assert!(driver.session.stickers.emoji.chat_status_open);
+    assert_eq!(
+        driver.session.stickers.emoji.status_picker,
+        crate::emoji::StatusPicker::ChatAppearance
+    );
     driver.close_chat_appearance();
-    assert!(!driver.session.stickers.emoji.chat_status_open);
+    assert_eq!(
+        driver.session.stickers.emoji.status_picker,
+        crate::emoji::StatusPicker::Closed
+    );
 }
 
 #[test]

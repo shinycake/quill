@@ -53,8 +53,10 @@ pub(crate) struct StyleEditor {
 pub(crate) enum StyleSave {
     /// Being edited: Create or Save may be pressed.
     Editing,
-    /// Create or Save was sent and has no answer yet.
-    Sent,
+    /// Create or Save was sent as `request`; only that request's answer
+    /// settles it, so a save from an editor left earlier never answers a
+    /// later one.
+    Sent { request: RequestId },
 }
 
 /// Where the style preview stands: the lookup its link started, the style
@@ -89,10 +91,6 @@ pub(crate) struct AiStylePreview {
     pub(super) examples: StyleExamples,
     /// The example shown; one at a time.
     pub(super) example: Option<StyleExample>,
-    pub(super) example_token: u64,
-    /// When the example being loaded was asked for (the refresh icon spins
-    /// from here).
-    pub(super) example_asked_at: Option<Instant>,
 }
 
 impl AiStylePreview {

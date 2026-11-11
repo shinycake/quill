@@ -68,7 +68,7 @@ pub fn is_allowed_url(url: &str) -> bool {
 /// Why a download ended without installing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DownloadError {
-    /// The user switched the language off; nothing to show.
+    /// The user cancelled (or switched it off); nothing to show.
     Cancelled,
     /// The text the row shows.
     Message(String),

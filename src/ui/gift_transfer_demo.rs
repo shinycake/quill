@@ -80,7 +80,7 @@ pub(super) fn seed_gift_transfer_session(sink: Arc<MemorySink>) -> Session {
     let mut session = seed_gift_market_session(sink);
     let mode = demo_mode();
     let now = now_unix();
-    session.users_state.contacts = Some(CONTACTS.to_vec());
+    session.users_state.contacts = quill::state::fetch::Fetch::Ready(CONTACTS.to_vec());
     session.ton_wallet.set_can_use(mode == "wallet");
     let hub = &mut session.payments.hub;
     hub.gifts_open = true;

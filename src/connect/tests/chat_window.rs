@@ -365,7 +365,7 @@ fn a_search_typed_in_a_chat_window_searches_its_chat_and_answers_there() {
         r#"{{"@type":"foundChatMessages","@extra":"{extra}","total_count":1,"next_from_message_id":0,"messages":[{}]}}"#,
         message_json(BOB.0, 60, false)
     ));
-    assert!(!h.driver.session.search.chat_search.open);
+    assert!(!h.driver.session.search.chat_search.is_open());
     let hits = h.driver.with_window_chat(BOB, |driver| {
         let state = &driver.session.search.chat_search;
         (state.chat_id, state.hits.len())

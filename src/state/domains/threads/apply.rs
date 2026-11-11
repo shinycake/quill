@@ -77,7 +77,7 @@ impl Session {
                             let key = (chat_id, topic);
                             if !self.threads.topic_histories.contains_key(&key) {
                                 self.topic_history_entry(ChatId(chat_id), topic)
-                                    .loaded_complete = true;
+                                    .mark_complete();
                             }
                             Ok(topic)
                         }

@@ -55,12 +55,11 @@ impl QuillApp {
                 recipient: quill::telegram::envelope::MessageSender::User { user_id: 11 },
                 recipient_name: "Demo chat A".into(),
                 requested_name: quote.name.clone(),
-                price: quote.stars,
-                quote: Some(quote),
-                loading: false,
-                sending: false,
-                completed: false,
-                note: Some("Injected quote — no purchase is sent in this demo.".into()),
+                stage: quill::marketplace::GiftPurchaseStage::Quoted {
+                    price: quote.stars,
+                    quote,
+                    note: Some("Injected quote — no purchase is sent in this demo.".into()),
+                },
             });
         }
         self.payments
@@ -71,7 +70,7 @@ impl QuillApp {
             .update(cx, |input, cx| {
                 input.set_value("A little gift for you 🎁", window, cx)
             });
-        self.payments.marketplace_open = true;
+        self.payments.marketplace.open_for(ChatId(11), false);
     }
 
     pub(crate) fn demo_ready_sessions(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -84,8 +83,9 @@ impl QuillApp {
         }
         self.open_sessions(cx);
         if std::env::var_os("QUILL_DEMO_DEVICE_LINK").is_some() {
-            self.privacy.device_login_qr =
-                Some(zeroize::Zeroizing::new("tg://login?token=AQID".into()));
+            self.privacy.device_link = crate::ui::device_qr::DeviceLink::Confirm(
+                zeroize::Zeroizing::new("tg://login?token=AQID".into()),
+            );
         }
         self.set_note(StatusNote::silent("screenshot demo — active sessions"));
     }
@@ -101,10 +101,10 @@ impl QuillApp {
         // Telegram).
         if let Some(session) = self.demo_session.as_mut() {
             self.demo_ui.seq.store(session.last_seq, Ordering::SeqCst);
-            session.settings.storage_stats = Some(demo_storage_stats());
-            session.settings.storage_stats_loading = false;
+            session.settings.storage_stats =
+                quill::state::fetch::Fetch::Ready(demo_storage_stats());
             session.settings.data_storage = demo_data_storage_prefs();
-            session.settings.storage_freed = Some(54_525_952);
+            session.settings.storage_clear = quill::state::StorageClear::Freed(54_525_952);
         }
         self.open_settings(Some(quill::settings_catalog::Page::DataStorage), cx);
         self.set_note(StatusNote::silent("screenshot demo — data & storage"));

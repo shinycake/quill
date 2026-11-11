@@ -219,7 +219,7 @@ impl QuillApp {
             entities: &item.caption_entities,
             msg_key: (item.chat_id.0, item.message_id.0 as u64),
             is_caption: true,
-            revealed: &self.message_ui.spoiler_revealed,
+            revealed: &self.message_ui.revealed,
             emoji_paths: &emoji_paths,
         };
         let wrap = (max_w - 2. * PLATE_PAD_X_REM * rem).max(1.);

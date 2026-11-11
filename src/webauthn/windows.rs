@@ -171,11 +171,14 @@ fn resolve() -> Option<Api> {
 /// The cancellation of the call in flight, shared by the worker and
 /// Quill's Cancel button.
 #[derive(Default)]
-struct Cancellation {
+enum Cancellation {
+    /// No call is in flight.
+    #[default]
+    Idle,
+    /// A call is in flight, with its id when the DLL gave one.
+    InFlight(Option<GUID>),
     /// Cancel was pressed; a call not started yet never starts.
-    cancelled: bool,
-    /// The id of the call in flight, when the DLL gave one.
-    id: Option<GUID>,
+    Cancelled,
 }
 
 type CancelSlot = Arc<Mutex<Cancellation>>;
@@ -194,27 +197,29 @@ fn begin(api: &Api, slot: &CancelSlot) -> Result<Option<GUID>, CeremonyError> {
     let mut state = slot
         .lock()
         .map_err(|_| CeremonyError::Other("cancellation state poisoned".into()))?;
-    if state.cancelled {
+    if matches!(*state, Cancellation::Cancelled) {
         return Err(CeremonyError::Cancelled);
     }
-    state.id = id;
+    *state = Cancellation::InFlight(id);
     Ok(id)
 }
 
 /// After a call: nothing left to cancel.
 fn end(slot: &CancelSlot) {
-    if let Ok(mut state) = slot.lock() {
-        state.id = None;
+    if let Ok(mut state) = slot.lock()
+        && matches!(*state, Cancellation::InFlight(_))
+    {
+        *state = Cancellation::Idle;
     }
 }
 
 /// Quill's Cancel: mark the ceremony cancelled and end the call in flight.
 fn cancel(slot: &CancelSlot) {
     let id = match slot.lock() {
-        Ok(mut state) => {
-            state.cancelled = true;
-            state.id.take()
-        }
+        Ok(mut state) => match std::mem::replace(&mut *state, Cancellation::Cancelled) {
+            Cancellation::InFlight(id) => id,
+            Cancellation::Idle | Cancellation::Cancelled => None,
+        },
         Err(_) => None,
     };
     if let (Some(id), Some(api)) = (id, loaded())

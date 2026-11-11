@@ -176,23 +176,19 @@ impl Session {
                 // Phase S2: `getStorageStatistics` answer — only our own
                 // in-flight request writes the cache (matched by `@extra`).
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetStorageStatistics) {
-                    self.settings.storage_stats = Some(StorageStats {
+                    self.settings.storage_stats.succeed(StorageStats {
                         total_size,
                         by_file_type,
                         by_chat,
                     });
-                    self.settings.storage_stats_loading = false;
                 }
                 // Batch 6: `optimizeStorage` answers with the statistics
                 // of the files it deleted. Drop the usage cache so the
                 // driver refetches the post-clear numbers on this same
                 // ingest.
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::OptimizeStorage) {
-                    self.settings.storage_freed = Some(total_size);
-                    self.settings.storage_clearing = false;
-                    self.settings.storage_stats = None;
-                    self.settings.storage_stats_loading = false;
-                    self.settings.data_storage_error = None;
+                    self.settings.storage_clear = StorageClear::Freed(total_size);
+                    self.settings.storage_stats = Default::default();
                 }
             }
             SettingsPayload::AutoDownloadSettingsPresets { low, medium, high } => {
@@ -203,13 +199,12 @@ impl Session {
                 // the seed on the next ingest (`data_storage_dirty`).
                 if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetAutoDownloadSettingsPresets)
-                    && !self.settings.data_storage.seeded
+                    && !self.settings.data_storage.seeded.is_seeded()
                 {
                     self.settings
                         .data_storage
                         .seed_from_presets(low, medium, high);
                     self.settings.data_storage_dirty = true;
-                    self.settings.auto_download_presets_loading = false;
                     self.settings.data_storage_error = None;
                 }
             }

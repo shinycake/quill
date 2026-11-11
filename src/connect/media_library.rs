@@ -33,13 +33,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .requests
                 .has_purpose(RequestPurpose::GetInstalledStickerSets)
         {
-            let extra = self
-                .session
-                .request(RequestPurpose::GetInstalledStickerSets, None);
-            if let Err(err) = self.sender.send_json(&get_installed_sticker_sets(extra)) {
-                self.session.requests.take(extra);
-                return Err(err);
-            }
+            self.sticker_request(
+                RequestPurpose::GetInstalledStickerSets,
+                get_installed_sticker_sets,
+            )?;
         }
         if self.session.stickers.emoji.installed_sets.is_empty()
             && !self
@@ -47,18 +44,10 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .requests
                 .has_purpose(RequestPurpose::GetInstalledEmojiSets)
         {
-            let extra = self
-                .session
-                .request(RequestPurpose::GetInstalledEmojiSets, None);
-            if let Err(err) =
-                self.sender
-                    .send_json(&crate::telegram::requests_emoji::get_installed_emoji_sets(
-                        extra,
-                    ))
-            {
-                self.session.requests.take(extra);
-                return Err(err);
-            }
+            self.emoji_set_request(
+                RequestPurpose::GetInstalledEmojiSets,
+                crate::telegram::requests_emoji::get_installed_emoji_sets,
+            )?;
         }
         if self.session.stickers.stickers.recent.is_empty()
             && !self

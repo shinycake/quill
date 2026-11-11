@@ -9,7 +9,7 @@ use super::inline_players::Demand;
 use super::inline_video::InlineTile;
 use super::message_media::MediaFrameKind;
 use super::play_intent::{PlayKind, PlayTarget};
-use super::playback_state::{ChatMessage, GifDecode, PlayingGif};
+use super::playback_state::{ChatMessage, GifDecode, GifPlayback, PlayingGif};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::*;
 use quill::ids::{ChatId, FileId, MessageId};
@@ -45,7 +45,7 @@ pub(super) fn row_gif_file(content: &MessageContent) -> Option<FileId> {
 
 impl QuillApp {
     pub(super) fn maybe_autoplay_gif(&mut self, ix: usize, cx: &mut Context<Self>) {
-        if self.playback.playing_animation.is_some()
+        if self.playback.animation.playing().is_some()
             || self.playback.intent.is_some()
             || self.playback.playing_voice.is_some()
             || self.playback.playing_audio.is_some()
@@ -95,7 +95,7 @@ impl QuillApp {
     /// The GIF file of `chat`'s row `message_id` loops in the window whose
     /// state is in place.
     pub(super) fn gif_playing(&self, chat: ChatId, message_id: MessageId) -> bool {
-        self.playback.playing_animation
+        self.playback.animation.playing()
             == Some(PlayingGif {
                 window: self.windows.scope,
                 message: ChatMessage::new(chat, message_id),
@@ -109,7 +109,8 @@ impl QuillApp {
         let here = self.windows.scope;
         if self
             .playback
-            .playing_animation
+            .animation
+            .playing()
             .is_some_and(|playing| playing.window == here)
         {
             self.stop_animation_playback();
@@ -128,7 +129,8 @@ impl QuillApp {
     pub(in crate::ui) fn stop_gif_of_window(&mut self, chat: ChatId) {
         if self
             .playback
-            .playing_animation
+            .animation
+            .playing()
             .is_some_and(|playing| playing.window == Some(chat))
         {
             self.stop_animation_playback();
@@ -141,10 +143,8 @@ impl QuillApp {
         for decode in self.playback.gif_decodes.values() {
             decode.cancel.store(true, Ordering::Relaxed);
         }
-        self.playback.playing_animation = None;
         // The clip hands its pictures to the atlas sweeper when it drops.
-        self.playback.gif = None;
-        self.playback.gif_started_at = None;
+        self.playback.animation = GifPlayback::Idle;
         self.drop_play_intent(PlayKind::Gif);
     }
 
@@ -225,7 +225,7 @@ impl QuillApp {
         self.stop_voice_playback();
         self.stop_audio_playback();
         self.stop_viewer_video();
-        self.playback.playing_animation = Some(PlayingGif {
+        self.playback.animation = GifPlayback::Waiting(PlayingGif {
             window: self.windows.scope,
             message: ChatMessage::new(chat_id, message_id),
         });
@@ -292,7 +292,8 @@ impl QuillApp {
                     this.playback.gif_decodes.remove(&key);
                     if this
                         .playback
-                        .playing_animation
+                        .animation
+                        .playing()
                         .is_some_and(|playing| playing.message == key)
                     {
                         this.stop_animation_playback();
@@ -353,11 +354,10 @@ impl QuillApp {
         clip: Arc<GifClip>,
         cx: &mut Context<Self>,
     ) {
-        if !self.gif_playing(chat_id, message_id) || self.playback.gif.is_some() {
+        if !self.gif_playing(chat_id, message_id) || self.playback.animation.clip().is_some() {
             return;
         }
-        self.playback.gif = Some(clip);
-        self.playback.gif_started_at = Some(Instant::now());
+        self.playback.animation.begin_clip(clip, Instant::now());
         self.set_note(StatusNote::silent(tr(keys::Q_AV_PLAYING_GIF)));
         self.notify_conversation(cx);
         cx.notify();
@@ -384,15 +384,15 @@ impl QuillApp {
             Ok(clip)
                 if self
                     .playback
-                    .gif
-                    .as_ref()
+                    .animation
+                    .clip()
                     .is_some_and(|playing| Arc::ptr_eq(playing, &clip)) => {}
             // Another clip of the same GIF is playing.
-            _ if self.playback.gif.is_some() => return,
+            _ if self.playback.animation.clip().is_some() => return,
             Ok(clip) => self.gif_started(key.chat, message_id, clip, cx),
             // Started again after this decode saw the stop: decode anew.
             Err(GifError::Cancelled) => {
-                self.playback.playing_animation = None;
+                self.playback.animation = GifPlayback::Idle;
                 self.play_gif_file(message_id, file_id, cx);
                 return;
             }
@@ -415,13 +415,12 @@ impl QuillApp {
     }
 
     pub(super) fn spawn_voice_tick(&mut self, cx: &mut Context<Self>) {
-        if self.recording.voice_tick {
+        if self.recording.tick.is_some() {
             return;
         }
-        self.recording.voice_tick = true;
         // The tick is the app's; each step runs as the recording's window.
         // window-scope: `recording_tick_in_window` enters the recording's window itself.
-        self.spawn_screen(cx, async move |this, cx| {
+        let task = self.spawn_screen(cx, async move |this, cx| {
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(100))
@@ -434,10 +433,10 @@ impl QuillApp {
                 }
             }
             let _ = this.update(cx, |this, _| {
-                this.recording.voice_tick = false;
+                this.recording.tick = None;
             });
-        })
-        .detach();
+        });
+        self.recording.tick = Some(task);
     }
 }
 

@@ -293,7 +293,7 @@ fn the_history_box_hands_its_choice_to_save(cx: &mut TestAppContext) {
     vcx.update(|_, cx| {
         app.update(cx, |app, cx| {
             if let Some(edit) = app.group_edit_box_mut() {
-                edit.history_box = Some(false);
+                edit.sub = super::EditSub::History(false);
             }
             cx.notify();
         })
@@ -310,7 +310,7 @@ fn the_history_box_hands_its_choice_to_save(cx: &mut TestAppContext) {
     frames(vcx);
     let edit = app.read_with(vcx, |app, _| {
         app.group_edit_box()
-            .map(|edit| (edit.history_box, edit.history_visible))
+            .map(|edit| (edit.history_box(), edit.history_visible))
     });
     assert_eq!(edit, Some((None, Some(true))));
     assert!(shell.read_with(vcx, |s, _| s.open_dialog == Some(DialogKind::GroupEditBox)));

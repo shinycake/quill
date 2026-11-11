@@ -271,7 +271,7 @@ impl QuillApp {
                 move |content, window, cx| {
                     let body = body_app.update(cx, |this, cx| {
                         let focus = this.chat_ui.contact_dialog.as_mut().and_then(|dialog| {
-                            std::mem::take(&mut dialog.focus_on_mount).then(|| dialog.query.clone())
+                            dialog.mount.take_first_draw().then(|| dialog.query.clone())
                         });
                         focus_after_mount(focus, window, cx);
                         this.share_content_panel(cx)

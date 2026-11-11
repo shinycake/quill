@@ -25,7 +25,6 @@ pub(super) struct GroupCall {
     /// Feeder threads' way in; cleared before the handles go away.
     gate: Arc<sender::Gate>,
     join: GroupJoin,
-    mode: GroupCallMode,
     muted: bool,
     /// The camera to send, by device id, and its source while it runs.
     camera_id: Option<String>,
@@ -46,17 +45,27 @@ pub(super) struct GroupCall {
 
 /// How far `connect_group` got. `Connected` only after every step of the
 /// join worked; a failed step leaves `AnswerApplied`, so the caller's retry
-/// redoes the steps and does not report a join that never finished.
+/// redoes the steps and does not report a join that never finished. The
+/// connection mode comes with the join answer, so only the later stages
+/// have one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GroupJoin {
     Created,
-    AnswerApplied,
-    Connected,
+    AnswerApplied { mode: GroupCallMode },
+    Connected { mode: GroupCallMode },
 }
 
 impl GroupCall {
     fn connected(&self) -> bool {
-        self.join == GroupJoin::Connected
+        matches!(self.join, GroupJoin::Connected { .. })
+    }
+
+    /// The mode the join answer set; RTC until there is one.
+    fn mode(&self) -> GroupCallMode {
+        match self.join {
+            GroupJoin::Created => GroupCallMode::Rtc,
+            GroupJoin::AnswerApplied { mode } | GroupJoin::Connected { mode } => mode,
+        }
     }
 }
 
@@ -67,7 +76,15 @@ struct Presentation {
     handle: Native<qc_group>,
     /// The external screencast source Quill's screen capture feeds.
     screen: Native<qc_video_capture>,
-    connected: bool,
+    stage: PresentationStage,
+}
+
+/// Whether the screen instance has its join answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PresentationStage {
+    /// The instance made its offer; no answer applied yet.
+    Offered,
+    Connected,
 }
 
 /// A new instance and its join payload; `None` when tgcalls refuses it.
@@ -292,7 +309,6 @@ impl TgcallsEngine {
                 handle,
                 gate: Arc::new(sender::Gate::default()),
                 join: GroupJoin::Created,
-                mode: GroupCallMode::Rtc,
                 muted: true,
                 camera_id: None,
                 camera: None,
@@ -331,18 +347,17 @@ impl TgcallsEngine {
             crate::advanced::debug_mode::call_log(&format!(
                 "[call] group {group_call_id} tgcalls joined ({mode:?})"
             ));
-            call.mode = mode;
-            call.join = GroupJoin::AnswerApplied;
+            call.join = GroupJoin::AnswerApplied { mode };
         }
-        let mode = call.mode;
+        let mode = call.mode();
         // The steps below read the call as connected; a failure puts it
         // back, so a retry runs them again.
-        call.join = GroupJoin::Connected;
+        call.join = GroupJoin::Connected { mode };
         let steps = self.finish_group_join(group_call_id, camera, mode);
         if steps.is_err()
             && let Ok(call) = self.group_mut(group_call_id)
         {
-            call.join = GroupJoin::AnswerApplied;
+            call.join = GroupJoin::AnswerApplied { mode };
         }
         steps
     }
@@ -373,7 +388,7 @@ impl TgcallsEngine {
 
     /// Whether the call sends anything: a member's RTC call does.
     fn group_sends(call: &GroupCall) -> bool {
-        call.connected() && call.role == GroupCallRole::Member && !call.mode.is_stream()
+        call.connected() && call.role == GroupCallRole::Member && !call.mode().is_stream()
     }
 
     fn apply_group_mute(&mut self, group_call_id: i32) -> Result<(), EngineError> {
@@ -394,7 +409,7 @@ impl TgcallsEngine {
         let call = self.group_mut(group_call_id)?;
         let name = devices::speaker_name(call.speaker.as_deref());
         // A stream plays at the media viewer's volume, as in tdesktop.
-        let volume = if call.mode.is_stream() {
+        let volume = if call.mode().is_stream() {
             stream_volume
         } else {
             1.0
@@ -478,12 +493,12 @@ impl TgcallsEngine {
     ) -> Result<(), EngineError> {
         let api = self.api;
         let call = self.group_mut(group_call_id)?;
-        let unified = (call.connected() && call.mode == GroupCallMode::Rtmp)
+        let unified = (call.connected() && call.mode() == GroupCallMode::Rtmp)
             .then(|| unified_min_quality(call.stream_quality));
         if call.video_sources != sources {
             call.video_sources = sources.to_vec();
         }
-        let stream = call.connected() && call.mode.is_stream();
+        let stream = call.connected() && call.mode().is_stream();
         // A stream shows one picture: the RTMP feed alone, or one speaker
         // (their screen first), so the feed never flips between people.
         let chosen: Vec<GroupVideoSource> = match (stream, unified.is_some()) {
@@ -636,13 +651,13 @@ impl TgcallsEngine {
             op: "qc_group_set_join_response",
             code: -1,
         })?;
-        if presentation.connected {
+        if presentation.stage == PresentationStage::Connected {
             return Ok(());
         }
         let answer = text("qc_group_set_join_response", answer)?;
         // tdesktop's screen instance is always RTC.
         apply_answer(api, presentation.handle, &answer, GroupCallMode::Rtc);
-        presentation.connected = true;
+        presentation.stage = PresentationStage::Connected;
         call.gate.set_screen(Some(presentation.screen.as_ptr()));
         Ok(())
     }
@@ -725,7 +740,7 @@ impl TgcallsEngine {
         self.groups
             .values()
             .find(|call| call.chat_id == chat_id && call.connected())
-            .map(|call| call.mode)
+            .map(GroupCall::mode)
     }
 
     /// The stream tile's quality; an RTMP stream asks for its unified
@@ -767,7 +782,7 @@ impl TgcallsEngine {
     pub(super) fn set_streams_volume(&mut self, volume: f32) {
         self.stream_volume = volume;
         for call in self.groups.values() {
-            if call.mode.is_stream() {
+            if call.mode().is_stream() {
                 call.context.sound.set_volume(volume);
             }
         }
@@ -778,7 +793,7 @@ impl TgcallsEngine {
         group_call_id: i32,
     ) -> Option<crate::calls::stream_audio::watch::PlaybackHealth> {
         let call = self.groups.get(&group_call_id)?;
-        if !call.mode.is_stream() {
+        if !call.mode().is_stream() {
             return None;
         }
         call.context

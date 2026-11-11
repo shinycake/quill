@@ -126,10 +126,31 @@ struct Slot {
     /// The player's paint count at the last sweep: more since means it
     /// was painted in view.
     shown_mark: u64,
-    /// Off screen since then: paused, asleep after [`RELEASE_AFTER`].
-    hidden_since: Option<Instant>,
-    /// No backend (`VideoPlayer::hibernate`) until painted in view again.
-    asleep: bool,
+    stage: SlotStage,
+}
+
+/// Where a slot's player is against the screen. `OffScreen` is paused and
+/// leaves for `Asleep` after [`RELEASE_AFTER`] (or when another player
+/// evicts it); `Asleep` has no backend (`VideoPlayer::hibernate`) until a
+/// sweep sees it painted in view, which opens a new player (`InView`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SlotStage {
+    InView,
+    OffScreen { since: Instant },
+    Asleep,
+}
+
+impl SlotStage {
+    fn off_screen_since(self) -> Option<Instant> {
+        match self {
+            Self::OffScreen { since } => Some(since),
+            _ => None,
+        }
+    }
+
+    fn is_asleep(self) -> bool {
+        self == Self::Asleep
+    }
 }
 
 impl Slot {
@@ -150,8 +171,7 @@ impl Slot {
             path,
             max_edge,
             seen: 0,
-            hidden_since: Some(now),
-            asleep: false,
+            stage: SlotStage::OffScreen { since: now },
         }
     }
 }
@@ -206,12 +226,12 @@ impl State {
         self.slots
             .iter()
             .filter(|(key, slot)| {
-                !slot.asleep && before.get(*key).copied() != Some(self.held(key.0))
+                !slot.stage.is_asleep() && before.get(*key).copied() != Some(self.held(key.0))
             })
             .map(|(key, slot)| {
                 (
                     slot.player.clone(),
-                    !self.held(key.0) && slot.hidden_since.is_none(),
+                    !self.held(key.0) && slot.stage == SlotStage::InView,
                 )
             })
             .collect()
@@ -220,8 +240,8 @@ impl State {
     fn awake(&self) -> Vec<(Key, Option<Instant>)> {
         self.slots
             .iter()
-            .filter(|(_, slot)| !slot.asleep)
-            .map(|(key, slot)| (*key, slot.hidden_since))
+            .filter(|(_, slot)| !slot.stage.is_asleep())
+            .map(|(key, slot)| (*key, slot.stage.off_screen_since()))
             .collect()
     }
 }
@@ -482,8 +502,7 @@ impl UserpicVideos {
             Admit::Open => None,
             Admit::Evict(other) => self.with(|state| {
                 let slot = state.slots.get_mut(&other)?;
-                slot.asleep = true;
-                slot.hidden_since = None;
+                slot.stage = SlotStage::Asleep;
                 Some(slot.player.clone())
             })?,
         };
@@ -555,24 +574,26 @@ impl UserpicVideos {
                 };
                 slot.shown_mark = count;
                 let visible = count > mark;
-                if slot.asleep {
+                if slot.stage.is_asleep() {
                     if visible {
                         revive.push(key);
                     }
                     continue;
                 }
-                match off_screen_step(visible, slot.hidden_since, now) {
-                    OffScreenStep::Show => slot.hidden_since = None,
-                    OffScreenStep::Hide => slot.hidden_since = Some(now),
+                match off_screen_step(visible, slot.stage.off_screen_since(), now) {
+                    OffScreenStep::Show => slot.stage = SlotStage::InView,
+                    OffScreenStep::Hide => slot.stage = SlotStage::OffScreen { since: now },
                     OffScreenStep::Stay => {}
                     OffScreenStep::Release => {
-                        slot.asleep = true;
-                        slot.hidden_since = None;
+                        slot.stage = SlotStage::Asleep;
                         sleepers.push(slot.player.clone());
                         continue;
                     }
                 }
-                commands.push((slot.player.clone(), !held && slot.hidden_since.is_none()));
+                commands.push((
+                    slot.player.clone(),
+                    !held && slot.stage == SlotStage::InView,
+                ));
             }
             (commands, sleepers, revive)
         }) else {
@@ -618,7 +639,7 @@ impl UserpicVideos {
                     && state
                         .slots
                         .iter()
-                        .any(|(key, slot)| !slot.asleep && !state.held(key.0))
+                        .any(|(key, slot)| !slot.stage.is_asleep() && !state.held(key.0))
             })
             .unwrap_or(false);
         if !wanted {
@@ -641,10 +662,9 @@ impl UserpicVideos {
     #[cfg(feature = "demo-capture")]
     pub(super) fn is_playing(&self, key: Key) -> bool {
         self.with(|state| {
-            state
-                .slots
-                .get(&key)
-                .is_some_and(|slot| !state.held(key.0) && !slot.asleep && slot.player.wants_play())
+            state.slots.get(&key).is_some_and(|slot| {
+                !state.held(key.0) && !slot.stage.is_asleep() && slot.player.wants_play()
+            })
         })
         .unwrap_or(false)
     }
@@ -654,7 +674,7 @@ impl UserpicVideos {
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
     pub(super) fn asleep(&self, key: Key) -> Option<bool> {
-        self.with(|state| state.slots.get(&key).map(|slot| slot.asleep))
+        self.with(|state| state.slots.get(&key).map(|slot| slot.stage.is_asleep()))
             .flatten()
     }
 

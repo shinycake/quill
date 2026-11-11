@@ -42,7 +42,7 @@ fn replay_sponsored_report_option_required_then_ok() {
 
     // The Recommended row is not reportable.
     assert!(session.begin_sponsored_report(chat_id, 9002).is_none());
-    assert!(session.messages.sponsored_report.picking().is_none());
+    assert!(session.messages.sponsored_report.flight().is_none());
 
     assert!(session.begin_sponsored_report(chat_id, 9001).is_some());
     let extra = session.request(RequestPurpose::ReportChatSponsoredMessage, Some(chat_id));
@@ -56,12 +56,7 @@ fn replay_sponsored_report_option_required_then_ok() {
             extra.0
         )],
     );
-    let flight = session
-        .messages
-        .sponsored_report
-        .picking()
-        .cloned()
-        .unwrap();
+    let flight = session.messages.sponsored_report.flight().cloned().unwrap();
     assert_eq!(flight.chat_id, chat_id);
     assert_eq!(flight.message_id, 9001);
     assert_eq!(flight.title, "Why report?");
@@ -82,7 +77,7 @@ fn replay_sponsored_report_option_required_then_ok() {
             extra.0
         )],
     );
-    assert!(session.messages.sponsored_report.picking().is_none());
+    assert!(session.messages.sponsored_report.flight().is_none());
     let outcome = session
         .messages
         .sponsored_report
@@ -113,7 +108,7 @@ fn replay_sponsored_report_failed() {
             extra.0
         )],
     );
-    assert!(session.messages.sponsored_report.picking().is_none());
+    assert!(session.messages.sponsored_report.flight().is_none());
     let outcome = session
         .messages
         .sponsored_report

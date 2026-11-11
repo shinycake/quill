@@ -24,19 +24,19 @@ delivery.next_preview_wait | the delay before the next preview build, for the pr
 delivery.notification_sounds * | the notification sound output device and player
 delivery.polled_redraw * | when the poll loop last redrew: timing, no ids
 delivery.windows * | Quill's notification windows; the queue is keyed by `(AccountKey, ChatId)` and each shown popup by its key
-preferences.keybinding_capture | the keybinding being recorded in Settings: a key name
-preferences.keybinding_error | the conflict message of that recording
 preferences.keybinding_focus | the focus handle of the recording field
-preferences.keybindings_applied | whether the keymap was installed, once per process
+preferences.keybinding | the rebinding capture in Settings and whether the keymap was installed, once per process
+preferences.keybinding.capture | the action being recorded
+preferences.keybinding.refusals | the chords the page refused, per row; gone with the page, a lock or an account change
+preferences.keybinding.keymap | the account whose overrides the process keymap carries
 preferences.appearance_applied | the theme, accent and font last applied to the windows
 preferences.app_theme * | the app theme: custom themes, palettes, the theme editor, Omarchy; files on disk, not per account
 preferences.system_accent | the OS accent color
+preferences.system_accent.Read.0 | the OS accent color once read
 preferences.send_to * | the Explorer "Send to" shortcut belongs to the machine: read once, written off the UI thread, whichever account is on screen
-preferences.system_accent_probed | whether the OS accent was read
 preferences.system_accent_poll | the one task waiting for the OS accent read to land
 preferences.font_picker | the font family picker entity
 preferences.accent_picker | the accent color picker entity
-preferences.index_sliders * | slider entities, keyed by setting; most are app settings, but the two storage-limit sliders show one account's TDLib limits, so every arrival on Data and Storage (and every leave) drops them and they are rebuilt from the account shown (`forget_storage_sliders`)
 preferences.translate * | the translation preferences file
 preferences.update_state | the updater's state, for the install
 preferences.update_banner_dismissed | the update banner was dismissed, for the run
@@ -58,7 +58,7 @@ frame.title_badge | the unread badge image cache, by count
 frame.media_roots_frame | the media folders read this frame, rebuilt every frame
 frame.frame_started | when this frame began
 frame.tick_view | the view that drives the frame tick
-frame.frame_clock_running | the frame clock runs
+frame.frame_clock * | the frame clock's loop: stopped, or running with its task
 frame.clock_timing | the display refresh timing
 frame.main_refresh | the main window's refresh interval
 frame.layers_drawn | which layers drew this frame, reset each frame
@@ -77,28 +77,30 @@ frame.draft_timer * | the one debounced draft timer: a token the driver on scree
 language.open * | the language box: languages are the app's
 language.writes * | language file write counters
 language.recent | recently picked languages
-auth_demo.demo_state | the synthetic mode's authorization state, next to demo_session
+auth_demo.stage | where the startup connection stands while there is no client: the process's, before any account is on screen
+auth_demo.stage.Blocked.0 | why the client could not start: the process's, before any account is on screen
+auth_demo.stage.Shown.0 | the synthetic mode's authorization state, next to demo_session
 auth_demo.demo_inputs | the synthetic mode shows its inputs
 start_files.choosing | files handed to the app at start, waiting for a chat on whichever account
+start_files.choosing.Choosing.files | the files waiting for a chat
 start_files.search | the chat search field of that chooser
-update_pill.from | the update pill's glide start
-update_pill.to | the update pill's glide end
-update_pill.since | when that glide began
-update_pill.downloading | the update is downloading
-update_pill.ready | the update is ready, and since when
+update_pill.fill | the update pill's glide: settled, or easing between two shares
+update_pill.fill.Settled.0 | the share the glide rests at
+update_pill.fill.Easing.from | the update pill's glide start
+update_pill.fill.Easing.to | the update pill's glide end
+update_pill.fill.Easing.since | when that glide began
+update_pill.phase | the last control: downloading, or ready and since when its percentage began to fade
 agent_bridge.ui_send | the channel agents send UI commands on; a command stops when the screen's epoch changes (`agent_driver.rs`)
 agent_bridge.driver | the UI driver runs agents' input commands one at a time for whichever account is on screen; a command stops when the screen's epoch changes and the next one starts (`agent_driver.rs`)
 takeover.wake_at | when the takeover banner next redraws
 connect.generation | which prepared connection may open
 connect.closed_noted | the generation whose close was noted
-disk.state | the disk space level, for the data folder
+disk.stage | the disk space level, a doubted drop below close and a call holding the on-screen client at Full, for the data folder
 disk.free | the free space last read
 disk.floors | the floors for that level
-disk.confirming | the space warning is being confirmed
 disk.waited | how long the disk has been short
 disk.unwritable | the data folder cannot be written
 disk.screen_refused | the on-screen client was refused for space; `disk.on_screen` names it
-disk.held_for_call | the on-screen client is held open for its call; checked at every reading against `disk.on_screen`
 disk.full_notices | how many full-disk notices were shown
 disk.cache_folder | the cache folder measured
 disk.database_bytes | the database size measured
@@ -154,15 +156,11 @@ slices.image_cache | the bounded image cache, keyed by image source
 slices.idle_trim | the idle cache trim task
 slices.scope | the view being drawn
 group_call.window | the video chat window, opened and closed by the sync with the session on screen; the call ends with the client (`retire_live_to_background`)
-group_call.window_opening | that window is opening
 group_call.chat_shown | the window's chat column is open, a layout preference
 group_call.ptt | push-to-talk key settings
 group_call.ptt_clock | the push-to-talk clock
 group_call.ptt_capture | the push-to-talk key is being recorded
-group_call.global_ptt | the OS-wide push-to-talk listener
-group_call.global_ptt_polling | it is polled
-group_call.global_ptt_listener_stop | its stop flag
-group_call.window_visible | the window is visible
+group_call.global_ptt * | the OS-wide push-to-talk hook with its listener and permission re-check tasks
 group_call.level_anim | the own voice level animation
 group_call.level_seen | the level last drawn
 group_call.row_levels | participant voice level animations by source id; pruned to the call's participants every sync
@@ -172,8 +170,7 @@ group_call.players | tile players by `LiveKey`; the sync drops every one whose c
 group_call.tile_overlays * | tile control fades by `LiveKey`, pruned with the players
 group_call.stage_volume | the stage tile's volume popover
 group_call.stage_volume.sender | the stage's speaker: the popover is cleared whenever no stage is drawn, and the pin that keeps a stage drawn is the screen's (GroupCallScreen)
-group_call.stage_volume.level | the popover's volume, as stage_volume.sender
-group_call.stage_volume.dragging | the slider is being dragged, as stage_volume.sender
+group_call.stage_volume.stage * | the slider's level and drag, as stage_volume.sender
 group_call.stage_volume.slider | the popover's slider, as stage_volume.sender
 group_call.stage_volume._events | the slider's subscription, as stage_volume.sender
 group_call.stream * | the stream window's player, photo, controls and overlay; `clear` runs when the call shown is no stream; the join wait is the screen's (`group_call_screen.stream_joining`)
@@ -196,7 +193,6 @@ screen_share.demo_system_audio | the screenshot demos' system sound
 main_window.handle | the main window's handle
 main_window.place * | the main window's place
 main_window.cascade | the chat window cascade count
-main_window.dialogs_closed | the main window's dialogs were closed this switch
 main_window.export_stop | the exit a Quit left behind the Stop and quit alert, which is the window's
 main_window._key_scope | the key-scope interceptor
 first_run.Welcome * | the first-run intro's player and timings, before any account
@@ -206,3 +202,4 @@ composer_sends.reads * | what was read about the files of every tray (sound trac
 pending_deep_link.link | a link waiting for the deep-link pump: one from outside Quill (launch, OS) is taken by whichever account is on screen; one clicked in an account is followed only by that account (`QueuedLink::account`, `for_screen`) and dropped once another is on screen
 pending_deep_link.window | the chat window the link was clicked in; followed only with its account (`QueuedLink::for_screen`)
 pending_deep_link.by_agent | an agent's step queued the link; followed only with its account (`QueuedLink::for_screen`)
+main_window.dialogs_closed | windows whose kit dialog the app closed, for the shell that shows it to forget its `open_dialog` (the kit layer names no dialog, so the shell cannot ask it); a window's entry is taken by that shell's next sync and dropped when the window closes

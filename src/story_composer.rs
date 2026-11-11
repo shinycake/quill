@@ -225,28 +225,26 @@ pub enum ComposerStage {
     Failed(String),
 }
 
-/// What the composer is for.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum ComposerMode {
-    /// A new story.
-    #[default]
-    New,
-    /// Phase 9.5: edit mode — `(poster_chat_id, story_id)` of the posted
-    /// story being edited (`editStory`, `td_api.tl:13732`). The media path
-    /// is optional (empty = keep current content); caption + areas are
-    /// prefilled from the story.
-    Edit((i64, i32)),
-    /// Phase 9.5: repost mode — `(poster_chat_id, story_id)` of the
-    /// source story; sent as `postStory.from_story_full_id`
-    /// (`td_api.tl:13715`).
-    Repost((i64, i32)),
-}
-
 impl ComposerStage {
     /// A press of Post or Save is still being answered, or has been.
     pub fn busy(&self) -> bool {
         !matches!(self, Self::Editing | Self::Failed(_))
     }
+}
+
+/// What the composer is for. Edit and repost are exclusive; each carries
+/// `(poster_chat_id, story_id)` of the story it works on.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ComposerMode {
+    #[default]
+    New,
+    /// Phase 9.5: the source story, sent as `postStory.from_story_full_id`
+    /// (`td_api.tl:13715`).
+    Repost(i64, i32),
+    /// Phase 9.5: the posted story being edited (`editStory`,
+    /// `td_api.tl:13732`). The media path is optional (empty = keep
+    /// current content); caption + areas are prefilled from the story.
+    Edit(i64, i32),
 }
 
 /// Composer state. Pure (no GPUI); the UI layer owns the text inputs and
@@ -268,7 +266,7 @@ pub struct StoryComposer {
     pub reaction_emojis: String,
     /// Where the Post / Save press stands (`ComposerStage`).
     pub stage: ComposerStage,
-    /// New story, edit of a posted one, or repost.
+    /// What the composer posts: a new story, a repost or an edit.
     pub mode: ComposerMode,
     /// Phase 9.5: post on behalf of this chat (`getChatsToPostStories`,
     /// `td_api.tl:13698`); `None` = the current user's own stories.
@@ -289,7 +287,7 @@ impl StoryComposer {
     pub fn open_edit(poster_chat_id: i64, story_id: i32) -> Self {
         Self {
             open: true,
-            mode: ComposerMode::Edit((poster_chat_id, story_id)),
+            mode: ComposerMode::Edit(poster_chat_id, story_id),
             ..Default::default()
         }
     }
@@ -298,28 +296,29 @@ impl StoryComposer {
     pub fn open_repost(poster_chat_id: i64, story_id: i32) -> Self {
         Self {
             open: true,
-            mode: ComposerMode::Repost((poster_chat_id, story_id)),
+            mode: ComposerMode::Repost(poster_chat_id, story_id),
             ..Default::default()
         }
     }
 
     /// Phase 9.5: true in edit mode — the media path may be empty (keep).
     pub fn is_edit(&self) -> bool {
-        self.edit_target().is_some()
+        matches!(self.mode, ComposerMode::Edit(..))
     }
 
-    /// The posted story being edited.
+    /// Edit mode: `(poster_chat_id, story_id)` of the posted story.
     pub fn edit_target(&self) -> Option<(i64, i32)> {
         match self.mode {
-            ComposerMode::Edit(story) => Some(story),
+            ComposerMode::Edit(chat, story) => Some((chat, story)),
             _ => None,
         }
     }
 
-    /// The story being reposted.
+    /// Repost mode: `(poster_chat_id, story_id)` of the source story, sent
+    /// as `postStory.from_story_full_id` (`td_api.tl:13715`).
     pub fn repost_source(&self) -> Option<(i64, i32)> {
         match self.mode {
-            ComposerMode::Repost(story) => Some(story),
+            ComposerMode::Repost(chat, story) => Some((chat, story)),
             _ => None,
         }
     }

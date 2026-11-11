@@ -54,32 +54,25 @@ fn square_note_probe_accepts_fixture_and_rejects_landscape() {
 
 #[test]
 fn cancelable_extraction_kill_aborts_and_reports_cancelled() {
-    let slot = std::sync::Arc::new(std::sync::Mutex::new(None));
-    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let extraction = Extraction::default();
     std::thread::scope(|scope| {
         let handle = scope.spawn(|| {
             let mut command = Command::new("sleep");
             command.arg("30");
-            wait_for_cancelable_child(&mut command, &slot, &cancel)
+            wait_for_cancelable_child(&mut command, &extraction)
         });
         // Wait for the child to be published, then kill it the way the UI
         // does on viewer close/step.
         let mut published = false;
         for _ in 0..200 {
-            if slot.lock().map(|guard| guard.is_some()).unwrap_or(false) {
+            if extraction.is_running() {
                 published = true;
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
         assert!(published, "child was published to the slot");
-        let mut child = slot
-            .lock()
-            .ok()
-            .and_then(|mut guard| guard.take())
-            .expect("child present");
-        child.kill().expect("kill extraction");
-        child.wait().expect("reap extraction");
+        extraction.cancel();
         let err = handle.join().expect("worker thread").unwrap_err();
         assert!(
             err.contains("cancelled"),
@@ -184,16 +177,15 @@ fn extraction_cancelled_before_the_child_is_published_leaves_no_orphan() {
         .expect("time")
         .as_nanos();
     let cache = std::env::temp_dir().join(format!("quill-extract-prepub-test-{nanos}"));
-    let slot = std::sync::Arc::new(std::sync::Mutex::new(None));
-    let cancel = std::sync::atomic::AtomicBool::new(true);
-    let err =
-        extract_frames(&clip, &cache, 8.0, 240, 12, Some((&slot, &cancel)), None).unwrap_err();
+    let extraction = Extraction::default();
+    extraction.cancel();
+    let err = extract_frames(&clip, &cache, 8.0, 240, 12, Some(&extraction), None).unwrap_err();
     assert!(
         err.contains("cancelled"),
         "expected a cancellation error, got: {err}"
     );
     assert!(
-        slot.lock().map(|guard| guard.is_none()).unwrap_or(true),
+        !extraction.is_running(),
         "no orphaned ffmpeg child may remain in the slot"
     );
     let _ = std::fs::remove_dir_all(&cache);

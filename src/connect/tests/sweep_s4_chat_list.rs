@@ -51,8 +51,8 @@ fn a_contacts_retry_that_cannot_be_sent_ends_in_the_error_not_in_loading() {
     rig.down.store(true, Ordering::SeqCst);
     assert!(rig.driver.fetch_contacts().is_err());
     let users = &rig.driver.session.users_state;
-    assert!(users.contacts.is_none());
-    assert!(users.contacts_error, "the tab draws its Retry");
+    assert!(users.contacts.data().is_none());
+    assert!(users.contacts.error().is_some(), "the tab draws its Retry");
 }
 
 #[test]

@@ -62,7 +62,7 @@ impl QuillApp {
         let report = session
             .messages
             .sponsored_report
-            .picking()
+            .flight()
             .filter(|flight| flight.chat_id == chat_id)
             .map(|flight| flight.message_id);
         // "Hide ads" answers for no ad in particular (id 0): under the

@@ -17,6 +17,28 @@ use std::time::Duration;
 /// How long the card stays when nobody dismisses it.
 const CARD_LIFETIME: Duration = Duration::from_secs(6);
 
+/// Where a window's custom emoji card stands. Every stage has a way out: the
+/// pack's answer shows it, a close, View or the timer hides it, and a tap of
+/// another emoji replaces it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) enum CustomEmojiCard {
+    #[default]
+    Hidden,
+    /// The emoji was tapped; its pack is being asked for. `tap` tells this
+    /// tap from every other, so each has its own timer.
+    Asked { emoji_id: i64, tap: u64 },
+    /// The card is on screen for this tap.
+    Shown {
+        preview: CustomEmojiPreview,
+        tap: u64,
+    },
+}
+
+fn next_tap() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 impl QuillApp {
     /// A custom emoji in a message was tapped: ask for its pack.
     pub(super) fn tap_custom_emoji(&mut self, emoji_id: i64, cx: &mut Context<Self>) {
@@ -44,9 +66,10 @@ impl QuillApp {
     /// The emoji was tapped (again): its card is for this tap, and its
     /// timer starts from it.
     pub(super) fn note_custom_emoji_tap(&mut self, emoji_id: i64) {
-        self.message_ui.custom_emoji_tapped = Some(emoji_id);
-        self.message_ui.custom_emoji_tap_count =
-            self.message_ui.custom_emoji_tap_count.wrapping_add(1);
+        self.message_ui.custom_emoji = CustomEmojiCard::Asked {
+            emoji_id,
+            tap: next_tap(),
+        };
     }
 
     fn clear_custom_emoji_preview(&mut self, cx: &mut Context<Self>) {
@@ -55,8 +78,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             session.stickers.custom_emoji_preview = None;
         }
-        self.message_ui.custom_emoji_card_seen = None;
-        self.message_ui.custom_emoji_tapped = None;
+        self.message_ui.custom_emoji = CustomEmojiCard::Hidden;
         cx.notify();
     }
 
@@ -67,7 +89,11 @@ impl QuillApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let tapped = self.message_ui.custom_emoji_tapped?;
+        let tapped = match &self.message_ui.custom_emoji {
+            CustomEmojiCard::Hidden => return None,
+            CustomEmojiCard::Asked { emoji_id, .. } => *emoji_id,
+            CustomEmojiCard::Shown { preview, .. } => preview.emoji_id,
+        };
         let preview = self.session()?.stickers.custom_emoji_preview.as_ref()?;
         if preview.emoji_id != tapped {
             return None;
@@ -82,19 +108,21 @@ impl QuillApp {
     #[inline(never)]
     fn custom_emoji_card_body(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let preview: CustomEmojiPreview = self.session()?.stickers.custom_emoji_preview.clone()?;
-        let tap = self.message_ui.custom_emoji_tap_count;
-        if self
-            .message_ui
-            .custom_emoji_card_seen
-            .as_ref()
-            .is_none_or(|(seen, seen_tap)| *seen != preview || *seen_tap != tap)
-        {
-            let shown = (preview.clone(), tap);
-            self.message_ui.custom_emoji_card_seen = Some(shown.clone());
+        let (tap, newly_shown) = match &self.message_ui.custom_emoji {
+            CustomEmojiCard::Hidden => return None,
+            CustomEmojiCard::Asked { tap, .. } => (*tap, true),
+            CustomEmojiCard::Shown { preview: seen, tap } => (*tap, *seen != preview),
+        };
+        if newly_shown {
+            let shown = CustomEmojiCard::Shown {
+                preview: preview.clone(),
+                tap,
+            };
+            self.message_ui.custom_emoji = shown.clone();
             self.spawn_scoped(cx, async move |this, cx| {
                 cx.background_executor().timer(CARD_LIFETIME).await;
                 let _ = this.update(cx, |this, cx| {
-                    if this.message_ui.custom_emoji_card_seen.as_ref() == Some(&shown) {
+                    if this.message_ui.custom_emoji == shown {
                         this.clear_custom_emoji_preview(cx);
                     }
                 });

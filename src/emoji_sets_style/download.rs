@@ -10,7 +10,7 @@ use std::path::Path;
 use sha2::{Digest, Sha256};
 
 use super::catalog::{EmojiSetId, set_dir};
-pub use crate::spell_download::Progress;
+pub use crate::spell_download::{DownloadError, Progress};
 
 /// Only HTTPS on GitHub is fetched; the release redirects to its asset host
 /// and the hash check vets what arrives.
@@ -59,14 +59,14 @@ pub fn install_file(app_root: &Path, file: &Path) -> Result<EmojiSetId, String> 
 }
 
 #[cfg(feature = "ui")]
-fn fetch(url: &str, progress: &Progress) -> Result<Vec<u8>, &'static str> {
+fn fetch(url: &str, progress: &Progress) -> Result<Vec<u8>, DownloadError> {
     use std::io::Read;
     use std::sync::atomic::Ordering;
 
     use super::catalog::MAX_PACK_BYTES;
 
     if !is_allowed_url(url) {
-        return Err("Unexpected emoji set address.");
+        return Err("Unexpected emoji set address.".into());
     }
     let agent = ureq::Agent::config_builder()
         .https_only(true)
@@ -79,39 +79,44 @@ fn fetch(url: &str, progress: &Progress) -> Result<Vec<u8>, &'static str> {
         .header("User-Agent", format!("Quill/{}", crate::version::APP))
         .call()
         .map_err(|err| match err {
-            ureq::Error::StatusCode(404) => "This emoji set isn't available yet.",
-            _ => "Couldn't download the emoji set. Check your connection and retry.",
+            ureq::Error::StatusCode(404) => {
+                DownloadError::from("This emoji set isn't available yet.")
+            }
+            _ => DownloadError::from(
+                "Couldn't download the emoji set. Check your connection and retry.",
+            ),
         })?;
     let mut reader = response.body_mut().as_reader().take(MAX_PACK_BYTES + 1);
     let mut out = Vec::new();
     let mut chunk = [0u8; 32 * 1024];
     loop {
         if progress.is_cancelled() {
-            return Err("Cancelled.");
+            return Err(DownloadError::Cancelled);
         }
         let n = reader
             .read(&mut chunk)
-            .map_err(|_| "The download was interrupted. Retry.")?;
+            .map_err(|_| DownloadError::from("The download was interrupted. Retry."))?;
         if n == 0 {
             break;
         }
         out.extend_from_slice(chunk.get(..n).unwrap_or_default());
         progress.received.fetch_add(n as u64, Ordering::Relaxed);
         if out.len() as u64 > MAX_PACK_BYTES {
-            return Err("The emoji set is larger than expected.");
+            return Err("The emoji set is larger than expected.".into());
         }
     }
     Ok(out)
 }
 
-/// Download set `id` and install it. The error text is shown on the row.
+/// Download set `id` and install it. A message is shown on the row; a
+/// cancel shows nothing.
 #[cfg(feature = "ui")]
-pub fn download(app_root: &Path, id: EmojiSetId, progress: &Progress) -> Result<(), String> {
+pub fn download(app_root: &Path, id: EmojiSetId, progress: &Progress) -> Result<(), DownloadError> {
     let zip = fetch(&id.download_url(), progress)?;
     if progress.is_cancelled() {
-        return Err("Cancelled.".into());
+        return Err(DownloadError::Cancelled);
     }
-    install(app_root, id, &zip)
+    install(app_root, id, &zip).map_err(DownloadError::Message)
 }
 
 #[cfg(test)]

@@ -14,8 +14,8 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::screen::{
-    PreviewSlot, ScreenAccess, ScreenBackend, ScreenCapture, ScreenOptions, ScreenSource, SourceId,
-    SourceKind, Thumbnail, fit_capture_size, nv12_to_i420,
+    PreviewSlot, ScreenAccess, ScreenBackend, ScreenCapture, ScreenOptions, ScreenSource,
+    ShareVisibility, SourceId, SourceKind, Thumbnail, fit_capture_size, nv12_to_i420,
 };
 use super::{CaptureError, CaptureEvent, FrameSink, VideoFrame};
 use block2::RcBlock;
@@ -358,25 +358,23 @@ impl WindowMonitor {
     ) -> std::io::Result<Self> {
         let (stop, stopped) = mpsc::channel::<()>();
         let worker = crate::thread_guard::spawn_guarded("quill-screen-pause", move || {
-            let mut paused = false;
+            let mut visibility = ShareVisibility::default();
             while let Err(mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(PAUSE_POLL) {
                 if shared.stopped.load(Ordering::Acquire) {
                     return;
                 }
                 match window_state(window) {
-                    WindowState::OnScreen if paused => {
-                        paused = false;
-                        sink.push_event(CaptureEvent::Resumed);
-                    }
-                    WindowState::OffScreen if !paused => {
-                        paused = true;
-                        sink.push_event(CaptureEvent::Paused);
+                    state @ (WindowState::OnScreen | WindowState::OffScreen) => {
+                        let visible = matches!(state, WindowState::OnScreen);
+                        if let Some(event) = visibility.seen(visible) {
+                            sink.push_event(event);
+                        }
                     }
                     WindowState::Gone => {
                         shared.end();
                         return;
                     }
-                    WindowState::OnScreen | WindowState::OffScreen | WindowState::Unknown => {}
+                    WindowState::Unknown => {}
                 }
             }
         })?;

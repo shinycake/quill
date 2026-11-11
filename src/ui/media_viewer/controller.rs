@@ -23,12 +23,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         self.viewer_clip_path(item)?;
-        if self.viewer.clip_error.is_some() && self.viewer.player.is_none() {
+        if self.viewer.clip.error().is_some() && self.viewer.clip.player().is_none() {
             return None;
         }
         let transport = self
             .viewer_transport()
-            .filter(|_| self.viewer.video == Some(item.message_id))
+            .filter(|_| self.viewer.clip.video() == Some(item.message_id))
             .unwrap_or_else(|| Transport {
                 state: PlayState::Ready,
                 position: 0.0,
@@ -63,7 +63,7 @@ impl QuillApp {
             toggle_play: handler(|this, _, cx| this.toggle_viewer_video(cx)),
             toggle_mute: handler(|this, _, cx| this.toggle_playback_mute(cx)),
             fullscreen: handler(|this, window, cx| this.viewer_toggle_fullscreen(window, cx)),
-            pip: (self.viewer.player.is_some() && self.viewer_may_pip(item))
+            pip: (self.viewer.clip.player().is_some() && self.viewer_may_pip(item))
                 .then(|| handler(|this, _, cx| this.open_video_pip(cx))),
             hover: Rc::new(move |at, _, cx| {
                 let _ = hover_view.update(cx, |this, cx| {
@@ -78,7 +78,7 @@ impl QuillApp {
             VideoController::new(row_id, &transport, &self.viewer.controls, actions)
                 .level(self.players.volume)
                 .fullscreen(self.viewer.extra.video_fullscreen.is_on())
-                .shown(!self.viewer.controls_hidden)
+                .shown(!self.viewer.visibility.is_hidden())
                 .speed_dial(speed_dial)
                 .quality(quality)
                 .into_any_element(),
@@ -104,11 +104,11 @@ impl QuillApp {
         let local = self.viewer_clip_path(item).is_some();
         let failed = self
             .viewer
-            .player
-            .as_ref()
+            .clip
+            .player()
             .is_some_and(|player| player.state() == PlayState::Failed);
         let view = cx.entity().downgrade();
-        let state = if let Some(error) = self.viewer.clip_error.clone().filter(|_| local) {
+        let state = if let Some(error) = self.viewer.clip.error().cloned().filter(|_| local) {
             let open_view = view.clone();
             PictureState::Failed {
                 detail: error.into(),
@@ -171,7 +171,7 @@ impl QuillApp {
     /// Chat windows: whether the clip has waited long enough for the
     /// spinner, arming a redraw for when it will have.
     fn viewer_waiting_shown(&mut self, cx: &mut Context<Self>) -> bool {
-        let waiting = self.viewer.player.as_ref().is_some_and(|player| {
+        let waiting = self.viewer.clip.player().is_some_and(|player| {
             matches!(player.state(), PlayState::Opening | PlayState::Buffering)
         });
         let now = cx.background_executor().now();
@@ -252,7 +252,7 @@ impl QuillApp {
     /// Space went down (key repeats included): arm the hold check.
     pub(super) fn viewer_space_down(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // GIFs have no transport to speed up: Space just toggles.
-        if self.viewer.player.is_none() || self.viewer_loops() {
+        if self.viewer.clip.player().is_none() || self.viewer_loops() {
             self.toggle_viewer_video(cx);
             return;
         }
@@ -294,7 +294,7 @@ impl QuillApp {
         {
             return;
         }
-        if let Some(player) = &self.viewer.player {
+        if let Some(player) = self.viewer.clip.player() {
             player.set_rate(SPEED_BOOST_RATE);
         }
         cx.notify();
@@ -332,7 +332,7 @@ impl QuillApp {
 
     /// Back to the chosen speed after a boost.
     fn restore_viewer_rate(&mut self, cx: &mut Context<Self>) {
-        if let Some(player) = self.viewer.player.as_ref().filter(|_| !self.viewer_loops()) {
+        if let Some(player) = self.viewer.clip.player().filter(|_| !self.viewer_loops()) {
             player.set_rate(self.players.speed);
         }
         cx.notify();

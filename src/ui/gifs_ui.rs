@@ -20,7 +20,7 @@ use quill::gif_grid::{GIF_GRID_PADDING, layout_gifs};
 use quill::ids::{ChatId, FileId};
 use quill::inline_grid::{MEDIA_HEIGHT, Placed, SKIP, should_load_more};
 use quill::lang::{keys, tr, tr_with};
-use quill::state::{GifPanel, GifSearchStage, RequestPurpose};
+use quill::state::{GifPanel, RequestPurpose};
 use quill::telegram::envelope::AnimationItem;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -46,7 +46,7 @@ fn empty_tile(color: Hsla) -> AnyElement {
 
 /// An answer for the session's GIF list is on its way.
 fn gifs_on_their_way(panel: &GifPanel) -> bool {
-    panel.saved.loading() || panel.search.loading()
+    panel.loading() || panel.search_loading()
 }
 
 /// What the footer's sections choose.
@@ -121,8 +121,8 @@ impl GifWanted {
 
     /// What the session's list holds now.
     fn shown(panel: &GifPanel) -> Self {
-        if panel.search.is_on() {
-            Self::Search(panel.search_query.clone())
+        if panel.search_mode() {
+            Self::Search(panel.search_query().to_string())
         } else {
             Self::Saved
         }
@@ -177,12 +177,17 @@ impl QuillApp {
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             match &wanted {
-                GifWanted::Saved => session.stickers.gifs.search = GifSearchStage::Off,
+                GifWanted::Saved => session.stickers.gifs.search_left(),
                 GifWanted::Search(query) => {
                     // No search bot offline: the demo finds nothing.
-                    session.stickers.gifs.search = GifSearchStage::Loading;
-                    session.stickers.gifs.search_query = query.clone();
-                    session.accept_gif_search_results(Vec::new(), String::new(), true);
+                    session.stickers.gifs.search_begun(query.clone());
+                    session.stickers.gifs.search_sent(quill::ids::RequestId(0));
+                    session.accept_gif_search_results(
+                        Some(quill::ids::RequestId(0)),
+                        Vec::new(),
+                        String::new(),
+                        true,
+                    );
                 }
             }
             true
@@ -278,8 +283,8 @@ impl QuillApp {
             return GifShown::Live;
         }
         match &self.pickers.gif_wanted {
-            GifWanted::Saved if panel.saved.loaded() || !panel.saved.items().is_empty() => {
-                GifShown::Saved(panel.saved.items())
+            GifWanted::Saved if panel.loaded() || !panel.animations.is_empty() => {
+                GifShown::Saved(&panel.animations)
             }
             GifWanted::Saved => GifShown::Missing,
             GifWanted::Search(query) => panel
@@ -317,8 +322,8 @@ impl QuillApp {
             scroll_top,
             viewport,
             content as f32,
-            panel.search.is_on() && !panel.search_next_offset.is_empty(),
-            panel.search.loading(),
+            panel.search_mode() && !panel.search_next_offset.is_empty(),
+            panel.search_loading(),
         ) {
             return;
         }
@@ -403,11 +408,11 @@ impl QuillApp {
             Some(tr(keys::Q_MISC_NO_GIFS_FOUND))
         } else if matches!(shown, GifShown::Missing) || gifs_on_their_way(panel) {
             None
-        } else if panel.search.failed() && panel.search_bot_username.is_empty() {
+        } else if panel.search_failed() && panel.search_bot_username.is_empty() {
             Some(tr(keys::Q_MISC_GIF_SEARCH_IS_NOT_AVAILABLE))
-        } else if panel.saved.failed() || panel.search.failed() {
+        } else if panel.failed() || panel.search_failed() {
             Some(tr(keys::Q_MISC_COULD_NOT_UPDATE_GIFS_TRY))
-        } else if panel.search.is_on() {
+        } else if panel.search_mode() {
             Some(tr(keys::Q_MISC_NO_GIFS_FOUND))
         } else {
             Some(tr(keys::Q_MISC_NO_SAVED_GIFS_YET_RIGHT))
@@ -456,8 +461,7 @@ impl QuillApp {
                     continue;
                 };
                 let saved = panel
-                    .saved
-                    .items()
+                    .animations
                     .iter()
                     .any(|item| item.file_id == animation.file_id);
                 line = line.child(self.gif_tile(animation, cell, saved, pending, &roots, cx));

@@ -27,15 +27,9 @@ fn new_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
 
 fn search(app: &QuillApp, host: CountryHost, cx: &gpui_kit::App) -> String {
     let country_box = match host {
-        CountryHost::Payment => app.payments.dialog.as_ref().unwrap().country_box.as_ref(),
+        CountryHost::Payment => app.payments.dialog.as_ref().unwrap().country_box(),
         CountryHost::PaymentCard => app.card_form().unwrap().country_box.as_ref(),
-        CountryHost::Poll => app
-            .chat_ui
-            .poll_dialog
-            .as_ref()
-            .unwrap()
-            .country_box
-            .as_ref(),
+        CountryHost::Poll => app.chat_ui.poll_dialog.as_ref().unwrap().country_box(),
     };
     country_box.unwrap().search.read(cx).value().to_string()
 }
@@ -45,22 +39,29 @@ fn the_shipping_country_is_picked_from_the_list(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, window, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.form = Some(shipping_form());
+            session.payments.checkout = quill::state::CheckoutForm::Ready(shipping_form());
         }
         app.open_payment_dialog(window, cx);
         let dialog = app.payments.dialog.as_ref().unwrap();
         assert_eq!(dialog.country_iso, "");
-        assert!(dialog.country_box.is_none());
+        assert!(dialog.country_box().is_none());
 
         app.open_country_box(CountryHost::Payment, window, cx);
-        assert!(app.payments.dialog.as_ref().unwrap().country_box.is_some());
+        assert!(
+            app.payments
+                .dialog
+                .as_ref()
+                .unwrap()
+                .country_box()
+                .is_some()
+        );
         assert_eq!(search(app, CountryHost::Payment, cx), "");
 
         // Picking a row stores the code, ends the box, and the order
         // carries it.
         app.country_box_click(CountryHost::Payment, "FR", window, cx);
         let dialog = app.payments.dialog.as_ref().unwrap();
-        assert!(dialog.country_box.is_none());
+        assert!(dialog.country_box().is_none());
         assert_eq!(dialog.country_iso, "FR");
         assert_eq!(dialog.order(cx).shipping_address.country_code, "FR");
         assert_eq!(app.country_display_name("FR"), "France");
@@ -72,14 +73,14 @@ fn cancelling_keeps_the_shipping_country(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, window, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.form = Some(shipping_form());
+            session.payments.checkout = quill::state::CheckoutForm::Ready(shipping_form());
         }
         app.open_payment_dialog(window, cx);
         app.payments.dialog.as_mut().unwrap().country_iso = "DE".into();
         app.open_country_box(CountryHost::Payment, window, cx);
         app.close_country_box(CountryHost::Payment, cx);
         let dialog = app.payments.dialog.as_ref().unwrap();
-        assert!(dialog.country_box.is_none());
+        assert!(dialog.country_box().is_none());
         assert_eq!(dialog.country_iso, "DE");
     });
 }
@@ -109,7 +110,7 @@ fn the_poll_takes_several_countries_up_to_the_limit(cx: &mut TestAppContext) {
         app.country_box_save(CountryHost::Poll, cx);
 
         let dialog = app.chat_ui.poll_dialog.as_ref().unwrap();
-        assert!(dialog.country_box.is_none());
+        assert!(dialog.country_box().is_none());
         assert_eq!(dialog.country_codes, ["GB", "FR"]);
         assert!(dialog.is_dirty(cx));
         assert_eq!(dialog.draft(cx).country_codes, ["GB", "FR"]);
@@ -152,7 +153,7 @@ fn both_boxes_render_their_rows_and_buttons(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     app.update_in(&mut vcx, |app, window, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.form = Some(shipping_form());
+            session.payments.checkout = quill::state::CheckoutForm::Ready(shipping_form());
         }
         app.open_payment_dialog(window, cx);
         app.open_poll_dialog(window, cx);

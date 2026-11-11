@@ -73,10 +73,14 @@ impl Session {
                 }
             }
             Some(RequestPurpose::GetProfilePhotoEmojiIcons) => {
-                self.users_state.profile_photo_emoji_icons_failed = true;
+                self.users_state
+                    .profile_photo_emoji_icons
+                    .fail(error_reason(err));
             }
             Some(RequestPurpose::GetChatPhotoEmojiIcons) => {
-                self.users_state.chat_photo_emoji_icons_failed = true;
+                self.users_state
+                    .chat_photo_emoji_icons
+                    .fail(error_reason(err));
             }
             Some(RequestPurpose::GetProfileShareThemeBackdrops) => {
                 self.users_state.peer_qr.backdrops.fail();
@@ -98,7 +102,9 @@ impl Session {
                 self.users_state.peer_qr.fail_link(free, error_reason(err));
             }
             Some(RequestPurpose::GetBackgroundEmojiIcons) => {
-                self.users_state.background_emoji_icons_failed = true;
+                self.users_state
+                    .background_emoji_icons
+                    .fail(error_reason(err));
             }
             // B10: profile panel fetches keep the reason for a Retry row;
             // refused edits surface as a toast.
@@ -187,7 +193,10 @@ impl Session {
         // Phase 6: a failed `getContacts` surfaces a retry in the
         // contacts tab instead of a stuck spinner.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetContacts) {
-            self.users_state.contacts_error = true;
+            self.users_state.contacts = crate::state::fetch::Fetch::Failed {
+                error: format!("error {}", err.code),
+                stale: None,
+            };
         }
     }
 }

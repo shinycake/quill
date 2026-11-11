@@ -103,6 +103,21 @@ macro_rules! on_screen_fields {
 }
 pub(in crate::ui) use on_screen_fields;
 
+/// The screen and its client. A client put on the screen
+/// (`QuillApp::put_on_screen`) must be replaced before it leaves; a client
+/// that left with no window at hand (`screen_leaves_later`) leaves this
+/// screen's goodbyes and replacement still to run, and no client may be put
+/// on it before they have.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ScreenClient {
+    /// No client: the screen is blank or its goodbyes ran.
+    Empty,
+    /// A client draws on the screen.
+    Filled,
+    /// The client left; the goodbyes and the replacement are due.
+    GoodbyesDue,
+}
+
 on_screen_fields! {
     pub struct OnScreen via Farewell;
     /// What the account leaving the screen says, through its own client
@@ -112,13 +127,8 @@ on_screen_fields! {
     /// Changes with every replacement; work started under an older epoch
     /// does not run (`chat_window::scoped::ScopedApp`).
     pub(super) epoch: ScreenEpoch,
-    /// A client was put on this screen (`QuillApp::put_on_screen`): it
-    /// must be replaced before that client leaves.
-    client_filled: bool,
-    /// The client left with no window at hand (`screen_leaves_later`):
-    /// this screen's goodbyes and its replacement are still to run, and no
-    /// client may be put on it before they have.
-    goodbyes_due: bool,
+    /// Where the screen stands with its client.
+    client: ScreenClient,
     ;
     /// Mini apps: the helper window, its launch and the open box
     /// (`ui/web_app_ui.rs`, `DialogKind::WebAppConfirm`). First: its
@@ -169,6 +179,9 @@ on_screen_fields! {
     earn: super::earn_state::EarnUi,
     /// Gift resale, auctions and crafting boxes (`ui/gift_market_state.rs`).
     gift_market: super::gift_market_state::GiftMarketUi,
+    /// The step sliders of the open settings pages and the auto-delete
+    /// picker (`ui/index_sliders.rs`); they show this account's values.
+    index_sliders: super::index_sliders::IndexSliders,
     /// The giveaway form (`ui/giveaway_state.rs`).
     giveaway: super::giveaway_state::GiveawayUi,
     /// Paid messages: price, confirmation, Remove Fee (`ui/paid_messages_state.rs`).
@@ -244,7 +257,6 @@ impl OnScreen {
     pub(super) fn new(
         epoch: ScreenEpoch,
         chat_prefs: &ChatPrefs,
-        connect_status: super::connect_ui::ConnectUiStatus,
         status_note: String,
         window: &mut Window,
         cx: &mut Context<QuillApp>,
@@ -314,8 +326,7 @@ impl OnScreen {
         super::history_a11y::install(&message_ui.history_focus, window, cx);
         Self {
             epoch,
-            client_filled: false,
-            goodbyes_due: false,
+            client: ScreenClient::Empty,
             mini_apps: Default::default(),
             history,
             recording: super::recording_state::RecordingUi::new(),
@@ -345,6 +356,7 @@ impl OnScreen {
             payments: super::payments_state::PaymentUi::new(window, cx),
             earn: super::earn_state::EarnUi::new(window, cx),
             gift_market: super::gift_market_state::GiftMarketUi::new(),
+            index_sliders: Default::default(),
             giveaway: super::giveaway_state::GiveawayUi::new(),
             paid_messages: super::paid_messages_state::PaidMessagesUi::new(),
             paid_reaction: super::paid_reaction_state::PaidReactionUi::new(),
@@ -378,7 +390,7 @@ impl OnScreen {
             account_boxes: super::account_state::AccountBoxes::new(window, cx),
             auth_ui: super::auth_state::AuthUi::new(window, cx),
             agent_ui: super::agent_state::AgentUi::new(),
-            connection: super::connection_state::ConnectionUi::new(connect_status, status_note),
+            connection: super::connection_state::ConnectionUi::new(status_note),
             windows: super::chat_window::ChatWindows::new(),
         }
     }
@@ -421,14 +433,10 @@ impl QuillApp {
     pub(in crate::ui) fn replace_screen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.set_window_scope(None);
         let epoch = self.screen.epoch.next();
-        // The status is the connection's, which the switch sets again right
-        // after (`adopt_live`, `start_connection`); a fresh default would
-        // show the synthetic pane for a frame.
-        let status = self.connection.status.clone();
         // So is the status line's note: a restart set "Connecting" before
         // the deferred replacement runs (`screen_leaves_later`).
         let note = self.connection.note().text().to_string();
-        self.screen = OnScreen::new(epoch, &self.chat_prefs, status, note, window, cx);
+        self.screen = OnScreen::new(epoch, &self.chat_prefs, note, window, cx);
         // The side column slides out drawing the panels it last had, which
         // name the old account's users and chats.
         self.frame.panels = super::panel_reveal::PanelReveal::new(std::time::Instant::now());
@@ -444,11 +452,13 @@ impl QuillApp {
     /// it did before, under the new epoch.
     pub(in crate::ui) fn screen_leaves_later(&mut self, cx: &mut Context<Self>) {
         self.screen.epoch = self.screen.epoch.next();
-        self.screen.client_filled = false;
+        if self.screen.client == ScreenClient::Filled {
+            self.screen.client = ScreenClient::Empty;
+        }
         let Some(handle) = self.main_window.handle else {
             return;
         };
-        self.screen.goodbyes_due = true;
+        self.screen.client = ScreenClient::GoodbyesDue;
         let app = cx.entity().downgrade();
         // screen-scope: the goodbyes of the screen that just left; its
         // epoch has already moved, and no client is on screen yet.
@@ -458,7 +468,7 @@ impl QuillApp {
             });
             // The window went meanwhile: the old UI stays, as without one.
             if said.is_err() {
-                let _ = app.update(cx, |this, _| this.screen.goodbyes_due = false);
+                let _ = app.update(cx, |this, _| this.screen.client = ScreenClient::Empty);
             }
         });
     }
@@ -469,7 +479,7 @@ impl QuillApp {
     /// in debug builds), the old screen's draft flush and closes would go
     /// to it with the old account's ids, so only the old UI is dropped.
     fn say_due_goodbyes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.screen.goodbyes_due {
+        if self.screen.client != ScreenClient::GoodbyesDue {
             return;
         }
         if self.live.is_none() {
@@ -478,13 +488,13 @@ impl QuillApp {
         }
         self.close_main_window_dialogs(window, cx);
         self.replace_screen(window, cx);
-        self.screen.client_filled = true;
+        self.screen.client = ScreenClient::Filled;
     }
 
     /// The old screen's goodbyes are still to run (`screen_leaves_later`):
     /// a client must wait for them before it is put on screen.
     pub(in crate::ui) fn goodbyes_due(&self) -> bool {
-        self.screen.goodbyes_due
+        self.screen.client == ScreenClient::GoodbyesDue
     }
 
     /// The client leaves the screen, for the background or the closing set.
@@ -493,7 +503,7 @@ impl QuillApp {
     /// takes `live` directly: the app is going away with everything on it.)
     pub(in crate::ui) fn take_live(&mut self) -> Option<LiveConnect> {
         debug_assert!(
-            !self.screen.client_filled,
+            self.screen.client != ScreenClient::Filled,
             "the client leaves the screen before its UI is replaced"
         );
         self.live.take()
@@ -510,10 +520,10 @@ impl QuillApp {
         live.driver.session.forget_screen_outcomes();
         debug_assert!(self.live.is_none(), "a client is already on screen");
         debug_assert!(
-            !self.screen.goodbyes_due,
+            self.screen.client != ScreenClient::GoodbyesDue,
             "a client is put on screen before the last one's goodbyes ran"
         );
-        self.screen.client_filled = true;
+        self.screen.client = ScreenClient::Filled;
         // The private media scratch is this account's from here on.
         quill::local_path::set_media_cache_scope(&live.driver.session.account);
         quill::telegram::name_accent::set_active_account(&live.driver.session.account);

@@ -117,15 +117,15 @@ fn a_link_resolved_while_locked_opens_after_the_unlock(cx: &mut TestAppContext) 
     let (app, mut vcx) = open_chat(cx);
     lock(&app, &mut vcx);
     app.update(&mut vcx, |app, cx| {
-        app.links.pending_deep_link_open = Some(PendingOpen::user(
-            OTHER,
-            DeepLinkAction::OpenUser { user_id: OTHER.0 },
+        app.links.resolved = Some(crate::ui::links_state::ResolvedLink::open(
+            PendingOpen::user(OTHER, DeepLinkAction::OpenUser { user_id: OTHER.0 }),
+            None,
         ));
         cx.notify();
     });
     frame(&mut vcx);
     app.read_with(&vcx, |app, _| {
-        assert!(app.links.pending_deep_link_open.is_some(), "held");
+        assert!(app.links.resolved.is_some(), "held");
         assert_eq!(
             app.open_chat_id(),
             Some(CHAT),
@@ -139,7 +139,7 @@ fn a_link_resolved_while_locked_opens_after_the_unlock(cx: &mut TestAppContext) 
     frame(&mut vcx);
     app.read_with(&vcx, |app, _| {
         assert!(
-            app.links.pending_deep_link_open.is_none(),
+            app.links.resolved.is_none(),
             "the link ran after the unlock"
         );
     });

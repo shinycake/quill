@@ -258,7 +258,7 @@ impl Session {
     }
 
     pub fn accept_saved_animations(&mut self, animations: Vec<AnimationItem>) {
-        self.stickers.gifs.saved.accept(animations);
+        self.stickers.gifs.saved_answered(animations);
     }
 
     /// Slice S9: store a GIF-search `inlineQueryResults` page. A first page
@@ -268,11 +268,17 @@ impl Session {
     /// `first_page`.
     pub fn accept_gif_search_results(
         &mut self,
+        request: Option<RequestId>,
         animations: Vec<AnimationItem>,
         next_offset: String,
         first_page: bool,
     ) {
-        self.stickers.gifs.search.ready();
+        // A page of an earlier search, or of one that was left, is not the
+        // search's now.
+        if !self.stickers.gifs.search_waits_for(request) {
+            return;
+        }
+        self.stickers.gifs.search_answered();
         if first_page {
             self.stickers.gifs.search_results = animations;
         } else {
@@ -295,8 +301,8 @@ impl Session {
                 next_offset
             };
         let gifs = &mut self.stickers.gifs;
-        gifs.searches_kept
-            .keep(&gifs.search_query, &gifs.search_results);
+        let query = gifs.search_query().to_string();
+        gifs.searches_kept.keep(&query, &gifs.search_results);
     }
 
     /// The answer of `request`; one for a set that is no longer the asked

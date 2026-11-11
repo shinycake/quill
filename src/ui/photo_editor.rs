@@ -50,7 +50,7 @@ pub(super) enum EditorMode {
 }
 
 /// What the edited picture is for.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq)]
 pub(super) enum EditorPurpose {
     /// A pending composer attachment, as it was when the editor opened.
     Attachment(TrayItem),
@@ -65,7 +65,11 @@ pub(super) enum EditorPurpose {
     /// transparent square canvas, the crop is fixed, and the result is
     /// fitted to the set's side (tdesktop's `fixedCrop` editor from
     /// `StickerCreatorBox`; `photo_editor_set.rs`).
-    Set { set_id: i64, kind: SetKind },
+    Set {
+        set_id: i64,
+        kind: SetKind,
+        edit: SetEdit,
+    },
     /// A profile, group or channel photo: a square crop shown as a circle,
     /// confirmed with "Set Photo" (tdesktop `PrepareProfilePhoto`;
     /// `photo_editor_profile.rs`).
@@ -73,13 +77,61 @@ pub(super) enum EditorPurpose {
 }
 
 #[derive(Clone, Copy)]
-enum CropDrag {
+pub(super) enum CropDrag {
     /// Corner 0..4: top-left, top-right, bottom-right, bottom-left.
     Corner(usize),
     Move {
         from: (f32, f32),
         start: CropRect,
     },
+}
+
+/// What the pointer is doing on the editor, from press to release: one
+/// gesture at a time, so a stroke, a crop handle and a sticker drag never
+/// run together.
+pub(super) enum Gesture {
+    None,
+    /// Drawing the stroke that is not on `strokes` yet.
+    Stroke(Stroke),
+    Crop(CropDrag),
+    Item(ItemDrag),
+}
+
+impl Gesture {
+    fn stroke(&self) -> Option<&Stroke> {
+        match self {
+            Self::Stroke(stroke) => Some(stroke),
+            Self::None | Self::Crop(_) | Self::Item(_) => None,
+        }
+    }
+
+    pub(super) fn item(&self) -> Option<ItemDrag> {
+        match self {
+            Self::Item(drag) => Some(*drag),
+            Self::None | Self::Stroke(_) | Self::Crop(_) => None,
+        }
+    }
+}
+
+/// Set mode's choices, part of its purpose: how round the sticker's
+/// corners come out and whether the picked image's ratio is kept. In Set
+/// mode `placed[0]` is the picked image on the transparent canvas, movable
+/// and zoomable, never deleted.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) struct SetEdit {
+    pub(super) corners: StickerCorners,
+    pub(super) ratio: KeepRatio,
+}
+
+/// "Keep original aspect ratio" in Set mode.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum KeepRatio {
+    /// The picked image has no ratio to keep (emoji, or a square).
+    NotOffered,
+    /// Offered with the picked image's ratio, off.
+    Off(f64),
+    /// On: the crop is the largest centered rectangle of that ratio.
+    On(f64),
 }
 
 pub(super) struct PhotoEditor {
@@ -90,26 +142,16 @@ pub(super) struct PhotoEditor {
     preview: OwnedImage,
     pub(super) crop: CropRect,
     pub(super) strokes: Vec<Stroke>,
-    current: Option<Stroke>,
     pub(super) mode: EditorMode,
     color: usize,
     size: usize,
-    drag: Option<CropDrag>,
+    /// The pointer gesture in progress (`Gesture`).
+    pub(super) gesture: Gesture,
     /// Stickers and emoji on the photo, each with its display copy.
     pub(super) placed: Vec<(Placed, OwnedImage)>,
     pub(super) selected: Option<usize>,
-    pub(super) item_drag: Option<ItemDrag>,
     /// Where the image was painted last frame, for mapping the pointer.
     pub(super) image_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
-    /// Set mode: `placed[0]` is the picked image on the transparent
-    /// canvas, movable and zoomable, never deleted.
-    pub(super) base_item: bool,
-    /// Set mode: how round the sticker's corners come out.
-    pub(super) corners: StickerCorners,
-    /// Set mode: "Keep original aspect ratio" is on.
-    pub(super) keep_ratio: bool,
-    /// Set mode: the picked image's ratio when it may be kept, else 0.
-    pub(super) original_ratio: f64,
 }
 
 /// A display copy of `image` (at most 1600 px), in GPUI's BGRA order.
@@ -159,19 +201,13 @@ impl PhotoEditor {
             orientation: Orientation::default(),
             crop: CropRect::FULL,
             strokes: Vec::new(),
-            current: None,
             mode: EditorMode::Crop,
             color: 2,
             size: 1,
-            drag: None,
             placed: Vec::new(),
             selected: None,
-            item_drag: None,
+            gesture: Gesture::None,
             image_bounds: Rc::new(Cell::new(None)),
-            base_item: false,
-            corners: StickerCorners::default(),
-            keep_ratio: false,
-            original_ratio: 0.0,
         }
     }
 
@@ -267,7 +303,7 @@ impl PhotoEditor {
             EditorMode::Draw => {
                 if let (Some(&color), Some(&width)) = (COLORS.get(self.color), SIZES.get(self.size))
                 {
-                    self.current = Some(Stroke {
+                    self.gesture = Gesture::Stroke(Stroke {
                         color,
                         width,
                         points: vec![(x, y)],
@@ -291,17 +327,17 @@ impl PhotoEditor {
                     let dy = (cy - y) * (bounds.size.height / px(1.));
                     dx.abs() <= HANDLE_GRAB && dy.abs() <= HANDLE_GRAB
                 });
-                self.drag = match near {
-                    Some(corner) => Some(CropDrag::Corner(corner)),
+                self.gesture = match near {
+                    Some(corner) => Gesture::Crop(CropDrag::Corner(corner)),
                     None if (crop.x..crop.x + crop.w).contains(&x)
                         && (crop.y..crop.y + crop.h).contains(&y) =>
                     {
-                        Some(CropDrag::Move {
+                        Gesture::Crop(CropDrag::Move {
                             from: (x, y),
                             start: crop,
                         })
                     }
-                    None => None,
+                    None => Gesture::None,
                 };
             }
         }
@@ -311,16 +347,20 @@ impl PhotoEditor {
         let Some((x, y)) = self.normalized(position) else {
             return;
         };
-        if let Some(stroke) = self.current.as_mut() {
+        if let Gesture::Stroke(stroke) = &mut self.gesture {
             stroke.points.push((x.clamp(0.0, 1.0), y.clamp(0.0, 1.0)));
             return;
         }
-        if self.item_drag.is_some() {
+        if self.gesture.item().is_some() {
             self.drag_item((x, y));
             return;
         }
         let (x, y) = (x.clamp(0.0, 1.0), y.clamp(0.0, 1.0));
-        match self.drag {
+        let drag = match self.gesture {
+            Gesture::Crop(drag) => Some(drag),
+            Gesture::None | Gesture::Stroke(_) | Gesture::Item(_) => None,
+        };
+        match drag {
             Some(CropDrag::Move { from, start }) => {
                 self.crop = CropRect {
                     x: start.x + x - from.0,
@@ -356,11 +396,9 @@ impl PhotoEditor {
     }
 
     fn release(&mut self) {
-        if let Some(stroke) = self.current.take() {
+        if let Gesture::Stroke(stroke) = std::mem::replace(&mut self.gesture, Gesture::None) {
             self.strokes.push(stroke);
         }
-        self.drag = None;
-        self.item_drag = None;
     }
 }
 
@@ -384,17 +422,17 @@ impl QuillApp {
             .get(index)
             .and_then(|attachment| attachment.extras.photo_render);
         if let Some(render) = render {
-            self.viewer.photo_editor_after = Some(super::viewer_state::DeferredOpen {
-                render,
-                view: self
-                    .session()
-                    .map(|s| s.view_generation)
-                    .unwrap_or_default(),
-            });
+            let view = self
+                .session()
+                .map(|s| s.view_generation)
+                .unwrap_or_default();
+            self.viewer
+                .photo_editor
+                .defer(super::viewer_state::DeferredOpen { render, view });
             cx.notify();
             return;
         }
-        self.viewer.photo_editor_after = None;
+        self.viewer.photo_editor.clear_deferred();
         self.open_photo_editor_for(item, cx);
     }
 
@@ -421,8 +459,9 @@ impl QuillApp {
                         if this.viewer.photo_editor.is_none()
                             && this.composer_sends.holds_item(&item)
                         {
-                            this.viewer.photo_editor =
-                                Some(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
+                            this.viewer
+                                .photo_editor
+                                .open(PhotoEditor::new(EditorPurpose::Attachment(item), pixels));
                         }
                     }
                     Err(_) => this.set_note(StatusNote::error(tr(
@@ -436,8 +475,7 @@ impl QuillApp {
     }
 
     pub(super) fn close_photo_editor(&mut self, cx: &mut Context<Self>) {
-        self.viewer.photo_editor = None;
-        self.viewer.photo_editor_after = None;
+        self.viewer.photo_editor.close();
         cx.notify();
     }
 
@@ -478,7 +516,7 @@ impl QuillApp {
         let strokes: Vec<Stroke> = editor
             .strokes
             .iter()
-            .chain(editor.current.as_ref())
+            .chain(editor.gesture.stroke())
             .cloned()
             .collect();
         let image_bounds = editor.image_bounds.clone();
@@ -489,11 +527,11 @@ impl QuillApp {
             .collect();
         // Set mode: the picked image shows its handle while cropping too.
         let selected_item = editor.selected.filter(|_| {
-            mode == EditorMode::Stickers || (mode == EditorMode::Crop && editor.base_item)
+            mode == EditorMode::Stickers || (mode == EditorMode::Crop && editor.is_set())
         });
-        let base_item = editor.base_item;
+        let base_item = editor.is_set();
         let round_crop = editor.is_profile();
-        let corner_multiplier = editor.corners.multiplier();
+        let corner_multiplier = editor.corners().multiplier();
         let surface = canvas(
             move |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
             move |bounds, hitbox, window, _| {

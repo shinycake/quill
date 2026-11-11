@@ -76,7 +76,7 @@ impl QuillApp {
 
     /// Phase A1: keep the slow-mode countdown re-rendering while the open
     /// chat is gated. At most one task per open chat (guarded by
-    /// `slow_mode_tick_chat`, mirroring `spawn_voice_tick`); it exits
+    /// `slow_mode_tick`, mirroring `spawn_voice_tick`); it exits
     /// when the gate lifts or the open chat changes. Called from
     /// `render`, which has the `&mut self` the tick needs.
     pub(super) fn ensure_slow_mode_tick(&mut self, cx: &mut Context<Self>) {
@@ -87,11 +87,15 @@ impl QuillApp {
         else {
             return;
         };
-        if self.composer_ui.slow_mode_tick_chat == Some(chat_id) {
+        if self
+            .composer_ui
+            .slow_mode_tick
+            .as_ref()
+            .is_some_and(|(ticking, _)| *ticking == chat_id)
+        {
             return;
         }
-        self.composer_ui.slow_mode_tick_chat = Some(chat_id);
-        self.spawn_scoped(cx, async move |this, cx| {
+        let tick = self.spawn_scoped(cx, async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
                 let cont = this
@@ -104,8 +108,13 @@ impl QuillApp {
                         if still_open && still_gated {
                             true
                         } else {
-                            if this.composer_ui.slow_mode_tick_chat == Some(chat_id) {
-                                this.composer_ui.slow_mode_tick_chat = None;
+                            if this
+                                .composer_ui
+                                .slow_mode_tick
+                                .as_ref()
+                                .is_some_and(|(ticking, _)| *ticking == chat_id)
+                            {
+                                this.composer_ui.slow_mode_tick = None;
                             }
                             false
                         }
@@ -115,7 +124,8 @@ impl QuillApp {
                     break;
                 }
             }
-        })
-        .detach();
+        });
+        // Another chat's tick is dropped (and so stopped) by this one.
+        self.composer_ui.slow_mode_tick = Some((chat_id, tick));
     }
 }

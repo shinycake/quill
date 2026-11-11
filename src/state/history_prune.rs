@@ -205,7 +205,7 @@ impl TopicHistory {
     /// window short of the latest has no tail worth keeping: it goes, and
     /// the topic opens at its latest page again.
     pub(crate) fn trim_to_tail(&mut self, keep: usize) -> usize {
-        if self.has_newer {
+        if self.has_newer() {
             let before = self.messages.len();
             self.reset_window();
             return before - self.messages.len();
@@ -215,7 +215,7 @@ impl TopicHistory {
             self.messages.remove(id);
         }
         if !doomed.is_empty() {
-            self.loaded_complete = false;
+            self.reopen_oldest();
             if let Some(oldest) = self.messages.keys().next() {
                 self.next_from_message_id = MessageId(*oldest);
             }
@@ -393,7 +393,7 @@ impl Session {
             return;
         }
         if let Some(history) = self.threads.topic_histories.get_mut(&(chat_id.0, topic)) {
-            let moved = history.has_newer | (history.trim_to_tail(CLOSED_TAIL_KEEP) > 0);
+            let moved = history.has_newer() | (history.trim_to_tail(CLOSED_TAIL_KEEP) > 0);
             self.history_pruning.touch_topic((chat_id.0, topic));
             // Pages asked for from the window that went would land across
             // a gap.
@@ -511,9 +511,7 @@ impl Session {
         groups
             .supergroup_members
             .retain(|(chat, _), _| *chat != chat_id.0);
-        groups
-            .supergroup_member_queries
-            .retain(|(chat, _), _| *chat != chat_id.0);
+        groups.member_asks.retain(|(chat, _), _| *chat != chat_id.0);
         let dropped = groups.basic_group_members.remove(&chat_id.0).is_some()
             || groups.supergroup_members.len() != members;
         if dropped && !groups.member_list_stale.contains(&chat_id.0) {

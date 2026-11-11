@@ -59,7 +59,7 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
     let grams = &driver.session.payments.hub.grams;
     assert_eq!(grams.balance_nano, Some(750_000_000));
     // The probe never fills the list.
-    assert!(grams.entries.is_empty() && !grams.loaded);
+    assert!(grams.entries.is_empty() && !grams.load.answered());
 
     driver.open_grams(false).unwrap();
     let first = sent_request(&recorder, "getTonTransactions");
@@ -86,7 +86,7 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
         ),
     );
     let grams = &driver.session.payments.hub.grams;
-    assert!(grams.open && grams.loaded && !grams.loading);
+    assert!(grams.open && grams.load == crate::gift_market::PageLoad::Ready);
     assert_eq!(grams.entries.len(), 11);
     assert_eq!(grams.balance_nano, Some(12_750_000_000));
     assert_eq!(
@@ -158,7 +158,7 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
         ),
     );
     assert!(driver.session.payments.hub.grams.entries.is_empty());
-    assert!(driver.session.payments.hub.grams.loading);
+    assert!(driver.session.payments.hub.grams.load.is_loading());
     // Another switch: an error for the older tab leaves the live one
     // loading.
     driver.set_grams_filter(TxFilter::Outgoing).unwrap();
@@ -171,7 +171,7 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
         ),
     );
     let grams = &driver.session.payments.hub.grams;
-    assert!(grams.loading && grams.error.is_none());
+    assert!(grams.load.is_loading() && grams.load.error().is_none());
     ingest(
         &mut driver,
         answer(
@@ -180,8 +180,8 @@ fn the_probe_fills_the_balance_once_and_the_screen_pages() {
         ),
     );
     let grams = &driver.session.payments.hub.grams;
-    assert!(!grams.loading);
-    assert!(grams.error.is_some());
+    assert!(!grams.load.is_loading());
+    assert!(grams.load.error().is_some());
 
     // Only reads were sent.
     for json in recorder.snapshot() {

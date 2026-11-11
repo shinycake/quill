@@ -286,10 +286,12 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         use quill::contacts_index::{HEADER_HEIGHT, ListItem, ROW_HEIGHT};
-        let failed = self.session().is_some_and(|s| s.users_state.contacts_error);
+        let failed = self
+            .session()
+            .is_some_and(|s| s.users_state.contacts.error().is_some());
         let loading = self
             .session()
-            .is_some_and(|s| s.users_state.contacts.is_none())
+            .is_some_and(|s| s.users_state.contacts.data().is_none())
             && !failed;
         let note = |text: &'static str, cx: &mut Context<Self>| {
             div()
@@ -378,7 +380,7 @@ impl QuillApp {
                 cx.notify();
                 return;
             }
-            if next && live.driver.session.users_state.contacts.is_none() {
+            if next && live.driver.session.users_state.contacts.data().is_none() {
                 // Re-enable refetches the server list so the tab
                 // converges with TDLib immediately.
                 if let Err(err) = live.driver.fetch_contacts() {

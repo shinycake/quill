@@ -87,7 +87,7 @@ impl QuillApp {
             view.files_requested = true;
             session.stickers.sticker_set_view = Some(view);
         }
-        self.message_ui.menu_ui.sticker_set_open = true;
+        self.message_ui.menu_ui.show_sticker_set();
         // `QUILL_DEMO_STICKER_BOX=<state>` opens one of the editing states
         // for its screenshot: reorder, rename, delete, create, editor, video, panel.
         match std::env::var("QUILL_DEMO_STICKER_BOX").as_deref() {
@@ -96,10 +96,10 @@ impl QuillApp {
                 self.sticker_box.rename_input.update(_cx, |input, cx| {
                     input.set_value("My doodles", _window, cx);
                 });
-                self.sticker_box.rename_open = true;
+                self.sticker_box.confirm = crate::ui::sticker_set_box::state::SetConfirm::Rename;
             }
             Ok("delete") => {
-                self.sticker_box.delete_sticker = self
+                let item = self
                     .demo_session
                     .as_ref()
                     .and_then(|s| s.stickers.sticker_set_view.as_ref())
@@ -107,6 +107,10 @@ impl QuillApp {
                         StickerSetViewStage::Ready { stickers, .. } => stickers.get(2).cloned(),
                         _ => None,
                     });
+                if let Some(item) = item {
+                    self.sticker_box.confirm =
+                        crate::ui::sticker_set_box::state::SetConfirm::DeleteSticker(item);
+                }
             }
             Ok("create") => {
                 self.sticker_box.create = Some(super::state::CreateSticker {
@@ -167,7 +171,7 @@ impl QuillApp {
                 );
             }
             Ok("panel") => {
-                self.message_ui.menu_ui.sticker_set_open = false;
+                self.message_ui.menu_ui.end_sticker_set();
                 self.set_media_panel_mode(crate::ui::media_panel::PanelMode::Compose);
                 self.pickers.media_panel.tab = crate::ui::media_panel::PanelTab::Stickers;
             }

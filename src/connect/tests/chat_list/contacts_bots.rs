@@ -232,7 +232,12 @@ fn contacts_fetched_once_for_tab() {
         )
         .unwrap();
     assert_eq!(
-        driver.session.users_state.contacts.as_deref(),
+        driver
+            .session
+            .users_state
+            .contacts
+            .data()
+            .map(Vec::as_slice),
         Some([31].as_slice())
     );
     assert_eq!(driver.fetch_contacts().unwrap(), None);
@@ -382,7 +387,7 @@ fn add_contact_sends_imported_contact() {
     let recorder = Arc::new(RecordingSender::new());
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
-    driver.session.users_state.contacts = Some(Vec::new());
+    driver.session.users_state.contacts = crate::state::fetch::Fetch::Ready(Vec::new());
     let extra = driver
         .add_contact(31, "+15550131", "Ada", "Lovelace")
         .unwrap()
@@ -407,7 +412,7 @@ fn add_contact_sends_imported_contact() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.users_state.contacts.is_none());
+    assert!(driver.session.users_state.contacts.data().is_none());
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -424,7 +429,7 @@ fn a6_remove_contact_sends_and_invalidates() {
     let recorder = Arc::new(RecordingSender::new());
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
-    driver.session.users_state.contacts = Some(vec![31]);
+    driver.session.users_state.contacts = crate::state::fetch::Fetch::Ready(vec![31]);
     let extra = driver
         .remove_contact(31)
         .unwrap()
@@ -445,7 +450,7 @@ fn a6_remove_contact_sends_and_invalidates() {
             .unwrap(),
         )
         .unwrap();
-    assert!(driver.session.users_state.contacts.is_none());
+    assert!(driver.session.users_state.contacts.data().is_none());
     assert_eq!(
         driver.session.users_state.contacts_notice.as_deref(),
         Some("Contact deleted.")
@@ -466,7 +471,7 @@ fn a6_delete_synced_contacts_clears_then_removes() {
     let recorder = Arc::new(RecordingSender::new());
     let seq = AtomicU64::new(0);
     let mut driver = ready_driver(&recorder, prepared, &dyn_sink, &seq);
-    driver.session.users_state.contacts = Some(vec![31, 32]);
+    driver.session.users_state.contacts = crate::state::fetch::Fetch::Ready(vec![31, 32]);
     let sent_count = driver.delete_synced_contacts().unwrap();
     assert_eq!(sent_count, 2);
     let sent = recorder.snapshot();

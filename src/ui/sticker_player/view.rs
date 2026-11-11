@@ -106,8 +106,8 @@ impl StickerView {
             .filter(|(other, _)| self.spec.same_file(other))
             .max_by_key(|(_, clip)| clip.used)
             .map(|(_, clip)| clip);
-        let Some(timeline) = clip.and_then(|clip| clip.timeline) else {
-            return if clip.is_none_or(|clip| clip.failed) {
+        let Some(timeline) = clip.and_then(|clip| clip.timeline()) else {
+            return if clip.is_none_or(|clip| clip.failed()) {
                 ViewState::Gone
             } else {
                 ViewState::Opening
@@ -224,7 +224,7 @@ impl StickerView {
             .clips
             .iter()
             .filter(|(key, _)| self.spec.same_file(key))
-            .find_map(|(_, clip)| clip.timeline)?
+            .find_map(|(_, clip)| clip.timeline())?
             .duration();
         Some((head.pos(), total))
     }

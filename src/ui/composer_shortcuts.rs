@@ -32,8 +32,23 @@ pub(super) struct ComposerLinkDialog {
     /// The text in that range, to detect a draft that changed meanwhile.
     selected: String,
     input: Entity<TextareaState>,
-    /// Focus the field once the dialog has mounted.
-    focus_on_mount: bool,
+    /// `Opening` until the dialog has mounted and focused the field.
+    stage: BoxStage,
+}
+
+/// Where a box stands in showing itself: it focuses its field once, at the
+/// first frame it is on screen.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BoxStage {
+    Opening,
+    Open,
+}
+
+impl BoxStage {
+    /// The first frame: true once, then the box is `Open`.
+    fn mounted(&mut self) -> bool {
+        std::mem::replace(self, Self::Open) == Self::Opening
+    }
 }
 
 /// The "Code Language" box (tdesktop `EditCodeLanguageBox`): one field,
@@ -42,9 +57,33 @@ pub(super) struct CodeLanguageDialog {
     /// Where the block was when the box opened, to notice a changed draft.
     block: Range<usize>,
     input: Entity<TextareaState>,
-    error: Option<&'static str>,
-    /// Focus and select the field once the dialog has mounted.
-    focus_on_mount: bool,
+    stage: CodeLanguageStage,
+}
+
+/// The Code Language box: waiting for its first frame (to focus the field),
+/// then editing, with the language error the last Apply found.
+#[derive(Clone, Copy)]
+enum CodeLanguageStage {
+    Opening,
+    Editing { error: Option<&'static str> },
+}
+
+impl CodeLanguageStage {
+    /// The first frame: true once, then the box is `Editing` with no error.
+    fn mounted(&mut self) -> bool {
+        let first = matches!(self, Self::Opening);
+        if first {
+            *self = Self::Editing { error: None };
+        }
+        first
+    }
+
+    fn error(&self) -> Option<&'static str> {
+        match *self {
+            Self::Opening => None,
+            Self::Editing { error } => error,
+        }
+    }
 }
 
 /// The chord for a shortcut as shown in menus: "⌘B" on macOS, "Ctrl+B"
@@ -156,7 +195,7 @@ impl QuillApp {
             range,
             selected,
             input,
-            focus_on_mount: true,
+            stage: BoxStage::Opening,
         });
         cx.notify();
     }
@@ -223,7 +262,7 @@ impl QuillApp {
     /// The link field, once, for the dialog to focus after it mounts.
     pub(super) fn take_link_focus(&mut self) -> Option<Entity<TextareaState>> {
         let dialog = self.chat_ui.link_dialog.as_mut()?;
-        std::mem::take(&mut dialog.focus_on_mount).then(|| dialog.input.clone())
+        dialog.stage.mounted().then(|| dialog.input.clone())
     }
 
     /// The link box's body: what the link is for and the address field.
@@ -316,8 +355,7 @@ impl QuillApp {
         self.chat_ui.code_language = Some(CodeLanguageDialog {
             block,
             input,
-            error: None,
-            focus_on_mount: true,
+            stage: CodeLanguageStage::Opening,
         });
         cx.notify();
     }
@@ -360,7 +398,9 @@ impl QuillApp {
                 }
                 Err(error) => {
                     if let Some(dialog) = self.chat_ui.code_language.as_mut() {
-                        dialog.error = Some(error.note());
+                        dialog.stage = CodeLanguageStage::Editing {
+                            error: Some(error.note()),
+                        };
                     }
                 }
             }
@@ -390,7 +430,9 @@ impl QuillApp {
             }
             Err(error) => {
                 if let Some(dialog) = self.chat_ui.code_language.as_mut() {
-                    dialog.error = Some(error.note());
+                    dialog.stage = CodeLanguageStage::Editing {
+                        error: Some(error.note()),
+                    };
                 }
             }
         }
@@ -400,7 +442,7 @@ impl QuillApp {
     /// The language field, once, for the dialog to focus after it mounts.
     pub(super) fn take_code_language_focus(&mut self) -> Option<Entity<TextareaState>> {
         let dialog = self.chat_ui.code_language.as_mut()?;
-        std::mem::take(&mut dialog.focus_on_mount).then(|| dialog.input.clone())
+        dialog.stage.mounted().then(|| dialog.input.clone())
     }
 
     /// The Code Language box's body (tdesktop `EditCodeLanguageBox`): the
@@ -430,7 +472,7 @@ impl QuillApp {
                         .child(
                             div()
                                 .text_color(cx.theme().danger)
-                                .child(dialog.error.unwrap_or("")),
+                                .child(dialog.stage.error().unwrap_or("")),
                         )
                         .child(
                             div()

@@ -144,7 +144,7 @@ impl QuillApp {
     /// push-to-talk was switched off: drop held state, close the microphone.
     pub(super) fn group_call_ptt_release_all(&mut self, cx: &mut Context<Self>) {
         // With the system-wide hook the key-up still arrives in the background.
-        if self.group_call.global_ptt.is_active() {
+        if self.group_call.global_ptt.hook.is_active() {
             return;
         }
         self.ptt_end_hold(cx);
@@ -183,35 +183,35 @@ impl QuillApp {
         let want = (self.live.is_some() && config.enabled && self.group_call_joined())
             .then_some(config.key);
         let mut events = None;
-        let changed = self.group_call.global_ptt.sync(want.as_deref(), |key| {
-            let (tx, rx) = std::sync::mpsc::channel::<KeyEdge>();
-            let sink: Sink = std::sync::Arc::new(move |edge| {
-                let _ = tx.send(edge);
+        let changed = self
+            .group_call
+            .global_ptt
+            .hook
+            .sync(want.as_deref(), |key| {
+                let (tx, rx) = std::sync::mpsc::channel::<KeyEdge>();
+                let sink: Sink = std::sync::Arc::new(move |edge| {
+                    let _ = tx.send(edge);
+                });
+                let handle = quill::calls::ptt_global::start_platform(key, sink)?;
+                events = Some(rx);
+                Ok(handle)
             });
-            let handle = quill::calls::ptt_global::start_platform(key, sink)?;
-            events = Some(rx);
-            Ok(handle)
-        });
-        if (events.is_some() || !self.group_call.global_ptt.is_active())
-            && let Some(stop) = self.group_call.global_ptt_listener_stop.take()
-        {
-            stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        if events.is_some() || !self.group_call.global_ptt.hook.is_active() {
+            self.group_call.global_ptt.listener = None;
         }
         let started = events.is_some();
         if let Some(rx) = events {
-            let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-            self.group_call.global_ptt_listener_stop = Some(stop.clone());
-            self.listen_global_ptt(rx, stop, cx);
+            self.group_call.global_ptt.listener = Some(self.listen_global_ptt(rx, cx));
         }
         if want.is_none() && changed {
             let _ = self.group_call.ptt.reset();
-        } else if started || (changed && !self.group_call.global_ptt.is_active()) {
+        } else if started || (changed && !self.group_call.global_ptt.hook.is_active()) {
             // A new hook knows nothing of a key the old one saw go down, and
             // a hook that failed to start sees no release at all.
             self.ptt_end_hold(cx);
         }
         if matches!(
-            self.group_call.global_ptt.state(),
+            self.group_call.global_ptt.hook.state(),
             HookState::NeedsPermission
         ) {
             self.arm_global_ptt_permission_poll(cx);
@@ -224,18 +224,16 @@ impl QuillApp {
     /// Forward hook-thread events to the app. Each wait on the background
     /// executor lasts at most `PTT_LISTEN_SLICE`, so a hook that went away
     /// without dropping its sender cannot pin an executor thread; the loop
-    /// ends when `stop` is set or the sender is gone.
+    /// ends when the returned task is dropped or the sender is gone.
     fn listen_global_ptt(
         &mut self,
         rx: std::sync::mpsc::Receiver<KeyEdge>,
-        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
         cx: &mut Context<Self>,
-    ) {
-        use std::sync::atomic::Ordering;
+    ) -> Task<()> {
         use std::sync::mpsc::RecvTimeoutError;
         self.spawn_screen(cx, async move |this, cx| {
             let mut rx = rx;
-            while !stop.load(Ordering::Relaxed) {
+            loop {
                 let (back, edge) = cx
                     .background_executor()
                     .spawn(async move {
@@ -249,15 +247,10 @@ impl QuillApp {
                     Err(RecvTimeoutError::Timeout) => continue,
                     Err(RecvTimeoutError::Disconnected) => {
                         // The hook is gone: no release will come.
-                        if !stop.load(Ordering::Relaxed) {
-                            let _ = this.update(cx, |this, cx| this.ptt_end_hold(cx));
-                        }
+                        let _ = this.update(cx, |this, cx| this.ptt_end_hold(cx));
                         break;
                     }
                 };
-                if stop.load(Ordering::Relaxed) {
-                    break;
-                }
                 if this
                     .update(cx, |this, cx| this.global_ptt_edge(edge, cx))
                     .is_err()
@@ -266,7 +259,6 @@ impl QuillApp {
                 }
             }
         })
-        .detach();
     }
 
     fn global_ptt_edge(&mut self, edge: KeyEdge, cx: &mut Context<Self>) {
@@ -284,33 +276,34 @@ impl QuillApp {
     /// Input Monitoring changes need no restart to be noticed by a fresh
     /// check, so look again every couple of seconds while it is missing.
     fn arm_global_ptt_permission_poll(&mut self, cx: &mut Context<Self>) {
-        if self.group_call.global_ptt_polling {
+        if self.group_call.global_ptt.permission_poll.is_some() {
             return;
         }
-        self.group_call.global_ptt_polling = true;
-        self.spawn_screen(cx, async move |this, cx| {
+        let poll = self.spawn_screen(cx, async move |this, cx| {
             cx.background_executor().timer(Duration::from_secs(2)).await;
-            // The flag belongs to the app, so it clears even after a switch.
+            // The slot belongs to the app, so it clears even after a switch.
+            // Nothing awaits below, so dropping this task's own handle only
+            // ends the future once the tick is done.
             let _ = this.app().update(cx, |this, _| {
-                this.group_call.global_ptt_polling = false;
+                this.group_call.global_ptt.permission_poll = None;
             });
             let _ = this.update(cx, |this, cx| {
                 if quill::calls::ptt_global::permission_granted() {
                     this.recheck_global_ptt(cx);
                 } else if matches!(
-                    this.group_call.global_ptt.state(),
+                    this.group_call.global_ptt.hook.state(),
                     HookState::NeedsPermission
                 ) {
                     this.arm_global_ptt_permission_poll(cx);
                 }
             });
-        })
-        .detach();
+        });
+        self.group_call.global_ptt.permission_poll = Some(poll);
     }
 
     /// "Check again" in Settings: allow a failed start to be retried.
     pub(super) fn recheck_global_ptt(&mut self, cx: &mut Context<Self>) {
-        self.group_call.global_ptt.retry();
+        self.group_call.global_ptt.hook.retry();
         self.sync_global_ptt(cx);
         cx.notify();
     }
@@ -392,7 +385,7 @@ impl QuillApp {
         let capturing = self.group_call.ptt_capture;
         let needs_permission = config.enabled
             && (matches!(
-                self.group_call.global_ptt.state(),
+                self.group_call.global_ptt.hook.state(),
                 HookState::NeedsPermission
             ) || !quill::calls::ptt_global::permission_granted());
         let ptt_row = div()
@@ -475,7 +468,7 @@ impl QuillApp {
                 ))
                 .child(div().text_xs().text_color(muted).px_2().child(
                     quill::calls::ptt_global::status_note(
-                        self.group_call.global_ptt.state(),
+                        self.group_call.global_ptt.hook.state(),
                         quill::calls::ptt_global::static_limit().as_deref(),
                     ),
                 ));
@@ -532,13 +525,17 @@ impl QuillApp {
         call: &quill::state::ActiveGroupCall,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if call.is_joined || call.join_as_options.len() < 2 {
+        let options = call
+            .join_as_options
+            .data()
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        if call.is_joined || options.len() < 2 {
             return None;
         }
         let selected = call.join_as;
         let owner = cx.entity().downgrade();
-        let names: Vec<(MessageSender, String)> = call
-            .join_as_options
+        let names: Vec<(MessageSender, String)> = options
             .iter()
             .map(|sender| (*sender, self.group_call_participant_name(sender)))
             .collect();

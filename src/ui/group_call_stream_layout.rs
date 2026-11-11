@@ -39,8 +39,9 @@ use super::calls::stream_title::{SEPARATOR_GAP, title_layout, title_rect};
 use super::calls::stream_view::blurred_photo;
 use super::calls::stream_volume::{KEY_STEP, VolumeHost};
 use super::group_call_panel::LEAVE_BG;
-use super::group_call_state::StreamJoining;
+use super::group_call_state::{StreamJoining, StreamWatch};
 use super::group_call_stream_boxes::StreamOverlay;
+use super::group_call_stream_photo::StreamPhoto;
 use super::video_player::VideoPlayer;
 use super::video_player::controls::{
     BADGE_GAP, BAR_HEIGHT, CONTROLS_BG, ControlsFade, LiveActions, LiveFacts, LiveKeyAction,
@@ -109,9 +110,8 @@ impl StreamJoinIntent {
 pub(crate) struct StreamWindow {
     /// The stream's live player, over the driver's feed for the chat.
     pub(super) player: Option<VideoPlayer>,
-    /// The blurred chat photo for a photo path (`None` while it blurs).
-    pub(super) photo: Option<(String, Option<Arc<RenderImage>>)>,
-    photo_task: Option<Task<()>>,
+    /// The blurred chat photo for a photo path.
+    pub(super) photo: StreamPhoto,
     pub(super) controls: ControlsFade,
     /// The task that hides the controls when the deadline passes: present
     /// while the timer runs (one task; a move only pushes its deadline).
@@ -134,13 +134,12 @@ impl StreamWindow {
     /// photo from every window and forget what the window showed.
     pub(super) fn clear(&mut self, cx: &mut App) {
         self.close_boxes();
-        if let Some(image) = self.photo.take().and_then(|(_, image)| image) {
+        if let Some(image) = self.photo.take_image() {
             cx.drop_image(image, None);
         }
         if let Some(player) = self.player.take() {
             player.release_live(cx);
         }
-        self.photo_task = None;
         self.demo_feed = None;
         self.volume = None;
     }
@@ -254,7 +253,7 @@ impl QuillApp {
             server_known: call.rtmp_url.as_deref().is_some_and(|url| !url.is_empty()),
             recording: call.record_duration > 0,
             share_link: self.group_call_can_share_link(call),
-            transport_failed: call.transport_error.is_some(),
+            transport_failed: call.transport.error().is_some(),
         })
     }
 
@@ -265,7 +264,7 @@ impl QuillApp {
             .session()
             .and_then(|s| s.calls.active_group_call.as_ref())
             .map(|call| call.id);
-        self.group_call_screen.stream_join = Some((intent, tracked));
+        self.group_call_screen.want_stream(intent, tracked);
         // A new ask starts clean: only an error after it ends the wish.
         if let Some(live) = self.live.as_mut() {
             live.driver.session.calls.group_call_error = None;
@@ -285,7 +284,8 @@ impl QuillApp {
                 cx.background_executor().timer(JOIN_TIMEOUT).await;
                 let _ = this.update(cx, |app, cx| app.stream_join_ended(id, cx));
             });
-            self.group_call_screen.stream_joining = Some(StreamJoining::new(id, timeout));
+            self.group_call_screen.stream_watch =
+                StreamWatch::Joining(StreamJoining::new(id, timeout));
         } else {
             self.stream_join_failed();
         }
@@ -294,7 +294,7 @@ impl QuillApp {
 
     /// The join was not sent or did not land: stop waiting and say so.
     fn stream_join_failed(&mut self) {
-        self.group_call_screen.stream_joining = None;
+        self.group_call_screen.clear_stream_joining();
         let reason = tr(keys::Q_OPS_STREAM_JOIN_FAILED).to_string();
         if let Some(live) = self.live.as_mut() {
             live.driver.session.calls.group_call_error = Some(reason);
@@ -315,7 +315,7 @@ impl QuillApp {
         if joining != facts.id {
             self.stream_join_failed();
         } else if facts.joined {
-            self.group_call_screen.stream_joining = None;
+            self.group_call_screen.clear_stream_joining();
         } else if facts.transport_failed {
             // The connect failed without a join error.
             self.stream_join_failed();
@@ -323,7 +323,7 @@ impl QuillApp {
             .session()
             .is_some_and(|s| s.calls.group_call_error.is_some())
         {
-            self.group_call_screen.stream_joining = None;
+            self.group_call_screen.clear_stream_joining();
         }
     }
 
@@ -338,7 +338,7 @@ impl QuillApp {
             .and_then(|s| s.calls.active_group_call.as_ref())
             .is_some_and(|call| call.id == id && call.is_joined);
         if joined {
-            self.group_call_screen.stream_joining = None;
+            self.group_call_screen.clear_stream_joining();
         } else {
             self.stream_join_failed();
         }
@@ -348,7 +348,7 @@ impl QuillApp {
     /// Run the join you asked for once its call is tracked. Any other
     /// unjoined stream waits for its Join button.
     pub(super) fn consume_stream_join_intent(&mut self, cx: &mut Context<Self>) {
-        let Some((intent, tracked_then)) = self.group_call_screen.stream_join else {
+        let Some((intent, tracked_then)) = self.group_call_screen.stream_wish() else {
             return;
         };
         let Some(call) = self
@@ -361,7 +361,7 @@ impl QuillApp {
                 .session()
                 .is_some_and(|s| s.calls.group_call_error.is_some())
             {
-                self.group_call_screen.stream_join = None;
+                self.group_call_screen.clear_stream_wish();
             }
             return;
         };
@@ -370,12 +370,12 @@ impl QuillApp {
             // Another call took the place of the one tracked when you
             // asked: the wish is stale and must not join much later.
             if tracked_then != Some(call.id) {
-                self.group_call_screen.stream_join = None;
+                self.group_call_screen.clear_stream_wish();
             }
             return;
         }
         let (id, stream, joined) = (call.id, uses_stream_layout(call), call.is_joined);
-        self.group_call_screen.stream_join = None;
+        self.group_call_screen.clear_stream_wish();
         if joined {
             return;
         }
@@ -471,7 +471,7 @@ impl QuillApp {
             .group_call_stream_bar(facts, volume, full, shown, cx)
             .into_any_element();
         let band = (!full).then(|| self.stream_title_band(cx));
-        let share = if self.group_call_boxes.share_open {
+        let share = if self.group_call_boxes.share_open() {
             self.session()
                 .and_then(|s| s.calls.active_group_call.as_ref())
                 .and_then(|call| self.group_call_share_overlay(call, cx))
@@ -706,7 +706,7 @@ impl QuillApp {
     ) -> bool {
         let stream = &self.group_call.stream;
         if stream.overlay.is_some()
-            || self.group_call_boxes.share_open
+            || self.group_call_boxes.share_open()
             || self.group_call_screen.title_dialog.is_some()
         {
             return false;
@@ -776,36 +776,37 @@ impl QuillApp {
         let Some(path) = path else {
             // No photo for this chat: the previous chat's blur must not
             // stand in for it.
-            if let Some((_, Some(old))) = self.group_call.stream.photo.take() {
+            if let Some(old) = self.group_call.stream.photo.take_image() {
                 cx.drop_image(old, Some(window));
             }
-            self.group_call.stream.photo_task = None;
+            self.group_call.stream.photo = StreamPhoto::None;
             return None;
         };
-        if let Some((cached, image)) = self.group_call.stream.photo.as_ref()
-            && *cached == path
-        {
-            return image.clone();
+        if self.group_call.stream.photo.path() == Some(path.as_str()) {
+            return self.group_call.stream.photo.image();
         }
-        if let Some((_, Some(old))) = self.group_call.stream.photo.take() {
+        if let Some(old) = self.group_call.stream.photo.take_image() {
             cx.drop_image(old, Some(window));
         }
-        self.group_call.stream.photo = Some((path.clone(), None));
+        let waiting = path.clone();
         let task = cx.spawn(async move |this, cx| {
             let source = path.clone();
             let image = cx
                 .background_spawn(async move { blurred_photo(Path::new(&source)) })
                 .await;
             let _ = this.update(cx, |app, cx| {
-                if let Some((cached, slot)) = app.group_call.stream.photo.as_mut()
-                    && *cached == path
+                if matches!(&app.group_call.stream.photo,
+                    StreamPhoto::Blurring { path: cached, .. } if *cached == path)
                 {
-                    *slot = image;
+                    app.group_call.stream.photo = StreamPhoto::Blurred { path, image };
                     cx.notify();
                 }
             });
         });
-        self.group_call.stream.photo_task = Some(task);
+        self.group_call.stream.photo = StreamPhoto::Blurring {
+            path: waiting,
+            _task: task,
+        };
         None
     }
 
@@ -838,7 +839,7 @@ impl QuillApp {
                 cx.background_executor().timer(wait).await;
                 // Asked outside the app's update: the window's own state.
                 let handle = this
-                    .update(cx, |app, _| app.group_call.window)
+                    .update(cx, |app, _| app.group_call.window.handle())
                     .ok()
                     .flatten();
                 let active = handle

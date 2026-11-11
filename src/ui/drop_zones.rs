@@ -32,6 +32,34 @@ pub(super) enum ArchiveJob {
     Building(SendSlot),
 }
 
+/// A file drag over the conversation. The paths are looked at off the UI
+/// thread, and an answer applies only while the drag still holds the paths
+/// it was asked for. A drag leaves to `Idle` when it ends (no active drag at
+/// the next draw) or its files are dropped.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) enum FileDrag {
+    #[default]
+    Idle,
+    /// Asked: what the paths hold is being probed.
+    Probing(Vec<PathBuf>),
+    /// Answered: the zones to offer (`None` when nothing is offered).
+    Probed {
+        paths: Vec<PathBuf>,
+        state: Option<DragState>,
+    },
+    /// A demo's fixed drop-zone state (no real drag in a screenshot).
+    Preview(DragState),
+}
+
+impl FileDrag {
+    fn paths(&self) -> &[PathBuf] {
+        match self {
+            FileDrag::Probing(paths) | FileDrag::Probed { paths, .. } => paths,
+            FileDrag::Idle | FileDrag::Preview(_) => &[],
+        }
+    }
+}
+
 impl QuillApp {
     /// Whether the open chat takes dropped files into its composer.
     pub(super) fn file_drop_enabled(&self) -> bool {
@@ -44,11 +72,10 @@ impl QuillApp {
 
     /// A file drag moved over the conversation: remember what it holds.
     pub(super) fn note_file_drag(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
-        if !self.file_drop_enabled() || self.composer_ui.drop_paths == paths {
+        if !self.file_drop_enabled() || self.composer_ui.file_drag.paths() == paths {
             return;
         }
-        self.composer_ui.drop_paths = paths.to_vec();
-        self.composer_ui.drop_state = None;
+        self.composer_ui.file_drag = FileDrag::Probing(paths.to_vec());
         // Each path is looked at on disk, which can stall on a network drive.
         let probed = paths.to_vec();
         self.run_off_ui_scoped_then(
@@ -57,8 +84,11 @@ impl QuillApp {
                 (probed, classify(&entries))
             },
             |this, (probed, state), cx| {
-                if this.composer_ui.drop_paths == probed {
-                    this.composer_ui.drop_state = state;
+                if this.composer_ui.file_drag.paths() == probed {
+                    this.composer_ui.file_drag = FileDrag::Probed {
+                        paths: probed,
+                        state,
+                    };
                     cx.notify();
                 }
             },
@@ -68,24 +98,23 @@ impl QuillApp {
 
     /// The zones to draw now: a live file drag, or a demo's fixed state.
     pub(super) fn visible_drop_state(&mut self, cx: &App) -> Option<DragState> {
-        if self.composer_ui.drop_preview.is_some() {
-            return self.composer_ui.drop_preview;
+        if let FileDrag::Preview(state) = self.composer_ui.file_drag {
+            return Some(state);
         }
         if !cx.has_active_drag() {
-            self.composer_ui.drop_state = None;
-            self.composer_ui.drop_paths.clear();
+            self.composer_ui.file_drag = FileDrag::Idle;
         }
-        self.composer_ui
-            .drop_state
-            .filter(|_| self.file_drop_enabled())
+        match self.composer_ui.file_drag {
+            FileDrag::Probed { state, .. } => state.filter(|_| self.file_drop_enabled()),
+            FileDrag::Idle | FileDrag::Probing(_) | FileDrag::Preview(_) => None,
+        }
     }
 
     /// Files dropped on the conversation outside any zone, or while the
     /// zones are off (editing): the usual attach, which picks media or
     /// documents by what was dropped.
     pub(super) fn drop_files_plain(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
-        self.composer_ui.drop_state = None;
-        self.composer_ui.drop_paths.clear();
+        self.composer_ui.file_drag = FileDrag::Idle;
         if self.file_drop_enabled() || self.chat_ui.is_editing() {
             self.attach_dropped_files(paths, cx);
         }
@@ -98,8 +127,7 @@ impl QuillApp {
         paths: &[PathBuf],
         cx: &mut Context<Self>,
     ) {
-        self.composer_ui.drop_state = None;
-        self.composer_ui.drop_paths.clear();
+        self.composer_ui.file_drag = FileDrag::Idle;
         if !self.file_drop_enabled() {
             return;
         }

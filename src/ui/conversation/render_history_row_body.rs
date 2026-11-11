@@ -79,7 +79,7 @@ impl QuillApp {
                         downloading,
                         &shared.media_roots,
                         session,
-                        &self.message_ui.spoiler_revealed,
+                        &self.message_ui.revealed,
                         corner,
                         cx,
                     );
@@ -97,7 +97,7 @@ impl QuillApp {
                     // Settings → Appearance: font size + bubble/plain style.
                     look,
                     session,
-                    &self.message_ui.spoiler_revealed,
+                    &self.message_ui.revealed,
                     corner,
                     cx,
                 )
@@ -189,7 +189,7 @@ impl QuillApp {
                     self.message_custom_emoji_frames(message, cx),
                     inline,
                     widget,
-                    &self.message_ui.spoiler_revealed,
+                    &self.message_ui.revealed,
                     inputs.is_secret,
                     inputs.fact_check_expanded,
                     self.session(),
@@ -522,7 +522,7 @@ impl QuillApp {
             super::spoiler_fx::media_cover(
                 &message.content,
                 super::spoiler_fx::media_key(message.chat_id, message.id),
-                &self.message_ui.spoiler_revealed,
+                &self.message_ui.revealed,
             ),
             Some(super::spoiler_fx::MediaCover::Covered)
         )
@@ -536,7 +536,7 @@ impl QuillApp {
         let redraw = match super::spoiler_fx::media_cover(
             &message.content,
             key,
-            &self.message_ui.spoiler_revealed,
+            &self.message_ui.revealed,
         ) {
             Some(super::spoiler_fx::MediaCover::Fading(_)) => true,
             Some(super::spoiler_fx::MediaCover::Covered) => {

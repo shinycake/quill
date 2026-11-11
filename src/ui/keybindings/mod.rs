@@ -83,30 +83,6 @@ pub(super) const COMPOSER_CONTEXT: &str = "QuillComposer";
 /// a depth tie), which `apply_custom_bindings` and `shortcut_rows` do.
 const COMPOSER_INPUT_CONTEXT: &str = "QuillComposer > Input";
 
-/// Also discard stale capture state once the Shortcuts page is gone.
-pub(super) fn capture_active(
-    shown: bool,
-    capture: &mut Option<String>,
-    error: &mut Option<(String, String)>,
-) -> bool {
-    if !shown {
-        *capture = None;
-        *error = None;
-    }
-    shown && capture.is_some()
-}
-
-/// A new prefs root needs its own keymap, even when it has no overrides.
-pub(super) fn invalidate_account_keybindings(
-    applied: &mut bool,
-    capture: &mut Option<String>,
-    error: &mut Option<(String, String)>,
-) {
-    *applied = false;
-    *capture = None;
-    *error = None;
-}
-
 /// Parity slice (platform-custom-keybindings): a user-rebindable action.
 pub struct RebindableAction {
     /// Stable id used in persisted prefs (e.g. "focus-composer").
@@ -767,6 +743,8 @@ pub fn apply_custom_bindings(cx: &mut App, customs: &[CustomKeybinding]) {
     cx.bind_keys(bindings);
 }
 
+mod capture;
+pub(super) use capture::{Capture, KeybindingUi, Keymap};
 mod shortcut_rows;
 pub use shortcut_rows::*;
 
@@ -781,9 +759,9 @@ mod tests {
     // attribute and fail macro expansion ("recursion limit reached").
     use super::{
         Action, HOST_OS, KeybindingConflict, Keystroke, Modifiers, OpenPinnedChat, QuitApp,
-        REBINDABLE_ACTIONS, ShowAccount, canonical_event_chord, capture_active, composer_bindings,
+        REBINDABLE_ACTIONS, ShowAccount, canonical_event_chord, composer_bindings,
         composer_scoped_bindings, conflict_message, context_menu_captures_key, default_bindings,
-        fixed_keystrokes, invalidate_account_keybindings, keybinding_conflict, resolve_keybindings,
+        fixed_keystrokes, keybinding_conflict, resolve_keybindings,
     };
     use quill::settings::CustomKeybinding;
 
@@ -834,30 +812,6 @@ mod tests {
             .unparse(HOST_OS);
         assert_eq!(chords, vec![expected]);
         assert!(binding_for("focus-composer", &primary("shift-l")).is_some());
-    }
-
-    #[test]
-    fn capture_only_consumes_keys_while_shortcuts_are_shown_and_armed() {
-        let mut capture = None;
-        let mut error = None;
-        assert!(!capture_active(true, &mut capture, &mut error));
-        capture = Some("focus-composer".to_string());
-        assert!(capture_active(true, &mut capture, &mut error));
-        error = Some(("focus-composer".to_string(), "Conflict".to_string()));
-        assert!(!capture_active(false, &mut capture, &mut error));
-        assert_eq!(capture, None);
-        assert_eq!(error, None);
-    }
-
-    #[test]
-    fn account_change_invalidates_applied_bindings_and_capture() {
-        let mut applied = true;
-        let mut capture = Some("focus-composer".to_string());
-        let mut error = Some(("focus-composer".to_string(), "Conflict".to_string()));
-        invalidate_account_keybindings(&mut applied, &mut capture, &mut error);
-        assert!(!applied);
-        assert_eq!(capture, None);
-        assert_eq!(error, None);
     }
 
     #[test]

@@ -20,10 +20,65 @@ use gpui_kit::*;
 use quill::composer::{ComposerEdit, ComposerReplyTo, DeleteConfirm};
 use quill::ids::{ChatId, MessageId, TopicId};
 
+/// Which info cards are open in a chat. A thread's card opens over a
+/// topic's and the topic's is back when the thread closes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum InfoCard {
+    #[default]
+    Closed,
+    /// Under the open forum topic's strip.
+    Topic,
+    /// Under the open reply thread's root bar.
+    Thread,
+    /// Both: the topic's card stays under the thread's.
+    Both,
+}
+
+impl InfoCard {
+    pub(crate) fn topic(self) -> bool {
+        matches!(self, Self::Topic | Self::Both)
+    }
+
+    pub(crate) fn thread(self) -> bool {
+        matches!(self, Self::Thread | Self::Both)
+    }
+
+    fn of(topic: bool, thread: bool) -> Self {
+        match (topic, thread) {
+            (false, false) => Self::Closed,
+            (true, false) => Self::Topic,
+            (false, true) => Self::Thread,
+            (true, true) => Self::Both,
+        }
+    }
+
+    /// The thread view closed (or another opened): its card goes, a
+    /// topic's stays.
+    pub(super) fn close_thread(&mut self) {
+        *self = Self::of(self.topic(), false);
+    }
+
+    /// The topic's card opens (its menu's Info).
+    pub(super) fn open_topic(&mut self) {
+        *self = Self::of(true, self.thread());
+    }
+
+    /// A tap on the topic card's button.
+    pub(super) fn toggle_topic(&mut self) {
+        *self = Self::of(!self.topic(), self.thread());
+    }
+
+    /// A tap on the thread card's button.
+    pub(super) fn toggle_thread(&mut self) {
+        *self = Self::of(self.topic(), !self.thread());
+    }
+}
+
 /// The composer while a message is edited: the edit, the normal draft and
 /// reply stashed for it (`DraftType::Normal`), and the "Cancel editing?" box
 /// (`DialogKind::CancelEditConfirm`). One value, so the box cannot outlive
 /// the edit.
+
 #[derive(Debug)]
 pub(super) struct EditMode {
     /// Told apart from every other edit: a picker or an answer started for
@@ -158,20 +213,10 @@ pub(crate) struct ChatUi {
     /// The bot command list above the composer: closed, opened by a typed
     /// `/` token, or opened by the bot's Menu button.
     pub(super) command_menu: super::composer::CommandMenu,
-    /// Bots slice: `@botname query` inline-mode results dropdown above
-    /// the composer. `inline_results_selected` is the highlighted row
-    /// (Up/Down/Enter). `inline_query_armed` is the `(username, query)` a
-    /// debounce timer is currently armed for — `poll_live` re-runs the
-    /// inline progress check after every batch of session updates, and the
-    /// armed identity keeps it from spawning a duplicate timer per poll.
-    pub(super) inline_results_open: bool,
-    pub(super) inline_results_selected: usize,
-    pub(super) inline_query_armed: Option<(String, String)>,
-    /// The trigger's query waits for the session: the bot is being
-    /// resolved, or an older query of this chat and bot is in flight.
-    /// `progress_inline_mode` sends it when updates land, in whichever
-    /// window this value is in.
-    pub(super) inline_query_waiting: bool,
+    /// Bots slice: `@botname query` inline-mode results dropdown above the
+    /// composer: closed, or open with its highlighted row and what its
+    /// query waits for (the 100ms debounce timer of TGX, or the session).
+    pub(super) inline: super::inline_stage::InlineMode,
     /// This window's copy of the session's resolution of the trigger's bot
     /// (the session has one slot any window's trigger replaces).
     pub(super) inline_bot: Option<quill::state::InlineBotResolve>,
@@ -194,7 +239,7 @@ pub(crate) struct ChatUi {
     /// a typed trigger) in this secret chat (TGX `SecretChatContextBotAlert`);
     /// the stashed query is inserted on Confirm. It lives with the chat
     /// that asked, so another chat never confirms it.
-    pub(super) pending_inline_bot_alert: Option<String>,
+    pub(super) bot_alert: super::inline_mode::BotAlert,
     /// What the last rich send took out of the field, until TDLib answers.
     pub(super) sent_text: super::composer::SentText,
     /// The draft the last AI composer action was asked about.
@@ -228,11 +273,11 @@ pub(crate) struct ChatUi {
     /// M1: the scheduled-messages dialog (view/delete). Here so that a
     /// chat change closes it: its rows act on the chat shown.
     pub(super) scheduled_dialog_open: bool,
-    /// M1: the schedule picker popup above the composer.
-    pub(super) schedule_popup_open: bool,
-    /// The date+time picker behind the schedule popup (created when the
-    /// popup opens, see `open_schedule_picker`). Its Reschedule target is
-    /// a message id of this chat, so the picker goes with the chat.
+    /// M1: the schedule picker popup above the composer: `Some` while it is
+    /// open, with the date+time picker it holds (created when the popup
+    /// opens, see `open_schedule_picker`). Its Reschedule target is a message
+    /// id of this chat, so the picker goes with the chat. The share box's
+    /// schedule step is a picker of its own target in the same slot.
     pub(super) schedule_picker: Option<super::scheduled::SchedulePicker>,
     /// Phase 4.2: poll creation dialog (open above the composer). Here so
     /// that a chat change closes it: Create posts to the chat shown.
@@ -243,10 +288,9 @@ pub(crate) struct ChatUi {
     /// The attach menu's contact chooser. Here so that a chat change closes
     /// it: the contact goes to the chat this value was made for.
     pub(super) contact_dialog: Option<super::ShareContentDialog>,
-    /// The info card under the open forum topic's strip.
-    pub(super) topic_info_open: bool,
-    /// The info card under the open reply thread's root bar.
-    pub(super) thread_info_open: bool,
+    /// The info card under the open forum topic's strip or the open reply
+    /// thread's root bar: one at a time, and gone with the chat.
+    pub(super) info_card: InfoCard,
     /// Text a chat open handed over without a window at hand, for this
     /// chat's composer (`QuillApp::apply_compose_after_open`).
     pub(super) compose_after_open: Option<String>,

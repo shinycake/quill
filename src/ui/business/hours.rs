@@ -75,7 +75,7 @@ impl QuillApp {
 
     fn business_time_zones(&self) -> Vec<TimeZone> {
         self.session()
-            .and_then(|s| s.settings.business.time_zones.clone())
+            .and_then(|s| s.settings.business.time_zones.data().cloned())
             .unwrap_or_default()
     }
 

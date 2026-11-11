@@ -4,7 +4,7 @@
 use super::ton_wallet::Rig;
 use crate::state::DeepLinkState;
 use crate::ton_wallet::{
-    FIRST_TRANSFER_HINT, MoneyTab, ProfileAddress, READ_ONLY_METHODS, TxLookup, WalletSurface,
+    FIRST_TRANSFER_HINT, MoneyDetail, MoneyTab, ProfileAddress, READ_ONLY_METHODS, WalletSurface,
 };
 use serde_json::{Value, json};
 
@@ -109,7 +109,7 @@ fn opening_money_loads_state_rates_and_history_once() {
     assert_eq!(own.gram_amount, 3_000_000_000, "the page's balance wins");
     assert!(own.is_backup_enabled);
     assert_eq!(wallet.rates, vec![("EUR".to_string(), 0.5)]);
-    assert_eq!(wallet.money.history.items.len(), 1);
+    assert_eq!(wallet.money.history.items().len(), 1);
     assert!(wallet.money.history.has_more());
 
     rig.driver.fetch_wallet_history(true).unwrap();
@@ -139,7 +139,7 @@ fn collectibles_load_on_first_view() {
     rig.driver.set_money_tab(MoneyTab::Transactions).unwrap();
     rig.driver.set_money_tab(MoneyTab::Collectibles).unwrap();
     assert_eq!(rig.sent("getTonWalletNfts"), 1, "loaded once");
-    assert_eq!(rig.driver.session.ton_wallet.money.nfts.items.len(), 1);
+    assert_eq!(rig.driver.session.ton_wallet.money.nfts.items().len(), 1);
 }
 
 #[test]
@@ -200,24 +200,21 @@ fn a_transfer_card_opens_its_transaction_and_the_first_grams_hint() {
     );
     assert!(rig.driver.open_wallet_transaction("t1").unwrap());
     assert!(matches!(
-        rig.driver.session.ton_wallet.money.tx_lookup,
-        TxLookup::Loading { .. }
+        rig.driver.session.ton_wallet.money.detail,
+        MoneyDetail::Lookup { .. }
     ));
     assert_eq!(rig.last("getTonWalletTransaction")["transaction_id"], "t1");
     rig.answer("getTonWalletTransaction", transfer("t1", 2_000_000_000));
     let money = &rig.driver.session.ton_wallet.money;
-    assert!(money.open && money.tx_lookup == TxLookup::Idle);
-    assert_eq!(
-        money.selected_tx.as_ref().map(|tx| tx.id.as_str()),
-        Some("t1")
-    );
+    assert!(money.open);
+    assert_eq!(money.selected_tx().map(|tx| tx.id.as_str()), Some("t1"));
     assert!(
-        money.hint_open,
+        money.hint_open(),
         "first incoming transfer brings up the hint"
     );
 
     rig.driver.dismiss_first_transfer_hint().unwrap();
-    assert!(!rig.driver.session.ton_wallet.money.hint_open);
+    assert!(!rig.driver.session.ton_wallet.money.hint_open());
     assert_eq!(rig.sent("hideSuggestedAction"), 1);
     assert_eq!(
         rig.last("hideSuggestedAction")["action"]["@type"],
@@ -258,7 +255,7 @@ fn a_failed_lookup_says_so() {
         json!({"@type": "error", "code": 400, "message": "TRANSACTION_NOT_FOUND"}),
     );
     let money = &rig.driver.session.ton_wallet.money;
-    assert!(money.selected_tx.is_none());
+    assert!(money.selected_tx().is_none());
     assert!(money.tx_error().is_some());
 }
 
@@ -269,32 +266,34 @@ fn a_late_answer_for_an_earlier_card_is_dropped() {
     rig.driver.open_wallet_transaction("t1").unwrap();
     let first_extra = rig.last("getTonWalletTransaction")["@extra"].clone();
     rig.driver.open_wallet_transaction("t2").unwrap();
-    let second = rig.driver.session.ton_wallet.money.tx_lookup.clone();
+    let second = rig.driver.session.ton_wallet.money.detail.clone();
     // The first card answers after the second was clicked: dropped, for an
     // answer and for an error alike.
     let mut late = transfer("t1", 1);
     late["@extra"] = first_extra.clone();
     rig.ingest(&late.to_string());
     let money = &rig.driver.session.ton_wallet.money;
-    assert!(money.selected_tx.is_none());
-    assert_eq!(money.tx_lookup, second);
+    assert!(money.selected_tx().is_none());
+    assert_eq!(money.detail, second);
     rig.ingest(
         &json!({"@type": "error", "@extra": first_extra, "code": 400, "message": "X"}).to_string(),
     );
-    assert_eq!(rig.driver.session.ton_wallet.money.tx_lookup, second);
+    assert_eq!(rig.driver.session.ton_wallet.money.detail, second);
     rig.answer("getTonWalletTransaction", transfer("t2", 2_000_000_000));
     let money = &rig.driver.session.ton_wallet.money;
-    assert_eq!(
-        money.selected_tx.as_ref().map(|tx| tx.id.as_str()),
-        Some("t2")
-    );
+    assert_eq!(money.selected_tx().map(|tx| tx.id.as_str()), Some("t2"));
 }
 
 fn resolve_link(rig: &mut Rig, url: &str, link_type: &str) -> Option<DeepLinkState> {
     rig.driver.request_deep_link_info(url).unwrap();
     assert_eq!(rig.last("getInternalLinkType")["link"], url);
     rig.answer("getInternalLinkType", json!({"@type": link_type}));
-    rig.driver.session.chats_state.deep_link.take()
+    rig.driver
+        .session
+        .chats_state
+        .deep_link
+        .take()
+        .map(|flow| flow.stage)
 }
 
 #[test]

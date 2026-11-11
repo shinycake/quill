@@ -88,7 +88,7 @@ fn a_main_window_chat_change_leaves_a_chat_windows_gif(cx: &mut TestAppContext) 
         message: ChatMessage::new(OTHER, MessageId(7)),
     };
     in_window(&h, chat_window, Some(OTHER), cx, |app, _, _| {
-        app.playback.playing_animation = Some(gif);
+        app.playback.animation = crate::ui::playback_state::GifPlayback::Waiting(gif);
         app.playback
             .autoplayed_gifs
             .insert(ChatMessage::new(OTHER, MessageId(7)));
@@ -100,7 +100,7 @@ fn a_main_window_chat_change_leaves_a_chat_windows_gif(cx: &mut TestAppContext) 
         app.select_listed_chat(ChatId(13), window, cx);
     });
     h.app.read_with(cx, |app, _| {
-        assert_eq!(app.playback.playing_animation, Some(gif), "it plays on");
+        assert_eq!(app.playback.animation.playing(), Some(gif), "it plays on");
         let marks = &app.playback.autoplayed_gifs;
         assert!(marks.contains(&ChatMessage::new(OTHER, MessageId(7))));
         assert!(
@@ -110,12 +110,12 @@ fn a_main_window_chat_change_leaves_a_chat_windows_gif(cx: &mut TestAppContext) 
     });
     // The main window's own GIF stops with its chat.
     in_window(&h, h.main, None, cx, |app, window, cx| {
-        app.playback.playing_animation = Some(PlayingGif {
+        app.playback.animation = crate::ui::playback_state::GifPlayback::Waiting(PlayingGif {
             window: None,
             message: ChatMessage::new(ChatId(13), MessageId(5)),
         });
         app.select_listed_chat(OPEN, window, cx);
-        assert_eq!(app.playback.playing_animation, None);
+        assert_eq!(app.playback.animation.playing(), None);
     });
 }
 
@@ -187,7 +187,7 @@ fn viewing_a_set_closes_the_box_in_the_other_window(cx: &mut TestAppContext) {
     let open_in = |chat: Option<ChatId>, cx: &mut TestAppContext| {
         h.app
             .update(cx, |app, cx| {
-                app.in_window_scope(chat, cx, |app, _| app.message_ui.menu_ui.sticker_set_open)
+                app.in_window_scope(chat, cx, |app, _| app.message_ui.menu_ui.sticker_set_open())
             })
             .unwrap_or(false)
     };
@@ -203,21 +203,22 @@ fn a_closed_boxs_video_pick_opens_no_editor(cx: &mut TestAppContext) {
     use quill::sticker_set_box::SetKind;
     let h = new_app(cx);
     in_window(&h, h.main, None, cx, |app, window, cx| {
-        app.message_ui.menu_ui.sticker_set_open = false;
-        app.sticker_box.pending_video = Some(PendingVideo {
-            pick: PickExisting {
-                set_id: 78,
-                kind: SetKind::Stickers,
-                adapt: false,
-            },
-            file_id: quill::ids::FileId(5),
-            file: PickedFile::Video,
-            emoji: None,
-            window: None,
-        });
+        app.message_ui.menu_ui.end_sticker_set();
+        app.sticker_box.pending =
+            crate::ui::sticker_set_box::state::PickWait::Downloading(PendingVideo {
+                pick: PickExisting {
+                    set_id: 78,
+                    kind: SetKind::Stickers,
+                    adapt: false,
+                },
+                file_id: quill::ids::FileId(5),
+                file: PickedFile::Video,
+                emoji: None,
+                window: None,
+            });
         app.sticker_box_window_upkeep(window, cx);
         assert!(
-            app.sticker_box.pending_video.is_none(),
+            app.sticker_box.pending.downloading().is_none(),
             "the pick is dropped"
         );
         assert!(app.composer_ui.send_box.video_editor.is_none());
@@ -236,7 +237,9 @@ fn viewing_another_set_closes_the_other_windows_sticker_editor(cx: &mut TestAppC
     in_window(&h, chat_window, Some(OTHER), cx, |app, _, cx| {
         app.view_message_sticker_set(78, cx);
         let pixels = image::RgbaImage::from_pixel(300, 300, image::Rgba([1, 2, 3, 255]));
-        app.viewer.photo_editor = PhotoEditor::for_set(pixels, 78, SetKind::Stickers);
+        if let Some(editor) = PhotoEditor::for_set(pixels, 78, SetKind::Stickers) {
+            app.viewer.photo_editor.open(editor);
+        }
         assert!(app.viewer.photo_editor.is_some());
     });
     in_window(&h, h.main, None, cx, |app, _, cx| {
@@ -289,7 +292,7 @@ fn attached_stickers_close_the_box_in_the_other_window(cx: &mut TestAppContext) 
     let open_in = |chat: Option<ChatId>, cx: &mut TestAppContext| {
         h.app
             .update(cx, |app, cx| {
-                app.in_window_scope(chat, cx, |app, _| app.message_ui.menu_ui.sticker_set_open)
+                app.in_window_scope(chat, cx, |app, _| app.message_ui.menu_ui.sticker_set_open())
             })
             .unwrap_or(false)
     };
@@ -382,7 +385,7 @@ fn the_checkout_prefills_in_the_window_that_hosts_it(cx: &mut TestAppContext) {
     let chat_window = h.open_in_new_window(OTHER, cx);
     in_window(&h, chat_window, Some(OTHER), cx, |app, window, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.form = None;
+            session.payments.checkout = quill::state::CheckoutForm::Closed;
         }
         app.open_payment_dialog(window, cx);
         app.windows
@@ -390,9 +393,9 @@ fn the_checkout_prefills_in_the_window_that_hosts_it(cx: &mut TestAppContext) {
     });
     h.app.update(cx, |app, _| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.form = Some(crate::ui::payments::card_form_demo::stripe_checkout(
-                true, false,
-            ));
+            session.payments.checkout = quill::state::CheckoutForm::Ready(
+                crate::ui::payments::card_form_demo::stripe_checkout(true, false),
+            );
         }
     });
     let prefilled = |cx: &mut TestAppContext| {
@@ -400,7 +403,7 @@ fn the_checkout_prefills_in_the_window_that_hosts_it(cx: &mut TestAppContext) {
             app.payments
                 .dialog
                 .as_ref()
-                .map(|d| (d.prefilled, d.credential_choice.clone()))
+                .map(|d| (!d.awaiting_form(), d.method.choice()))
         })
     };
     in_window(&h, h.main, None, cx, |app, window, cx| {

@@ -8,7 +8,7 @@
 use super::app::QuillApp;
 use super::shell::DialogKind;
 use super::video_editor::{EditorTarget, VideoEditorDialog, palette};
-use super::video_editor_timeline::Fade;
+use super::video_editor_timeline::{Fade, QualityPointer};
 use gpui_kit::TestSupportExt;
 use gpui_kit::component::{Icon, Sizable};
 use gpui_kit::prelude::FluentBuilder;
@@ -48,7 +48,7 @@ impl QuillApp {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_ref() else {
             return div().into_any_element();
         };
-        let ready = editor.timeline.is_some();
+        let ready = editor.timeline().is_some();
         let stage = self.video_editor_stage(editor, cx);
         let mut controls = div()
             .w_full()
@@ -60,7 +60,7 @@ impl QuillApp {
         if ready {
             controls = controls.child(self.video_editor_timeline(editor, cx));
         }
-        if let Some(note) = &editor.note {
+        if let Some(note) = editor.note() {
             controls = controls.child(
                 div()
                     .pt(px(HINT_SKIP))
@@ -110,7 +110,7 @@ impl QuillApp {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
-        let Some(info) = editor.info else {
+        let Some(info) = editor.info() else {
             return;
         };
         let (width, height) = editor.edits.edited_size(&info);
@@ -141,11 +141,15 @@ impl QuillApp {
             return;
         };
         if let Some(pressed) = pressed {
-            editor.motion.quality_pressed = pressed;
-        } else if !editor.motion.quality_pressed {
+            editor.motion.quality_pointer = if pressed {
+                QualityPointer::Down
+            } else {
+                QualityPointer::Up
+            };
+        } else if editor.motion.quality_pointer == QualityPointer::Up {
             return;
         }
-        let (Some(bounds), Some(info)) = (editor.motion.quality_bounds.get(), editor.info) else {
+        let (Some(bounds), Some(info)) = (editor.motion.quality_bounds.get(), editor.info()) else {
             return;
         };
         let (width, height) = editor.edits.edited_size(&info);
@@ -169,7 +173,7 @@ impl QuillApp {
         if editor.target.square() {
             return None;
         }
-        let (width, height) = editor.edits.edited_size(&editor.info?);
+        let (width, height) = editor.edits.edited_size(&editor.info()?);
         let levels = quality_levels(width, height);
         if levels.len() < 2 {
             return None;
@@ -224,7 +228,7 @@ impl QuillApp {
                                 if let Some(editor) =
                                     this.composer_ui.send_box.video_editor.as_mut()
                                 {
-                                    editor.motion.quality_pressed = false;
+                                    editor.motion.quality_pointer = QualityPointer::Up;
                                 }
                             });
                         }
@@ -240,7 +244,7 @@ impl QuillApp {
     /// The rounded bar: Cancel at the left, Done at the right, the tools
     /// spread between them.
     fn video_editor_bar(&self, editor: &VideoEditorDialog, cx: &mut Context<Self>) -> AnyElement {
-        let ready = editor.info.is_some() && !editor.busy;
+        let ready = editor.info().is_some() && !editor.busy();
         // The sound is dropped anyway for a sticker or a replacement, so
         // there is nothing to choose (`removeAudio`).
         let gif_allowed = matches!(editor.target, EditorTarget::Tray(_));

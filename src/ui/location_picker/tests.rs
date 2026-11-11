@@ -229,6 +229,7 @@ fn the_search_narrows_the_venues_and_closing_it_brings_them_back(cx: &mut TestAp
     open_picker(&app, vcx);
     click(vcx, "location-search-open");
     assert!(find(vcx, "location-search"));
+    assert!(field_agrees_with_picker(&app, vcx, true));
     vcx.simulate_input("pont");
     frames(vcx);
     assert!(
@@ -245,7 +246,23 @@ fn the_search_narrows_the_venues_and_closing_it_brings_them_back(cx: &mut TestAp
 
     click(vcx, "location-search-close");
     assert!(find(vcx, "location-map"));
+    assert!(field_agrees_with_picker(&app, vcx, false));
     assert_eq!(venue_count(&app, vcx), 6);
+}
+
+/// The search field is open exactly while the picker holds a query.
+fn field_agrees_with_picker(
+    app: &Entity<QuillApp>,
+    vcx: &mut VisualTestContext,
+    open: bool,
+) -> bool {
+    app.read_with(vcx, |app, _| {
+        let picker_open = app
+            .location_sharing()
+            .and_then(|sharing| sharing.picker())
+            .is_some_and(|picker| picker.search_open());
+        picker_open == open && app.location_ui.search.input().is_some() == open
+    })
 }
 
 #[gpui_kit::test]

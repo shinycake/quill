@@ -13,7 +13,7 @@ pub(in crate::ui) fn rich_block_element(
     msg_key: (i64, u64),
     chat_id: ChatId,
     message_id: MessageId,
-    revealed: &std::collections::HashSet<(i64, u64, u64, bool)>,
+    revealed: &super::revealed::Revealed,
     // Settings → Appearance: message font size.
     font: Pixels,
     cx: &mut Context<QuillApp>,
@@ -423,7 +423,7 @@ pub(in crate::ui) fn reply_quote_strip(
 mod reveal_tests {
     use super::super::{InlineAction, RichPart, paragraph_text};
     use quill::text::{TextEntity, TextEntityKind, TextRun, styled_runs};
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
 
     fn spoiler() -> Vec<TextRun> {
         styled_runs(
@@ -437,7 +437,7 @@ mod reveal_tests {
     }
 
     fn reveal_key(part: RichPart) -> Option<(i64, u64, u64, bool)> {
-        let revealed = HashSet::new();
+        let revealed = crate::ui::message_text::revealed::Revealed::default();
         let empty = HashMap::new();
         let layered = HashMap::new();
         let text = paragraph_text(
@@ -473,7 +473,8 @@ mod reveal_tests {
         let Some(key) = reveal_key(first) else {
             panic!("the run is a spoiler");
         };
-        let revealed = HashSet::from([key]);
+        let mut revealed = crate::ui::message_text::revealed::Revealed::default();
+        revealed.reveal_spoiler(key);
         let (empty, layered) = (HashMap::new(), HashMap::new());
         let hidden = |part: RichPart| {
             !paragraph_text(

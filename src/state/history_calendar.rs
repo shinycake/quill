@@ -25,7 +25,7 @@ pub enum DateJumpMode {
 /// runs it in that window's view, and drops it when the window closed
 /// or shows another chat by then.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ViewJump {
+pub struct ViewJump {
     pub window: Option<ChatId>,
     pub chat_id: ChatId,
     pub message_id: MessageId,

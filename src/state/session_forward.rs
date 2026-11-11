@@ -165,17 +165,7 @@ impl Session {
             self.remember_files(&message.files);
             self.upsert_message(message.clone(), message.id.0 < 0);
         }
-        let flight = match self.messages.in_flight_forward.take() {
-            Some(flight) if flight.extra == pending.id => Some(flight),
-            other => {
-                self.messages.in_flight_forward = other;
-                self.messages
-                    .queued_forward_flights
-                    .iter()
-                    .position(|flight| flight.extra == pending.id)
-                    .map(|index| self.messages.queued_forward_flights.remove(index))
-            }
-        };
+        let flight = self.messages.take_forward_flight(pending.id);
         let dest_chat_id = flight
             .as_ref()
             .map(|f| f.dest_chat_id)

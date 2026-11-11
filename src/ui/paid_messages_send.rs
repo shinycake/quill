@@ -12,6 +12,7 @@ use super::app::QuillApp;
 use super::chat_theme::{danger, text_muted, warning};
 use super::paid_messages_state::{ComposerPaidConfirm, RemoveFeeBox};
 use super::shell::{DialogKind, QuillShell};
+use crate::ui::composer_sends::SendOnce;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -43,6 +44,7 @@ impl QuillApp {
         &mut self,
         chat_id: ChatId,
         text: &str,
+        once: SendOnce,
         cx: &mut Context<Self>,
     ) -> bool {
         let Some(session) = self.session() else {
@@ -69,7 +71,7 @@ impl QuillApp {
                 text: text.to_string(),
             },
             slot,
-            once: self.send_once(),
+            once,
         });
         self.open_box(DialogKind::PaidSendConfirm);
         self.paid_messages.confirm_trust = None;
@@ -158,6 +160,16 @@ impl QuillApp {
         if remember {
             if let Some(live) = self.live.as_mut() {
                 live.driver.remember_paid_trust(chat, confirm.per_message);
+                if let Some(error) = live
+                    .driver
+                    .session
+                    .payments
+                    .paid_messages
+                    .trust_save_error()
+                    .map(str::to_string)
+                {
+                    self.set_note(StatusNote::error(error));
+                }
             } else if let Some(session) = self.paid_session_mut() {
                 session
                     .payments
@@ -167,7 +179,7 @@ impl QuillApp {
             }
         }
         let total = confirm.total();
-        self.with_send_once(once, |this| this.submit_composer(confirm.text, window, cx));
+        self.submit_composer(confirm.text, once, window, cx);
         // Not trusted: what the send left held is released up to the total
         // the user just agreed to, never more.
         let mut budget = total;

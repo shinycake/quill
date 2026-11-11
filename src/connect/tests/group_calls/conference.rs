@@ -320,7 +320,8 @@ fn a_dead_conference_gives_way_to_a_new_join() {
         .active_group_call
         .as_mut()
         .unwrap()
-        .transport_error = Some("screen share failed".into());
+        .transport
+        .fail("screen share failed");
     assert_eq!(
         harness
             .1
@@ -500,7 +501,7 @@ fn add_people_searches_the_server_and_lists_people_outside_your_contacts() {
     let mut harness = conference_driver();
     feed(&mut harness, &user_json(41, "Noa", "Peretz"));
     feed(&mut harness, &user_json(50, "Dana", "Levi"));
-    harness.1.session.users_state.contacts = Some(vec![41, 50]);
+    harness.1.session.users_state.contacts = crate::state::fetch::Fetch::Ready(vec![41, 50]);
     harness.1.search_add_people("  da ").expect("search sends");
     let mine = sent_request(&harness.2, "searchChatsOnServer");
     let public = sent_request(&harness.2, "searchPublicChats");

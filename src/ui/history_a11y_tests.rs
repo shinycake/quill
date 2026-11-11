@@ -184,7 +184,7 @@ fn the_first_messages_of_a_focused_empty_chat_take_focus(cx: &mut TestAppContext
     vcx.update(|window, cx| {
         app.update(cx, |app, cx| app.history_a11y_focus_in(window, cx));
     });
-    let armed = app.read_with(vcx, |app, _| app.message_ui.a11y.announce_first);
+    let armed = app.read_with(vcx, |app, _| app.message_ui.a11y.focus.armed());
     assert!(armed.is_some());
     assert_eq!(focused(&app, vcx), None);
     // The first slice arrives: the newest message (or the one after the
@@ -199,7 +199,7 @@ fn the_first_messages_of_a_focused_empty_chat_take_focus(cx: &mut TestAppContext
         focused(&app, vcx),
         expected.and_then(|at| kids.get(at).copied())
     );
-    assert!(app.read_with(vcx, |app, _| app.message_ui.a11y.announce_first.is_none()));
+    assert!(app.read_with(vcx, |app, _| app.message_ui.a11y.focus.armed().is_none()));
 }
 
 #[gpui_kit::test]

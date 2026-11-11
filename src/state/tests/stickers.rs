@@ -98,6 +98,8 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { first_page: true }),
         None,
     );
+    with_purpose.stickers.gifs.search_begun("cat".into());
+    with_purpose.stickers.gifs.search_sent(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -118,6 +120,7 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { first_page: false }),
         None,
     );
+    with_purpose.stickers.gifs.search_sent(extra);
     apply_json(
         &mut with_purpose,
         &seq,
@@ -146,8 +149,10 @@ fn s9_gif_backend_purpose_gated_dispatch() {
 
     // An addSavedAnimation `ok` clears the saved-GIF cache so it
     // refetches the server-confirmed list.
-    let found = with_purpose.stickers.gifs.search_results.clone();
-    with_purpose.stickers.gifs.saved.accept(found);
+    with_purpose
+        .stickers
+        .gifs
+        .saved_answered(with_purpose.stickers.gifs.search_results.clone());
     let extra = with_purpose.request(RequestPurpose::AddSavedAnimation, None);
     apply_json(
         &mut with_purpose,
@@ -155,11 +160,13 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.stickers.gifs.saved.items().is_empty());
+    assert!(with_purpose.stickers.gifs.animations.is_empty());
 
     // A removeSavedAnimation `ok` invalidates the same way.
-    let found = with_purpose.stickers.gifs.search_results.clone();
-    with_purpose.stickers.gifs.saved.accept(found);
+    with_purpose
+        .stickers
+        .gifs
+        .saved_answered(with_purpose.stickers.gifs.search_results.clone());
     let extra = with_purpose.request(RequestPurpose::RemoveSavedAnimation, None);
     apply_json(
         &mut with_purpose,
@@ -167,7 +174,7 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(with_purpose.stickers.gifs.saved.items().is_empty());
+    assert!(with_purpose.stickers.gifs.animations.is_empty());
 
     // updateAnimationSearchParameters stores provider + emojis.
     apply_json(
@@ -293,7 +300,7 @@ fn gif_panel_downloads_stills_then_preview_loops_then_unpreviewed_clips() {
         minithumbnail: None,
         thumb_still: still,
     };
-    session.stickers.gifs.saved = GifSaved::Ready(vec![
+    session.stickers.gifs.saved_answered(vec![
         // An MP4 preview loop: the loop plays, the GIF itself waits.
         gif(1, Some(11), false),
         // A still JPEG and no loop: the GIF itself plays.
@@ -393,23 +400,37 @@ fn a_failed_refetch_keeps_the_shown_sticker_set() {
     assert_eq!(stage(&session), Some(StickerSetViewStage::Failed));
 }
 
+fn saved_gif(id: i32) -> crate::telegram::envelope::AnimationItem {
+    crate::telegram::envelope::AnimationItem {
+        duration: 1,
+        width: 1,
+        height: 1,
+        file_name: String::new(),
+        mime_type: "video/mp4".into(),
+        file_id: crate::ids::FileId(id),
+        thumb_file_id: None,
+        thumb_width: 0,
+        thumb_height: 0,
+        minithumbnail: None,
+        thumb_still: true,
+    }
+}
+
 #[test]
-fn a_failed_greeting_fetch_leaves_loading_and_is_not_asked_again() {
-    let (mut session, sink) = session();
-    let seq = AtomicU64::new(0);
-    session.stickers.stickers.greeting.begin();
-    let extra = session.request(RequestPurpose::GetGreetingStickers, None);
-    apply_json(
-        &mut session,
-        &seq,
-        &sink,
-        &format!(
-            r#"{{"@type":"error","@extra":"{}","code":500,"message":"boom"}}"#,
-            extra.0
-        ),
-    );
-    let greeting = &session.stickers.stickers.greeting;
-    assert!(!greeting.is_loading());
-    assert!(greeting.error().is_some());
-    assert!(!greeting.is_idle(), "one attempt per session");
+fn an_update_during_the_request_survives_its_answer_and_asks_again() {
+    let mut gifs = crate::state::GifPanel::default();
+    gifs.saved_asked();
+    // `updateSavedAnimations` while the request is out: the answer may
+    // predate the change.
+    gifs.stale = true;
+    gifs.saved_answered(vec![saved_gif(1)]);
+    assert!(gifs.loaded() && gifs.stale, "the list is asked for again");
+    assert_eq!(gifs.animations.len(), 1, "the list does not blank");
+    // A failure keeps the list and counts as loaded until the next opening.
+    gifs.stale = false;
+    gifs.saved_failed();
+    assert!(gifs.failed() && gifs.loaded());
+    assert_eq!(gifs.animations.len(), 1);
+    gifs.saved_retry();
+    assert!(!gifs.failed() && !gifs.loaded());
 }

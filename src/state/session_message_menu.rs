@@ -53,13 +53,14 @@ pub struct MessageReportFlow {
 }
 
 /// The poll option a right-click opened the menu on, and what TDLib allows
-/// for it. `properties` is `None` until `getPollOptionProperties` answers.
+/// for it. `properties` is `Loading` until `getPollOptionProperties`
+/// answers, `Failed` when it is refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PollOptionMenu {
     pub chat_id: ChatId,
     pub message_id: MessageId,
     pub option_id: String,
-    pub properties: Option<crate::telegram::envelope::PollOptionProperties>,
+    pub properties: crate::state::fetch::Fetch<crate::telegram::envelope::PollOptionProperties>,
 }
 
 /// A stable key of a poll option id, for request purposes that must be
@@ -440,7 +441,7 @@ impl Session {
             chat_id,
             message_id,
             option_id: option_id.to_string(),
-            properties: None,
+            properties: crate::state::fetch::Fetch::Loading { stale: None },
         });
     }
 

@@ -106,7 +106,12 @@ impl Session {
                 if is_regular {
                     self.stickers.stickers.trending_stale = true;
                 } else {
-                    self.stickers.emoji.trending_stale = true;
+                    // The shown tab asks again; any other is asked when
+                    // it is selected.
+                    let emoji = &mut self.stickers.emoji;
+                    if emoji.open && emoji.tab == crate::emoji::EmojiSetTab::Trending {
+                        emoji.lists.trending = crate::state::fetch::Fetch::Idle;
+                    }
                 }
             }
             payload @ (StickersPayload::MessageEffect { .. }
@@ -228,7 +233,7 @@ impl Session {
                     generation,
                 })) = pending.map(|p| p.purpose)
                     && matches!(
-                        &self.chats_state.deep_link,
+                        self.chats_state.deep_link_stage(),
                         Some(DeepLinkState::ResolvingChat {
                             action: DeepLinkAction::StickerSet { .. },
                             generation: slot,
@@ -237,7 +242,7 @@ impl Session {
                 {
                     // `addstickers` / `addemoji` link: hand the set id to the
                     // preview dialog (`getStickerSet` loads its stickers).
-                    self.chats_state.deep_link = Some(DeepLinkState::Ui(
+                    self.chats_state.enter_deep_link_stage(DeepLinkState::Ui(
                         crate::deep_link_types::DeepLinkUi::StickerSet { set_id: id },
                     ));
                 } else if let Some(RequestPurpose::Stickers(StickersPurpose::ViewStickerSet {
@@ -293,7 +298,7 @@ impl Session {
                 }
             }
             StickersPayload::UpdateSavedAnimations { .. } => {
-                self.stickers.gifs.saved.mark_stale();
+                self.stickers.gifs.stale = true;
             }
             // Slice S9: `updateAnimationSearchParameters` (schema 1.8.67,
             // line 11064) — server-pushed; store the provider name and the

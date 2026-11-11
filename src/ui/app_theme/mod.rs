@@ -247,7 +247,7 @@ impl QuillApp {
     /// color" is on and the OS reports one, else the theme's chosen one.
     pub(crate) fn theme_accent(&self, theme: BuiltinTheme) -> Option<u32> {
         if self.appearance.system_accent
-            && let Some(system) = self.preferences.system_accent
+            && let Some(system) = self.preferences.system_accent.color()
         {
             return Some(system);
         }

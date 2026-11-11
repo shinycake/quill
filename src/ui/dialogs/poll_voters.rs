@@ -7,7 +7,8 @@ pub struct PollVotersDialog {
     pub(crate) chat_id: ChatId,
     pub(crate) message_id: MessageId,
     pub(crate) selected_option: Option<usize>,
-    /// B15: opened from "Poll Stats" — shows the vote graph above the
-    /// per-option voter lists (`getPollVoteStatistics`).
+    /// Opened from "Poll Stats" (`getPollVoteStatistics`) with the vote
+    /// graph above the lists. Fixed when the dialog opens and never
+    /// switched: a setting, not a stage.
     pub(crate) show_stats: bool,
 }

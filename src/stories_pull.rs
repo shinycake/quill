@@ -64,15 +64,14 @@ pub struct Reveal {
     written: f32,
 }
 
-/// Whether the strip is expanded, and its slide-in.
+/// Where the strip is: a gap above the list, sliding in, or a row of it.
 #[derive(Debug, Default)]
 pub enum StripPull {
-    /// Resting as the stack of small avatars.
     #[default]
     Collapsed,
-    /// Expanded and sliding into view.
+    /// Expanded, and sliding into view.
     Revealing(Reveal),
-    /// Expanded and in place.
+    /// Expanded and in view.
     Expanded,
 }
 

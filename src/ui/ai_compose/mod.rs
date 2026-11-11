@@ -32,6 +32,7 @@ mod style_tests;
 use super::ai_compose_state::{AiComposeOpen, AiComposeView};
 use super::app::QuillApp;
 use super::status_note::StatusNote;
+use crate::ui::composer_sends::SendOnce;
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::button::ButtonCustomVariant;
 use gpui_kit::*;
@@ -238,7 +239,7 @@ impl QuillApp {
             .map(|open| open.conversation.clone());
         self.apply_ai_compose(window, cx);
         if asked.is_some() && self.open_conversation() == asked {
-            self.submit_from_send_button(window, cx);
+            self.submit_from_send_button(SendOnce::default(), window, cx);
         }
     }
 

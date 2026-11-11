@@ -126,22 +126,21 @@ pub(super) fn media_block(
     }
 }
 
-/// Set while a lifted message drag is in flight, so the history can tell it
-/// from any other drag. Cleared when the button comes up.
-#[derive(Default)]
-struct ForwardLift(bool);
+/// Present while a lifted message drag is in flight, so the history can tell
+/// it from any other drag. Removed when the button comes up.
+struct ForwardLift;
 
 impl Global for ForwardLift {}
 
 /// A message drag was lifted and has not ended.
 pub(super) fn forward_lift_live(cx: &App) -> bool {
-    cx.try_global::<ForwardLift>().is_some_and(|lift| lift.0) && cx.has_active_drag()
+    cx.has_global::<ForwardLift>() && cx.has_active_drag()
 }
 
 /// The button came up: the lifted drag, if any, is over.
 pub(super) fn end_forward_lift(cx: &mut App) {
     if cx.has_global::<ForwardLift>() {
-        cx.set_global(ForwardLift(false));
+        cx.remove_global::<ForwardLift>();
     }
 }
 
@@ -209,7 +208,7 @@ where
     match drag {
         Some(drag) => element
             .on_drag(drag, |drag: &ForwardDrag, _, _, cx| {
-                cx.set_global(ForwardLift(true));
+                cx.set_global(ForwardLift);
                 cx.new(|_| ForwardGhost::new(drag))
             })
             // tdesktop starts a drag after `QApplication::startDragDistance`;

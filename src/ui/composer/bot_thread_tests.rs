@@ -51,7 +51,7 @@ fn send(app: &Entity<QuillApp>, cx: &mut VisualTestContext, text: &str) {
             app.composer.update(cx, |input, cx| {
                 input.set_value(text.to_string(), window, cx)
             });
-            app.submit_composer(text.to_string(), window, cx);
+            app.submit_composer(text.to_string(), Default::default(), window, cx);
         });
     });
     frames(cx);

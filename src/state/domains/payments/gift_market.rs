@@ -1,8 +1,8 @@
 //! Reducer for the gift market (`crate::gift_market`): resale pages and
 //! purchases, auction states and bids, crafting candidates and results.
 use crate::gift_market::{
-    AuctionFetch, AuctionFollow, CraftGift, CraftResult, GiftMarketPayload, GiftMarketPurpose,
-    bid_done_toast, error_note,
+    AuctionFetch, AuctionFollow, BuyPhase, CraftGift, CraftResult, CraftRun, GiftMarketPayload,
+    GiftMarketPurpose, PageLoad, bid_done_toast, error_note,
 };
 use crate::marketplace::GiftPurchaseResult;
 use crate::state::fetch::Fetch;
@@ -41,13 +41,13 @@ impl Session {
                 }
                 let me = self.my_user_id;
                 let market = &mut self.payments.gift_market;
-                if let Some(search) = market.resale.as_mut().filter(|s| s.request_id == request) {
+                if let Some(search) = market.resale.as_mut().filter(|s| s.load.waits_for(request)) {
                     search.apply(page, me, index > 0);
                 } else if let Some(search) = market
                     .craft
                     .as_mut()
                     .map(|craft| &mut craft.market)
-                    .filter(|s| s.request_id == request)
+                    .filter(|s| s.load.waits_for(request))
                 {
                     search.apply(page, me, index > 0);
                 }
@@ -111,12 +111,11 @@ impl Session {
                     .gift_market
                     .craft
                     .as_mut()
-                    .filter(|craft| craft.candidates_request == request)
+                    .filter(|craft| craft.candidates_load.waits_for(request))
                 else {
                     return;
                 };
-                craft.candidates_loading = false;
-                craft.candidates_loaded = true;
+                craft.candidates_load = PageLoad::Ready;
                 craft.candidates_total = candidates.total_count;
                 craft.candidates_offset = if candidates.gifts.is_empty() {
                     String::new()
@@ -145,10 +144,9 @@ impl Session {
                     .gift_market
                     .craft
                     .as_mut()
-                    .filter(|craft| request != 0 && craft.craft_request == request)
+                    .filter(|craft| craft.run == (CraftRun::Crafting { request }))
                 {
-                    craft.crafting = false;
-                    craft.result = Some(result);
+                    craft.run = CraftRun::Done(result);
                 }
             }
         }
@@ -162,17 +160,12 @@ impl Session {
     /// The answer to the buy `request`, for the box that sent it only.
     pub(crate) fn apply_gift_market_purchase(&mut self, result: GiftPurchaseResult, request: u64) {
         let market = &mut self.payments.gift_market;
-        let Some(buy) = market
-            .buy
-            .as_mut()
-            .filter(|buy| request != 0 && buy.request == request)
-        else {
+        let Some(buy) = market.buy.as_mut().filter(|buy| buy.waits_for(request)) else {
             return;
         };
-        buy.sending = false;
+        buy.phase = BuyPhase::Idle;
         match result {
             GiftPurchaseResult::Sent(received_gift_id) => {
-                buy.done = Some(received_gift_id.clone());
                 let listing = buy.listing.clone();
                 let recipient = buy.recipient.clone();
                 let for_craft = buy.for_craft;
@@ -249,9 +242,9 @@ impl Session {
                 if let Some(craft) = market
                     .craft
                     .as_mut()
-                    .filter(|craft| request != 0 && craft.craft_request == request)
+                    .filter(|craft| craft.run == (CraftRun::Crafting { request }))
                 {
-                    craft.crafting = false;
+                    craft.run = CraftRun::Idle;
                 }
             }
             _ => {}
@@ -278,22 +271,16 @@ impl Session {
                 {
                     // Only the search that sent this request fails; a newer
                     // filter's search (or the other box's) keeps loading.
-                    if search.loading && request != 0 && search.request_id == request {
-                        search.loading = false;
-                        search.loaded = true;
-                        search.error = Some(note.clone());
+                    if search.load.waits_for(request) {
+                        search.load = PageLoad::Failed(note.clone());
                     }
                 }
             }
             GiftMarketPurpose::BuyResale => {
-                let Some(buy) = market
-                    .buy
-                    .as_mut()
-                    .filter(|buy| request != 0 && buy.request == request)
-                else {
+                let Some(buy) = market.buy.as_mut().filter(|buy| buy.waits_for(request)) else {
                     return;
                 };
-                buy.sending = false;
+                buy.phase = BuyPhase::Idle;
                 if low {
                     market.balance_low = true;
                 } else {
@@ -324,23 +311,22 @@ impl Session {
                 let Some(craft) = market
                     .craft
                     .as_mut()
-                    .filter(|craft| request != 0 && craft.candidates_request == request)
+                    .filter(|craft| craft.candidates_load.waits_for(request))
                 else {
                     return;
                 };
-                craft.candidates_loading = false;
-                craft.candidates_loaded = true;
+                craft.candidates_load = PageLoad::Failed(note.clone());
                 market.notes.push(note);
             }
             GiftMarketPurpose::Craft => {
                 let Some(craft) = market
                     .craft
                     .as_mut()
-                    .filter(|craft| request != 0 && craft.craft_request == request)
+                    .filter(|craft| request != 0 && craft.run == (CraftRun::Crafting { request }))
                 else {
                     return;
                 };
-                craft.crafting = false;
+                craft.run = CraftRun::Idle;
                 market.notes.push(note);
             }
             GiftMarketPurpose::AcquiredGifts { gift_id } => {

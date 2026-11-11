@@ -31,8 +31,8 @@ impl Session {
                 AuthorizationState::LoggingOut | AuthorizationState::Closed
             )
         {
-            self.chat_list.chats_exhausted = false;
-            self.chat_list.archive_chats_exhausted = false;
+            self.chat_list.main_paging = ListPaging::More;
+            self.chat_list.archive_paging = ListPaging::More;
             self.chat_list.folder_chats_exhausted.clear();
         }
         if matches!(state, AuthorizationState::Closed) {
@@ -44,8 +44,7 @@ impl Session {
             self.media.download_extras.clear();
             self.search.search.close();
             self.search.chat_search.close();
-            self.messages.in_flight_forward = None;
-            self.messages.queued_forward_flights.clear();
+            self.messages.forward_flights.clear();
             self.chats_state.chat_message_sender.clear();
             self.chats_state.send_as_options.clear();
             self.messages.share_search = ShareSearch::default();
@@ -59,7 +58,7 @@ impl Session {
             self.calls.invite_results = None;
             self.search.search.close();
             self.search.chat_search.close();
-            self.messages.in_flight_forward = None;
+            self.messages.forward_flights.clear();
         }
         if matches!(state, AuthorizationState::Closing) {
             self.shutdown = ShutdownPhase::WaitingClosed;

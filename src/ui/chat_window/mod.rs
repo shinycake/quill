@@ -301,6 +301,12 @@ impl ChatWindows {
     }
 
     /// Whether `chat_id` has a window of its own.
+    /// Whether the window view `view` is listed: its bookkeeping did not
+    /// run yet.
+    pub(in crate::ui) fn lists_view(&self, view: EntityId) -> bool {
+        self.open.iter().any(|open| open.view.entity_id() == view)
+    }
+
     pub(in crate::ui) fn has(&self, chat_id: ChatId) -> bool {
         self.window_for(chat_id).is_some()
     }
@@ -646,6 +652,17 @@ impl QuillApp {
         }
         self.end_recording_of_window(chat_id, cx);
         self.close_location_picker_of_window(chat_id, cx);
+        // A mark that its kit dialog was closed from outside goes with the
+        // window: nothing is left to read it.
+        if let Some(open) = self
+            .windows
+            .open
+            .iter()
+            .find(|open| open.chat_id == chat_id)
+            && let Ok(mut closed) = self.main_window.dialogs_closed.try_borrow_mut()
+        {
+            closed.remove(&open.handle.window_id());
+        }
         self.windows.open.retain(|open| open.chat_id != chat_id);
         // Its media panel goes: the GIF downloads follow the panels left.
         self.sync_gif_downloads();
@@ -751,7 +768,7 @@ impl QuillApp {
             session.leave_open_chat();
         }
         self.set_composer_markup("", window, cx);
-        self.composer_ui.prev_text = SharedString::default();
+        self.composer_ui.echo.set(SharedString::default());
         self.history.rows_key = None;
         if self
             .session()

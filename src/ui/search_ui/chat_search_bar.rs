@@ -304,7 +304,7 @@ impl QuillApp {
             }
         } else if let Some(session) = self.demo_session.as_mut() {
             let trimmed = query.trim();
-            if session.search.search.open
+            if session.search.search.is_open()
                 && session.search.search.query == trimmed
                 && !matches!(session.search.search.status(), SearchStatus::Closed)
             {

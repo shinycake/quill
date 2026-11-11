@@ -82,7 +82,8 @@ fn open_checkout(
     let mut vcx = VisualTestContext::from_window(handle.into(), cx);
     app.update_in(&mut vcx, |app, window, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.form = Some(stripe_checkout(can_save, need_password));
+            session.payments.checkout =
+                quill::state::CheckoutForm::Ready(stripe_checkout(can_save, need_password));
         }
         app.payments.card_transport = Some(transport);
         app.open_payment_dialog(window, cx);
@@ -310,16 +311,16 @@ fn the_provider_token_becomes_the_payment_method(cx: &mut TestAppContext) {
             .dialog
             .as_ref()
             .expect("checkout open");
-        assert!(dialog.card_form.is_none(), "back on the checkout");
-        assert_eq!(dialog.credential_choice, PaymentCredentialChoice::NewCard);
-        let card = dialog.new_card.as_ref().expect("a new card");
+        assert!(dialog.card_form().is_none(), "back on the checkout");
+        assert_eq!(dialog.method.choice(), PaymentCredentialChoice::NewCard);
+        let card = dialog.method.card().expect("a new card");
         assert_eq!(card.credentials.title(), "visa *4242");
         assert_eq!(
             card.credentials.data(),
             r#"{"id":"tok_visa","type":"card"}"#
         );
         assert!(card.save);
-        assert!(!dialog.password_prompt);
+        assert!(!dialog.method.needs_password());
     });
 }
 
@@ -336,9 +337,9 @@ fn provider_errors_keep_the_form_open(cx: &mut TestAppContext) {
             .dialog
             .as_ref()
             .expect("checkout open");
-        let form = dialog.card_form.as_ref().expect("still on the card form");
+        let form = dialog.card_form().expect("still on the card form");
         assert!(!form.is_tokenizing(), "Done works again");
-        assert!(dialog.new_card.is_none());
+        assert!(dialog.method.card().is_none());
         assert_eq!(
             form.notice.as_ref().map(|notice| notice.as_ref()),
             Some(quill::lang::tr(quill::lang::keys::PAYMENTS_CARD_DECLINED))
@@ -370,7 +371,7 @@ fn prompt_shown(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> bool {
             .payments
             .dialog
             .as_ref()
-            .is_some_and(|dialog| dialog.password_prompt)
+            .is_some_and(|dialog| dialog.method.needs_password())
     })
 }
 
@@ -414,10 +415,10 @@ fn saving_without_a_password_asks_to_turn_it_on(cx: &mut TestAppContext) {
         let app = app.read(cx);
         let dialog = app.payments.dialog.as_ref();
         (
-            app.twofa.open,
+            app.twofa.is_open(),
             dialog.is_some_and(|dialog| {
-                dialog.new_card.is_some()
-                    && dialog.credential_choice == PaymentCredentialChoice::NewCard
+                dialog.method.card().is_some()
+                    && dialog.method.choice() == PaymentCredentialChoice::NewCard
             }),
         )
     });
@@ -440,7 +441,7 @@ fn saving_without_a_password_asks_to_turn_it_on(cx: &mut TestAppContext) {
                 pending_reset_date: 0,
             });
         }
-        app.twofa.open = false;
+        app.twofa.close();
         cx.notify();
     });
     draw(&mut vcx);
@@ -504,7 +505,7 @@ fn new_card_opens_the_form_over_the_checkout(cx: &mut TestAppContext) {
             .payments
             .dialog
             .as_ref()
-            .map(|dialog| dialog.credential_choice.clone())
+            .map(|dialog| dialog.method.choice())
     });
     assert_eq!(
         choice,
@@ -533,6 +534,6 @@ fn escape_leaves_the_card_form_for_the_checkout(cx: &mut TestAppContext) {
             .dialog
             .as_ref()
             .expect("checkout open");
-        assert!(dialog.card_form.is_none());
+        assert!(dialog.card_form().is_none());
     });
 }

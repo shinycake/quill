@@ -36,6 +36,42 @@ pub enum AutoDownloadAnswer {
     Refused(RequestId),
 }
 
+/// The local storage clear (`optimizeStorage`): one at a time. `Clearing`
+/// leaves on its answer (`Freed`) or its error (`Failed`, the line the page
+/// shows); `Freed` and `Failed` stay until the screen is reopened or the
+/// next clear starts.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum StorageClear {
+    #[default]
+    Idle,
+    Clearing,
+    /// Bytes the last confirmed clear freed: the screen shows "{size}
+    /// freed on your device!".
+    Freed(i64),
+    /// The clear did not go: why, for the page.
+    Failed(String),
+}
+
+impl StorageClear {
+    pub fn is_clearing(&self) -> bool {
+        matches!(self, StorageClear::Clearing)
+    }
+
+    pub fn freed(&self) -> Option<i64> {
+        match self {
+            StorageClear::Freed(bytes) => Some(*bytes),
+            StorageClear::Idle | StorageClear::Clearing | StorageClear::Failed(_) => None,
+        }
+    }
+
+    pub fn failed(&self) -> Option<&str> {
+        match self {
+            StorageClear::Failed(why) => Some(why),
+            StorageClear::Idle | StorageClear::Clearing | StorageClear::Freed(_) => None,
+        }
+    }
+}
+
 pub struct SettingsState {
     /// See [`AutoDownloadAnswer`].
     pub auto_download_answer: Option<AutoDownloadAnswer>,
@@ -114,9 +150,10 @@ pub struct SettingsState {
     /// Phase S2: cached `getStorageStatistics` answer (aggregated by file
     /// type, TGX `TGStorageStats` style); drives the storage-usage overlay,
     /// including the "Secret media and files" category.
-    pub storage_stats: Option<StorageStats>,
-    /// Phase S2: a `getStorageStatistics` round trip is in flight.
-    pub storage_stats_loading: bool,
+    /// A `getStorageStatistics` round trip in flight is `Loading`; its
+    /// error leaves `Failed` (the overlay draws it, the next open asks
+    /// again).
+    pub storage_stats: crate::state::fetch::Fetch<StorageStats>,
     /// Slice S4: per-network auto-download settings, the local source of
     /// truth (TDLib has no getter for the current values). Loaded from
     /// `data_storage.json` at session setup; seeded once from
@@ -126,21 +163,13 @@ pub struct SettingsState {
     /// persists it on the next ingest (the reducer cannot touch the
     /// filesystem).
     pub data_storage_dirty: bool,
-    /// Slice S4: a `getAutoDownloadSettingsPresets` round trip is in flight.
-    pub auto_download_presets_loading: bool,
     /// Slice S4: last Data & Storage failure, shown on the screen
     /// (failures surface there, never as toasts — the S3 pattern).
     pub data_storage_error: Option<String>,
-    /// Batch 6: bytes the last confirmed `optimizeStorage` freed — the
-    /// screen shows "{size} freed on your device!" until reopened.
-    pub storage_freed: Option<i64>,
-    /// Batch 6: an `optimizeStorage` round trip is in flight.
-    pub storage_clearing: bool,
+    /// Batch 6: the `optimizeStorage` round trip and its result.
+    pub storage_clear: StorageClear,
     /// Batch 6: the local storage limits TDLib reports (`updateOption`).
     pub storage_limits: crate::storage_limits::StorageLimits,
-    /// This session sent the first cache limits; the account counts as
-    /// seeded once TDLib echoes them (`storage_limits.chosen()`).
-    pub storage_limits_seed_sent: bool,
     /// B13: new-chat privacy, inactive-session TTL, 18+ option, network
     /// usage and the remember-password check.
     pub privacy_data: PrivacyData,
@@ -370,17 +399,13 @@ impl SettingsState {
             reaction_notification_settings: None,
             scope_saves: Default::default(),
             reaction_saves: Default::default(),
-            storage_stats: None,
-            storage_stats_loading: false,
+            storage_stats: Default::default(),
             data_storage: DataStoragePrefs::default(),
             data_storage_dirty: false,
-            auto_download_presets_loading: false,
             auto_download_answer: None,
             data_storage_error: None,
-            storage_freed: None,
-            storage_clearing: false,
+            storage_clear: StorageClear::Idle,
             storage_limits: Default::default(),
-            storage_limits_seed_sent: false,
             privacy_data: Default::default(),
             notices: AccountNotices::default(),
             sessions: Fetch::Idle,
@@ -434,6 +459,14 @@ fn dedup_ids(mut list: Vec<i64>, more: Vec<i64>) -> Vec<i64> {
 }
 
 impl SettingsState {
+    /// The "freed" line goes when the screen is reopened; a clear still on
+    /// its way is not forgotten.
+    pub fn reset_storage_freed(&mut self) {
+        if matches!(self.storage_clear, StorageClear::Freed(_)) {
+            self.storage_clear = StorageClear::Idle;
+        }
+    }
+
     /// A preview download finished: whether a picker still waits for it.
     /// Either way the request is over.
     pub fn take_sound_preview(&mut self, sound_id: i64) -> bool {

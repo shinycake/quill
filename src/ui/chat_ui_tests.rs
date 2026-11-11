@@ -310,7 +310,7 @@ fn another_chat_drops_the_reschedule_picker_and_the_scheduled_list(cx: &mut Test
     });
     frames(&mut vcx);
     app.read_with(&vcx, |app, _| {
-        assert!(app.chat_ui.schedule_picker.is_some() && app.chat_ui.schedule_popup_open);
+        assert!(app.chat_ui.schedule_picker.is_some());
     });
     open(&app, &mut vcx, other);
     app.read_with(&vcx, |app, _| {
@@ -318,7 +318,6 @@ fn another_chat_drops_the_reschedule_picker_and_the_scheduled_list(cx: &mut Test
             app.chat_ui.schedule_picker.is_none(),
             "the picker was the last chat's"
         );
-        assert!(!app.chat_ui.schedule_popup_open);
         assert!(
             !app.chat_ui.scheduled_dialog_open,
             "the list was the last chat's"
@@ -333,14 +332,34 @@ fn another_chat_closes_the_info_cards(cx: &mut TestAppContext) {
     let other = other_chat(&app, &mut vcx);
     open(&app, &mut vcx, CHAT);
     app.update(&mut vcx, |app, cx| {
-        app.chat_ui.topic_info_open = true;
-        app.chat_ui.thread_info_open = true;
+        app.chat_ui.info_card = crate::ui::chat_ui_state::InfoCard::Topic;
         cx.notify();
     });
     open(&app, &mut vcx, other);
     app.read_with(&vcx, |app, _| {
-        assert!(!app.chat_ui.topic_info_open && !app.chat_ui.thread_info_open);
+        assert_eq!(
+            app.chat_ui.info_card,
+            crate::ui::chat_ui_state::InfoCard::Closed
+        );
     });
+}
+
+/// A thread's card opens over a topic's; closing the thread brings the
+/// topic's back.
+#[test]
+fn a_thread_card_keeps_the_topic_card_under_it() {
+    use crate::ui::chat_ui_state::InfoCard;
+    let mut card = InfoCard::Closed;
+    card.toggle_topic();
+    card.toggle_thread();
+    assert!(card.topic() && card.thread());
+    card.close_thread();
+    assert_eq!(card, InfoCard::Topic);
+    card.toggle_thread();
+    card.toggle_thread();
+    assert_eq!(card, InfoCard::Topic);
+    card.toggle_topic();
+    assert_eq!(card, InfoCard::Closed);
 }
 
 /// Round 8, 2a: a new poll or checklist goes to the chat shown at Create,
@@ -554,14 +573,11 @@ fn another_chat_drops_the_secret_inline_bot_alert(cx: &mut TestAppContext) {
     let other = other_chat(&app, &mut vcx);
     open(&app, &mut vcx, CHAT);
     app.update(&mut vcx, |app, _| {
-        app.chat_ui.pending_inline_bot_alert = Some("@bot query".into());
+        app.chat_ui.bot_alert = crate::ui::inline_mode::BotAlert::Switch("@bot query".into());
     });
     open(&app, &mut vcx, other);
     assert!(
-        app.read_with(&vcx, |app, _| app
-            .chat_ui
-            .pending_inline_bot_alert
-            .is_none()),
+        app.read_with(&vcx, |app, _| !app.chat_ui.bot_alert.is_pending()),
         "the alert stayed with the chat it was raised in"
     );
 }

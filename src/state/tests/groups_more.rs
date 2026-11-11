@@ -1,6 +1,7 @@
 //! State reducer tests: groups (continued from groups.rs).
 use super::common::*;
 use super::*;
+use crate::state::fetch::Fetch;
 
 #[test]
 fn event_log_gate() {
@@ -95,7 +96,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         GroupsPurpose::GetChatEventLog { from_event_id: 0 },
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &[300, 299]));
-    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
     else {
         panic!("expected loaded event log");
     };
@@ -113,7 +114,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         GroupsPurpose::GetChatEventLog { from_event_id: 299 },
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &full));
-    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
     else {
         panic!("expected loaded event log");
     };
@@ -129,7 +130,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         GroupsPurpose::GetChatEventLog { from_event_id: 200 },
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &[199]));
-    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
     else {
         panic!("expected loaded event log");
     };
@@ -142,7 +143,7 @@ fn event_log_fetch_replaces_appends_and_dedups() {
         GroupsPurpose::GetChatEventLog { from_event_id: 0 },
     );
     apply_json(&mut session, &seq, &sink, &page(extra.0, &[500]));
-    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
     else {
         panic!("expected loaded event log");
     };
@@ -173,7 +174,7 @@ fn event_log_failure_states() {
         ),
     );
     let ChatEventLogFetch::Failed(message) =
-        session.groups.event_logs.get(&13).expect("log failed")
+        session.groups.event_log_fetch(13).expect("log failed")
     else {
         panic!("expected failed event log");
     };
@@ -206,7 +207,7 @@ fn event_log_failure_states() {
             extra.0
         ),
     );
-    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_logs.get(&13).expect("log loaded")
+    let ChatEventLogFetch::Loaded(loaded) = session.groups.event_log_fetch(13).expect("log loaded")
     else {
         panic!("expected loaded event log");
     };
@@ -664,13 +665,14 @@ fn g2_welcome_pack_and_flag_cached() {
         .groups
         .welcome_messages
         .get(&13)
+        .and_then(|pack| pack.data())
         .expect("welcome pack");
     assert_eq!(pack.len(), 1);
     assert_eq!(pack[0].id, 7);
-    assert_eq!(
-        session.groups.welcome_message_fetches.get(&13),
-        Some(&WelcomeMessagesFetch::Loaded)
-    );
+    assert!(matches!(
+        session.groups.welcome_messages.get(&13),
+        Some(Fetch::Ready(_))
+    ));
     apply_json(
         &mut session,
         &seq,
@@ -741,8 +743,10 @@ fn g2_boost_slots_stashed_for_chain() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::GetBoostSlotsForBoost, Some(ChatId(13)));
-    // Stashed only while a boost waits for the slots.
-    session.groups.boost_intent = Some(13);
+    // Kept only while the box of that chat waits for the slots.
+    let mut open = crate::boost_box::BoostBoxState::new(13, false);
+    open.phase = crate::boost_box::BoostPhase::Working(crate::boost_box::BoostWork::Slots);
+    session.groups.boost_box = Some(open);
     apply_json(
         &mut session,
         &seq,
@@ -752,10 +756,16 @@ fn g2_boost_slots_stashed_for_chain() {
             extra.0
         ),
     );
-    let ids: Vec<i32> = session.groups.boost_slots_by_chat[&13]
-        .iter()
-        .map(|slot| slot.slot_id)
-        .collect();
+    let Some(crate::boost_box::BoostPhase::Working(crate::boost_box::BoostWork::SlotsReady(slots))) =
+        session
+            .groups
+            .boost_box
+            .as_ref()
+            .map(|state| state.phase.clone())
+    else {
+        panic!("the box holds the slots");
+    };
+    let ids: Vec<i32> = slots.iter().map(|slot| slot.slot_id).collect();
     assert_eq!(ids, vec![3, 7]);
 }
 
@@ -865,8 +875,8 @@ fn g2_welcome_fetch_error_marks_failed() {
         ),
     );
     assert!(matches!(
-        session.groups.welcome_message_fetches.get(&13),
-        Some(WelcomeMessagesFetch::Failed(_))
+        session.groups.welcome_messages.get(&13),
+        Some(Fetch::Failed { .. })
     ));
 }
 
@@ -916,11 +926,10 @@ fn g2_welcome_delete_ok_drops_pack() {
     // the cached pack so the dialog refetches it.
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.groups.welcome_messages.insert(13, Vec::new());
     session
         .groups
-        .welcome_message_fetches
-        .insert(13, WelcomeMessagesFetch::Loaded);
+        .welcome_messages
+        .insert(13, Fetch::Ready(Vec::new()));
     let extra = session.request(
         RequestPurpose::Groups(GroupsPurpose::DeleteChatWelcomeMessage {
             welcome_message_id: 7,
@@ -934,7 +943,6 @@ fn g2_welcome_delete_ok_drops_pack() {
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
     assert!(!session.groups.welcome_messages.contains_key(&13));
-    assert!(!session.groups.welcome_message_fetches.contains_key(&13));
 }
 
 #[test]

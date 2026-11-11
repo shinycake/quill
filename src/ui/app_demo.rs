@@ -2,7 +2,7 @@
 //! the session and runs its registered setup at the end.
 
 use super::app::QuillApp;
-use super::connect_ui::ConnectUiStatus;
+use super::connect_ui::ConnectStage;
 use super::screenshot_demo::ScreenshotDemo;
 use super::synthetic::SyntheticChat;
 use gpui_kit::component::input::{InputEvent, TextareaState};
@@ -10,7 +10,6 @@ use gpui_kit::component::menu::AppMenuBar;
 use gpui_kit::*;
 use quill::credentials::TelegramCredentials;
 use quill::diagnostics::MemorySink;
-use quill::telegram::envelope::AuthorizationState;
 use std::sync::Arc;
 use std::time::Duration;
 impl QuillApp {
@@ -35,25 +34,23 @@ impl QuillApp {
         let chat_prefs = Self::load_chat_prefs();
         let demo_sink = Arc::new(MemorySink::new());
         let mut demo_session = None;
-        let (connect_status, live, status_note, auth_demo) = match demo {
+        let (live, status_note, auth_demo) = match demo {
             Some(d) => {
-                let (seed, status, note, auth) = d.start();
+                let (seed, stage, note) = d.start();
                 if let Some(seed) = seed {
                     demo_session = Some(Box::new(seed(demo_sink.clone())));
                 }
-                (status, None, note, auth)
+                (None, note, stage)
             }
             None => (
-                ConnectUiStatus::Live,
                 None,
                 "Connecting to Telegram…".into(),
-                AuthorizationState::WaitTdlibParameters,
+                ConnectStage::Connecting,
             ),
         };
         let screen = super::on_screen::OnScreen::new(
             Default::default(),
             &chat_prefs,
-            connect_status,
             status_note,
             window,
             cx,

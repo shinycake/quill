@@ -200,7 +200,7 @@ impl QuillApp {
                             .accessibility_label(tr(keys::GROUP_CALL_CLOSE))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.group_call_boxes.invite_open = false;
+                                this.group_call_boxes.close_call_box();
                                 this.close_conference_link();
                                 cx.notify();
                             })),
@@ -209,7 +209,7 @@ impl QuillApp {
             .children(self.conference_link_row(call, cx));
         let contacts = self
             .session()
-            .and_then(|s| s.users_state.contacts.clone())
+            .and_then(|s| s.users_state.contacts.data().cloned())
             .unwrap_or_default();
         let mut rows = div()
             .id("group-call-invite-rows")

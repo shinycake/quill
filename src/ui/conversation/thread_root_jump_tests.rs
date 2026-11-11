@@ -134,7 +134,7 @@ impl Sim {
             s.threads
                 .thread
                 .as_ref()
-                .is_some_and(|thread| thread.history.loaded_complete)
+                .is_some_and(|thread| thread.history.loaded_complete())
         })
     }
 
@@ -188,6 +188,6 @@ fn the_page_that_reaches_the_root_lands_the_view_on_it(cx: &mut TestAppContext) 
     assert_eq!(sim.top(), (Some(MessageId(ROOT)), 0.));
     let pending = sim
         .app
-        .update(&mut sim.vcx, |app, _| app.history.scroll_goal.is_some());
+        .update(&mut sim.vcx, |app, _| app.history.aim.goal().is_some());
     assert!(!pending);
 }

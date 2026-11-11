@@ -83,7 +83,7 @@ impl Session {
                 _ => None,
             };
             if self.stickers.gifs.search_bot_user_id.is_none() {
-                self.stickers.gifs.search.fail();
+                self.stickers.gifs.search_failed_now();
             }
         }
         // Bots slice: `searchPublicChat` answer for `@botname`
@@ -146,13 +146,14 @@ impl Session {
             && let Some(DeepLinkState::ResolvingChat {
                 action,
                 generation: slot_generation,
-            }) = self.chats_state.deep_link.as_ref()
+            }) = self.chats_state.deep_link_stage()
             && *slot_generation == generation
         {
-            self.chats_state.deep_link = Some(DeepLinkState::ChatReady {
-                chat_id,
-                action: action.clone(),
-            });
+            self.chats_state
+                .enter_deep_link_stage(DeepLinkState::ChatReady {
+                    chat_id,
+                    action: action.clone(),
+                });
         }
         if let ChatKind::Supergroup { supergroup_id, .. } = kind {
             self.groups
@@ -434,7 +435,7 @@ impl Session {
                         // The list is still on its way: its answer is the
                         // whole list, this link included once the server
                         // has it. Nothing is invented from one entry.
-                        InviteLinkFetch::Loading => {}
+                        InviteLinkFetch::Loading(_) => {}
                         // A failed list is dropped so the next fetch asks
                         // again, instead of showing one link as the list.
                         InviteLinkFetch::Failed(_) => {

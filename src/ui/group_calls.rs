@@ -2,6 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::group_call_state::CallBox;
 use super::group_call_stream_layout::StreamJoinIntent;
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -38,7 +39,7 @@ impl QuillApp {
                     Err(_) => {
                         // Nothing was asked for, so nothing will track the
                         // call: the wish must not join it later.
-                        self.group_call_screen.stream_join = None;
+                        self.group_call_screen.clear_stream_wish();
                         StatusNote::error(tr(keys::Q_AV_COULDNT_REACH_THE_VOICE_CHAT))
                     }
                 };
@@ -107,7 +108,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             // As the driver's join: it starts without the last error.
             if let Some(call) = session.calls.active_group_call.as_mut() {
-                call.transport_error = None;
+                call.transport.clear_error();
                 call.is_joined = true;
             }
             self.set_note(StatusNote::silent(tr(
@@ -278,7 +279,7 @@ impl QuillApp {
         let sharing = self
             .session()
             .and_then(|session| session.calls.active_group_call.as_ref())
-            .is_some_and(|call| call.screen_sharing || call.screen_share_pending);
+            .is_some_and(|call| call.screen_share.is_on());
         if !sharing && self.open_screen_chooser(super::screen_share_state::ScreenFor::Group, cx) {
             return;
         }
@@ -368,9 +369,13 @@ impl QuillApp {
     /// the cache is empty.
     pub(super) fn open_group_call_invite(&mut self, cx: &mut Context<Self>) {
         self.group_call_needs_unlock(cx);
-        self.group_call_boxes.invite_open = true;
+        let call = self
+            .session()
+            .and_then(|s| s.calls.active_group_call.as_ref())
+            .map(|call| call.id);
+        self.group_call_boxes.call_box = CallBox::Invite { call };
         if let Some(live) = self.live.as_mut()
-            && live.driver.session.users_state.contacts.is_none()
+            && live.driver.session.users_state.contacts.data().is_none()
         {
             let _ = live.driver.fetch_contacts();
         }

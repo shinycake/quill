@@ -162,7 +162,7 @@ fn a_cancelled_report_ignores_its_late_answer() {
         .ingest(copy_and_parse(&answer, &seq, &sink).unwrap())
         .unwrap();
     assert!(
-        driver.session.messages.sponsored_report.picking().is_none(),
+        driver.session.messages.sponsored_report.flight().is_none(),
         "the picker stays closed"
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -209,13 +209,13 @@ fn a_picked_report_option_closes_the_picker_until_the_answer() {
     driver
         .ingest(copy_and_parse(&answer, &seq, &sink).unwrap())
         .unwrap();
-    assert!(driver.session.messages.sponsored_report.picking().is_some());
+    assert!(driver.session.messages.sponsored_report.flight().is_some());
     driver
         .report_sponsored_message(chat, 9001, "c3BhbQ==")
         .unwrap()
         .expect("the pick is sent");
     assert!(
-        driver.session.messages.sponsored_report.picking().is_none(),
+        driver.session.messages.sponsored_report.flight().is_none(),
         "the picker is gone while the pick is out"
     );
     let _ = std::fs::remove_dir_all(&dir);

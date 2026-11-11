@@ -33,9 +33,19 @@ pub(super) const COVER_SIZE: f32 = 96.;
 /// The cover's player, if one plays (a `QuillApp` field).
 #[derive(Default)]
 pub(super) struct VideoAvatarUi {
-    clip: Option<CoverClip>,
-    /// The clip that failed to open or decode: its still stays.
-    failed: Option<FileId>,
+    cover: Cover,
+}
+
+/// The cover player's stage.
+#[derive(Default)]
+enum Cover {
+    /// No clip is wanted, or its file is not local yet.
+    #[default]
+    None,
+    Playing(CoverClip),
+    /// The clip that failed to open or decode: its still stays. Left when
+    /// the cover no longer wants a clip.
+    Failed(FileId),
 }
 
 impl crate::ui::on_screen::Farewell for VideoAvatarUi {}
@@ -71,7 +81,10 @@ impl VideoAvatarUi {
     #[cfg(test)]
     #[cfg(feature = "demo-capture")]
     pub(super) fn player(&self) -> Option<&VideoPlayer> {
-        self.clip.as_ref().map(|clip| &clip.player)
+        match &self.cover {
+            Cover::Playing(clip) => Some(&clip.player),
+            _ => None,
+        }
     }
 }
 
@@ -84,38 +97,36 @@ impl QuillApp {
         if !on_screen || !super::video_player::supported() {
             return None;
         }
-        self.session()?
-            .info_cover_animation()
-            .filter(|(_, animation)| self.video_avatar.failed != Some(animation.file_id))
+        self.session()?.info_cover_animation()
     }
 
     /// Open, keep, pause or drop the cover player to match the state.
     /// Runs at the start of every main-window render; `active` is whether
     /// a Quill window is in front.
     pub(super) fn sync_video_avatar(&mut self, active: bool, scale: f32, cx: &mut Context<Self>) {
-        if let Some(clip) = &self.video_avatar.clip
+        if let Cover::Playing(clip) = &self.video_avatar.cover
             && clip.player.take_error().is_some()
         {
-            self.video_avatar.failed = Some(clip.file_id);
+            self.video_avatar.cover = Cover::Failed(clip.file_id);
         }
         let Some((owner, animation)) = self.wanted_cover_clip() else {
-            self.video_avatar.clip = None;
+            self.video_avatar.cover = Cover::None;
             return;
         };
-        let current = self
-            .video_avatar
-            .clip
-            .as_ref()
-            .is_some_and(|clip| clip.owner == owner && clip.file_id == animation.file_id);
-        if !current {
-            self.video_avatar.clip = self.open_cover_clip(owner, animation, scale, cx);
+        let keep = match &self.video_avatar.cover {
+            Cover::Playing(clip) => clip.owner == owner && clip.file_id == animation.file_id,
+            Cover::Failed(file) => *file == animation.file_id,
+            Cover::None => false,
+        };
+        if !keep {
+            self.video_avatar.cover = self.open_cover_clip(owner, animation, scale, cx);
         }
         // The lock screen covers it too (the kit's dialogs read closed then).
         let covered = self.viewer.state.is_open()
             || self.stories.viewer.is_open()
             || self.kit_dialog_open()
             || self.refused_while_locked();
-        if let Some(clip) = &self.video_avatar.clip {
+        if let Cover::Playing(clip) = &self.video_avatar.cover {
             let play = active && !covered;
             if play != clip.player.wants_play() {
                 if play {
@@ -135,22 +146,22 @@ impl QuillApp {
         animation: ChatPhotoAnimation,
         scale: f32,
         cx: &mut Context<Self>,
-    ) -> Option<CoverClip> {
+    ) -> Cover {
         let roots = self.media_display_roots();
-        let path = self
-            .session()?
-            .media
-            .files
-            .get(&animation.file_id.0)?
-            .usable_path()
-            .and_then(|path| quill::local_path::sandboxed_display_path(path, &roots))?;
+        let Some(path) = self.session().and_then(|session| {
+            session
+                .media
+                .files
+                .get(&animation.file_id.0)?
+                .usable_path()
+                .and_then(|path| quill::local_path::sandboxed_display_path(path, &roots))
+        }) else {
+            return Cover::None;
+        };
         let max_edge = (COVER_SIZE * scale.max(1.)).ceil() as u32;
         let player = match VideoPlayer::open(&path, Purpose::Inline { max_edge }, None, cx) {
             Ok(player) => player,
-            Err(_) => {
-                self.video_avatar.failed = Some(animation.file_id);
-                return None;
-            }
+            Err(_) => return Cover::Failed(animation.file_id),
         };
         player.set_volume(0.0);
         player.set_looping(true);
@@ -162,7 +173,7 @@ impl QuillApp {
             player: player.downgrade(),
             behind: behind.clone(),
         });
-        Some(CoverClip {
+        Cover::Playing(CoverClip {
             owner,
             file_id: animation.file_id,
             player,
@@ -189,20 +200,19 @@ impl QuillApp {
         still: AnyElement,
         behind: Hsla,
     ) -> AnyElement {
-        let video = self
-            .video_avatar
-            .clip
-            .as_ref()
-            .filter(|clip| clip.owner == owner)
-            .map(|clip| {
-                clip.behind.set(behind);
-                div()
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .size_full()
-                    .child(clip.view.clone())
-            });
+        let playing = match &self.video_avatar.cover {
+            Cover::Playing(clip) => Some(clip),
+            _ => None,
+        };
+        let video = playing.filter(|clip| clip.owner == owner).map(|clip| {
+            clip.behind.set(behind);
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .child(clip.view.clone())
+        });
         div()
             .relative()
             .flex_none()

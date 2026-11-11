@@ -222,8 +222,7 @@ impl QuillApp {
                         // Gated on the open chat still being one: a pending
                         // alert from a previous chat never renders elsewhere.
                         .when(
-                            self.chat_ui.pending_inline_bot_alert.is_some()
-                                && self.open_chat_is_secret(),
+                            self.chat_ui.bot_alert.is_pending() && self.open_chat_is_secret(),
                             |this| this.child(self.inline_bot_alert_banner(cx)),
                         )
                         .children(self.composer_edit_bar_slot(cx))
@@ -271,10 +270,9 @@ impl QuillApp {
                         // buttons that summon them.
                         // The share box's schedule step shows inside its dialog.
                         .when(
-                            self.chat_ui.schedule_popup_open
-                                && !self.chat_ui.schedule_picker.as_ref().is_some_and(|picker| {
-                                    picker.target == super::scheduled::ScheduleTarget::Share
-                                }),
+                            self.chat_ui.schedule_picker.as_ref().is_some_and(|picker| {
+                                picker.target != super::scheduled::ScheduleTarget::Share
+                            }),
                             |this| this.child(self.schedule_popup(cx)),
                         )
                         .when_some(self.paid_messages_notice(cx), |this, row| this.child(row))
@@ -475,7 +473,7 @@ impl QuillApp {
             open.and_then(|id| session.and_then(|s| s.chats.get(&id.0).cloned()));
         let media_roots = self.media_display_roots();
         let sender_name = title.clone();
-        let chat_search_open = session.is_some_and(|s| s.search.chat_search.open);
+        let chat_search_open = session.is_some_and(|s| s.search.chat_search.is_open());
         let highlight_id = session.and_then(|s| match s.search.chat_search.jump {
             ChatSearchJump::Ready { message_id } | ChatSearchJump::Loading { message_id } => {
                 Some(message_id)
@@ -540,7 +538,9 @@ impl QuillApp {
                 this.child(self.forum_topic_strip(&info, cx))
             })
             .when_some(
-                topic_info.clone().filter(|_| self.chat_ui.topic_info_open),
+                topic_info
+                    .clone()
+                    .filter(|_| self.chat_ui.info_card.topic()),
                 |this, info| this.child(self.topic_info_card(&info, cx)),
             )
             .children(self.subsection_tabs_strip(SubsectionTabsMode::Top, cx))
@@ -622,7 +622,7 @@ impl QuillApp {
                     // Phase 5.1: opening a forum supergroup shows its topics;
                     // with the topic column on screen the pane only asks for
                     // a choice.
-                    if self.history.forum_column_shown {
+                    if self.history.forum_column.on_screen() {
                         pane_placeholder(
                             tr(keys::Q_CHAT_CHOOSE_A_TOPIC),
                             tr(keys::Q_CHAT_PICK_A_TOPIC_FROM_THE),
@@ -745,7 +745,7 @@ impl QuillApp {
             .min_h_0()
             .min_w_0()
             .children(self.thread_root_bar(cx))
-            .when(self.chat_ui.thread_info_open, |this| {
+            .when(self.chat_ui.info_card.thread(), |this| {
                 this.children(self.thread_info_card(cx))
             })
             .child(list)

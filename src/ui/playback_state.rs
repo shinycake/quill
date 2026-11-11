@@ -6,7 +6,6 @@
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::*;
 use quill::ids::ChatId;
-use quill::ids::FileId;
 use quill::ids::MessageId;
 use std::collections::HashMap;
 use std::time::Instant;
@@ -50,40 +49,33 @@ pub(crate) struct PlaybackUi {
     pub(super) playing_audio: Option<MessageId>,
     /// What a press asked to play once its file is downloaded (`play_intent`).
     pub(super) intent: Option<super::play_intent::PlayIntent>,
-    /// The right-click menu of a Playlist page track.
-    pub(super) playlist_menu: Option<super::playlist_manage::PlaylistMenu>,
-    /// A track of your own playlist waiting for the "remove" confirmation.
-    pub(super) playlist_remove: Option<FileId>,
+    /// The right-click menu of a Playlist page track, or the "remove"
+    /// confirmation of one of your own tracks.
+    pub(super) playlist: super::playlist_manage::PlaylistFlow,
     /// Length of the loaded track (TDLib's rounded duration). Plain data:
     /// whether a track is active comes from `playing_voice`/`playing_audio`
     /// (see `track_duration`) and whether it plays, and where, from `audio`.
     pub(super) track_length: Option<f64>,
     /// Interactive seek slider bound to the active row (Phase 4.6).
     pub(super) seek_slider: Option<Entity<SliderState>>,
-    /// True while the user is dragging the seek slider (Change without Release yet).
-    pub(super) seek_scrubbing: bool,
-    /// Drag preview position in seconds, shown in the time label while scrubbing.
+    /// Drag preview position in seconds, shown in the time label while the
+    /// user is dragging the seek slider (a Change without its Release yet):
+    /// `Some` is the scrubbing.
     pub(super) seek_preview_secs: Option<f64>,
     /// Where the pointer rests over a seek control of the active track.
     pub(super) seek_hover: Option<SeekHover>,
-    /// Guard for the playback progress tick task.
-    pub(super) tick: bool,
-    /// What the seek bars, the player bar and the Touch Bar showed of the
-    /// track at the last tick: the tick redraws them only when it changed.
-    pub(super) tick_shown: Option<TrackShown>,
+    /// The playback progress tick task, with what the seek bars, the player
+    /// bar and the Touch Bar showed of the track at its last tick.
+    pub(super) tick: PlaybackTick,
     /// Last known position per chat message, so rows keep their seek bar fill (and
     /// resume from it) after pause/stop.
     pub(super) positions: HashMap<ChatMessage, f64>,
     /// History row whose `image/gif` file is looping (`inline_playback`),
-    /// with the window and chat it plays in.
-    pub(super) playing_animation: Option<PlayingGif>,
+    /// with the window and chat it plays in, and its pictures once decoded.
+    pub(super) animation: GifPlayback,
     /// GIFs that autoplayed once, by chat: leaving a chat resets only
     /// its own, so another window's GIF does not start over.
     pub(super) autoplayed_gifs: std::collections::HashSet<ChatMessage>,
-    /// The playing GIF's held pictures (`gif_clip`), once decoded. Shared
-    /// with the history row (and its animation layer) that draws it.
-    pub(super) gif: Option<std::sync::Arc<super::gif_clip::GifClip>>,
-    pub(super) gif_started_at: Option<Instant>,
     /// The GIF decodes running, by chat message (one per GIF at a time).
     pub(super) gif_decodes: HashMap<ChatMessage, GifDecode>,
     /// A linked `?t=` media timestamp waiting for its message to load
@@ -101,14 +93,89 @@ pub(crate) struct PlayingGif {
     pub(super) message: ChatMessage,
 }
 
+/// The looping GIF of the history, one value. It leaves for `Idle` on
+/// `stop_animation_playback` (a stop, another playback, a closed window or
+/// chat), which drops the clip with it.
+#[derive(Clone, Default)]
+pub(crate) enum GifPlayback {
+    #[default]
+    Idle,
+    /// Chosen; the first picture is still being decoded.
+    Waiting(PlayingGif),
+    /// Playing: the held pictures (`gif_clip`), shared with the history row
+    /// (and its animation layer) that draws them.
+    Playing {
+        playing: PlayingGif,
+        clip: std::sync::Arc<super::gif_clip::GifClip>,
+        started: Instant,
+    },
+}
+
+impl GifPlayback {
+    pub(super) fn playing(&self) -> Option<PlayingGif> {
+        match self {
+            Self::Idle => None,
+            Self::Waiting(playing) | Self::Playing { playing, .. } => Some(*playing),
+        }
+    }
+
+    pub(super) fn clip(&self) -> Option<&std::sync::Arc<super::gif_clip::GifClip>> {
+        match self {
+            Self::Playing { clip, .. } => Some(clip),
+            _ => None,
+        }
+    }
+
+    /// The first picture is in: the chosen GIF plays from `started`.
+    pub(super) fn begin_clip(
+        &mut self,
+        clip: std::sync::Arc<super::gif_clip::GifClip>,
+        started: Instant,
+    ) {
+        if let Self::Waiting(playing) = *self {
+            *self = Self::Playing {
+                playing,
+                clip,
+                started,
+            };
+        }
+    }
+}
+
+/// The progress tick: not running, or the task that is and what it showed
+/// at its last tick (it redraws only when that changed).
+pub(super) enum PlaybackTick {
+    Off,
+    Running {
+        _task: Task<()>,
+        shown: Option<TrackShown>,
+    },
+}
+
+impl PlaybackUi {
+    /// The user is dragging the seek slider (`seek_preview_secs`).
+    pub(super) fn seek_scrubbing(&self) -> bool {
+        self.seek_preview_secs.is_some()
+    }
+
+    /// Record what the tick shows now; whether it differs from the last.
+    pub(super) fn note_tick_shown(&mut self, now: TrackShown) -> bool {
+        match &mut self.tick {
+            PlaybackTick::Running { shown, .. } => shown.replace(now) != Some(now),
+            PlaybackTick::Off => true,
+        }
+    }
+}
+
 impl PlaybackUi {
     /// The playing GIF, for its history row.
     pub(super) fn gif_play(&self) -> Option<super::gif_clip::GifPlay> {
-        let clip = self.gif.clone()?;
-        Some(super::gif_clip::GifPlay::new(
-            clip,
-            self.gif_started_at.unwrap_or_else(Instant::now),
-        ))
+        match &self.animation {
+            GifPlayback::Playing { clip, started, .. } => {
+                Some(super::gif_clip::GifPlay::new(clip.clone(), *started))
+            }
+            _ => None,
+        }
     }
 
     /// Length of the active track; `None` when no row is active.
@@ -123,20 +190,15 @@ impl PlaybackUi {
             playing_voice: None,
             playing_audio: None,
             intent: None,
-            playlist_menu: None,
-            playlist_remove: None,
+            playlist: Default::default(),
             track_length: None,
             seek_slider: None,
-            seek_scrubbing: false,
             seek_preview_secs: None,
             seek_hover: None,
-            tick: false,
-            tick_shown: None,
+            tick: PlaybackTick::Off,
             positions: HashMap::new(),
-            playing_animation: None,
+            animation: GifPlayback::Idle,
             autoplayed_gifs: Default::default(),
-            gif: None,
-            gif_started_at: None,
             gif_decodes: HashMap::new(),
             pending_media_seek: None,
         }

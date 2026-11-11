@@ -63,11 +63,18 @@ pub(super) struct MenuFocus {
     pub(super) focus: FocusHandle,
     /// Focus handles of the open context menu's items.
     pub(super) items: ContextMenuItems,
-    pub(super) was_open: bool,
-    /// What had the focus when the menu opened.
-    pub(super) previous: Option<FocusHandle>,
+    /// Whether the menu was open at the last frame, and what had the focus
+    /// when it opened.
+    stage: MenuFocusStage,
     /// Focus return for hand-drawn layers (`esc_stack::track_layer_focus`).
     pub(super) layers: super::esc_stack::LayerFocus,
+}
+
+/// The focus hand-off of one menu: closed, or open with the focus to give
+/// back when it closes.
+enum MenuFocusStage {
+    Closed,
+    Open { previous: Option<FocusHandle> },
 }
 
 impl MenuFocus {
@@ -75,8 +82,7 @@ impl MenuFocus {
         Self {
             focus: cx.focus_handle(),
             items: ContextMenuItems::default(),
-            was_open: false,
-            previous: None,
+            stage: MenuFocusStage::Closed,
             layers: Default::default(),
         }
     }
@@ -337,19 +343,23 @@ impl QuillApp {
         self.frame.menu.items.begin();
         let menu_open = self.context_menu_open();
         let menu = &mut self.frame.menu;
-        if menu_open && !menu.was_open {
-            menu.previous = window.focused(cx);
-            window.focus(&menu.focus, cx);
-        } else if !menu_open && menu.was_open {
-            // A menu action may already have focused an editor or a dialog.
-            if menu.focus.contains_focused(window, cx)
-                && let Some(previous) = menu.previous.as_ref()
-            {
-                window.focus(previous, cx);
+        match (&menu.stage, menu_open) {
+            (MenuFocusStage::Closed, true) => {
+                let previous = window.focused(cx);
+                window.focus(&menu.focus, cx);
+                menu.stage = MenuFocusStage::Open { previous };
             }
-            menu.previous = None;
+            (MenuFocusStage::Open { previous }, false) => {
+                // A menu action may already have focused an editor or a dialog.
+                if menu.focus.contains_focused(window, cx)
+                    && let Some(previous) = previous.as_ref()
+                {
+                    window.focus(previous, cx);
+                }
+                menu.stage = MenuFocusStage::Closed;
+            }
+            _ => {}
         }
-        menu.was_open = menu_open;
         self.track_layer_focus(window, cx);
     }
 
@@ -359,7 +369,7 @@ impl QuillApp {
     /// own; the others only the main window draws, so a chat window's keys
     /// and Escape never reach them.
     pub(super) fn context_menu_open(&self) -> bool {
-        self.message_ui.menu.is_some() || (!self.windows.in_window() && self.main_menu_open())
+        self.message_ui.menu.is_open() || (!self.windows.in_window() && self.main_menu_open())
     }
 
     /// The menus only the main window draws: the chat list's row, archive
@@ -369,13 +379,13 @@ impl QuillApp {
             || self.chat_list.archive_menu.is_some()
             || self.admin.community.flow.row_menu.is_some()
             || self.chat_list.global.story_menu.is_some()
-            || self.playback.playlist_menu.is_some()
+            || self.playback.playlist.menu().is_some()
             || self.folders.tab_menu.is_some()
     }
 
     /// Close the message menu and forget the reaction options it asked for.
     pub(super) fn close_message_menu(&mut self) {
-        self.message_ui.menu = None;
+        self.message_ui.menu.close();
         let session = match self.live.as_mut() {
             Some(live) => Some(&mut live.driver.session),
             None => self.demo_session.as_deref_mut(),
@@ -393,7 +403,7 @@ impl QuillApp {
         }
         self.close_message_menu();
         if !self.windows.in_window() {
-            self.playback.playlist_menu = None;
+            self.playback.playlist.close_menu();
             self.chat_list.menu = None;
             self.chat_list.archive_menu = None;
             self.admin.community.flow.row_menu = None;

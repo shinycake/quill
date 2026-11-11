@@ -463,7 +463,7 @@ impl QuillApp {
         // slot follows the pref again.
         self.composer_sends
             .update(&origin.slot, |send| send.group_media = None);
-        self.chat_ui.schedule_popup_open = false;
+        self.close_composer_schedule_popup();
         self.chat_ui.set_reply(None);
         self.clear_suggest_bar_after_send(chat_id);
         self.composer_sends.set_draft_clear(

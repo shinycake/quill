@@ -1,6 +1,7 @@
 //! Methods moved out of `composer.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::composer_sends::SendOnce;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr};
 
@@ -15,11 +16,10 @@ pub(in crate::ui) struct SendOptionsState {
 
 impl QuillApp {
     /// M1: the composer's `messageSendOptions` for the next send.
-    pub(in crate::ui) fn composer_send_options(&self) -> SendOptions {
+    pub(in crate::ui) fn composer_send_options(&self, once: SendOnce) -> SendOptions {
         let send = self.pending_send();
         SendOptions {
-            disable_notification: self.composer_effective_silent()
-                || self.composer_ui.send_silent_once,
+            disable_notification: self.composer_effective_silent() || once.silent,
             scheduling: send.scheduling,
             schedule_repeat_period: match send.scheduling {
                 ComposerScheduling::SendAtDate(_) => send.schedule_repeat,
@@ -31,7 +31,7 @@ impl QuillApp {
             link_preview_link: send.preview.link_index,
             // The driver overrides this for secret chats at send time.
             is_secret: false,
-            effect_id: self.composer_ui.send_effect_once,
+            effect_id: once.effect,
             ..SendOptions::default()
         }
     }
@@ -104,7 +104,7 @@ impl QuillApp {
 
     /// M1: load the chat's scheduled sends and open the dialog.
     pub(in crate::ui) fn open_scheduled_dialog(&mut self, cx: &mut Context<Self>) {
-        self.chat_ui.schedule_popup_open = false;
+        self.close_composer_schedule_popup();
         if let Some(live) = self.live.as_mut()
             && let Some(chat_id) = live.driver.session.open_chat
         {
@@ -389,8 +389,8 @@ impl QuillApp {
             option_chip("chip-schedule", label, cx)
                 .cursor_pointer()
                 .on_click(cx.listener(|this, _, window, cx| {
-                    if this.chat_ui.schedule_popup_open {
-                        this.chat_ui.schedule_popup_open = false;
+                    if this.chat_ui.schedule_picker.is_some() {
+                        this.close_composer_schedule_popup();
                         cx.notify();
                     } else {
                         this.open_schedule_picker(ScheduleTarget::Composer, window, cx);

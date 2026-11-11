@@ -230,25 +230,22 @@ impl QuillApp {
     }
 
     pub(super) fn reload_account_keybindings(&mut self, cx: &mut Context<Self>) {
-        super::keybindings::invalidate_account_keybindings(
-            &mut self.preferences.keybindings_applied,
-            &mut self.preferences.keybinding_capture,
-            &mut self.preferences.keybinding_error,
-        );
+        self.preferences.keybinding.invalidate_account();
         self.apply_pending_keybindings(cx);
     }
 
     fn apply_pending_keybindings(&mut self, cx: &mut Context<Self>) {
-        if self.preferences.keybindings_applied {
-            return;
-        }
         let Some(live) = self.live.as_ref() else {
             return;
         };
+        let account = live.driver.session.account.clone();
+        if self.preferences.keybinding.keymap.carries(&account) {
+            return;
+        }
         let customs = live.driver.load_custom_keybindings();
         // Empty prefs rebuild defaults too, replacing the previous account's chords.
         super::keybindings::apply_custom_bindings(cx, &customs);
-        self.preferences.keybindings_applied = true;
+        self.preferences.keybinding.keymap = super::keybindings::Keymap::Applied(account);
     }
 
     /// Redraw for what the TDLib poll applied, as urgently as it needs
@@ -277,7 +274,7 @@ impl QuillApp {
             // progress of the download it waits for; the message menu draws
             // there too and shows the reply count.
             PolledAction::Conversation
-                if self.viewer.state.is_open() || self.message_ui.menu.is_some() =>
+                if self.viewer.state.is_open() || self.message_ui.menu.is_open() =>
             {
                 cx.notify()
             }
@@ -551,9 +548,7 @@ impl QuillApp {
     /// restart fails the status line says so and the poll loop (which
     /// breaks on `live.is_none()`) stops.
     pub(super) fn restart_live_connection(&mut self, cx: &mut Context<Self>) {
-        self.payments.marketplace_open = false;
-        self.payments.marketplace_error = None;
-        self.payments.marketplace_private = true;
+        self.payments.marketplace.forget();
         self.close_screen_client(cx);
         // D2 fix-up: the warning promises "Downloaded media will be
         // erased from this device" — TDLib destroyed its own data, but

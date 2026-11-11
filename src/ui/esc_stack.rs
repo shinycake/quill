@@ -87,7 +87,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // Slice CL: the peek preview is the most transient layer.
     layer!(
         "chat-preview",
-        |app| app.chat_list.preview.is_some() || app.chat_list.preview_press.is_some(),
+        |app| app.chat_list.peek.open().is_some(),
         |app, _, cx| app.close_chat_preview(cx)
     ),
     // Drawn in the call windows, not the main window: Esc there closes
@@ -126,7 +126,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         "story-reply-recording",
         |app| app.story_reply_recording_active(),
         |app, _, cx| {
-            if app.recording.locked {
+            if app.recording.locked() {
                 app.set_note(StatusNote::silent(tr(
                     keys::Q_MISC_RECORDING_IS_LOCKED_UNLOCK_IT,
                 )));
@@ -141,7 +141,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app| app.story_reply_panel_active(),
         |app, _, cx| {
             if let Some(open) = app.stories.viewer_ui_mut() {
-                open.reply_panel = false;
+                open.set_reply_panel(false);
             }
             app.close_media_panel(cx);
         }
@@ -183,14 +183,14 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     // confirm row (locked recordings ignore Esc beyond a hint).
     layer!(
         "record-discard-confirm",
-        |app| app.recording.discard_confirm && app.recording_here(),
+        |app| app.recording.discard_confirming() && app.recording_here(),
         |app, _, cx| {
-            app.recording.discard_confirm = false;
+            app.recording.set_discard_confirming(false);
             cx.notify();
         }
     ),
     layer!("recording", |app| app.recording_here(), |app, _, cx| {
-        if app.recording.locked {
+        if app.recording.locked() {
             app.set_note(StatusNote::silent(tr(
                 keys::Q_MISC_RECORDING_IS_LOCKED_UNLOCK_IT,
             )));
@@ -239,7 +239,7 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
         |app| app.session().is_some_and(|session| session
             .messages
             .sponsored_report
-            .picking()
+            .flight()
             .is_some()),
         |app, _, cx| app.dismiss_sponsored_report_ui(cx)
     ),
@@ -366,13 +366,22 @@ const FOCUS_RETURN_LAYERS: &[&str] = &[
 
 /// Bookkeeping for [`QuillApp::track_layer_focus`]. Weak handles only: a
 /// strong one would keep a closed dialog's focus handle alive.
-#[derive(Default)]
-pub(super) struct LayerFocus {
-    /// Focus as of the last frame with no tracked layer open.
-    base: Option<WeakFocusHandle>,
-    /// Focus as of the last frame with a tracked layer open.
-    open_focus: Option<WeakFocusHandle>,
-    was_open: bool,
+pub(super) enum LayerFocus {
+    /// No tracked layer was open at the last frame; `base` is the focus
+    /// then.
+    Closed { base: Option<WeakFocusHandle> },
+    /// A tracked layer was open at the last frame; `base` is the focus
+    /// before the first of them, `focus` the focus now.
+    Open {
+        base: Option<WeakFocusHandle>,
+        focus: Option<WeakFocusHandle>,
+    },
+}
+
+impl Default for LayerFocus {
+    fn default() -> Self {
+        LayerFocus::Closed { base: None }
+    }
 }
 
 impl QuillApp {
@@ -395,21 +404,30 @@ impl QuillApp {
     pub(super) fn track_layer_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let open = self.focus_return_layer_open();
         let focused = window.focused(cx);
-        let state = &mut self.frame.menu.layers;
-        if open {
-            state.open_focus = focused.map(|handle| handle.downgrade());
-        } else if state.was_open {
-            let open_focus = state.open_focus.take().and_then(|weak| weak.upgrade());
-            let untouched = focused.is_none() || focused == open_focus;
-            let base = state.base.take().and_then(|weak| weak.upgrade());
-            if untouched && let Some(base) = base {
-                window.focus(&base, cx);
+        let weak = |handle: Option<FocusHandle>| handle.map(|handle| handle.downgrade());
+        let before = std::mem::take(&mut self.frame.menu.layers);
+        self.frame.menu.layers = match (open, before) {
+            (true, LayerFocus::Closed { base } | LayerFocus::Open { base, .. }) => {
+                LayerFocus::Open {
+                    base,
+                    focus: weak(focused),
+                }
             }
-            state.base = window.focused(cx).map(|handle| handle.downgrade());
-        } else {
-            state.base = focused.map(|handle| handle.downgrade());
-        }
-        self.frame.menu.layers.was_open = open;
+            (false, LayerFocus::Open { base, focus }) => {
+                let open_focus = focus.and_then(|weak| weak.upgrade());
+                let untouched = focused.is_none() || focused == open_focus;
+                let base = base.and_then(|weak| weak.upgrade());
+                if untouched && let Some(base) = base {
+                    window.focus(&base, cx);
+                }
+                LayerFocus::Closed {
+                    base: weak(window.focused(cx)),
+                }
+            }
+            (false, LayerFocus::Closed { .. }) => LayerFocus::Closed {
+                base: weak(focused),
+            },
+        };
     }
 }
 
@@ -733,8 +751,12 @@ mod dispatch_tests {
             (
                 "marketplace",
                 // box-host: a test sets the flag directly
-                |a| a.payments.marketplace_open = true,
-                |a| a.payments.marketplace_open,
+                |a| {
+                    a.payments
+                        .marketplace
+                        .open_for(quill::ids::ChatId(1), false)
+                },
+                |a| a.payments.marketplace.is_open(),
             ),
             (
                 "passcode settings",

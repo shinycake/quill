@@ -221,7 +221,7 @@ fn enlarge_after_a_swap_hands_back_the_new_player(cx: &mut TestAppContext) {
     pip.run_until_parked();
     settle(main);
     let window = app
-        .read_with(main, |app, _| app.group_call.window)
+        .read_with(main, |app, _| app.group_call.window.handle())
         .expect("the stream window is back");
     let mut stream = VisualTestContext::from_window(window, cx);
     settle(&mut stream);

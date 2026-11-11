@@ -221,39 +221,25 @@ impl<S: JsonSender> ConnectDriver<S> {
             .requests
             .has_purpose(RequestPurpose::GetInstalledStickerSets)
         {
-            let extra = self
-                .session
-                .request(RequestPurpose::GetInstalledStickerSets, None);
-            if let Err(err) =
-                self.sender
-                    .send_json(&crate::telegram::requests::get_installed_sticker_sets(
-                        extra,
-                    ))
-            {
+            self.sticker_request(
+                RequestPurpose::GetInstalledStickerSets,
+                crate::telegram::requests::get_installed_sticker_sets,
+            )
+            .inspect_err(|_| {
                 // Try again on the next poll.
                 self.session.stickers.creator_refetch_sets = true;
-                self.session.requests.take(extra);
-                return Err(err);
-            }
+            })?;
         }
         if !self
             .session
             .requests
             .has_purpose(RequestPurpose::GetInstalledEmojiSets)
         {
-            let extra = self
-                .session
-                .request(RequestPurpose::GetInstalledEmojiSets, None);
-            if let Err(err) =
-                self.sender
-                    .send_json(&crate::telegram::requests_emoji::get_installed_emoji_sets(
-                        extra,
-                    ))
-            {
-                self.session.stickers.creator_refetch_sets = true;
-                self.session.requests.take(extra);
-                return Err(err);
-            }
+            self.emoji_set_request(
+                RequestPurpose::GetInstalledEmojiSets,
+                crate::telegram::requests_emoji::get_installed_emoji_sets,
+            )
+            .inspect_err(|_| self.session.stickers.creator_refetch_sets = true)?;
         }
         Ok(())
     }

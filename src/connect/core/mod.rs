@@ -1,7 +1,6 @@
 //! Connect driver core: construction, the update pump, and lifecycle.
 use super::composer::ai_rich_draft_note;
 use super::*;
-use crate::composer::DraftSaveClock;
 use crate::credentials::TelegramCredentials;
 use crate::ids::{ChatId, ChatMessage, MessageId, RequestId};
 use crate::state::{
@@ -77,7 +76,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let story_page_ok = answered
             .filter(|_| ok)
             .and_then(crate::state::story_list_of);
-        let main_was_exhausted = self.session.chat_list.chats_exhausted;
+        let main_was_exhausted = self.session.chat_list.main_paging.is_exhausted();
         let had_topic_icons = !self.session.threads.forum_topic_icons.is_empty();
         // Parity slice: a folder `loadChats` page completing with ok pages
         // on (until a 404 marks the folder exhausted in the reducer).
@@ -553,8 +552,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         // M1: stash the `getMessageLink` answer for the UI clipboard drain.
         if let Some((link, is_public)) = message_link_answer {
-            self.session.messages.message_link_result = Some(link);
-            self.session.messages.message_link_public = is_public;
+            self.session.messages.message_link =
+                Some(crate::state::MessageLinkAnswer { link, is_public });
         }
         // Slice msg-richtext-ai-tools: stash AI answers for the composer
         // drain. A late answer for a chat the user has since left is
@@ -667,11 +666,12 @@ impl<S: JsonSender> ConnectDriver<S> {
                 RequestPurpose::AddChatWelcomeMessage
                 | RequestPurpose::Groups(GroupsPurpose::EditChatWelcomeMessage { .. })
                 | RequestPurpose::Groups(GroupsPurpose::DeleteChatWelcomeMessage { .. })
-                    if !self
+                    if self
                         .session
                         .groups
                         .welcome_messages
-                        .contains_key(&chat_id.0) =>
+                        .get(&chat_id.0)
+                        .is_none_or(|pack| pack.can_ask()) =>
                 {
                     let _ = self.load_chat_welcome_messages(chat_id);
                 }
@@ -725,7 +725,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if became_ready || load_chats_ok {
             self.maybe_load_main_chats()?;
         }
-        let main_ended = !main_was_exhausted && self.session.chat_list.chats_exhausted;
+        let main_ended = !main_was_exhausted && self.session.chat_list.main_paging.is_exhausted();
         if load_archive_ok || load_chats_failed || main_ended {
             self.maybe_load_archive_chats()?;
         }
@@ -794,7 +794,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         // Corner "@" / heart buttons and jump to date: run in the window
         // that asked, for its chat. A failed jump (closed chat) drops it.
         let unread = self.session.messages.unread_jump.take();
-        for jump in [unread, self.session.search.date_jump.take()]
+        for jump in [unread, self.session.search.take_date_jump()]
             .into_iter()
             .flatten()
         {
@@ -832,11 +832,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.cancel_gif_search_requests();
             self.session.stickers.gifs.search_results.clear();
             self.session.stickers.gifs.search_next_offset.clear();
-            self.session.stickers.gifs.search.begin();
+            self.session.stickers.gifs.search_asked();
         }
         if self.chats_path_active()
             && self.session.stickers.gifs.open
-            && self.session.stickers.gifs.search.loading()
+            && self.session.stickers.gifs.search_loading()
         {
             self.maybe_search_gifs(false)?;
         }
@@ -955,7 +955,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     }
 
     fn maybe_send_parameters(&mut self) -> Result<(), ConnectSendError> {
-        if self.parameters_sent {
+        if self.parameters_sent() {
             return Ok(());
         }
         if !matches!(self.session.auth, AuthorizationState::WaitTdlibParameters) {
@@ -976,7 +976,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
-        self.parameters_sent = true;
         self.send_language_options()
     }
 }

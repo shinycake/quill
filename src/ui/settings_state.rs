@@ -17,8 +17,9 @@ pub(crate) struct SettingsUi {
     pub(super) page: Option<quill::settings_catalog::Page>,
     /// A page reached from a row of `page`, with a back arrow.
     pub(super) sub: Option<super::settings_window::SubPage>,
-    /// The Log out confirmation is on screen.
-    pub(super) log_out_confirm: bool,
+    /// The box the settings window has open, if any: one value, since
+    /// kit dialogs never stack.
+    pub(super) boxes: SettingsBox,
     /// The search field and its results.
     pub(super) search: super::settings_window::SettingsSearch,
     /// The setting search just landed on.
@@ -29,7 +30,6 @@ pub(crate) struct SettingsUi {
     pub(super) sub_scroll: ScrollHandle,
     /// Holds focus inside the settings window, so Esc steps back.
     pub(super) focus: FocusHandle,
-    pub(super) sticker_settings_open: bool,
     /// The stickers and masks manager boxes: removals, dragged order and
     /// scroll. The session has one manager, so its edits are the screen's,
     /// not the window's that opened it (the masks box opens from a chat
@@ -53,19 +53,71 @@ pub(crate) struct SettingsUi {
     pub(super) ptt_delay_slider: Option<Entity<gpui_kit::component::slider::SliderState>>,
 }
 
+/// What the operating system's accent color is known to be.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(crate) enum SystemAccent {
+    /// Not read yet.
+    #[default]
+    Unread,
+    /// Read: the color (0xRRGGBB) when the system reports one.
+    Read(Option<u32>),
+}
+
+impl SystemAccent {
+    /// The color, when read and reported.
+    pub(super) fn color(self) -> Option<u32> {
+        match self {
+            Self::Read(color) => color,
+            Self::Unread => None,
+        }
+    }
+}
+
+/// The box the settings window shows over itself.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(crate) enum SettingsBox {
+    #[default]
+    None,
+    /// Account > Log out confirmation.
+    LogOut,
+    /// Chats > "Manage sticker sets".
+    Stickers,
+}
+
+impl SettingsBox {
+    /// Open `which` (replacing any other box), or close it when it is the
+    /// one open: closing a box never closes another.
+    pub(crate) fn set(&mut self, which: SettingsBox, open: bool) {
+        if open {
+            *self = which;
+        } else if *self == which {
+            *self = SettingsBox::None;
+        }
+    }
+}
+
 impl SettingsUi {
+    pub(super) fn box_open(&self, which: SettingsBox) -> bool {
+        self.boxes == which
+    }
+
+    /// Open `which` (replacing any other box), or close it when it is the
+    /// one open: closing a box never closes another.
+    pub(super) fn set_box(&mut self, which: SettingsBox, open: bool) {
+        self.boxes.set(which, open);
+    }
+
     pub(super) fn new(cx: &mut Context<QuillApp>) -> Self {
         Self {
             open: false,
             page: None,
             sub: None,
-            log_out_confirm: false,
+            boxes: SettingsBox::None,
             search: Default::default(),
             arrival: None,
             page_scroll: ScrollHandle::new(),
             sub_scroll: ScrollHandle::new(),
             focus: cx.focus_handle(),
-            sticker_settings_open: false,
             sticker_manager: Default::default(),
             storage_scroll: super::dialogs::data_storage::StorageScroll::new(),
             data_storage_editor: Default::default(),
@@ -89,14 +141,14 @@ impl super::on_screen::Farewell for SettingsUi {
         _: &mut gpui_kit::Window,
         cx: &mut gpui_kit::Context<QuillApp>,
     ) {
-        if app.settings.sticker_settings_open {
+        if app.settings.box_open(SettingsBox::Stickers) {
             app.close_stickers_manager(cx);
         }
         // These boxes keep their open flags in the session, which goes to
         // the background with the account.
         let (masks, emoji, archive) = app.session().map_or((false, false, false), |session| {
             (
-                session.stickers.masks.open,
+                session.stickers.masks.dialog_open(),
                 session.stickers.emoji.open,
                 session.chat_list.archive_settings_open,
             )
@@ -121,19 +173,11 @@ impl super::on_screen::Farewell for SettingsUi {
 /// prefs and its box, app updates, What's New, the advanced page and the
 /// emoji set. A `QuillApp` field (`preferences`).
 pub(crate) struct PreferencesUi {
-    /// Parity slice (platform-custom-keybindings): the rebindable action id
-    /// currently capturing a keystroke, if any.
-    pub(super) keybinding_capture: Option<String>,
-    /// Parity slice (platform-custom-keybindings): a capture that was
-    /// refused (fixed chrome or another rebindable action). The shortcuts
-    /// chip keeps showing the chord that is actually bound.
-    pub(super) keybinding_error: Option<(String, String)>,
+    /// The rebinding capture and the keymap's stage (`ui/keybindings`).
+    pub(super) keybinding: super::keybindings::KeybindingUi,
     /// Parity slice (platform-custom-keybindings): focus handle for the
     /// keystroke-capture row.
     pub(super) keybinding_focus: FocusHandle,
-    /// Parity slice (platform-custom-keybindings): saved shortcut overrides
-    /// applied to the keymap once the live driver is ready.
-    pub(super) keybindings_applied: bool,
     /// Settings → Appearance slice: last `(theme mode, accent)` pushed
     /// into the global component theme, so `apply_appearance` only
     /// notifies (re-renders) when something actually changed.
@@ -142,11 +186,9 @@ pub(crate) struct PreferencesUi {
     pub(super) appearance_applied: Option<(ThemeMode, u64, bool, u16, String)>,
     /// App themes: custom theme list, the applied palette, the editor.
     pub(super) app_theme: super::app_theme::AppThemeUi,
-    /// The operating system's accent color (0xRRGGBB), when it reports one
-    /// and has been read (`refresh_system_accent`).
-    pub(super) system_accent: Option<u32>,
-    /// `system_accent` was read at least once.
-    pub(super) system_accent_probed: bool,
+    /// The operating system's accent color, once read
+    /// (`refresh_system_accent`).
+    pub(super) system_accent: SystemAccent,
     /// The one task waiting for a Linux accent read to land; a second
     /// refresh while it runs does not start another.
     pub(super) system_accent_poll: Option<Task<()>>,
@@ -156,9 +198,6 @@ pub(crate) struct PreferencesUi {
     /// `ColorSelect`), tdesktop's "custom" accent circle. Holds the last
     /// custom color; choosing one sets `appearance.accent_rgb`.
     pub(super) accent_picker: Entity<gpui_kit::component::color_picker::ColorPickerState>,
-    /// The step sliders of the network editor, the local storage limits and
-    /// the auto-delete picker (`index_sliders.rs`).
-    pub(super) index_sliders: super::index_sliders::IndexSliders,
     /// Translation prefs (`translate_prefs.json`); the dialog and the
     /// bar's toast are the screen's (`OnScreen::translate`).
     pub(super) translate: super::translate_ui::TranslateUi,
@@ -183,18 +222,14 @@ impl PreferencesUi {
         demo: Option<ScreenshotDemo>,
     ) -> Self {
         Self {
-            keybinding_capture: None,
-            keybinding_error: None,
+            keybinding: Default::default(),
             keybinding_focus: cx.focus_handle(),
-            keybindings_applied: false,
             appearance_applied: None,
             app_theme: Default::default(),
-            system_accent: None,
-            system_accent_probed: false,
+            system_accent: SystemAccent::Unread,
             system_accent_poll: None,
             font_picker,
             accent_picker,
-            index_sliders: Default::default(),
             translate: super::translate_ui::TranslateUi::load(),
             update_state: if demo.is_none() {
                 quill::update_install::startup_state()
@@ -207,5 +242,20 @@ impl PreferencesUi {
             emoji_style: Default::default(),
             send_to: Default::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod box_tests {
+    use super::SettingsBox;
+
+    #[test]
+    fn closing_a_box_never_closes_the_other() {
+        let mut boxes = SettingsBox::None;
+        boxes.set(SettingsBox::Stickers, true);
+        boxes.set(SettingsBox::LogOut, false);
+        assert_eq!(boxes, SettingsBox::Stickers);
+        boxes.set(SettingsBox::LogOut, true);
+        assert_eq!(boxes, SettingsBox::LogOut, "one box at a time");
     }
 }

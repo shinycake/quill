@@ -8,7 +8,6 @@ use gpui_kit::component::input::TextareaState;
 use gpui_kit::*;
 use quill::composer::should_send_on_enter;
 use quill::lang::{keys, tr};
-use quill::telegram::envelope::AuthorizationState;
 
 /// The sign-in flow's UI for the account on screen: its inputs, the
 /// registration and terms steps, recovery and the QR code. A field of
@@ -146,15 +145,18 @@ impl super::on_screen::Farewell for AuthUi {}
 /// and whether a screenshot demo shows the sign-in inputs. The process's,
 /// next to `demo_session`: a `QuillApp` field (`auth_demo`).
 pub(crate) struct AuthDemo {
-    pub(super) demo_state: AuthorizationState,
+    pub(super) stage: super::connect_ui::ConnectStage,
     /// Screenshot / synthetic demo: show the matching auth field without a live client.
     pub(super) demo_inputs: bool,
 }
 
 impl AuthDemo {
-    pub(super) fn new(demo_state: AuthorizationState, demo: Option<ScreenshotDemo>) -> Self {
+    pub(super) fn new(
+        stage: super::connect_ui::ConnectStage,
+        demo: Option<ScreenshotDemo>,
+    ) -> Self {
         Self {
-            demo_state,
+            stage,
             demo_inputs: demo.is_some_and(|d| d.auth_inputs()),
         }
     }

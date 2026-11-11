@@ -55,12 +55,29 @@ impl SpellUi {
 /// underlines.
 #[derive(Default)]
 pub(crate) struct ComposerSpelling {
-    /// Misspellings underlined in the composer; byte ranges into
-    /// `checked_text`.
-    pub(super) misspellings: Vec<quill::spellcheck::Misspelling>,
-    /// The composer text `misspellings` refers to (shifted on every edit,
-    /// so underlines follow the text before the re-check lands).
-    pub(super) checked_text: String,
-    /// The debounced background re-check (dropping it cancels it).
-    pub(super) task: Option<Task<()>>,
+    pub(super) underlines: Underlines,
+    pub(super) check: Check,
+}
+
+/// The composer text last checked with the misspellings found in it: one
+/// value, since the ranges only mean something against that text.
+#[derive(Default)]
+pub(crate) struct Underlines {
+    /// Misspellings underlined in the composer; byte ranges into `text`.
+    pub(super) found: Vec<quill::spellcheck::Misspelling>,
+    /// The composer text `found` refers to (shifted on every edit, so
+    /// underlines follow the text before the re-check lands).
+    pub(super) text: String,
+}
+
+/// The debounced background re-check. Holding the task is the checking
+/// stage: dropping it cancels the check.
+#[derive(Default)]
+pub(crate) enum Check {
+    #[default]
+    Idle,
+    Checking {
+        /// Held so that dropping the stage cancels the check.
+        _task: Task<()>,
+    },
 }

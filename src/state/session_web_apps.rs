@@ -138,8 +138,7 @@ impl Session {
         pending: Option<&PendingRequest>,
     ) -> bool {
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetGrossingWebAppBots) {
-            self.bots.web_apps.grossing_bots = Some(user_ids.to_vec());
-            self.bots.web_apps.grossing_loading = false;
+            self.bots.web_apps.grossing.succeed(user_ids.to_vec());
             return true;
         }
         false
@@ -148,10 +147,12 @@ impl Session {
     pub(crate) fn apply_web_app_ok(&mut self, pending: Option<&PendingRequest>) {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::Bots(BotsPurpose::CanBotSendMessages { bot_user_id })) => {
-                self.bots.web_apps.write_access = Some((bot_user_id, WriteAccessResult::Allowed));
+                self.bots.web_apps.write_access = pending
+                    .map(|p| WriteAnswer::new(p.id, bot_user_id, WriteAccessResult::Allowed));
             }
             Some(RequestPurpose::Bots(BotsPurpose::AllowBotToSendMessages { bot_user_id })) => {
-                self.bots.web_apps.write_access = Some((bot_user_id, WriteAccessResult::Granted));
+                self.bots.web_apps.write_access = pending
+                    .map(|p| WriteAnswer::new(p.id, bot_user_id, WriteAccessResult::Granted));
             }
             Some(RequestPurpose::Bots(BotsPurpose::ToggleBotEmojiStatusAccess {
                 bot_user_id,
@@ -204,7 +205,8 @@ impl Session {
                 self.bots.web_apps.found = Some((bot_user_id, Err(message)));
             }
             RequestPurpose::Bots(BotsPurpose::CanBotSendMessages { bot_user_id }) => {
-                self.bots.web_apps.write_access = Some((
+                self.bots.web_apps.write_access = Some(WriteAnswer::new(
+                    p.id,
                     bot_user_id,
                     if err.code == 404 {
                         WriteAccessResult::NeedsConsent
@@ -214,7 +216,11 @@ impl Session {
                 ));
             }
             RequestPurpose::Bots(BotsPurpose::AllowBotToSendMessages { bot_user_id }) => {
-                self.bots.web_apps.write_access = Some((bot_user_id, WriteAccessResult::Denied));
+                self.bots.web_apps.write_access = Some(WriteAnswer::new(
+                    p.id,
+                    bot_user_id,
+                    WriteAccessResult::Denied,
+                ));
             }
             RequestPurpose::Bots(BotsPurpose::SharePhoneWithMiniApp { .. }) => {
                 self.bots.web_apps.phone_share = Some(PhoneShare::Refused(p.id));
@@ -245,11 +251,10 @@ impl Session {
                     });
             }
             RequestPurpose::GetGrossingWebAppBots => {
-                self.bots.web_apps.grossing_loading = false;
                 self.bots
                     .web_apps
-                    .grossing_bots
-                    .get_or_insert_with(Vec::new);
+                    .grossing
+                    .fail(format!("error {}", err.code));
             }
             RequestPurpose::SendWebAppCustomRequest => {
                 if let Some(req_id) = self.bots.web_apps.custom_requests.remove(&p.id.0) {

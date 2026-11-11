@@ -592,7 +592,7 @@ mod viewer {
     /// frame is drawn, and faded controls are not drawn at all.
     pub(super) fn wake_controls(app: &mut QuillApp) {
         app.viewer.last_activity = std::time::Instant::now();
-        app.viewer.controls_hidden = false;
+        app.viewer.visibility.show();
     }
 
     pub(super) fn settle(vcx: &mut VisualTestContext) {
@@ -634,7 +634,7 @@ mod viewer {
         settle(vcx);
         app.read_with(vcx, |app, _| {
             assert!(!app.viewer.state.is_open());
-            assert!(app.viewer.player.is_none());
+            assert!(app.viewer.clip.player().is_none());
         });
         assert!(script.borrow().dropped, "closing released the backend");
     }

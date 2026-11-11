@@ -592,7 +592,7 @@ fn a_text_send_closes_the_quote_picker(cx: &mut TestAppContext) {
     vcx.update(|window, cx| {
         app.update(cx, |app, cx| {
             app.set_composer_markup("thanks", window, cx);
-            app.submit_from_send_button(window, cx);
+            app.submit_from_send_button(Default::default(), window, cx);
         });
     });
     frames(vcx);

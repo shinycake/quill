@@ -128,7 +128,7 @@ impl QuillApp {
         // Paused, the light holds where the pause found it; fading out, where
         // the session ended.
         let sweep_at = match &phase {
-            Phase::Paused { .. } => facts.paused_ms,
+            Phase::Paused { .. } => facts.hold.paused_ms(),
             Phase::FadingOut { ended_ms, .. } => *ended_ms,
             Phase::Driving { .. } | Phase::Idle => now,
         };

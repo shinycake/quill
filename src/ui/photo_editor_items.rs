@@ -4,7 +4,7 @@
 #![deny(clippy::indexing_slicing)]
 use super::app::QuillApp;
 use super::photo_edit::Placed;
-use super::photo_editor::{EditorMode, HANDLE_GRAB, PhotoEditor, preview_of};
+use super::photo_editor::{EditorMode, Gesture, HANDLE_GRAB, PhotoEditor, preview_of};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::*;
@@ -83,7 +83,7 @@ impl PhotoEditor {
                 && ((hy - y) * scale_y).abs() <= HANDLE_GRAB
             {
                 let distance = ((x - item.center.0) * scale_x).hypot((y - item.center.1) * scale_y);
-                self.item_drag = Some(ItemDrag::Resize {
+                self.gesture = Gesture::Item(ItemDrag::Resize {
                     start_width: item.width,
                     start_distance: distance.max(1.0),
                 });
@@ -95,20 +95,23 @@ impl PhotoEditor {
             (left..left + w).contains(&x) && (top..top + h).contains(&y)
         });
         self.selected = hit;
-        self.item_drag = hit.and_then(|index| {
-            Some(ItemDrag::Move {
-                from: (x, y),
-                start: self.placed.get(index)?.0.center,
+        self.gesture = hit
+            .and_then(|index| {
+                Some(ItemDrag::Move {
+                    from: (x, y),
+                    start: self.placed.get(index)?.0.center,
+                })
             })
-        });
+            .map_or(Gesture::None, Gesture::Item);
     }
 
     pub(super) fn drag_item(&mut self, (x, y): (f32, f32)) {
         let (Some(index), Some(drag), Some(bounds)) =
-            (self.selected, self.item_drag, self.image_bounds.get())
+            (self.selected, self.gesture.item(), self.image_bounds.get())
         else {
             return;
         };
+        let base = self.is_base(index);
         let Some((item, _)) = self.placed.get_mut(index) else {
             return;
         };
@@ -125,7 +128,7 @@ impl PhotoEditor {
             } => {
                 let (scale_x, scale_y) = (bounds.size.width / px(1.), bounds.size.height / px(1.));
                 let distance = ((x - item.center.0) * scale_x).hypot((y - item.center.1) * scale_y);
-                let largest = if self.base_item && index == 0 {
+                let largest = if base {
                     super::photo_editor_set::BASE_MAX_WIDTH
                 } else {
                     2.0

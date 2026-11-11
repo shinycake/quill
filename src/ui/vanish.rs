@@ -361,16 +361,24 @@ impl VanishClock {
     }
 }
 
+/// Where a ghost is: waiting for the deletion to land, or crumbling.
+enum GhostStage {
+    /// Deletion requested at this instant, not landed yet.
+    Waiting { requested: Instant },
+    /// The message left the history at `started`: the animation's clock.
+    Crumbling {
+        started: Instant,
+        grains: Rc<Vec<Grain>>,
+    },
+}
+
 pub(super) struct Vanishing {
     message: HistoryMessage,
-    requested: Instant,
-    /// When the message left the history: the animation's clock.
-    started: Option<Instant>,
+    stage: GhostStage,
     /// The row's height and the bubble (window points) when deleted.
     row: Option<Bounds<Pixels>>,
     bubble: Option<Bounds<Pixels>>,
     palette: Palette,
-    grains: Rc<Vec<Grain>>,
 }
 
 /// How far a crumbling message has got, as far as the history rows care:
@@ -392,11 +400,15 @@ impl Vanishing {
         self.message.chat_id == chat_id && self.message.id == id
     }
 
+    fn is_waiting(&self) -> bool {
+        matches!(self.stage, GhostStage::Waiting { .. })
+    }
+
     fn phase(&self, now: Instant) -> Phase {
-        if self.started.is_none() {
+        if let GhostStage::Waiting { requested } = self.stage {
             // A clock behind the request counts as no time passed.
             let waited = now
-                .checked_duration_since(self.requested)
+                .checked_duration_since(requested)
                 .unwrap_or(Duration::ZERO);
             return if waited < VANISH_WAIT {
                 Phase::Waiting
@@ -418,7 +430,9 @@ impl Vanishing {
     /// vanish logic judges (`vanish_now`), so paint, the rows hash and the
     /// remeasure all agree.
     fn elapsed(&self, now: Instant) -> Option<f32> {
-        let started = self.started?;
+        let GhostStage::Crumbling { started, .. } = self.stage else {
+            return None;
+        };
         Some(
             now.checked_duration_since(started)
                 .unwrap_or(Duration::ZERO)
@@ -485,12 +499,10 @@ impl QuillApp {
             };
             vanishing.push(Vanishing {
                 message: message.clone(),
-                requested: now,
-                started: None,
+                stage: GhostStage::Waiting { requested: now },
                 row,
                 bubble,
                 palette,
-                grains: Rc::new(Vec::new()),
             });
         }
     }
@@ -519,19 +531,21 @@ impl QuillApp {
                 continue;
             }
             if emptied
-                && ghost.started.is_none()
+                && ghost.is_waiting()
                 && !self
                     .session()
                     .is_some_and(|s| s.message_deleted(ghost.message.chat_id, ghost.message.id))
             {
                 continue;
             }
-            if ghost.started.is_none() {
-                ghost.started = Some(now);
+            if ghost.is_waiting() {
                 let area = ghost.bubble.or(ghost.row);
-                ghost.grains = Rc::new(area.map_or_else(Vec::new, |area| {
-                    grains(ghost.message.id.0 as u64, area, &ghost.palette)
-                }));
+                ghost.stage = GhostStage::Crumbling {
+                    started: now,
+                    grains: Rc::new(area.map_or_else(Vec::new, |area| {
+                        grains(ghost.message.id.0 as u64, area, &ghost.palette)
+                    })),
+                };
             }
             // The row stays (cut away, then closing) until its gap is gone.
             if ghost.phase(now) == Phase::InRows {
@@ -555,7 +569,7 @@ impl QuillApp {
         vanishing.iter().any(|ghost| {
             ghost.message.chat_id == chat
                 && ghost.phase(now) != Phase::Done
-                && (ghost.started.is_some()
+                && (!ghost.is_waiting()
                     || self
                         .session()
                         .is_some_and(|s| s.message_deleted(chat, ghost.message.id)))
@@ -716,7 +730,7 @@ impl QuillApp {
                 self.history.vanish_conflicts.set(0);
                 // A delete still waiting for its answer shows nothing, so it
                 // asks for no frames: the answer renders and starts it.
-                vanishing.iter().any(|ghost| ghost.started.is_some())
+                vanishing.iter().any(|ghost| !ghost.is_waiting())
             }
             Err(_) => conflict_keeps_running(&self.history.vanish_conflicts),
         };
@@ -737,7 +751,10 @@ impl QuillApp {
         let clouds: Vec<(f32, Rc<Vec<Grain>>)> = vanishing
             .iter()
             .filter(|ghost| Some(ghost.message.chat_id) == shown)
-            .filter_map(|ghost| Some((ghost.elapsed(now)?, ghost.grains.clone())))
+            .filter_map(|ghost| match &ghost.stage {
+                GhostStage::Crumbling { grains, .. } => Some((ghost.elapsed(now)?, grains.clone())),
+                GhostStage::Waiting { .. } => None,
+            })
             .filter(|(_, grains)| !grains.is_empty())
             .collect();
         if clouds.is_empty() {
@@ -827,8 +844,10 @@ impl QuillApp {
         let back = Duration::from_secs_f32(secs);
         let now = self.vanish_now();
         for ghost in self.history.vanishing.borrow_mut().iter_mut() {
-            if ghost.started.is_some() {
-                ghost.started = now.checked_sub(back);
+            if let GhostStage::Crumbling { started, .. } = &mut ghost.stage
+                && let Some(moved) = now.checked_sub(back)
+            {
+                *started = moved;
             }
         }
     }

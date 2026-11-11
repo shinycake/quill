@@ -44,9 +44,12 @@ fn a_share_does_not_take_the_open_chats_composer_choices(cx: &mut TestAppContext
         if !app.composer_effective_silent() {
             app.toggle_composer_silent();
         }
-        app.composer_ui.send_effect_once = 77;
         app.update_pending_send(|send| send.scheduling = ComposerScheduling::SendWhenOnline);
-        let composer = app.composer_send_options();
+        let once = crate::ui::composer_sends::SendOnce {
+            effect: 77,
+            ..Default::default()
+        };
+        let composer = app.composer_send_options(once);
         assert!(composer.disable_notification);
         assert_eq!(composer.effect_id, 77);
         assert_eq!(composer.scheduling, ComposerScheduling::SendWhenOnline);
@@ -62,7 +65,12 @@ fn a_share_does_not_take_the_open_chats_composer_choices(cx: &mut TestAppContext
         assert!(same.disable_notification);
         assert_eq!(same.effect_id, 0);
         assert_eq!(same.scheduling, ComposerScheduling::None);
-        // The composer's next message still has its schedule and effect.
-        assert_eq!(app.composer_send_options().effect_id, 77);
+        // The composer's next message still has its schedule; the effect was
+        // that send's own.
+        assert_eq!(app.composer_send_options(Default::default()).effect_id, 0);
+        assert_eq!(
+            app.composer_send_options(Default::default()).scheduling,
+            ComposerScheduling::SendWhenOnline
+        );
     });
 }

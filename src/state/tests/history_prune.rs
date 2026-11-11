@@ -61,7 +61,7 @@ fn topic_with(session: &mut Session, chat: i64, topic: i32, count: i64) {
     for id in 1..=count {
         history.upsert(history_message(live(chat, id), false));
     }
-    history.loaded_complete = true;
+    history.mark_complete();
     session
         .threads
         .topic_histories
@@ -383,7 +383,7 @@ fn leaving_a_topic_trims_it_and_the_open_topic_stays_whole() {
     settle(&mut session);
     let left = &session.threads.topic_histories[&(7, 1)];
     assert_eq!(left.messages.len(), CLOSED_TAIL_KEEP);
-    assert!(!left.loaded_complete);
+    assert!(!left.loaded_complete());
     assert_eq!(left.next_from_message_id, MessageId(141), "paging resumes");
     assert_eq!(session.threads.topic_histories[&(7, 2)].messages.len(), 200);
     session.deselect_topic();
@@ -539,7 +539,7 @@ fn a_late_page_for_a_closed_topic_stays_inside_the_topic_bound() {
     for topic in 1..=(CLOSED_TOPICS_MAX as i32 + 6) {
         session
             .topic_history_entry(ChatId(7), topic)
-            .loaded_complete = true;
+            .mark_complete();
     }
     assert_eq!(session.threads.topic_histories.len(), CLOSED_TOPICS_MAX);
     // The open topic's entry is not part of the LRU.
@@ -552,7 +552,7 @@ fn a_late_page_for_a_closed_topic_stays_inside_the_topic_bound() {
 #[test]
 fn an_older_page_for_an_evicted_topic_does_not_start_it_again() {
     let (mut session, _sink) = session();
-    session.topic_history_entry(ChatId(7), 1).loaded_complete = true;
+    session.topic_history_entry(ChatId(7), 1).mark_complete();
     let extra = session.request_for_topic(RequestPurpose::GetTopicHistory, Some(ChatId(7)), 1);
     let pending = session.requests.get(extra).cloned().expect("in flight");
     for topic in 2..=(CLOSED_TOPICS_MAX as i32 + 6) {

@@ -263,7 +263,7 @@ fn the_reply_media_panel_hides_the_neighbours(cx: &mut TestAppContext) {
     let toggle = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
         app.update(vcx, |app, cx| {
             if let Some(open) = app.stories.viewer_ui_mut() {
-                open.reply_open = true;
+                open.open_reply();
             }
             app.toggle_story_reply_panel(PanelTab::Emoji, cx);
         });
@@ -369,11 +369,11 @@ fn a_refused_story_reply_keeps_the_text_and_the_row(cx: &mut TestAppContext) {
             "congrats!",
             "the typed text survives a refused send"
         );
-        assert!(app.stories.viewer_ui().reply_open, "the row stays open");
+        assert!(app.stories.viewer_ui().reply_open(), "the row stays open");
         app.finish_story_reply_text(Some(true), window, cx);
         assert_eq!(app.stories.reply_input.read(cx).value().to_string(), "");
         assert!(
-            !app.stories.viewer_ui().reply_open,
+            !app.stories.viewer_ui().reply_open(),
             "a sent reply closes it"
         );
     });

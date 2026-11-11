@@ -42,7 +42,7 @@ impl QuillApp {
                 None => Err(tr(keys::Q_PREFS_NO_APP_DATA_FOLDER_IS).to_string()),
             };
             if let Err(message) = started {
-                self.account.passcode.logout_confirm = false;
+                self.account.passcode.screen = super::lock_screen::LockScreen::Entry;
                 self.lock_failed(message, cx);
                 return;
             }
@@ -56,7 +56,7 @@ impl QuillApp {
         quill::wake::PASSCODE.poke();
         self.account.passcode.system_unlock = false;
         self.account.passcode.system_unlock_key = None;
-        self.account.passcode.logout_confirm = false;
+        self.account.passcode.screen = super::lock_screen::LockScreen::Entry;
         self.account.passcode.connect_at_unlock = None;
         // What waited for the unlock was the wiped accounts'.
         self.account.passcode.unlock_intents.drop_all();

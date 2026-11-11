@@ -59,10 +59,16 @@ struct ManagerView {
     installed: Vec<StickerSetInfo>,
     trending: Vec<StickerSetInfo>,
     archived: Vec<StickerSetInfo>,
-    /// The list on screen is still being fetched.
-    loading: bool,
-    failed: bool,
+    status: ListStatus,
     unread: usize,
+}
+
+/// Where the list on screen is: fetching, failed, or what it holds.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ListStatus {
+    Loading,
+    Failed,
+    Shown,
 }
 
 impl QuillApp {
@@ -82,8 +88,7 @@ impl QuillApp {
                 installed: Vec::new(),
                 trending: Vec::new(),
                 archived: Vec::new(),
-                loading: false,
-                failed: false,
+                status: ListStatus::Shown,
                 unread: 0,
             };
         };
@@ -127,16 +132,16 @@ impl QuillApp {
                         StickersPurpose::GetArchivedMaskSets { first_page: false }.into(),
                     )
                     || match tab {
-                        ManagerTab::Installed => !masks.installed_loaded,
-                        _ => !masks.archived_loaded,
+                        ManagerTab::Installed => masks.installed.is_idle(),
+                        _ => masks.archived.is_idle(),
                     };
                 (
                     tab,
-                    masks.installed.clone(),
+                    masks.installed.items().to_vec(),
                     Vec::new(),
-                    masks.archived.clone(),
+                    masks.archived.items().to_vec(),
                     loading,
-                    masks.failed,
+                    masks.installed.error().is_some() || masks.archived.error().is_some(),
                 )
             }
         };
@@ -156,15 +161,21 @@ impl QuillApp {
             installed,
             trending,
             archived,
-            loading,
-            failed,
+            status: if failed {
+                ListStatus::Failed
+            } else if loading {
+                ListStatus::Loading
+            } else {
+                ListStatus::Shown
+            },
             unread,
         }
     }
 
     /// Open the box on the installed stickers.
     pub(super) fn open_archived_stickers(&mut self, cx: &mut Context<Self>) {
-        self.settings.sticker_settings_open = true;
+        self.settings
+            .set_box(crate::ui::settings_state::SettingsBox::Stickers, true);
         self.open_box(DialogKind::ArchivedStickers);
         self.settings.sticker_manager.composer_tab = self
             .session()
@@ -200,7 +211,11 @@ impl QuillApp {
 
     /// Close the box and send what it changed (tdesktop `saveChanges`).
     pub(super) fn close_stickers_manager(&mut self, cx: &mut Context<Self>) {
-        let was_open = std::mem::replace(&mut self.settings.sticker_settings_open, false);
+        let was_open = self
+            .settings
+            .box_open(crate::ui::settings_state::SettingsBox::Stickers);
+        self.settings
+            .set_box(crate::ui::settings_state::SettingsBox::Stickers, false);
         self.finish_manager(Kind::Stickers);
         if let Some(live) = self.live.as_mut() {
             live.driver.close_sticker_panel();
@@ -220,7 +235,7 @@ impl QuillApp {
     pub(super) fn close_mask_sets(&mut self, cx: &mut Context<Self>) {
         self.finish_manager(Kind::Masks);
         if let Some(masks) = self.masks_panel_mut() {
-            masks.open = false;
+            masks.set_dialog_open(false);
             masks.confirm_remove = None;
         }
         cx.notify();
@@ -452,9 +467,9 @@ impl QuillApp {
                 cx,
             ))
         });
-        let status = if view.failed {
+        let status = if view.status == ListStatus::Failed {
             Some(tr(keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN))
-        } else if view.loading && sets.is_empty() {
+        } else if view.status == ListStatus::Loading && sets.is_empty() {
             Some(tr(keys::CONTACTS_LOADING))
         } else if sets.is_empty() {
             Some(match (view.tab, kind) {
@@ -560,7 +575,10 @@ fn apply_demo_commit(
 ) {
     let sets = match kind {
         Kind::Stickers => &mut session.stickers.stickers.sets,
-        Kind::Masks => &mut session.stickers.masks.installed,
+        Kind::Masks => match session.stickers.masks.installed.data_mut() {
+            Some(sets) => sets,
+            None => return,
+        },
     };
     sets.retain(|set| !removed.contains(&set.id));
     if let Some(order) = order {
@@ -577,14 +595,14 @@ crate::ui::shell::register_dialogs! {
     /// Settings > Chats > "Manage sticker sets".
     ArchivedStickers => DialogSpec::new(
         5000,
-        |app| app.settings.sticker_settings_open,
+        |app| app.settings.box_open(crate::ui::settings_state::SettingsBox::Stickers),
         QuillApp::build_stickers_manager_dialog,
     )
     .close(|app, _, cx| app.close_stickers_manager(cx)),
     /// The photo editor's "Manage masks".
     MaskSets => DialogSpec::new(
         5110,
-        |app| app.session().is_some_and(|s| s.stickers.masks.open),
+        |app| app.session().is_some_and(|s| s.stickers.masks.dialog_open()),
         QuillApp::build_mask_sets_dialog,
     )
     .close(|app, _, cx| app.close_mask_sets(cx)),

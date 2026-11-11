@@ -6,6 +6,7 @@
 use super::RichDraftBox;
 use crate::ui::ai_compose::marked_link;
 use crate::ui::app::QuillApp;
+use crate::ui::composer_sends::SendOnce;
 use crate::ui::shell::{DialogKind, QuillShell};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -228,7 +229,7 @@ impl QuillApp {
                                 cx,
                             );
                             if let Some(plain) = plain {
-                                this.send_rich_draft_plain(plain, window, cx);
+                                this.send_rich_draft_plain(plain, SendOnce::default(), window, cx);
                             }
                             cx.notify();
                         })),

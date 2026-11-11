@@ -47,9 +47,8 @@ fn sweeping_a_shared_media_page_allows_the_next_page_request() {
 fn sweeping_an_in_chat_search_page_clears_its_loading_flag() {
     let mut session = ready_session();
     let chat = ChatId(5);
+    session.search.chat_search.open_for(chat);
     let generation = session.search.chat_search.generation;
-    session.search.chat_search.open = true;
-    session.search.chat_search.chat_id = Some(chat);
     session.search.chat_search.begin_more(MessageId(9));
     session.request_chat_search(RequestPurpose::SearchChatMessagesMore, chat, generation);
 
@@ -110,7 +109,10 @@ fn account_loss_resets_the_loading_flags_of_pending_lookups() {
         RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { append: false }),
         None,
     );
-    session.payments.star_subscriptions_request = Some(subscriptions);
+    session
+        .payments
+        .star_subscriptions
+        .begin_load(subscriptions);
     session.payments.hub.tx_loading = true;
     let history = session.request(
         RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { append: false }),
@@ -134,7 +136,7 @@ fn account_loss_resets_the_loading_flags_of_pending_lookups() {
     session.begin_logout();
 
     assert!(!session.settings.privacy_data.network.is_loading());
-    assert!(!session.payments.star_subscriptions_loading());
+    assert!(!session.payments.star_subscriptions.is_loading());
     assert!(!session.payments.hub.tx_loading);
     assert!(!session.payments.hub.gifts_loading);
     assert!(!session.media.playlists[&9].loading);
@@ -210,20 +212,20 @@ fn sweeping_a_lost_transfer_check_lets_the_next_open_ask_again() {
 
     assert!(sweep(&mut session));
 
-    assert!(!session.groups.ownership.check_in_flight);
-    assert!(session.groups.ownership.check_error.is_some());
+    assert!(!session.groups.ownership.check.is_loading());
+    assert!(session.groups.ownership.check.error().is_some());
 }
 
 /// Sweep 05-202: a lost recommended-channels answer ends its loading state.
 #[test]
 fn sweeping_lost_recommended_channels_clears_their_loading_flag() {
     let mut session = ready_session();
-    session.search.search.tabs.recommended_loading = true;
+    session.search.search.tabs.recommended.begin();
     session.request(RequestPurpose::GetRecommendedChats, None);
 
     assert!(sweep(&mut session));
 
-    assert!(!session.search.search.tabs.recommended_loading);
+    assert!(!session.search.search.tabs.recommended.is_loading());
 }
 
 /// A swept upgrade or history toggle takes its waiting step with it and

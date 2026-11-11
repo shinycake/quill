@@ -9,6 +9,7 @@
 
 use super::app::QuillApp;
 use super::*;
+use crate::ui::composer_sends::SendOnce;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::component::button::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -252,6 +253,7 @@ impl QuillApp {
     pub(super) fn submit_forward_bar(
         &mut self,
         text: String,
+        once: SendOnce,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -264,13 +266,13 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        let options = self.composer_send_options();
+        let options = self.composer_send_options(once);
         if !text.trim().is_empty() || !self.pending_attachments().is_empty() {
             // The comment goes as a plain message: the bar is lowered to
             // the selection while it does, so the composer does not route
             // it back here.
             self.share.forward.drop_bar();
-            self.submit_composer(text, window, cx);
+            self.submit_composer(text, once, window, cx);
             self.share.forward = match self.share.forward.take_draft() {
                 Some(draft) => ForwardStage::Bar { draft, dest },
                 None => ForwardStage::None,

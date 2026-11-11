@@ -347,7 +347,7 @@ fn clear_storage_sends_optimize_storage_and_reports_freed_bytes() {
     assert_eq!(request["file_types"][1]["@type"], "fileTypeVideo");
     assert_eq!(request["chat_ids"], serde_json::json!([]));
     assert_eq!(request["return_deleted_file_statistics"], true);
-    assert!(f.1.session.settings.storage_clearing);
+    assert!(f.1.session.settings.storage_clear.is_clearing());
     // One clear at a time.
     assert_invalid(f.1.clear_storage(&[], &[]));
     let extra = request["@extra"].as_str().unwrap().to_string();
@@ -359,10 +359,10 @@ fn clear_storage_sends_optimize_storage_and_reports_freed_bytes() {
             r#"{{"@type":"storageStatistics","size":"5242880","count":3,"by_chat":[],"@extra":"{extra}"}}"#
         ),
     );
-    assert_eq!(f.1.session.settings.storage_freed, Some(5_242_880));
-    assert!(!f.1.session.settings.storage_clearing);
+    assert_eq!(f.1.session.settings.storage_clear.freed(), Some(5_242_880));
+    assert!(!f.1.session.settings.storage_clear.is_clearing());
     // The usage numbers are refetched on the same ingest.
-    assert!(f.1.session.settings.storage_stats_loading);
+    assert!(f.1.session.settings.storage_stats.is_loading());
     assert_eq!(requests_of(&f.2, "getStorageStatistics").len(), 1);
     cleanup(f);
 }
@@ -388,9 +388,9 @@ fn clear_storage_failure_reports_and_frees_the_gate() {
         &f.3,
         &format!(r#"{{"@type":"error","code":500,"message":"x","@extra":"{extra}"}}"#),
     );
-    assert!(!f.1.session.settings.storage_clearing);
-    assert!(f.1.session.settings.data_storage_error.is_some());
-    assert!(f.1.session.settings.storage_freed.is_none());
+    assert!(!f.1.session.settings.storage_clear.is_clearing());
+    assert!(f.1.session.settings.storage_clear.failed().is_some());
+    assert!(f.1.session.settings.storage_clear.freed().is_none());
     cleanup(f);
 }
 
@@ -792,7 +792,9 @@ fn the_first_ready_sets_tdesktops_cache_limits_once() {
     );
     let paths = f.1.paths.clone();
     assert!(
-        !crate::data_settings::load_data_storage_prefs(&paths).storage_limits_seeded,
+        !crate::data_settings::load_data_storage_prefs(&paths)
+            .storage_limits_seeded
+            .is_seeded(),
         "not before TDLib has them"
     );
     let mut f = f;
@@ -802,14 +804,24 @@ fn the_first_ready_sets_tdesktops_cache_limits_once() {
         &f.3,
         r#"{"@type":"updateOption","name":"use_storage_optimizer","value":{"@type":"optionValueBoolean","value":true}}"#,
     );
-    assert!(crate::data_settings::load_data_storage_prefs(&paths).storage_limits_seeded);
+    assert!(
+        crate::data_settings::load_data_storage_prefs(&paths)
+            .storage_limits_seeded
+            .is_seeded()
+    );
     cleanup(f);
 }
 
 #[test]
 fn limits_tdlib_never_took_are_sent_again_on_the_next_ready() {
     let mut f = fixture();
-    assert!(!f.1.session.settings.data_storage.storage_limits_seeded);
+    assert!(
+        !f.1.session
+            .settings
+            .data_storage
+            .storage_limits_seeded
+            .is_seeded()
+    );
     f.2.sent.lock().unwrap().clear();
     f.1.maybe_seed_storage_limits().unwrap();
     assert!(
@@ -817,7 +829,7 @@ fn limits_tdlib_never_took_are_sent_again_on_the_next_ready() {
         "once per session"
     );
     // The process died before the echo: a new session starts unseeded.
-    f.1.session.settings.storage_limits_seed_sent = false;
+    f.1.session.settings.data_storage.storage_limits_seeded = crate::data_settings::Seed::Unseeded;
     f.1.maybe_seed_storage_limits().unwrap();
     assert_eq!(requests_of(&f.2, "setOption").len(), 4);
     cleanup(f);
@@ -826,13 +838,12 @@ fn limits_tdlib_never_took_are_sent_again_on_the_next_ready() {
 #[test]
 fn a_later_start_or_an_earlier_choice_is_left_alone() {
     let mut f = fixture();
-    f.1.session.settings.data_storage.storage_limits_seeded = true;
-    f.1.session.settings.storage_limits_seed_sent = false;
+    f.1.session.settings.data_storage.storage_limits_seeded = crate::data_settings::Seed::Seeded;
     f.2.sent.lock().unwrap().clear();
     f.1.maybe_seed_storage_limits().unwrap();
     assert!(requests_of(&f.2, "setOption").is_empty(), "seeded once");
 
-    f.1.session.settings.data_storage.storage_limits_seeded = false;
+    f.1.session.settings.data_storage.storage_limits_seeded = crate::data_settings::Seed::Unseeded;
     let no_limit =
         crate::telegram::envelope::OptionValue::Integer(crate::storage_limits::UNLIMITED_KIB);
     f.1.session
@@ -844,7 +855,13 @@ fn a_later_start_or_an_earlier_choice_is_left_alone() {
         requests_of(&f.2, "setOption").is_empty(),
         "an earlier No limit sticks"
     );
-    assert!(f.1.session.settings.data_storage.storage_limits_seeded);
+    assert!(
+        f.1.session
+            .settings
+            .data_storage
+            .storage_limits_seeded
+            .is_seeded()
+    );
     cleanup(f);
 }
 

@@ -57,9 +57,10 @@ pub(crate) struct PendingSend {
 }
 
 /// The options a single send carries and the next does not: "Send without
-/// sound" and "Send with Effect" (`ComposerUi::send_silent_once`,
-/// `send_effect_once`). A send that waits (a paid-message confirm, a photo
-/// edit still rendering) keeps its own copy, so it goes out with them.
+/// sound" and "Send with Effect". They are an argument of the send path
+/// (`submit_composer`), never a field. A send that waits (a paid-message
+/// confirm, a photo edit still rendering) keeps its own copy, so it goes
+/// out with them.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct SendOnce {
     pub(super) silent: bool,
@@ -406,29 +407,6 @@ impl QuillApp {
         }
     }
 
-    /// The one-time options of the send being made now.
-    pub(super) fn send_once(&self) -> SendOnce {
-        SendOnce {
-            silent: self.composer_ui.send_silent_once,
-            effect: self.composer_ui.send_effect_once,
-        }
-    }
-
-    /// Run a send that waited with the one-time options it was made with.
-    pub(super) fn with_send_once<R>(
-        &mut self,
-        once: SendOnce,
-        f: impl FnOnce(&mut Self) -> R,
-    ) -> R {
-        let outer = self.send_once();
-        self.composer_ui.send_silent_once = once.silent;
-        self.composer_ui.send_effect_once = once.effect;
-        let result = f(self);
-        self.composer_ui.send_silent_once = outer.silent;
-        self.composer_ui.send_effect_once = outer.effect;
-        result
-    }
-
     /// The slot the composer on screen sends from: the account on screen,
     /// the open chat (the window's own while a chat window is in scope)
     /// and its topic.
@@ -523,7 +501,7 @@ impl QuillApp {
             matches!(&editor.purpose, super::photo_editor::EditorPurpose::Attachment(item) if item.slot == slot)
         });
         if on_sent_tray {
-            self.viewer.photo_editor = None;
+            self.viewer.photo_editor.take();
         }
     }
 

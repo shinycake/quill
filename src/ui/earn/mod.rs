@@ -337,7 +337,8 @@ impl QuillApp {
         };
         let notes = std::mem::take(&mut earn.notes);
         let url = earn.open_url.take();
-        let closed = std::mem::replace(&mut earn.setup_closed, false);
+        let closed = earn.effects.contains(&quill::earn::EarnEffect::SetupDone);
+        earn.effects.clear();
         let progressed = !notes.is_empty() || url.is_some() || closed;
         // Every note toasts, one after another through the toast queue.
         for note in notes {
@@ -381,12 +382,6 @@ impl QuillApp {
         }
         self.join_upkeep();
         self.earn_balances_upkeep();
-        let link_open = self.earn_state().is_some_and(|e| e.link_box.is_some());
-        match (link_open, self.earn.link_shown) {
-            (true, None) => self.earn.link_shown = Some(std::time::Instant::now()),
-            (false, Some(_)) => self.earn.link_shown = None,
-            _ => {}
-        }
     }
 
     /// The content of an earn page under the layer's top bar: the page,

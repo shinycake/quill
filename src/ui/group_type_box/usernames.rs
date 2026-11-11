@@ -140,7 +140,7 @@ impl QuillApp {
             .and_then(|edit| self.session()?.chat_usernames(edit.chat_id))
             .map(|lists| lists.active.clone())
             .unwrap_or_default();
-        let Some(type_box) = self.group_edit_box_mut().and_then(|e| e.type_box.as_mut()) else {
+        let Some(type_box) = self.group_edit_box_mut().and_then(|e| e.type_box_mut()) else {
             return;
         };
         let shown = display_order(&type_box.draft.order, &active);

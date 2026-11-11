@@ -83,10 +83,35 @@ const PACKAGE_SENTINEL: &str = if cfg!(windows) {
     "lib/libtdjson.so"
 };
 
-#[derive(Serialize, Deserialize)]
+/// How the install ended, as the receipt says.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum Outcome {
+    Installed,
+    Failed,
+}
+
+#[derive(Serialize)]
 struct InstallResult {
     release: ReleaseInfo,
-    failed: bool,
+    outcome: Outcome,
+}
+
+impl InstallResult {
+    /// A receipt as written: `outcome`, or the `failed` flag older
+    /// versions wrote.
+    pub(super) fn parse(bytes: &[u8]) -> Option<Self> {
+        let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+        let release = serde_json::from_value(value.get("release")?.clone()).ok()?;
+        let outcome = match value.get("outcome").and_then(serde_json::Value::as_str) {
+            Some("installed") => Outcome::Installed,
+            Some("failed") => Outcome::Failed,
+            Some(_) => return None,
+            None if value.get("failed")?.as_bool()? => Outcome::Failed,
+            None => Outcome::Installed,
+        };
+        Some(Self { release, outcome })
+    }
 }
 
 /// Why this copy cannot replace itself. Each reason has its own line in the
@@ -181,7 +206,7 @@ pub fn startup_state() -> UpdateState {
     finish_previous_update();
     let result = result_path().and_then(|p| take_receipt(&p));
     match result {
-        Some(r) if r.failed => UpdateState::InstallFailed(
+        Some(r) if r.outcome == Outcome::Failed => UpdateState::InstallFailed(
             r.release,
             "Update installation failed. Your previous version was restored. Retry the update.",
         ),
@@ -196,7 +221,7 @@ fn take_receipt(path: &Path) -> Option<InstallResult> {
     }
     let bytes = fs::read(path).ok();
     let _ = fs::remove_file(path);
-    bytes.and_then(|b| serde_json::from_slice(&b).ok())
+    bytes.and_then(|b| InstallResult::parse(&b))
 }
 
 pub fn acknowledge_changelog() -> std::io::Result<()> {
@@ -228,13 +253,13 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     create_private(path, bytes).map(drop)
 }
 
-fn write_result(path: PathBuf, release: &ReleaseInfo, failed: bool) -> std::io::Result<()> {
+fn write_result(path: PathBuf, release: &ReleaseInfo, outcome: Outcome) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     let bytes = serde_json::to_vec(&InstallResult {
         release: release.clone(),
-        failed,
+        outcome,
     })?;
     let temp = path.with_extension(format!("{}.tmp", std::process::id()));
     let written = write_private(&temp, &bytes)
@@ -750,17 +775,17 @@ fn install_bundle(
     manifest::verify(&plan.staged, &plan.files)?;
     verify_staged(layout, &plan.staged, &plan.release)?;
     if cfg!(windows) {
-        write_result(receipt_for(target), &plan.release, false)?;
+        write_result(receipt_for(target), &plan.release, Outcome::Installed)?;
         return swap::swap_files(&layout.install, &plan.staged, launch);
     }
     if cfg!(target_os = "macos") {
         // Beside the bundle, like the plan: the swap carries nothing extra.
-        write_result(receipt_for(target), &plan.release, false)?;
+        write_result(receipt_for(target), &plan.release, Outcome::Installed)?;
     } else {
         write_result(
             receipt_for(&package_exe(&plan.staged)),
             &plan.release,
-            false,
+            Outcome::Installed,
         )?;
     }
     let backup = layout
@@ -822,7 +847,7 @@ fn apply_claimed(
                 plan
             });
             if let Some(plan) = &plan {
-                let _ = write_result(receipt_for(&target), &plan.release, true);
+                let _ = write_result(receipt_for(&target), &plan.release, Outcome::Failed);
             }
             let _ = start(
                 &target,
@@ -871,7 +896,7 @@ fn apply_plan(
     );
     if result.is_err() {
         // Written first: the restarted version reads it at once.
-        let _ = write_result(receipt_for(&target), &plan.release, true);
+        let _ = write_result(receipt_for(&target), &plan.release, Outcome::Failed);
         let _ = relaunch();
         if staged_for(&plan.staged, &target) {
             let _ = swap::remove_any(&plan.staged);

@@ -75,6 +75,7 @@ impl QuillApp {
     pub(super) fn submit_composer(
         &mut self,
         text: String,
+        once: crate::ui::composer_sends::SendOnce,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -112,11 +113,10 @@ impl QuillApp {
                 }
                 // The tray goes, now or once its renders land: an editor
                 // asked for mid-render no longer opens.
-                self.viewer.photo_editor_after = None;
+                self.viewer.photo_editor.clear_deferred();
                 // A photo's edit is still rendering: the Send waits for it,
                 // so the unedited file never goes out.
                 if self.tray_renders_an_edit() {
-                    let once = self.send_once();
                     self.update_pending_send(|send| send.held_send = Some((text, once)));
                     self.set_note(StatusNote::silent(tr(keys::Q_OPS_PREPARING_THE_FILES)));
                     cx.notify();
@@ -124,7 +124,7 @@ impl QuillApp {
                 }
                 // B4: the forward bar sends the comment, then the forward.
                 if self.forward_bar_here() {
-                    self.submit_forward_bar(text, window, cx);
+                    self.submit_forward_bar(text, once, window, cx);
                     return;
                 }
                 // A picture still being read, or getting its thumbnail,
@@ -140,13 +140,13 @@ impl QuillApp {
                 // M2: the rich editor sends blocks, not text.
                 if self.chat_ui.rich_editor_open {
                     let blocks = quill::rich::markup_to_blocks(&text);
-                    self.submit_rich_composer(blocks, window, cx);
+                    self.submit_rich_composer(blocks, once, window, cx);
                     return;
                 }
                 // In a bot's "All" view the message starts a thread of its
                 // own and goes there.
                 if let Some(chat_id) = self.open_chat_id()
-                    && self.send_waits_for_bot_thread(chat_id, &text, cx)
+                    && self.send_waits_for_bot_thread(chat_id, &text, once, cx)
                 {
                     return;
                 }
@@ -171,7 +171,7 @@ impl QuillApp {
                         cx.notify();
                         return;
                     }
-                    if self.paid_send_waits(chat_id, &text, cx) {
+                    if self.paid_send_waits(chat_id, &text, once, cx) {
                         return;
                     }
                     // A video's sound track is still being read: wait, so a
@@ -259,7 +259,7 @@ impl QuillApp {
                                     // M1: silent / scheduled / when-online /
                                     // link-preview options ride the snapshot to
                                     // `sendMessage.options`.
-                                    .with_send_options(self.composer_post_options())
+                                    .with_send_options(self.composer_post_options(once))
                                     // MED4: caption-above-media toggle.
                                     .with_caption_above_media(
                                         self.pending_send().caption_above
@@ -280,7 +280,7 @@ impl QuillApp {
                                 )
                                 .with_reply(if i == 0 { reply.clone() } else { None })
                                 .with_self_destruct(self_destruct)
-                                .with_send_options(self.composer_post_options())
+                                .with_send_options(self.composer_post_options(once))
                                 // MED4: caption-above-media toggle.
                                 .with_caption_above_media(
                                     self.pending_send().caption_above
@@ -301,7 +301,7 @@ impl QuillApp {
                             // M1: silent / scheduled / when-online /
                             // link-preview options ride the snapshot to
                             // `sendMessage.options`.
-                            .with_send_options(self.composer_post_options())
+                            .with_send_options(self.composer_post_options(once))
                             // MED4: caption-above-media toggle.
                             .with_caption_above_media(
                                 self.pending_send().caption_above && !self.open_chat_is_secret(),
@@ -468,6 +468,7 @@ impl QuillApp {
     pub(super) fn submit_rich_composer(
         &mut self,
         mut blocks: Vec<quill::rich::RichBlock>,
+        once: crate::ui::composer_sends::SendOnce,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -570,7 +571,7 @@ impl QuillApp {
         let reply_to = self
             .reply_for_send(cx)
             .and_then(|reply| reply.send_reply(chat_id));
-        let options = self.composer_post_options();
+        let options = self.composer_post_options(once);
         let typed = self.composer_markup(cx);
         let Some(live) = self.live.as_mut() else {
             return;
@@ -585,7 +586,7 @@ impl QuillApp {
                 self.note_message_leaving(&typed);
                 self.remember_sent_text(request, typed);
                 self.finish_pending_send();
-                self.chat_ui.schedule_popup_open = false;
+                self.close_composer_schedule_popup();
                 self.chat_ui.set_reply(None);
                 self.chat_ui.rich_editor_open = false;
                 self.clear_suggest_bar_after_send(chat_id);

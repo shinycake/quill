@@ -1,6 +1,7 @@
 //! Methods moved out of `groups_forum.rs` to keep files under 1000 lines.
 
 use super::*;
+use crate::ui::history_state::ForumColumnUi;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
@@ -213,19 +214,22 @@ impl QuillApp {
         window: &Window,
     ) -> quill::state::ForumColumn {
         let width = f32::from(window.viewport_size().width);
+        let peeking = self.history.forum_column.peeking();
         let layout = self
             .session()
             .map_or(quill::state::ForumColumn::Hidden, |s| {
-                s.forum_column(width, self.history.forum_chats_peek)
+                s.forum_column(width, peeking)
             });
-        if self.history.forum_chats_peek
-            && self
-                .session()
-                .is_some_and(|s| s.forum_column(width, false) == quill::state::ForumColumn::Hidden)
-        {
-            self.history.forum_chats_peek = false;
-        }
-        self.history.forum_column_shown = layout != quill::state::ForumColumn::Hidden;
+        let forum_still_open = self
+            .session()
+            .is_some_and(|s| s.forum_column(width, false) != quill::state::ForumColumn::Hidden);
+        self.history.forum_column = if layout != quill::state::ForumColumn::Hidden {
+            ForumColumnUi::Column
+        } else if peeking && forum_still_open {
+            ForumColumnUi::Peek
+        } else {
+            ForumColumnUi::Hidden
+        };
         layout
     }
 
@@ -294,7 +298,7 @@ impl QuillApp {
                                 .tooltip(tr(keys::Q_PEOPLE_SHOW_CHATS))
                                 .accessibility_label(tr(keys::Q_PEOPLE_SHOW_CHATS))
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    this.history.forum_chats_peek = true;
+                                    this.history.forum_column = ForumColumnUi::Peek;
                                     cx.notify();
                                 })),
                         )

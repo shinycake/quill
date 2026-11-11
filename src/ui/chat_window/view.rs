@@ -30,8 +30,6 @@ pub(crate) struct ChatWindowView {
     title_shown: String,
     /// The geometry at the last render; a change is saved for next time.
     bounds_seen: Option<Bounds<Pixels>>,
-    /// The window's bookkeeping ran (the app knows the window is gone).
-    closed: bool,
     /// This window is kept out of screen capture (a secret chat, or its
     /// viewer showing a secret chat's media): each window has its own.
     capture_blocked: bool,
@@ -68,7 +66,6 @@ impl ChatWindowView {
             shell,
             title_shown: String::new(),
             bounds_seen: None,
-            closed: false,
             capture_blocked: false,
             _observe: observe,
             _placed: placed,
@@ -97,15 +94,25 @@ impl ChatWindowView {
     /// the app. `window` is this window while it can still run their
     /// closes (`None`: the platform already destroyed it, and its
     /// per-window boxes go with its state).
-    fn closing(&mut self, reopenable: bool, window: Option<&mut Window>, cx: &mut Context<Self>) {
-        if self.closed {
-            return;
-        }
-        self.closed = true;
+    pub(super) fn closing(
+        &mut self,
+        reopenable: bool,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
+        let me = cx.entity_id();
         let chat_id = self.chat_id;
         // Where the window stood, for "Reopen closed window".
         let bounds = self.bounds_seen.filter(|_| reopenable);
         let _ = self.owner.update(cx, |app, cx| {
+            // The app lists the window until its bookkeeping runs (the
+            // bookkeeping unlists it): one that is not listed was closed
+            // already, by this window's earlier close report or by an
+            // account switch that came before the platform's. Running it
+            // again would act on a window of the same chat the app has now.
+            if !app.windows.lists_view(me) {
+                return;
+            }
             // Its boxes close against its own state, before it goes.
             if let Some(window) = window {
                 app.close_window_boxes(chat_id, window, cx);
@@ -113,20 +120,6 @@ impl ChatWindowView {
             app.in_window_scope(Some(chat_id), cx, |app, cx| app.flush_leaving_draft(cx));
             app.chat_window_closed(chat_id, bounds, cx);
         });
-    }
-
-    /// The app already did the window's bookkeeping (an account switch
-    /// closed it): its close runs nothing more. The platform reports the
-    /// close after the switch, when the bookkeeping would run on the new
-    /// account and file its windows as these, now gone.
-    pub(super) fn mark_closed(&mut self) {
-        self.closed = true;
-    }
-
-    /// Whether the window's bookkeeping ran.
-    #[cfg(test)]
-    pub(super) fn is_closed(&self) -> bool {
-        self.closed
     }
 
     /// Whether this window is kept out of screen capture.

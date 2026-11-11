@@ -179,13 +179,7 @@ impl QuillApp {
         {
             let _ = live.driver.fetch_greeting_stickers();
         }
-        let list = self
-            .session()?
-            .stickers
-            .stickers
-            .greeting
-            .data()
-            .map_or(&[][..], Vec::as_slice);
+        let list = self.session()?.stickers.stickers.greeting.data()?;
         let at = (seed.unsigned_abs() as usize).checked_rem(list.len())?;
         list.get(at).cloned()
     }

@@ -22,7 +22,7 @@ const RING_FPS: u32 = 15;
 impl QuillApp {
     /// The self-destruct timer of the open item, when it has one.
     fn viewer_message_timer(&self) -> Option<quill::telegram::envelope::MessageSelfDestruct> {
-        if self.viewer.state.source() == ViewerSource::Profile {
+        if self.viewer.state.source().is_profile() {
             return None;
         }
         let item = self.viewer.state.current()?;

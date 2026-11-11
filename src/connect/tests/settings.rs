@@ -164,7 +164,7 @@ fn less_data_for_calls_reaches_every_network_when_one_send_fails() {
             .unwrap(),
         )
         .unwrap();
-    driver.session.settings.data_storage.seeded = true;
+    driver.session.settings.data_storage.seeded = crate::data_settings::Seed::Seeded;
     assert!(driver.set_less_data_for_calls(true).is_err());
     let sent = sender.sent.lock().expect("sent").clone();
     let sent_sets = sent

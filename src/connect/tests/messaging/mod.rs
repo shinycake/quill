@@ -187,9 +187,9 @@ fn gif_panel_loads_saved_animations_and_send_uses_input_animation() {
                 .unwrap(),
             )
             .unwrap();
-    assert_eq!(driver.session.stickers.gifs.saved.items().len(), 1);
+    assert_eq!(driver.session.stickers.gifs.animations.len(), 1);
     assert_eq!(
-        driver.session.stickers.gifs.saved.items()[0].file_id,
+        driver.session.stickers.gifs.animations[0].file_id,
         FileId(33)
     );
     assert!(
