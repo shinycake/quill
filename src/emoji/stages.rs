@@ -303,6 +303,10 @@ pub enum AnimatedSuggestion {
         emoji: String,
         sticker: Option<StickerItem>,
     },
+    /// The ask for `emoji` failed. Nothing is suggested, and the same emoji
+    /// is not asked for again on every keystroke; another emoji, or a text
+    /// that ends in none, leaves it.
+    Failed { emoji: String },
 }
 
 impl AnimatedSuggestion {
@@ -310,7 +314,9 @@ impl AnimatedSuggestion {
     pub fn emoji_for(&self) -> Option<&str> {
         match self {
             Self::Idle => None,
-            Self::Asking { emoji, .. } | Self::Ready { emoji, .. } => Some(emoji),
+            Self::Asking { emoji, .. } | Self::Ready { emoji, .. } | Self::Failed { emoji } => {
+                Some(emoji)
+            }
         }
     }
 
@@ -318,7 +324,7 @@ impl AnimatedSuggestion {
     pub fn sticker(&self) -> Option<&StickerItem> {
         match self {
             Self::Ready { sticker, .. } => sticker.as_ref(),
-            _ => None,
+            Self::Idle | Self::Asking { .. } | Self::Failed { .. } => None,
         }
     }
 
@@ -338,6 +344,18 @@ impl AnimatedSuggestion {
         {
             let emoji = std::mem::take(emoji);
             *self = Self::Ready { emoji, sticker };
+            return true;
+        }
+        false
+    }
+
+    /// `asked` failed: only the ask that waits for it leaves `Asking`.
+    pub fn failed_request(&mut self, asked: Option<RequestId>) -> bool {
+        if let Self::Asking { emoji, request } = self
+            && Some(*request) == asked
+        {
+            let emoji = std::mem::take(emoji);
+            *self = Self::Failed { emoji };
             return true;
         }
         false

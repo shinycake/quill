@@ -288,6 +288,43 @@ fn an_animated_emoji_answer_for_a_replaced_ask_is_dropped() {
 }
 
 #[test]
+fn a_failed_animated_emoji_ask_leaves_asking_and_is_not_repeated() {
+    let mut rig = Rig::new();
+    rig.driver.update_animated_emoji_suggestion("a 🔥").unwrap();
+    rig.driver.update_animated_emoji_suggestion("a 😀").unwrap();
+    let asks = rig.sent("getAnimatedEmoji");
+    // The replaced ask's failure is not the current one's.
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":400,"message":"EMOTICON_INVALID"}}"#,
+        extra_of(&asks[0])
+    ));
+    assert!(matches!(
+        rig.driver.session.stickers.emoji.animated,
+        crate::emoji::AnimatedSuggestion::Asking { ref emoji, .. } if emoji == "😀"
+    ));
+    rig.ingest(&format!(
+        r#"{{"@type":"error","@extra":"{}","code":400,"message":"EMOTICON_INVALID"}}"#,
+        extra_of(&asks[1])
+    ));
+    assert!(matches!(
+        rig.driver.session.stickers.emoji.animated,
+        crate::emoji::AnimatedSuggestion::Failed { ref emoji } if emoji == "😀"
+    ));
+    // The same emoji is not asked for again while it is typed after.
+    rig.driver
+        .update_animated_emoji_suggestion("ab 😀")
+        .unwrap();
+    assert_eq!(rig.sent("getAnimatedEmoji").len(), 2);
+    // Another emoji asks, and a text with none clears the stage.
+    rig.driver
+        .update_animated_emoji_suggestion("ab 🔥")
+        .unwrap();
+    assert_eq!(rig.sent("getAnimatedEmoji").len(), 3);
+    rig.driver.update_animated_emoji_suggestion("ab").unwrap();
+    assert!(rig.driver.session.stickers.emoji.animated.is_idle());
+}
+
+#[test]
 fn a_refused_member_probe_is_not_sent_again_by_the_poll() {
     let mut rig = Rig::new();
     rig.ingest(

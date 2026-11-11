@@ -8068,7 +8068,7 @@ drivers listed below, `earn/state.rs`, `emoji/mod.rs`, `export/handle.rs`,
 | 03-A005 | `WithdrawStep::Checking` holds the request; `Withdraw::request` is gone. |
 | 03-A006, 09-079 | `SetupPage` is one `SetupStage` (`Editing`, `Confirming`, `SavingInBox`, `Saving`); `confirm` and `saving` are gone. |
 | 03-A010 | The trending emoji sets are `TrendingSets` (`Idle`, `Loading{from, request, shown}`, `Ready`, `Stale`, `Failed`); the four paging fields and the `Fetch<()>` are gone. |
-| 03-A011 | `KeywordEmojis` and `AnimatedSuggestion` are stages holding the request that asked; a replaced ask's answer lands nowhere, a refused search is `Failed` so the panel does not ask again. |
+| 03-A011 | `KeywordEmojis` and `AnimatedSuggestion` are stages holding the request that asked; a replaced ask's answer lands nowhere, a refused search is `Failed` so the panel does not ask again. A failed `getAnimatedEmoji` ends its own `Asking` in `Failed { emoji }`: nothing is suggested and the same emoji is not asked for on every keystroke. |
 | 03-A012 | Skipped: `EmojiPanel::open` is the visibility of the box (section 8, 03-032); the host registry holds only which window shows it. |
 | 03-B001 | Skipped: `ExportView` is what the person chose for the progress box (Hide), independent of the export's stage (every stage can be shown or hidden); only the Hide button writes it. |
 | 03-B002 | A worker call that times out tells the link (`gave_up`), which frees the request slot instead of waiting for an answer nobody takes. |

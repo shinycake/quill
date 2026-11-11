@@ -143,6 +143,12 @@ impl Session {
                 .keyword_emojis
                 .failed_request(pending.map(|p| p.id));
         }
+        if emoji_purpose == Some(RequestPurpose::GetAnimatedEmoji) {
+            self.stickers
+                .emoji
+                .animated
+                .failed_request(pending.map(|p| p.id));
+        }
         if let Some(list) = emoji_purpose.and_then(|p| self.stickers.emoji.lists.for_purpose(p)) {
             list.fail(crate::lang::tr(
                 crate::lang::keys::Q_MEDIA_COULD_NOT_UPDATE_EMOJI_PACKS,
