@@ -21,10 +21,20 @@ use quill::payment_invoice::invoice_link_invoice;
 #[derive(Default, Debug, PartialEq, Eq)]
 pub(super) struct InvoiceWatch {
     slug: String,
+    attempt: Attempt,
+}
+
+/// The last payment attempt, as the looks saw it.
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
+enum Attempt {
+    #[default]
+    None,
     /// A payment was being sent on the last look.
-    sending: bool,
-    failed: bool,
-    pending: bool,
+    Sending,
+    /// It ended with an error on the form.
+    Failed,
+    /// It ended at a verification step.
+    Pending,
 }
 
 /// What the payment state shows right now.
@@ -56,25 +66,27 @@ impl InvoiceWatch {
             // A payment still being sent when the checkout closed (Esc, or
             // the 3-D Secure page taking over before the next look) may
             // still go through: that is pending, never cancelled.
-            return Some(if self.failed {
+            return Some(if self.attempt == Attempt::Failed {
                 "failed"
-            } else if self.pending || self.sending || view.sending {
+            } else if self.attempt != Attempt::None || view.sending {
                 "pending"
             } else {
                 "cancelled"
             });
         }
         if view.sending {
-            self.sending = true;
-            self.failed = false;
-            self.pending = false;
-        } else if self.sending {
+            self.attempt = Attempt::Sending;
+        } else if self.attempt == Attempt::Sending {
             // The attempt ended without paying: an error on the form means it
             // failed, a verification step means it is pending, and anything
             // else leaves it cancelled.
-            self.sending = false;
-            self.failed = view.note;
-            self.pending = view.verification && !view.note;
+            self.attempt = if view.note {
+                Attempt::Failed
+            } else if view.verification {
+                Attempt::Pending
+            } else {
+                Attempt::None
+            };
         }
         None
     }

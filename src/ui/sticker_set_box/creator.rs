@@ -228,7 +228,7 @@ impl QuillApp {
             // another set now (`claim_sticker_set_box`), whose "New
             // Sticker" this editor's Done would fill.
             Some(_) if !self.sticker_box_shows(set_id) => {}
-            Some(editor) => self.viewer.photo_editor = Some(editor),
+            Some(editor) => self.viewer.photo_editor.open(editor),
             None => self.set_note(StatusNote::error(OPEN_FAILED_NOTE)),
         }
         cx.notify();

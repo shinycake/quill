@@ -187,7 +187,7 @@ impl QuillApp {
         self.sound_starts(cx);
         // The sound was replaced, so a recording preview is over.
         self.recording.preview = None;
-        self.viewer.clip_error = None;
+        self.viewer.clip.clear_error();
         let playing = self.start_player(path, offset_secs, duration_secs, cx);
         match kind {
             PlaybackKind::Voice => self.playback.playing_voice = Some(message_id),

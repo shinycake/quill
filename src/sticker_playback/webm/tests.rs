@@ -264,7 +264,7 @@ fn webm_decode_bench() {
     };
     println!("rss_self_start_kb={}", max_rss_kb(libc::RUSAGE_SELF));
     let cancel = AtomicBool::new(false);
-    let child = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let child = std::sync::Arc::new(crate::video::Extraction::default());
     for path in &files {
         for (edge, max) in [(224usize, 120usize), (56, 36)] {
             let mut times = Vec::new();

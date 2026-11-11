@@ -114,13 +114,13 @@ impl QuillApp {
                     .unwrap_or_default();
                 let opens = this
                     .viewer
-                    .photo_editor_after
-                    .take_if(|open| open.render == render)
+                    .photo_editor
+                    .take_deferred_for(render)
                     .is_some_and(|open| open.view == view);
                 match landed.held {
                     // The tray goes now, so no editor opens on it.
                     Some((text, once)) if here => {
-                        this.viewer.photo_editor_after = None;
+                        this.viewer.photo_editor.clear_deferred();
                         this.with_send_once(once, |this| this.submit_composer(text, window, cx));
                     }
                     Some(_) => this.note_held_send_dropped(),
@@ -142,9 +142,7 @@ impl QuillApp {
                 && app
                     .app()
                     .update(cx, |this, cx| {
-                        this.viewer
-                            .photo_editor_after
-                            .take_if(|open| open.render == render);
+                        this.viewer.photo_editor.take_deferred_for(render);
                         let landed =
                             this.land_attachment_edit(&item.slot, render, kept.clone(), cx);
                         if landed.held.is_some() {

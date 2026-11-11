@@ -253,15 +253,51 @@ struct Track {
     paused: Option<(u64, Instant, Arc<RenderImage>)>,
     paused_previous: Option<Arc<RenderImage>>,
     /// The off-screen policy: the in-sight and all paint counts at the
-    /// last wake, wakes counted unseen since, when the last look went
-    /// out, since when no paint came, and whether the last wake was let
-    /// go (a redraw for another reason then converts nothing either).
+    /// last wake, and what the wakes made of them.
     seen: u64,
     painted: u64,
-    unseen: u32,
-    probed: Option<Instant>,
+    sight: Sight,
+}
+
+/// What the wakes counted: wakes unseen, since when no paint came, and
+/// when the last look went out.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+struct Looks {
+    count: u32,
     unpainted_since: Option<Instant>,
-    quiet: bool,
+    probed: Option<Instant>,
+}
+
+/// Whether the picture is in sight. `Quiet`: the last wake was let go (a
+/// redraw for another reason then converts nothing either) until the
+/// next look or a paint in sight.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum Sight {
+    #[default]
+    InView,
+    Unseen(Looks),
+    Quiet(Looks),
+}
+
+impl Sight {
+    fn counting(looks: Looks) -> Self {
+        if looks == Looks::default() {
+            Self::InView
+        } else {
+            Self::Unseen(looks)
+        }
+    }
+
+    fn quiet(&self) -> bool {
+        matches!(self, Self::Quiet(_))
+    }
+
+    fn looks(&self) -> Looks {
+        match self {
+            Self::InView => Looks::default(),
+            Self::Unseen(looks) | Self::Quiet(looks) => *looks,
+        }
+    }
 }
 
 impl Track {
@@ -330,7 +366,7 @@ impl LiveCore {
     /// target; large frames are left to the waker task.
     fn take_inline(&self) -> Option<(Arc<LiveFrame>, Target)> {
         let mut track = self.track.try_borrow_mut().ok()?;
-        if track.quiet {
+        if track.sight.quiet() {
             return None;
         }
         let inline = self.inline_always;
@@ -491,45 +527,44 @@ impl LiveCore {
         let view = self.view.get()?;
         let painted = self.painted.get();
         let mut track = self.track.try_borrow_mut().ok()?;
+        let mut looks = track.sight.looks();
         if shown != track.seen {
             // Painted in sight since the last wake.
             track.seen = shown;
             track.painted = painted;
-            track.unseen = 0;
-            track.probed = None;
-            track.unpainted_since = None;
+            looks = Looks::default();
         } else if painted != track.painted {
             // Painted, but out of sight.
             track.painted = painted;
-            track.unseen = track.unseen.saturating_add(1);
-            track.unpainted_since = None;
+            looks.count = looks.count.saturating_add(1);
+            looks.unpainted_since = None;
         } else {
             // Not painted since the last wake: a slow window that has not
             // drawn yet, or, past 500 ms, one that is not drawing
             // (minimized, or behind another).
-            let since = *track.unpainted_since.get_or_insert(now);
+            let since = *looks.unpainted_since.get_or_insert(now);
             if now.saturating_duration_since(since) >= UNSEEN_STALE {
-                track.unseen = track.unseen.saturating_add(1);
+                looks.count = looks.count.saturating_add(1);
             }
         }
-        if track.unseen >= UNSEEN_WAKES {
+        if looks.count >= UNSEEN_WAKES {
             let probe = if self.tile {
                 UNSEEN_PROBE
             } else {
                 UNSEEN_PROBE_PICTURE
             };
-            let quiet = match track.probed {
+            let quiet = match looks.probed {
                 None => true,
                 Some(at) => now.saturating_duration_since(at) < probe,
             };
             if quiet {
-                track.probed.get_or_insert(now);
-                track.quiet = true;
+                looks.probed.get_or_insert(now);
+                track.sight = Sight::Quiet(looks);
                 return None;
             }
-            track.probed = Some(now);
+            looks.probed = Some(now);
         }
-        track.quiet = false;
+        track.sight = Sight::counting(looks);
         self.asks.set(self.asks.get().wrapping_add(1));
         Some(view)
     }
@@ -737,11 +772,9 @@ impl VideoPlayer {
         core.painted.set(core.painted.get().wrapping_add(1));
         let back = visible
             && core.track.try_borrow_mut().is_ok_and(|mut track| {
-                let quiet = std::mem::take(&mut track.quiet);
+                let quiet = track.sight.quiet();
                 if quiet {
-                    track.unseen = 0;
-                    track.probed = None;
-                    track.unpainted_since = None;
+                    track.sight = Sight::InView;
                 }
                 quiet
             });

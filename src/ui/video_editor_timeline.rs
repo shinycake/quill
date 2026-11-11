@@ -83,6 +83,16 @@ impl Fade {
     pub(super) fn target(&self) -> f32 {
         self.to
     }
+
+    /// A value resting at `at`.
+    fn held_at(at: f32) -> Self {
+        Self {
+            from: at,
+            to: at,
+            start: None,
+            duration_ms: 0,
+        }
+    }
 }
 
 /// A press on the picture: a crop drag, or a tap that pauses.
@@ -105,17 +115,11 @@ pub(super) struct EditorMotion {
     frames_cancel: Option<Arc<AtomicBool>>,
     /// Where the strip control was painted.
     pub(super) timeline_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
-    /// The held part of the strip and the pointer's offset from it.
-    pub(super) grab: Option<(Grab, f32)>,
-    /// The head was dragged in this hold (the bubble flies on release).
-    head_dragged: bool,
+    /// The held part of the strip, if any.
+    pub(super) strip: StripGesture,
     pub(super) dot: Fade,
-    seek_pending: Option<i64>,
-    seek_last: Option<Instant>,
-    pub(super) bubble: Fade,
-    bubble_shown_at: Option<Instant>,
-    /// The picture flying into the bubble since then.
-    pub(super) capture: Option<Instant>,
+    /// The cover bubble and the picture flying into it.
+    pub(super) bubble: CoverBubble,
     /// Where the picture and the crop were painted.
     pub(super) picture_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     pub(super) crop_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
@@ -125,7 +129,135 @@ pub(super) struct EditorMotion {
     pub(super) quality_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     /// The active dot sliding from this index (`_activeShift`).
     pub(super) quality_shift: Fade,
-    pub(super) quality_pressed: bool,
+    pub(super) quality_pointer: QualityPointer,
+}
+
+/// Whether the pointer is down on the quality line.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum QualityPointer {
+    #[default]
+    Up,
+    Down,
+}
+
+/// The player's follow of a drag: at most one seek per `SEEK_THROTTLE`.
+#[derive(Clone, Copy, Default)]
+pub(super) struct Seek {
+    last: Option<Instant>,
+    /// The latest wish a throttled seek has not taken yet.
+    pending: Option<i64>,
+}
+
+/// The strip is idle, or a part of it is held.
+#[derive(Default)]
+pub(super) enum StripGesture {
+    #[default]
+    Idle,
+    Held {
+        grab: Grab,
+        /// The pointer's offset from the held part.
+        shift: f32,
+        seek: Seek,
+    },
+}
+
+impl StripGesture {
+    pub(super) fn is_held(&self) -> bool {
+        matches!(self, Self::Held { .. })
+    }
+}
+
+/// The cover bubble over the strip: shown while the cover moves, then the
+/// picture flies in, and it fades out.
+#[derive(Clone, Copy, Default)]
+pub(super) enum CoverBubble {
+    #[default]
+    Hidden,
+    /// Easing in while the cover is dragged.
+    Showing(Fade),
+    /// The picture flies into the bubble since this instant.
+    Capturing(Instant),
+    /// Fully shown since this instant, for at least `BUBBLE_MIN_VISIBLE`.
+    Shown(Instant),
+    Fading(Fade),
+}
+
+impl CoverBubble {
+    pub(super) fn value(&self, now: Instant) -> f32 {
+        match self {
+            Self::Hidden | Self::Capturing(_) => 0.0,
+            Self::Shown(_) => 1.0,
+            Self::Showing(fade) | Self::Fading(fade) => fade.value(now),
+        }
+    }
+
+    /// The flight's start, while the picture flies.
+    pub(super) fn capture(&self) -> Option<Instant> {
+        match self {
+            Self::Capturing(start) => Some(*start),
+            _ => None,
+        }
+    }
+
+    fn animating(&self, now: Instant) -> bool {
+        match self {
+            Self::Hidden => false,
+            Self::Capturing(_) | Self::Shown(_) => true,
+            Self::Showing(fade) | Self::Fading(fade) => fade.animating(now),
+        }
+    }
+
+    /// The cover is being dragged: ease the bubble in. A flight in progress
+    /// goes on.
+    fn show(&mut self, reduce_motion: bool) {
+        let mut fade = match self {
+            Self::Capturing(_) => return,
+            Self::Hidden => Fade::default(),
+            Self::Shown(_) => Fade::held_at(1.0),
+            Self::Showing(fade) | Self::Fading(fade) => *fade,
+        };
+        if fade.target() < 1.0 {
+            fade.start(1.0, BUBBLE_MS, reduce_motion);
+        }
+        *self = Self::Showing(fade);
+    }
+
+    /// The head was let go: the picture flies into the bubble, or the
+    /// bubble just shows with reduced motion.
+    fn captured(&mut self, now: Instant, reduce_motion: bool) {
+        *self = if reduce_motion {
+            Self::Shown(now)
+        } else {
+            Self::Capturing(now)
+        };
+    }
+
+    fn fade_out(&mut self, reduce_motion: bool) {
+        let mut fade = Fade::held_at(1.0);
+        if let Self::Showing(now) = self {
+            fade = *now;
+        }
+        fade.start(0.0, BUBBLE_MS, reduce_motion);
+        *self = Self::Fading(fade);
+    }
+
+    /// Advance the flight and the fade; `held` is whether the strip is.
+    fn tick(&mut self, now: Instant, reduce_motion: bool, held: bool) {
+        if let Self::Capturing(start) = *self
+            && now.duration_since(start) >= Duration::from_millis(CAPTURE_MS)
+        {
+            *self = Self::Shown(now);
+        }
+        if let Self::Shown(shown) = *self
+            && now.duration_since(shown) >= BUBBLE_MIN_VISIBLE
+        {
+            self.fade_out(reduce_motion);
+        }
+        // The head was let go without a flight: the bubble fades out.
+        if !held && matches!(self, Self::Showing(fade) if fade.target() > 0.0) {
+            self.fade_out(reduce_motion);
+        }
+    }
 }
 
 impl EditorMotion {
@@ -142,14 +274,13 @@ impl EditorMotion {
             || self.bubble.animating(now)
             || self.grid.animating(now)
             || self.quality_shift.animating(now)
-            || self.capture.is_some()
-            || self.bubble_shown_at.is_some()
+
     }
 }
 
 /// The timeline with the strip width it was painted at.
 fn measured(editor: &VideoEditorDialog) -> Option<Timeline> {
-    let mut timeline = editor.timeline?;
+    let mut timeline = editor.timeline()?;
     timeline.width = editor
         .motion
         .timeline_bounds
@@ -169,7 +300,7 @@ fn size_label(editor: &VideoEditorDialog) -> Option<String> {
             true,
         ),
         EditorTarget::Tray(_) | EditorTarget::MessageEdit => {
-            estimated_size(&editor.edits, &editor.info?)?
+            estimated_size(&editor.edits, &editor.info()?)?
         }
     };
     let text = quill::telegram::envelope::format_size_text(i64::try_from(bytes).ok()?);
@@ -183,7 +314,7 @@ impl QuillApp {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
-        let (Some(timeline), Some(info)) = (measured(editor), editor.info) else {
+        let (Some(timeline), Some(info)) = (measured(editor), editor.info()) else {
             return;
         };
         let (_, strip) = timeline.strip();
@@ -264,12 +395,15 @@ impl QuillApp {
             return;
         };
         let grab = timeline.grab_at(x);
-        editor.motion.grab = Some((grab, timeline.grab_shift(grab, x)));
-        editor.motion.head_dragged = grab == Grab::Head;
+        editor.motion.strip = StripGesture::Held {
+            grab,
+            shift: timeline.grab_shift(grab, x),
+            seek: Seek::default(),
+        };
         if grab == Grab::Head {
             editor.motion.dot.start(1.0, DOT_MS, reduce);
         }
-        if let Some(player) = editor.player.as_ref() {
+        if let Some(player) = editor.player() {
             player.pause();
         }
         self.video_timeline_drag(x, cx);
@@ -280,13 +414,15 @@ impl QuillApp {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
-        let (Some(mut timeline), Some((grab, shift))) = (measured(editor), editor.motion.grab)
-        else {
+        let StripGesture::Held { grab, shift, .. } = editor.motion.strip else {
+            return;
+        };
+        let Some(mut timeline) = measured(editor) else {
             return;
         };
         let moved = timeline.drag(grab, x - shift);
-        let width = editor.timeline.map_or(0.0, |kept| kept.width);
-        editor.timeline = Some(Timeline { width, ..timeline });
+        let width = editor.timeline().map_or(0.0, |kept| kept.width);
+        editor.set_timeline(Timeline { width, ..timeline });
         editor.edits.from_ms = timeline.from;
         editor.edits.till_ms = timeline.till;
         editor.edits.cover_ms = timeline.cover;
@@ -297,13 +433,7 @@ impl QuillApp {
             }
             Moved::Trim(at) => at,
             Moved::Cover(at) => {
-                editor.motion.bubble_shown_at = None;
-                if editor.motion.bubble.target() < 1.0 {
-                    editor
-                        .motion
-                        .bubble
-                        .start(1.0, BUBBLE_MS, cx.reduce_motion());
-                }
+                editor.motion.bubble.show(cx.reduce_motion());
                 at
             }
         };
@@ -311,21 +441,23 @@ impl QuillApp {
         // The player follows at most every `SEEK_THROTTLE`; the last wish
         // is taken on release.
         let now = Instant::now();
-        let due = editor
-            .motion
-            .seek_last
-            .is_none_or(|last| now.duration_since(last) >= SEEK_THROTTLE);
-        if due {
-            editor.motion.seek_last = Some(now);
-            editor.motion.seek_pending = None;
-            if let Some(player) = editor.player.as_ref() {
-                player.seek(at as f64 / 1000.0);
+        let mut due = false;
+        if let StripGesture::Held { seek, .. } = &mut editor.motion.strip {
+            due = seek
+                .last
+                .is_none_or(|last| now.duration_since(last) >= SEEK_THROTTLE);
+            if due {
+                seek.last = Some(now);
+                seek.pending = None;
+            } else {
+                seek.pending = Some(at);
             }
-        } else {
-            editor.motion.seek_pending = Some(at);
+        }
+        if due && let Some(player) = editor.player() {
+            player.seek(at as f64 / 1000.0);
         }
         let cover_moved = matches!(moved, Moved::Cover(_));
-        let no_player = editor.player.is_none();
+        let no_player = editor.player().is_none();
         if cover_moved || no_player {
             self.refresh_video_preview(at, cx);
         }
@@ -339,37 +471,31 @@ impl QuillApp {
         let Some(editor) = self.composer_ui.send_box.video_editor.as_mut() else {
             return;
         };
-        let Some((grab, _)) = editor.motion.grab.take() else {
+        let StripGesture::Held { grab, seek, .. } =
+            std::mem::take(&mut editor.motion.strip)
+        else {
             return;
         };
         if grab == Grab::Head {
             editor.motion.dot.start(0.0, DOT_MS, reduce);
         }
         let (from, till) = (editor.edits.from_ms, editor.edits.till_ms);
-        let latest = editor
-            .motion
-            .seek_pending
-            .take()
+        let latest = seek
+            .pending
             .or(editor.playback_ms)
             .unwrap_or(from)
             .clamp(from, till);
         let resume = if latest >= till { from } else { latest };
-        editor.motion.seek_last = None;
         editor.playback_ms = Some(resume);
-        if let Some(player) = editor.player.as_ref() {
+        if let Some(player) = editor.player() {
             player.seek(resume as f64 / 1000.0);
             if !editor.user_paused {
                 player.play();
             }
         }
-        if std::mem::take(&mut editor.motion.head_dragged) {
+        if grab == Grab::Head {
             // `startCapture`: the bubble hides while the picture flies in.
-            if reduce {
-                editor.motion.bubble_shown_at = Some(Instant::now());
-            } else {
-                editor.motion.capture = Some(Instant::now());
-                editor.motion.bubble = Fade::default();
-            }
+            editor.motion.bubble.captured(Instant::now(), reduce);
         }
         cx.notify();
     }
@@ -382,33 +508,8 @@ impl QuillApp {
             return;
         };
         let now = Instant::now();
-        let motion = &mut editor.motion;
-        if let Some(start) = motion.capture
-            && now.duration_since(start) >= Duration::from_millis(CAPTURE_MS)
-        {
-            motion.capture = None;
-            motion.bubble = Fade {
-                from: 1.0,
-                to: 1.0,
-                start: None,
-                duration_ms: 0,
-            };
-            motion.bubble_shown_at = Some(now);
-        }
-        if let Some(shown) = motion.bubble_shown_at
-            && now.duration_since(shown) >= BUBBLE_MIN_VISIBLE
-        {
-            motion.bubble_shown_at = None;
-            motion.bubble.start(0.0, BUBBLE_MS, reduce);
-        }
-        // The head was let go without a flight: the bubble fades out.
-        if motion.grab.is_none()
-            && motion.capture.is_none()
-            && motion.bubble_shown_at.is_none()
-            && motion.bubble.target() > 0.0
-        {
-            motion.bubble.start(0.0, BUBBLE_MS, reduce);
-        }
+        let held = editor.motion.strip.is_held();
+        editor.motion.bubble.tick(now, reduce, held);
     }
 
     /// The strip control: frames, selection, head, cover dot and labels.
@@ -422,7 +523,7 @@ impl QuillApp {
         let scope = self.windows.scope;
         let screen = self.screen_epoch();
         let bounds_cell = editor.motion.timeline_bounds.clone();
-        let timeline = editor.timeline;
+        let timeline = editor.timeline();
         let frames: Vec<Option<Arc<RenderImage>>> = editor
             .motion
             .frames
@@ -432,7 +533,7 @@ impl QuillApp {
         let playback = editor.playback_ms;
         let dot = editor.motion.dot.value(Instant::now());
         let size_text = size_label(editor);
-        let wanted_reload = editor.info.is_some();
+        let wanted_reload = editor.info().is_some();
         let painted_width = editor.motion.frames_width;
         canvas(
             move |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
@@ -515,13 +616,13 @@ impl QuillApp {
         let now = Instant::now();
         let still = editor.still.as_deref().cloned()?;
         let shown = editor.motion.bubble.value(now);
-        let capture = editor.motion.capture.map(|start| {
+        let capture = editor.motion.bubble.capture().map(|start| {
             ease_out_quint(now.duration_since(start).as_millis() as f32 / CAPTURE_MS as f32)
         });
         if shown <= 0.0 && capture.is_none() {
             return None;
         }
-        let mut timeline = editor.timeline?;
+        let mut timeline = editor.timeline()?;
         let strip = editor.motion.timeline_bounds.get()?;
         timeline.width = f32::from(strip.size.width);
         let crop = editor.motion.crop_bounds.get();

@@ -320,7 +320,7 @@ fn the_strip_stays_up_while_the_pointer_rests_on_it(cx: &mut TestAppContext) {
     idle(vcx);
     assert_eq!(current(&app, vcx), 8902);
     assert!(
-        app.read_with(vcx, |app, _| !app.viewer.controls_hidden),
+        app.read_with(vcx, |app, _| !app.viewer.visibility.is_hidden()),
         "a click on a thumb under the resting pointer keeps the strip up"
     );
 
@@ -332,7 +332,7 @@ fn the_strip_stays_up_while_the_pointer_rests_on_it(cx: &mut TestAppContext) {
     settle(vcx);
     idle(vcx);
     assert!(
-        app.read_with(vcx, |app, _| app.viewer.controls_hidden),
+        app.read_with(vcx, |app, _| app.viewer.visibility.is_hidden()),
         "off the strip, the controls fade after the idle wait"
     );
 }

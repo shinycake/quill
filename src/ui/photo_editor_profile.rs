@@ -262,7 +262,7 @@ impl QuillApp {
         }
         let mut editor = PhotoEditor::new(EditorPurpose::Profile(target), pixels);
         editor.crop = editor.initial_crop();
-        self.viewer.photo_editor = Some(editor);
+        self.viewer.photo_editor.open(editor);
         cx.notify();
     }
 

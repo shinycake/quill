@@ -6784,3 +6784,64 @@ Thirty-four minor entries; each was proved against the integration branch first.
   process-wide (`next_query_token`). 13-165: tdesktop toasts the hide at
   once (the bar is optimistic here too, with `RequestRollback`), and the
   local hidden flag is already keyed by account.
+
+### Sweep fixes (is-19)
+
+Thirty-five implicit-state entries; each stage that was a set of bools and
+options is now one value. Behaviour is the same unless said below.
+
+- **Boxes and windows.** Two-step box: `TwoFaBox { Closed, Open { view,
+  confirm, notice } }`; moving to a view or closing replaces the whole
+  value (13-169). What's New window: `WhatsNewWindow { Closed, Opening,
+  Open }` (14-045). Pump scan: `PumpScan { Fresh, Scanned { .. } }` (13-168).
+  Wallpaper preview: the `bg/` link lookup is a `PreviewStage::Looking`
+  carrying its request; the preview reads its answer or failure from the
+  session once and owns the failure line, instead of reading the
+  session-wide `background_error` on every draw (14-022).
+- **Mini apps.** One `LaunchFlow { Idle, Searching, FetchingAttachBot,
+  Adding, Confirming }` holds the launch's wait and its box (14-039); a
+  newer launch replaces an older wait, and an answer for another bot is
+  dropped. The window has `HelperState`, `WriteAccess` and `DataSend`
+  (14-038); `closing_confirmation` is the app's own setting and is in the
+  allow list. The emoji-status lookup is matched by the request id it sent,
+  not by the purpose, so another batch's lookup no longer keeps it alive
+  (14-036). The invoice watch is `Attempt { None, Sending, Failed, Pending }`
+  (14-037).
+- **Video editor.** `EditorStage { Reading, Unreadable, Ready, Encoding }`
+  holds the info, the strip's selection, the player, the note and the serial
+  of the probe or encode in flight (14-005). The strip drag is
+  `StripGesture { Idle, Held { grab, shift, seek } }` and the cover bubble is
+  `CoverBubble` (14-006).
+- **Players.** The live feed's off-screen policy is `Sight { InView, Unseen,
+  Quiet }` (14-016). `ControlsFade` has `Mode { Window, Full { shown_until }
+  }` (14-017). The PiP window has `Gesture { Idle { dragged }, Pressed,
+  Dragging }`, `LineDrag` and `FeedLeft` (14-019). A player's life is
+  `Life { Awake { awaiting }, Failed, Asleep }` (14-027); the loop's seek is
+  `LoopSeek` (14-029). The cover avatar is `Cover { None, Playing, Failed }`
+  and no longer retries a failed file on every frame (14-015).
+- **Viewer.** `ViewerClip { None, Playing, Gif, Failed }` holds the item, the
+  player, the media-session tick (a stored task, so it ends with the clip)
+  and the error (14-031); the dead `video_path` is gone, and `video_layer`
+  stays a separate drawing entity reused across clips. A photo turn is
+  `Reorient { Idle, Decoding, Ready }` with a token (14-032). Controls are
+  `ControlsVisibility { Shown { idle_task }, Hidden }` (14-030). The photo
+  editor and its deferred open are one `PhotoEditorSlot` (14-033).
+- **Caches and ticks.** The wallpaper render board is one map of
+  `Stage { Queued, Running, Done }` by key (14-025). The update pill is
+  `Fill` and `Phase` (14-009); a vanishing message is `GhostStage { Waiting,
+  Crumbling }` (14-014).
+- **Core.** The install receipt records `Outcome`, and old receipts with
+  `failed` still read (14-067). `Extraction` is one value under one lock for
+  a cancelable ffmpeg run, shared by the worker and the UI that cancels it
+  (14-066); the round-video capture is `Capture { Recording, Stopped,
+  Finished }` (14-065). The decode clock is `Run { Paused, HeldAfterSeek,
+  Running }` (14-064); the decode thread's flags are `Decoding { Running,
+  Seeking, Ended, Failed, Stopped }`, so a seek on a failed clip tries the
+  file again (14-062); the player's picture stage is `Presenting`
+  (14-063, 14-072). The voice pause handshake is one atomic with a `Failed`
+  stage (14-070) and a capture is `Source { Live, Fixture, Closed }`
+  (14-071). A passkey ceremony is `CeremonyState`, CTAPHID reassembly is
+  `Assembly { Idle, Reading }` and the Windows cancellation is
+  `Cancellation { Idle, InFlight, Cancelled }` (14-073, 14-074, 14-075).
+- **Files outside the bundle.** The sticker player's `Cancel` and the WebM
+  decode take the new `video::Extraction` (14-066).

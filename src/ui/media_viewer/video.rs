@@ -51,12 +51,12 @@ impl QuillApp {
 
     /// The viewer clip's transport, while one is open.
     pub(in crate::ui) fn viewer_transport(&self) -> Option<crate::ui::video_player::Transport> {
-        self.viewer.player.as_ref().map(|player| player.transport())
+        self.viewer.clip.player().map(|player| player.transport())
     }
 
     /// The viewer clip plays (or is about to): a GIF image always does.
     pub(in crate::ui) fn viewer_video_playing(&self) -> bool {
-        self.viewer.gif.is_some()
+        self.viewer.clip.gif().is_some()
             || self
                 .viewer_transport()
                 .is_some_and(|transport| transport.is_playing())
@@ -95,8 +95,7 @@ impl QuillApp {
         self.stop_voice_playback();
         self.stop_audio_playback();
         self.stop_animation_playback();
-        self.viewer.player = None;
-        self.viewer.gif = None;
+        self.viewer.clip.stop();
         let looping = item.loops();
         let duration = item.duration_secs.unwrap_or(0).max(0) as f64;
         // A media-timestamp link opened this clip at a given second; a
@@ -111,14 +110,12 @@ impl QuillApp {
                     .then(|| self.viewer_photo_clip_start())
             })
             .unwrap_or(0.0);
-        self.viewer.video = Some(item.message_id);
-        self.viewer.video_path = Some(path.to_path_buf());
-        self.viewer.clip_error = None;
+        self.viewer.clip.clear_error();
         if looping
             && Self::viewer_is_gif_file(item, path)
             && !crate::ui::video_player::plays_gif_files()
         {
-            self.viewer.gif = Some(path.to_path_buf());
+            self.viewer.clip.animate(item.message_id, path.to_path_buf());
             cx.notify();
             return;
         }
@@ -132,7 +129,7 @@ impl QuillApp {
             Ok(player) => player,
             Err(err) => {
                 self.stop_viewer_video();
-                self.viewer.clip_error = Some(viewer_error_message(item, &err));
+                self.viewer.clip.fail(viewer_error_message(item, &err));
                 cx.notify();
                 return;
             }
@@ -148,7 +145,7 @@ impl QuillApp {
             player.seek(start);
         }
         player.play();
-        self.viewer.player = Some(player);
+        self.viewer.clip.play(item.message_id, player);
         if !looping {
             self.create_viewer_sliders(duration, cx);
         }
@@ -203,7 +200,7 @@ impl QuillApp {
     /// Pause, keeping the item active so the controls stay and Play
     /// resumes where it stopped.
     pub(in crate::ui) fn pause_viewer_video(&mut self, cx: &mut Context<Self>) {
-        if let Some(player) = &self.viewer.player {
+        if let Some(player) = self.viewer.clip.player() {
             player.pause();
         }
         cx.notify();
@@ -211,9 +208,9 @@ impl QuillApp {
 
     /// Resume where it paused (from the start once it ended).
     pub(in crate::ui) fn resume_viewer_video(&mut self, cx: &mut Context<Self>) {
-        match &self.viewer.player {
+        match self.viewer.clip.player() {
             Some(player) => player.play(),
-            None if self.viewer.gif.is_some() => {}
+            None if self.viewer.clip.gif().is_some() => {}
             None => self.stop_viewer_video(),
         }
         cx.notify();
@@ -223,7 +220,7 @@ impl QuillApp {
     /// never-started → begin from 0 (through `maybe_autoplay_viewer_video`).
     pub(in crate::ui) fn toggle_viewer_video(&mut self, cx: &mut Context<Self>) {
         let playing = self.viewer_video_playing();
-        if self.viewer.video.is_none() {
+        if self.viewer.clip.video().is_none() {
             self.maybe_autoplay_viewer_video(cx);
             return;
         }
@@ -292,10 +289,12 @@ impl QuillApp {
     /// Full stop: drop the player and clear all viewer-video state.
     /// Called on viewer close/step and when any other player starts.
     pub(in crate::ui) fn stop_viewer_video(&mut self) {
-        self.viewer.player = None;
-        self.viewer.gif = None;
-        self.viewer.video = None;
-        self.viewer.video_path = None;
+        let was_playing = self.viewer.clip.player().is_some();
+        self.viewer.clip.stop();
+        if was_playing && self.active_playback_id().is_none() {
+            // The media-session tick that did this ends with the clip.
+            quill::media_session::publish(None);
+        }
         self.drop_viewer_play_intent_here();
         // The player is gone, so a boost has nothing to restore.
         let _ = self.viewer.controls.clear_clip();

@@ -117,7 +117,7 @@ fn discard_stale(mut stale: claim::Claim, exe: &Path) {
         // The helper died after the swap: this start is the new version.
         let landed = plan.release.version == crate::version::APP;
         if plan.target == exe && !landed {
-            let _ = super::write_result(super::receipt_for(exe), &plan.release, true);
+            let _ = super::write_result(super::receipt_for(exe), &plan.release, super::Outcome::Failed);
         }
         discard(stale.path(), Some(&plan), exe);
     }
@@ -279,7 +279,7 @@ mod tests {
 
     fn receipt(exe: &Path) -> Option<InstallResult> {
         let bytes = fs::read(crate::update_install::receipt_for(exe)).ok()?;
-        serde_json::from_slice(&bytes).ok()
+        InstallResult::parse(&bytes)
     }
 
     #[test]
@@ -440,7 +440,7 @@ mod tests {
             assert!(!claim.exists(), "{tag}");
             assert!(!dir.join(format!("{TEMP_PREFIX}a.new")).exists(), "{tag}");
             let failed = receipt(&exe).unwrap();
-            assert!(failed.failed, "{tag}: the failed attempt is reported");
+            assert_eq!(failed.outcome, crate::update_install::Outcome::Failed, "{tag}: the failed attempt is reported");
             assert_eq!(failed.release.version, "999.0.0");
             // The next start opens normally too.
             assert_eq!(

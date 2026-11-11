@@ -7,7 +7,7 @@
 use super::super::super::{PlayState, VideoPlayer};
 use super::super::live::live_badge;
 use super::super::volume_icon;
-use super::{LivePip, VideoPip};
+use super::{FeedLeft, LivePip, VideoPip};
 use gpui_kit::assets::IconName;
 use gpui_kit::*;
 use quill::calls::live_video::LiveEnd;
@@ -48,7 +48,7 @@ impl VideoPip {
                 if !left {
                     return EndCheck::Close;
                 }
-                if !std::mem::replace(&mut self.feed_left_told, true) {
+                if std::mem::replace(&mut self.feed_left, FeedLeft::Told) == FeedLeft::Unasked {
                     let feed_left = live.feed_left.clone();
                     cx.defer(move |cx| feed_left(cx));
                 }

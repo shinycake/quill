@@ -414,7 +414,7 @@ fn saving_without_a_password_asks_to_turn_it_on(cx: &mut TestAppContext) {
         let app = app.read(cx);
         let dialog = app.payments.dialog.as_ref();
         (
-            app.twofa.open,
+            app.twofa.is_open(),
             dialog.is_some_and(|dialog| {
                 dialog.new_card.is_some()
                     && dialog.credential_choice == PaymentCredentialChoice::NewCard
@@ -440,7 +440,7 @@ fn saving_without_a_password_asks_to_turn_it_on(cx: &mut TestAppContext) {
                 pending_reset_date: 0,
             });
         }
-        app.twofa.open = false;
+        app.twofa.close();
         cx.notify();
     });
     draw(&mut vcx);

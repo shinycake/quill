@@ -358,7 +358,7 @@ impl QuillApp {
             .flex()
             .flex_col()
             .gap_2()
-            .when_some(self.twofa.notice.clone(), |this, note| {
+            .when_some(self.twofa.notice().cloned(), |this, note| {
                 this.child(div().text_xs().text_color(danger()).child(note))
             })
             .child(

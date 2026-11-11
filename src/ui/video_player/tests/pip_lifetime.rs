@@ -106,7 +106,7 @@ fn back_to_the_viewer_works_when_the_message_is_no_longer_loaded(cx: &mut TestAp
         assert!(app.viewer.pip.is_none());
         let item = app.viewer.state.current().expect("the viewer is back");
         assert_eq!(item.message_id, MessageId(204));
-        let player = app.viewer.player.as_ref().expect("it plays");
+        let player = app.viewer.clip.player().expect("it plays");
         assert!(player.same_as(&viewer_player));
     });
     assert!(!script.borrow().dropped);
@@ -266,7 +266,7 @@ fn an_album_video_comes_back_to_its_own_item(cx: &mut TestAppContext) {
         assert_eq!(item.message_id, MessageId(205));
         assert_eq!(item.play_file_id, Some(FileId(99)), "the second video");
         assert_eq!(app.viewer.state.current_offset(), 1);
-        let player = app.viewer.player.as_ref().expect("it plays");
+        let player = app.viewer.clip.player().expect("it plays");
         assert!(player.same_as(&viewer_player));
     });
 }
@@ -283,7 +283,7 @@ fn opening_the_clip_from_the_chat_continues_the_pip_player(cx: &mut TestAppConte
     settle(vcx);
     app.read_with(vcx, |app, _| {
         assert!(app.viewer.pip.is_none(), "the window closed");
-        let player = app.viewer.player.as_ref().expect("the viewer plays");
+        let player = app.viewer.clip.player().expect("the viewer plays");
         assert!(
             player.same_as(&viewer_player),
             "the same player, no restart"

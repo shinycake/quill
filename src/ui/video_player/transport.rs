@@ -29,6 +29,21 @@ pub(crate) enum PlayState {
     Failed,
 }
 
+/// The loop's seek back to the start. `Landing`: it was sent ahead of the
+/// end and the backend still reports a position near it (its seek has not
+/// landed yet); it ends when the position leaves the end, or on sleep.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LoopSeek {
+    Idle,
+    Landing,
+}
+
+impl LoopSeek {
+    fn in_flight(self) -> bool {
+        self == Self::Landing
+    }
+}
+
 /// A paused seek or step waits this long for its picture at most.
 const AWAIT_PICTURE: Duration = Duration::from_secs(2);
 /// A player still opening asks for a frame at every vsync this long; an
@@ -194,9 +209,7 @@ pub(crate) struct TransportMachine {
     /// The user wants it playing (survives Opening and Buffering).
     wants_play: bool,
     looping: bool,
-    /// A loop was sent ahead of the end and the backend still reports a
-    /// position near it (its seek has not landed yet).
-    loop_sent: bool,
+    loop_seek: LoopSeek,
     position: f64,
     pulled_at: Instant,
     duration: Option<f64>,
@@ -216,7 +229,7 @@ impl TransportMachine {
             state: PlayState::Opening,
             wants_play: false,
             looping: false,
-            loop_sent: false,
+            loop_seek: LoopSeek::Idle,
             position: 0.0,
             pulled_at: now,
             duration: None,
@@ -338,7 +351,7 @@ impl TransportMachine {
     /// through a new machine. A failed clip stays failed.
     pub(crate) fn sleep(&mut self, now: Instant) {
         self.wants_play = false;
-        self.loop_sent = false;
+        self.loop_seek = LoopSeek::Idle;
         if self.state != PlayState::Failed {
             self.position = self.position_at(now);
             self.pulled_at = now;
@@ -434,23 +447,23 @@ impl TransportMachine {
                 .duration
                 .is_some_and(|total| status.position >= total - LOOP_LEAD);
         if !near_end {
-            self.loop_sent = false;
+            self.loop_seek = LoopSeek::Idle;
         }
         // While a loop's seek has not landed the backend still reports the
         // end: keep the position at the start (no flash of the end in the
         // remaining-time pill).
-        if status.position.is_finite() && !self.loop_sent {
+        if status.position.is_finite() && !self.loop_seek.in_flight() {
             self.position = status.position.max(0.0);
             self.pulled_at = now;
         }
-        let loops_early = near_end && !self.loop_sent;
-        let ended = status.at_end && !self.loop_sent;
+        let loops_early = near_end && !self.loop_seek.in_flight();
+        let ended = status.at_end && !self.loop_seek.in_flight();
         match self.state {
             PlayState::Playing | PlayState::Buffering if ended || loops_early => {
                 if self.looping {
                     self.position = 0.0;
                     self.state = PlayState::Playing;
-                    self.loop_sent = true;
+                    self.loop_seek = LoopSeek::Landing;
                     return Some(Command::Loop);
                 }
                 self.state = PlayState::Ended;

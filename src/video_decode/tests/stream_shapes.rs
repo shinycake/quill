@@ -1,4 +1,5 @@
 use super::super::decode_loop::{Decoder, Turn};
+use super::super::presenting::Presenting;
 use super::super::ffi::FfiDemuxer;
 use super::super::{
     AUDIO_LOW_SECS, AUDIO_OUTPUT_LATENCY, AudioChunk, AudioTap, Demuxer, Item, MediaInfo,
@@ -225,9 +226,7 @@ impl Rig {
         let decoder = Decoder::start(demuxer, &shared, want_audio);
         let mut player = Player {
             shared: shared.clone(),
-            first: true,
-            last_pts: None,
-            ended: false,
+            presenting: Presenting::AwaitingFirst,
             bgra: Default::default(),
             thread: None,
         };
@@ -447,10 +446,10 @@ fn a_clip_ends_on_time_after_its_sound_stopped_early() {
     let frames = frames_to_the_end(2.0);
     let run = rig.run(t0, frames - 1);
     rig.player.update_ended(run.now);
-    assert!(!rig.player.ended, "{} of 2 s", run.last_shown());
+    assert!(!rig.player.presenting.is_ended(), "{} of 2 s", run.last_shown());
     let run = rig.run(run.now, 1);
     rig.player.update_ended(run.now);
-    assert!(rig.player.ended);
+    assert!(rig.player.presenting.is_ended());
     assert!(rig.player.error().is_none());
 }
 
@@ -516,11 +515,11 @@ fn a_clip_nobody_paints_ends_when_its_time_runs_out() {
     let t0 = rig.start();
     rig.play_with_nothing_painting(1.0);
     rig.player.update_ended(t0 + Duration::from_secs(1));
-    assert!(!rig.player.ended, "still playing at 1 s");
+    assert!(!rig.player.presenting.is_ended(), "still playing at 1 s");
     rig.play_with_nothing_painting(1.5);
     rig.player.update_ended(t0 + Duration::from_secs_f64(2.5));
     assert!(
-        rig.player.ended,
+        rig.player.presenting.is_ended(),
         "{} pictures queued",
         rig.pictures_queued()
     );
@@ -536,11 +535,11 @@ fn a_clip_seeked_while_nobody_paints_ends_when_its_time_runs_out() {
     rig.settle();
     rig.play_with_nothing_painting(0.5);
     rig.player.update_ended(t0 + Duration::from_secs_f64(0.5));
-    assert!(!rig.player.ended, "still playing at 1.5 s");
+    assert!(!rig.player.presenting.is_ended(), "still playing at 1.5 s");
     rig.play_with_nothing_painting(1.0);
     rig.player.update_ended(t0 + Duration::from_secs_f64(1.5));
     assert!(
-        rig.player.ended,
+        rig.player.presenting.is_ended(),
         "{} pictures queued at {}",
         rig.pictures_queued(),
         rig.player.position_at(t0 + Duration::from_secs_f64(1.5)),
@@ -562,12 +561,12 @@ fn a_silent_clip_seeked_while_nobody_paints_ends_when_its_time_runs_out() {
         now
     };
     let halfway = play(&mut rig, 0.5);
-    assert!(!rig.player.ended, "still playing at 1.5 s");
+    assert!(!rig.player.presenting.is_ended(), "still playing at 1.5 s");
     let position = rig.player.position_at(halfway);
     assert!((position - 1.5).abs() <= 2.0 * FRAME_SECS, "{position}");
     play(&mut rig, 0.6);
     assert!(
-        rig.player.ended,
+        rig.player.presenting.is_ended(),
         "{} pictures queued at {}",
         rig.pictures_queued(),
         rig.player.position_at(now),
@@ -583,7 +582,7 @@ fn a_paused_silent_clip_seeked_while_nobody_paints_stays_where_it_was_put() {
     rig.settle_at(t0);
     let later = t0 + Duration::from_secs(5);
     rig.player.update_ended(later);
-    assert!(!rig.player.ended);
+    assert!(!rig.player.presenting.is_ended());
     assert_eq!(rig.player.position_at(later), 1.0);
 }
 
@@ -747,7 +746,7 @@ fn a_seek_past_the_last_picture_ends_the_clip() {
     rig.player.seek(1.0);
     rig.settle();
     rig.player.update_ended(t0);
-    assert!(rig.player.ended);
+    assert!(rig.player.presenting.is_ended());
     assert!(rig.player.error().is_none());
     assert_eq!(rig.player.position_at(t0), 1.0);
 }
@@ -775,7 +774,7 @@ fn a_seek_where_pictures_ran_out_before_the_duration_ends_there() {
     rig.player.seek(2.0);
     rig.settle();
     rig.player.update_ended(t0);
-    assert!(rig.player.ended);
+    assert!(rig.player.presenting.is_ended());
     assert_eq!(rig.player.position_at(t0), 3.0);
 }
 
@@ -789,7 +788,7 @@ fn a_seek_into_sound_with_no_pictures_runs_on_the_sound_then_ends() {
     rig.player.seek(2.0);
     rig.settle();
     rig.player.update_ended(t0);
-    assert!(!rig.player.ended, "the sound is still playing");
+    assert!(!rig.player.presenting.is_ended(), "the sound is still playing");
     let t1 = t0 + Duration::from_millis(500);
     rig.pull_sound(0.5);
     let heard = rig.player.position_at(t1);
@@ -797,7 +796,7 @@ fn a_seek_into_sound_with_no_pictures_runs_on_the_sound_then_ends() {
     rig.pull_sound(1.0);
     rig.settle();
     rig.player.update_ended(t1);
-    assert!(rig.player.ended);
+    assert!(rig.player.presenting.is_ended());
 }
 
 #[test]
@@ -842,7 +841,7 @@ fn a_seek_to_the_end_before_any_picture_showed_is_not_a_failure() {
     rig.settle();
     assert!(rig.player.error().is_none());
     rig.player.update_ended(Instant::now());
-    assert!(rig.player.ended);
+    assert!(rig.player.presenting.is_ended());
 }
 
 #[test]
@@ -859,7 +858,7 @@ fn ffmpeg_keeps_showing_pictures_after_the_sound_stopped_and_ends() {
     let sound_off = (run.sound - STOPS_EARLY_SOUND_SECS).abs();
     assert!(sound_off < 0.05, "{} s of sound", run.sound);
     rig.player.update_ended(run.now);
-    assert!(rig.player.ended);
+    assert!(rig.player.presenting.is_ended());
     assert!(rig.player.error().is_none());
 }
 
@@ -939,7 +938,7 @@ fn ffmpeg_a_seek_past_the_end_shows_the_last_picture_then_ends() {
     rig.settle();
     rig.play_out_sound();
     rig.player.update_ended(t0);
-    assert!(rig.player.ended);
+    assert!(rig.player.presenting.is_ended());
     assert_eq!(rig.player.position_at(t0), total);
     assert!(rig.player.error().is_none());
 }

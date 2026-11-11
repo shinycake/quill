@@ -98,7 +98,7 @@ pub(super) fn open_pip_on(
     });
     settle(vcx_ref);
     let player = app
-        .read_with(vcx_ref, |app, _| app.viewer.player.clone())
+        .read_with(vcx_ref, |app, _| app.viewer.clip.player().cloned())
         .expect("the viewer plays the clip");
     calls(script);
     app.update_in(vcx_ref, |app, _, cx| app.open_video_pip(cx));
@@ -145,7 +145,7 @@ fn the_viewer_hands_its_player_over_and_the_window_plays_pauses_and_closes(
     // The viewer closed and let go of its player; the window has it.
     app.read_with(vcx, |app, _| {
         assert!(!app.viewer.state.is_open());
-        assert!(app.viewer.player.is_none());
+        assert!(app.viewer.clip.player().is_none());
     });
     let (window, view) = pip_of(&app, vcx);
     let player = pip_player(&view, vcx).expect("the window plays");
@@ -233,7 +233,7 @@ fn back_to_the_viewer_reopens_it_with_the_same_player_where_it_was(cx: &mut Test
             (item.chat_id, item.message_id),
             (ChatId(11), MessageId(204))
         );
-        let player = app.viewer.player.as_ref().expect("the viewer plays");
+        let player = app.viewer.clip.player().expect("the viewer plays");
         assert!(player.same_as(&viewer_player), "the same player came back");
         assert!(player.wants_play());
         // Where it was (the transport runs on while playing).
@@ -345,7 +345,7 @@ fn a_secret_chats_clip_never_goes_to_picture_in_picture(cx: &mut TestAppContext)
     app.read_with(&vcx, |app, _| {
         assert!(app.viewer.pip.is_none(), "no floating window");
         assert!(app.viewer.state.is_open(), "the viewer keeps the clip");
-        assert!(app.viewer.player.is_some());
+        assert!(app.viewer.clip.player().is_some());
     });
 }
 

@@ -36,7 +36,7 @@ pub use head::{AHEAD, Pick, PlayHead, PlayMode, Rest, Timeline};
 use super::{FitzType, Tint};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 /// The largest edge a clip is drawn at.
 pub const MAX_EDGE: u32 = 1024;
@@ -102,7 +102,7 @@ impl DecodedFrames {
 #[derive(Clone, Default)]
 pub struct Cancel {
     pub flag: Arc<AtomicBool>,
-    pub child: Arc<Mutex<Option<std::process::Child>>>,
+    pub child: Arc<crate::video::Extraction>,
 }
 
 /// A decode that runs through every frame in one go (WebM video stickers,

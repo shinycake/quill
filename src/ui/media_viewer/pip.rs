@@ -50,16 +50,16 @@ impl QuillApp {
         // never comes.
         self.cancel_viewer_boost(cx);
         // Only clips with the controller go (tdesktop `_streamed->controls`).
-        if self.viewer.gif.is_some() || self.viewer_loops() {
+        if self.viewer.clip.gif().is_some() || self.viewer_loops() {
             return;
         }
         let Some(item) = self.viewer.state.current().cloned() else {
             return;
         };
-        if self.viewer.video != Some(item.message_id) || !self.viewer_may_pip(&item) {
+        if self.viewer.clip.video() != Some(item.message_id) || !self.viewer_may_pip(&item) {
             return;
         }
-        let Some(player) = self.viewer.player.take() else {
+        let Some(player) = self.viewer.clip.take_player() else {
             return;
         };
         let clip = ClipRef {
@@ -260,14 +260,10 @@ impl QuillApp {
     pub(super) fn adopt_viewer_player(
         &mut self,
         item: &MediaViewerItem,
-        path: &std::path::Path,
+        _path: &std::path::Path,
         player: VideoPlayer,
         cx: &mut Context<Self>,
     ) {
-        self.viewer.gif = None;
-        self.viewer.video = Some(item.message_id);
-        self.viewer.video_path = Some(path.to_path_buf());
-        self.viewer.clip_error = None;
         let total = player.transport().total();
         let duration = if total > 0.0 {
             total
@@ -275,7 +271,7 @@ impl QuillApp {
             f64::from(item.duration_secs.unwrap_or(0).max(0))
         };
         player.clear_watchers();
-        self.viewer.player = Some(player);
+        self.viewer.clip.play(item.message_id, player);
         self.create_viewer_sliders(duration, cx);
         self.spawn_viewer_session_tick(cx);
         cx.notify();
@@ -320,8 +316,8 @@ impl QuillApp {
         self.reset_viewer_item_state(cx);
         let taken = self
             .viewer
-            .player
-            .as_ref()
+            .clip
+            .player()
             .is_some_and(|viewer| viewer.same_as(&player));
         if !taken {
             // Nothing reopened the clip: the window keeps playing it.

@@ -4,7 +4,6 @@ ActiveGroupCall::loaded_all_participants
 ActiveGroupCall::loaded_all_participants+transport_error
 ActiveGroupCall::screen_share_pending
 AppearancePrefs::ignore_battery_saving
-Assembly::started
 AudioEngine::failed
 AudioEngine::start_failed
 AudioEngine::start_failed+error
@@ -25,7 +24,6 @@ CallSnap::connecting
 CallSummary::busy
 CallUi::window_opening
 CameraDraft::starting
-Ceremony::finished
 ChatListState::archive_settings_loading
 ChatSummary::my_rights_fetched
 ChatSwipeFacts::is_saved
@@ -82,12 +80,8 @@ HistoryState::loaded_complete
 HistoryState::newer_failed
 HistoryUi::anchor_pending
 InlineMembersUi::admins_asked
-InstallResult::failed
 InviteLinkMembersState::loading
 InviteLinkMembersState::loading+error
-InvoiceWatch::failed
-InvoiceWatch::pending
-InvoiceWatch::sending
 JoinedLines::started
 LanguageLinkLookup::loading
 LanguageLinkLookup::loading+error
@@ -111,9 +105,6 @@ MediaFacts::in_saved_messages
 MediaMenuFacts::downloading
 MediaState::disk_paused_saved_changed
 MembersView::loading
-MiniAppWindow::closing_confirmation
-MiniAppWindow::data_sent
-MiniAppWindow::waiting_write_access
 MutedSpeechHint::done
 NewChatView::busy
 NewChatView::busy+failure
@@ -207,15 +198,11 @@ ThreadWindow::loaded_complete
 TopPerson::saved_messages
 TopicHistory::loaded_complete
 TopicHistory::newer_failed
-TransportMachine::loop_sent
 UiClip::failed
-UpdatePill::downloading
 UsersState::background_emoji_icons_failed
 UsersState::background_emoji_icons_failed+profile_edit_error
 UsersState::chat_photo_emoji_icons_failed
 UsersState::profile_photo_emoji_icons_failed
 UsersState::wearable_gifts_loaded
 Validation::finished
-VideoEditorDialog::busy
 WebApps::grossing_loading
-WhatsNewUi::opening

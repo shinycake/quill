@@ -152,18 +152,17 @@ enum RenderAction {
 pub(super) struct MiniAppWindow {
     child: Option<Child>,
     writer: helper_pipe::HelperWriter,
-    /// Set once the helper stopped reading and was killed.
-    wedged: bool,
+    helper: launch_flow::HelperState,
     events: mpsc::Receiver<HelperEvent>,
     launch: WebAppLaunch,
     theme: ThemeParams,
-    ready: bool,
+    /// The app asked to confirm before it closes (`setup_closing_behavior`).
     closing_confirmation: bool,
     settings_button: bool,
     popups: HashMap<String, PopupPurpose>,
     popup_seq: u64,
-    waiting_write_access: bool,
-    data_sent: bool,
+    write_access: launch_flow::WriteAccess,
+    data_sent: launch_flow::DataSend,
     privacy_policy_url: Option<String>,
     in_attachment_menu: bool,
     emoji: emoji_status::EmojiStatusFlow,
@@ -195,11 +194,11 @@ impl MiniAppWindow {
 
     fn send(&mut self, command: &HostCommand) {
         if self.writer.send(encode(command).into_bytes()) == helper_pipe::Sent::Queued
-            || self.wedged
+            || self.helper == launch_flow::HelperState::Wedged
         {
             return;
         }
-        self.wedged = true;
+        self.helper = launch_flow::HelperState::Wedged;
         eprintln!("quill: the mini app helper stopped reading its input; closing it");
         if let Some(child) = self.child.as_mut() {
             let _ = child.kill();
@@ -271,14 +270,8 @@ impl crate::ui::on_screen::Farewell for MiniApps {
 #[derive(Default)]
 pub(super) struct MiniApps {
     pub(super) window: Option<MiniAppWindow>,
-    pub(super) confirm: Option<WebAppConfirm>,
-    /// A launch waiting for `getAttachmentMenuBot` (deep link) before it
-    /// can go on.
-    awaiting_attach_bot: Option<Awaited>,
-    /// A launch waiting for `searchWebApp` before the open box.
-    awaiting_search: Option<Awaited>,
-    /// A launch waiting for `toggleBotIsAddedToAttachmentMenu`.
-    awaiting_toggle: Option<Awaited>,
+    /// The launch's answer or box it waits on.
+    flow: launch_flow::LaunchFlow,
     /// What only a render can do, in the order it was asked: two asked
     /// before the next render both run.
     render_actions: Vec<RenderAction>,
@@ -565,7 +558,7 @@ impl QuillApp {
                     .map(|live| live.driver.search_web_app(bot_id, short_name));
                 if matches!(sent, Some(Ok(_))) {
                     let window = self.asking_window_or_last_press();
-                    self.mini_apps.awaiting_search = Some(Awaited {
+                    self.mini_apps.flow.search(Awaited {
                         then: PendingOpen::Link {
                             chat_id: Some(chat_id),
                             bot_id,
@@ -607,7 +600,7 @@ impl QuillApp {
                     .map(|live| live.driver.fetch_attachment_menu_bot(bot_id));
                 if matches!(sent, Some(Ok(_))) {
                     let window = self.asking_window_or_last_press();
-                    self.mini_apps.awaiting_attach_bot = Some(Awaited {
+                    self.mini_apps.flow.fetch_attach_bot(Awaited {
                         then: PendingOpen::Attach {
                             chat_id: target,
                             bot_id,
@@ -659,7 +652,7 @@ impl QuillApp {
             .and_then(|session| session.users.get(&bot_id))
             .is_some_and(|user| user.verification.is_verified);
         if trust::needs_confirmation(&self.web_app_account(), bot_id, verified, false) {
-            self.mini_apps.confirm = Some(WebAppConfirm::OpenTerms {
+            self.mini_apps.flow.ask(WebAppConfirm::OpenTerms {
                 then: open,
                 request_write: false,
                 allow_write: false,
@@ -745,7 +738,7 @@ impl QuillApp {
 
     /// The box's main button.
     pub(super) fn accept_web_app_confirm(&mut self, cx: &mut Context<Self>) {
-        let Some(confirm) = self.mini_apps.confirm.take() else {
+        let Some(confirm) = self.mini_apps.flow.take_confirm() else {
             return;
         };
         match confirm {
@@ -788,7 +781,7 @@ impl QuillApp {
                 });
                 if matches!(sent, Some(Ok(_))) {
                     let window = self.asking_window_or_last_press();
-                    self.mini_apps.awaiting_toggle = Some(Awaited { then, window });
+                    self.mini_apps.flow.add(Awaited { then, window });
                     self.ensure_mini_app_poll(cx);
                 } else {
                     self.set_status_note(
@@ -802,12 +795,12 @@ impl QuillApp {
     }
 
     pub(super) fn cancel_web_app_confirm(&mut self, cx: &mut Context<Self>) {
-        self.mini_apps.confirm = None;
+        self.mini_apps.flow.clear_confirm();
         cx.notify();
     }
 
     pub(super) fn set_web_app_confirm_write(&mut self, on: bool, cx: &mut Context<Self>) {
-        match &mut self.mini_apps.confirm {
+        match self.mini_apps.flow.confirm_mut() {
             Some(WebAppConfirm::OpenTerms { allow_write, .. })
             | Some(WebAppConfirm::AddToMenu { allow_write, .. }) => *allow_write = on,
             Some(WebAppConfirm::RemoveFromMenu { .. }) | None => {}
@@ -823,12 +816,12 @@ impl QuillApp {
     ) -> Dialog {
         let on_close =
             QuillShell::on_close_kind(app, shell, DialogKind::WebAppConfirm, |this, _, cx| {
-                this.mini_apps.confirm = None;
+                this.mini_apps.flow.clear_confirm();
                 cx.notify();
             });
         app.update(cx, |this, cx| {
             let muted = cx.theme().muted_foreground;
-            let Some(confirm) = this.mini_apps.confirm.clone() else {
+            let Some(confirm) = this.mini_apps.flow.confirm().cloned() else {
                 return dialog;
             };
             let bot_name = |this: &QuillApp, bot_id: i64| {
@@ -977,6 +970,7 @@ fn bottom_button(setup: quill::web_app::bridge::ButtonSetup) -> BottomButton {
 mod awaited;
 mod emoji_status;
 mod helper_pipe;
+mod launch_flow;
 mod inline_results_button;
 mod invoice;
 mod phone;
@@ -986,10 +980,10 @@ crate::ui::shell::register_dialogs! {
     /// Mini apps: the first-open terms box / add to the attachment menu.
     WebAppConfirm => DialogSpec::new(
         2550,
-        |app| app.mini_apps.confirm.is_some(),
+        |app| app.mini_apps.flow.confirm().is_some(),
         QuillApp::build_web_app_confirm_dialog,
     )
-    .close(|app, _, cx| { app.mini_apps.confirm = None; cx.notify(); }),
+    .close(|app, _, cx| { app.mini_apps.flow.clear_confirm(); cx.notify(); }),
 }
 
 #[cfg(test)]

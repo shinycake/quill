@@ -58,7 +58,7 @@ fn open_window(app: &mut QuillApp, cx: &mut gpui_kit::App) -> mpsc::Receiver<Hos
     app.mini_apps.window = Some(MiniAppWindow {
         child: Some(child),
         writer: HelperWriter::spawn(stdin),
-        wedged: false,
+        helper: crate::ui::web_app_ui::launch_flow::HelperState::Ready,
         events: mpsc::channel().1,
         launch: WebAppLaunch {
             bot_user_id: BOT,
@@ -69,13 +69,12 @@ fn open_window(app: &mut QuillApp, cx: &mut gpui_kit::App) -> mpsc::Receiver<Hos
             url: "https://example.com/app".into(),
         },
         theme: theme_params(cx),
-        ready: true,
         closing_confirmation: false,
         settings_button: false,
         popups: Default::default(),
         popup_seq: 0,
-        waiting_write_access: false,
-        data_sent: false,
+        write_access: crate::ui::web_app_ui::launch_flow::WriteAccess::Idle,
+        data_sent: crate::ui::web_app_ui::launch_flow::DataSend::Unsent,
         privacy_policy_url: None,
         in_attachment_menu: false,
         emoji: Default::default(),
@@ -276,18 +275,14 @@ fn an_account_switch_closes_the_mini_app_and_what_waits(cx: &mut TestAppContext)
             then: waiting,
             window: None,
         };
-        app.mini_apps.awaiting_attach_bot = Some(awaited.clone());
-        app.mini_apps.awaiting_search = Some(awaited.clone());
-        app.mini_apps.awaiting_toggle = Some(awaited);
+        app.mini_apps.flow.add(awaited);
         app.ensure_mini_app_poll(cx);
 
         app.switch_account(&quill::ids::AccountKey("other".into()), "", window, cx);
 
         assert!(app.mini_apps.window.is_none(), "the window closed");
         assert!(matches!(next(&received), HostCommand::Close));
-        assert!(app.mini_apps.awaiting_attach_bot.is_none());
-        assert!(app.mini_apps.awaiting_search.is_none());
-        assert!(app.mini_apps.awaiting_toggle.is_none());
+        assert!(!app.mini_apps.flow.is_waiting(), "the launch's wait went");
         assert!(app.mini_apps.poll.is_none(), "the poll stopped");
         assert!(!app.poll_mini_apps(cx), "nothing is left to wait for");
     });

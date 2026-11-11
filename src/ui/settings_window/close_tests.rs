@@ -315,7 +315,7 @@ fn aborting_the_recovery_email_asks_inside_the_2fa_box(cx: &mut TestAppContext) 
     frames(vcx);
     app.read_with(vcx, |app, _| {
         assert_eq!(
-            app.twofa.confirm,
+            app.twofa.confirm(),
             Some(crate::ui::dialogs::TwofaConfirm::AbortRecoveryEmail)
         );
         assert!(app.admin.group_confirm_dialog.is_none(), "no box under it");
