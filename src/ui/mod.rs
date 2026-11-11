@@ -72,6 +72,7 @@ mod connection_state;
 mod country_box;
 pub(crate) mod crash_notice;
 mod demo_state;
+mod dialog_body;
 mod dialog_image_cache;
 mod dialogs_state;
 mod display_events;

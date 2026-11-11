@@ -129,7 +129,7 @@ impl QuillApp {
             .folders
             .editor
             .as_ref()
-            .is_some_and(|d| d.load == FolderLoad::Merging)
+            .is_some_and(|d| matches!(d.load, FolderLoad::Merging))
         {
             self.settle_folder_editor_merge(cx);
             return;
@@ -183,7 +183,7 @@ impl QuillApp {
                 .and_then(|d| d.editor.spec_onto_current(&d.base, fresh.as_ref()));
             let Some(spec) = merged else { return };
             if let Some(dialog) = self.folders.editor.as_mut() {
-                dialog.load = FolderLoad::Ready;
+                dialog.load = FolderLoad::ready();
             }
             self.send_folder_editor_spec(Some(folder_id), spec, cx);
             return;
@@ -214,8 +214,7 @@ impl QuillApp {
             }
         };
         if let Some(dialog) = self.folders.editor.as_mut() {
-            dialog.load = FolderLoad::Ready;
-            dialog.error = Some(error);
+            dialog.load = FolderLoad::refused(error);
         }
         cx.notify();
     }
@@ -236,15 +235,13 @@ impl QuillApp {
             None => return,
             Some(DialogAnswer::Failed(line)) => {
                 if let Some(dialog) = self.folders.editor.as_mut() {
-                    dialog.load = FolderLoad::Ready;
-                    dialog.error = Some(line);
+                    dialog.load = FolderLoad::refused(line);
                 }
             }
             // The limit box is up; the form stays as it was, with no line.
             Some(DialogAnswer::LimitHit) => {
                 if let Some(dialog) = self.folders.editor.as_mut() {
-                    dialog.load = FolderLoad::Ready;
-                    dialog.error = None;
+                    dialog.load = FolderLoad::ready();
                 }
             }
             Some(DialogAnswer::Done | DialogAnswer::Checked(_)) => {

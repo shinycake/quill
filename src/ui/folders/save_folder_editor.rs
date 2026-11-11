@@ -9,14 +9,14 @@ impl QuillApp {
     pub(in crate::ui) fn save_folder_editor(&mut self, cx: &mut Context<Self>) {
         let (name, folder_id) = match self.folders.editor.as_ref() {
             // The folder is still loading: its spec would go out blank.
-            Some(dialog) if dialog.load != FolderLoad::Ready => return,
+            Some(dialog) if !dialog.load.is_ready() => return,
             Some(dialog) => (dialog.name(cx), dialog.folder_id),
             None => return,
         };
         if let Some(dialog) = self.folders.editor.as_mut() {
             dialog.editor.name = name;
             if let Some(err) = dialog.editor.validate() {
-                dialog.error = Some(err.to_string());
+                dialog.load = FolderLoad::refused(err.to_string());
                 cx.notify();
                 return;
             }
@@ -65,12 +65,10 @@ impl QuillApp {
         if let Some(dialog) = self.folders.editor.as_mut() {
             match sent {
                 Some(Err(err)) => {
-                    dialog.error = Some(user_error_for(keys::Q_NOTES_FAILED_FOLDER, &err));
+                    dialog.load =
+                        FolderLoad::refused(user_error_for(keys::Q_NOTES_FAILED_FOLDER, &err));
                 }
-                _ => {
-                    dialog.load = FolderLoad::Merging;
-                    dialog.error = None;
-                }
+                _ => dialog.load = FolderLoad::Merging,
             }
         }
         cx.notify();
@@ -114,13 +112,13 @@ impl QuillApp {
             Ok(Some(request)) => {
                 if let Some(dialog) = self.folders.editor.as_mut() {
                     dialog.load = FolderLoad::Saving(request);
-                    dialog.error = None;
                 }
             }
             Ok(None) => self.folder_editor_saved(folder_id.is_some()),
             Err(err) => {
                 if let Some(dialog) = self.folders.editor.as_mut() {
-                    dialog.error = Some(user_error_for(keys::Q_NOTES_FAILED_SAVE_FOLDER, &err));
+                    dialog.load =
+                        FolderLoad::refused(user_error_for(keys::Q_NOTES_FAILED_SAVE_FOLDER, &err));
                 }
             }
         }
@@ -230,16 +228,23 @@ impl QuillApp {
             Some(live) => live
                 .driver
                 .delete_chat_folder(confirm.folder_id, &leave)
-                .map(|_| ()),
+                .map(Some),
             None => {
                 self.apply_demo_folder_delete(confirm.folder_id);
-                Ok(())
+                Ok(None)
             }
         };
-        self.set_note(match result {
-            Ok(()) => StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_DELETED)),
-            Err(err) => StatusNote::error(user_error_for(keys::Q_NOTES_FAILED_DELETE_FOLDER, &err)),
-        });
+        match result {
+            // The toast waits for TDLib's answer (`settle_folder_deletes`).
+            Ok(Some(request)) => {
+                self.folders.deletes.insert(confirm.folder_id, request);
+            }
+            Ok(None) => self.set_note(StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_DELETED))),
+            Err(err) => self.set_note(StatusNote::error(user_error_for(
+                keys::Q_NOTES_FAILED_DELETE_FOLDER,
+                &err,
+            ))),
+        }
         // The tab follows the folder's end: the live app leaves it when
         // `updateChatFolders` no longer lists the folder (the poll), so a
         // delete that failed keeps the folder and its tab.
@@ -247,6 +252,42 @@ impl QuillApp {
             self.set_chat_list_view(self.chat_list.filter, None);
         }
         cx.notify();
+    }
+
+    /// Poll-loop half of the folder delete: the toast says what TDLib
+    /// answered to each `deleteChatFolder`.
+    pub(in crate::ui) fn settle_folder_deletes(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.folders.deletes.is_empty() {
+            return false;
+        }
+        let waiting: Vec<(i32, quill::ids::RequestId)> = self
+            .folders
+            .deletes
+            .iter()
+            .map(|(folder, request)| (*folder, *request))
+            .collect();
+        let mut changed = false;
+        for (folder_id, request) in waiting {
+            let Some(answer) = self
+                .session_mut()
+                .and_then(|s| s.chat_list.dialog_answers.take(request))
+            else {
+                continue;
+            };
+            self.folders.deletes.remove(&folder_id);
+            use quill::state::DialogAnswer;
+            self.set_note(match answer {
+                DialogAnswer::Failed(line) => StatusNote::error(line),
+                DialogAnswer::Done | DialogAnswer::Checked(_) | DialogAnswer::LimitHit => {
+                    StatusNote::silent(tr(keys::Q_CHATLIST_FOLDER_DELETED))
+                }
+            });
+            changed = true;
+        }
+        if changed {
+            cx.notify();
+        }
+        changed
     }
 
     /// Settings > Folders' up and down buttons: swap a folder with its

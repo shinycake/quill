@@ -84,13 +84,10 @@ QuillApp::build_deep_link_share_dialog::body.borrow_mut 1
 QuillApp::build_direct_confirm_dialog::body.borrow_mut 1
 QuillApp::build_direct_messages_dialog::body.borrow_mut 1
 QuillApp::build_drop_topic_dialog::body.borrow_mut 1
-QuillApp::build_earn_withdraw_dialog::body.borrow_mut 1
 QuillApp::build_edit_profile_dialog::body.borrow_mut 1
 QuillApp::build_emoji_sets_dialog::body.borrow_mut 1
 QuillApp::build_fact_check_dialog::body.borrow_mut 1
 QuillApp::build_file_open_dialog::body.borrow_mut 1
-QuillApp::build_folder_delete_dialog::body.borrow_mut 1
-QuillApp::build_folder_editor_dialog::body.borrow_mut 1
 QuillApp::build_forum_manage_dialog::body.borrow_mut 1
 QuillApp::build_gift_market_dialog::body.borrow_mut 1
 QuillApp::build_gift_transfer_dialog::body.borrow_mut 1
@@ -100,8 +97,6 @@ QuillApp::build_grams_dialog::body.borrow_mut 1
 QuillApp::build_grams_needed_dialog::body.borrow_mut 1
 QuillApp::build_grams_withdraw_dialog::body.borrow_mut 1
 QuillApp::build_group_call_create_dialog::body.borrow_mut 1
-QuillApp::build_group_confirm_dialog::body.borrow_mut 1
-QuillApp::build_group_history_box::body.borrow_mut 1
 QuillApp::build_group_settings_dialog::body.borrow_mut 1
 QuillApp::build_import_contacts_dialog::body.borrow_mut 1
 QuillApp::build_invite_link_custom_dialog::field.borrow_mut 1
@@ -123,7 +118,6 @@ QuillApp::build_passcode_dialog::body.borrow_mut 1
 QuillApp::build_payment_dialog::body.borrow_mut 2
 QuillApp::build_payment_receipt_dialog::body.borrow_mut 1
 QuillApp::build_peer_color_dialog::body.borrow_mut 1
-QuillApp::build_permissions_dialog::body.borrow_mut 1
 QuillApp::build_pick_sticker_dialog::body.borrow_mut 1
 QuillApp::build_poll_voters_dialog::body.borrow_mut 1
 QuillApp::build_premium_dialog::body.borrow_mut 1
@@ -160,7 +154,6 @@ QuillApp::build_text_box::body.borrow_mut 1
 QuillApp::build_theme_editor_dialog::body.borrow_mut 1
 QuillApp::build_translate_dialog::body.borrow_mut 1
 QuillApp::build_twofa_dialog::body.borrow_mut 1
-QuillApp::build_username_dialog::body.borrow_mut 1
 QuillApp::build_video_editor_dialog::body.borrow_mut 1
 QuillApp::build_wallet_notice_dialog::body.borrow_mut 1
 QuillApp::build_wallpaper_preview_dialog::body.borrow_mut 1
@@ -324,7 +317,6 @@ note_playing::playing.borrow_mut 1
 note_source::source.borrow_mut 1
 note_target::last.borrow_mut 1
 once::body.borrow_mut 2
-one_shot::body.borrow_mut 2
 open_chat_window::built.borrow_mut 1
 open_chat_window::built_out.borrow_mut 1
 open_if_ready::first.borrow_mut 1

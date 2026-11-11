@@ -12,13 +12,48 @@ use quill::lang::{keys, tr};
 pub struct WelcomeDialog {
     pub(crate) chat_id: ChatId,
     pub(crate) new_input: Entity<TextareaState>,
-    pub(crate) editing: Option<i32>,
+    /// The row being edited, with its Save.
+    pub(crate) row: RowEdit,
     pub(crate) edit_input: Entity<TextareaState>,
     /// The last Add: the typed text goes on its answer, stays on its error.
     pub(crate) add: quill::state::Submit,
-    /// The last Save of the row being edited: the row closes on its
-    /// answer, stays open on its error.
-    pub(crate) save: quill::state::Submit,
+}
+
+/// The inline edit row. The row id, its Save and the edit text's owner
+/// are one value: opening another row replaces it whole.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) enum RowEdit {
+    #[default]
+    Closed,
+    /// Row `id` is open. `save` is its last Save: the row closes on its
+    /// answer and stays open on its error.
+    Open { id: i32, save: quill::state::Submit },
+}
+
+impl RowEdit {
+    /// The id of the row being edited.
+    pub(crate) fn id(&self) -> Option<i32> {
+        match self {
+            RowEdit::Closed => None,
+            RowEdit::Open { id, .. } => Some(*id),
+        }
+    }
+
+    /// The open row's Save.
+    pub(crate) fn save(&self) -> Option<&quill::state::Submit> {
+        match self {
+            RowEdit::Closed => None,
+            RowEdit::Open { save, .. } => Some(save),
+        }
+    }
+
+    /// The open row's Save, to settle or replace.
+    pub(crate) fn save_mut(&mut self) -> Option<&mut quill::state::Submit> {
+        match self {
+            RowEdit::Closed => None,
+            RowEdit::Open { save, .. } => Some(save),
+        }
+    }
 }
 
 impl WelcomeDialog {
@@ -38,10 +73,39 @@ impl WelcomeDialog {
         Self {
             chat_id,
             new_input,
-            editing: None,
+            row: RowEdit::Closed,
             edit_input,
             add: Default::default(),
-            save: Default::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RowEdit;
+    use quill::ids::RequestId;
+    use quill::state::Submit;
+
+    #[test]
+    fn a_row_edit_carries_its_row_and_its_save_together() {
+        let mut row = RowEdit::Closed;
+        assert_eq!(row.id(), None);
+        assert!(row.save().is_none());
+        assert!(row.save_mut().is_none());
+        row = RowEdit::Open {
+            id: 4,
+            save: Submit::Editing,
+        };
+        if let Some(save) = row.save_mut() {
+            *save = Submit::sent(vec![RequestId(9)]);
+        }
+        assert_eq!(row.id(), Some(4));
+        assert_eq!(row.save(), Some(&Submit::Sending(vec![RequestId(9)])));
+        // Another row replaces the value whole: no save of the old row stays.
+        row = RowEdit::Open {
+            id: 5,
+            save: Submit::Editing,
+        };
+        assert_eq!(row.save(), Some(&Submit::Editing));
     }
 }

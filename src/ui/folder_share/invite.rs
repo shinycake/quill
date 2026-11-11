@@ -10,6 +10,20 @@ impl QuillApp {
     /// `addlist` link opened: show the box and check the link. A check that
     /// cannot be sent ends the box in the error, not in "Checking link...".
     pub(in crate::ui) fn open_folder_invite(&mut self, link: String, cx: &mut Context<Self>) {
+        // An add in flight keeps its box: its answer is the only word on
+        // whether that folder was added. Another link waits for it.
+        if let Some(InviteStage::Adding { .. }) = self.folders.invite.as_ref().map(|d| &d.stage) {
+            self.open_box(DialogKind::FolderInvite);
+            cx.notify();
+            return;
+        }
+        // A check the new link replaces: its answer, if it came, goes.
+        if let Some(InviteStage::Checking(old)) = self.folders.invite.as_ref().map(|d| &d.stage) {
+            let old = *old;
+            if let Some(session) = self.session_mut_any() {
+                session.chat_list.dialog_answers.take(old);
+            }
+        }
         let stage = match self.live.as_mut() {
             Some(live) => match live.driver.check_folder_invite_link(&link) {
                 Ok(request) => InviteStage::Checking(request),

@@ -15,8 +15,6 @@ use gpui_kit::prelude::FluentBuilder;
 use quill::earn::*;
 use quill::lang::{keys, tr, tr_with};
 use quill::premium_hub::group_digits;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// tdesktop `lng_bot_earn_balance_about_url`.
 const STARS_TOS_URL: &str = "https://telegram.org/tos/stars";
@@ -248,6 +246,14 @@ impl QuillApp {
 
     /// Submit the password box; the field is emptied as the request goes.
     fn submit_withdraw_password(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // One in flight: a second Submit keeps what was typed.
+        if self
+            .earn_state()
+            .and_then(|earn| earn.withdraw.as_ref())
+            .is_some_and(|w| matches!(w.step, WithdrawStep::PasswordSending(_)))
+        {
+            return;
+        }
         let password = self.earn.password.read(cx).value().to_string();
         let sent = self
             .live
@@ -454,6 +460,7 @@ impl QuillApp {
                                 .label(tr(keys::Q_MONEY_SUBMIT))
                                 .primary()
                                 .loading(sending)
+                                .disabled(sending)
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.submit_withdraw_password(window, cx);
                                 })),
@@ -464,19 +471,11 @@ impl QuillApp {
                     return dialog.on_close(on_close);
                 }
             };
-            let body = Rc::new(RefCell::new(Some(body.into_any_element())));
+            let body = body.into_any_element();
             dialog
                 .overlay(true)
                 .title(crate::ui::shell::dialog_title(title))
-                .content(crate::ui::shell::scrollable_dialog_content(
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    },
-                ))
+                .content(crate::ui::dialog_body::one_shot_body(body))
                 .footer(footer)
                 .on_close(on_close)
         })

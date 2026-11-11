@@ -2,6 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::dialogs::welcome::RowEdit;
 use super::shell::{DialogKind, QuillShell};
 use super::*;
 use crate::ui::status_note::StatusNote;
@@ -99,12 +100,12 @@ impl QuillApp {
     /// open, saving, until TDLib answers.
     pub(super) fn submit_welcome_edit(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let (chat_id, welcome_id, text) = match self.admin.welcome_dialog.as_ref() {
-            Some(dialog) => match dialog.editing {
-                Some(welcome_id)
-                    if !dialog
-                        .save
-                        .is_sending(self.session().map(|session| &session.requests)) =>
-                {
+            Some(dialog) => match &dialog.row {
+                RowEdit::Open {
+                    id: welcome_id,
+                    save,
+                } if !save.is_sending(self.session().map(|session| &session.requests)) => {
+                    let welcome_id = *welcome_id;
                     (
                         dialog.chat_id,
                         welcome_id,
@@ -138,8 +139,13 @@ impl QuillApp {
         };
         match sent {
             Ok(id) => {
-                if let Some(dialog) = self.admin.welcome_dialog.as_mut() {
-                    dialog.save = Submit::sent(vec![id]);
+                if let Some(save) = self
+                    .admin
+                    .welcome_dialog
+                    .as_mut()
+                    .and_then(|dialog| dialog.row.save_mut())
+                {
+                    *save = Submit::sent(vec![id]);
                 }
             }
             Err(note) => self.set_note(note),
@@ -156,24 +162,23 @@ impl QuillApp {
             .admin
             .welcome_dialog
             .as_ref()
-            .and_then(|dialog| Some((dialog.editing?, dialog.chat_id)))
+            .and_then(|dialog| Some((dialog.row.id()?, dialog.chat_id)))
             .is_some_and(|(id, chat_id)| {
                 self.session()
                     .and_then(|s| s.groups.welcome_messages.get(&chat_id.0))
                     .is_some_and(|messages| !messages.items().iter().any(|m| m.id == id))
             });
         if edit_gone && let Some(dialog) = self.admin.welcome_dialog.as_mut() {
-            dialog.editing = None;
-            dialog.save = Submit::Editing;
+            dialog.row = RowEdit::Closed;
             cx.notify();
         }
         let requests = self.session().map(|session| &session.requests);
-        let Some((add, save)) = self
-            .admin
-            .welcome_dialog
-            .as_ref()
-            .map(|dialog| (dialog.add.view(requests), dialog.save.view(requests)))
-        else {
+        let Some((add, save)) = self.admin.welcome_dialog.as_ref().map(|dialog| {
+            (
+                dialog.add.view(requests),
+                dialog.row.save().map(|save| save.view(requests)),
+            )
+        }) else {
             return;
         };
         let mut note = None;
@@ -194,19 +199,22 @@ impl QuillApp {
                 SubmitView::Editing | SubmitView::Sending => {}
             }
             match save {
-                SubmitView::Done => {
-                    dialog.save = Submit::Editing;
-                    dialog.editing = None;
+                Some(SubmitView::Done) => {
+                    dialog.row = RowEdit::Closed;
                     note = Some(StatusNote::silent(tr(
                         keys::Q_PEOPLE_WELCOME_MESSAGE_UPDATED,
                     )));
                 }
-                SubmitView::Failed(reason) => {
-                    if dialog.save.keep_failure(reason) {
+                Some(SubmitView::Failed(reason)) => {
+                    if dialog
+                        .row
+                        .save_mut()
+                        .is_some_and(|save| save.keep_failure(reason))
+                    {
                         cx.notify();
                     }
                 }
-                SubmitView::Editing | SubmitView::Sending => {}
+                Some(SubmitView::Editing | SubmitView::Sending) | None => {}
             }
         }
         if let Some(note) = note {
@@ -261,7 +269,7 @@ impl QuillApp {
                 return dialog.on_close(on_close);
             };
             let chat_id = dialog_state.chat_id;
-            let editing = dialog_state.editing;
+            let editing = dialog_state.row.id();
             let requests = this.session().map(|session| &session.requests);
             let adding = dialog_state.add.is_sending(requests);
             let fetch = this
@@ -295,10 +303,10 @@ impl QuillApp {
                     ),
             );
             for (id, submit) in [
-                ("g2-welcome-add-refused", &dialog_state.add),
-                ("g2-welcome-save-refused", &dialog_state.save),
+                ("g2-welcome-add-refused", Some(&dialog_state.add)),
+                ("g2-welcome-save-refused", dialog_state.row.save()),
             ] {
-                if let Submit::Failed(reason) = submit {
+                if let Some(Submit::Failed(reason)) = submit {
                     body = body.child(div().id(id).text_xs().text_color(cx.theme().danger).child(
                         tr_with(keys::Q_PEOPLE_COULDNT_SAVE_REASON, &[("reason", reason)]),
                     ));
@@ -399,11 +407,14 @@ impl QuillApp {
             .gap_1()
             .child(div().text_sm().child(text));
         if editing == Some(welcome_id) {
-            let saving = self.admin.welcome_dialog.as_ref().is_some_and(|dialog| {
-                dialog
-                    .save
-                    .is_sending(self.session().map(|session| &session.requests))
-            });
+            let saving = self
+                .admin
+                .welcome_dialog
+                .as_ref()
+                .and_then(|dialog| dialog.row.save())
+                .is_some_and(|save| {
+                    save.is_sending(self.session().map(|session| &session.requests))
+                });
             let edit_input = self
                 .admin
                 .welcome_dialog
@@ -435,8 +446,7 @@ impl QuillApp {
                         .ghost()
                         .on_click(cx.listener(|this, _, _, cx| {
                             if let Some(dialog) = this.admin.welcome_dialog.as_mut() {
-                                dialog.editing = None;
-                                dialog.save = Submit::Editing;
+                                dialog.row = RowEdit::Closed;
                             }
                             cx.notify();
                         })),
@@ -463,9 +473,22 @@ impl QuillApp {
                                         Self::message_copyable_text(&message.content)
                                     })
                                     .unwrap_or_default();
+                                let saving = this
+                                    .admin
+                                    .welcome_dialog
+                                    .as_ref()
+                                    .and_then(|dialog| dialog.row.save())
+                                    .is_some_and(|save| {
+                                        save.is_sending(this.session().map(|s| &s.requests))
+                                    });
+                                if saving {
+                                    return;
+                                }
                                 if let Some(dialog) = this.admin.welcome_dialog.as_mut() {
-                                    dialog.editing = Some(welcome_id);
-                                    dialog.save = Submit::Editing;
+                                    dialog.row = RowEdit::Open {
+                                        id: welcome_id,
+                                        save: Submit::Editing,
+                                    };
                                     dialog.edit_input.update(cx, |input, cx| {
                                         input.set_value(&text, window, cx);
                                     });

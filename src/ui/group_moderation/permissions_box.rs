@@ -34,8 +34,6 @@ use quill::permissions_box::{
 };
 use quill::state::{Submit, SubmitView};
 use quill::telegram::envelope::ChatPermissions;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 fn boosts_label(boosts: i32) -> String {
     boosts.to_string()
@@ -256,16 +254,9 @@ impl QuillApp {
                     ),
                 );
             dialog
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::dialog_body::one_shot_body(
+                    body.into_any_element(),
+                ))
                 .footer(footer)
                 .on_close(on_close)
         })

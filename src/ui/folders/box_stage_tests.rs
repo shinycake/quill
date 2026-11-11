@@ -78,8 +78,8 @@ fn the_folder_editor_closes_on_its_answer_and_shows_a_refusal(cx: &mut TestAppCo
         answer(app, request, REFUSED);
         app.maybe_prefill_folder_editor(window, cx);
         let dialog = app.folders.editor.as_ref().expect("still open");
-        assert_eq!(dialog.load, FolderLoad::Ready);
-        assert!(dialog.error.is_some(), "the box says why");
+        assert!(dialog.load.is_ready());
+        assert!(dialog.load.error().is_some(), "the box says why");
     });
     app.update_in(&mut vcx, |app, window, cx| {
         let request = sent(app, RequestPurpose::EditChatFolder, Some(5));
@@ -284,8 +284,11 @@ fn a_limit_box_leaves_the_folder_editor_without_an_error_line(cx: &mut TestAppCo
         );
         app.maybe_prefill_folder_editor(window, cx);
         let dialog = app.folders.editor.as_ref().expect("still open");
-        assert_eq!(dialog.load, FolderLoad::Ready, "Save works again");
-        assert_eq!(dialog.error, None, "the limit box says it alone");
+        assert_eq!(
+            dialog.load,
+            FolderLoad::ready(),
+            "Save works again, with no line: the limit box says it alone"
+        );
     });
 }
 
@@ -307,8 +310,8 @@ fn a_save_waiting_for_the_fresh_folder_never_spins_without_a_request(cx: &mut Te
         answer(app, request, REFUSED);
         app.maybe_prefill_folder_editor(window, cx);
         let dialog = app.folders.editor.as_ref().expect("still open");
-        assert_eq!(dialog.load, FolderLoad::Ready);
-        assert!(dialog.error.is_some(), "the form says why");
+        assert!(dialog.load.is_ready());
+        assert!(dialog.load.error().is_some(), "the form says why");
     });
 }
 
@@ -396,5 +399,67 @@ fn the_copied_check_mark_goes_back_to_the_copy_icon(cx: &mut TestAppContext) {
             app.folders.share.as_ref().map(|d| d.copy_mark().clone()),
             Some(CopyMark::Idle)
         );
+    });
+}
+
+#[gpui_kit::test]
+fn the_folder_delete_toast_waits_for_tdlibs_answer(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let refused = sent(app, RequestPurpose::DeleteChatFolder, Some(5));
+        let accepted = sent(app, RequestPurpose::DeleteChatFolder, Some(6));
+        app.folders.deletes.insert(5, refused);
+        app.folders.deletes.insert(6, accepted);
+        assert!(!app.settle_folder_deletes(cx), "nothing answered yet");
+        assert_eq!(app.folders.deletes.len(), 2);
+        answer(app, refused, REFUSED);
+        assert!(app.settle_folder_deletes(cx));
+        assert!(
+            !app.folders.deletes.contains_key(&5),
+            "the answer ends its entry"
+        );
+        assert!(
+            app.folders.deletes.contains_key(&6),
+            "another folder's delete still waits"
+        );
+        let said = app.connection.status_note().to_string();
+        assert!(
+            !said.contains("deleted"),
+            "a refused delete is not reported as deleted: {said}"
+        );
+        answer(app, accepted, r#""@type":"ok""#);
+        assert!(app.settle_folder_deletes(cx));
+        assert!(app.folders.deletes.is_empty());
+    });
+}
+
+#[gpui_kit::test]
+fn another_link_does_not_replace_an_add_in_flight(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open(cx);
+    app.update_in(&mut vcx, |app, _, cx| {
+        let request = sent(app, RequestPurpose::AddChatFolderByInviteLink, None);
+        let info = Box::new(quill::telegram::envelope::ChatFolderInviteLinkInfo {
+            folder: quill::telegram::envelope::ChatFolderInfo {
+                id: 0,
+                name: "Work".into(),
+                icon_name: String::new(),
+                color_id: -1,
+                is_shareable: false,
+                has_my_invite_links: false,
+            },
+            missing_chat_ids: vec![],
+            added_chat_ids: vec![],
+        });
+        app.folders.invite = Some(FolderInviteDialog::new(
+            "first".into(),
+            InviteStage::Adding { request, info },
+        ));
+        app.open_folder_invite("second".into(), cx);
+        let dialog = app.folders.invite.as_ref().expect("the box stays");
+        assert_eq!(dialog.link, "first", "the add in flight keeps its box");
+        assert!(matches!(
+            dialog.stage,
+            InviteStage::Adding { request: kept, .. } if kept == request
+        ));
     });
 }

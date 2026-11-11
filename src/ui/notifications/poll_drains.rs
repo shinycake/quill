@@ -350,6 +350,7 @@ impl QuillApp {
         self.prune_drop_topic();
         if self.settle_folder_share(cx)
             | self.settle_recommended_adds(cx)
+            | self.settle_folder_deletes(cx)
             | self.settle_add_contact(cx)
             | self.settle_edit_contact(cx)
             | self.drive_folder_invite(cx)

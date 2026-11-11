@@ -180,7 +180,8 @@ impl QuillApp {
         };
         let earn = &session.payments.earn;
         let Some(setup) = earn.setup.as_ref().filter(|s| s.bot_user_id == bot_user_id) else {
-            return about(tr(keys::Q_MONEY_LOADING)).into_any_element();
+            let waiting = about(tr(keys::Q_MONEY_LOADING)).into_any_element();
+            return self.earn_unloaded(EarnPanel::Setup { bot_user_id }, waiting, cx);
         };
         let exists = setup.exists();
         let primary = cx.theme().primary;

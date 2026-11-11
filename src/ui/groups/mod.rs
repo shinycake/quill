@@ -19,8 +19,6 @@ use quill::state::GroupsPurpose;
 use quill::state::{MemberListFilter, RequestPurpose, Session};
 use quill::telegram::client::copy_and_parse;
 use quill::telegram::envelope::{ChannelMemberStatus, ChatAdminRights, ChatKind, ChatPermissions};
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 /// Phase D3b: human labels for the 18 `chatAdministratorRights` fields

@@ -23,6 +23,9 @@ pub(crate) struct FolderUi {
     /// request of each, by the recommendation's name. A second tap on the
     /// same one waits for the first; the answer ends it either way.
     pub(super) recommended_adds: std::collections::HashMap<String, quill::ids::RequestId>,
+    /// Folders being deleted: the `deleteChatFolder` request of each. The
+    /// toast waits for its answer, which ends the entry either way.
+    pub(super) deletes: std::collections::HashMap<i32, quill::ids::RequestId>,
     /// A folder limit box (or the tag Premium notice).
     pub(super) limit_box: Option<quill::folder_limits::FolderLimitKind>,
     /// Scroll state of the top tab strip, shared with the kit `TabBar`.
@@ -43,6 +46,7 @@ impl FolderUi {
             tab_menu: None,
             new_chats_dialog: None,
             recommended_adds: std::collections::HashMap::new(),
+            deletes: std::collections::HashMap::new(),
             limit_box: None,
             tabs_scroll: gpui_kit::ScrollHandle::new(),
             tabs_revealed: std::cell::Cell::new(None),

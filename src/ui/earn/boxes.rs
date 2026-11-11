@@ -11,29 +11,14 @@ use crate::ui::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
-use gpui_kit::component::dialog::{Dialog, DialogContent};
+use gpui_kit::component::dialog::Dialog;
 use quill::boost_box::BoostCounters;
 use quill::lang::{keys, tr, tr_with, trn};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// tdesktop `lng_channel_earn_learn_coin_link`.
 const TON_BLOG_URL: &str = "https://telegram.org/blog/monetization-for-channels";
 
-/// The one-shot body the kit dialog content closure takes.
-fn one_shot(
-    body: AnyElement,
-) -> impl Fn(DialogContent, &mut Window, &mut App) -> DialogContent + 'static {
-    let body = Rc::new(RefCell::new(Some(body)));
-    crate::ui::shell::scrollable_dialog_content(move |content, _, _| {
-        let body = body
-            .borrow_mut()
-            .take()
-            .unwrap_or_else(|| div().into_any_element());
-        content.child(body)
-    })
-}
-
+use crate::ui::dialog_body::one_shot_body as one_shot;
 /// tdesktop's diamonds easter egg on the learn box's TON emoji.
 fn diamonds_toast(count: u32) -> String {
     match count {
@@ -287,6 +272,19 @@ impl QuillApp {
         })
     }
 
+    /// Ask for the boost link the box shows; a refused send says so.
+    pub(super) fn ask_boost_link(&mut self, chat_id: i64, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut()
+            && live
+                .driver
+                .fetch_chat_boost_link(quill::ids::ChatId(chat_id))
+                .is_err()
+        {
+            self.set_note(StatusNote::error(tr(keys::Q_MONEY_COULDNT_LOAD_THE_PAGE)));
+        }
+        cx.notify();
+    }
+
     fn close_earn_ask_boost(&mut self, cx: &mut Context<Self>) {
         self.earn.ask_boost = None;
         cx.notify();
@@ -364,6 +362,21 @@ impl QuillApp {
                             link.clone()
                         }),
                 );
+            if link.is_empty() {
+                // The link is asked once per chat; a refused or failed ask
+                // leaves it empty, so Retry asks again (a running ask is
+                // not repeated).
+                body = body.child(
+                    div().flex().justify_center().child(
+                        Button::new("earn-boost-link-retry")
+                            .label(tr(keys::Q_CHAT_RETRY))
+                            .ghost()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.ask_boost_link(chat_id, cx);
+                            })),
+                    ),
+                );
+            }
             if let Some(features) = Self::boost_features_for(session, chat_id, false, level) {
                 body = body.child(features);
             }

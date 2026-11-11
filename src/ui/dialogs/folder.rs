@@ -14,7 +14,11 @@ use std::collections::HashSet;
 pub enum FolderLoad {
     Loading,
     Failed(String),
-    Ready,
+    /// The form. `error` is the line the last Save or merge left on it
+    /// (cleared by the next stage, so it never draws beside a load error).
+    Ready {
+        error: Option<String>,
+    },
     /// Save found the folder changed since the form opened: the fresh
     /// folder is being fetched so the person's edits go onto it, not over
     /// it (`FolderEditor::merged_onto`). A failed fetch is back in `Ready`
@@ -23,6 +27,32 @@ pub enum FolderLoad {
     /// Save went out: the box closes on the answer to this request and
     /// shows the error (back in `Ready`) when it fails.
     Saving(RequestId),
+}
+
+impl FolderLoad {
+    /// The form with no line under it.
+    pub(crate) fn ready() -> Self {
+        FolderLoad::Ready { error: None }
+    }
+
+    /// The form with `line` under it.
+    pub(crate) fn refused(line: impl Into<String>) -> Self {
+        FolderLoad::Ready {
+            error: Some(line.into()),
+        }
+    }
+
+    pub(crate) fn is_ready(&self) -> bool {
+        matches!(self, FolderLoad::Ready { .. })
+    }
+
+    /// The line under the form.
+    pub(crate) fn error(&self) -> Option<&str> {
+        match self {
+            FolderLoad::Ready { error } => error.as_deref(),
+            _ => None,
+        }
+    }
 }
 
 /// Parity slice: create/edit chat-folder dialog. The editable folder model
@@ -38,7 +68,6 @@ pub struct FolderEditorDialog {
     pub(crate) name_input: Entity<TextareaState>,
     /// Edit flow: `getChatFolder` before the editor prefills.
     pub(crate) load: FolderLoad,
-    pub(crate) error: Option<String>,
     /// The chat picker is showing for this list (`None` = the form).
     pub(crate) picker: Option<PickerMode>,
     pub(crate) picker_search: Entity<TextareaState>,
@@ -77,9 +106,8 @@ impl FolderEditorDialog {
             load: if folder_id.is_some() {
                 FolderLoad::Loading
             } else {
-                FolderLoad::Ready
+                FolderLoad::ready()
             },
-            error: None,
             picker: None,
             picker_search,
         }
@@ -94,8 +122,7 @@ impl FolderEditorDialog {
     ) {
         self.editor = FolderEditor::from_spec(spec);
         self.base = spec.clone();
-        self.load = FolderLoad::Ready;
-        self.error = None;
+        self.load = FolderLoad::ready();
         let name = spec.name.clone();
         self.name_input.update(cx, |input, cx| {
             input.set_value(name, window, cx);

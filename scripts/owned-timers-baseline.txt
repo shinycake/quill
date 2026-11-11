@@ -7,7 +7,6 @@ detached:QuillApp::arm_viewer_swipe_timeout 1
 detached:QuillApp::begin_chat_preview_press 1
 detached:QuillApp::bot_username_changed 1
 detached:QuillApp::business_bot_watch 1
-detached:QuillApp::close_earn_layer 1
 detached:QuillApp::close_profile_modal 1
 detached:QuillApp::copy_folder_link 1
 detached:QuillApp::custom_emoji_card_body 1
