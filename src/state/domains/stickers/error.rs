@@ -49,8 +49,12 @@ impl Session {
             }
             // "Attached Stickers": the box it opened (set 0) says it failed.
             Some(RequestPurpose::Stickers(StickersPurpose::GetAttachedStickerSets { .. })) => {
-                if pending.map(|p| p.id) == self.stickers.stickers.attached_request {
-                    self.stickers.stickers.attached_request = None;
+                if self
+                    .stickers
+                    .stickers
+                    .attached
+                    .failed(pending.map(|p| p.id))
+                {
                     self.fail_sticker_set_view(0);
                 }
             }
@@ -118,6 +122,17 @@ impl Session {
         {
             self.stickers.stickers.suggest_for = SuggestFor::Nothing;
         }
+        // The composer's suggestions asked for an emoji and failed: the next
+        // keystroke asks again.
+        if pending.map(|p| p.purpose) == Some(RequestPurpose::SuggestStickers)
+            && self
+                .stickers
+                .stickers
+                .suggest_for
+                .waits_for(pending.map(|p| p.id))
+        {
+            self.stickers.stickers.suggest_for = SuggestFor::Nothing;
+        }
         let emoji_purpose = pending.map(|p| p.purpose);
         if emoji_purpose == Some(RequestPurpose::GetInstalledEmojiSets) {
             self.stickers.emoji.lists.installed.fail(error_reason(err));
@@ -162,7 +177,10 @@ impl Session {
                     crate::lang::tr(crate::lang::keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN)
                         .to_string();
                 match self.stickers.stickers.lists.for_purpose(pending.purpose) {
-                    Some(list) => list.fail(line),
+                    // A list an update marked out of date keeps its mark.
+                    Some(list) => {
+                        list.answer_failed(line);
+                    }
                     None if self.stickers.manager.note_commit_failure(pending.id) => {}
                     None => self.stickers.creator_notes.push_back(line),
                 }

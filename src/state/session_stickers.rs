@@ -35,20 +35,7 @@ impl Session {
     }
 
     pub(crate) fn finish_sticker_batch_item(&mut self, set_id: i64, success: bool) {
-        if let Some(index) = self
-            .stickers
-            .stickers
-            .batch_pending
-            .iter()
-            .position(|id| *id == set_id)
-        {
-            self.stickers.stickers.batch_pending.remove(index);
-            if success {
-                self.stickers.stickers.batch_completed += 1;
-            } else {
-                self.stickers.stickers.batch_failed += 1;
-            }
-        }
+        self.stickers.stickers.batch.finish(set_id, success);
     }
 
     /// The box's change of the viewed set went out.
@@ -282,34 +269,13 @@ impl Session {
     ) {
         // A page of an earlier search, or of one that was left, is not the
         // search's now.
-        if !self.stickers.gifs.search_waits_for(request) {
+        let gifs = &mut self.stickers.gifs;
+        if !gifs.search_page_answered(request, animations, next_offset, first_page) {
             return;
         }
-        self.stickers.gifs.search_answered();
-        if first_page {
-            self.stickers.gifs.search_results = animations;
-        } else {
-            for item in animations {
-                if !self
-                    .stickers
-                    .gifs
-                    .search_results
-                    .iter()
-                    .any(|r| r.file_id == item.file_id)
-                {
-                    self.stickers.gifs.search_results.push(item);
-                }
-            }
-        }
-        self.stickers.gifs.search_next_offset =
-            if !next_offset.is_empty() && next_offset == self.stickers.gifs.search_offset {
-                String::new()
-            } else {
-                next_offset
-            };
-        let gifs = &mut self.stickers.gifs;
         let query = gifs.search_query().to_string();
-        gifs.searches_kept.keep(&query, &gifs.search_results);
+        let found = gifs.search_results().to_vec();
+        gifs.searches_kept.keep(&query, &found);
     }
 
     /// The answer of `request`; one for a set that is no longer the asked

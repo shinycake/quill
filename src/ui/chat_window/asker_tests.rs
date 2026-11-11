@@ -463,7 +463,7 @@ fn the_gif_tab_follows_its_windows_field(cx: &mut TestAppContext) {
     let _chat_window = h.open_in_new_window(OTHER, cx);
     h.app.update(cx, |app, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.stickers.gifs.search_begun("cats".into());
+            session.stickers.gifs.search_begun("cats".into(), None);
         }
         app.set_window_scope(Some(OTHER));
         app.follow_gif_field(cx);

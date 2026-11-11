@@ -98,7 +98,7 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { first_page: true }),
         None,
     );
-    with_purpose.stickers.gifs.search_begun("cat".into());
+    with_purpose.stickers.gifs.search_begun("cat".into(), None);
     with_purpose.stickers.gifs.search_sent(extra);
     apply_json(
         &mut with_purpose,
@@ -109,9 +109,12 @@ fn s9_gif_backend_purpose_gated_dispatch() {
             extra.0
         ),
     );
-    assert_eq!(with_purpose.stickers.gifs.search_results.len(), 1);
-    assert_eq!(with_purpose.stickers.gifs.search_results[0].file_id.0, 101);
-    assert_eq!(with_purpose.stickers.gifs.search_next_offset, "50");
+    assert_eq!(with_purpose.stickers.gifs.search_results().len(), 1);
+    assert_eq!(
+        with_purpose.stickers.gifs.search_results()[0].file_id.0,
+        101
+    );
+    assert_eq!(with_purpose.stickers.gifs.search_next_offset(), "50");
     assert!(with_purpose.bots.inline_query.is_none());
 
     // Second page appends new entries (deduped by file id) and
@@ -120,6 +123,7 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         RequestPurpose::Stickers(StickersPurpose::GetGifSearchResults { first_page: false }),
         None,
     );
+    with_purpose.stickers.gifs.search_asked("50");
     with_purpose.stickers.gifs.search_sent(extra);
     apply_json(
         &mut with_purpose,
@@ -132,9 +136,12 @@ fn s9_gif_backend_purpose_gated_dispatch() {
     );
     // g1 (file 101) was already on page one — deduped; g2 (file 102)
     // appends; the offset advances to "" (exhausted).
-    assert_eq!(with_purpose.stickers.gifs.search_results.len(), 2);
-    assert_eq!(with_purpose.stickers.gifs.search_results[1].file_id.0, 102);
-    assert_eq!(with_purpose.stickers.gifs.search_next_offset, "");
+    assert_eq!(with_purpose.stickers.gifs.search_results().len(), 2);
+    assert_eq!(
+        with_purpose.stickers.gifs.search_results()[1].file_id.0,
+        102
+    );
+    assert_eq!(with_purpose.stickers.gifs.search_next_offset(), "");
 
     // A stray inlineQueryResults (no matching purpose) is ignored.
     let (mut without_purpose, sink2) = session();
@@ -145,14 +152,14 @@ fn s9_gif_backend_purpose_gated_dispatch() {
         &sink2,
         r#"{"@type":"inlineQueryResults","inline_query_id":7,"button":null,"results":[],"next_offset":"9"}"#,
     );
-    assert!(without_purpose.stickers.gifs.search_results.is_empty());
+    assert!(without_purpose.stickers.gifs.search_results().is_empty());
 
     // An addSavedAnimation `ok` clears the saved-GIF cache so it
     // refetches the server-confirmed list.
     with_purpose
         .stickers
         .gifs
-        .saved_answered(with_purpose.stickers.gifs.search_results.clone());
+        .saved_answered(with_purpose.stickers.gifs.search_results().to_vec());
     let extra = with_purpose.request(RequestPurpose::AddSavedAnimation, None);
     apply_json(
         &mut with_purpose,
@@ -166,7 +173,7 @@ fn s9_gif_backend_purpose_gated_dispatch() {
     with_purpose
         .stickers
         .gifs
-        .saved_answered(with_purpose.stickers.gifs.search_results.clone());
+        .saved_answered(with_purpose.stickers.gifs.search_results().to_vec());
     let extra = with_purpose.request(RequestPurpose::RemoveSavedAnimation, None);
     apply_json(
         &mut with_purpose,
@@ -331,7 +338,7 @@ fn attached_sticker_sets_fail_the_box_and_drop_an_earlier_answer() {
     let ask = |session: &mut Session| {
         session.stickers.sticker_set_view = Some(StickerSetView::loading(0));
         let extra = session.request(purpose, None);
-        session.stickers.stickers.attached_request = Some(extra);
+        session.stickers.stickers.attached.asked(extra);
         extra
     };
     let failed = ask(&mut session);
@@ -363,11 +370,15 @@ fn attached_sticker_sets_fail_the_box_and_drop_an_earlier_answer() {
     };
     apply_json(&mut session, &seq, &sink, &sets(earlier));
     assert_eq!(
-        session.stickers.stickers.attached_answer, None,
+        session.stickers.stickers.attached,
+        AttachedStickers::Asking(later),
         "an earlier ask's answer"
     );
     apply_json(&mut session, &seq, &sink, &sets(later));
-    assert_eq!(session.stickers.stickers.attached_answer, Some(None));
+    assert_eq!(
+        session.stickers.stickers.attached,
+        AttachedStickers::Answered(None)
+    );
 }
 
 /// A box already showing its set keeps it when a refetch fails (one sent
@@ -423,12 +434,15 @@ fn an_update_during_the_request_survives_its_answer_and_asks_again() {
     gifs.saved_asked();
     // `updateSavedAnimations` while the request is out: the answer may
     // predate the change.
-    gifs.stale = true;
+    gifs.saved_outdated();
     gifs.saved_answered(vec![saved_gif(1)]);
-    assert!(gifs.loaded() && gifs.stale, "the list is asked for again");
+    assert!(
+        gifs.loaded() && gifs.saved_wanted(),
+        "the list is asked for again"
+    );
     assert_eq!(gifs.animations.len(), 1, "the list does not blank");
     // A failure keeps the list and counts as loaded until the next opening.
-    gifs.stale = false;
+    gifs.saved_asked();
     gifs.saved_failed();
     assert!(gifs.failed() && gifs.loaded());
     assert_eq!(gifs.animations.len(), 1);

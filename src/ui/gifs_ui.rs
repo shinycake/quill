@@ -180,7 +180,7 @@ impl QuillApp {
                 GifWanted::Saved => session.stickers.gifs.search_left(),
                 GifWanted::Search(query) => {
                     // No search bot offline: the demo finds nothing.
-                    session.stickers.gifs.search_begun(query.clone());
+                    session.stickers.gifs.search_begun(query.clone(), None);
                     session.stickers.gifs.search_sent(quill::ids::RequestId(0));
                     session.accept_gif_search_results(
                         Some(quill::ids::RequestId(0)),
@@ -322,7 +322,7 @@ impl QuillApp {
             scroll_top,
             viewport,
             content as f32,
-            panel.search_mode() && !panel.search_next_offset.is_empty(),
+            panel.search_mode() && !panel.search_next_offset().is_empty(),
             panel.search_loading(),
         ) {
             return;

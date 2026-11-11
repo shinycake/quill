@@ -7,7 +7,7 @@ use crate::state::{GifList, GifPanel};
 #[test]
 fn a_new_search_starts_clean_after_a_failed_one() {
     let mut panel = GifPanel::default();
-    panel.search_begun("cats".into());
+    panel.search_begun("cats".into(), None);
     panel.search_failed_now();
     assert!(panel.search_failed() && !panel.search_loading());
     // Back to the saved GIFs: the failure goes with the search.
@@ -15,20 +15,20 @@ fn a_new_search_starts_clean_after_a_failed_one() {
     assert_eq!(panel.list, GifList::Saved);
     assert!(!panel.search_failed());
     // The next search is loading, not still failed.
-    panel.search_begun("cats".into());
+    panel.search_begun("cats".into(), None);
     assert!(panel.search_loading() && !panel.search_failed());
     panel.search_sent(RequestId(1));
-    panel.search_answered();
+    assert!(panel.search_page_answered(Some(RequestId(1)), Vec::new(), String::new(), true));
     assert!(!panel.search_loading() && !panel.search_failed());
 }
 
 #[test]
 fn a_late_page_of_an_earlier_search_does_not_answer_the_new_one() {
     let mut panel = GifPanel::default();
-    panel.search_begun("cats".into());
+    panel.search_begun("cats".into(), None);
     panel.search_sent(RequestId(1));
     // The user searches again before the first page lands.
-    panel.search_begun("dogs".into());
+    panel.search_begun("dogs".into(), None);
     panel.search_sent(RequestId(2));
     assert!(!panel.search_waits_for(Some(RequestId(1))));
     assert!(panel.search_waits_for(Some(RequestId(2))));
@@ -51,16 +51,16 @@ fn a_failed_save_while_the_list_loads_keeps_the_fetch() {
 #[test]
 fn a_failed_search_asks_again_loading_not_failed() {
     let mut panel = GifPanel::default();
-    panel.search_begun("cats".into());
+    panel.search_begun("cats".into(), None);
     panel.search_failed_now();
-    panel.search_asked();
+    panel.search_asked("");
     assert!(panel.search_loading() && !panel.search_failed());
 }
 
 #[test]
 fn an_answer_to_a_left_search_changes_nothing() {
     let mut panel = GifPanel::default();
-    panel.search_answered();
+    assert!(!panel.search_page_answered(Some(RequestId(1)), Vec::new(), String::new(), true));
     panel.search_failed_now();
     assert_eq!(panel.list, GifList::Saved);
 }
@@ -106,4 +106,37 @@ fn clearing_a_failure_leaves_a_list_that_did_not_fail_alone() {
     idle.saved_asked();
     idle.saved_failure_cleared();
     assert!(idle.loading());
+}
+
+#[test]
+fn a_new_search_replaces_what_the_last_one_found() {
+    // Sweep r2-19 (06-032): results, offsets and chat are the search's own.
+    let mut panel = GifPanel::default();
+    panel.search_begun("cats".into(), Some(crate::ids::ChatId(5)));
+    panel.search_sent(RequestId(1));
+    assert!(panel.search_page_answered(Some(RequestId(1)), Vec::new(), "50".into(), true));
+    assert_eq!(panel.search_next_offset(), "50");
+    assert_eq!(panel.search_chat(), Some(crate::ids::ChatId(5)));
+    panel.search_begun("dogs".into(), None);
+    assert!(panel.search_results().is_empty());
+    assert_eq!(panel.search_next_offset(), "");
+    assert_eq!(panel.search_chat(), None);
+    panel.search_left();
+    assert_eq!(panel.search_next_offset(), "");
+}
+
+#[test]
+fn a_saved_list_marked_out_of_date_drops_the_older_answer_and_is_asked_again() {
+    // Sweep r2-19 (06-028): the mark is the fetch's own `Outdated`.
+    let mut panel = GifPanel::default();
+    panel.saved_answered(Vec::new());
+    assert!(!panel.saved_wanted());
+    panel.saved_asked();
+    panel.saved_outdated();
+    panel.saved_answered(Vec::new());
+    assert!(panel.saved_wanted(), "the answer predates the change");
+    panel.saved_failed();
+    assert!(panel.saved_wanted(), "a failure keeps the mark");
+    panel.saved_asked();
+    assert!(!panel.saved_wanted());
 }

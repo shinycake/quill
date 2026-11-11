@@ -12,11 +12,14 @@ impl Session {
         _extra: Option<RequestId>,
         _seq: u64,
     ) {
-        // An answer ends its list's fetch; an update carries no request.
+        // An answer ends its list's fetch; an update carries no request. A
+        // list an update marked out of date meanwhile keeps its mark: this
+        // answer predates the change and is shown until the refetch asks
+        // again.
         if let Some(pending) = pending
             && let Some(list) = self.stickers.stickers.lists.for_purpose(pending.purpose)
         {
-            list.succeed(());
+            list.answer(());
         }
         match payload {
             StickersPayload::UpdateActiveEmojiReactions { emojis } => {
@@ -36,13 +39,10 @@ impl Session {
                 ) {
                     // B11: "Attached Stickers" of a photo or video, for the
                     // request the box waits for.
-                    if pending.map(|p| p.id).is_some()
-                        && pending.map(|p| p.id) == self.stickers.stickers.attached_request
-                    {
-                        self.stickers.stickers.attached_request = None;
-                        self.stickers.stickers.attached_answer =
-                            Some(sets.first().map(|set| set.id));
-                    }
+                    self.stickers
+                        .stickers
+                        .attached
+                        .answered(pending.map(|p| p.id), sets.first().map(|set| set.id));
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetInstalledStickerSets)
                 {
@@ -96,15 +96,15 @@ impl Session {
             // refetches) or store the pushed value.
             StickersPayload::UpdateRecentStickers { is_attached } => {
                 if !is_attached {
-                    self.stickers.stickers.recent_stale = true;
+                    self.stickers.stickers.lists.recent.outdate();
                 }
             }
             StickersPayload::UpdateFavoriteStickers => {
-                self.stickers.stickers.favorites_stale = true
+                self.stickers.stickers.lists.favorites.outdate();
             }
             StickersPayload::UpdateTrendingStickerSets { is_regular } => {
                 if is_regular {
-                    self.stickers.stickers.trending_stale = true;
+                    self.stickers.stickers.lists.trending.outdate();
                 } else {
                     // The shown tab asks again; any other is asked when
                     // it is selected.
@@ -153,8 +153,16 @@ impl Session {
                     self.accept_found_stickers(stickers);
                 } else if purpose == Some(RequestPurpose::SuggestStickers) {
                     // Slice S12: composer suggestions land in their own
-                    // slot — never the search UI's `found_stickers`.
-                    self.accept_sticker_suggestions(stickers);
+                    // slot — never the search UI's `found_stickers`. Only the
+                    // request the composer waits for lands.
+                    if self
+                        .stickers
+                        .stickers
+                        .suggest_for
+                        .waits_for(pending.map(|p| p.id))
+                    {
+                        self.accept_sticker_suggestions(stickers);
+                    }
                 } else if purpose == Some(RequestPurpose::GetFavoriteStickers) {
                     self.accept_favorite_stickers(stickers);
                 } else if purpose == Some(RequestPurpose::GetRecentStickers) {
@@ -298,7 +306,7 @@ impl Session {
                 }
             }
             StickersPayload::UpdateSavedAnimations { .. } => {
-                self.stickers.gifs.stale = true;
+                self.stickers.gifs.saved_outdated();
             }
             // Slice S9: `updateAnimationSearchParameters` (schema 1.8.67,
             // line 11064) — server-pushed; store the provider name and the

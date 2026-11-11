@@ -271,3 +271,54 @@ fn an_older_voters_error_does_not_fail_the_newer_first_page() {
         Some(PollVotersFetch::Failed(_))
     ));
 }
+
+/// 06-033: a failed `searchStickers` for the composer is asked again on the
+/// next keystroke, not skipped for that emoji, and an older request's error
+/// does not end the newer one.
+#[test]
+fn a_failed_suggestion_search_is_asked_again() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let older = session.request(RequestPurpose::SuggestStickers, None);
+    let newer = session.request(RequestPurpose::SuggestStickers, None);
+    session.stickers.stickers.suggest_for = SuggestFor::Asked {
+        emoji: "😀".into(),
+        request: newer,
+    };
+    apply_json(&mut session, &seq, &sink, &error(older));
+    assert!(session.stickers.stickers.suggest_for.waits_for(Some(newer)));
+    apply_json(&mut session, &seq, &sink, &error(newer));
+    assert!(session.stickers.stickers.suggest_for.is_nothing());
+}
+
+/// 06-028: an update that arrives while a list is being fetched keeps its
+/// mark through that answer, so the refetch still happens.
+#[test]
+fn a_sticker_list_marked_out_of_date_keeps_the_mark_through_an_older_answer() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let extra = session.request(RequestPurpose::GetRecentStickers, None);
+    let lists = &mut session.stickers.stickers.lists;
+    lists.recent.begin();
+    lists.recent.sent(extra);
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        r#"{"@type":"updateRecentStickers","is_attached":false,"sticker_ids":[]}"#,
+    );
+    assert!(session.stickers.stickers.lists.recent.is_outdated());
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"stickers","stickers":[],"@extra":"{}"}}"#,
+            extra.0
+        ),
+    );
+    assert!(session.stickers.stickers.lists.recent.is_outdated());
+    // A failed refetch send keeps the mark too (`answer_failed`).
+    assert!(!session.stickers.stickers.lists.recent.answer_failed("x"));
+    assert!(session.stickers.stickers.lists.recent.is_outdated());
+}

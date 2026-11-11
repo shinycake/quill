@@ -168,32 +168,21 @@ pub struct StickerPanel {
     /// Each list tab's own fetch: a failure of one list shows on that tab
     /// only, and a failed mutation is a note, not a list failure.
     pub lists: StickerLists,
-    pub batch_total: usize,
-    pub batch_completed: usize,
-    pub batch_failed: usize,
-    pub batch_pending: Vec<i64>,
+    /// The latest batch of set changes (`manage_sticker_sets`).
+    pub batch: StickerBatch,
     /// Slice S8: trending sets (`getTrendingStickerSets`) + premium-row flag.
     pub trending: Vec<StickerSetInfo>,
     pub trending_total: usize,
     pub trending_offset: usize,
     pub trending_next_offset: usize,
     pub trending_is_premium: bool,
-    /// `updateRecentStickers` / `updateFavoriteStickers` /
-    /// `updateTrendingStickerSets` arrived (another device changed them):
-    /// refetch the loaded list.
     /// `getGreetingStickers`: hello stickers for empty private chats.
     /// Asked once per session from `Idle`; a failure stays `Failed`, so a
     /// redraw never asks again.
     pub greeting: Fetch<Vec<StickerItem>>,
-    /// `getAttachedStickerSets` answered: the sets (first opens in the
-    /// sticker set dialog; `None` inside: the media has none).
-    pub attached_answer: Option<Option<i64>>,
-    /// The `getAttachedStickerSets` the open "Attached Stickers" box waits
-    /// for. An answer or error of an earlier one is dropped.
-    pub attached_request: Option<RequestId>,
-    pub recent_stale: bool,
-    pub favorites_stale: bool,
-    pub trending_stale: bool,
+    /// The "Attached Stickers" lookup of a photo or video
+    /// (`getAttachedStickerSets`).
+    pub attached: AttachedStickers,
     /// Slice S8: favorite stickers (`getFavoriteStickers`).
     pub favorites: Vec<StickerItem>,
     /// Slice S8: recent stickers (`getRecentStickers`).
@@ -220,27 +209,16 @@ pub struct GifPanel {
     pub open: bool,
     pub animations: Vec<AnimationItem>,
     /// The saved list (`getSavedAnimations`): `Idle` until asked, `Loading`
-    /// (with `Some` when a refresh runs over an answer), `Ready`, or
-    /// `Failed` (also after a failed save or remove, which leaves the list
-    /// in place). The list itself is `animations`.
+    /// (with `Some` when a refresh runs over an answer), `Ready`, `Outdated`
+    /// (`updateSavedAnimations` arrived: refreshed even if the panel is
+    /// closed) or `Failed` (also after a failed save or remove, which
+    /// leaves the list in place). The list itself is `animations`.
     pub saved: Fetch<()>,
     /// Which list the panel holds: the saved GIFs, or a search and how it
     /// stands. Leaving the search leaves its stage with it.
     pub list: GifList,
-    /// The chat of the window that asked (the inline query's chat); paging
-    /// keeps it.
-    pub search_chat: Option<crate::ids::ChatId>,
     pub search_bot_username: String,
     pub search_bot_user_id: Option<i64>,
-    /// `updateSavedAnimations` arrived; refresh even if the panel was closed.
-    pub stale: bool,
-    /// Slice S9: GIF search via the animation search bot
-    /// (`getInlineQueryResults`; schema 1.8.67, lines 6483, 13019).
-    /// First page replaces; later pages append, deduped by file id.
-    pub search_results: Vec<AnimationItem>,
-    /// Slice S9: `next_offset` of the last search page ("" = exhausted).
-    pub search_next_offset: String,
-    pub search_offset: String,
     /// Slice S9: `updateAnimationSearchParameters` (schema 1.8.67, line
     /// 11064) — the upstream animation-search provider name and its
     /// suggested search emojis.
@@ -298,13 +276,23 @@ pub enum GifList {
     Search(GifSearch),
 }
 
-/// A GIF search: its query, where it stands, and the page request it waits
-/// for (none before the first one goes out).
+/// A GIF search (Slice S9: the animation search bot, `getInlineQueryResults`;
+/// schema 1.8.67, lines 6483, 13019): its query, where it stands (the page
+/// request it waits for is in `fetch`), and what it found. A new search
+/// replaces all of it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GifSearch {
     pub query: String,
     pub fetch: Fetch<()>,
-    pub request: Option<crate::ids::RequestId>,
+    /// The chat of the window that asked (the inline query's chat); paging
+    /// keeps it.
+    pub chat: Option<crate::ids::ChatId>,
+    /// First page replaces; later pages append, deduped by file id.
+    pub results: Vec<AnimationItem>,
+    /// `next_offset` of the last page ("" = exhausted).
+    pub next_offset: String,
+    /// The offset the page in flight (or the last answered) was asked from.
+    pub offset: String,
 }
 
 const GIF_FAILED: &str = "gif request failed";
@@ -356,17 +344,35 @@ impl GifPanel {
         self.saved.begin();
     }
 
-    /// `getSavedAnimations` answered.
-    /// A `stale` mark made while the request was out stays: the answer may
-    /// predate the change, so the list is asked for again.
+    /// `getSavedAnimations` answered. An `updateSavedAnimations` that came
+    /// while the request was out marks the list out of date: the answer may
+    /// predate the change, so it is shown (the list does not blank) and the
+    /// mark stays, so the list is asked for again.
     pub fn saved_answered(&mut self, animations: Vec<AnimationItem>) {
         self.animations = animations;
-        self.saved.succeed(());
+        if !self.saved.answer(()) {
+            self.saved = Fetch::Outdated(Some(()));
+        }
+    }
+
+    /// `updateSavedAnimations` arrived (another device or a save changed
+    /// the list): it is asked for again, also with the panel closed.
+    pub fn saved_outdated(&mut self) {
+        self.saved.outdate();
+    }
+
+    /// The saved list should be asked for now: never asked, or out of date.
+    pub fn saved_wanted(&self) -> bool {
+        !self.loaded() || self.saved.is_outdated()
     }
 
     /// `getSavedAnimations` failed, or could not be sent: counted as loaded,
-    /// so nothing asks again until the panel is opened.
+    /// so nothing asks again until the panel is opened. A list marked out
+    /// of date stays marked.
     pub fn saved_failed(&mut self) {
+        if self.saved.is_outdated() {
+            return;
+        }
         self.saved = Fetch::Failed {
             error: GIF_FAILED.to_string(),
             stale: Some(()),
@@ -409,16 +415,19 @@ impl GifPanel {
         };
     }
 
-    /// A search for `query` starts: the panel holds its (not yet answered)
-    /// results.
-    pub fn search_begun(&mut self, query: String) {
+    /// A search for `query` starts, for the window of `chat`: the panel holds
+    /// its (not yet answered) results, and nothing of an earlier search.
+    pub fn search_begun(&mut self, query: String, chat: Option<crate::ids::ChatId>) {
         self.list = GifList::Search(GifSearch {
             query,
             fetch: Fetch::Loading {
                 stale: None,
                 request: None,
             },
-            request: None,
+            chat,
+            results: Vec::new(),
+            next_offset: String::new(),
+            offset: String::new(),
         });
     }
 
@@ -427,42 +436,77 @@ impl GifPanel {
         self.list = GifList::Saved;
     }
 
-    /// The search waits for a request again (a retry, or the first after
-    /// the bot is known); the request that answers it is named by
-    /// [`Self::search_sent`].
-    pub fn search_asked(&mut self) {
+    /// The search waits for a page again, asked from `offset` (a retry, or
+    /// the first after the bot is known); the request that answers it is
+    /// named by [`Self::search_sent`].
+    pub fn search_asked(&mut self, offset: &str) {
         if let GifList::Search(search) = &mut self.list {
             search.fetch.begin();
-            search.request = None;
+            search.offset = offset.to_string();
         }
+    }
+
+    /// The search starts over (the search bot changed): what it found is
+    /// gone and its first page is asked again.
+    pub fn search_restarted(&mut self) {
+        if let GifList::Search(search) = &mut self.list {
+            search.results.clear();
+            search.next_offset.clear();
+        }
+        self.search_asked("");
     }
 
     /// The page request `request` went out for the search.
     pub fn search_sent(&mut self, request: crate::ids::RequestId) {
         if let GifList::Search(search) = &mut self.list {
-            search.request = Some(request);
+            search.fetch.sent(request);
         }
     }
 
     /// Whether `request` is the page the search waits for.
     pub fn search_waits_for(&self, request: Option<crate::ids::RequestId>) -> bool {
         matches!(&self.list, GifList::Search(search)
-            if request.is_some() && search.request == request)
+            if request.is_some_and(|request| search.fetch.waits_for(request)))
     }
 
-    /// A search page answered (the caller checked [`Self::search_waits_for`]).
-    pub fn search_answered(&mut self) {
-        if let GifList::Search(search) = &mut self.list {
-            search.fetch.succeed(());
-            search.request = None;
+    /// A search page answered. Only the page the search waits for lands
+    /// (`false` for an earlier search's, or one that was left): the first
+    /// page replaces the results, later pages append them.
+    pub fn search_page_answered(
+        &mut self,
+        request: Option<crate::ids::RequestId>,
+        animations: Vec<AnimationItem>,
+        next_offset: String,
+        first_page: bool,
+    ) -> bool {
+        let GifList::Search(search) = &mut self.list else {
+            return false;
+        };
+        if !request.is_some_and(|request| search.fetch.waits_for(request)) {
+            return false;
         }
+        search.fetch.succeed(());
+        if first_page {
+            search.results = animations;
+        } else {
+            for item in animations {
+                if !search.results.iter().any(|r| r.file_id == item.file_id) {
+                    search.results.push(item);
+                }
+            }
+        }
+        search.next_offset = if !next_offset.is_empty() && next_offset == search.offset {
+            String::new()
+        } else {
+            next_offset
+        };
+        true
     }
 
     /// The search failed, or could not be sent.
     pub fn search_failed_now(&mut self) {
         if let GifList::Search(search) = &mut self.list {
             search.fetch.fail(GIF_FAILED);
-            search.request = None;
         }
     }
 
@@ -483,9 +527,34 @@ impl GifPanel {
         }
     }
 
+    /// What the search found so far; empty while the panel shows the saved
+    /// GIFs.
+    pub fn search_results(&self) -> &[AnimationItem] {
+        match &self.list {
+            GifList::Search(search) => &search.results,
+            GifList::Saved => &[],
+        }
+    }
+
+    /// The offset of the next search page; empty when there is none.
+    pub fn search_next_offset(&self) -> &str {
+        match &self.list {
+            GifList::Search(search) => &search.next_offset,
+            GifList::Saved => "",
+        }
+    }
+
+    /// The chat of the window that asked the search.
+    pub fn search_chat(&self) -> Option<crate::ids::ChatId> {
+        match &self.list {
+            GifList::Search(search) => search.chat,
+            GifList::Saved => None,
+        }
+    }
+
     pub fn visible_animations(&self) -> &[AnimationItem] {
         if self.search_mode() {
-            &self.search_results
+            self.search_results()
         } else {
             &self.animations
         }
@@ -493,6 +562,150 @@ impl GifPanel {
 
     pub fn close(&mut self) {
         self.open = false;
+    }
+}
+
+/// The latest batch of sticker set changes (`manage_sticker_sets`): one
+/// value from the first request to the last answer. Progress of a finished
+/// batch stays readable until the next batch replaces it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum StickerBatch {
+    #[default]
+    Idle,
+    /// Changes still out; `pending` are the sets they are for.
+    Running {
+        total: usize,
+        completed: usize,
+        failed: usize,
+        pending: Vec<i64>,
+    },
+    /// Every change answered.
+    Done {
+        total: usize,
+        completed: usize,
+        failed: usize,
+    },
+}
+
+impl StickerBatch {
+    /// A batch for `set_ids` starts, replacing the last one.
+    pub fn begin(&mut self, set_ids: Vec<i64>) {
+        *self = Self::Running {
+            total: set_ids.len(),
+            completed: 0,
+            failed: 0,
+            pending: set_ids,
+        };
+    }
+
+    /// The change of `set_id` answered (`success`) or failed. A set that is
+    /// not pending (a stale answer, a change made outside a batch) changes
+    /// nothing.
+    pub fn finish(&mut self, set_id: i64, success: bool) {
+        let Self::Running {
+            total,
+            completed,
+            failed,
+            pending,
+        } = self
+        else {
+            return;
+        };
+        let Some(index) = pending.iter().position(|id| *id == set_id) else {
+            return;
+        };
+        pending.remove(index);
+        if success {
+            *completed += 1;
+        } else {
+            *failed += 1;
+        }
+        if pending.is_empty() {
+            *self = Self::Done {
+                total: *total,
+                completed: *completed,
+                failed: *failed,
+            };
+        }
+    }
+
+    pub fn total(&self) -> usize {
+        match self {
+            Self::Idle => 0,
+            Self::Running { total, .. } | Self::Done { total, .. } => *total,
+        }
+    }
+
+    pub fn completed(&self) -> usize {
+        match self {
+            Self::Idle => 0,
+            Self::Running { completed, .. } | Self::Done { completed, .. } => *completed,
+        }
+    }
+
+    pub fn failed(&self) -> usize {
+        match self {
+            Self::Idle => 0,
+            Self::Running { failed, .. } | Self::Done { failed, .. } => *failed,
+        }
+    }
+
+    /// The sets whose changes are still out.
+    pub fn pending(&self) -> &[i64] {
+        match self {
+            Self::Running { pending, .. } => pending,
+            _ => &[],
+        }
+    }
+}
+
+/// The "Attached Stickers" lookup of a photo or video
+/// (`getAttachedStickerSets`): asked as one request, then answered with the
+/// first set (`None`: the media has none) until the box takes it. An answer
+/// or error of an earlier request is dropped.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AttachedStickers {
+    #[default]
+    Idle,
+    Asking(RequestId),
+    Answered(Option<i64>),
+}
+
+impl AttachedStickers {
+    /// The lookup goes out as `request`.
+    pub fn asked(&mut self, request: RequestId) {
+        *self = Self::Asking(request);
+    }
+
+    /// `request` answered with `first`: taken only while it is the lookup
+    /// waited for.
+    pub fn answered(&mut self, request: Option<RequestId>, first: Option<i64>) -> bool {
+        if request.is_some_and(|request| *self == Self::Asking(request)) {
+            *self = Self::Answered(first);
+            return true;
+        }
+        false
+    }
+
+    /// `request` failed (or never went out): only the lookup waited for
+    /// ends. `true` when it was.
+    pub fn failed(&mut self, request: Option<RequestId>) -> bool {
+        if request.is_some_and(|request| *self == Self::Asking(request)) {
+            *self = Self::Idle;
+            return true;
+        }
+        false
+    }
+
+    /// The answer, once.
+    pub fn take_answer(&mut self) -> Option<Option<i64>> {
+        match *self {
+            Self::Answered(first) => {
+                *self = Self::Idle;
+                Some(first)
+            }
+            _ => None,
+        }
     }
 }
 
@@ -504,8 +717,10 @@ pub enum SuggestFor {
     Nothing,
     /// `getInstalledStickerSets` is out; the emoji is asked when it lands.
     WaitingForSets(String),
-    /// `searchStickers` for this emoji went out or answered.
-    Asked(String),
+    /// `searchStickers` for this emoji went out (or answered): only the
+    /// answer of `request` lands, and its error returns the stage to
+    /// `Nothing`, so the next keystroke asks again.
+    Asked { emoji: String, request: RequestId },
 }
 
 impl SuggestFor {
@@ -513,8 +728,13 @@ impl SuggestFor {
     pub fn emoji(&self) -> Option<&str> {
         match self {
             Self::Nothing => None,
-            Self::WaitingForSets(emoji) | Self::Asked(emoji) => Some(emoji),
+            Self::WaitingForSets(emoji) | Self::Asked { emoji, .. } => Some(emoji),
         }
+    }
+
+    /// Whether `request` is the `searchStickers` the suggestions wait for.
+    pub fn waits_for(&self, request: Option<RequestId>) -> bool {
+        matches!(self, Self::Asked { request: asked, .. } if Some(*asked) == request)
     }
 
     pub fn is_nothing(&self) -> bool {
