@@ -125,7 +125,7 @@ fn call_ids_and_video_chat_boxes_do_not_carry_over(cx: &mut TestAppContext) {
             _timer: gpui_kit::Task::ready(()),
         };
         app.group_call_screen.window_closed_by_user = Some(1);
-        app.group_call_screen.settings_open = true;
+        app.group_call_screen.view_of(5).open = crate::ui::group_call_state::CallBox::Settings;
         app.group_call_screen.stream_watch = crate::ui::group_call_state::StreamWatch::Joining(
             crate::ui::group_call_state::StreamJoining::new(1, gpui_kit::Task::ready(())),
         );
@@ -146,7 +146,7 @@ fn call_ids_and_video_chat_boxes_do_not_carry_over(cx: &mut TestAppContext) {
         ));
         let group = &app.group_call_screen;
         assert_eq!(group.window_closed_by_user, None);
-        assert!(!group.settings_open);
+        assert!(group.view.is_none(), "A's call view and its box are gone");
         assert!(
             group.stream_wish().is_none(),
             "no join waits for B's call 1"

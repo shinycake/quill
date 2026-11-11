@@ -397,7 +397,10 @@ impl QuillApp {
     /// dedupe cache so the Refresh button always hits the server).
     pub(super) fn refresh_invite_links(&mut self, chat_id: ChatId, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
-            match live.driver.refresh_chat_invite_links(chat_id) {
+            // The counts are asked on their own, so a Retry after a refused
+            // list sends them too.
+            let counts = live.driver.fetch_chat_invite_link_counts(chat_id);
+            match live.driver.refresh_chat_invite_links(chat_id).and(counts) {
                 Ok(_) => {}
                 Err(_) => {
                     self.set_note(StatusNote::error(tr(

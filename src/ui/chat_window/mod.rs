@@ -771,7 +771,7 @@ impl QuillApp {
         }
         self.set_composer_markup("", window, cx);
         self.composer_ui.echo.set(SharedString::default());
-        self.history.rows_key = None;
+        self.history.invalidate_rows();
         if self
             .session()
             .is_some_and(|session| session.users_state.open_info_panel.is_some())

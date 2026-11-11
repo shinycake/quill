@@ -17,6 +17,7 @@ use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use quill::giveaway::MembersStage;
 use quill::giveaway::{
     GiveawayDraft, GiveawayKind, GiveawayLimits, PERIOD_MAX_SECS, PRIZE_DESCRIPTION_MAX,
     gift_code_months, gift_code_price,
@@ -375,9 +376,10 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.payments
-            .pick_search
-            .update(cx, |input, cx| input.set_value("", window, cx));
+        if let Some(form) = self.giveaway.form.as_ref() {
+            form.search
+                .update(cx, |input, cx| input.set_value("", window, cx));
+        }
         let chat = self.giveaway.form.as_ref().map(|f| f.draft.boosted_chat_id);
         if let (Some(live), Some(chat)) = (self.live.as_mut(), chat) {
             match page {
@@ -427,25 +429,32 @@ impl QuillApp {
         let Some(list) = self.session().map(|s| &s.payments.giveaway.award_members) else {
             return;
         };
-        if !on_users
-            || (list.error().is_some() && !scrolled)
-            || !load_due(
-                scrolled_near_end(&self.payments.pick_scroll),
-                list.can_load_more(),
-                list.is_loading(),
-            )
-        {
+        let near_end = scrolled_near_end(&self.payments.pick_scroll);
+        if !on_users || !members_page_due(&list.stage, near_end, scrolled) {
             return;
         }
+        self.load_more_award_members(cx);
+    }
+
+    /// Ask for the next page, or the failed one again (the Retry button).
+    fn load_more_award_members(&mut self, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             let _ = live.driver.load_more_award_members();
         }
         cx.notify();
     }
 
-    /// The search field changed: on the members page, search on the server.
-    pub(super) fn pick_search_changed(&mut self, cx: &mut Context<Self>) {
-        let query = self.payments.pick_search.read(cx).value().to_string();
+    /// The form's search field changed: on the members page, search on the
+    /// server.
+    pub(super) fn giveaway_search_changed(&mut self, cx: &mut Context<Self>) {
+        let Some(query) = self
+            .giveaway
+            .form
+            .as_ref()
+            .map(|form| form.search.read(cx).value().to_string())
+        else {
+            return;
+        };
         let on_users = self
             .giveaway
             .form
@@ -491,16 +500,9 @@ impl QuillApp {
             return div().into_any_element();
         };
         let muted = cx.theme().muted_foreground;
-        let query = self
-            .payments
-            .pick_search
-            .read(cx)
-            .value()
-            .trim()
-            .to_lowercase();
+        let query = form.search.read(cx).value().trim().to_lowercase();
         let mut body = div().flex().flex_col().gap_1();
-        body =
-            body.child(Input::new(&self.payments.pick_search).aria_label(tr(keys::Q_MONEY_SEARCH)));
+        body = body.child(Input::new(&form.search).aria_label(tr(keys::Q_MONEY_SEARCH)));
         match form.page {
             GiveawayPage::Users => {
                 let list = &session.payments.giveaway.award_members;
@@ -537,7 +539,24 @@ impl QuillApp {
                     );
                 }
                 if let Some(error) = list.error() {
-                    body = body.child(div().text_sm().child(error.to_string()));
+                    body = body.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap_2()
+                            .text_sm()
+                            .child(error.to_string())
+                            .child(
+                                Button::new("giveaway-award-retry")
+                                    .label(tr(keys::Q_MONEY_RETRY))
+                                    .ghost()
+                                    .small()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.load_more_award_members(cx);
+                                    })),
+                            ),
+                    );
                 } else if list.is_loading() {
                     body = body.child(
                         div()
@@ -631,6 +650,17 @@ impl QuillApp {
     }
 }
 
+/// Whether the members list asks for another page now: one read of its
+/// stage. A failed page waits for a scroll (or the Retry button); nothing
+/// is asked while a page is out or at the end.
+fn members_page_due(stage: &MembersStage, near_end: bool, scrolled: bool) -> bool {
+    match stage {
+        MembersStage::Ready => load_due(near_end, true, false),
+        MembersStage::Failed(_) => scrolled && load_due(near_end, true, false),
+        MembersStage::Idle | MembersStage::Loading | MembersStage::Done => false,
+    }
+}
+
 /// The name of a country by its code, falling back to the code.
 fn country_name(session: &Session, code: &str) -> String {
     session
@@ -640,4 +670,25 @@ fn country_name(session: &Session, code: &str) -> String {
         .and_then(|list| list.iter().find(|c| c.iso == code))
         .map(|c| c.name.clone())
         .unwrap_or_else(|| code.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MembersStage, members_page_due};
+
+    #[test]
+    fn a_failed_members_page_waits_for_a_scroll_and_nothing_loops() {
+        let failed = MembersStage::Failed("boom".into());
+        assert!(!members_page_due(&failed, true, false), "not on its own");
+        assert!(members_page_due(&failed, true, true), "a scroll asks again");
+        assert!(!members_page_due(&failed, false, true));
+        assert!(members_page_due(&MembersStage::Ready, true, false));
+        for stage in [
+            MembersStage::Idle,
+            MembersStage::Loading,
+            MembersStage::Done,
+        ] {
+            assert!(!members_page_due(&stage, true, true));
+        }
+    }
 }

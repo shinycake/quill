@@ -94,8 +94,12 @@ pub(super) fn member_look(
 
 impl QuillApp {
     pub(super) fn toggle_group_call_messages(&mut self, cx: &mut Context<Self>) {
-        self.group_call.chat_shown = !self.group_call.chat_shown;
-        if self.group_call.chat_shown {
+        let Some(view) = self.call_view_mut() else {
+            return;
+        };
+        view.chat_shown = !view.chat_shown;
+        let shown = view.chat_shown;
+        if shown {
             self.group_call.panel_scroll.scroll_to_bottom();
         }
         cx.notify();
@@ -109,7 +113,7 @@ impl QuillApp {
     ) -> impl IntoElement {
         let owner = cx.entity().downgrade();
         let call = call.clone();
-        let chat_shown = self.group_call.chat_shown;
+        let chat_shown = self.call_view().is_some_and(|view| view.chat_shown);
         let share_link = self.group_call_can_share_link(&call);
         let screen_source = self
             .live

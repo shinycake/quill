@@ -25,3 +25,4 @@ bare:BottomBar::Starting src/chat_bottom_bar.rs: the bar to draw, derived each f
 unkeyed:CallEnd::Busy src/ui/calls_state.rs: the callee's line was busy (the call's discard reason). A summary the user leaves with Cancel or Redial; nothing is in flight.
 unkeyed:CallWindowTarget::Busy src/ui/call_window_sync.rs: what the call window shows, read from the session each frame; "busy" is the busy line's summary, not work in flight.
 unkeyed:SearchField::Opening src/ui/call_add_people.rs: the search input is built by the call window's first render of the box (it needs that window). No request or task; closing the box drops it.
+bare:EntryStage::Loading src/ui/image_budget/entry_stage.rs: what `use_image` last returned for the entry. The decode is GPUI's image load, held beside the stage (`Entry::load`); dropping the entry drops it.

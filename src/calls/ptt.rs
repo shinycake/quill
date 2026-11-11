@@ -86,45 +86,74 @@ pub enum PttAction {
     Mute,
 }
 
-/// Where push-to-talk stands; talking is every stage but `Idle`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-enum PttStage {
-    #[default]
+/// Where push-to-talk stands; talking is every stage but `Idle`. `T` is the
+/// caller's wake-up for the release delay (the UI's timer task): it lives in
+/// the stage that waits for it, so every way out of `Releasing` (a new key
+/// press, the deadline, a reset) drops, and so cancels, it.
+#[derive(Debug)]
+enum PttStage<T> {
     Idle,
     /// The key is down and the microphone open.
     Held,
     /// The key came up; the microphone stays open until `mute_at` (ms on
-    /// the caller's clock).
-    Releasing { mute_at: u64 },
+    /// the caller's clock). `wake` is set once the caller armed its timer.
+    Releasing {
+        mute_at: u64,
+        wake: Option<T>,
+    },
 }
 
 /// Key-driven talk state with a release delay.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct PushToTalk {
-    stage: PttStage,
+#[derive(Debug)]
+pub struct PushToTalk<T = ()> {
+    stage: PttStage<T>,
+}
+
+impl<T> Default for PushToTalk<T> {
+    fn default() -> Self {
+        PushToTalk {
+            stage: PttStage::Idle,
+        }
+    }
 }
 
 impl PushToTalk {
+    /// Whether `key` is the configured push-to-talk key.
+    pub fn matches(config: &PttConfig, key: &str) -> bool {
+        config.enabled && config.sanitized().key == key.to_ascii_lowercase()
+    }
+}
+
+impl<T> PushToTalk<T> {
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Whether the microphone is currently open because of push-to-talk.
     pub fn is_talking(&self) -> bool {
-        self.stage != PttStage::Idle
+        !matches!(self.stage, PttStage::Idle)
     }
 
     /// Pending mute deadline, so the UI can schedule one wake-up.
     pub fn mute_deadline(&self) -> Option<u64> {
         match self.stage {
-            PttStage::Releasing { mute_at } => Some(mute_at),
+            PttStage::Releasing { mute_at, .. } => Some(mute_at),
             _ => None,
         }
     }
 
-    /// Whether `key` is the configured push-to-talk key.
-    pub fn matches(config: &PttConfig, key: &str) -> bool {
-        config.enabled && config.sanitized().key == key.to_ascii_lowercase()
+    /// Whether the release wake-up still needs arming: the key is up and
+    /// the delay runs without a timer.
+    pub fn needs_wake(&self) -> bool {
+        matches!(self.stage, PttStage::Releasing { wake: None, .. })
+    }
+
+    /// Hand the release delay's wake-up to the stage waiting for it. Outside
+    /// `Releasing` it is dropped on the spot.
+    pub fn hold_wake(&mut self, wake: T) {
+        if let PttStage::Releasing { wake: slot, .. } = &mut self.stage {
+            *slot = Some(wake);
+        }
     }
 
     /// The key went down. Auto-repeat while held is ignored.
@@ -145,7 +174,7 @@ impl PushToTalk {
 
     /// The key came up at `now_ms`. With no delay the mute is immediate.
     pub fn key_up(&mut self, now_ms: u64, delay_ms: u32) -> Option<PttAction> {
-        if self.stage != PttStage::Held {
+        if !matches!(self.stage, PttStage::Held) {
             return None;
         }
         if delay_ms == 0 {
@@ -154,6 +183,7 @@ impl PushToTalk {
         }
         self.stage = PttStage::Releasing {
             mute_at: now_ms.saturating_add(u64::from(delay_ms)),
+            wake: None,
         };
         None
     }
@@ -161,7 +191,7 @@ impl PushToTalk {
     /// Advance the clock; fires the delayed mute once its deadline passed.
     pub fn tick(&mut self, now_ms: u64) -> Option<PttAction> {
         match self.stage {
-            PttStage::Releasing { mute_at } if now_ms >= mute_at => {
+            PttStage::Releasing { mute_at, .. } if now_ms >= mute_at => {
                 self.stage = PttStage::Idle;
                 Some(PttAction::Mute)
             }
@@ -173,7 +203,7 @@ impl PushToTalk {
     /// held/pending state. Returns `Mute` when the microphone was open.
     pub fn reset(&mut self) -> Option<PttAction> {
         let was_talking = self.is_talking();
-        *self = PushToTalk::default();
+        self.stage = PttStage::Idle;
         was_talking.then_some(PttAction::Mute)
     }
 }
@@ -184,7 +214,7 @@ mod tests {
 
     #[test]
     fn press_talks_and_release_mutes_after_the_delay() {
-        let mut ptt = PushToTalk::new();
+        let mut ptt = PushToTalk::<()>::new();
         assert_eq!(ptt.key_down(), Some(PttAction::Talk));
         assert!(ptt.is_talking());
         assert_eq!(ptt.key_up(1_000, 200), None);
@@ -198,7 +228,7 @@ mod tests {
 
     #[test]
     fn zero_delay_mutes_on_release() {
-        let mut ptt = PushToTalk::new();
+        let mut ptt = PushToTalk::<()>::new();
         ptt.key_down();
         assert_eq!(ptt.key_up(10, 0), Some(PttAction::Mute));
         assert!(!ptt.is_talking());
@@ -206,7 +236,7 @@ mod tests {
 
     #[test]
     fn auto_repeat_is_ignored() {
-        let mut ptt = PushToTalk::new();
+        let mut ptt = PushToTalk::<()>::new();
         assert_eq!(ptt.key_down(), Some(PttAction::Talk));
         assert_eq!(ptt.key_down(), None);
         assert_eq!(ptt.key_down(), None);
@@ -214,7 +244,7 @@ mod tests {
 
     #[test]
     fn pressing_inside_the_delay_cancels_the_mute() {
-        let mut ptt = PushToTalk::new();
+        let mut ptt = PushToTalk::<()>::new();
         ptt.key_down();
         ptt.key_up(0, 500);
         assert_eq!(ptt.key_down(), None, "already open, no second unmute");
@@ -225,15 +255,44 @@ mod tests {
     }
 
     #[test]
+    fn the_release_wake_goes_with_its_stage() {
+        use std::rc::Rc;
+        let wake = Rc::new(());
+        let mut ptt: PushToTalk<Rc<()>> = PushToTalk::new();
+        ptt.hold_wake(wake.clone());
+        assert_eq!(Rc::strong_count(&wake), 1, "nothing is waiting: dropped");
+
+        ptt.key_down();
+        ptt.key_up(0, 500);
+        assert!(ptt.needs_wake());
+        ptt.hold_wake(wake.clone());
+        assert!(!ptt.needs_wake());
+        assert_eq!(Rc::strong_count(&wake), 2);
+        ptt.key_down();
+        assert_eq!(Rc::strong_count(&wake), 1, "pressing again cancels it");
+
+        ptt.key_up(0, 500);
+        ptt.hold_wake(wake.clone());
+        assert_eq!(ptt.tick(500), Some(PttAction::Mute));
+        assert_eq!(Rc::strong_count(&wake), 1, "the deadline ends it");
+
+        ptt.key_down();
+        ptt.key_up(0, 500);
+        ptt.hold_wake(wake.clone());
+        ptt.reset();
+        assert_eq!(Rc::strong_count(&wake), 1, "a reset ends it");
+    }
+
+    #[test]
     fn stray_release_does_nothing() {
-        let mut ptt = PushToTalk::new();
+        let mut ptt = PushToTalk::<()>::new();
         assert_eq!(ptt.key_up(0, 200), None);
         assert!(!ptt.is_talking());
     }
 
     #[test]
     fn reset_mutes_an_open_microphone_once() {
-        let mut ptt = PushToTalk::new();
+        let mut ptt = PushToTalk::<()>::new();
         ptt.key_down();
         assert_eq!(ptt.reset(), Some(PttAction::Mute));
         assert_eq!(ptt.reset(), None);
@@ -277,7 +336,7 @@ mod tests {
 
     #[test]
     fn long_delay_keeps_the_microphone_open_until_it_elapses() {
-        let mut ptt = PushToTalk::new();
+        let mut ptt = PushToTalk::<()>::new();
         ptt.key_down();
         assert_eq!(ptt.key_up(100, 2000), None);
         assert_eq!(ptt.tick(2099), None);

@@ -26,19 +26,24 @@ fn open_app(cx: &mut TestAppContext) -> (Entity<QuillApp>, VisualTestContext) {
 #[gpui_kit::test]
 fn the_lock_closes_the_invite_and_share_boxes(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_app(cx);
+    app.update_in(&mut vcx, |app, _, _| {
+        let Some(session) = app.demo_session.as_mut() else {
+            panic!("the demo has a session");
+        };
+        session.calls.active_group_call = Some(quill::state::ActiveGroupCall::fresh(1));
+    });
     for open in [
-        CallBox::Invite { call: Some(1) },
+        CallBox::Invite,
         CallBox::Share {
-            call: Some(1),
             speaker: false,
             copied: false,
         },
     ] {
         app.update_in(&mut vcx, |app, _, cx| {
-            app.group_call_boxes.call_box = open;
+            assert!(app.open_call_box(open), "the call has a window to open it");
             app.close_call_layers_for_lock(cx);
-            assert_eq!(app.group_call_boxes.call_box, CallBox::None);
-            assert!(!app.group_call_boxes.share_open());
+            assert!(matches!(app.call_box(), Some(CallBox::None)));
+            assert!(!app.share_open());
         });
     }
 }

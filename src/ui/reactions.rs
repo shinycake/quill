@@ -373,7 +373,7 @@ impl QuillApp {
                 .toggle_reaction_choice(chat_id, message_id, &choice)
                 .is_ok();
             if sent && fly.is_some() {
-                self.history.reaction_fly = fly;
+                self.history.reaction_fly.set(fly);
             }
             self.screen.connection.set_note_for(
                 &self.screen.windows,
@@ -387,7 +387,7 @@ impl QuillApp {
             return sent;
         }
         if fly.is_some() {
-            self.history.reaction_fly = fly;
+            self.history.reaction_fly.set(fly);
         }
         match choice {
             ReactionChoice::Emoji(emoji) => {

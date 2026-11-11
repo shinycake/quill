@@ -100,12 +100,12 @@ pub(super) static ESC_LAYERS: &[EscLayer] = &[
     ),
     layer!(
         "group-call-settings",
-        |app| app.group_call_screen.settings_open,
+        |app| app.settings_open(),
         |app, _, cx| app.close_group_call_settings(cx)
     ),
     layer!(
         "group-call-title",
-        |app| app.group_call_screen.title_dialog.is_some(),
+        |app| app.title_dialog().is_some(),
         |app, _, cx| app.close_group_call_title_dialog(cx)
     ),
     // Phase 9.7: the chat story page paints above the story composer.
@@ -674,14 +674,16 @@ mod dispatch_tests {
         let (app, mut vcx) = new_app(cx);
         let vcx = &mut vcx;
         app.update_in(vcx, |app, window, cx| {
-            app.group_call_screen.title_dialog = Some(
+            if let Some(session) = app.demo_session.as_mut() {
+                session.calls.active_group_call = Some(quill::state::ActiveGroupCall::fresh(77));
+            }
+            app.open_call_box(crate::ui::group_call_state::CallBox::Rename(
                 crate::ui::dialogs::group_call::GroupCallTitleDialog::new(window, cx, "x"),
-            );
-            app.group_call_screen.settings_open = true;
+            ));
             app.screen_share.chooser = crate::ui::screen_share_state::Chooser::PrivacyBox(
                 crate::ui::screen_share_state::ChooserTarget {
                     for_call: crate::ui::screen_share_state::ScreenFor::Group,
-                    group_call: None,
+                    group_call: Some(77),
                 },
             );
             app.stories.page = Some(crate::ui::story_page::StoryPage::new(ChatId(1), window, cx));
@@ -690,8 +692,7 @@ mod dispatch_tests {
         vcx.simulate_keystrokes("escape");
         assert_eq!(top(&app, vcx), None, "the main window's own layer closed");
         app.read_with(vcx, |app, _| {
-            assert!(app.group_call_screen.title_dialog.is_some());
-            assert!(app.group_call_screen.settings_open);
+            assert!(app.title_dialog().is_some());
             assert!(app.screen_share.chooser.privacy_for().is_some());
         });
     }

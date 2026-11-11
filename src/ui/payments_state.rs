@@ -121,15 +121,12 @@ impl PaymentUi {
                 .placeholder(tr(keys::Q_MONEY_SEARCH))
                 .submit_on_enter(false)
         });
-        cx.subscribe_in(
-            &pick_search,
-            window,
-            |this, _, event: &InputEvent, _, cx| {
-                if matches!(event, InputEvent::Change) {
-                    this.pick_search_changed(cx);
-                }
-            },
-        )
+        cx.subscribe_in(&pick_search, window, |_, _, event: &InputEvent, _, cx| {
+            // The pickers read the query when they draw.
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })
         .detach();
         let gift_recipient_search = cx.new(|cx| {
             InputState::new(window, cx)

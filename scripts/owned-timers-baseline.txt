@@ -14,7 +14,6 @@ detached:QuillApp::ensure_self_destruct_tick 1
 detached:QuillApp::general_link_handler_section 1
 detached:QuillApp::live_story_header 1
 detached:QuillApp::new_chatbot_draft 2
-detached:QuillApp::ptt_release 1
 detached:QuillApp::schedule_chat_search_commit 1
 detached:QuillApp::schedule_search_commit 1
 detached:QuillApp::show_notification_with_preview 1
