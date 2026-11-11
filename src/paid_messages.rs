@@ -602,6 +602,12 @@ impl PaidSave {
         self.by_target.insert(target, TargetSave::Saving(request));
     }
 
+    /// `target` is idle again (the offline demo's save ended with no
+    /// request to answer).
+    pub fn clear(&mut self, target: PaidTarget) {
+        self.by_target.remove(&target);
+    }
+
     /// The request of the save of `target` that is out, if any.
     pub fn request_for(&self, target: PaidTarget) -> Option<crate::ids::RequestId> {
         match self.by_target.get(&target) {

@@ -23,8 +23,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr, tr_with};
 use quill::paid_messages::{
-    PaidConfirm, SendGate, needs_confirmation, pays_bar_text, refund_label, remove_fee_text,
-    stars_text,
+    PaidConfirm, SendGate, pays_bar_text, refund_label, remove_fee_text, stars_text,
 };
 use quill::state::Session;
 use std::cell::RefCell;

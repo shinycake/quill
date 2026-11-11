@@ -206,7 +206,9 @@ pub fn poll_answer_for_tap(poll: &Poll, index: usize) -> Option<Vec<i32>> {
     if poll.is_closed || poll.vote_restriction_reason.is_some() || index >= poll.options.len() {
         return None;
     }
-    let index = index as i32;
+    let Ok(index) = i32::try_from(index) else {
+        return None;
+    };
     let chosen = poll.chosen_indexes();
     if !poll.allows_revoting && !chosen.is_empty() {
         // Matches TDLib: any `setPollAnswer` after a vote exists is
