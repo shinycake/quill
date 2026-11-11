@@ -74,23 +74,23 @@ fn gifts_page_applies_and_registers_sticker_files() {
 fn gift_mutation_ok_marks_the_list_stale_and_errors_release_the_lock() {
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
-    session.payments.hub.gift_mutating = true;
     let extra = session.request(
         RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { saved: false }),
         None,
     );
+    session.payments.hub.gift_mutation.begin(extra.0);
     apply_json(
         &mut session,
         &seq,
         &sink,
         &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra.0),
     );
-    assert!(!session.payments.hub.gift_mutating);
+    assert!(!session.payments.hub.gift_mutation.is_running());
     assert!(session.payments.hub.gifts_stale);
 
-    session.payments.hub.gift_mutating = true;
     session.payments.hub.gift_convert_confirm = Some("g1".into());
     let extra = session.request(RequestPurpose::SellGift, None);
+    session.payments.hub.gift_mutation.begin(extra.0);
     apply_json(
         &mut session,
         &seq,
@@ -100,7 +100,7 @@ fn gift_mutation_ok_marks_the_list_stale_and_errors_release_the_lock() {
             extra.0
         ),
     );
-    assert!(!session.payments.hub.gift_mutating);
+    assert!(!session.payments.hub.gift_mutation.is_running());
     assert!(session.payments.hub.gift_convert_confirm.is_none());
     assert!(session.payments.hub.gifts_error.is_some());
 }

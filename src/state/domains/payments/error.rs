@@ -192,7 +192,7 @@ impl Session {
                 RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { .. })
                 | RequestPurpose::SellGift,
             ) => {
-                self.payments.hub.gift_mutating = false;
+                self.payments.hub.gift_mutation.settle(pending.map(|p| p.id.0));
                 self.payments.hub.gift_convert_confirm = None;
                 self.payments.hub.gifts_error =
                     Some(format!("Couldn't update the gift: {}", error_reason(err)));

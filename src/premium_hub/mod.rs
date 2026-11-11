@@ -668,6 +668,7 @@ fn limit_title(constructor: &str) -> Option<&'static str> {
 
 pub mod feature;
 pub mod fragment;
+pub mod gift_mutation;
 pub mod gift_value;
 pub mod promo;
 
@@ -785,7 +786,7 @@ pub struct PremiumHub {
     pub gift_selected: Option<String>,
     /// `sellGift` awaiting confirmation for this gift id.
     pub gift_convert_confirm: Option<String>,
-    pub gift_mutating: bool,
+    pub gift_mutation: gift_mutation::GiftMutation,
     pub gifts_stale: bool,
     // Premium.
     pub premium_open: bool,

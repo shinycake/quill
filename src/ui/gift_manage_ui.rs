@@ -226,7 +226,7 @@ impl QuillApp {
         } else if let Some(session) = self.demo_session.as_mut() {
             // The demo has no connection: answer as the server would.
             session.payments.gifts_manage.deleting = Some(id.to_string());
-            session.finish_gift_delete();
+            session.finish_gift_delete(None);
         }
         cx.notify();
     }
@@ -252,7 +252,7 @@ pub(super) fn gift_collection_tabs(
     cx: &mut Context<QuillApp>,
 ) -> AnyElement {
     let manage = &session.payments.gifts_manage;
-    let busy = session.payments.hub.gift_mutating;
+    let busy = session.payments.hub.gift_mutation.is_running();
     if manage.collections.is_empty() && !mine {
         return div().into_any_element();
     }

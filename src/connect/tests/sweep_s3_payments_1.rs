@@ -630,9 +630,9 @@ fn a_stale_gift_refetch_waits_for_a_page_in_flight_and_is_cleared_by_its_answer(
 fn reopening_the_gifts_box_keeps_the_lock_of_a_mutation_in_flight() {
     let mut t = Flaky::new();
     let owner = crate::telegram::envelope::MessageSender::User { user_id: ME };
-    t.driver.session.payments.hub.gift_mutating = true;
+    t.driver.session.payments.hub.gift_mutation.begin(1);
     t.driver.open_received_gifts(owner).unwrap();
-    assert!(t.driver.session.payments.hub.gift_mutating);
+    assert!(t.driver.session.payments.hub.gift_mutation.is_running());
 }
 
 #[test]

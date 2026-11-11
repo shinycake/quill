@@ -119,7 +119,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         hub.gifts_error = None;
         hub.gift_selected = None;
         hub.gift_convert_confirm = None;
-        // `gift_mutating` is not reset: a toggle or sale still out keeps its
+        // `gift_mutation` is not reset: a toggle or sale still out keeps its
         // lock until its own answer (another request would pay twice).
         hub.gifts_stale = false;
         self.begin_gift_manage(owner);
@@ -198,7 +198,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         saved: bool,
     ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active()
-            || self.session.payments.hub.gift_mutating
+            || self.session.payments.hub.gift_mutation.is_running()
             || !self
                 .session
                 .payments
@@ -218,11 +218,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { saved }),
             None,
         );
-        self.session.payments.hub.gift_mutating = true;
+        self.session.payments.hub.gift_mutation.begin(extra.0);
         self.session.payments.hub.gifts_error = None;
         let json = toggle_gift_is_saved(extra, received_gift_id, saved);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.payments.hub.gift_mutating = false;
+            self.session.payments.hub.gift_mutation.cancel();
             return Err(err);
         }
         Ok(extra)
@@ -242,7 +242,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .iter()
             .any(|gift| gift.id == received_gift_id && gift.can_convert());
         if !self.chats_path_active()
-            || self.session.payments.hub.gift_mutating
+            || self.session.payments.hub.gift_mutation.is_running()
             || !self
                 .session
                 .payments
@@ -255,11 +255,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         let extra = self
             .session
             .request_for_subject(RequestPurpose::SellGift, received_gift_id);
-        self.session.payments.hub.gift_mutating = true;
+        self.session.payments.hub.gift_mutation.begin(extra.0);
         self.session.payments.hub.gifts_error = None;
         let json = sell_gift(extra, received_gift_id);
         if let Err(err) = self.send_json_request(extra, &json) {
-            self.session.payments.hub.gift_mutating = false;
+            self.session.payments.hub.gift_mutation.cancel();
             return Err(err);
         }
         Ok(extra)
