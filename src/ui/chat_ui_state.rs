@@ -645,9 +645,9 @@ impl QuillApp {
         {
             live.driver.session.acks.forget(request);
         }
-        for request in old.bar_work.requests() {
-            if let Some(live) = self.live.as_mut() {
-                live.driver.session.acks.forget(*request);
+        if let Some(session) = self.session_mut() {
+            for request in old.bar_work.requests() {
+                session.acks.forget(*request);
             }
         }
         for delete in &old.scheduled_deletes {
