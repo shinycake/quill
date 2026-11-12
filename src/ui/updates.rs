@@ -432,10 +432,16 @@ impl QuillApp {
     /// The release's notes, and why this copy cannot install it itself.
     fn update_release_notes(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let release = self.known_release()?;
-        let notes: SharedString = if release.notes.is_empty() {
-            tr(keys::Q_OPS_NO_RELEASE_NOTES_WERE_PROVIDED).into()
+        let notes = if release.notes.is_empty() {
+            div()
+                .text_color(cx.theme().muted_foreground)
+                .child(tr(keys::Q_OPS_NO_RELEASE_NOTES_WERE_PROVIDED))
+                .into_any_element()
         } else {
-            release.notes.clone().into()
+            super::whats_new::release_notes_markdown(
+                "quill-release-notes-text",
+                release.notes.clone(),
+            )
         };
         // A newer release the button cannot install: the reason.
         let reason = matches!(
@@ -452,10 +458,8 @@ impl QuillApp {
                 .child(
                     div()
                         .id("quill-release-notes")
-                        .role(Role::Label)
-                        .aria_label(notes.clone())
+                        .debug_selector(|| "quill-release-notes".into())
                         .text_sm()
-                        .text_color(cx.theme().muted_foreground)
                         .child(notes),
                 )
                 .children(reason.map(|why| {
