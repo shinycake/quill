@@ -48,3 +48,11 @@ src/video_decode/presenting.rs 55 read
 src/video_decode/reattach.rs 72 read
 src/video_edit.rs 902 read
 src/video_encoder.rs 309 read
+src/video_timeline.rs 537 read
+src/viewer_extras.rs 370 read
+src/voice.rs 999 read
+src/voice_input.rs 214 read
+src/voice_opus.rs 481 read
+src/wake.rs 347 read
+src/wallpaper_raster/mod.rs 590 read
+src/wallpaper_raster/soft_light.rs 105 read
