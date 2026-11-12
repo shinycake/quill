@@ -90,7 +90,7 @@ fn a_start_cancelled_while_the_microphone_opens_leaves_nothing(cx: &mut TestAppC
 }
 
 #[gpui_kit::test]
-fn record_works_again_while_a_cancelled_microphone_has_not_answered(cx: &mut TestAppContext) {
+fn record_works_again_right_after_a_cancelled_start(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_chat(cx);
     let opens = fake_microphone(&app, &mut vcx);
     start(&app, CaptureFor::Message, &mut vcx);
@@ -101,11 +101,8 @@ fn record_works_again_while_a_cancelled_microphone_has_not_answered(cx: &mut Tes
     start(&app, CaptureFor::Message, &mut vcx);
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
-        assert_eq!(
-            opens.load(Ordering::SeqCst),
-            2,
-            "the second press opened too"
-        );
+        // The cancelled start never ran, so only the second press opened.
+        assert_eq!(opens.load(Ordering::SeqCst), 1, "the second press opened");
         assert!(app.recording_active(), "the second press records");
     });
 }

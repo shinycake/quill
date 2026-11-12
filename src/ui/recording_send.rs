@@ -414,9 +414,12 @@ impl QuillApp {
             .is_some_and(|session| session.settings.media_prefs.hq_round_videos);
         let choice = self.capture_choice();
         let start = self.recording.next_start_id();
-        let starting = cx.background_spawn(async move { VideoNoteCapture::start(hq, &choice) });
+        // The camera is opened from inside the task the stage holds: a
+        // start cancelled before the task first runs opens nothing.
         let opening = self.spawn_scoped(cx, async move |this, cx| {
-            let result = starting.await;
+            let result = cx
+                .background_spawn(async move { VideoNoteCapture::start(hq, &choice) })
+                .await;
             let held = this.update(cx, |this, cx| {
                 this.hold_started_video(result, start, purpose, lock, cx);
             });
@@ -469,9 +472,10 @@ impl QuillApp {
         }
         let start = self.recording.next_start_id();
         let open = self.recording.open_voice.clone();
-        let opening = cx.background_spawn(async move { open() });
+        // The microphone is opened from inside the task the stage holds: a
+        // start cancelled before the task first runs opens nothing.
         let task = self.spawn_scoped(cx, async move |this, cx| {
-            let mut result = Some(opening.await);
+            let mut result = Some(cx.background_spawn(async move { open() }).await);
             let held = this.update(cx, |this, cx| {
                 if let Some(result) = result.take() {
                     this.hold_started_voice(result, start, purpose, cx);

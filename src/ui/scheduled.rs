@@ -286,6 +286,14 @@ impl QuillApp {
             target if target.is_composer() => self.send_slot(),
             _ => None,
         };
+        // One box at a time: a reschedule hides the list (its ticks wait
+        // for the new time or for Cancel), any other picker closes it.
+        match target {
+            ScheduleTarget::Reschedule(_) | ScheduleTarget::RescheduleSelected => {
+                self.hide_scheduled_dialog_for_picker();
+            }
+            _ => self.close_scheduled_dialog(),
+        }
         self.chat_ui.schedule_picker = Some(SchedulePicker {
             target,
             date,
@@ -702,7 +710,6 @@ impl QuillApp {
                     .ghost()
                     .small()
                     .on_click(cx.listener(|this, _, window, cx| {
-                        this.hide_scheduled_dialog_for_picker();
                         this.open_schedule_picker(ScheduleTarget::RescheduleSelected, window, cx);
                         this.close_kit_dialog_if_done(DialogKind::Scheduled, window, cx);
                     })),
@@ -831,7 +838,6 @@ impl QuillApp {
                         .label(tr(keys::Q_OPS_RESCHEDULE))
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.hide_scheduled_dialog_for_picker();
                             this.open_schedule_picker(ScheduleTarget::Reschedule(id), window, cx);
                             this.close_kit_dialog_if_done(DialogKind::Scheduled, window, cx);
                         })),
