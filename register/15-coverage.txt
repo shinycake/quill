@@ -47,6 +47,3 @@ src/ui/demos/video_avatar.rs 181 read
 src/ui/demos/video_fixtures.rs 368 read
 src/ui/demos/video_userpics.rs 157 read
 src/ui/demos/widgets.rs 103 read
-src/ui/device_layer.rs 184 read
-src/ui/device_qr.rs 270 read
-src/ui/dialog_focus.rs 20 read
