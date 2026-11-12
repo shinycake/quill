@@ -59,3 +59,17 @@ src/ui/settings_window/agent_activity.rs 576 read
 src/ui/settings_window/agent_activity_demo.rs 113 read
 src/ui/settings_window/agent_grants.rs 493 read
 src/ui/settings_window/agent_grants_demo.rs 46 read
+src/ui/settings_window/agent_page.rs 621 read
+src/ui/settings_window/agent_switch.rs 89 read
+src/ui/settings_window/agent_tools.rs 578 read
+src/ui/settings_window/agent_window.rs 264 read
+src/ui/settings_window/arrival.rs 282 read
+src/ui/settings_window/log_out.rs 95 read
+src/ui/settings_window/mod.rs 498 read
+src/ui/settings_window/nav.rs 110 read
+src/ui/settings_window/notifications.rs 163 read
+src/ui/settings_window/pages.rs 263 read
+src/ui/settings_window/privacy.rs 171 read
+src/ui/settings_window/rows.rs 215 read
+src/ui/settings_window/search.rs 483 read
+src/ui/settings_window/sidebar.rs 188 read
