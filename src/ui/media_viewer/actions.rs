@@ -651,7 +651,7 @@ impl QuillApp {
         if let Some(live) = self.live.as_mut()
             && live.driver.fetch_attached_sticker_sets(file_id).is_err()
         {
-            self.sticker_box.host = crate::ui::sticker_set_box::state::SetBoxHost::Closed;
+            self.close_sticker_set_dialog(cx);
             self.set_note(StatusNote::error(tr(
                 keys::Q_AV_COULD_NOT_LOAD_THE_ATTACHED,
             )));

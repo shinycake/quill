@@ -80,8 +80,9 @@ async fn answer_wakes(
         // callback and the single-instance listener poke `signal`). A link
         // waiting behind another flow is not polled for: the deep-link pump
         // pokes `signal` when it frees its slot (`QuillApp::pump_deep_link`).
-        let wait = std::time::Duration::from_secs(60);
-        super::wake_wait::sleep_or_wake(cx.background_executor(), signal, seen, wait).await;
+        // No timeout: every source pokes, and a poke that lands while `turn`
+        // runs has moved the epoch past `seen`, so it ends this wait at once.
+        signal.wait_since(seen).await;
         seen = signal.epoch();
     }
 }

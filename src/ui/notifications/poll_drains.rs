@@ -338,6 +338,7 @@ impl QuillApp {
             | self.settle_recommended_adds(cx)
             | self.settle_folder_deletes(cx)
             | self.settle_add_contact(cx)
+            | self.drain_new_contact(cx)
             | self.settle_edit_contact(cx)
             | self.drive_folder_invite(cx)
             | self.drain_folder_limit(cx)
