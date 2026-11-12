@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 /// decoder can't read still sends, it just shows its kind).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct VideoPreview {
-    /// The first frame, upright, at most [`FRAME_SIDE`] on its long side.
+    /// The first frame, upright, at most 640 px on its long side.
     pub(crate) frame: Option<Frame>,
     /// Whole seconds.
     pub(crate) duration: Option<i32>,
@@ -26,9 +26,6 @@ pub(crate) struct Frame {
     pub(crate) width: u32,
     pub(crate) height: u32,
 }
-
-/// Big enough for the largest tile on a Retina screen.
-const FRAME_SIDE: u32 = 640;
 
 impl QuillApp {
     /// Start reading every tray video (and round video) that has not been
@@ -116,11 +113,14 @@ fn frame_at(path: PathBuf) -> Option<Frame> {
 
 #[cfg(target_os = "macos")]
 mod macos {
-    use super::{FRAME_SIDE, VideoPreview};
+    use super::VideoPreview;
     use objc2_av_foundation::{AVAssetImageGenerator, AVURLAsset};
     use objc2_core_media::CMTime;
     use objc2_foundation::{NSString, NSURL};
     use std::path::Path;
+
+    /// Big enough for the largest tile on a Retina screen.
+    const FRAME_SIDE: u32 = 640;
 
     /// The first frame and length through AVFoundation; `None` when it
     /// can't open the file (a format only ffmpeg knows).
