@@ -47,6 +47,7 @@ fn the_system_offer_waits_for_the_window_to_be_active(cx: &mut TestAppContext) {
         "an inactive window keeps the offer"
     );
     vcx.update(|window, _| window.activate_window());
+    vcx.run_until_parked();
     assert!(vcx.update(|window, _| window.is_window_active()));
     app.update_in(vcx, |app, window, cx| app.passcode_frame(window, cx));
     assert_ne!(
