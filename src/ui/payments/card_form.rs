@@ -128,7 +128,10 @@ impl CardInput {
 /// Editing, or waiting for the provider's token (Done is busy then and
 /// a second press does nothing, as `if (_stripe) return;` in tdesktop).
 pub(crate) enum CardPhase {
-    Editing,
+    /// Editing the fields. `notice` is the provider's last refusal ("Your
+    /// card was declined."), shown until Done is pressed again or it is
+    /// dismissed. Error ids only, never card data.
+    Editing { notice: Option<SharedString> },
     Tokenizing { _task: Task<()> },
 }
 
@@ -147,10 +150,6 @@ pub(crate) struct CardForm {
     /// "Save Information for future use", when the form allows saving.
     pub(crate) save: Option<bool>,
     pub(crate) phase: CardPhase,
-    /// The provider's last refusal ("Your card was declined."), shown in
-    /// the form until Done is pressed again or it is closed. Error ids
-    /// only, never card data.
-    pub(crate) notice: Option<SharedString>,
 }
 
 impl CardForm {
@@ -181,6 +180,14 @@ impl CardForm {
     /// The country field is marked as an error.
     pub(crate) fn country_invalid(&self) -> bool {
         self.country_check.rejects(&self.country_iso)
+    }
+
+    /// The provider's last refusal, while the form is editing.
+    pub(crate) fn notice(&self) -> Option<&SharedString> {
+        match &self.phase {
+            CardPhase::Editing { notice } => notice.as_ref(),
+            CardPhase::Tokenizing { .. } => None,
+        }
     }
 
     pub(crate) fn is_tokenizing(&self) -> bool {
@@ -309,8 +316,7 @@ impl QuillApp {
             country_focus: cx.focus_handle(),
             default_country,
             save: can_save.then_some(false),
-            phase: CardPhase::Editing,
-            notice: None,
+            phase: CardPhase::Editing { notice: None },
         };
         if let Some(dialog) = self.payments.dialog.as_mut() {
             dialog.page = PaymentPage::CardForm(Box::new(card_form));
@@ -609,9 +615,6 @@ impl QuillApp {
         }
         let provider = form.provider.clone();
         let transport = self.card_transport();
-        if let Some(form) = self.card_form_mut() {
-            form.notice = None;
-        }
         let tokenizing = cx
             .background_executor()
             .spawn(async move { tokenize(&provider, &card, transport.as_ref()) });
@@ -648,7 +651,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(form) = self.card_form_mut() {
-            form.phase = CardPhase::Editing;
+            form.phase = CardPhase::Editing { notice: None };
         }
         let notice = match result {
             Ok(credentials) => {
@@ -674,14 +677,18 @@ impl QuillApp {
             }
         };
         if let Some(form) = self.card_form_mut() {
-            form.notice = Some(text.into());
+            form.phase = CardPhase::Editing {
+                notice: Some(text.into()),
+            };
         }
         cx.notify();
     }
 
     pub(in crate::ui) fn dismiss_card_notice(&mut self, cx: &mut Context<Self>) {
-        if let Some(form) = self.card_form_mut() {
-            form.notice = None;
+        if let Some(form) = self.card_form_mut()
+            && !form.is_tokenizing()
+        {
+            form.phase = CardPhase::Editing { notice: None };
         }
         cx.notify();
     }

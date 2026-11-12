@@ -345,7 +345,7 @@ fn provider_errors_keep_the_form_open(cx: &mut TestAppContext) {
         assert!(!form.is_tokenizing(), "Done works again");
         assert!(dialog.method.card().is_none());
         assert_eq!(
-            form.notice.as_ref().map(|notice| notice.as_ref()),
+            form.notice().map(|notice| notice.as_ref()),
             Some(quill::lang::tr(quill::lang::keys::PAYMENTS_CARD_DECLINED))
         );
     });
@@ -356,7 +356,7 @@ fn provider_errors_keep_the_form_open(cx: &mut TestAppContext) {
     // Done again drops the old refusal while the provider answers.
     let cleared = app.update_in(&mut vcx, |app, window, cx| {
         app.submit_card_form(window, cx);
-        app.card_form().is_some_and(|form| form.notice.is_none())
+        app.card_form().is_some_and(|form| form.notice().is_none())
     });
     assert!(cleared);
     draw(&mut vcx);
