@@ -86,3 +86,13 @@ src/ui/app_theme/mod.rs 436 read
 src/ui/app_theme/chooser.rs 492 read
 src/ui/app_theme/kit_colors.rs 323 read
 src/ui/app_theme/editor.rs 595 read
+src/ui/appearance/mod.rs 684 read
+src/ui/appearance/new_accent_picker.rs 837 read
+src/ui/appearance/appearance_keybindings_section.rs 241 read
+src/ui/appearance/send_to_menu_section.rs 198 read
+src/ui/appearance/telegram_wallpapers.rs 328 read
+src/ui/appearance_power.rs 311 read
+src/ui/archive_hint.rs 134 read
+src/ui/archive_mute_suggestion.rs 140 read
+src/ui/archive_row.rs 353 read
+src/ui/attach_bots.rs 204 read
