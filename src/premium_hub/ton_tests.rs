@@ -1,5 +1,5 @@
 use super::{
-    GramRevenue, GramsHub, GramsPayload, TonTxKind, TonTxPage, WithdrawalState,
+    GramRevenue, GramsEvent, GramsHub, GramsPayload, TonTxKind, TonTxPage, WithdrawalState,
     get_gram_revenue_statistics, get_ton_transactions, get_user, gram_amount_2dp, gram_balance,
     gram_balance_short, parse_kind, parse_payload, parse_ton_transactions, signed_gram_amount,
     usd_line,
@@ -427,10 +427,10 @@ fn entering_the_idle_password_box_queues_its_focus_once() {
     use super::GramWithdraw;
     let mut hub = GramsHub::default();
     hub.enter_withdraw(GramWithdraw::Sending(RequestId(3)));
-    assert!(!hub.take_ready());
+    assert!(hub.take_events().is_empty());
     hub.enter_withdraw(GramWithdraw::idle(None));
-    assert!(hub.take_ready());
-    assert!(!hub.take_ready(), "taken once");
+    assert_eq!(hub.take_events(), vec![GramsEvent::PasswordReady]);
+    assert!(hub.take_events().is_empty(), "taken once");
     hub.enter_withdraw(GramWithdraw::SecurityCheck { later: false });
-    assert!(!hub.take_ready());
+    assert!(hub.take_events().is_empty());
 }

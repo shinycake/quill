@@ -688,3 +688,46 @@ fn a_send_answer_names_the_temporary_message_of_its_request() {
         }]
     );
 }
+
+/// Sweep r3-08 round 2 (14-004): an album's answer names the temporary
+/// message of each photo under the album's request, so a captioned album
+/// sent from a main composer finds its draft clear too.
+#[test]
+fn an_album_answer_names_each_temporary_message_of_its_request() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    new_chat(
+        &mut session,
+        &seq,
+        &sink,
+        9,
+        r#"{"@type":"chatTypeSupergroup","supergroup_id":9,"is_channel":false}"#,
+    );
+    let album = session.request(RequestPurpose::SendMessageAlbum, Some(ChatId(9)));
+    let photo = |id: i64| {
+        format!(
+            r#"{{"id":{id},"chat_id":9,"is_outgoing":true,"sending_state":{{"@type":"messageSendingStatePending"}},"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"x","entities":[]}}}}}}"#
+        )
+    };
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"messages","@extra":"{}","total_count":2,"messages":[{},{}]}}"#,
+            album.0,
+            photo(-5),
+            photo(-6)
+        ),
+    );
+    let answers: Vec<_> = session
+        .messages
+        .sent_answers
+        .iter()
+        .map(|a| (a.request, a.message_id))
+        .collect();
+    assert_eq!(
+        answers,
+        vec![(album, MessageId(-5)), (album, MessageId(-6))]
+    );
+}

@@ -21,7 +21,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 use quill::gift_manage::ExportError;
 use quill::lang::{keys, tr};
-use quill::premium_hub::ton::{GramWithdraw, WithdrawOutcome};
+use quill::premium_hub::ton::{GramWithdraw, GramsEvent, WithdrawOutcome};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -168,7 +168,7 @@ impl QuillApp {
                         .withdraw
                         .as_ref()
                         .is_some_and(GramWithdraw::shows_password);
-                let ready = grams.take_ready();
+                let ready = grams.take_events().contains(&GramsEvent::PasswordReady);
                 (grams.take_withdraw_outcome(), showing, ready)
             }
             None => (None, false, false),

@@ -3,6 +3,25 @@ use crate::state::*;
 use crate::telegram::envelope::MessagesPayload;
 
 impl Session {
+    /// Keep the temporary message TDLib made for send `request`, so the
+    /// composer's ack finds the clear of the send it ends. Nobody may be
+    /// looking (an agent session): keep the newest 64.
+    pub(crate) fn record_send_answer(
+        &mut self,
+        request: RequestId,
+        chat_id: ChatId,
+        message_id: MessageId,
+    ) {
+        if self.messages.sent_answers.len() >= 64 {
+            self.messages.sent_answers.remove(0);
+        }
+        self.messages.sent_answers.push(SendAnswered {
+            request,
+            chat_id,
+            message_id,
+        });
+    }
+
     /// Applies one messages payload; called by
     /// [`Session::apply_payload`].
     pub(crate) fn apply_messages_payload(
@@ -548,15 +567,7 @@ impl Session {
                 } else if let Some(request) =
                     pending.filter(|p| p.purpose == RequestPurpose::SendMessage)
                 {
-                    // Nobody may be looking (an agent session): keep the newest.
-                    if self.messages.sent_answers.len() >= 64 {
-                        self.messages.sent_answers.remove(0);
-                    }
-                    self.messages.sent_answers.push(SendAnswered {
-                        request: request.id,
-                        chat_id: message.chat_id,
-                        message_id: message.id,
-                    });
+                    self.record_send_answer(request.id, message.chat_id, message.id);
                     self.upsert_message(message, true);
                 } else if matches!(
                     pending.map(|p| p.purpose),
