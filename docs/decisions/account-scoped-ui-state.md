@@ -8053,32 +8053,32 @@ from the top after its entries; what that found is in the `new-` rows.
 | --- | --- |
 | 12-C006 | The chooser's window is a stage of `Chooser`: `Opening { sheet, _open: Task }` (the task makes the window and moves the stage on) and `Open { sheet, window }`. A chooser closed while its window is made drops the task, so no window is made for it; `OpenChooser.window: Option` is gone. |
 | 12-C007 | `ScreenShareUi.demo_active` is `Option<DemoShare { source, with_audio }>`; `demo_active_audio` is gone. |
-| 11-035 | `apply_chat_ttl` closes the timer picker only once the send went out; a refused send keeps the picker and the pick. |
+| 11-035 | The timer picker closes before the send (`close_ttl_picker`), as the integration branch has it; this branch's keep-on-refusal variant was dropped in the rebase. |
 | 12-D005 | The two-step buttons that send (reset, recovery code, resend, the confirm box's yes) say "request not sent" when the driver refuses, and the confirm box stays open on a refusal. The screens without a form draw the notice line too. |
 | 12-D006 | `WindowSelected.messages` is a map by document order: a text that holds none of the selection lets go, and a read with no selection resets the record. The one message the copy names is the first text in document order that holds the selection. |
 | 12-D007 | `SELECTED`, `OWNERS` (selectable text) and the send-fly tables are `Cell`s taken and put back (`with_taken`); `SelectionFx` and the history row bands use `try_borrow`. `selection_bar.rs:25` is not in this bundle. |
 | 12-D009 | `DragSelect.pending` is gone: the release reads the message's send stage (`message_still_sending`), and a message that is gone counts as not selectable. `selection_press_row` and `selection_row` lost the `pending` parameter. |
 | 12-D010 | "Save Selected" has a `SaveSelection { Idle, Picking(Task) }` stage in `ChatUi`: one picker at a time, dropped with the chat. A refused download ask says so. |
 | 12-D011 (and 02-008) | `ChatUi.pending_delete` is gone: `confirm_delete` takes the `DeleteConfirm` the box captured. |
-| 12-D012 | `delete_selection` keeps the selection when the send was refused. A refused report or "delete all" stops the delete and says so. |
+| 12-D012 | `delete_selection` keeps the selection when the send was refused. A refused report or "delete all" stops the delete and keeps the box (the integration branch's `refused` form). |
 | 12-D016 | The flight is one `Flight { Idle, Waiting(Fly), Flying { fly, started } }`; `Fly.started` is gone. It ends with its own landing, its window closing, the account leaving the screen (`end_account_surfaces`) and the lock (`close_for_lock`). A refused sticker send forgets the noted cell. |
 | 12-D017 | `SystemAccent` is `Unread`, `Reading { color, _wait: Task }`, `Read(color)`; `system_accent_poll` is gone. |
-| 12-D018 (and 14-003) | `update_banner_dismissed` is `update_banner_dismissed_for: Option<release version>`; the banner shows for an installed release not dismissed, so no hand reset when a check starts. |
-| 13-005 | The destinations ticked in the share box live in `ForwardStage::Picking { ticks }`; every way out of the box drops them. The typed comment and the search text follow the stage (`ShareUi::sync_inputs`, per window frame). |
-| 13-006 | The forward result banner is `ChatUi.forward_result`: the source chat's, drawn only in a window that shows it, gone with the chat. |
+| 12-D018 (and 14-003) | The banner's dismissal is `ChangelogBanner::{Shown, Dismissed}` inside `UpdateState::Installed`, as the integration branch has it; this branch's `update_banner_dismissed_for` was dropped in the rebase. |
+| 13-005 | The ticked destinations stay `ShareUi.selection`, cleared when the box opens and closes, as the integration branch has it (`ForwardStage::Picking { share_at }`); this branch's `ticks` in the stage was dropped in the rebase. |
+| 13-006 | The forward result banner stays `ShareUi.forward_result`, shown by `present_forward_result` as the integration branch has it; this branch's `ChatUi.forward_result` was dropped in the rebase. |
 | 13-013 | `MediaMenuFacts.downloading` and `.local` are one `MenuFile { Remote, Downloading, OnDisk }`. |
-| 13-017 | `ForwardStage::begin_selection` is the one way the gallery's selection becomes the forward: a reply chooser open now closes first. |
-| 13-016 | `ChatListUi.menu` and `.peek` are one `ChatOverlay { None, Menu, Pressing, Peek }`: opening one replaces the other, and a close ends only its own (`close_menu`, `close_peek`). |
+| 13-017 | The gallery's selection opens the forward box through `open_forward_picker`, which closes the reply chooser (`ChatUi`), as the integration branch has it; `ForwardStage::begin_selection` was dropped in the rebase. |
+| 13-016 | The chat list's menu is `ChatListMenu` and the peek `PeekPreview`, as the integration branch has them; this branch's `ChatOverlay` was dropped in the rebase. |
 | 13-018 | The Shift+click range anchor is `ForwardDraft.range_anchor`: it ends with the selection, so a menu "Select" no longer starts from an earlier selection's row. `ChatUi.selection_anchor` is gone. |
 | 13-012 | The shortcuts page reads the keymap with `try_borrow`. |
 | 13-007 | `PhoneLookups` is gone. The IP default is `AuthState.guessed_country: Fetch<String>` (asked once, a refusal or an error leaves it `Failed`, matched by its request); the list was a `Fetch` already. |
-| 13-008 | `PhoneStep::Sending` holds the `RequestId` of `submit_phone`; it is over when that request is gone from the session. |
+| 13-008 | `PhoneStep::Sending` holds the `RequestId` of `submit_phone`; its answer is read from `session.acks` as the integration branch has it. |
 | 13-014 | A refused profile-list send leaves the list `Failed` (it was removed, so the strip asked again every render). |
 | 04-061 | A cancelled download is `DictDownload::Cancelling { _task }`: the task goes on to see the worker out and read the dictionary folder, so a cancel that came too late to stop the install still shows it. |
 | 13-021 | `QUIT_ASKED` is `QuitStage { Normal, Asked { at } }`: refused by the app (`note_quit_refused`), or over after `QUIT_GRACE`. `QUIT` and `GPU_GONE` are `Cell`s. |
 | 13-020 | A statistics refresh that cannot go ends the panel `Failed` (it stayed `Loaded` in the old theme, so the poll asked every pass); `drain_statistics_theme` reports progress only when a request went out. |
 | 13-025 | The export waits for a poll post's votes chart while it is loading or never asked, and for a post not looked up yet. A failed chart is exported without it. |
-| 13-023 | A refused `getStatisticalGraph` leaves the graph `Failed` (Retry), not absent. |
+| 13-023 | A refused `getStatisticalGraph` leaves the graph `Failed` (Retry), not absent (`graph_unsent(extra, message)`, as the integration branch has it). |
 | new-01 | The three timers in these files that the owned-timers baseline held are explained in `owned-timers-allow.txt` (the self-destruct badge clock, the held press's pointer, the dictionary progress counter): each has no event, and its task is its stage's. The self-destruct task is let go of after its update, not detached. |
 
 - **Not changed, on purpose.** `share_state.rs`'s `link_text` is the link chooser's
@@ -8086,12 +8086,15 @@ from the top after its entries; what that found is in the `new-` rows.
   `search_share_chats`, `refresh_message_menu_actions` and `open_similar_chat`
   are sent and not waited for: nothing holds a stage for their answers, and a
   refusal changes nothing the user sees.
-- **Files outside the bundle that changed** (the smallest change each): the
-  chat list overlay (`chat_list_state.rs` and the ten files that opened or closed a
-  menu or peek), `forward_stage.rs`, `forward.rs`, `forward_box.rs`, `routing.rs`,
-  `copy_inline_text.rs`, `chat_ui_state.rs`, the lock and account closers, and in
-  the core crate `composer/actions.rs`, `auth/state.rs`, `profile_panels.rs`,
-  `stats_pages.rs` and `groups/mod.rs`.
+- **Rebase onto the integration branch (r2-followup).** Where both sides fixed the same
+  entry the integration shape stayed (see the rows above): `ChatListMenu`,
+  `ForwardStage::Picking.share_at`, the request-matched sign-in answers, and the
+  refused-delete stop. This branch's own fixes the integration branch has nothing for stayed.
+- **Files outside the bundle that changed** (the smallest change each): `copy_inline_text.rs`,
+  `chat_ui_state.rs`, `history_a11y.rs`, the lock and account closers, and in the core
+  crate `composer/actions.rs`, `auth/state.rs`, `profile_panels.rs`, `stats_pages.rs` and
+  `groups/mod.rs`.
+
 ### Sweep fixes (r2-32)
 
 Round 2, bundle 32: the statistics rows, the story state files, the suggested

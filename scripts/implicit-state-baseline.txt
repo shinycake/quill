@@ -14,7 +14,6 @@ BackendStatus::failed
 CheckoutView::sending
 
 DestRow::saved
-DragSelect::pending
 
 FooterMeta::pending
 
@@ -25,7 +24,6 @@ GiveawaySummary::finished
 
 
 
-MediaMenuFacts::downloading
 
 
 

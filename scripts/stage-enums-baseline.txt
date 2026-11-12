@@ -72,7 +72,6 @@ bare:Phase::Loading 1
 bare:Phase::Requested 1
 bare:Phase::Waiting 1
 bare:PhoneFlow::Asking 1
-bare:PhoneLookups::Asked 1
 bare:Picture::Loading 1
 bare:PictureState::Waiting 1
 bare:PinTarget::Loading 1
