@@ -417,3 +417,46 @@ fn the_wallet_turning_off_closes_its_notice_with_the_money_page() {
     assert!(wallet.notice.is_none() && !wallet.money_open());
     assert!(wallet.rates.is_idle());
 }
+
+fn push_state(rig: &mut Rig, gram_amount: i64) {
+    rig.ingest(&json!({"@type": "updateTonWalletState", "state": {
+        "@type": "tonWalletState", "address": ADDRESS, "public_key": "", "gram_amount": gram_amount,
+        "is_being_created": false, "is_backup_enabled": true,
+    }}).to_string());
+}
+
+#[test]
+fn the_update_then_the_ok_settles_the_load() {
+    let mut rig = Rig::new();
+    rig.wallet_on(true);
+    rig.driver.open_money_page().unwrap();
+    push_state(&mut rig, 5);
+    assert!(rig.driver.session.ton_wallet.own.data().is_some());
+    assert!(
+        !rig.driver.session.ton_wallet.own.is_loading(),
+        "the update settles the load it belongs to"
+    );
+    rig.answer("loadTonWalletState", json!({"@type": "ok"}));
+    let own = &rig.driver.session.ton_wallet.own;
+    assert_eq!(own.data().map(|s| s.gram_amount), Some(5));
+    assert!(own.error().is_none() && !own.is_loading());
+}
+
+#[test]
+fn an_ok_with_no_update_for_this_load_fails_it_despite_an_earlier_state() {
+    let mut rig = Rig::new();
+    rig.wallet_on(true);
+    rig.driver.open_money_page().unwrap();
+    push_state(&mut rig, 5);
+    // The earlier load left a state; the next open asks again.
+    rig.driver.session.ton_wallet.own.fail("offline");
+    rig.driver.open_money_page().unwrap();
+    assert_eq!(rig.sent("loadTonWalletState"), 2);
+    assert!(rig.driver.session.ton_wallet.own.is_loading());
+    rig.answer("loadTonWalletState", json!({"@type": "ok"}));
+    let own = &rig.driver.session.ton_wallet.own;
+    assert!(own.error().is_some(), "not settled from the old state");
+    assert!(own.can_ask());
+    rig.driver.open_money_page().unwrap();
+    assert_eq!(rig.sent("loadTonWalletState"), 3, "asked again");
+}

@@ -22,7 +22,18 @@ impl Session {
             // every change, so it applies whenever the wallet is on.
             TonWalletPayload::State(state) => {
                 if wallet.can_use {
-                    wallet.own.replace_data(state);
+                    // The push is the result of the load in flight: it
+                    // settles that load. Without one it only replaces the
+                    // held state.
+                    match wallet.own {
+                        crate::state::fetch::Fetch::Loading {
+                            request: Some(asked),
+                            ..
+                        } => {
+                            wallet.own.answered(Some(asked), state);
+                        }
+                        _ => wallet.own.replace_data(state),
+                    }
                 }
             }
             TonWalletPayload::ExchangeRates(rates) => {
@@ -222,22 +233,16 @@ impl Session {
             TonWalletPurpose::LoadState,
         ))) = pending.map(|p| p.purpose)
         {
-            // The state itself arrives as an update; an `ok` that came with
-            // none leaves the fetch to be asked again.
+            // The update settles the load it belongs to. An `ok` that finds
+            // the load still waiting came with no update for it (whatever
+            // an earlier load left does not count), so the fetch fails and
+            // is asked again.
             let wallet = &mut self.ton_wallet;
-            let request = pending.map(|p| p.id);
-            if request.is_some_and(|request| wallet.own.waits_for(request)) {
-                match wallet.own.data().cloned() {
-                    Some(state) => {
-                        wallet.own.answered(request, state);
-                    }
-                    None => {
-                        wallet
-                            .own
-                            .failed(request, "the wallet state did not arrive", false);
-                    }
-                }
-            }
+            wallet.own.failed(
+                pending.map(|p| p.id),
+                "the wallet state did not arrive",
+                false,
+            );
         }
     }
 }
