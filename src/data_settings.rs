@@ -138,58 +138,7 @@ impl AutoDownloadNetSettings {
             Self::parse(value.get("high")?),
         ))
     }
-
-    /// The cap of one media type.
-    pub fn cap(&self, kind: CapKind) -> i64 {
-        match kind {
-            CapKind::Photo => self.max_photo_file_size,
-            CapKind::Video => self.max_video_file_size,
-            CapKind::Other => self.max_other_file_size,
-        }
-    }
-
-    /// Set the cap of one media type, clamped to what TDLib's wire format
-    /// accepts (`max_photo_file_size` is an int32).
-    pub fn set_cap(&mut self, kind: CapKind, bytes: i64) {
-        let bytes = bytes.clamp(0, NO_LIMIT_SIZE_CAP);
-        match kind {
-            CapKind::Photo => self.max_photo_file_size = bytes,
-            CapKind::Video => self.max_video_file_size = bytes,
-            CapKind::Other => self.max_other_file_size = bytes,
-        }
-    }
-
-    /// Whether `kind` downloads automatically (tdesktop's per-type
-    /// switch: a zero cap is off).
-    pub fn cap_enabled(&self, kind: CapKind) -> bool {
-        self.cap(kind) > 0
-    }
-
-    /// Flip tdesktop's per-type switch: turning it on starts at
-    /// [`DEFAULT_ENABLED_CAP`] (`kDefaultDownloadLimit`).
-    pub fn set_cap_enabled(&mut self, kind: CapKind, enabled: bool) {
-        let bytes = if !enabled {
-            0
-        } else if self.cap(kind) > 0 {
-            self.cap(kind)
-        } else {
-            DEFAULT_ENABLED_CAP
-        };
-        self.set_cap(kind, bytes);
-    }
 }
-
-/// The three size caps `setAutoDownloadSettings` carries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CapKind {
-    Photo,
-    Video,
-    Other,
-}
-
-/// tdesktop `kDefaultDownloadLimit`: the cap a type starts at when its
-/// switch is turned on while it was off.
-pub const DEFAULT_ENABLED_CAP: i64 = 10 * 1024 * 1024;
 
 /// Slice S4: one chat's row from a `getStorageStatistics` answer
 /// (`storageStatisticsByChat chat_id:int53 size:int53 count:int32
@@ -201,26 +150,6 @@ pub struct StorageChatStats {
     pub chat_id: i64,
     pub size: i64,
     pub count: i32,
-}
-
-/// Slice S4: "No limit" sentinel for the size-cap pickers. `i32::MAX`:
-/// fits both schema bounds (`max_photo_file_size:int32`,
-/// `max_video_file_size:int53`), so `setAutoDownloadSettings` can never
-/// fail TDLib's wire round-trip check. (`i64::MAX` would deterministically
-/// 400 — TDLib's `from_json(int32&)` rejects out-of-range values.)
-pub const NO_LIMIT_SIZE_CAP: i64 = i32::MAX as i64;
-
-/// Slice S4: label for one size-cap step.
-pub fn size_cap_label(bytes: i64) -> String {
-    if bytes <= 0 {
-        "Off".to_string()
-    } else if bytes == NO_LIMIT_SIZE_CAP {
-        "No limit".to_string()
-    } else if bytes < 1024 * 1024 {
-        format!("{} KB", bytes / 1024)
-    } else {
-        format!("{} MB", bytes / (1024 * 1024))
-    }
 }
 
 /// Whether a value TDLib has no getter for was learned. It persists as the
@@ -378,24 +307,6 @@ impl DataStoragePrefs {
         self.wifi = high;
         self.seeded = PresetsSeed::Seeded;
     }
-
-    /// Slice S4: one-line summary for a network row, e.g.
-    /// "On · photos 15 MB · videos 50 MB · files Off".
-    pub fn network_summary(&self, network: NetworkKind) -> String {
-        let s = self.for_network(network);
-        if !self.seeded.is_seeded() {
-            return "Loading…".to_string();
-        }
-        if !s.is_auto_download_enabled {
-            return "Off".to_string();
-        }
-        format!(
-            "On · photos {} · videos {} · files {}",
-            size_cap_label(s.max_photo_file_size),
-            size_cap_label(s.max_video_file_size),
-            size_cap_label(s.max_other_file_size),
-        )
-    }
 }
 
 fn data_storage_prefs_path(paths: &AccountPaths) -> PathBuf {
@@ -502,39 +413,6 @@ mod tests {
         assert_eq!(prefs.wifi.max_photo_file_size, 3);
         assert_eq!(prefs.mobile.max_photo_file_size, 2);
         assert_eq!(prefs.roaming.max_photo_file_size, 1);
-    }
-
-    #[test]
-    fn size_caps_label_and_switch() {
-        let mut net = AutoDownloadNetSettings::default();
-        net.set_cap(CapKind::Photo, i64::MAX);
-        assert_eq!(net.cap(CapKind::Photo), NO_LIMIT_SIZE_CAP);
-        net.set_cap_enabled(CapKind::Photo, false);
-        assert!(!net.cap_enabled(CapKind::Photo));
-        net.set_cap_enabled(CapKind::Photo, true);
-        assert_eq!(net.cap(CapKind::Photo), DEFAULT_ENABLED_CAP);
-        net.set_cap(CapKind::Video, 50 * 1024 * 1024);
-        net.set_cap_enabled(CapKind::Video, true);
-        assert_eq!(net.cap(CapKind::Video), 50 * 1024 * 1024);
-        assert_eq!(size_cap_label(0), "Off");
-        assert_eq!(size_cap_label(NO_LIMIT_SIZE_CAP), "No limit");
-        assert_eq!(size_cap_label(15 * 1024 * 1024), "15 MB");
-    }
-
-    #[test]
-    fn network_summary_states() {
-        let mut prefs = DataStoragePrefs::default();
-        assert_eq!(prefs.network_summary(NetworkKind::WiFi), "Loading…");
-        prefs.seeded = PresetsSeed::Seeded;
-        assert_eq!(prefs.network_summary(NetworkKind::WiFi), "Off");
-        prefs.wifi.is_auto_download_enabled = true;
-        prefs.wifi.max_photo_file_size = 15 * 1024 * 1024;
-        prefs.wifi.max_video_file_size = 50 * 1024 * 1024;
-        prefs.wifi.max_other_file_size = 0;
-        assert_eq!(
-            prefs.network_summary(NetworkKind::WiFi),
-            "On · photos 15 MB · videos 50 MB · files Off"
-        );
     }
 
     #[test]

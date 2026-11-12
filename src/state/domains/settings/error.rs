@@ -34,11 +34,6 @@ impl Session {
                         error_reason(err)
                     ),
                 );
-                if let Some(request) = extra {
-                    self.settings
-                        .auto_download_answers
-                        .push(AutoDownloadAnswer::Refused(request));
-                }
             }
             Some(RequestPurpose::OptimizeStorage) => {
                 self.settings.storage_clear = StorageClear::Failed(format!(

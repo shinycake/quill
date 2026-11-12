@@ -12,37 +12,25 @@ pub(super) const ENTRIES: &[Entry] = &[
         "json",
         "html",
     ]),
+    Entry::new("data.auto_download", P, keys::MEDIA_AUTO_SETTINGS).keywords(&[
+        "auto download",
+        "automatic downloads",
+        "pause downloads",
+        "data saver",
+    ]),
+    Entry::new("data.auto_download_private", P, keys::MEDIA_AUTO_IN_PRIVATE)
+        .section(keys::MEDIA_AUTO_SETTINGS)
+        .keywords(&["photos", "videos", "files", "gifs", "size limit"]),
+    Entry::new("data.auto_download_groups", P, keys::MEDIA_AUTO_IN_GROUPS)
+        .section(keys::MEDIA_AUTO_SETTINGS)
+        .keywords(&["photos", "videos", "files", "gifs", "size limit"]),
     Entry::new(
-        "data.auto_download_mobile",
+        "data.auto_download_channels",
         P,
-        keys::Q_SETTINGS_DATA_AUTO_DOWNLOAD_MOBILE,
+        keys::MEDIA_AUTO_IN_CHANNELS,
     )
-    .section(keys::Q_OPS_AUTOMATIC_DOWNLOADS)
-    .keywords(&["cellular"]),
-    Entry::new(
-        "data.auto_download_wifi",
-        P,
-        keys::Q_SETTINGS_DATA_AUTO_DOWNLOAD_WIFI,
-    )
-    .section(keys::Q_OPS_AUTOMATIC_DOWNLOADS)
-    .keywords(&["wireless"]),
-    Entry::new(
-        "data.auto_download_roaming",
-        P,
-        keys::Q_SETTINGS_DATA_AUTO_DOWNLOAD_ROAMING,
-    )
-    .section(keys::Q_OPS_AUTOMATIC_DOWNLOADS)
-    .keywords(&["abroad"]),
-    Entry::new("data.max_file_size", P, keys::Q_OPS_MAXIMUM_FILE_SIZE)
-        .section(keys::Q_OPS_AUTOMATIC_DOWNLOADS)
-        .keywords(&["photos", "videos", "limit"]),
-    Entry::new(
-        "data.less_data_calls",
-        P,
-        keys::Q_PREFS_USE_LESS_DATA_FOR_CALLS,
-    )
-    .section(keys::Q_OPS_AUTOMATIC_DOWNLOADS)
-    .keywords(&["bandwidth", "traffic"]),
+    .section(keys::MEDIA_AUTO_SETTINGS)
+    .keywords(&["photos", "videos", "files", "gifs", "size limit"]),
     Entry::new("data.download_folder", P, keys::Q_OPS_DOWNLOAD_FOLDER)
         .section(keys::ALL_DOWNLOADS)
         .keywords(&["save location", "directory", "path"]),

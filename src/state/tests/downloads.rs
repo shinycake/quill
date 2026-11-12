@@ -227,54 +227,64 @@ fn download_unsticks_after_file_extra_then_idle_update_or_error() {
 
 #[test]
 fn auto_download_gate_respects_data_saver_and_chat_kind() {
-    use crate::settings::{AUTO_DOWNLOAD_FILE, AUTO_DOWNLOAD_PHOTO, AUTO_DOWNLOAD_VIDEO};
+    use crate::settings::{AutoDownloadKind as K, AutoDownloadOverride, SourceLimits};
     let (mut session, _sink) = session();
-    // Unknown kind → private bucket; defaults allow photos.
+    // Unknown kind → private chats; the defaults allow photos.
     let mut chat = placeholder_chat(ChatId(13));
     session.chats.insert(13, chat.clone());
-    assert!(session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_PHOTO));
-    assert!(!session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_VIDEO));
-    // Channel bucket is independent.
+    assert!(session.auto_download_allowed(ChatId(13), K::Photo, 1));
+    // Channels have their own limits: no files by default.
     chat.kind = ChatKind::Supergroup {
         supergroup_id: 1,
         is_channel: true,
     };
     session.chats.insert(13, chat);
-    session.settings.media_prefs.auto_download_channels = AUTO_DOWNLOAD_VIDEO;
-    assert!(!session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_PHOTO));
-    assert!(session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_VIDEO));
-    // Data saver pauses everything, regardless of bucket.
+    assert!(!session.auto_download_allowed(ChatId(13), K::File, 1));
+    let prefs = &mut session.settings.media_prefs;
+    prefs.auto_download.channels = SourceLimits::DISABLED;
+    prefs.auto_download.channels.video = 1024;
+    assert!(!session.auto_download_allowed(ChatId(13), K::Photo, 1));
+    assert!(session.auto_download_allowed(ChatId(13), K::Video, 1024));
+    assert!(!session.auto_download_allowed(ChatId(13), K::Video, 1025));
+    // Data saver pauses everything, whatever the source.
     session.settings.media_prefs.data_saver = true;
-    assert!(!session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_VIDEO));
+    assert!(!session.auto_download_allowed(ChatId(13), K::Video, 1));
     session.settings.media_prefs.data_saver = false;
-    // Groups bucket: basic groups.
+    // Groups: basic groups, and a chat's exception wins.
     let mut group = placeholder_chat(ChatId(14));
     group.kind = ChatKind::BasicGroup { basic_group_id: 2 };
     session.chats.insert(14, group);
-    session.settings.media_prefs.auto_download_groups = AUTO_DOWNLOAD_FILE;
-    assert!(session.auto_download_allowed(ChatId(14), AUTO_DOWNLOAD_FILE));
-    assert!(!session.auto_download_allowed(ChatId(14), AUTO_DOWNLOAD_PHOTO));
+    assert!(session.auto_download_allowed(ChatId(14), K::Photo, 1));
+    session
+        .settings
+        .media_prefs
+        .auto_download
+        .exceptions
+        .insert(14, AutoDownloadOverride::Never);
+    assert!(!session.auto_download_allowed(ChatId(14), K::Photo, 1));
 }
 
 #[test]
 fn a_low_disk_holds_every_automatic_download() {
-    use crate::settings::AUTO_DOWNLOAD_PHOTO;
+    use crate::settings::AutoDownloadKind as K;
     let (mut session, _sink) = session();
     session.chats.insert(13, placeholder_chat(ChatId(13)));
-    assert!(session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_PHOTO));
+    assert!(session.auto_download_allowed(ChatId(13), K::Photo, 1));
     session.media.disk = crate::state::DiskPressure::Full;
-    assert!(!session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_PHOTO));
+    assert!(!session.auto_download_allowed(ChatId(13), K::Photo, 1));
     session.media.disk = crate::state::DiskPressure::Healthy;
-    assert!(session.auto_download_allowed(ChatId(13), AUTO_DOWNLOAD_PHOTO));
+    assert!(session.auto_download_allowed(ChatId(13), K::Photo, 1));
 }
 
 #[test]
 fn auto_download_media_ids_follow_per_type_flags() {
-    // MED3: full-media auto-download honors the per-media-type flags —
-    // voice on by default (TGX 0x63), video/file off; data saver and
+    // Full-media auto-download follows each kind's limit; data saver and
     // spoiler/secret suppress everything.
-    use crate::settings::{AUTO_DOWNLOAD_FILE, AUTO_DOWNLOAD_VIDEO};
+    use crate::settings::{DEFAULT_AUTOPLAY_LIMIT, DEFAULT_DOWNLOAD_LIMIT};
     let (mut session, sink) = session();
+    let private = &mut session.settings.media_prefs.auto_download.private;
+    private.video = 0;
+    private.file = 0;
     let seq = AtomicU64::new(0);
     session.open_chat(ChatId(1));
     // Voice note (file 4), video (file 5), document (file 9).
@@ -305,10 +315,12 @@ fn auto_download_media_ids_follow_per_type_flags() {
             media_file_json(9, "", false),
         ),
     );
-    // Defaults: voice auto-downloads; video and file do not.
+    // Voice downloads; video and files are switched off.
     assert_eq!(session.auto_download_media_file_ids(), vec![FileId(4)]);
-    // Enabling video+file for private chats picks them up.
-    session.settings.media_prefs.auto_download_private |= AUTO_DOWNLOAD_VIDEO | AUTO_DOWNLOAD_FILE;
+    // Switching video and files on for private chats picks them up.
+    let private = &mut session.settings.media_prefs.auto_download.private;
+    private.video = DEFAULT_AUTOPLAY_LIMIT;
+    private.file = DEFAULT_DOWNLOAD_LIMIT;
     assert_eq!(
         session.auto_download_media_file_ids(),
         vec![FileId(4), FileId(5), FileId(9)]
@@ -335,13 +347,12 @@ fn auto_download_media_ids_follow_per_type_flags() {
 
 #[test]
 fn auto_download_skips_files_over_size_cap() {
-    // MED3 review: full-media auto-download skips files whose known
-    // size exceeds `AUTO_DOWNLOAD_MAX_BYTES` (TGX
-    // `canAutomaticallyDownload` download limit, WiFi default 50 MiB).
+    // Full-media auto-download skips files whose known size exceeds the
+    // limit of their kind (8 MB for voice messages by default).
     let (mut session, sink) = session();
     let seq = AtomicU64::new(0);
     session.open_chat(ChatId(1));
-    // Voice note (file 4), auto-downloaded by default (TGX 0x63).
+    // Voice note (file 4), auto-downloaded by default.
     apply_json(
         &mut session,
         &seq,
@@ -356,7 +367,7 @@ fn auto_download_skips_files_over_size_cap() {
     session
         .media
         .files
-        .update(4, |file| file.size = 100 * 1024 * 1024);
+        .update(4, |file| file.size = 9 * 1024 * 1024);
     assert!(session.auto_download_media_file_ids().is_empty());
 }
 

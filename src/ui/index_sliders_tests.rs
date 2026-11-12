@@ -1,6 +1,6 @@
 //! The Data & Storage step sliders against a demo window (needs the
-//! `demo-capture` feature for gpui-kit's test support): the network
-//! editor's size caps and the local storage limits.
+//! `demo-capture` feature for gpui-kit's test support): the automatic media
+//! download box and the local storage limits.
 use crate::ui::app::QuillApp;
 use crate::ui::index_sliders::StepSlider;
 use crate::ui::screenshot_demo::ScreenshotDemo;
@@ -9,8 +9,7 @@ use gpui_kit::component::Root;
 use gpui_kit::component::slider::{SliderEvent, SliderValue};
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, TestAppContext, VisualTestContext, px, size};
-use quill::data_settings::{CapKind, NetworkKind};
-use quill::limit_steps::{cap_at, cap_index};
+use quill::settings::{AutoDownloadLimitGroup, AutoDownloadOverride, SourceLimits};
 
 const MIB: i64 = 1024 * 1024;
 const GIB: i64 = 1024 * MIB;
@@ -72,67 +71,122 @@ fn move_slider(
     frames(vcx);
 }
 
-fn draft_cap(app: &Entity<QuillApp>, vcx: &mut VisualTestContext, kind: CapKind) -> Option<i64> {
+fn groups_limits(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<SourceLimits> {
     app.read_with(vcx, |app, _| {
-        app.settings
-            .data_storage_editor
-            .shown()
-            .map(|(_, draft)| draft.cap(kind))
+        app.session()
+            .map(|s| s.settings.media_prefs.auto_download.groups)
     })
 }
 
+fn click(vcx: &mut VisualTestContext, id: &'static str) {
+    vcx.update(|window, cx| window.click(id, cx));
+    frames(vcx);
+}
+
 #[gpui_kit::test]
-fn network_editor_size_caps_follow_their_sliders(cx: &mut TestAppContext) {
+fn the_auto_download_box_saves_its_switches_and_sliders(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx);
     let vcx = &mut vcx;
     app.update_in(vcx, |app, window, cx| {
         app.demo_ready_storage_usage(window, cx)
     });
     frames(vcx);
-    vcx.update(|window, cx| window.click("data-storage-net-Wi-Fi", cx));
-    frames(vcx);
-    let wifi = app.read_with(vcx, |app, _| {
-        app.settings.data_storage_editor.shown().map(|(n, _)| n)
-    });
-    assert_eq!(wifi, Some(NetworkKind::WiFi), "the row opens the editor");
+    let before = groups_limits(&app, vcx);
+    click(vcx, "auto-download-open-groups");
     for id in [
-        "data-storage-limit-photo",
-        "data-storage-limit-video",
-        "data-storage-limit-other",
+        "auto-download-limit-download",
+        "auto-download-limit-autoplay",
     ] {
-        assert!(shown(vcx, id), "{id} is shown while the type is on");
+        assert!(shown(vcx, id), "{id} is shown in the box");
     }
-
-    // Dragging sets the cap to the step: index 29 is 50 MB.
-    move_slider(&app, vcx, StepSlider::DataCap(CapKind::Video), 29, false);
-    assert_eq!(draft_cap(&app, vcx, CapKind::Video), Some(50 * MIB));
-    move_slider(&app, vcx, StepSlider::DataCap(CapKind::Video), 39, true);
-    assert_eq!(draft_cap(&app, vcx, CapKind::Video), Some(100 * MIB));
-    // The other types did not move.
-    assert_eq!(draft_cap(&app, vcx, CapKind::Photo), Some(10 * MIB));
-
-    // The switch turns the type off (no slider) and on again where the
-    // slider is.
-    vcx.update(|window, cx| window.click("data-storage-cap-photo", cx));
-    frames(vcx);
-    assert_eq!(draft_cap(&app, vcx, CapKind::Photo), Some(0));
-    assert!(!shown(vcx, "data-storage-limit-photo"));
-    vcx.update(|window, cx| window.click("data-storage-cap-photo", cx));
-    frames(vcx);
-    assert_eq!(
-        draft_cap(&app, vcx, CapKind::Photo),
-        Some(10 * MIB),
-        "back on at the slider's step"
+    // Index 29 is 50 MB, index 4 is 5 MB.
+    let download = StepSlider::AutoDownloadLimit(AutoDownloadLimitGroup::Download);
+    let autoplay = StepSlider::AutoDownloadLimit(AutoDownloadLimitGroup::Autoplay);
+    move_slider(&app, vcx, download, 29, false);
+    move_slider(&app, vcx, autoplay, 4, true);
+    click(vcx, "auto-download-kind-file");
+    // Nothing applies before Save.
+    assert_eq!(groups_limits(&app, vcx), before);
+    click(vcx, "auto-download-save");
+    assert!(
+        !shown(vcx, "auto-download-limit-download"),
+        "Save closes the box"
     );
-    assert!(shown(vcx, "data-storage-limit-photo"));
+    let groups = groups_limits(&app, vcx).unwrap_or(SourceLimits::DISABLED);
+    assert_eq!(groups.photo, 50 * MIB);
+    assert_eq!(groups.file, 0);
+    assert_eq!(groups.voice, 50 * MIB);
+    assert_eq!(groups.video, 5 * MIB);
 
-    // The last step is "no limit" for a photo (an int32 on the wire).
-    move_slider(&app, vcx, StepSlider::DataCap(CapKind::Photo), 99, true);
+    // Cancel drops the edits.
+    click(vcx, "auto-download-open-groups");
+    click(vcx, "auto-download-kind-photo");
+    click(vcx, "auto-download-cancel");
+    assert_eq!(groups_limits(&app, vcx), Some(groups));
+
+    // The row switch turns the whole source off, and on with the defaults.
+    click(vcx, "auto-download-switch-groups");
+    assert_eq!(groups_limits(&app, vcx), Some(SourceLimits::DISABLED));
+    click(vcx, "auto-download-switch-groups");
     assert_eq!(
-        draft_cap(&app, vcx, CapKind::Photo),
-        Some(quill::data_settings::NO_LIMIT_SIZE_CAP)
+        groups_limits(&app, vcx),
+        Some(SourceLimits::defaults(
+            quill::settings::AutoDownloadSource::Groups
+        ))
     );
-    assert_eq!(cap_index(cap_at(10)), 10);
+
+    // The master switch pauses every automatic download.
+    click(vcx, "auto-download-master");
+    let paused = app.read_with(vcx, |app, _| {
+        app.session()
+            .is_some_and(|s| s.settings.media_prefs.data_saver)
+    });
+    assert!(paused);
+    click(vcx, "auto-download-master");
+}
+
+#[gpui_kit::test]
+fn the_exception_picker_stages_its_list_until_the_box_saves(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, window, cx| {
+        app.demo_ready_storage_usage(window, cx)
+    });
+    frames(vcx);
+    let private_chat = app.read_with(vcx, |app, _| {
+        app.session().and_then(|s| {
+            s.ordered_chats()
+                .into_iter()
+                .find(|chat| {
+                    quill::settings::AutoDownloadSource::of_chat(&chat.kind)
+                        == quill::settings::AutoDownloadSource::Private
+                        && !s.is_saved_messages(chat.id)
+                })
+                .map(|chat| chat.id.0)
+        })
+    });
+    let Some(chat) = private_chat else {
+        panic!("the demo has a private chat");
+    };
+    click(vcx, "auto-download-open-private");
+    click(vcx, "auto-download-exceptions-never");
+    let pick: &'static str = Box::leak(format!("auto-download-pick-{chat}").into_boxed_str());
+    assert!(shown(vcx, pick), "the picker lists private chats");
+    click(vcx, pick);
+    click(vcx, "auto-download-pick-save");
+    let exception = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, _| {
+            app.session().and_then(|s| {
+                s.settings
+                    .media_prefs
+                    .auto_download
+                    .exception(quill::ids::ChatId(chat))
+            })
+        })
+    };
+    assert_eq!(exception(&app, vcx), None, "only the box's Save applies");
+    click(vcx, "auto-download-save");
+    assert_eq!(exception(&app, vcx), Some(AutoDownloadOverride::Never));
 }
 
 #[gpui_kit::test]

@@ -1,32 +1,17 @@
-//! Slice S4: Settings → Data & Storage dialog (TGX
-//! `SettingsDataStorageController`): per-network automatic-download
-//! settings (`getAutoDownloadSettingsPresets` /
-//! `setAutoDownloadSettings`), the "use less data for calls" toggle
-//! (`autoDownloadSettings.use_less_data_for_calls`), the storage-usage
-//! breakdown with per-chat rows (`getStorageStatistics` with
-//! `chat_limit` 50), and "Clear cache" (`removeAllFilesFromDownloads`).
-//!
-//! The current per-network values are the local source of truth —
-//! TDLib exposes the presets and the setter but no getter for the
-//! current values — so they load from `data_storage.json` and are
-//! seeded once from the presets (Wi-Fi ← high, mobile ← medium,
-//! roaming ← low).
+//! Settings › Data and storage: the export, automatic media download
+//! (`auto_download`), the download folder, the storage-usage breakdown with
+//! per-chat rows (`getStorageStatistics` with `chat_limit` 50) and "Clear
+//! cache" (`removeAllFilesFromDownloads`), and network usage.
 
 use super::super::app::QuillApp;
-use super::super::index_sliders::{StepSlider, cap_slider_start};
+use super::super::index_sliders::StepSlider;
 use super::super::*;
-use super::storage_editor::StorageEditor;
-use crate::ui::settings_window::rows::{detail_row, group, switch_row};
+use crate::ui::settings_window::rows::{detail_row, group};
 use gpui_kit::component::button::*;
-use gpui_kit::component::switch::Switch;
 use gpui_kit::component::*;
-use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use quill::data_settings::{
-    AutoDownloadNetSettings, CapKind, DataStoragePrefs, NO_LIMIT_SIZE_CAP, NetworkKind,
-};
+use quill::data_settings::{AutoDownloadNetSettings, DataStoragePrefs};
 use quill::lang::{keys, tr, tr_with};
-use quill::limit_steps::cap_at;
 use std::cell::Cell;
 use std::rc::Rc;
 /// Slice S4: bytes formatter that handles 0 and GB — the shared
@@ -45,29 +30,13 @@ pub(crate) fn format_storage_bytes(n: i64) -> String {
     }
 }
 
-pub(super) fn section_header(title: &'static str) -> impl IntoElement {
-    div()
-        .id(format!("storage-heading-{title}"))
-        .role(Role::Heading)
-        .aria_label(title)
-        .text_xs()
-        .font_semibold()
-        .child(title)
-}
-
 /// Where the scroll to the storage list stands. `placed` is the page's
 /// vertical offset the last scroll left (set a frame after it).
 enum StorageScrollStage {
     Idle,
     /// A scroll to the list is due on the next frame.
     Requested,
-    /// The rows above the list were still loading at the last scroll: it
-    /// goes again once they arrive, unless the user scrolled meanwhile
-    /// (then it is `Idle`).
-    WaitingSettled {
-        placed: Rc<Cell<Option<Pixels>>>,
-    },
-    /// The list was scrolled to with the rows above it settled.
+    /// The list was scrolled to.
     Placed {
         placed: Rc<Cell<Option<Pixels>>>,
     },
@@ -106,14 +75,10 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let settled = self
-            .session()
-            .is_none_or(|session| !session.settings.data_storage.seeded.is_loading());
         let scroll = &mut self.settings.storage_scroll;
         let offset = scroll.page.offset().y;
         let user_moved = match &scroll.stage {
-            StorageScrollStage::WaitingSettled { placed }
-            | StorageScrollStage::Placed { placed } => {
+            StorageScrollStage::Placed { placed } => {
                 placed.get().is_some_and(|placed| placed != offset)
             }
             StorageScrollStage::Idle | StorageScrollStage::Requested => false,
@@ -121,21 +86,10 @@ impl QuillApp {
         if user_moved {
             scroll.stage = StorageScrollStage::Idle;
         }
-        let due = match &scroll.stage {
-            StorageScrollStage::Requested => true,
-            StorageScrollStage::WaitingSettled { .. } => settled,
-            StorageScrollStage::Idle | StorageScrollStage::Placed { .. } => false,
-        };
-        if due {
+        if matches!(scroll.stage, StorageScrollStage::Requested) {
             let placed: Rc<Cell<Option<Pixels>>> = Rc::default();
-            scroll.stage = if settled {
-                StorageScrollStage::Placed {
-                    placed: placed.clone(),
-                }
-            } else {
-                StorageScrollStage::WaitingSettled {
-                    placed: placed.clone(),
-                }
+            scroll.stage = StorageScrollStage::Placed {
+                placed: placed.clone(),
             };
             scroll.usage.scroll_to(window, cx);
             let page = scroll.page.clone();
@@ -153,13 +107,12 @@ impl QuillApp {
     /// storage + presets fetches (both guarded: once per session).
     pub(crate) fn open_data_storage(&mut self, cx: &mut Context<Self>) {
         self.open_settings(Some(quill::settings_catalog::Page::DataStorage), cx);
-        self.settings.data_storage_editor = StorageEditor::Closed;
+        self.close_auto_download();
         self.forget_storage_sliders();
         self.settings.storage_confirm = None;
         if let Some(live) = self.live.as_mut() {
             live.driver.session.settings.reset_storage_freed();
             let _ = live.driver.maybe_fetch_storage_statistics();
-            let _ = live.driver.fetch_auto_download_presets();
             let _ = live.driver.fetch_network_statistics();
         }
         self.privacy.extra.network_reset = Default::default();
@@ -173,104 +126,35 @@ impl QuillApp {
         cx.notify();
     }
 
-    /// The Data & Storage settings page: the per-network editor when one
-    /// is open, otherwise the overview with a refresh button.
+    /// The Data & Storage settings page: an automatic media download box
+    /// when one is open, otherwise the overview with a refresh button.
     pub(crate) fn data_storage_page(&mut self, cx: &mut Context<Self>) -> Div {
         self.settle_storage_sliders(cx);
         self.ensure_storage_sliders(cx);
-        let Some((network, draft)) = self.settings.data_storage_editor.shown() else {
-            return div()
-                .flex()
-                .flex_col()
-                .gap_3()
-                .child(self.data_storage_body(cx))
-                .child(
-                    div().flex().child(
-                        Button::new("storage-refresh")
-                            .label(tr(keys::Q_OPS_REFRESH))
-                            .outline()
-                            .small()
-                            .on_click(cx.listener(|this, _, _, cx| this.refresh_storage_usage(cx))),
-                    ),
-                );
-        };
+        if let Some(editor) = self.auto_download_editor_page(cx) {
+            return editor;
+        }
         div()
             .flex()
             .flex_col()
             .gap_3()
-            .child(div().text_lg().font_semibold().child(tr_with(
-                keys::Q_OPS_NETWORK_DOWNLOADS,
-                &[("network", network.label())],
-            )))
-            .child(self.data_storage_editor_body(cx, network, &draft))
-            .children(
-                self.session()
-                    .and_then(|s| {
-                        s.settings
-                            .data_storage_save
-                            .error_of(quill::state::StorageSaveKind::AutoDownload)
-                            .map(str::to_owned)
-                    })
-                    .map(|err| {
-                        div()
-                            .text_xs()
-                            .text_color(danger())
-                            .child(tr_with(keys::Q_OPS_ERROR, &[("err", &err)]))
-                    }),
-            )
+            .child(self.data_storage_body(cx))
             .child(
-                div()
-                    .flex()
-                    .justify_end()
-                    .gap_2()
-                    .child(
-                        Button::new("data-storage-back")
-                            .label(tr(keys::Q_OPS_BACK))
-                            .ghost()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.settings.data_storage_editor = StorageEditor::Closed;
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("data-storage-save")
-                            .label(tr(keys::SETTINGS_SAVE))
-                            .primary()
-                            .on_click(
-                                cx.listener(|this, _, _, cx| this.save_data_storage_editor(cx)),
-                            ),
-                    ),
+                div().flex().child(
+                    Button::new("storage-refresh")
+                        .label(tr(keys::Q_OPS_REFRESH))
+                        .outline()
+                        .small()
+                        .on_click(cx.listener(|this, _, _, cx| this.refresh_storage_usage(cx))),
+                ),
             )
-    }
-
-    fn save_data_storage_editor(&mut self, cx: &mut Context<Self>) {
-        let StorageEditor::Open { network, draft } = self.settings.data_storage_editor else {
-            return;
-        };
-        if let Some(live) = self.live.as_mut() {
-            // Applied on the confirmed `ok`, never optimistically. The draft
-            // stays in the editor until TDLib answers (`drain_storage_editor`):
-            // a refused or unsent save reopens it as it was.
-            if let Ok(request) = live.driver.set_auto_download_settings(network, draft) {
-                self.settings.data_storage_editor = StorageEditor::Saving {
-                    network,
-                    draft,
-                    request,
-                };
-            }
-        } else if let Some(demo) = self.demo_session.as_mut() {
-            *demo.settings.data_storage.for_network_mut(network) = draft;
-            demo.settings.data_storage.seeded = quill::data_settings::PresetsSeed::Seeded;
-            self.settings.data_storage_editor = StorageEditor::Closed;
-        }
-        cx.notify();
     }
 
     /// Leaving the page drops an unsaved editor and any pending confirm.
     pub(crate) fn leave_data_storage(&mut self) {
         self.apply_unreleased_storage_drag();
         self.settings.storage_scroll.stage = StorageScrollStage::Idle;
-        self.settings.data_storage_editor = StorageEditor::Closed;
+        self.close_auto_download();
         self.settings.storage_confirm = None;
         self.privacy.extra.network_reset = Default::default();
         self.forget_storage_sliders();
@@ -282,7 +166,6 @@ impl QuillApp {
         self.forget_storage_sliders();
         if let Some(session) = self.session_mut() {
             session.settings.data_storage_save.clear();
-            session.settings.auto_download_answers.clear();
             if session.settings.storage_clear.failed().is_some() {
                 session.settings.storage_clear = quill::state::StorageClear::Idle;
             }
@@ -341,104 +224,8 @@ impl QuillApp {
             group(Some(tr(keys::SETTINGS_EXPORT_DATA)), [export]),
             cx,
         ));
-        // --- Automatic downloads ---
-        // The size caps are in the per-network editor.
-        let prefs = session.as_ref().map(|s| &s.settings.data_storage);
-        let mut downloads: Vec<AnyElement> = Vec::new();
-        if !prefs.is_some_and(|p| p.seeded.is_seeded()) {
-            let loading = prefs.is_some_and(|p| p.seeded.is_loading());
-            downloads.push(
-                self.setting_spot(
-                    &[
-                        "data.auto_download_mobile",
-                        "data.auto_download_wifi",
-                        "data.auto_download_roaming",
-                        "data.less_data_calls",
-                    ],
-                    div()
-                        .px_3()
-                        .py_2()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap_2()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(if loading {
-                            tr(keys::Q_OPS_LOADING_DOWNLOAD_SETTINGS)
-                        } else {
-                            tr(keys::Q_OPS_DOWNLOAD_SETTINGS_UNAVAILABLE)
-                        })
-                        // Retry whenever nothing is out: after a failure,
-                        // and when the request could not be sent at all.
-                        .when(!loading, |this| {
-                            this.child(
-                                Button::new("download-settings-retry")
-                                    .label(tr(keys::Q_CHAT_RETRY))
-                                    .ghost()
-                                    .small()
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        if let Some(live) = this.live.as_mut() {
-                                            let _ = live.driver.fetch_auto_download_presets();
-                                        }
-                                        cx.notify();
-                                    })),
-                            )
-                        }),
-                    cx,
-                ),
-            );
-        } else if let Some(prefs) = prefs {
-            for network in NetworkKind::ALL {
-                let ids: &'static [&'static str] = match network {
-                    NetworkKind::Mobile => &["data.auto_download_mobile"],
-                    NetworkKind::Roaming => &["data.auto_download_roaming"],
-                    NetworkKind::WiFi => &["data.auto_download_wifi"],
-                };
-                let row =
-                    self.data_storage_network_row(cx, network, &prefs.network_summary(network));
-                downloads.push(self.setting_spot(ids, row, cx));
-            }
-            // One toggle drives all three networks' `use_less_data_for_calls`
-            // (TGX keeps a single switch); each network keeps its own caps.
-            let all_on = NetworkKind::ALL
-                .iter()
-                .all(|n| prefs.for_network(*n).use_less_data_for_calls);
-            let owner = cx.entity().downgrade();
-            downloads.push(self.setting_spot(
-                &["data.less_data_calls"],
-                switch_row(
-                    "data-storage-less-data-calls",
-                    tr(keys::Q_OPS_USE_LESS_DATA_FOR_CALLS),
-                    Some(tr(keys::Q_OPS_LOWER_DATA_USAGE_DURING_TELEGRAM)),
-                    all_on,
-                    move |&on, _, cx| {
-                        let _ = owner.update(cx, |this, cx| {
-                            if let Some(live) = this.live.as_mut() {
-                                // Send failures land on `data_storage_error`,
-                                // shown on this page (the S3 pattern).
-                                let _ = live.driver.set_less_data_for_calls(on);
-                            } else if let Some(demo) = this.demo_session.as_mut() {
-                                for n in NetworkKind::ALL {
-                                    demo.settings
-                                        .data_storage
-                                        .for_network_mut(n)
-                                        .use_less_data_for_calls = on;
-                                }
-                            }
-                            cx.notify();
-                        });
-                    },
-                    cx,
-                ),
-                cx,
-            ));
-        }
-        body = body.child(self.setting_spot(
-            &["data.max_file_size"],
-            group(Some(tr(keys::Q_OPS_AUTOMATIC_DOWNLOADS)), downloads),
-            cx,
-        ));
+        // --- Automatic media download ---
+        body = body.child(self.auto_download_section(cx));
         // --- Download folder (B13) ---
         body = body.child(self.download_folder_section(cx));
         // --- Storage usage ---
@@ -510,211 +297,6 @@ impl QuillApp {
         // --- Network usage (B13) ---
         body = body.child(self.network_usage_section(cx));
         body
-    }
-
-    /// Slice S4: one auto-download network row — label, current summary,
-    /// chevron; opens the per-network editor.
-    fn data_storage_network_row(
-        &self,
-        cx: &mut Context<Self>,
-        network: NetworkKind,
-        summary: &str,
-    ) -> AnyElement {
-        detail_row(
-            format!("data-storage-net-{}", network.label().replace(' ', "-")),
-            network.label(),
-            summary.to_string(),
-            cx.listener(move |this, _, _, cx| {
-                let draft = this
-                    .session()
-                    .map(|s| *s.settings.data_storage.for_network(network));
-                if let Some(draft) = draft {
-                    for kind in CAP_KINDS {
-                        let start = draft.cap(kind);
-                        let start = if start > 0 {
-                            start
-                        } else {
-                            quill::data_settings::DEFAULT_ENABLED_CAP
-                        };
-                        this.set_step_slider(
-                            StepSlider::DataCap(kind),
-                            cap_slider_start(start),
-                            cx,
-                        );
-                    }
-                    this.settings.data_storage_editor = StorageEditor::open(network, draft);
-                    cx.notify();
-                }
-            }),
-            cx,
-        )
-        .accessibility_label(tr_with(
-            keys::Q_OPS_AUTOMATIC_DOWNLOAD_SETTINGS,
-            &[("label", (network.label()))],
-        ))
-        .into_any_element()
-    }
-
-    /// Slice S4: the per-network editor — the enable switch, the three
-    /// size-cap cyclers, and this network's less-data-for-calls switch.
-    /// Edits stay in the draft until Save.
-    fn data_storage_editor_body(
-        &self,
-        cx: &mut Context<Self>,
-        network: NetworkKind,
-        draft: &AutoDownloadNetSettings,
-    ) -> Div {
-        let mut body = div().flex().flex_col().gap_2();
-        body = body.child(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .py_1()
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .child(div().text_sm().child(tr(keys::Q_OPS_AUTOMATIC_DOWNLOAD)))
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(tr_with(
-                                    keys::Q_LEFTOVERS_AUTO_DOWNLOAD_ON,
-                                    &[("network", &(network.label().to_lowercase()).to_string())],
-                                )),
-                        ),
-                )
-                .child(
-                    Switch::new("data-storage-enabled")
-                        .checked(draft.is_auto_download_enabled)
-                        .accessibility_label(tr(keys::Q_OPS_AUTOMATIC_DOWNLOAD))
-                        .on_click(cx.listener(|this, &on, _, cx| {
-                            if let Some(draft) = this.settings.data_storage_editor.draft_mut() {
-                                draft.is_auto_download_enabled = on;
-                            }
-                            cx.notify();
-                        })),
-                ),
-        );
-        body = body.child(section_header(tr(keys::Q_OPS_MAXIMUM_FILE_SIZE)));
-        for (kind, id, title) in [
-            (CapKind::Photo, "photo", tr(keys::Q_OPS_PHOTOS)),
-            (CapKind::Video, "video", tr(keys::Q_OPS_VIDEOS)),
-            (CapKind::Other, "other", tr(keys::Q_OPS_OTHER_FILES)),
-        ] {
-            body = body.child(self.data_storage_cap_row(cx, kind, id, title, draft));
-        }
-        body = body.child(
-            div()
-                .flex()
-                .items_center()
-                .justify_between()
-                .py_1()
-                .child(
-                    div()
-                        .text_sm()
-                        .child(tr(keys::Q_OPS_USE_LESS_DATA_FOR_CALLS)),
-                )
-                .child(
-                    Switch::new("data-storage-editor-less-data-calls")
-                        .checked(draft.use_less_data_for_calls)
-                        .accessibility_label(tr(keys::Q_OPS_USE_LESS_DATA_FOR_CALLS))
-                        .on_click(cx.listener(|this, &on, _, cx| {
-                            if let Some(draft) = this.settings.data_storage_editor.draft_mut() {
-                                draft.use_less_data_for_calls = on;
-                            }
-                            cx.notify();
-                        })),
-                ),
-        );
-        body = body.child(
-            div()
-                .text_xs()
-                .text_color(cx.theme().muted_foreground)
-                .child(tr(keys::Q_OPS_SAVED_ON_THIS_DEVICE_APPLIES)),
-        );
-        body
-    }
-
-    /// One media type of the editor (tdesktop `AutoDownloadBox`): its
-    /// switch, and while it is on the "Limit by size" slider
-    /// (`AddSizeLimitSlider`: `lng_media_size_limit` / `lng_media_size_up_to`).
-    fn data_storage_cap_row(
-        &self,
-        cx: &mut Context<Self>,
-        kind: CapKind,
-        id: &'static str,
-        title: &str,
-        draft: &AutoDownloadNetSettings,
-    ) -> Div {
-        let cap = draft.cap(kind);
-        let value = if cap >= NO_LIMIT_SIZE_CAP {
-            tr(keys::Q_OPS_NO_LIMIT).to_string()
-        } else {
-            tr_with(
-                keys::MEDIA_SIZE_UP_TO,
-                &[(
-                    "size",
-                    tr_with(
-                        keys::Q_LEFTOVERS_MB,
-                        &[("cap", &(cap / (1024 * 1024)).to_string())],
-                    )
-                    .as_str(),
-                )],
-            )
-        };
-        let slider = (cap > 0)
-            .then(|| {
-                self.step_slider_row(
-                    StepSlider::DataCap(kind),
-                    cap_slider_id(kind),
-                    tr(keys::MEDIA_SIZE_LIMIT).to_string(),
-                    value,
-                    cx,
-                )
-            })
-            .flatten();
-        div()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .py_1()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(div().text_sm().child(title.to_string()))
-                    .child(
-                        Switch::new(format!("data-storage-cap-{id}"))
-                            .checked(cap > 0)
-                            .accessibility_label(title.to_string())
-                            .on_click(cx.listener(move |this, &on, _, cx| {
-                                // Switching on resumes at the slider's step.
-                                let index = this.index_sliders.index(StepSlider::DataCap(kind), cx);
-                                if let Some(draft) = this.settings.data_storage_editor.draft_mut() {
-                                    draft.set_cap_enabled(kind, on);
-                                    if let Some(index) = index.filter(|_| on) {
-                                        draft.set_cap(kind, cap_at(index));
-                                    }
-                                }
-                                cx.notify();
-                            })),
-                    ),
-            )
-            .children(slider)
-    }
-}
-
-const CAP_KINDS: [CapKind; 3] = [CapKind::Photo, CapKind::Video, CapKind::Other];
-
-fn cap_slider_id(kind: CapKind) -> &'static str {
-    match kind {
-        CapKind::Photo => "data-storage-limit-photo",
-        CapKind::Video => "data-storage-limit-video",
-        CapKind::Other => "data-storage-limit-other",
     }
 }
 
