@@ -144,7 +144,6 @@ pub struct HistoryMessage {
     /// custom keyboard above the composer (showKeyboard).
     pub reply_markup: Option<ReplyMarkup>,
     /// Phase B3: schema `message.self_destruct_type` /
-    /// Phase B3: schema `message.self_destruct_type` /
     /// `message.self_destruct_in` (TDLib 1.8.67 lines 3146–3147 / 3165).
     /// `None` for ordinary messages. Self-destructed rows leave via
     /// `updateDeleteMessages` (the normal delete path).

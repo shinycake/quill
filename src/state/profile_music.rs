@@ -55,7 +55,6 @@ impl Session {
         }
     }
 
-    /// The current user's own playlist, when it is loaded.
     /// Where track `file_id` sits in your own playlist now.
     pub fn my_playlist_position(&self, file_id: FileId) -> Option<usize> {
         let me = self.my_user_id?;

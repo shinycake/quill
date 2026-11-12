@@ -252,11 +252,12 @@ impl Session {
             .sublist
             .as_mut()
             .filter(|view| view.topic_id == topic_id)
-            .filter(|view| pending.is_some_and(|p| view.history.older == OlderEnd::Asking(p.id)))
         else {
             return;
         };
-        view.history.older = OlderEnd::Open;
+        if !pending.is_some_and(|p| view.history.settle_older(p.id)) {
+            return;
+        }
         let empty = messages.is_empty();
         let mut oldest: Option<i64> = None;
         for message in messages {

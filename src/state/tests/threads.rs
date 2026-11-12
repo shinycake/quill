@@ -740,7 +740,7 @@ fn only_the_first_pages_own_answer_or_error_leaves_loading_history() {
     let other = asked_thread_page(&mut session, 101, 13);
     let status = |session: &Session| session.threads.thread.as_ref().unwrap().status.clone();
     if let Some(thread) = session.threads.thread.as_mut() {
-        thread.status = ThreadStatus::LoadingHistory(first);
+        thread.status = ThreadStatus::LoadingHistory;
     }
     apply_json(
         &mut session,
@@ -752,18 +752,17 @@ fn only_the_first_pages_own_answer_or_error_leaves_loading_history() {
             msg(503, 14, 501, "b")
         ),
     );
-    assert_eq!(status(&session), ThreadStatus::LoadingHistory(first));
-    let again = asked_thread_page(&mut session, 101, 13);
+    assert_eq!(status(&session), ThreadStatus::LoadingHistory);
     apply_json(
         &mut session,
         &seq,
         &sink,
         &format!(
             r#"{{"@type":"error","@extra":"{}","code":500,"message":"x"}}"#,
-            again.0
+            other.0
         ),
     );
-    assert_eq!(status(&session), ThreadStatus::LoadingHistory(first));
+    assert_eq!(status(&session), ThreadStatus::LoadingHistory);
     apply_json(
         &mut session,
         &seq,

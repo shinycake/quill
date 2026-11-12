@@ -653,9 +653,10 @@ pub enum ChatSearchJumpNeed {
 pub enum OlderEnd {
     #[default]
     Open,
-    /// A Saved Messages page request is out (sublist or tag filter): only
-    /// its answer extends the list, and an answer to any other (a view left
-    /// and entered again) is dropped. Leaves with the answer, its error, or
+    /// An older page request is out (a Saved Messages sublist or tag
+    /// filter, a forum topic or a comment thread): only its answer extends
+    /// the list, and an answer to any other (a view left and entered
+    /// again) is dropped. Leaves with the answer, its error, or
     /// the window being replaced.
     Asking(RequestId),
     Failed,

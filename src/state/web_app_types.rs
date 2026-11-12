@@ -228,8 +228,9 @@ pub struct WebApps {
     /// One-shot: custom request answers.
     pub custom_replies: Vec<CustomRequestReply>,
     /// Apps tab: `getGrossingWebAppBots` bot ids. One request at a time,
-    /// so its answer and its error need no key; a failure is drawn with
-    /// the tab's reopen as the retry.
+    /// so its answer and its error are matched to the request its stage
+    /// holds (`answered` / `failed`); a failure is drawn with the tab's
+    /// reopen as the retry.
     pub grossing: crate::state::fetch::Fetch<Vec<i64>>,
     /// One-shot: `sendWebAppData` outcomes, oldest first, each by its
     /// request.

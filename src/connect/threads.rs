@@ -171,10 +171,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             return sent;
         }
         let next = match &sent {
-            Ok(Some(id)) => ThreadStatus::LoadingHistory(*id),
+            Ok(Some(_)) => ThreadStatus::LoadingHistory,
             // Nothing to send: the page is already out, or there is none.
             Ok(None) => match self.thread_page_in_flight() {
-                Some(id) => ThreadStatus::LoadingHistory(id),
+                Some(_) => ThreadStatus::LoadingHistory,
                 None => ThreadStatus::Ready,
             },
             Err(_) => ThreadStatus::Failed("Could not open the thread.".into()),

@@ -40,10 +40,12 @@ pub enum ThreadStatus {
     /// The thread's chat is open; reading and the first
     /// `getMessageThreadHistory` page are still to be started.
     ChatOpen,
-    /// The first `getMessageThreadHistory` page is in flight (the
-    /// request that went out). Its answer makes the thread `Ready`, its
-    /// error `Failed`; it is entered only once the send succeeded.
-    LoadingHistory(RequestId),
+    /// The first `getMessageThreadHistory` page is in flight. The request
+    /// is the window's older end (`history.older`), which matches its
+    /// answer; this stage only says the thread has no page to show yet.
+    /// The answer makes the thread `Ready`, the error `Failed`; it is
+    /// entered only once the send succeeded.
+    LoadingHistory,
     Ready,
     /// The reducer replaced the window (an own send while newer replies
     /// were unloaded); the driver has to request the newest page, which
@@ -74,14 +76,14 @@ impl ThreadStatus {
     pub fn is_opening(&self) -> bool {
         matches!(
             self,
-            Self::SwitchingChat | Self::ChatOpen | Self::LoadingHistory(_)
+            Self::SwitchingChat | Self::ChatOpen | Self::LoadingHistory
         )
     }
 
     /// A newer history page may be applied: not while the first page is
     /// out (a newer one then is from a view that is gone).
     pub fn takes_newer_page(&self) -> bool {
-        !matches!(self, Self::LoadingHistory(_))
+        !matches!(self, Self::LoadingHistory)
     }
 
     /// The first page landed: the thread shows rows (or the reload of its
@@ -124,8 +126,6 @@ pub struct ThreadView {
     pub history: TopicHistory,
     /// The unread divider goes above the first incoming reply after this id.
     pub unread_anchor: Option<MessageId>,
-    /// Bumped by "jump to root" so the view scrolls to the top again.
-    pub root_jump_serial: u64,
     /// The forum topic the thread was opened from. Sends and typing stay in
     /// that topic (`messageTopicForum`) and reply to the thread root;
     /// `None` outside forums, where a thread is its own `messageTopicThread`.
@@ -156,7 +156,6 @@ impl ThreadView {
             root_ids: Vec::new(),
             history: TopicHistory::default(),
             unread_anchor: None,
-            root_jump_serial: 0,
             forum_topic_id: None,
             draft: None,
         }
@@ -333,14 +332,10 @@ impl ThreadView {
     }
 
     /// Whether the older (or first) page answered by `request` is the one
-    /// the thread waits for: the first page is held by the status, later
-    /// pages by the window's older end. Any other is from a window that is
-    /// gone.
+    /// the thread waits for: the window's older end holds it. Any other is
+    /// from a window that is gone.
     pub(crate) fn takes_older_page(&self, request: RequestId) -> bool {
-        match self.status {
-            ThreadStatus::LoadingHistory(waiting) => waiting == request,
-            _ => self.history.older == OlderEnd::Asking(request),
-        }
+        self.history.older == OlderEnd::Asking(request)
     }
 
     /// Drop the loaded replies so the newest page can load; the root rows

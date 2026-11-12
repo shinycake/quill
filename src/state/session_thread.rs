@@ -293,7 +293,7 @@ impl Session {
             if thread.history.settle_older(pending.id) {
                 thread.history.fail_older();
             }
-        } else if matches!(thread.status, ThreadStatus::LoadingHistory(_))
+        } else if matches!(thread.status, ThreadStatus::LoadingHistory)
             && thread.takes_older_page(pending.id)
         {
             thread.history.settle_older(pending.id);
