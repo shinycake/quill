@@ -581,6 +581,7 @@ fn the_business_wait_ends_with_the_own_full_info_error_or_answer() {
     let seq = AtomicU64::new(0);
     session.my_user_id = Some(31);
     let extra = session.request_for_user(RequestPurpose::GetUserFullInfo, 31);
+    session.users_state.user_full_infos.begin(31, extra);
     assert!(session.business_own_info().is_loading());
     apply_json(
         &mut session,
@@ -596,8 +597,11 @@ fn the_business_wait_ends_with_the_own_full_info_error_or_answer() {
         "a failure is not an endless Loading"
     );
     // Asked again: another user's failure leaves the wait alone.
+    session.users_state.user_full_infos.forget_failure(&31);
     let extra = session.request_for_user(RequestPurpose::GetUserFullInfo, 31);
+    session.users_state.user_full_infos.begin(31, extra);
     let other = session.request_for_user(RequestPurpose::GetUserFullInfo, 32);
+    session.users_state.user_full_infos.begin(32, other);
     apply_json(
         &mut session,
         &seq,

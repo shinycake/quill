@@ -36,21 +36,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         if self.session.bots.bot_info.contains_key(&user_id) {
             return Ok(());
         }
-        if self
-            .session
-            .requests
-            .has_purpose_for_chat(RequestPurpose::GetUserFullInfo, chat_id)
-        {
+        // One ask per bot: out, answered, or failed (the Retry of a box
+        // that shows it asks again), never once per poll.
+        let infos = &self.session.users_state.user_full_infos;
+        if infos.is_loading(&user_id) || infos.failed(&user_id) {
             return Ok(());
         }
-        let extra = self
-            .session
-            .request(RequestPurpose::GetUserFullInfo, Some(chat_id));
-        if let Err(err) = self.sender.send_json(&get_user_full_info(extra, user_id)) {
-            self.session.requests.take(extra);
-            return Err(err);
-        }
-        Ok(())
+        self.send_full_info_request(user_id).map(|_| ())
     }
 
     /// Phase 3.3: `getCommands` for the open bot chat's global commands.

@@ -26,9 +26,37 @@ impl UserFullInfos {
         self.get(user_id).is_some()
     }
 
-    /// An answer: the data, and no failure.
+    /// A pushed update (`updateUserFullInfo`) or a seeded value: the data,
+    /// and no failure. An ask still out keeps waiting for its own answer,
+    /// with this as the data shown meanwhile.
     pub fn insert(&mut self, user_id: i64, data: UserFullInfoData) {
-        self.by_user.insert(user_id, Fetch::Ready(data));
+        match self.by_user.get_mut(&user_id) {
+            Some(Fetch::Loading { stale, .. }) => *stale = Some(data),
+            _ => {
+                self.by_user.insert(user_id, Fetch::Ready(data));
+            }
+        }
+    }
+
+    /// The answer of `request` (`None`: it names none). The ask that waits
+    /// for it is done; one that waits for another request, started since,
+    /// is not, and shows this meanwhile.
+    pub fn answered(
+        &mut self,
+        user_id: i64,
+        request: Option<crate::ids::RequestId>,
+        data: UserFullInfoData,
+    ) {
+        match self.by_user.get_mut(&user_id) {
+            Some(entry) if entry.is_loading() && !request.is_some_and(|r| entry.waits_for(r)) => {
+                if let Fetch::Loading { stale, .. } = entry {
+                    *stale = Some(data);
+                }
+            }
+            _ => {
+                self.by_user.insert(user_id, Fetch::Ready(data));
+            }
+        }
     }
 
     pub fn remove(&mut self, user_id: &i64) {
@@ -59,9 +87,38 @@ impl UserFullInfos {
             .collect()
     }
 
-    /// The ask for this user failed.
-    pub fn fail(&mut self, user_id: i64, error: String) {
+    /// The ask for this user could not be sent: it fails, and the
+    /// entry's pump does not repeat it.
+    pub fn fail_unsent(&mut self, user_id: i64, error: String) {
         self.by_user.entry(user_id).or_default().fail(error);
+    }
+
+    /// `request` failed. Only the ask that waits for it is affected (an
+    /// older request's late error leaves a newer ask waiting): a refresh
+    /// of a user whose info is held goes back to showing it, and a first
+    /// ask fails with the reason.
+    pub fn failed_request(
+        &mut self,
+        user_id: i64,
+        request: Option<crate::ids::RequestId>,
+        error: String,
+    ) {
+        let Some(entry) = self.by_user.get_mut(&user_id) else {
+            return;
+        };
+        if !request.is_some_and(|request| entry.waits_for(request)) {
+            return;
+        }
+        if entry.data().is_some() {
+            entry.cancel();
+        } else {
+            entry.fail(error);
+        }
+    }
+
+    /// An ask for this user is out.
+    pub fn is_loading(&self, user_id: &i64) -> bool {
+        self.by_user.get(user_id).is_some_and(Fetch::is_loading)
     }
 
     /// Whether the last ask failed (and no answer has come since).
