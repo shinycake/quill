@@ -121,34 +121,6 @@ fn label_for(biometrics: bool) -> &'static str {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::label_for;
-    use quill::lang::{PackValue, Snapshot};
-
-    #[test]
-    fn the_label_follows_a_language_change() {
-        quill::lang::isolate_thread();
-        assert_eq!(label_for(false), "Unlock with System Password");
-        let mut pack = Snapshot::new("pt-br", "pt", false);
-        pack.layer([
-            (
-                "lng_settings_use_systempwd",
-                &PackValue::Ordinary("Senha do sistema".into()),
-            ),
-            (
-                "lng_settings_use_touchid",
-                &PackValue::Ordinary("Touch ID".into()),
-            ),
-        ]);
-        quill::lang::install(Some(pack));
-        assert_eq!(label_for(false), "Senha do sistema");
-        assert_eq!(label_for(true), "Touch ID");
-        quill::lang::install(None);
-        assert_eq!(label_for(false), "Unlock with System Password");
-    }
-}
-
 /// Closes the OS prompt when dropped (macOS: `LAContext invalidate`), so a
 /// prompt nobody waits for any more leaves the screen with its wait.
 pub struct Close {
@@ -205,5 +177,33 @@ pub fn authenticate(reason: &str) -> Prompt {
         let _ = reason;
         let _ = tx.send(false);
         Prompt::without_prompt(rx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::label_for;
+    use quill::lang::{PackValue, Snapshot};
+
+    #[test]
+    fn the_label_follows_a_language_change() {
+        quill::lang::isolate_thread();
+        assert_eq!(label_for(false), "Unlock with System Password");
+        let mut pack = Snapshot::new("pt-br", "pt", false);
+        pack.layer([
+            (
+                "lng_settings_use_systempwd",
+                &PackValue::Ordinary("Senha do sistema".into()),
+            ),
+            (
+                "lng_settings_use_touchid",
+                &PackValue::Ordinary("Touch ID".into()),
+            ),
+        ]);
+        quill::lang::install(Some(pack));
+        assert_eq!(label_for(false), "Senha do sistema");
+        assert_eq!(label_for(true), "Touch ID");
+        quill::lang::install(None);
+        assert_eq!(label_for(false), "Unlock with System Password");
     }
 }
