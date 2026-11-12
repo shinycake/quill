@@ -63,6 +63,9 @@ pub fn wait_closed<S: JsonSender>(
 pub struct LiveConnect {
     pub driver: ConnectDriver<LiveSender>,
     pub bridge: ReceiveBridge,
+    /// When this client started: a hand-off to the background keeps the
+    /// give-up clock of a connect that is still going.
+    pub started: Instant,
     _live: LiveTdJson,
 }
 
@@ -287,6 +290,7 @@ fn open_prepared_client(
     Ok(LiveConnect {
         driver,
         bridge,
+        started: Instant::now(),
         _live: live,
     })
 }

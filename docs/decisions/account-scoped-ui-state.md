@@ -10239,7 +10239,7 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 | 05-004 | `Presses` is `Idle` / `Held(over)` / `Handled(over)`. |
 | 05-007 | `EffectWatch` keys are `ChatMessage`. |
 | g-453 | `MediaFile` is `MediaFileView`: read from the downloads table and the disk when the menu is built. |
-| 06-005, g-469..g-471 | `Lifecycle::Waiting { streak, since }` (the widget waiting longest starts first). The guard counts a field typed by one of the enum's own generic parameters as the owned handle (`Loading { runtime: R }`, `Running(R)`). |
+| 06-005, g-469..g-471 | `Lifecycle::Waiting { streak, since }`: the widget holds its place in the queue (`since` orders `start_waiting_widgets`, the one waiting longest starts first) and no work; the pool it waits on gives no ticket. The guard counts a field typed by one of the enum's own generic parameters as the owned handle (`Loading { runtime: R }`, `Running(R)`). |
 | 06-010, g-472 | `Neighbour::Asking { gateway, since }`: a gateway that never answers is asked again after `RESOLVE_AGAIN_AFTER`. |
 | 06-011, g-447 | `BackgroundStatus::Connecting { since }`: a start that stays there past `CONNECT_GIVE_UP` is `Failed` and started again. |
 | g-460, 06-008 | `new_chat::ViewState` is `StepView` (a view worked out on each draw; `TypeSaveStage::Saving(requests)` and `NewChatStage::Creating` own the requests). `GiftsLayout` is `GiftsLayoutView`, `OwnLinkState` is `OwnLinkView` (both are worked out on each draw). |
@@ -10261,3 +10261,21 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 Guards: `check-stage-enums.py` counts a field typed by one of the enum's own generic parameters as a carrier (not when the enum is also written `Name<()>` in `src/`, so `DeviceRun::Running` stays reported), and a field named `deadline`, `retry_at_*`, `commit_at_*` or `*_until_*` as a deadline. Allow lines removed with their shapes: `GlyphSave`, `StreamStage`, `BadgeStage::Pending`, `Stage::Writing`; the `WithdrawalState::Pending` line now names only `src/earn/revenue.rs`.
 
 Tests: `location_picker::picker_tests` (typing before a place, a new place stops the lookup), `paid_reaction::tests` (resend, let go, refused undo), `connect::tests::sweep_s3_payments_1`, `notify_accounts::tests` (give up), `net_watch::tests` (asked again), `proxy::tests` (probe by request), `icon_badge` (hung push), `paid_messages` (trust retry), `media_session::worker`.
+
+#### Fix round 2 (r4-04)
+
+| Review item | Change |
+|---|---|
+| `new_chat` rename | `StepView::{Idle, Waiting, Refused}` is a view with no payload; `TypeSaveStage::Saving(requests)` and `Creating` own the requests. |
+| Stage-enum guard | A generic field counts only when no `Name<()>` appears in `src/` (`DeviceRun::Running` is reported again, its baseline line stays). A deadline field is `deadline`, `retry_at_*`, `commit_at_*` or `*_until_*`; `sent_at_ms` is not one. `test_shape_guard.py` covers both. |
+| `link_handler` | `Stage::Reading { last, waker, invalidated, _thread }` owns its read thread (spawned under the lock); `Known { cached, stale }`. The `invalidated: Option<Instant>` mark and `Cached.started` are gone. |
+| `net_watch` | `Watcher::{Stopped, Running { _thread, since }}`: a listener thread that finished (Linux, macOS) is started again by the next `tracker()` call, at most every `WATCH_RESTART_AFTER`. |
+| `media_session::worker` | The test builds the dead worker directly and counts starts through a per-test spawn closure (`send_with`); no static, no spin. |
+| `location_picker` | `VenueView::Failed` derives from `AskStage::Failed` (`ListData::Failed` gone); the ask holds the query as typed (`initial_query` gone); the nearby place to return to lives in `SearchInput::{Typing, Settled} { back }` (`no_search_location` gone). A query typed before the first fix is sent around the fix (05-002). |
+| `gift_manage` | `GiftListFetch<T>::Answered(Vec<T>)` holds the list (`gifts()` and `premium_options()` read it); `SendStage::Open { recipient, step: SendStep }` holds the recipient. |
+| `main.rs` | The wake subscription, the first window open, the macOS menu install and the tray/chrome loop are held in globals (`WakeWatch`, `OpeningMainWindow`, `InstallingMenus`, `ChromeLoop`), like `DemoDriver`. |
+| `Lifecycle::Waiting` | Documented above: it holds its queue place, no work. |
+| `collapsed_keyboards` | Keyed by `ChatMessage`, like `dismissed_keyboards`. |
+| `paid_messages` | `SaveFailed { retry_at_ms, tries }`: the wait doubles per failure up to `TRUST_RETRY_MAX_MS`. |
+| `background_accounts::switch` | A hand-off stamps `Connecting` with `LiveConnect::started`, so the give-up clock keeps running. |
+| `marketplace` | `accept_quote`, `accept_result` and `fail` take the `RequestId` and check it themselves. |

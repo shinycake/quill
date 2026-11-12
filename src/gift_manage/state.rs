@@ -79,23 +79,29 @@ impl GiftFlow {
 
 /// One list the send-gift dialog asks for when it opens. The dialog is
 /// rebuilt for each recipient, so only the answer (or failure) of the
-/// request named here lands; an earlier box's is dropped.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum GiftListFetch {
+/// request named here lands; an earlier box's is dropped. The list is the
+/// answer: it exists only in `Answered`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GiftListFetch<T> {
     /// Not asked (the demo, or Premium options for yourself or a channel).
-    #[default]
     NotAsked,
     /// The request in flight.
     Asking(crate::ids::RequestId),
     /// The answer landed.
-    Answered,
+    Answered(Vec<T>),
     /// The request failed or could not be sent; the line the box shows.
     /// Apart from `SendStage`, so a list failure never overwrites a
     /// `sendGift` in flight.
     Failed(String),
 }
 
-impl GiftListFetch {
+impl<T> Default for GiftListFetch<T> {
+    fn default() -> Self {
+        Self::NotAsked
+    }
+}
+
+impl<T> GiftListFetch<T> {
     /// Whether `pending` is the request this list waits for.
     pub(crate) fn asked_by(&self, pending: Option<&crate::state::PendingRequest>) -> bool {
         matches!((self, pending), (Self::Asking(id), Some(pending)) if *id == pending.id)
@@ -104,17 +110,27 @@ impl GiftListFetch {
     pub fn is_loading(&self) -> bool {
         matches!(self, Self::Asking(_))
     }
+
+    /// The list, once answered; empty before.
+    pub fn items(&self) -> &[T] {
+        match self {
+            Self::Answered(items) => items,
+            _ => &[],
+        }
+    }
+
+    /// The list is answered, with nothing in it.
+    pub fn answered_empty(&self) -> bool {
+        matches!(self, Self::Answered(items) if items.is_empty())
+    }
 }
 
-/// Where the send-gift dialog stands, open or not, with its `sendGift`.
+/// What the open send-gift dialog is doing with its `sendGift`.
 /// The dialog is rebuilt for each recipient, so only the answer of the
-/// sending stage's own request leaves it; picking another gift, closing the
+/// sending step's own request leaves it; picking another gift, closing the
 /// box or sending again leaves `Done` and `Failed`.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum SendStage {
-    /// No dialog: nothing open, nothing out.
-    #[default]
-    Closed,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SendStep {
     /// The dialog is open and nothing is out.
     Idle,
     /// The `sendGift` in flight, its dialog open.
@@ -129,71 +145,125 @@ pub enum SendStage {
     Failed(String),
 }
 
+/// Where the send-gift dialog stands, open or not. The recipient lives in
+/// the open stage: a closed dialog has none.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum SendStage {
+    /// No dialog: nothing open, nothing out.
+    #[default]
+    Closed,
+    /// A dialog for `recipient`, or its `sendGift` still out after it closed.
+    Open {
+        recipient: GiftRecipient,
+        step: SendStep,
+    },
+}
+
 /// The send-gift dialog (`GiftBox` in tdesktop).
 #[derive(Debug, Clone, Default)]
 pub struct SendGiftState {
-    pub recipient: Option<GiftRecipient>,
-    pub gifts: Vec<AvailableGift>,
-    /// `getAvailableGifts` for `gifts`.
-    pub gifts_fetch: GiftListFetch,
+    /// `getAvailableGifts`, and its answer.
+    pub gifts_fetch: GiftListFetch<AvailableGift>,
     pub selected: Option<i64>,
-    pub premium_options: Vec<PremiumGiftOption>,
-    /// `getPremiumGiftPaymentOptions` for `premium_options`.
-    pub premium_fetch: GiftListFetch,
+    /// `getPremiumGiftPaymentOptions`, and its answer.
+    pub premium_fetch: GiftListFetch<PremiumGiftOption>,
     pub stage: SendStage,
 }
 
 impl SendGiftState {
+    /// A dialog open for `recipient`, nothing asked yet.
+    pub fn opened_for(recipient: GiftRecipient) -> Self {
+        Self {
+            stage: SendStage::Open {
+                recipient,
+                step: SendStep::Idle,
+            },
+            ..Default::default()
+        }
+    }
+
+    /// Who the dialog (open, or closed over its send) is for.
+    pub fn recipient(&self) -> Option<&GiftRecipient> {
+        match &self.stage {
+            SendStage::Open { recipient, .. } => Some(recipient),
+            SendStage::Closed => None,
+        }
+    }
+
+    pub fn step(&self) -> Option<&SendStep> {
+        match &self.stage {
+            SendStage::Open { step, .. } => Some(step),
+            SendStage::Closed => None,
+        }
+    }
+
+    /// Moves the open stage to `next`; a closed dialog stays closed.
+    pub fn set_step(&mut self, next: SendStep) {
+        if let SendStage::Open { step, .. } = &mut self.stage {
+            *step = next;
+        }
+    }
+
+    /// The gifts `getAvailableGifts` listed.
+    pub fn gifts(&self) -> &[AvailableGift] {
+        self.gifts_fetch.items()
+    }
+
+    /// The Premium options `getPremiumGiftPaymentOptions` listed.
+    pub fn premium_options(&self) -> &[PremiumGiftOption] {
+        self.premium_fetch.items()
+    }
+
     /// The dialog is open.
     pub fn is_open(&self) -> bool {
-        !matches!(self.stage, SendStage::Closed | SendStage::SendingClosed(_))
+        matches!(self.step(), Some(step) if !matches!(step, SendStep::SendingClosed(_)))
     }
 
     /// A `sendGift` is in flight, with the dialog open or closed.
     pub fn sending(&self) -> bool {
         matches!(
-            self.stage,
-            SendStage::Sending(_) | SendStage::SendingClosed(_)
+            self.step(),
+            Some(SendStep::Sending(_) | SendStep::SendingClosed(_))
         )
     }
 
     /// Whether `pending` is the `sendGift` this dialog waits for.
     pub(crate) fn waits_for(&self, pending: Option<&crate::state::PendingRequest>) -> bool {
         pending.is_some_and(|pending| {
-            matches!(self.stage, SendStage::Sending(id) | SendStage::SendingClosed(id) if id == pending.id)
+            matches!(self.step(), Some(SendStep::Sending(id) | SendStep::SendingClosed(id)) if *id == pending.id)
         })
     }
 
     /// The dialog is closed: a `sendGift` in flight carries on without it.
     pub fn close(&mut self) {
         self.selected = None;
-        self.stage = match self.stage {
-            SendStage::Sending(request) | SendStage::SendingClosed(request) => {
-                SendStage::SendingClosed(request)
+        match self.step().cloned() {
+            Some(SendStep::Sending(request) | SendStep::SendingClosed(request)) => {
+                self.set_step(SendStep::SendingClosed(request));
             }
-            _ => SendStage::Closed,
-        };
+            _ => self.stage = SendStage::Closed,
+        }
     }
 
     /// The dialog is shown again over the `sendGift` it closed on.
     pub fn reopen(&mut self) {
-        if let SendStage::SendingClosed(request) = self.stage {
-            self.stage = SendStage::Sending(request);
+        if let Some(&SendStep::SendingClosed(request)) = self.step() {
+            self.set_step(SendStep::Sending(request));
         }
     }
 
     /// The line after a sent gift.
     pub fn done_line(&self) -> Option<&str> {
-        match &self.stage {
-            SendStage::Done(line) => Some(line),
+        match self.step() {
+            Some(SendStep::Done(line)) => Some(line),
             _ => None,
         }
     }
 
     /// The line after a failed send, gift list or Premium options list.
     pub fn error_line(&self) -> Option<&str> {
-        match (&self.stage, &self.gifts_fetch, &self.premium_fetch) {
-            (SendStage::Failed(line), _, _)
+        match (self.step(), &self.gifts_fetch, &self.premium_fetch) {
+            (Some(SendStep::Failed(line)), _, _)
             | (_, GiftListFetch::Failed(line), _)
             | (_, _, GiftListFetch::Failed(line)) => Some(line),
             _ => None,
@@ -218,7 +288,7 @@ impl SendGiftState {
 
     pub fn selected_gift(&self) -> Option<&AvailableGift> {
         let id = self.selected?;
-        self.gifts.iter().find(|g| g.id == id)
+        self.gifts().iter().find(|g| g.id == id)
     }
 }
 

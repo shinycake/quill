@@ -337,11 +337,7 @@ const WATCH_RUNS_FOR_GOOD: bool = cfg!(any(target_os = "linux", target_os = "mac
 
 impl Watcher {
     /// Starts the listener when none runs or the last one is lost.
-    fn ensure(
-        &mut self,
-        now: Instant,
-        spawn: impl FnOnce() -> io::Result<JoinHandle<Option<()>>>,
-    ) {
+    fn ensure(&mut self, now: Instant, spawn: impl FnOnce() -> io::Result<JoinHandle<Option<()>>>) {
         self.ensure_with(now, JoinHandle::is_finished, spawn);
     }
 

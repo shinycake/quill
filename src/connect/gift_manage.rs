@@ -592,18 +592,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         // for the same recipient shows that stage again; another recipient
         // waits for the answer instead of dropping it.
         if send.sending() {
-            if send.recipient.as_ref() != Some(&recipient) {
+            if send.recipient() != Some(&recipient) {
                 return Err(ConnectSendError::InvalidRequest);
             }
             // box-host: the UI's open names the window (`open_send_gift*`)
             send.reopen();
             return Ok(());
         }
-        *send = SendGiftState {
-            stage: SendStage::Idle,
-            recipient: Some(recipient),
-            ..Default::default()
-        };
+        *send = SendGiftState::opened_for(recipient);
         self.ask_send_gifts();
         if with_premium {
             self.ask_premium_gift_options();
@@ -679,9 +675,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if send.sending() {
             return;
         }
-        send.selected = id.filter(|id| send.gifts.iter().any(|g| g.id == *id));
+        send.selected = id.filter(|id| send.gifts().iter().any(|g| g.id == *id));
         if send.is_open() {
-            send.stage = SendStage::Idle;
+            send.set_step(SendStep::Idle);
         }
     }
 
@@ -697,8 +693,8 @@ impl<S: JsonSender> ConnectDriver<S> {
     ) -> Result<RequestId, ConnectSendError> {
         let send = &self.session.payments.gifts_manage.send;
         let (Some(recipient), Some(gift)) = (
-            send.recipient.clone(),
-            send.gifts.iter().find(|g| g.id == gift_id).cloned(),
+            send.recipient().cloned(),
+            send.gifts().iter().find(|g| g.id == gift_id).cloned(),
         ) else {
             return Err(ConnectSendError::InvalidRequest);
         };
@@ -720,7 +716,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             RequestPurpose::Payments(PaymentsPurpose::SendStarGift),
             None,
         );
-        self.session.payments.gifts_manage.send.stage = SendStage::Idle;
+        self.session
+            .payments
+            .gifts_manage
+            .send
+            .set_step(SendStep::Idle);
         let json = rq::send_gift(
             extra,
             gift_id,
@@ -730,7 +730,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             pay_for_upgrade,
         );
         self.send_json_request(extra, &json)?;
-        self.session.payments.gifts_manage.send.stage = SendStage::Sending(extra);
+        self.session
+            .payments
+            .gifts_manage
+            .send
+            .set_step(SendStep::Sending(extra));
         Ok(extra)
     }
 }

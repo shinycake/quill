@@ -4,7 +4,7 @@
 use crate::earn::EarnErrorHint;
 use crate::gift_manage::{
     ExportError, ExportSend, GiftEvent, GiftListFetch, GiftManagePayload, GiftManageState,
-    ProbeOutcome, SendStage, TransferStage,
+    ProbeOutcome, SendStage, SendStep, TransferStage,
 };
 use crate::lang::{keys, tr_with};
 use crate::state::*;
@@ -88,8 +88,7 @@ impl Session {
                 if !send.asked_gifts(pending) {
                     return;
                 }
-                send.gifts_fetch = GiftListFetch::Answered;
-                send.gifts = gifts;
+                send.gifts_fetch = GiftListFetch::Answered(gifts);
             }
             (
                 GiftManagePayload::PremiumOptions(options),
@@ -99,8 +98,7 @@ impl Session {
                 if !send.asked_premium(pending) {
                     return;
                 }
-                send.premium_fetch = GiftListFetch::Answered;
-                send.premium_options = options;
+                send.premium_fetch = GiftListFetch::Answered(options);
             }
             (
                 GiftManagePayload::TemporaryPassword { has_password },
@@ -169,13 +167,13 @@ impl Session {
                 // Stars were spent whichever dialog asked.
                 hub.stars.page.invalidate();
                 let ours = manage.send.waits_for(pending);
-                let shown = ours && matches!(manage.send.stage, SendStage::Sending(_));
+                let shown = ours && matches!(manage.send.step(), Some(SendStep::Sending(_)));
                 if ours {
-                    manage.send.stage = if shown {
-                        SendStage::Idle
+                    if shown {
+                        manage.send.set_step(SendStep::Idle);
                     } else {
-                        SendStage::Closed
-                    };
+                        manage.send.stage = SendStage::Closed;
+                    }
                 }
                 // A box closed or rebuilt for another recipient while it was
                 // out has nobody to show it: Stars moved, so say so.
@@ -187,8 +185,9 @@ impl Session {
                     return;
                 }
                 manage.send.selected = None;
-                manage.send.stage =
-                    SendStage::Done(crate::lang::tr(crate::lang::keys::Q_MONEY_GIFT_SENT).into());
+                manage.send.set_step(SendStep::Done(
+                    crate::lang::tr(crate::lang::keys::Q_MONEY_GIFT_SENT).into(),
+                ));
             }
             _ => {}
         }
@@ -396,13 +395,13 @@ impl Session {
             }
             PaymentsPurpose::SendStarGift => {
                 let ours = manage.send.waits_for(pending);
-                let shown = ours && matches!(manage.send.stage, SendStage::Sending(_));
+                let shown = ours && matches!(manage.send.step(), Some(SendStep::Sending(_)));
                 if ours && !shown {
                     manage.send.stage = SendStage::Closed;
                 }
                 let text = format!("Couldn't send the gift: {reason}. The gift may be sold out.");
                 if shown {
-                    manage.send.stage = SendStage::Failed(text);
+                    manage.send.set_step(SendStep::Failed(text));
                 } else {
                     self.payments
                         .notices

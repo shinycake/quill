@@ -205,7 +205,7 @@ impl QuillApp {
                 .session()
                 .map(|s| &s.payments.gifts_manage.send)
                 .filter(|send| send.is_open())
-                .and_then(|send| send.recipient.clone());
+                .and_then(|send| send.recipient().cloned());
             self.gift_market.flow.set_recipient(recipient);
         }
         match self.live.as_mut() {

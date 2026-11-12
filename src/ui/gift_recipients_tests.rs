@@ -65,7 +65,7 @@ fn gift_for(app: &Entity<QuillApp>, vcx: &mut VisualTestContext) -> Option<Strin
     app.read_with(vcx, |app, _| {
         let send = &app.session()?.payments.gifts_manage.send;
         send.is_open()
-            .then(|| send.recipient.as_ref().map(|r| r.name.clone()))
+            .then(|| send.recipient().map(|r| r.name.clone()))
             .flatten()
     })
 }

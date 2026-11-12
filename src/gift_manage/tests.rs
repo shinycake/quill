@@ -362,33 +362,38 @@ fn a_collection_change_while_the_list_loads_asks_again_after_it() {
 
 #[test]
 fn only_the_send_the_dialog_waits_for_leaves_sending() {
-    use crate::gift_manage::{SendGiftState, SendStage};
+    use crate::gift_manage::{SendGiftState, SendStep};
     use crate::ids::RequestId;
-    let mut send = SendGiftState {
-        stage: SendStage::Sending(RequestId(5)),
-        ..Default::default()
-    };
+    let mut send = SendGiftState::opened_for(recipient());
+    send.set_step(SendStep::Sending(RequestId(5)));
     assert!(send.sending() && send.done_line().is_none());
-    send.stage = SendStage::Done("Gift sent.".into());
+    send.set_step(SendStep::Done("Gift sent.".into()));
     assert!(!send.sending());
     assert_eq!(send.done_line(), Some("Gift sent."));
     assert_eq!(send.error_line(), None);
-    send.stage = SendStage::Failed("no".into());
+    send.set_step(SendStep::Failed("no".into()));
     assert_eq!(send.error_line(), Some("no"));
+}
+
+fn recipient() -> crate::gift_manage::GiftRecipient {
+    crate::gift_manage::GiftRecipient {
+        sender: crate::telegram::envelope::MessageSender::User { user_id: 7 },
+        name: "Ada".into(),
+        is_self: false,
+        is_channel: false,
+    }
 }
 
 #[test]
 fn a_gift_list_failure_leaves_a_send_in_flight_alone() {
-    use crate::gift_manage::{GiftListFetch, SendGiftState, SendStage};
+    use crate::gift_manage::{GiftListFetch, SendGiftState, SendStep};
     use crate::ids::RequestId;
-    let mut send = SendGiftState {
-        stage: SendStage::Sending(RequestId(5)),
-        gifts_fetch: GiftListFetch::Failed("Couldn't load the gifts.".into()),
-        ..Default::default()
-    };
+    let mut send = SendGiftState::opened_for(recipient());
+    send.set_step(SendStep::Sending(RequestId(5)));
+    send.gifts_fetch = GiftListFetch::Failed("Couldn't load the gifts.".into());
     assert!(send.sending(), "the send keeps its request");
     assert_eq!(send.error_line(), Some("Couldn't load the gifts."));
-    send.stage = SendStage::Failed("no".into());
+    send.set_step(SendStep::Failed("no".into()));
     assert_eq!(send.error_line(), Some("no"));
 }
 

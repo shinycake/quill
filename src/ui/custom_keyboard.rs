@@ -40,7 +40,7 @@ impl QuillApp {
         let hidden = self
             .message_ui
             .collapsed_keyboards
-            .contains(&(chat_id.0, message_id.0));
+            .contains(&quill::ids::ChatMessage::new(chat_id, message_id));
         let label = if hidden {
             tr(keys::BOT_KEYBOARD_SHOW)
         } else {
@@ -57,7 +57,7 @@ impl QuillApp {
                 .tooltip(label)
                 .accessibility_label(label)
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    let key = (chat_id.0, message_id.0);
+                    let key = quill::ids::ChatMessage::new(chat_id, message_id);
                     if !this.message_ui.collapsed_keyboards.remove(&key) {
                         this.message_ui.collapsed_keyboards.insert(key);
                     }
@@ -120,7 +120,7 @@ impl QuillApp {
         if self
             .message_ui
             .collapsed_keyboards
-            .contains(&(chat_id.0, message_id.0))
+            .contains(&quill::ids::ChatMessage::new(chat_id, message_id))
         {
             return None;
         }

@@ -69,9 +69,9 @@ impl Session {
             }
             Some(RequestPurpose::GetMarketplaceGift | RequestPurpose::SendMarketplaceGift) => {
                 if let Some(gift) = self.payments.marketplace_gift.as_mut()
-                    && pending.is_some_and(|p| gift.waits_for(p.id))
+                    && let Some(p) = pending
                 {
-                    gift.fail(format!("Gift request failed: {}", error_reason(err)));
+                    gift.fail(p.id, format!("Gift request failed: {}", error_reason(err)));
                 }
             }
             // No card info: the menu keeps only "Copy Card Number".

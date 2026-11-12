@@ -221,9 +221,10 @@ impl GiftPurchase {
         }
     }
 
-    /// The quote answered: it must be the gift asked for.
-    pub fn accept_quote(&mut self, quote: Option<GiftQuote>) {
-        if !self.is_loading() {
+    /// The quote `request` answered: it must be the request this purchase
+    /// waits for, and the gift asked for.
+    pub fn accept_quote(&mut self, request: crate::ids::RequestId, quote: Option<GiftQuote>) {
+        if !self.is_loading() || !self.waits_for(request) {
             return;
         }
         self.stage = match quote.filter(|q| q.name == self.requested_name) {
@@ -245,8 +246,8 @@ impl GiftPurchase {
 
     /// The send answered. A higher price never submits by itself: it goes
     /// back to the quote with the new amount.
-    pub fn accept_result(&mut self, result: GiftPurchaseResult) {
-        if !matches!(self.stage, GiftPurchaseStage::Sending { .. }) {
+    pub fn accept_result(&mut self, request: crate::ids::RequestId, result: GiftPurchaseResult) {
+        if !matches!(self.stage, GiftPurchaseStage::Sending { .. }) || !self.waits_for(request) {
             return;
         }
         let GiftPurchaseStage::Sending { quote, .. } =
@@ -279,14 +280,12 @@ impl GiftPurchase {
         };
     }
 
-    /// A request failed: loading ends with no quote, a send goes back to the
+    /// `request` failed: loading ends with no quote, a send goes back to the
     /// quote it was sent from. A quote, a receipt or an earlier failure has
-    /// no request to fail and stays as it is.
-    pub fn fail(&mut self, line: String) {
-        if !matches!(
-            self.stage,
-            GiftPurchaseStage::Loading(_) | GiftPurchaseStage::Sending { .. }
-        ) {
+    /// no request to fail and stays as it is, and so does an answer of a
+    /// request this purchase does not wait for.
+    pub fn fail(&mut self, request: crate::ids::RequestId, line: String) {
+        if !self.waits_for(request) {
             return;
         }
         self.stage =
@@ -329,18 +328,24 @@ mod stage_tests {
     fn a_failed_load_leaves_loading_and_a_failed_send_returns_to_the_quote() {
         let mut gift = purchase();
         assert!(gift.is_loading() && gift.waits_for(RequestId(1)));
-        gift.fail("no".into());
+        gift.fail(RequestId(9), "other".into());
+        assert!(gift.is_loading(), "another request's failure changes nothing");
+        gift.fail(RequestId(1), "no".into());
         assert!(!gift.is_loading() && gift.quote().is_none());
 
         let mut gift = purchase();
-        gift.accept_quote(Some(quote()));
+        gift.accept_quote(RequestId(9), Some(quote()));
+        assert!(gift.is_loading(), "another request's quote is dropped");
+        gift.accept_quote(RequestId(1), Some(quote()));
         gift.stage = GiftPurchaseStage::Sending {
             quote: quote(),
             price: GiftPrice::Stars(25),
             request: RequestId(2),
         };
         assert!(gift.is_sending() && gift.waits_for(RequestId(2)));
-        gift.fail("refused".into());
+        gift.accept_result(RequestId(9), GiftPurchaseResult::Sent(String::new()));
+        assert!(gift.is_sending(), "another request's result is dropped");
+        gift.fail(RequestId(2), "refused".into());
         assert!(!gift.is_sending());
         assert_eq!(gift.price(), Some(GiftPrice::Stars(25)));
         assert_eq!(gift.note().as_deref(), Some("refused"));
@@ -349,12 +354,12 @@ mod stage_tests {
     #[test]
     fn a_higher_price_asks_again_and_a_late_answer_changes_nothing() {
         let mut gift = purchase();
-        gift.accept_quote(Some(quote()));
+        gift.accept_quote(RequestId(1), Some(quote()));
         // An answer with nothing sent is ignored.
-        gift.accept_result(GiftPurchaseResult::Sent(String::new()));
+        gift.accept_result(RequestId(2), GiftPurchaseResult::Sent(String::new()));
         assert!(!gift.is_completed());
         assert_eq!(gift.price(), Some(GiftPrice::Stars(25)), "the quote stays");
-        gift.fail("stray".into());
+        gift.fail(RequestId(2), "stray".into());
         assert_eq!(
             gift.price(),
             Some(GiftPrice::Stars(25)),
@@ -366,9 +371,10 @@ mod stage_tests {
             price: GiftPrice::Stars(25),
             request: RequestId(2),
         };
-        gift.accept_result(GiftPurchaseResult::PriceIncreased(Some(GiftPrice::Stars(
-            40,
-        ))));
+        gift.accept_result(
+            RequestId(2),
+            GiftPurchaseResult::PriceIncreased(Some(GiftPrice::Stars(40))),
+        );
         assert_eq!(gift.price(), Some(GiftPrice::Stars(40)));
         assert!(!gift.is_sending() && !gift.is_completed());
     }

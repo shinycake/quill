@@ -57,7 +57,7 @@ pub(crate) struct MessageUi {
     /// (`(chat_id, message_id)`), hidden locally after use.
     pub(super) dismissed_keyboards: std::collections::HashSet<quill::ids::ChatMessage>,
     /// Keyboards the user hid with the composer's keyboard button.
-    pub(super) collapsed_keyboards: std::collections::HashSet<(i64, i64)>,
+    pub(super) collapsed_keyboards: std::collections::HashSet<quill::ids::ChatMessage>,
     /// A bot request button's share dialog (`DialogKind::RequestShare`).
     pub(super) request_share: Option<super::request_share::RequestShare>,
     /// "About These Ads" box (`DialogKind::SponsoredAbout`) is open.

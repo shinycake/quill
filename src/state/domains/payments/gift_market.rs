@@ -384,7 +384,7 @@ impl Session {
         self.payments
             .gifts_manage
             .send
-            .gifts
+            .gifts()
             .iter()
             .find(|gift| gift.id == gift_id && !gift.title.is_empty())
             .map(|gift| gift.title.clone())

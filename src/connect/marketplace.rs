@@ -56,7 +56,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if result.is_err()
             && let Some(gift) = self.session.payments.marketplace_gift.as_mut()
         {
-            gift.fail("Could not load the gift. Retry.".into());
+            gift.fail(extra, "Could not load the gift. Retry.".into());
         }
         result
     }

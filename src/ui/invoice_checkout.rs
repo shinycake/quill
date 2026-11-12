@@ -132,7 +132,7 @@ impl QuillApp {
     ) {
         let (recipient, limit) = match self.session() {
             Some(session) => (
-                session.payments.gifts_manage.send.recipient.clone(),
+                session.payments.gifts_manage.send.recipient().cloned(),
                 session.payments.gift_text_length_max,
             ),
             None => (None, None),

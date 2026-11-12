@@ -24,7 +24,7 @@ fn a_contact_without_a_chat_gets_the_gift_picker() {
     f.1.open_send_gift_to_user(901).unwrap();
     let send = &f.1.session.payments.gifts_manage.send;
     assert!(send.is_open());
-    let recipient = send.recipient.as_ref().expect("a recipient");
+    let recipient = send.recipient().expect("a recipient");
     assert_eq!(recipient.sender, MessageSender::User { user_id: 901 });
     assert_eq!(recipient.name, "Ada Lovelace");
     assert_eq!(requests(&f, "getAvailableGifts").len(), 1);

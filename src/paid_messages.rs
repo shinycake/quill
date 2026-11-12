@@ -501,14 +501,29 @@ pub enum TrustFile {
     Clean,
     /// The prices changed and are not written yet.
     Dirty,
-    /// The last write failed (the reason, for the person to see); the next
-    /// change writes again, and so does the first tick after `retry_at_ms`
-    /// (unix milliseconds).
-    SaveFailed { reason: String, retry_at_ms: u64 },
+    /// The last write failed `tries` times in a row (the reason, for the
+    /// person to see); the next change writes again, and so does the first
+    /// tick after `retry_at_ms` (unix milliseconds).
+    SaveFailed {
+        reason: String,
+        retry_at_ms: u64,
+        tries: u8,
+    },
 }
 
-/// How long a failed write of the trusted prices waits before the next try.
+/// How long a failed write of the trusted prices waits before the next try;
+/// each further failure doubles the wait, up to [`TRUST_RETRY_MAX_MS`].
 pub const TRUST_RETRY_MS: u64 = 30_000;
+
+/// The longest wait between two tries of a failing write.
+pub const TRUST_RETRY_MAX_MS: u64 = 15 * 60_000;
+
+/// The wait after `tries` failed writes in a row.
+fn trust_retry_after(tries: u8) -> u64 {
+    TRUST_RETRY_MS
+        .saturating_mul(1 << tries.saturating_sub(1).min(10))
+        .min(TRUST_RETRY_MAX_MS)
+}
 
 impl PaidMessages {
     /// The user agreed to `stars` per message in `chat_id`: remembered, and
@@ -560,12 +575,20 @@ impl PaidMessages {
     /// The write of [`Self::trust_to_write`] ended: the file is clean, or
     /// the reason it failed.
     pub fn trust_written(&mut self, result: Result<(), String>, now_ms: u64) {
+        let failed_before = match &self.trust_file {
+            TrustFile::SaveFailed { tries, .. } => *tries,
+            _ => 0,
+        };
         self.trust_file = match result {
             Ok(()) => TrustFile::Clean,
-            Err(reason) => TrustFile::SaveFailed {
-                reason,
-                retry_at_ms: now_ms.saturating_add(TRUST_RETRY_MS),
-            },
+            Err(reason) => {
+                let tries = failed_before.saturating_add(1);
+                TrustFile::SaveFailed {
+                    reason,
+                    retry_at_ms: now_ms.saturating_add(trust_retry_after(tries)),
+                    tries,
+                }
+            }
         };
     }
 
@@ -1305,6 +1328,21 @@ mod tests {
         state.trust_written(Ok(()), 1_000 + TRUST_RETRY_MS);
         assert_eq!(state.trust_save_error(), None);
         assert!(state.trust_to_write(u64::MAX).is_none());
+        // A write that keeps failing waits twice as long each time, to a cap.
+        let mut now = 0;
+        let mut last_wait = 0;
+        state.remember_trust(6, 9);
+        for _ in 0..20 {
+            state.trust_written(Err("disk".into()), now);
+            let wait = (0..=TRUST_RETRY_MAX_MS * 2)
+                .step_by(1_000)
+                .find(|ahead| state.trust_to_write(now + ahead).is_some())
+                .unwrap_or(u64::MAX);
+            assert!(wait >= last_wait, "the wait never shrinks");
+            last_wait = wait;
+            now += wait;
+        }
+        assert_eq!(last_wait, TRUST_RETRY_MAX_MS);
         // A user who stops charging loses the price, and the file is behind.
         state.record_answer(5, CanSend::Ok, 0, false);
         assert!(state.trust_to_write(0).is_some());

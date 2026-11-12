@@ -27,10 +27,10 @@
 
 use crate::lang::{keys, tr, tr_with};
 use crate::locks::LockExt;
-use std::thread::JoinHandle;
 #[cfg(any(test, target_os = "macos"))]
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 /// Who handles `tg:` links right now.
@@ -438,7 +438,10 @@ type Waker = Box<dyn FnOnce() + Send>;
 enum Stage {
     Empty,
     /// `stale`: [`invalidate`] was called since this answer was read.
-    Known { cached: Cached, stale: bool },
+    Known {
+        cached: Cached,
+        stale: bool,
+    },
     Reading {
         last: Option<Cached>,
         /// The one watcher to wake when the read ends.
@@ -456,7 +459,9 @@ struct Cell {
 
 impl Cell {
     const fn new() -> Self {
-        Self { stage: Stage::Empty }
+        Self {
+            stage: Stage::Empty,
+        }
     }
 
     fn reading(&self) -> bool {
@@ -768,10 +773,10 @@ pub fn release() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        LinkHandlerState, WINDOWS_COMMAND_KEY, app_bundle_of_exe,
-        ensure_linux_desktop_entry, is_quill_command, linux_application_dirs, linux_desktop_entry,
-        linux_launch_target, linux_query_args, linux_set_args, macos_state,
-        parse_xdg_default, status_text, windows_scheme_entries, windows_state,
+        LinkHandlerState, WINDOWS_COMMAND_KEY, app_bundle_of_exe, ensure_linux_desktop_entry,
+        is_quill_command, linux_application_dirs, linux_desktop_entry, linux_launch_target,
+        linux_query_args, linux_set_args, macos_state, parse_xdg_default, status_text,
+        windows_scheme_entries, windows_state,
     };
     use std::path::Path;
     use std::time::Instant;

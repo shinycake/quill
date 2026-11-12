@@ -260,8 +260,8 @@ fn ui_main(args: &[String]) {
         // kit Phase 9: honor the OS reduce-motion preference.
         ui::reduce_motion_probe::apply_at_startup(cx);
         ui::bind_keys(cx);
-        cx.on_system_wake(|_| quill::net_watch::system_woke())
-            .detach();
+        let wake = cx.on_system_wake(|_| quill::net_watch::system_woke());
+        cx.set_global(WakeWatch(wake));
         // kit Phase 7: File / Edit / View / Window / Help — native on
         // macOS, kit `AppMenuBar` data on Linux/Windows. The native menu
         // waits for the main window (`install_app_menus`).
@@ -282,11 +282,13 @@ fn ui_main(args: &[String]) {
         open_main_window(cx, launch)
             .unwrap_or_else(|error| ui::startup_failure::window_failed(&error));
         #[cfg(not(target_os = "macos"))]
-        cx.spawn(async move |cx| {
-            cx.update(|cx| open_main_window(cx, launch))
-                .unwrap_or_else(|error| ui::startup_failure::window_failed(&error));
-        })
-        .detach();
+        {
+            let opening = cx.spawn(async move |cx| {
+                cx.update(|cx| open_main_window(cx, launch))
+                    .unwrap_or_else(|error| ui::startup_failure::window_failed(&error));
+            });
+            cx.set_global(OpeningMainWindow(opening));
+        }
     });
     log::logger().flush();
 }
@@ -381,8 +383,8 @@ fn install_app_menus(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App, star
         ui::setup_app_menus(cx);
     } else {
         window.on_next_frame(|_, cx| {
-            cx.spawn(async move |cx| cx.update(ui::setup_app_menus))
-                .detach();
+            let menus = cx.spawn(async move |cx| cx.update(ui::setup_app_menus));
+            cx.set_global(InstallingMenus(menus));
         });
     }
 }
@@ -428,7 +430,7 @@ fn install_main_window_tray(
     // unread count, synced when `wake::CHROME` is poked. The
     // tray module no-ops when the count is unchanged or
     // the OS exposes no system tray.
-    cx.spawn({
+    let chrome = cx.spawn({
         let tray_view = view.downgrade();
         let tray_window = window.window_handle();
         async move |cx| {
@@ -507,8 +509,9 @@ fn install_main_window_tray(
             })
             .await;
         }
-    })
-    .detach();
+    });
+    // The loop ends with its view; a reopened main window replaces it.
+    cx.set_global(ChromeLoop(chrome));
     // A shown window gets its tray from the chrome loop's first pass, once
     // it has drawn.
     if start_in_tray {
@@ -828,6 +831,44 @@ fn run_screenshot_demo(demo: (ui::ScreenshotDemo, std::path::PathBuf)) {
             cx.set_global(DemoDriver(driver));
         });
 }
+
+/// The system-wake watch, owned by the app until it quits: a held
+/// `Subscription` or `Task` ends with its owner, a detached one could not be
+/// stopped.
+#[cfg(feature = "ui")]
+struct WakeWatch(
+    #[allow(dead_code, reason = "held so the subscription is not dropped")] gpui_kit::Subscription,
+);
+
+#[cfg(feature = "ui")]
+impl gpui_kit::Global for WakeWatch {}
+
+/// The main window's first open, queued behind the kit's start.
+#[cfg(all(feature = "ui", not(target_os = "macos")))]
+struct OpeningMainWindow(
+    #[allow(dead_code, reason = "held so the task is not dropped")] gpui_kit::Task<()>,
+);
+
+#[cfg(all(feature = "ui", not(target_os = "macos")))]
+impl gpui_kit::Global for OpeningMainWindow {}
+
+/// The macOS menu bar's install, queued after the first frame.
+#[cfg(all(feature = "ui", target_os = "macos"))]
+struct InstallingMenus<T: 'static>(
+    #[allow(dead_code, reason = "held so the task is not dropped")] gpui_kit::Task<T>,
+);
+
+#[cfg(all(feature = "ui", target_os = "macos"))]
+impl<T: 'static> gpui_kit::Global for InstallingMenus<T> {}
+
+/// The tray and app-icon chrome loop of the main window.
+#[cfg(feature = "ui")]
+struct ChromeLoop(
+    #[allow(dead_code, reason = "held so the task is not dropped")] gpui_kit::Task<()>,
+);
+
+#[cfg(feature = "ui")]
+impl gpui_kit::Global for ChromeLoop {}
 
 /// The screenshot demo's driver task, owned by the app until it quits.
 #[cfg(feature = "ui")]

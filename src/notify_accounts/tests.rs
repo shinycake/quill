@@ -535,3 +535,17 @@ fn a_start_that_never_leaves_connecting_fails_after_the_give_up() {
         BackgroundStatus::Ready
     );
 }
+
+/// Sweep r4-04: a connect handed to the background keeps the clock of the
+/// client's start, so the give-up does not begin again at the hand-off.
+#[test]
+fn a_handed_off_connect_gives_up_by_its_own_start() {
+    use super::CONNECT_GIVE_UP;
+    let started = std::time::Instant::now();
+    let handed_off = background_status(&AuthorizationState::WaitTdlibParameters, started);
+    let later = started + CONNECT_GIVE_UP;
+    assert!(matches!(
+        handed_off.clone().at(&handed_off, later),
+        BackgroundStatus::Failed(_)
+    ));
+}

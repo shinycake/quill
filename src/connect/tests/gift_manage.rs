@@ -3,7 +3,6 @@
 use super::super::*;
 use super::*;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
-use crate::gift_manage::GiftListFetch;
 use crate::ids::ChatId;
 use crate::platform::MemorySecretStore;
 use crate::premium_hub::StarAmount;
@@ -560,7 +559,7 @@ fn sending_a_gift_needs_an_open_dialog_a_sendable_gift_and_enough_stars() {
 
     open_send_dialog(&mut p);
     let send = &p.0.session.payments.gifts_manage.send;
-    assert!(send.is_open() && send.gifts_fetch == GiftListFetch::Answered && send.gifts.len() == 2);
+    assert!(send.is_open() && send.gifts().len() == 2);
     assert_eq!(count(&p.1, "getPremiumGiftPaymentOptions"), 1);
     // A sold-out gift and an unknown gift are refused.
     assert!(p.0.send_star_gift(56, "", false, false).is_err());
@@ -731,6 +730,10 @@ fn an_earlier_boxs_gift_answers_are_dropped() {
     let send = &p.0.session.payments.gifts_manage.send;
     assert!(send.gifts_fetch.is_loading() && send.error_line().is_none());
     assert!(send.premium_fetch.is_loading());
+    assert!(
+        send.gifts().is_empty(),
+        "a list asked again shows no old answer"
+    );
     let second = sent_request(&p.1, "getAvailableGifts");
     feed(
         &mut p,
@@ -740,7 +743,7 @@ fn an_earlier_boxs_gift_answers_are_dropped() {
         ]}),
     );
     let send = &p.0.session.payments.gifts_manage.send;
-    assert!(send.gifts_fetch == GiftListFetch::Answered && send.gifts.len() == 1);
+    assert!(send.gifts().len() == 1);
 }
 
 /// Sweep r2-27 (10-013): a failed Premium options list is a line the box
@@ -769,7 +772,7 @@ fn a_failed_premium_list_shows_a_line_and_retry_asks_only_it() {
     p.0.retry_send_gift_lists().unwrap();
     let send = &p.0.session.payments.gifts_manage.send;
     assert!(send.premium_fetch.is_loading());
-    assert_eq!(send.gifts_fetch, GiftListFetch::Answered);
+    assert!(send.gifts_fetch.answered_empty());
     assert!(!send.lists_failed());
 }
 
