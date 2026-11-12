@@ -236,6 +236,8 @@ pub(crate) struct ChatUi {
     /// the stashed query is inserted on Confirm. It lives with the chat
     /// that asked, so another chat never confirms it.
     pub(super) bot_alert: super::inline_mode::BotAlert,
+    /// A command picked from the `/` menu that the paid guard holds for Pay.
+    pub(super) menu_send: super::composer::send_bot_command::MenuSendStage,
     /// A bot's Restart whose unblock is out (`bottom_action`).
     pub(super) restart: super::bottom_action::BotRestart,
     /// What the chat's action bar sent (report, hide, unarchive, block), until its requests are answered.

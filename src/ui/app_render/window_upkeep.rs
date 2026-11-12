@@ -39,6 +39,8 @@ impl QuillApp {
         // An edit TDLib answered leaves edit mode (or goes on, on an error).
         self.settle_edit_send(window, cx);
         self.settle_sent_text(window, cx);
+        // A paid menu command whose Pay went through clears its reply and token.
+        self.settle_menu_send(window, cx);
         self.settle_checklist_dialog(cx);
         self.settle_poll_add_option(cx);
         self.settle_left_sends(cx);

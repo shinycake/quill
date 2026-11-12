@@ -1269,3 +1269,47 @@ fn a_stale_render_does_not_land_in_a_new_edit_of_the_same_message(cx: &mut TestA
     });
     assert_eq!(staged, None, "the stale render is not the new edit's photo");
 }
+
+/// A paid menu command that goes out after Pay clears the reply bar and
+/// the typed token, and closes the menu, as a free chat's send does. A
+/// reply the user changed meanwhile is not cleared.
+#[gpui_kit::test]
+fn a_released_menu_command_clears_its_reply_and_token(cx: &mut TestAppContext) {
+    use crate::ui::composer::send_bot_command::{MenuRelease, MenuToken};
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    open_chat(&app, vcx, GROUP);
+    let release = |reply: ComposerReplyTo| MenuRelease {
+        reply: Some(reply),
+        token: Some(MenuToken {
+            range: 0..3,
+            text: "/st".into(),
+        }),
+    };
+    set_field(&app, vcx, "/st");
+    let reply = ComposerReplyTo::new(GROUP, MessageId(10));
+    app.update(vcx, |app, _| app.chat_ui.set_reply(Some(reply.clone())));
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.chat_ui.command_menu = crate::ui::composer::CommandMenu::Typed { selected: 0 };
+            app.apply_menu_release(release(reply.clone()), window, cx)
+        })
+    });
+    app.read_with(vcx, |app, cx| {
+        assert!(app.chat_ui.reply().is_none(), "the reply bar goes");
+        assert!(app.composer.read(cx).value().is_empty(), "the token goes");
+        assert!(!app.chat_ui.command_menu.is_open(), "the menu closes");
+    });
+    // The reply is another message by the time Pay goes through: it stays.
+    set_field(&app, vcx, "/st");
+    let other = ComposerReplyTo::new(GROUP, MessageId(11));
+    app.update(vcx, |app, _| app.chat_ui.set_reply(Some(other.clone())));
+    vcx.update(|window, cx| {
+        app.update(cx, |app, cx| {
+            app.apply_menu_release(release(reply.clone()), window, cx)
+        })
+    });
+    app.read_with(vcx, |app, _| {
+        assert_eq!(app.chat_ui.reply(), Some(&other));
+    });
+}
