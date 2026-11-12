@@ -108,16 +108,15 @@ fn pay_sends_the_composer_text_and_asks_again_next_time(cx: &mut TestAppContext)
     let vcx = &mut vcx;
     app.update_in(vcx, |app, window, cx| {
         charge_in_chat(app, 25);
-        app.submit_composer("hello".into(), Default::default(), window, cx);
+        assert!(app.paid_send_waits(ChatId(11), "hello", Default::default(), None, cx));
         assert!(app.paid_messages.confirm.composer().is_some(), "asked");
         app.confirm_paid_send(window, cx);
         assert!(
             matches!(app.paid_messages.confirm, PaidConfirmStage::None),
             "Pay did not reopen the box"
         );
-        app.submit_composer("again".into(), Default::default(), window, cx);
         assert!(
-            app.paid_messages.confirm.composer().is_some(),
+            app.paid_send_waits(ChatId(11), "again", Default::default(), None, cx),
             "the next send asks again"
         );
     });
