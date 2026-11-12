@@ -103,7 +103,7 @@ impl QuillApp {
     /// sign-in screen draws no Settings window, so there the list opens
     /// as a box over it.
     pub(crate) fn open_proxy_list(&mut self, cx: &mut Context<Self>) {
-        if self.pane_mode() == super::app::PaneMode::Connecting {
+        if self.pane_mode() == super::app::PaneView::Connecting {
             self.auth_ui.proxy_list_open = true;
             self.open_box(DialogKind::ProxyList);
         } else {
@@ -117,7 +117,7 @@ impl QuillApp {
     /// screen is, so a box left open when the account reaches Ready never
     /// lands over the chat list.
     pub(super) fn proxy_list_box_shown(&self) -> bool {
-        self.auth_ui.proxy_list_open && self.pane_mode() == super::app::PaneMode::Connecting
+        self.auth_ui.proxy_list_open && self.pane_mode() == super::app::PaneView::Connecting
     }
 
     pub(crate) fn fetch_proxy_list(&mut self) {

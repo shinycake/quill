@@ -16,7 +16,7 @@ pub(super) fn one_line_preview(text: &str) -> String {
         .collect()
 }
 
-use super::app::{PaneMode, QuillApp};
+use super::app::{PaneView, QuillApp};
 use super::pressable::PressableDiv;
 use crate::ui::status_note::StatusNote;
 use crate::ui::user_error::user_error_for;
@@ -313,7 +313,7 @@ impl QuillApp {
         if self.hand_to_main_window(cx, |app, window, cx| app.open_search_ui(window, cx)) {
             return;
         }
-        if self.pane_mode() != PaneMode::Ready {
+        if self.pane_mode() != PaneView::Ready {
             return;
         }
         // The results take the place of the rows.
@@ -560,7 +560,7 @@ impl QuillApp {
     }
 
     pub(super) fn open_chat_search_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.pane_mode() != PaneMode::Ready {
+        if self.pane_mode() != PaneView::Ready {
             return;
         }
         let fresh = !self.session().is_some_and(|s| {
@@ -623,7 +623,7 @@ impl QuillApp {
     /// The "From:" picker's own field changed: filter the members. With no
     /// picker open nothing is asked.
     pub(super) fn sync_chat_search_members(&mut self, query: &str, cx: &mut Context<Self>) {
-        if self.pane_mode() != PaneMode::Ready || !self.chat_search_is_open() {
+        if self.pane_mode() != PaneView::Ready || !self.chat_search_is_open() {
             return;
         }
         if let Some(live) = self.live.as_mut() {
@@ -633,7 +633,7 @@ impl QuillApp {
     }
 
     pub(super) fn sync_chat_search_query(&mut self, query: &str, cx: &mut Context<Self>) {
-        if self.pane_mode() != PaneMode::Ready || !self.chat_search_is_open() {
+        if self.pane_mode() != PaneView::Ready || !self.chat_search_is_open() {
             return;
         }
         if let Some(live) = self.live.as_mut() {

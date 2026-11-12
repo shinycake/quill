@@ -379,6 +379,46 @@ fn a_failed_setting_keeps_its_line_when_another_control_succeeds() {
     cleanup(f);
 }
 
+/// 09-002: a reset while a fetch is out. The numbers of the fetch asked
+/// before the reset are dropped, the refetch behind it lands, and the
+/// reset's `ok` leaves the refetch alone.
+#[test]
+fn a_reset_leaves_only_the_fetch_asked_after_it() {
+    let usage = |extra: &str, received: u64| {
+        format!(
+            r#"{{"@type":"networkStatistics","since_date":1700000000,"entries":[{{"@type":"networkStatisticsEntryFile","file_type":{{"@type":"fileTypePhoto"}},"network_type":{{"@type":"networkTypeWiFi"}},"sent_bytes":0,"received_bytes":{received}}}],"@extra":"{extra}"}}"#
+        )
+    };
+    let mut f = fixture();
+    f.1.fetch_network_statistics().unwrap();
+    let before = extra_of(&last_request(&f));
+    f.1.reset_network_statistics().unwrap();
+    let snapshot = f.2.snapshot();
+    let reset: Value = serde_json::from_str(&snapshot[snapshot.len() - 2]).unwrap();
+    assert_eq!(reset["@type"], "resetNetworkStatistics");
+    let after = extra_of(&last_request(&f));
+    ingest(&mut f, &usage(&before, 900));
+    assert!(
+        f.1.session.settings.privacy_data.network.is_loading(),
+        "the answer of the fetch asked before the reset is dropped"
+    );
+    ingest(
+        &mut f,
+        &format!(r#"{{"@type":"ok","@extra":"{}"}}"#, extra_of(&reset)),
+    );
+    assert!(f.1.session.settings.privacy_data.network.is_loading());
+    ingest(&mut f, &usage(&after, 7));
+    let shown =
+        f.1.session
+            .settings
+            .privacy_data
+            .network
+            .data()
+            .map(|usage| usage.grand_total().total());
+    assert_eq!(shown, Some(7));
+    cleanup(f);
+}
+
 #[test]
 fn network_usage_fetch_and_reset() {
     let mut f = fixture();

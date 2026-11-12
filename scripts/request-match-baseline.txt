@@ -91,12 +91,9 @@ purpose:QuillApp::set_sticker_suggest_mode 1
 purpose:QuillApp::sidebar_auth 1
 purpose:QuillApp::sticker_set_action 1
 purpose:QuillApp::topic_editor_body 1
-purpose:Session::accept_group_call_participant_update 1
-purpose:Session::apply_ok 2
 purpose:Session::finish_mask_mutation 1
 purpose:Session::invalidate_emoji_caches 1
 purpose:Session::mark_saved_sounds_stale 1
-purpose:Session::needs_profile_audio_check 1
 purpose:Session::sharing_request_answering 1
 purpose:Session::suggested_post_busy 1
 unmatched:ConnectDriver::save_connected_bot 1
@@ -104,7 +101,6 @@ unmatched:ForumTopicsMap::insert 1
 unmatched:GifPanel::search_answered 1
 unmatched:QuillApp::refresh_storage_usage 1
 unmatched:QuillApp::submit_default_auto_delete 1
-unmatched:SearchState::accept_recommended 1
 unmatched:Session::apply_auth_payload 1
 unmatched:Session::apply_chat_list_payload 1
 unmatched:Session::apply_privacy_data_payload 1
@@ -119,7 +115,6 @@ unsent:ConnectDriver::fetch_blocked_senders 1
 unsent:ConnectDriver::fetch_chat_lists_to_add_chat 1
 unsent:ConnectDriver::fetch_contacts 1
 unsent:ConnectDriver::fetch_network_statistics 1
-unsent:ConnectDriver::fetch_recommended_chats 1
 unsent:ConnectDriver::maybe_fetch_live_story_extras 1
 unsent:ConnectDriver::maybe_fetch_notification_exceptions 1
 unsent:ConnectDriver::probe_self_star_stats 1

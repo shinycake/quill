@@ -28,11 +28,11 @@ impl Session {
         }
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::GetRecommendedChats) => {
-                self.search
-                    .search
-                    .tabs
-                    .recommended
-                    .fail(format!("error {}", err.code));
+                self.search.search.tabs.recommended.failed(
+                    pending.map(|p| p.id),
+                    format!("error {}", err.code),
+                    false,
+                );
             }
             Some(RequestPurpose::SearchMessagesMore | RequestPurpose::SearchPublicPostsMore)
                 if self.search.search.awaits(pending) =>

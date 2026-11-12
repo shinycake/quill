@@ -1,7 +1,7 @@
 //! conversation header, typing indicators.
 #![deny(clippy::indexing_slicing)]
 
-use super::app::{PaneMode, QuillApp, pane_placeholder};
+use super::app::{PaneView, QuillApp, pane_placeholder};
 use super::group_panels::SupergroupHeaderExtras;
 use super::history::HistoryShared;
 use super::history::{album_history_row, history_skeleton, session_history_row};
@@ -336,11 +336,11 @@ impl QuillApp {
     }
 
     /// Whether the open chat shows a composer at all.
-    pub(super) fn composer_available(&self, mode: PaneMode) -> bool {
+    pub(super) fn composer_available(&self, mode: PaneView) -> bool {
         match mode {
-            PaneMode::Synthetic => true,
-            PaneMode::Connecting => false,
-            PaneMode::Ready => {
+            PaneView::Synthetic => true,
+            PaneView::Connecting => false,
+            PaneView::Ready => {
                 let session = self.session();
                 // A frozen account is read-only everywhere.
                 if session.is_some_and(|s| s.is_frozen()) {

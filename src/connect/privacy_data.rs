@@ -252,6 +252,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.settings.privacy_data.network.cancel();
             return Err(err);
         }
+        self.session.settings.privacy_data.network.sent(extra);
         Ok(())
     }
 

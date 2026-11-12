@@ -1,7 +1,7 @@
 //! shared-media panel.
 #![deny(clippy::indexing_slicing)]
 
-use super::app::{PaneMode, QuillApp};
+use super::app::{PaneView, QuillApp};
 use crate::ui::empty_state::EmptyState;
 use crate::ui::status_note::StatusNote;
 use gpui_kit::assets::IconName;
@@ -234,7 +234,7 @@ impl QuillApp {
     /// fetches the active tab; the demo fixture seeds session state
     /// directly, so the demo path only opens the panel).
     pub(super) fn open_shared_media_ui(&mut self, cx: &mut Context<Self>) {
-        if self.pane_mode() != PaneMode::Ready {
+        if self.pane_mode() != PaneView::Ready {
             return;
         }
         let split = self.chat_prefs.profile_media_tabs_expanded;

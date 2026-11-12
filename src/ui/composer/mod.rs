@@ -5,7 +5,7 @@ use super::actions::{
     FormatBlockQuote, FormatBold, FormatClear, FormatItalic, FormatMonospace, FormatSpoiler,
     FormatStrikethrough, FormatUnderline,
 };
-use super::app::{PaneMode, QuillApp};
+use super::app::{PaneView, QuillApp};
 use super::demo::demo_media_allowlist;
 use super::nested_click::SwallowPress;
 use super::scheduled::ScheduleTarget;
@@ -81,11 +81,11 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         match self.pane_mode() {
-            PaneMode::Connecting => {
+            PaneView::Connecting => {
                 self.set_note(StatusNote::silent(tr(keys::Q_CHAT_SIGN_IN_BEFORE_SENDING)));
                 cx.notify();
             }
-            PaneMode::Ready => {
+            PaneView::Ready => {
                 // An agent driving the window never sends from here: the
                 // message goes through the agent write path.
                 if quill::agent::ui_driver::guard::injecting() {
@@ -450,7 +450,7 @@ impl QuillApp {
                     cx.notify();
                 }
             }
-            PaneMode::Synthetic => {
+            PaneView::Synthetic => {
                 self.chat.update(cx, |chat, cx| chat.send_text(text, cx));
                 self.composer
                     .update(cx, |input, cx| input.set_value("", window, cx));

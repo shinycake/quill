@@ -229,15 +229,12 @@ impl Session {
             }
             // The send/resend answers are dropped below, so nothing else
             // would end a send in flight.
-            self.auth_state.change_number.finish();
-            // A8: drop any stale in-flight send/resend purposes —
-            // a late resend answer must not resurrect the
-            // completed flow (re-write phone/timeout or park a
-            // phantom error after the number already changed).
-            self.requests
-                .take_purpose(RequestPurpose::SendPhoneNumberCode);
-            self.requests
-                .take_purpose(RequestPurpose::ResendPhoneNumberCode);
+            // A8: drop the send or resend still out — a late answer must
+            // not resurrect the completed flow (re-write phone/timeout or
+            // park a phantom error after the number already changed).
+            for request in self.auth_state.change_number.finish() {
+                self.requests.take(request);
+            }
         }
         // Slice S4: a `setAutoDownloadSettings` succeeded — apply
         // the confirmed sent settings (the `ok` carries none, so

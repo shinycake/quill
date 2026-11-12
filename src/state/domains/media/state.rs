@@ -3,6 +3,17 @@
 //! with `new`.
 use crate::state::*;
 
+/// Where a song stands against the current user's saved music.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileAudioMark {
+    /// `isProfileAudio` went out as `request`; only its answer settles the
+    /// song (a local save or remove replaces the mark, so a late answer
+    /// finds nothing to change).
+    Checking { request: RequestId },
+    Saved,
+    NotSaved,
+}
+
 pub struct MediaState {
     /// The emoji/sticker panel's set contents (`getStickerSet`, lazily).
     pub media_library: MediaLibrary,
@@ -47,8 +58,8 @@ pub struct MediaState {
     /// music button and the Playlist page.
     pub playlists: HashMap<i64, Playlist>,
     /// Songs checked against the current user's saved music
-    /// (`isProfileAudio`), by file id: `true` when saved.
-    pub profile_audio_ids: HashMap<i32, bool>,
+    /// (`isProfileAudio`), by file id.
+    pub profile_audio_ids: HashMap<i32, ProfileAudioMark>,
     /// Thumbnails of the Stories and Gifts grids waiting for a download.
     pub(crate) profile_thumbs_due: Vec<FileId>,
 }

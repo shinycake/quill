@@ -10,7 +10,7 @@
 //! input) keeps keys the history has no claim on.
 #![deny(clippy::indexing_slicing)]
 
-use super::app::{ChatListFilter, PaneMode, QuillApp};
+use super::app::{ChatListFilter, PaneView, QuillApp};
 use super::chat_row::ChatListItem;
 use super::chat_ui_state::A11yFocus;
 use super::history_a11y::A11yKey;
@@ -124,7 +124,7 @@ impl QuillApp {
     /// Shortcuts are off while a dialog, viewer or the lock screen owns the
     /// window, and before the account is signed in.
     pub(super) fn shortcut_blocked(&self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        self.pane_mode() != PaneMode::Ready
+        self.pane_mode() != PaneView::Ready
             || self.account.passcode.is_locked()
             || self.viewer.state.is_open()
             // The story viewer is the main window's: a chat window's

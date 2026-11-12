@@ -13,19 +13,46 @@ impl Session {
     /// Whether a song is in the current user's saved music, once known
     /// (`isProfileAudio`). `None` until the check has answered.
     pub fn profile_audio_known(&self, file_id: FileId) -> Option<bool> {
-        self.media.profile_audio_ids.get(&file_id.0).copied()
+        match self.media.profile_audio_ids.get(&file_id.0)? {
+            ProfileAudioMark::Saved => Some(true),
+            ProfileAudioMark::NotSaved => Some(false),
+            ProfileAudioMark::Checking { .. } => None,
+        }
     }
 
-    /// The song's check has not been asked yet and none is in flight.
+    /// The song's check has not been asked yet, or its ask is gone with no
+    /// answer (a lost request is asked again).
     pub fn needs_profile_audio_check(&self, file_id: FileId) -> bool {
         file_id.0 > 0
             && self.my_user_id.is_some()
-            && !self.media.profile_audio_ids.contains_key(&file_id.0)
-            && !self
-                .requests
-                .has_purpose(RequestPurpose::Media(MediaPurpose::IsProfileAudio {
-                    file_id: file_id.0,
-                }))
+            && match self.media.profile_audio_ids.get(&file_id.0) {
+                None => true,
+                Some(ProfileAudioMark::Checking { request }) => {
+                    self.requests.get(*request).is_none()
+                }
+                Some(ProfileAudioMark::Saved | ProfileAudioMark::NotSaved) => false,
+            }
+    }
+
+    /// `isProfileAudio` for `file_id` went out as `request`.
+    pub fn begin_profile_audio_check(&mut self, file_id: FileId, request: RequestId) {
+        self.media
+            .profile_audio_ids
+            .insert(file_id.0, ProfileAudioMark::Checking { request });
+    }
+
+    /// The answer of `request` settles the song, if its check is still the
+    /// one waiting.
+    fn settle_profile_audio_check(&mut self, file_id: i32, request: RequestId, saved: bool) {
+        if let Some(mark) = self.media.profile_audio_ids.get_mut(&file_id)
+            && *mark == (ProfileAudioMark::Checking { request })
+        {
+            *mark = if saved {
+                ProfileAudioMark::Saved
+            } else {
+                ProfileAudioMark::NotSaved
+            };
+        }
     }
 
     /// The current user's own playlist, when it is loaded.
@@ -47,7 +74,9 @@ impl Session {
 
     /// `save`: the track goes to the front of the list, unless it is there.
     pub fn local_save_profile_audio(&mut self, audio: ProfileAudio) {
-        self.media.profile_audio_ids.insert(audio.file_id.0, true);
+        self.media
+            .profile_audio_ids
+            .insert(audio.file_id.0, ProfileAudioMark::Saved);
         let Some(playlist) = self.my_playlist_mut() else {
             return;
         };
@@ -63,7 +92,9 @@ impl Session {
 
     /// `remove`: the track leaves the list. Returns whether it was there.
     pub fn local_remove_profile_audio(&mut self, file_id: FileId) -> bool {
-        self.media.profile_audio_ids.insert(file_id.0, false);
+        self.media
+            .profile_audio_ids
+            .insert(file_id.0, ProfileAudioMark::NotSaved);
         let Some(playlist) = self.my_playlist_mut() else {
             return false;
         };
@@ -103,13 +134,12 @@ impl Session {
     pub(crate) fn apply_profile_music_ok(&mut self, pending: Option<&PendingRequest>) {
         // The toasts for adding and removing show when the user acts, as in
         // tdesktop; only the check has a result to keep.
-        if let Some(RequestPurpose::Media(MediaPurpose::IsProfileAudio { file_id })) =
-            pending.map(|p| p.purpose)
+        if let Some((request, RequestPurpose::Media(MediaPurpose::IsProfileAudio { file_id }))) =
+            pending.map(|p| (p.id, p.purpose))
         {
-            // The check is only asked while the song is unknown, so a known
-            // value now came from a local save or remove made after the
-            // check went out, and it is newer than this answer.
-            self.media.profile_audio_ids.entry(file_id).or_insert(true);
+            // A local save or remove made after the check went out replaced
+            // its mark and is newer than this answer.
+            self.settle_profile_audio_check(file_id, request, true);
         }
     }
 
@@ -123,8 +153,17 @@ impl Session {
     ) {
         match pending.map(|p| p.purpose) {
             Some(RequestPurpose::Media(MediaPurpose::IsProfileAudio { file_id })) => {
-                if err.code == 404 {
-                    self.media.profile_audio_ids.entry(file_id).or_insert(false);
+                let request = pending.map(|p| p.id);
+                if let Some(request) = request {
+                    if err.code == 404 {
+                        self.settle_profile_audio_check(file_id, request, false);
+                    } else if self.media.profile_audio_ids.get(&file_id)
+                        == Some(&ProfileAudioMark::Checking { request })
+                    {
+                        // The check failed for another reason: unknown, and
+                        // asked again.
+                        self.media.profile_audio_ids.remove(&file_id);
+                    }
                 }
             }
             Some(RequestPurpose::Media(MediaPurpose::AddProfileAudio { file_id })) => {
@@ -277,5 +316,40 @@ mod tests {
         session.local_remove_profile_audio(FileId(1));
         session.apply_profile_music_ok(removed.as_ref());
         assert_eq!(session.profile_audio_known(FileId(1)), Some(false));
+    }
+
+    #[test]
+    fn a_check_is_settled_by_its_own_request_and_asked_again_when_it_fails_or_is_lost() {
+        let mut session = session_with(&[1]);
+        session.my_user_id = Some(7);
+        let ask = |session: &mut Session| {
+            let id = session.request(
+                RequestPurpose::Media(MediaPurpose::IsProfileAudio { file_id: 5 }),
+                None,
+            );
+            session.begin_profile_audio_check(FileId(5), id);
+            id
+        };
+        let first = ask(&mut session);
+        assert!(!session.needs_profile_audio_check(FileId(5)), "one is out");
+        // A failure other than 404 leaves the song unknown and asks again.
+        let pending = session.requests.take(first);
+        session.apply_profile_music_error(&TdError::from_code(500), pending.as_ref());
+        assert_eq!(session.profile_audio_known(FileId(5)), None);
+        assert!(session.needs_profile_audio_check(FileId(5)));
+        // An answer of an older request does not settle the newer check.
+        let old = ask(&mut session);
+        let new = ask(&mut session);
+        let old = session.requests.take(old);
+        session.apply_profile_music_ok(old.as_ref());
+        assert_eq!(session.profile_audio_known(FileId(5)), None);
+        let new = session.requests.take(new);
+        session.apply_profile_music_ok(new.as_ref());
+        assert_eq!(session.profile_audio_known(FileId(5)), Some(true));
+        // A request lost with no answer is asked again.
+        let lost = ask(&mut session);
+        session.media.profile_audio_ids.remove(&6);
+        session.requests.take(lost);
+        assert!(session.needs_profile_audio_check(FileId(5)));
     }
 }

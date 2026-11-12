@@ -40,8 +40,8 @@ pub(super) fn tabs_icon_only(sidebar_width: f32, side_buttons: usize, labelled_w
 
 impl QuillApp {
     /// The header row above the chat list.
-    pub(super) fn sidebar_header(&self, mode: PaneMode, cx: &mut Context<Self>) -> AnyElement {
-        let ready = mode == PaneMode::Ready;
+    pub(super) fn sidebar_header(&self, mode: PaneView, cx: &mut Context<Self>) -> AnyElement {
+        let ready = mode == PaneView::Ready;
         let lock = ready && self.account.passcode.enabled;
         let proxy = self.proxy_shield_button(cx);
         let side_buttons = usize::from(ready) + usize::from(lock) + usize::from(proxy.is_some());
@@ -78,7 +78,7 @@ impl QuillApp {
     /// The Chats / Contacts / Calls strip as a kit segmented `TabBar`. Other
     /// modes keep the plain "Chats" title.
     fn list_tabs(&self, icon_only: bool, cx: &mut Context<Self>) -> AnyElement {
-        if self.pane_mode() != PaneMode::Ready {
+        if self.pane_mode() != PaneView::Ready {
             return div()
                 .font_semibold()
                 .child(tr(keys::RECENT_CHATS))

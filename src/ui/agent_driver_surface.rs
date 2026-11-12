@@ -13,7 +13,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::agent_state::{active_account, is_secret_chat_id};
-use super::app::{PaneMode, QuillApp};
+use super::app::{PaneView, QuillApp};
 use super::esc_stack::ESC_LAYERS;
 use super::first_run_state::FirstRun;
 use super::on_screen::ScreenEpoch;
@@ -344,7 +344,7 @@ impl QuillApp {
     /// The surface the window shows now.
     pub(super) fn driver_surface(&self) -> Surface {
         let blocked = |what: &str| Surface::Blocked(what.to_string());
-        if self.pane_mode() != PaneMode::Ready {
+        if self.pane_mode() != PaneView::Ready {
             return blocked("the sign-in screen");
         }
         if self.account.passcode.is_locked() {

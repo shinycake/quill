@@ -6,7 +6,7 @@
 //! and Linux.
 #![deny(clippy::indexing_slicing)]
 
-use super::app::{PaneMode, QuillApp};
+use super::app::{PaneView, QuillApp};
 use super::chat_theme::accent;
 use super::composer_sends::SendSlot;
 use crate::ui::status_note::StatusNote;
@@ -71,8 +71,8 @@ impl FileDrag {
 impl QuillApp {
     /// Whether the open chat takes dropped files into its composer.
     pub(super) fn file_drop_enabled(&self) -> bool {
-        matches!(self.pane_mode(), PaneMode::Ready)
-            && self.composer_available(PaneMode::Ready)
+        matches!(self.pane_mode(), PaneView::Ready)
+            && self.composer_available(PaneView::Ready)
             && !self.chat_ui.is_editing()
             && !self.chat_ui.rich.editor_open()
             && !self.recording_active()

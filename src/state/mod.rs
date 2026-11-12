@@ -116,6 +116,7 @@ mod session_apply_queries;
 mod session_apply_users;
 mod session_boost_settings;
 mod session_calls;
+pub use session_calls::ParticipantMuteToggles;
 mod session_chat_caps;
 mod session_chat_look;
 mod session_chat_search;

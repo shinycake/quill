@@ -392,7 +392,7 @@ impl Render for QuillApp {
                 },
             )
             .when(
-                self.pane_mode() == super::app::PaneMode::Connecting && !self.shows_disk_screen(),
+                self.pane_mode() == super::app::PaneView::Connecting && !self.shows_disk_screen(),
                 |this| {
                     // Sign-in replaces the chat layout until the account is
                     // ready; the first-run onboarding comes before it.
@@ -411,7 +411,7 @@ impl Render for QuillApp {
                 },
             )
             .when(
-                self.pane_mode() != super::app::PaneMode::Connecting,
+                self.pane_mode() != super::app::PaneView::Connecting,
                 |this| {
                     // The onboarding replayed from Settings takes the
                     // signed-in layout's place until it is finished.

@@ -302,7 +302,7 @@ fn ton_connect_request_states() {
                 assert_eq!(parsed.session_id, 42);
                 assert_eq!(
                     parsed.state,
-                    TonConnectRequestState::Pending {
+                    TonConnectRequestState::Unanswered {
                         expiration_date: 1_900_000_000
                     }
                 );

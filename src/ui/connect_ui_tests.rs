@@ -1,4 +1,4 @@
-use crate::ui::app::{PaneMode, QuillApp};
+use crate::ui::app::{PaneView, QuillApp};
 use crate::ui::connect_ui::ConnectStage;
 use crate::ui::screenshot_demo::ScreenshotDemo;
 use crate::ui::shell::QuillShell;
@@ -104,7 +104,7 @@ fn a_build_without_credentials_keeps_its_note_and_offers_no_retry(cx: &mut TestA
         app.open_client(Err(ConnectBlocker::MissingCredentials), cx);
     });
     assert!(app.read_with(&vcx, |app, _| {
-        matches!(app.pane_mode(), PaneMode::Synthetic) && !app.connection.status_note().is_empty()
+        matches!(app.pane_mode(), PaneView::Synthetic) && !app.connection.status_note().is_empty()
     }));
     assert!(!shown(&mut vcx, RETRY));
 }

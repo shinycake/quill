@@ -285,7 +285,7 @@ impl QuillApp {
     /// Whether the folders sit in a column left of the chat list.
     pub(super) fn folder_rail_active(&self) -> bool {
         self.appearance.folder_tabs_view == FolderTabsView::Left
-            && self.pane_mode() == super::app::PaneMode::Ready
+            && self.pane_mode() == super::app::PaneView::Ready
     }
 
     /// Width the column takes from the chat-list column (0 when the tabs

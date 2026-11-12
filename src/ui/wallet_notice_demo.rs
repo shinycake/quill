@@ -124,7 +124,7 @@ impl QuillApp {
                     90_000_000_022,
                     ServiceAction::TonConnectRequest(TonConnectRequest {
                         session_id: 1,
-                        state: TonConnectRequestState::Pending { expiration_date: 0 },
+                        state: TonConnectRequestState::Unanswered { expiration_date: 0 },
                         dapp_name: "Fragment".into(),
                         topic: String::new(),
                     }),

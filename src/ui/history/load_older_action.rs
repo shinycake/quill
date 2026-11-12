@@ -7,7 +7,7 @@ use quill::lang::{keys, tr};
 impl QuillApp {
     pub(in crate::ui) fn load_older_action(&mut self, cx: &mut Context<Self>) {
         match self.pane_mode() {
-            PaneMode::Ready => {
+            PaneView::Ready => {
                 // Phase 5.1: a topic view pages its own history.
                 let topic_open = self
                     .live
@@ -35,10 +35,10 @@ impl QuillApp {
                 }
                 cx.notify();
             }
-            PaneMode::Synthetic => {
+            PaneView::Synthetic => {
                 self.chat.update(cx, |chat, cx| chat.prepend_older(cx));
             }
-            PaneMode::Connecting => {}
+            PaneView::Connecting => {}
         }
     }
 }

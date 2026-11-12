@@ -1,7 +1,7 @@
 //! chat-list row rendering: ChatListItem, badges, avatars, skeletons.
 #![deny(clippy::indexing_slicing)]
 
-use super::app::{PaneMode, QuillApp};
+use super::app::{PaneView, QuillApp};
 use super::message_text::kit_avatar_element;
 use super::pressable::PressableDiv;
 use super::userpic_videos::UserpicFrame;
@@ -121,12 +121,12 @@ pub(super) fn chat_list_skeleton_row(index: usize) -> impl IntoElement {
 
 /// Section caption above the chat list, shown only where it adds
 /// information the list itself doesn't (search mode, connecting).
-pub(super) fn chat_list_caption(mode: PaneMode, session: Option<&Session>) -> Option<SharedString> {
+pub(super) fn chat_list_caption(mode: PaneView, session: Option<&Session>) -> Option<SharedString> {
     match mode {
-        PaneMode::Synthetic => None,
-        PaneMode::Connecting => Some(tr(keys::Q_CHATLIST_CONNECTING).into()),
+        PaneView::Synthetic => None,
+        PaneView::Connecting => Some(tr(keys::Q_CHATLIST_CONNECTING).into()),
         // Search shows its own section headings.
-        PaneMode::Ready => {
+        PaneView::Ready => {
             let _ = session;
             None
         }

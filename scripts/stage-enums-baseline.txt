@@ -48,7 +48,6 @@ bare:MuteState::Connecting 1
 bare:Opening::Pending 1
 bare:OwnLinkState::Waiting 1
 bare:PaidStage::Waiting 1
-bare:PaneMode::Connecting 1
 bare:PasscodeJob::Running 1
 bare:Phase::Downloading 1
 bare:Phase::Loading 1
@@ -102,7 +101,6 @@ unkeyed:Cancellation::InFlight 1
 unkeyed:ChatSearchPaging::Loading 1
 unkeyed:ConferenceStage::Upgrading 1
 unkeyed:CreateStage::Creating 1
-unkeyed:DebugConfirm::Asking 1
 unkeyed:DemandStage::Asked 1
 unkeyed:DeviceRun::Running 1
 unkeyed:Dnd::Refreshing 1
@@ -134,7 +132,6 @@ unkeyed:SizedState::Loading 1
 unkeyed:Stage::Running 1
 unkeyed:StoryFetch::Asked 1
 unkeyed:TitleCheck::Sent 1
-unkeyed:TonConnectRequestState::Pending 1
 unkeyed:UpdateControl::Downloading 1
 unkeyed:VcardImport::Reading 1
 unkeyed:WaitingCheck::Pending 1

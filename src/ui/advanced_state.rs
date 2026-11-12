@@ -10,7 +10,8 @@ use std::cell::Cell;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DebugConfirm {
     Closed,
-    Asking { logs_on: bool },
+    /// The question is on screen; `logs_on` picks its wording.
+    Open { logs_on: bool },
 }
 
 impl DebugConfirm {
@@ -26,7 +27,7 @@ pub(crate) struct AdvancedUi {
     pub(super) codes: CodeFeeder,
     /// The `debugmode` question: closed, or on screen with whether the
     /// logs are on right now, which picks the wording. The box shows
-    /// exactly while this is `Asking`.
+    /// exactly while this is `Open`.
     pub(super) debug_confirm: DebugConfirm,
     /// Screenshot demos have no account store; their `testmode` switch lives
     /// here. A real app reads the environment from the store instead.

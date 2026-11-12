@@ -157,7 +157,12 @@ impl Session {
             }
             SettingsPayload::NetworkStatistics(usage) => {
                 if purpose == Some(RequestPurpose::GetNetworkStatistics) {
-                    self.settings.privacy_data.network.succeed(usage.clone());
+                    // Only the fetch that waits for this request takes it: the
+                    // numbers of a fetch asked before a reset are dropped.
+                    self.settings
+                        .privacy_data
+                        .network
+                        .answered(pending.map(|p| p.id), usage.clone());
                 }
                 true
             }
@@ -188,18 +193,10 @@ impl Session {
     /// `ok` of this block's purposes.
     pub(crate) fn apply_privacy_data_ok(&mut self, pending: Option<&PendingRequest>) {
         match pending.map(|p| p.purpose) {
-            Some(RequestPurpose::ResetNetworkStatistics) => {
-                // The old numbers are gone; the next open refetches.
-                let network = &mut self.settings.privacy_data.network;
-                *network = if network.is_loading() {
-                    crate::state::fetch::Fetch::Loading {
-                        stale: None,
-                        request: None,
-                    }
-                } else {
-                    crate::state::fetch::Fetch::Idle
-                };
-            }
+            // The old numbers are already gone: the driver cleared them when
+            // it sent the reset and asked again behind it, so the fetch in
+            // flight (if any) holds its own request and is left alone.
+            Some(RequestPurpose::ResetNetworkStatistics) => {}
             Some(RequestPurpose::HideCheckPasswordSuggestion) => {
                 self.chat_list
                     .suggestions
@@ -369,8 +366,11 @@ impl Session {
                 }
             }
             RequestPurpose::GetNetworkStatistics => {
-                data.network
-                    .fail(sessions_error_line("load the network usage", err));
+                data.network.failed(
+                    pending.map(|p| p.id),
+                    sessions_error_line("load the network usage", err),
+                    false,
+                );
             }
             RequestPurpose::ResetNetworkStatistics => {
                 data.network

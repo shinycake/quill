@@ -688,7 +688,9 @@ impl Session {
         }
         // `getRecommendedChats`: the Channels tab's list, not a query answer.
         if pending.map(|p| p.purpose) == Some(RequestPurpose::GetRecommendedChats) {
-            self.search.search.accept_recommended(chat_ids);
+            self.search
+                .search
+                .accept_recommended(pending.map(|p| p.id), chat_ids);
             return;
         }
         if self.search.search.awaits(pending) {

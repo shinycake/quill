@@ -398,7 +398,7 @@ impl QuillApp {
     /// composer replay their last frame. Outside the ready layout the
     /// chat list is not a slice, so everything redraws.
     pub(super) fn notify_chat_list(&self, cx: &mut Context<Self>) {
-        if self.pane_mode() == super::app::PaneMode::Ready {
+        if self.pane_mode() == super::app::PaneView::Ready {
             self.notify_sidebar(cx);
             // The Touch Bar's pinned chats show these rows' badges and
             // online dots, and it mirrors by itself only on an app notify.

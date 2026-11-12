@@ -2,7 +2,7 @@
 //! bar, kit-dialog sync.
 #![deny(clippy::indexing_slicing)]
 
-use super::app::{PaneMode, QuillApp};
+use super::app::{PaneView, QuillApp};
 use super::chat_window::{Shown, ShownDialog};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::*;
@@ -13,7 +13,7 @@ use gpui_kit::*;
 use quill::ids::ChatId;
 use quill::lang::{keys, tr};
 pub(super) fn title_bar(
-    mode: PaneMode,
+    mode: PaneView,
     live: bool,
     search_open: bool,
     update: Option<AnyElement>,
@@ -23,7 +23,7 @@ pub(super) fn title_bar(
     let _ = live;
     let _ = mode;
     let title = "Quill";
-    let show_cycle = mode == PaneMode::Synthetic;
+    let show_cycle = mode == PaneView::Synthetic;
     // kit Phase 7: kit `TitleBar` — native-feel chrome (drag, double-click
     // zoom, Linux min/max/close, macOS traffic-light inset) in theme tokens,
     // replacing the hand-rolled 44px bar. The caption + action buttons ride
@@ -41,7 +41,7 @@ pub(super) fn title_bar(
                 .items_center()
                 .flex_none()
                 .children(update)
-                .when(mode == PaneMode::Ready, |this| {
+                .when(mode == PaneView::Ready, |this| {
                     this.child(
                         Button::new("search")
                             .icon(if search_open {

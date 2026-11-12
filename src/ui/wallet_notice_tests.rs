@@ -302,7 +302,7 @@ fn chat_surfaces_open_the_notice(cx: &mut TestAppContext) {
         add_service(
             app,
             pending,
-            ServiceAction::TonConnectRequest(request(TonConnectRequestState::Pending {
+            ServiceAction::TonConnectRequest(request(TonConnectRequestState::Unanswered {
                 expiration_date: 0,
             })),
         );
@@ -426,7 +426,7 @@ fn the_encrypted_comment_and_review_request_do_nothing_while_the_wallet_is_off(
             pending,
             ServiceAction::TonConnectRequest(TonConnectRequest {
                 session_id: 1,
-                state: TonConnectRequestState::Pending { expiration_date: 0 },
+                state: TonConnectRequestState::Unanswered { expiration_date: 0 },
                 dapp_name: "Fragment".into(),
                 topic: String::new(),
             }),

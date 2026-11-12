@@ -287,7 +287,7 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn sync_search_query(&mut self, query: &str, cx: &mut Context<Self>) {
-        if self.pane_mode() != PaneMode::Ready {
+        if self.pane_mode() != PaneView::Ready {
             return;
         }
         if let Some(live) = self.live.as_mut() {

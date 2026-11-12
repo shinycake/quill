@@ -229,7 +229,8 @@ fn sweeping_a_lost_transfer_check_lets_the_next_open_ask_again() {
 fn sweeping_lost_recommended_channels_clears_their_loading_flag() {
     let mut session = ready_session();
     session.search.search.tabs.recommended.begin();
-    session.request(RequestPurpose::GetRecommendedChats, None);
+    let request = session.request(RequestPurpose::GetRecommendedChats, None);
+    session.search.search.tabs.recommended.sent(request);
 
     assert!(sweep(&mut session));
 

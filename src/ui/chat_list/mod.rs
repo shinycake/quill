@@ -2,7 +2,7 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
-use super::app::{ChatListFilter, PaneMode};
+use super::app::{ChatListFilter, PaneView};
 use super::chat_row::PinnedChatDrag;
 use super::chat_row::{
     ChatListItem, chat_list_caption, chat_list_skeleton_row, chat_row_has_tags, chat_row_height,

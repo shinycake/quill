@@ -31,21 +31,21 @@ impl QuillApp {
         let focus_visible = self.chat_list_focus_visible(window);
         let list = self.sidebar_column(mode, cx);
         let list = match mode {
-            PaneMode::Synthetic => sidebar_synthetic_rows(list, cx),
-            PaneMode::Connecting => list.child(
+            PaneView::Synthetic => sidebar_synthetic_rows(list, cx),
+            PaneView::Connecting => list.child(
                 div()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(tr(keys::Q_CHATLIST_NO_CHAT_LIST_UNTIL_READY)),
             ),
-            PaneMode::Ready => self.sidebar_ready(list, focus_visible, window, cx),
+            PaneView::Ready => self.sidebar_ready(list, focus_visible, window, cx),
         };
-        let list = if mode == PaneMode::Ready {
+        let list = if mode == PaneView::Ready {
             list.children(self.agent_connected_strip(cx))
         } else {
             list
         };
-        if mode == PaneMode::Ready {
+        if mode == PaneView::Ready {
             if self.folder_rail_active() {
                 return div()
                     .id("sidebar-with-folder-rail")
@@ -72,10 +72,10 @@ impl QuillApp {
 
     /// The column itself: its frame, the header and the list caption.
     #[inline(never)]
-    fn sidebar_column(&self, mode: PaneMode, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn sidebar_column(&self, mode: PaneView, cx: &mut Context<Self>) -> Stateful<Div> {
         div()
             .id("sidebar")
-            .when(mode != PaneMode::Ready, |this| this.overflow_y_scroll())
+            .when(mode != PaneView::Ready, |this| this.overflow_y_scroll())
             .track_focus(&self.focus_sidebar)
             .map(|this| self.chat_list_key_handlers(this, cx))
             .w(self.list_width())

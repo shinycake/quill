@@ -1,7 +1,59 @@
 //! Call and group-call acceptors.
 use super::*;
 
+/// The mute toggles of group call participants that went out, each under
+/// its request. A toggle is on its way while its request is still in the
+/// session's table (answered, failed or swept requests leave it), so no
+/// exit needs a hand reset.
+#[derive(Debug, Default)]
+pub struct ParticipantMuteToggles(Vec<(i32, MessageSender, RequestId)>);
+
+impl ParticipantMuteToggles {
+    /// `request` toggles `participant` of call `group_call_id`. Toggles
+    /// whose request is gone are dropped, and an older toggle of the same
+    /// participant is replaced.
+    pub fn begin(
+        &mut self,
+        group_call_id: i32,
+        participant: MessageSender,
+        request: RequestId,
+        is_out: impl Fn(RequestId) -> bool,
+    ) {
+        self.0.retain(|(call, who, asked)| {
+            is_out(*asked) && !(*call == group_call_id && *who == participant)
+        });
+        self.0.push((group_call_id, participant, request));
+    }
+
+    /// A toggle of `participant` is on its way.
+    pub fn out(
+        &self,
+        group_call_id: i32,
+        participant: MessageSender,
+        is_out: impl Fn(RequestId) -> bool,
+    ) -> bool {
+        self.0.iter().any(|(call, who, asked)| {
+            *call == group_call_id && *who == participant && is_out(*asked)
+        })
+    }
+}
+
 impl Session {
+    /// The mute toggle of `participant` went out as `request`.
+    pub fn begin_participant_mute_toggle(
+        &mut self,
+        group_call_id: i32,
+        participant: MessageSender,
+        request: RequestId,
+    ) {
+        let requests = &self.requests;
+        self.calls
+            .participant_mutes
+            .begin(group_call_id, participant, request, |asked| {
+                requests.get(asked).is_some()
+            });
+    }
+
     /// Phase C1: `updateCall` state machine. Quill tracks at most one
     /// call at a time (TDLib / official clients allow a single active
     /// 1:1 call):
@@ -321,12 +373,11 @@ impl Session {
         // a round trip. Once the request completed the next update settles.
         // Only a toggle of this participant counts: muting someone else
         // says nothing about your own row.
-        let toggle_in_flight = self.requests.has_purpose(RequestPurpose::Calls(
-            CallsPurpose::ToggleGroupCallParticipantMute {
-                group_call_id,
-                participant: participant.participant_id,
-            },
-        ));
+        let toggle_in_flight = self.calls.participant_mutes.out(
+            group_call_id,
+            participant.participant_id,
+            |request| self.requests.get(request).is_some(),
+        );
         let Some(tracked) = self.calls.group_call_mut(group_call_id) else {
             return;
         };

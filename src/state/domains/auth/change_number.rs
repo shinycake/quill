@@ -179,9 +179,20 @@ impl ChangeNumber {
         }
     }
 
-    /// The number changed (or the flow is over): back to the start.
-    pub fn finish(&mut self) {
+    /// The number changed (or the flow is over): back to the start. Returns
+    /// the send and resend still out, which the caller drops from the
+    /// request table so a late answer finds nothing.
+    pub fn finish(&mut self) -> Vec<RequestId> {
+        let out = match self {
+            Self::Sending { request, .. } | Self::Resending { request, .. } => vec![*request],
+            Self::Checking {
+                resend: Some(resend),
+                ..
+            } => vec![*resend],
+            _ => Vec::new(),
+        };
         *self = Self::Idle;
+        out
     }
 
     /// `request` ended: `error` is why it failed, `None` when it never left.

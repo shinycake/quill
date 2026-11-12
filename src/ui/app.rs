@@ -101,7 +101,7 @@ pub struct QuillApp {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum PaneMode {
+pub(super) enum PaneView {
     Synthetic,
     Connecting,
     Ready,
@@ -223,18 +223,18 @@ impl QuillApp {
         }
     }
 
-    pub(super) fn pane_mode(&self) -> PaneMode {
+    pub(super) fn pane_mode(&self) -> PaneView {
         if self
             .session()
             .is_some_and(|session| matches!(session.auth, AuthorizationState::Ready))
         {
-            return PaneMode::Ready;
+            return PaneView::Ready;
         }
         match self.auth_demo.stage {
             ConnectStage::NeedCredentials if self.live.is_none() && !self.auth_demo.demo_inputs => {
-                PaneMode::Synthetic
+                PaneView::Synthetic
             }
-            _ => PaneMode::Connecting,
+            _ => PaneView::Connecting,
         }
     }
 }
