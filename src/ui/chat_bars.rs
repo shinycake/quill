@@ -454,7 +454,10 @@ impl QuillApp {
             return;
         };
         if let Some(live) = self.live.as_mut() {
-            let mut ok = live.driver.block_sender(dialog.user_id).is_ok();
+            let mut ok = live
+                .driver
+                .block_sender(dialog.user_id, quill::state::BlockOrigin::ChatBar)
+                .is_ok();
             if dialog.report {
                 ok &= live.driver.report_chat(dialog.chat_id).is_ok();
             }

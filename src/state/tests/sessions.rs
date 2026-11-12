@@ -271,6 +271,7 @@ fn terminate_session_error_surfaces_honestly() {
         None,
     );
     session.settings.sessions_op.begin(extra);
+    session.settings.sessions_note.begin(extra);
     apply_json(
         &mut session,
         &seq,
@@ -590,6 +591,7 @@ fn disconnect_all_websites_error_surfaces_honestly() {
     let seq = AtomicU64::new(0);
     let extra = session.request(RequestPurpose::DisconnectAllWebsites, None);
     session.settings.websites_op.begin(extra);
+    session.settings.websites_note.begin(extra);
     apply_json(
         &mut session,
         &seq,
@@ -688,6 +690,7 @@ fn toggle_session_secret_chats_error_surfaces_honestly() {
         None,
     );
     session.settings.sessions_op.begin(extra);
+    session.settings.sessions_note.begin(extra);
     apply_json(
         &mut session,
         &seq,
@@ -753,6 +756,7 @@ fn a_failed_terminate_keeps_the_list_and_shows_the_error() {
     let seq = AtomicU64::new(0);
     session.settings.sessions = crate::state::fetch::Fetch::Ready(Vec::new());
     let extra = session.request(RequestPurpose::TerminateAllOtherSessions, None);
+    session.settings.sessions_note.begin(extra);
     apply_json(
         &mut session,
         &seq,
