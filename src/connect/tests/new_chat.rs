@@ -129,6 +129,7 @@ fn a_channel_is_created_then_gets_photo_link_and_subscribers() {
     let stage = NewChatStage::Creating {
         request: extra,
         back: crate::new_chat::NewChatBack::Info,
+        title: "Channel".into(),
     };
     assert_eq!(
         rig.driver
@@ -362,6 +363,7 @@ fn an_answered_type_save_moves_the_stage_on() {
     let lost = NewChatStage::Creating {
         request: RequestId(9_999),
         back: crate::new_chat::NewChatBack::Info,
+        title: "Channel".into(),
     };
     assert_eq!(
         rig.driver

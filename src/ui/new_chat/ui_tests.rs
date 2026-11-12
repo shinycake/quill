@@ -147,6 +147,7 @@ fn cancel_closes_the_box_while_the_create_request_is_out(cx: &mut TestAppContext
             dialog.stage = NewChatStage::Creating {
                 request,
                 back: NewChatBack::Info,
+                title: String::new(),
             };
         }
         assert!(app.new_chat_view().is_some_and(|view| view.busy()));
@@ -179,6 +180,7 @@ fn a_made_group_takes_its_dialog_away(cx: &mut TestAppContext) {
             dialog.stage = NewChatStage::Creating {
                 request,
                 back: NewChatBack::Info,
+                title: String::new(),
             };
         }
     });
@@ -191,4 +193,17 @@ fn a_made_group_takes_its_dialog_away(cx: &mut TestAppContext) {
     frames(vcx);
     assert!(app.read_with(vcx, |app, _| app.admin.create_chat_dialog.is_none()));
     assert!(shell.read_with(vcx, |s, _| s.open_dialog != Some(DialogKind::CreateChat)));
+}
+
+/// TDLib's refusal is about the text the stage holds: it shows again when
+/// that text is typed back, whatever the dialog's own last Confirm judged.
+#[test]
+fn a_refused_name_shows_its_error_when_typed_back() {
+    use super::TitleCheck;
+    // "A" was refused by the server; Confirm on an empty name followed.
+    let judged = TitleCheck::Judged(String::new());
+    assert!(judged.shows_error(Some("A"), "A"), "typed back: refused");
+    assert!(!judged.shows_error(Some("A"), "AB"), "another text: no error");
+    assert!(judged.shows_error(None, ""), "the dialog's own refusal");
+    assert!(!TitleCheck::Fine.shows_error(None, "A"));
 }

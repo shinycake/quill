@@ -32,25 +32,28 @@ use quill::new_chat::{
 /// The description shows three lines and grows to eight.
 const DESCRIPTION_ROWS: (usize, usize) = (3, 8);
 
-/// The name the last Confirm judged, so the name field's error is about that
-/// text: typing anything else ends it with no reset, whoever refused it.
+/// The dialog's own verdict on the name the last Confirm judged, so the name
+/// field's error is about that text: typing anything else ends it with no
+/// reset. TDLib's `NO_CHAT_TITLE` refusal is not kept here: the stage that
+/// asked holds the refused text (`NewChatStage::CreateRefused`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TitleCheck {
     /// Nothing judged yet.
     Fine,
-    /// This name went through Confirm: the dialog's own check refuses it when
-    /// it is empty or too long, and TDLib's `NO_CHAT_TITLE` refusal is about it.
+    /// This name went through Confirm and the dialog's own check refused it
+    /// (empty or too long).
     Judged(String),
 }
 
 impl TitleCheck {
-    /// The error shows while the field still holds the judged text and the
-    /// dialog's own check or TDLib refused it.
-    pub(crate) fn shows_error(&self, server_rejected: bool, current: &str) -> bool {
-        match self {
+    /// The error shows while the field holds the text the dialog's own check
+    /// refused, or the text TDLib refused as no title (`server_refused`).
+    pub(crate) fn shows_error(&self, server_refused: Option<&str>, current: &str) -> bool {
+        let own = match self {
             Self::Fine => false,
-            Self::Judged(text) => text == current && (server_rejected || title_refused(text)),
-        }
+            Self::Judged(text) => text == current && title_refused(text),
+        };
+        own || server_refused == Some(current)
     }
 }
 
@@ -80,8 +83,7 @@ pub(crate) struct NewChatDialog {
     pub(crate) auto_delete: Option<i32>,
     /// The auto-delete step's picker over [`TTL_CHOICES`].
     auto_delete_picker: Entity<SelectState<Vec<SharedString>>>,
-    /// What the name field shows: the dialog's own check on Confirm, or
-    /// TDLib's `NO_CHAT_TITLE` (`NewChatView::failure`), one verdict.
+    /// The dialog's own check of the name on Confirm.
     title: TitleCheck,
     /// The type step of a supergroup or channel (tdesktop
     /// `SetupChannelBox`, which starts on Public).
@@ -404,10 +406,14 @@ impl QuillApp {
         };
         match live.driver.create_new_chat(&request, photo) {
             Ok(Some(request)) => {
-                if let Some(dialog) = self.admin.create_chat_dialog.as_mut() {
-                    dialog.title = TitleCheck::Judged(title);
-                }
-                self.set_new_chat_stage(NewChatStage::Creating { request, back }, cx);
+                self.set_new_chat_stage(
+                    NewChatStage::Creating {
+                        request,
+                        back,
+                        title,
+                    },
+                    cx,
+                );
             }
             Ok(None) => {}
             Err(err) => {

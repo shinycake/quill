@@ -34,13 +34,15 @@ pub(super) struct LanguageWrites {
     files: [WriteStage; 3],
 }
 
-/// The last write asked of one file: none yet, or the task that waits for
-/// its predecessor and then writes.
+/// The last write asked of one file: none yet, or the task of the newest
+/// write, which waits for its predecessor and then writes. The task stays
+/// here after its write lands (a finished task awaits at once), so the next
+/// write can wait on it and quitting can wait on it.
 #[derive(Default)]
 enum WriteStage {
     #[default]
     Idle,
-    Writing {
+    Last {
         task: Task<()>,
     },
 }
@@ -57,12 +59,24 @@ impl LanguageWrites {
         };
         let previous = std::mem::take(stage);
         let task = cx.background_spawn(async move {
-            if let WriteStage::Writing { task } = previous {
+            if let WriteStage::Last { task } = previous {
                 task.await;
             }
             write();
         });
-        *stage = WriteStage::Writing { task };
+        *stage = WriteStage::Last { task };
+    }
+
+    /// Every file's newest write, taken out to be awaited: a write chain
+    /// ends with its newest task, so awaiting these awaits them all.
+    pub(super) fn take_pending(&mut self) -> Vec<Task<()>> {
+        self.files
+            .iter_mut()
+            .filter_map(|stage| match std::mem::take(stage) {
+                WriteStage::Last { task } => Some(task),
+                WriteStage::Idle => None,
+            })
+            .collect()
     }
 }
 
@@ -71,12 +85,15 @@ pub(crate) struct LanguageUi {
     pub(super) writes: LanguageWrites,
     /// Packs used before, newest first (`language_recent.json`).
     pub(super) recent: Vec<LanguageChoice>,
+    /// Quitting waits for the writes still out, so a quick A → B switch
+    /// and quit leaves B on disk, not nothing or A.
+    _flush_on_quit: Subscription,
 }
 
 impl LanguageUi {
     /// Loads the recent packs and, outside screenshot demos, installs the
     /// strings the last run used so the first frame is already translated.
-    pub(super) fn new(demo: bool, _cx: &mut Context<QuillApp>) -> Self {
+    pub(super) fn new(demo: bool, cx: &mut Context<QuillApp>) -> Self {
         let root = (!demo).then(quill::settings::safe_app_root).flatten();
         let recent = root
             .as_deref()
@@ -85,10 +102,19 @@ impl LanguageUi {
         if let Some(root) = root.as_deref() {
             super::language_ui::install_pack(quill::lang::prefs::load_cached_snapshot(root));
         }
+        let flush = cx.on_app_quit(|app: &mut QuillApp, _| {
+            let pending = app.language.writes.take_pending();
+            async move {
+                for task in pending {
+                    task.await;
+                }
+            }
+        });
         Self {
             open: None,
             recent,
             writes: LanguageWrites::default(),
+            _flush_on_quit: flush,
         }
     }
 }

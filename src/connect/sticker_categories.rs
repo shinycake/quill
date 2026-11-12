@@ -10,14 +10,22 @@ const CATEGORY_LIMIT: i32 = 100;
 
 impl<S: JsonSender> ConnectDriver<S> {
     /// Ask for the category strip while nothing was asked yet. A failed
-    /// ask stays `Failed` until the panel opens again (`reopen_sticker_categories`),
-    /// so a render never re-asks.
+    /// ask (a refused send included) stays `Failed` until the panel opens
+    /// again (`set_media_panel_mode` calls `clear_error`), so a render never
+    /// re-asks.
     pub fn fetch_sticker_categories(&mut self) -> Result<(), ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
         if !self.session.stickers.emoji.sticker_categories.is_idle() {
             return Ok(());
+        }
+        if !self.chats_path_active() {
+            self.session
+                .stickers
+                .emoji
+                .sticker_categories
+                .fail(crate::lang::tr(
+                    crate::lang::keys::Q_MEDIA_COULDNT_UPDATE_STICKERS_TRY_AGAIN,
+                ));
+            return Err(ConnectSendError::InvalidRequest);
         }
         let sent = self.sticker_request(RequestPurpose::GetStickerCategories, |id| {
             get_sticker_categories(id)
