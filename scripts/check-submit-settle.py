@@ -39,6 +39,8 @@ def main():
     for path in ui_files():
         with open(path, encoding='utf-8') as handle:
             text = handle.read()
+        # A file's own unit tests build stages by hand; only the box code counts.
+        text = text.split('#[cfg(test)]\nmod tests', 1)[0]
         if 'Submit::sent(' not in text:
             continue
         settles = SETTLE.findall(text)

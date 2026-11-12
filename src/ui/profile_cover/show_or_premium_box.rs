@@ -181,10 +181,12 @@ impl QuillApp {
         // Settled by this box's own request: an unrelated save of the same
         // rule (or an older failure) says nothing about it.
         let settled = self.session().map(|session| {
-            match quill::state::Submit::sent(vec![request]).view(Some(&session.requests)) {
-                quill::state::SubmitView::Done => Some(true),
-                quill::state::SubmitView::Failed(_) => Some(false),
-                quill::state::SubmitView::Sending | quill::state::SubmitView::Editing => None,
+            if session.requests.failure(request).is_some() {
+                Some(false)
+            } else if session.requests.get(request).is_some() {
+                None
+            } else {
+                Some(true)
             }
         });
         match settled {
