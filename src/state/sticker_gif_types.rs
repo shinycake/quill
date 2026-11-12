@@ -45,8 +45,13 @@ impl StickerSearch {
 /// request that asked.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum StickerSetStage {
+    /// No set is selected.
     #[default]
     Idle,
+    /// `set_id` is selected and its stickers are not asked for yet.
+    Selected {
+        set_id: i64,
+    },
     Loading {
         set_id: i64,
         request: RequestId,
@@ -64,9 +69,10 @@ impl StickerSetStage {
     pub fn set_id(&self) -> Option<i64> {
         match *self {
             Self::Idle => None,
-            Self::Loading { set_id, .. } | Self::Ready { set_id } | Self::Failed { set_id } => {
-                Some(set_id)
-            }
+            Self::Selected { set_id }
+            | Self::Loading { set_id, .. }
+            | Self::Ready { set_id }
+            | Self::Failed { set_id } => Some(set_id),
         }
     }
 
@@ -290,11 +296,10 @@ impl StickerBatch {
 }
 
 /// The sticker set the panel has selected: nothing, or a set with its
-/// `getStickerSet` stage (asked, answered or failed) and stickers. Changing
-/// mode or set replaces it whole.
+/// `getStickerSet` stage (selected, asked, answered or failed; the stage
+/// holds the set id) and stickers. Changing mode or set replaces it whole.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StickerSelection {
-    pub set_id: Option<i64>,
     pub stage: StickerSetStage,
     pub stickers: Vec<StickerItem>,
 }
@@ -303,8 +308,21 @@ impl StickerSelection {
     /// `set_id` is selected and not yet loaded.
     pub fn of(set_id: i64) -> Self {
         Self {
-            set_id: Some(set_id),
+            stage: StickerSetStage::Selected { set_id },
             ..Self::default()
+        }
+    }
+
+    /// The selected set.
+    pub fn set_id(&self) -> Option<i64> {
+        self.stage.set_id()
+    }
+
+    /// The selected set is asked for again: a request that was dropped, or
+    /// a failure the next opening retries.
+    pub fn reselect(&mut self) {
+        if let Some(set_id) = self.stage.set_id() {
+            self.stage = StickerSetStage::Selected { set_id };
         }
     }
 }
@@ -770,56 +788,6 @@ impl GifPanel {
     }
 }
 
-/// The "Attached Stickers" lookup of a photo or video
-/// (`getAttachedStickerSets`): asked as one request, then answered with the
-/// first set (`None`: the media has none) until the box takes it. An answer
-/// or error of an earlier request is dropped.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum AttachedStickers {
-    #[default]
-    Idle,
-    Asking(RequestId),
-    Answered(Option<i64>),
-}
-
-impl AttachedStickers {
-    /// The lookup goes out as `request`.
-    pub fn asked(&mut self, request: RequestId) {
-        *self = Self::Asking(request);
-    }
-
-    /// `request` answered with `first`: taken only while it is the lookup
-    /// waited for.
-    pub fn answered(&mut self, request: Option<RequestId>, first: Option<i64>) -> bool {
-        if request.is_some_and(|request| *self == Self::Asking(request)) {
-            *self = Self::Answered(first);
-            return true;
-        }
-        false
-    }
-
-    /// `request` failed (or never went out): only the lookup waited for
-    /// ends. `true` when it was.
-    pub fn failed(&mut self, request: Option<RequestId>) -> bool {
-        if request.is_some_and(|request| *self == Self::Asking(request)) {
-            *self = Self::Idle;
-            return true;
-        }
-        false
-    }
-
-    /// The answer, once.
-    pub fn take_answer(&mut self) -> Option<Option<i64>> {
-        match *self {
-            Self::Answered(first) => {
-                *self = Self::Idle;
-                Some(first)
-            }
-            _ => None,
-        }
-    }
-}
-
 /// The emoji the composer sticker suggestions are for, and whether they
 /// wait for the installed sets (`InstalledOnly` filters by them).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -867,11 +835,11 @@ impl StickerPanel {
     pub fn visible_stickers(&self) -> &[StickerItem] {
         match self.tab {
             StickerTab::Installed | StickerTab::Trending => &self.selection.stickers,
-            StickerTab::Archived if self.selection.set_id.is_some() => &self.selection.stickers,
+            StickerTab::Archived if self.selection.set_id().is_some() => &self.selection.stickers,
             StickerTab::Archived => &[],
             StickerTab::Recent => &self.recent,
             StickerTab::Favorites => &self.favorites,
-            StickerTab::Search if self.selection.set_id.is_some() => &self.selection.stickers,
+            StickerTab::Search if self.selection.set_id().is_some() => &self.selection.stickers,
             StickerTab::Search => &self.search.stickers,
         }
     }
@@ -881,11 +849,9 @@ impl StickerPanel {
     }
 
     pub fn selected_needs_load(&self) -> Option<i64> {
-        let id = self.selection.set_id?;
-        if self.selection.stage.set_id() == Some(id) {
-            None
-        } else {
-            Some(id)
+        match self.selection.stage {
+            StickerSetStage::Selected { set_id } => Some(set_id),
+            _ => None,
         }
     }
 }

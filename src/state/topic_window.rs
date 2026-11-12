@@ -183,6 +183,9 @@ impl Session {
             self.clear_topic_load_failed(chat_id, topic);
         }
         let entry = self.topic_history_entry(chat_id, topic);
+        if !newer {
+            entry.settle_older(pending.id);
+        }
         // A newer page for a window that already reaches the latest was
         // asked for from one that has gone.
         if newer && !entry.has_newer() {
@@ -223,7 +226,13 @@ impl Session {
         };
         match pending.purpose {
             RequestPurpose::GetTopicHistory => {
-                self.topic_history_entry(chat_id, topic).fail_older();
+                let entry = self.topic_history_entry(chat_id, topic);
+                // The page the window waits for fails it; the failure of
+                // another page (the window moved, a newer ask is out) does
+                // not.
+                if entry.settle_older(pending.id) || !entry.asking_older() {
+                    entry.fail_older();
+                }
             }
             _ => {
                 if let Some(history) = self.threads.topic_histories.get_mut(&(chat_id.0, topic)) {
@@ -318,5 +327,16 @@ impl Session {
         for id in self.topic_page_ids(chat_id, topic, ends) {
             drop(self.requests.take(RequestId(id)));
         }
+        if ends.contains(&WindowEnd::Oldest)
+            && let Some(history) = self.threads.topic_histories.get_mut(&(chat_id.0, topic))
+        {
+            history.forget_older();
+        }
+    }
+
+    /// An older page of the topic went out as `request`: the window waits
+    /// for it.
+    pub fn topic_older_asked(&mut self, chat_id: ChatId, topic: i32, request: RequestId) {
+        self.topic_history_entry(chat_id, topic).ask_older(request);
     }
 }

@@ -235,7 +235,7 @@ fn sticker_search_and_set_management_use_latest_confirmed_state() {
     driver.select_sticker_set(77).unwrap();
     assert_eq!(sent_request(&recorder, "getStickerSet")["set_id"], "77");
     driver.select_sticker_tab(StickerTab::Search).unwrap();
-    assert_eq!(driver.session.stickers.stickers.selection.set_id, None);
+    assert_eq!(driver.session.stickers.stickers.selection.set_id(), None);
     assert!(
         !driver
             .session
@@ -506,7 +506,7 @@ fn archived_sticker_paging_and_restore_ignore_pre_mutation_fetches() {
         )
         .unwrap();
     assert!(driver.session.stickers.stickers.archived.is_empty());
-    assert_eq!(driver.session.stickers.stickers.selection.set_id, None);
+    assert_eq!(driver.session.stickers.stickers.selection.set_id(), None);
     assert!(
         !driver
             .session

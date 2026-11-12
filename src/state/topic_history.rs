@@ -79,10 +79,19 @@ impl TopicHistory {
     }
 
     /// The last older page failed (nothing to fail once the start is
-    /// reached).
+    /// reached). Callers settle the page they wait for first
+    /// ([`Self::settle_older`]), so only that page's failure gets here.
     pub fn fail_older(&mut self) {
         if matches!(self.older, OlderEnd::Open | OlderEnd::Asking(_)) {
             self.older = OlderEnd::Failed;
+        }
+    }
+
+    /// The older page that was out is forgotten (its end of the window
+    /// moved): the end is open again.
+    pub fn forget_older(&mut self) {
+        if matches!(self.older, OlderEnd::Asking(_)) {
+            self.older = OlderEnd::Open;
         }
     }
 

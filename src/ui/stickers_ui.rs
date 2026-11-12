@@ -605,7 +605,7 @@ impl QuillApp {
         };
         for set in &visible_sets {
             let set_id = set.id;
-            let selected = panel.selection.set_id == Some(set_id);
+            let selected = panel.selection.set_id() == Some(set_id);
             let title = if set.title.is_empty() {
                 set.name.clone()
             } else {
@@ -677,7 +677,7 @@ impl QuillApp {
         }
         if panel.tab == StickerTab::Search
             && panel.search.has_more
-            && panel.selection.set_id.is_none()
+            && panel.selection.set_id().is_none()
         {
             grid = grid.child(
                 Button::new("sticker-search-more")
@@ -689,7 +689,7 @@ impl QuillApp {
         let mut preview = div().flex().items_center().justify_between().gap_2();
         if let Some(set) = visible_sets
             .iter()
-            .find(|set| Some(set.id) == panel.selection.set_id)
+            .find(|set| Some(set.id) == panel.selection.set_id())
         {
             preview = preview
                 .child(div().font_semibold().child(tr_with(

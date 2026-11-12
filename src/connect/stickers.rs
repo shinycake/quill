@@ -147,7 +147,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         let panel = &mut self.session.stickers.stickers;
         panel.lists.installed.clear_error();
         if panel.selection.stage.is_failed() {
-            panel.selection.stage = crate::state::StickerSetStage::Idle;
+            panel.selection.reselect();
         }
         if self
             .session
@@ -253,7 +253,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                     .stickers
                     .sets
                     .iter()
-                    .any(|set| Some(set.id) == self.session.stickers.stickers.selection.set_id)
+                    .any(|set| Some(set.id) == self.session.stickers.stickers.selection.set_id())
             {
                 self.session.select_sticker_set(id);
             }

@@ -108,13 +108,15 @@ impl Session {
             .stickers
             .stickers
             .selection
-            .set_id
+            .set_id()
             .is_some_and(|id| self.stickers.stickers.sets.iter().any(|set| set.id == id));
         if !still_selected {
-            self.stickers.stickers.selection = StickerSelection {
-                set_id: self.stickers.stickers.sets.first().map(|set| set.id),
-                ..StickerSelection::default()
-            };
+            self.stickers.stickers.selection = self
+                .stickers
+                .stickers
+                .sets
+                .first()
+                .map_or_else(StickerSelection::default, |set| StickerSelection::of(set.id));
         }
     }
 
@@ -246,7 +248,7 @@ impl Session {
     }
 
     pub fn select_sticker_set(&mut self, set_id: i64) {
-        if self.stickers.stickers.selection.set_id == Some(set_id) {
+        if self.stickers.stickers.selection.set_id() == Some(set_id) {
             return;
         }
         self.stickers.stickers.selection = StickerSelection::of(set_id);

@@ -29,7 +29,7 @@ impl Session {
             Some(history) => {
                 history.messages.is_empty()
                     && !history.loaded_complete()
-                    && self.topic_page_in_flight(chat_id, forum_topic_id, WindowEnd::Oldest)
+                    && history.asking_older()
             }
         }
     }
