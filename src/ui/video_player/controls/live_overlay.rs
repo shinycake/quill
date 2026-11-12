@@ -29,18 +29,21 @@ pub(crate) const OPENING_SPINNER: Duration = Duration::from_millis(500);
 /// "Connecting…" once the picture stood still this long.
 pub(crate) const CONNECTING_AFTER: Duration = Duration::from_secs(5);
 
-/// What the overlay is decided from, read once per draw.
+/// What the overlay is decided from, read once per draw: one value, so
+/// "nothing expected" and "failed" are not facts kept beside the player's
+/// state. The live player's state is `None` before there is a player (no
+/// feed yet, which reads as opening).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct LiveInput {
-    /// The live player's state; `None` before there is a player (no feed
-    /// yet, which reads as opening).
-    pub(crate) state: Option<PlayState>,
-    /// Nothing is expected: not joined, nobody broadcasting, or not
-    /// playable here. The placeholder shows without a spinner.
-    pub(crate) idle: bool,
+pub(crate) enum LiveInput {
     /// The host knows the picture failed (the call's connect reported an
     /// error) although the player has not.
-    pub(crate) failed: bool,
+    HostFailed,
+    /// Nothing is expected: not joined, nobody broadcasting, or not
+    /// playable here. The placeholder shows without a spinner, unless the
+    /// player already ended or failed.
+    Nothing(Option<PlayState>),
+    /// A picture is expected: the player's state.
+    Expected(Option<PlayState>),
 }
 
 /// What shows over the picture.
@@ -77,16 +80,21 @@ enum Phase {
 }
 
 fn phase(input: LiveInput) -> Phase {
-    if input.failed || input.state == Some(PlayState::Failed) {
+    let (state, idle) = match input {
+        LiveInput::HostFailed => return Phase::Failed,
+        LiveInput::Nothing(state) => (state, true),
+        LiveInput::Expected(state) => (state, false),
+    };
+    if state == Some(PlayState::Failed) {
         return Phase::Failed;
     }
-    if input.state == Some(PlayState::Ended) {
+    if state == Some(PlayState::Ended) {
         return Phase::Ended;
     }
-    if input.idle {
+    if idle {
         return Phase::Idle;
     }
-    match input.state {
+    match state {
         None | Some(PlayState::Opening) => Phase::Opening,
         Some(PlayState::Buffering) => Phase::Stalled,
         Some(PlayState::Paused) => Phase::Paused,
@@ -182,11 +190,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     fn input(state: Option<PlayState>) -> LiveInput {
-        LiveInput {
-            state,
-            idle: false,
-            failed: false,
-        }
+        LiveInput::Expected(state)
     }
 
     #[test]
@@ -251,11 +255,7 @@ mod tests {
     fn failure_and_end_win_over_everything_and_idle_has_no_spinner() {
         let t0 = Instant::now();
         let mut clock = LiveOverlayClock::default();
-        let idle = LiveInput {
-            state: None,
-            idle: true,
-            failed: false,
-        };
+        let idle = LiveInput::Nothing(None);
         let (overlay, due) = clock.observe(idle, t0);
         assert_eq!(overlay, LiveOverlay::Idle);
         assert_eq!(due, None);
@@ -263,11 +263,7 @@ mod tests {
         assert_eq!(overlay, LiveOverlay::Paused);
         let (overlay, _) = clock.observe(input(Some(PlayState::Ended)), t0);
         assert_eq!(overlay, LiveOverlay::Ended);
-        let failed = LiveInput {
-            state: Some(PlayState::Playing),
-            idle: true,
-            failed: true,
-        };
+        let failed = LiveInput::HostFailed;
         let (overlay, _) = clock.observe(failed, t0);
         assert_eq!(overlay, LiveOverlay::Failed);
         let (overlay, _) = clock.observe(input(Some(PlayState::Failed)), t0);

@@ -132,7 +132,7 @@ impl RevealProbe {
 impl MotionState {
     pub(crate) fn reveal_probe(&self) -> RevealProbe {
         RevealProbe {
-            first_row: self.reveal.borrow().map(|r| r.first_row),
+            first_row: self.reveal.get().map(|r| r.first_row),
             measure: self.reveal_measure.clone(),
             fills: self.list_fills.clone(),
         }
@@ -167,8 +167,9 @@ pub(crate) enum DateMotion {
 }
 
 /// Where the floating date pill stands. `Showing` runs from the first
-/// scroll until its hold ran out; the next scroll after that starts a new
-/// one (so the old timer goes with the old value).
+/// scroll until its hold ran out (`ScrollDate::settle` ends it, with its
+/// timer and the row it covers); the next scroll after that starts a new
+/// one.
 #[derive(Default)]
 enum PillStage {
     #[default]
@@ -183,6 +184,10 @@ struct Showing {
     /// Redraws the pill when its fade-out is due (tdesktop's
     /// `_scrollDateHideTimer`); the task clears itself when it fires.
     wake: Option<Task<()>>,
+    /// The row whose own day pill the floating one stands in for while it
+    /// shows: that row draws its pill's place empty, so one pill shows
+    /// (tdesktop paints the top row's date once, sticky).
+    covered_row: Option<usize>,
 }
 
 /// What the floating date pill shows, and until when.
@@ -193,10 +198,6 @@ pub(crate) struct ScrollDate {
     pub(crate) top_label: Option<String>,
     /// The top row starts its day, so an inline separator is on screen.
     pub(crate) separator_at_top: bool,
-    /// The row whose own day pill the floating one stands in for while it
-    /// shows: that row draws its pill's place empty, so one pill shows
-    /// (tdesktop paints the top row's date once, sticky).
-    pub(crate) covered_row: Option<usize>,
 }
 
 impl ScrollDate {
@@ -208,6 +209,7 @@ impl ScrollDate {
                 last_scroll: now,
                 hide_after: DATE_HIDE_AFTER,
                 wake: None,
+                covered_row: None,
             });
         }
         if let PillStage::Showing(showing) = &mut self.pill {
@@ -215,6 +217,29 @@ impl ScrollDate {
                 showing.hide_after = DATE_HIDE_AFTER_DAY_CHANGE;
             }
             showing.last_scroll = now;
+        }
+    }
+
+    /// The hold ran out: the pill is gone, and so are its timer and the
+    /// row it covered. Run at every draw of the pill.
+    pub(crate) fn settle(&mut self, now: Instant) {
+        if self.motion(now) == DateMotion::Hidden {
+            self.pill = PillStage::Hidden;
+        }
+    }
+
+    /// The row the floating pill covers while it is up.
+    pub(crate) fn covered_row(&self) -> Option<usize> {
+        match &self.pill {
+            PillStage::Showing(showing) => showing.covered_row,
+            PillStage::Hidden => None,
+        }
+    }
+
+    /// Record the row the drawn pill covers (`None`: no pill is drawn).
+    fn cover(&mut self, row: Option<usize>) {
+        if let PillStage::Showing(showing) = &mut self.pill {
+            showing.covered_row = row;
         }
     }
 
@@ -295,15 +320,19 @@ impl QuillApp {
         message_id: i64,
         cx: &mut Context<Self>,
     ) -> Option<(SharedString, ReactionFlyFrame)> {
-        let fly = self
-            .history
-            .reaction_fly
-            .as_ref()
-            .filter(|fly| fly.chat_id == chat_id && fly.message_id == message_id)?;
+        let fly = self.history.reaction_fly.take()?;
         let elapsed = super::motion::elapsed_since(fly.started, Instant::now());
+        // The run is over (or skipped for reduced motion): the fly is not
+        // put back, so it ends with its animation.
         let frame = reaction_fly_frame(elapsed, cx.reduce_motion())?;
+        let hit = fly.chat_id == chat_id && fly.message_id == message_id;
+        let glyph = fly.glyph.clone();
+        self.history.reaction_fly.set(Some(fly));
+        if !hit {
+            return None;
+        }
         self.request_animation_tick(60, cx);
-        Some((fly.glyph.clone(), frame))
+        Some((glyph, frame))
     }
 
     /// The reveal of new bottom rows at render time: `(shift, extra)` while
@@ -370,6 +399,13 @@ impl QuillApp {
         let (older, newer) = preload_due(above, below, viewport);
         if older {
             self.maybe_auto_load_older(cx);
+        } else if let Some(live) = self.live.as_mut()
+            && let Some(chat_id) = live.driver.session.open_chat_id()
+            && let Some(history) = live.driver.session.histories.get_mut(&chat_id.0)
+        {
+            // Scrolled away from the top edge: a failed older page may be
+            // asked for again when the reader comes back to it.
+            history.clear_load_failed();
         }
         if newer {
             self.maybe_auto_load_newer(cx);
@@ -404,11 +440,14 @@ impl QuillApp {
     /// The floating pill, absolutely positioned at the top center.
     pub(super) fn scroll_date_pill(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.refresh_scroll_date_top();
+        let now = cx.background_executor().now();
+        self.history.scroll_date.settle(now);
         let pill = self.floating_date_pill(cx);
-        self.history.scroll_date.covered_row = pill
+        let covered = pill
             .is_some()
             .then(|| self.history.scroll_top_probe.get().map(|(ix, _)| ix))
             .flatten();
+        self.history.scroll_date.cover(covered);
         pill
     }
 
@@ -517,6 +556,24 @@ mod tests {
         assert_eq!(date.motion(t0 + ms(1000)), DateMotion::Hidden);
         date.scrolled(t0 + ms(900), false);
         assert_eq!(date.motion(t0 + ms(900)), still(800));
+    }
+
+    #[test]
+    fn a_settled_pill_drops_its_timer_and_its_covered_row() {
+        let t0 = Instant::now();
+        let mut date = ScrollDate::default();
+        date.scrolled(t0, false);
+        date.cover(Some(3));
+        date.arm_wake(gpui_kit::Task::ready(()));
+        assert_eq!(date.covered_row(), Some(3));
+        date.settle(t0 + ms(500));
+        assert_eq!(date.covered_row(), Some(3), "the hold still runs");
+        assert!(date.wake_armed());
+        date.settle(t0 + ms(1000));
+        assert_eq!(date.covered_row(), None);
+        assert!(!date.wake_armed(), "the old timer goes with the old stage");
+        date.scrolled(t0 + ms(1100), false);
+        assert!(!date.wake_armed(), "the next scroll starts a fresh stage");
     }
 
     #[test]

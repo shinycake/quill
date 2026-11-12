@@ -52,7 +52,7 @@ impl QuillApp {
         };
         let job = VideoStickerJob {
             source: editor.source.clone(),
-            edits: editor.edits,
+            edits: editor.edits(),
             info,
         };
         // The frame stays as the box's still (closing the editor would
@@ -60,11 +60,11 @@ impl QuillApp {
         // Only a frame cut at the chosen cover goes to the box; a cut that
         // has not landed yet leaves the box without a still, never an
         // older frame.
-        let cover = editor.edits.cover_ms;
-        let preview = match editor.preview.take() {
-            Some((at, frame)) if at == cover => Some(frame),
-            Some((_, stale)) => {
-                let _ = std::fs::remove_file(stale);
+        let cover = editor.edits().cover_ms;
+        let preview = match editor.cover.take() {
+            Some(frame) if frame.at_ms == cover => Some(frame.path),
+            Some(stale) => {
+                let _ = std::fs::remove_file(stale.path);
                 None
             }
             None => None,

@@ -95,7 +95,7 @@ impl QuillApp {
                 .done(&attachment.path)
                 .and_then(|preview| preview.frame.as_ref())
                 .map(|frame| (frame.width, frame.height)),
-            _ => self.tray_photo_size(attachment.photo_file()),
+            _ => self.tray_photo_size(attachment),
         };
         size.map_or((4, 3), |(width, height)| {
             (
@@ -464,17 +464,13 @@ impl QuillApp {
 
     /// "PDF · 1.2 MB" (tdesktop's file row: extension and size).
     fn send_card_file_meta(&self, attachment: &ComposerAttachment) -> String {
-        let size = *self
+        let size = self
             .composer_sends
             .reads
             .file_sizes
-            .borrow_mut()
-            .entry(attachment.path.clone())
-            .or_insert_with(|| {
-                std::fs::metadata(&attachment.path)
-                    .ok()
-                    .map(|meta| meta.len())
-            });
+            .done(&attachment.path)
+            .copied()
+            .flatten();
         let extension = attachment
             .path
             .extension()

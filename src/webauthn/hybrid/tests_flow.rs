@@ -52,7 +52,8 @@ fn environment(
         }),
         rng: Box::new(rand::rngs::StdRng::seed_from_u64(7)),
         now_unix: 1_760_000_000,
-        bluetooth_probe: Duration::from_millis(300),
+        bluetooth_probe: Duration::from_secs(3600),
+        now: Arc::new(Instant::now),
     };
     (
         env,
@@ -85,17 +86,42 @@ fn watch(ceremony: Ceremony) -> Watched {
     }
 }
 
-/// The next event, waiting up to ten seconds.
+/// The next event: the worker's channel wakes the wait (no polling, no
+/// clock). A worker that ends without one reads as the failure it is.
 fn next(watched: &mut Watched) -> CeremonyEvent {
-    let until = Instant::now() + Duration::from_secs(10);
     loop {
         if let Some(event) = watched.pending.pop_front() {
             return event;
         }
-        watched.pending.extend(watched.ceremony.poll());
-        if watched.pending.is_empty() {
-            assert!(Instant::now() < until, "no event");
-            std::thread::sleep(Duration::from_millis(5));
+        let more = watched.ceremony.wait();
+        assert!(!more.is_empty(), "the worker ended without an event");
+        watched.pending.extend(more);
+    }
+}
+
+/// A clock the test moves by hand: the real start plus what was advanced.
+#[derive(Clone)]
+struct ManualClock {
+    base: Instant,
+    advanced: Arc<Mutex<Duration>>,
+}
+
+impl ManualClock {
+    fn new() -> Self {
+        Self {
+            base: Instant::now(),
+            advanced: Arc::default(),
+        }
+    }
+
+    fn now(&self) -> Instant {
+        let advanced = self.advanced.lock().map(|d| *d).unwrap_or_default();
+        self.base + advanced
+    }
+
+    fn advance(&self, by: Duration) {
+        if let Ok(mut advanced) = self.advanced.lock() {
+            *advanced += by;
         }
     }
 }
@@ -363,12 +389,12 @@ fn bluetooth_off_shows_no_code() {
 
 #[test]
 fn a_silent_scanner_reads_as_bluetooth_off() {
-    // The scanner never says; after the probe the sheet has no code.
-    let (env, _rig) = environment(None, None, None);
-    let started = Instant::now();
+    // The scanner never says; once the probe is used up the sheet has no
+    // code. A probe of no time is used up at once.
+    let (mut env, _rig) = environment(None, None, None);
+    env.bluetooth_probe = Duration::ZERO;
     let mut ceremony = watch(register(creation(), env));
     assert_eq!(next(&mut ceremony), CeremonyEvent::Hybrid { qr: None });
-    assert!(started.elapsed() >= Duration::from_millis(250));
 }
 
 #[test]
@@ -409,11 +435,15 @@ fn security_key_hands_over_to_the_key() {
 
 #[test]
 fn the_code_expires_with_the_request() {
-    let (env, _rig) = environment(Some(true), None, None);
+    let (mut env, _rig) = environment(Some(true), None, None);
+    let clock = ManualClock::new();
+    let worker_clock = clock.clone();
+    env.now = Arc::new(move || worker_clock.now());
     let mut options = creation();
     options.timeout_ms = 400;
     let mut ceremony = watch(register(options, env));
     let _ = qr_of(next(&mut ceremony));
+    clock.advance(Duration::from_millis(400));
     assert_eq!(
         next(&mut ceremony),
         CeremonyEvent::Failed(CeremonyError::Phone)

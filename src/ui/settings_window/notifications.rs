@@ -20,9 +20,9 @@ impl QuillApp {
         cx.notify();
     }
 
-    pub(super) fn fetch_notification_settings(&mut self) {
+    pub(in crate::ui) fn fetch_notification_settings(&mut self) {
         if let Some(live) = self.live.as_mut() {
-            let _ = live.driver.maybe_fetch_scope_notification_settings();
+            let _ = live.driver.retry_scope_notification_settings();
             let _ = live.driver.maybe_fetch_notification_sounds();
             for scope in NotificationSettingsScope::ALL {
                 let _ = live.driver.maybe_fetch_notification_exceptions(scope);

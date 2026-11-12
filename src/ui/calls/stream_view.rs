@@ -48,11 +48,40 @@ pub(crate) struct StreamPictureParts {
     /// The chat has a photo (blurring, or blurred).
     pub(crate) has_photo: bool,
     pub(crate) name: String,
-    /// Nothing is expected (not joined, nobody broadcasting, not
-    /// playable here): the placeholder shows without a spinner.
-    pub(crate) idle: bool,
+    /// What the picture is: nothing expected, expected (the player's
+    /// state), or the joined call's connect failed, said once.
+    pub(crate) picture: StreamPicture,
+}
+
+/// What the stream's picture is, decided once from the app.
+pub(crate) enum StreamPicture {
+    /// Nothing is expected (not joined, nobody broadcasting, not playable
+    /// here): the placeholder shows without a spinner.
+    Idle,
+    /// A picture is expected: the player opens, plays or stalls.
+    Expected,
     /// The joined call's connect reported this error.
-    pub(crate) failure: Option<String>,
+    Failed(String),
+}
+
+impl StreamPictureParts {
+    /// The overlay's input: the picture's stage with the player's state.
+    pub(crate) fn input(&self) -> LiveInput {
+        let state = self.player.as_ref().map(VideoPlayer::state);
+        match self.picture {
+            StreamPicture::Failed(_) => LiveInput::HostFailed,
+            StreamPicture::Idle => LiveInput::Nothing(state),
+            StreamPicture::Expected => LiveInput::Expected(state),
+        }
+    }
+
+    /// The error the failed card shows.
+    fn failure(&self) -> Option<&str> {
+        match &self.picture {
+            StreamPicture::Failed(error) => Some(error),
+            _ => None,
+        }
+    }
 }
 
 impl QuillApp {
@@ -80,7 +109,7 @@ impl QuillApp {
             .and_then(|s| s.chat_photo_path(quill::ids::ChatId(chat_id)))
             .is_some();
         let idle = !facts.joined || facts.stream == StreamState::NoStream;
-        let failure = self
+        let failure: Option<String> = self
             .session()
             .and_then(|s| s.calls.active_group_call.as_ref())
             // The stream's own connect failed: the error is shared with
@@ -88,6 +117,12 @@ impl QuillApp {
             // transport is up.
             .filter(|call| call.is_joined && !call.transport.is_connected())
             .and_then(|call| call.transport.error().map(str::to_string));
+        // A failed connect shows its card even when nothing is expected.
+        let picture = match failure {
+            Some(error) => StreamPicture::Failed(error),
+            None if idle => StreamPicture::Idle,
+            None => StreamPicture::Expected,
+        };
         let stream = &mut self.group_call.stream;
         follow_live_slot(&mut stream.player, sink.as_ref(), cx);
         Some(StreamPictureParts {
@@ -96,8 +131,7 @@ impl QuillApp {
             photo: stream.photo.image(),
             has_photo,
             name,
-            idle,
-            failure,
+            picture,
         })
     }
 
@@ -166,11 +200,7 @@ impl Render for StreamPictureView {
             .player
             .as_ref()
             .is_some_and(VideoPlayer::has_live_frame);
-        let input = LiveInput {
-            state: parts.player.as_ref().map(VideoPlayer::state),
-            idle: parts.idle,
-            failed: parts.failure.is_some(),
-        };
+        let input = parts.input();
         let now = cx.background_executor().now();
         let (overlay, due) = self.overlay.observe(input, now);
         if let Some(due) = due {
@@ -196,7 +226,9 @@ impl Render for StreamPictureView {
             on_retry: Some(Rc::new(move |_, cx| {
                 let _ = retry_owner.update(cx, |app, cx| app.retry_stream(cx));
             })),
-            detail: parts.failure.clone().map(SharedString::from),
+            detail: parts
+                .failure()
+                .map(|error| SharedString::from(error.to_owned())),
         };
         let state = PictureState::live(overlay, overlay_parts);
         // The placeholder goes under the picture when the overlay does not

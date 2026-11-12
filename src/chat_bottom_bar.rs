@@ -3,6 +3,7 @@
 //! `isJoinChannel`, `isMuteUnmute`, `isBotStart`, in that order).
 #![deny(clippy::indexing_slicing)]
 
+use crate::ids::RequestId;
 use crate::telegram::envelope::ChannelMemberStatus;
 
 /// The action bar shown in place of the composer.
@@ -21,9 +22,25 @@ pub enum BottomBar {
     MuteUnmute { muted: bool },
     /// A bot chat that has not been started.
     Start,
+    /// The same, with the start request out: the button is off.
+    Starting,
     /// The user accepts messages only from contacts and Premium users,
     /// and the viewer is neither (`EmptyChatLockedBox::PremiumRequired`).
     PremiumRequired,
+}
+
+/// Whether a bot chat offers its Start button: one value, read from the
+/// chat each frame.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum StartState {
+    /// The chat is not a bot's, or it has been started.
+    #[default]
+    NotStartable,
+    /// A start link armed a parameter, or the history loaded empty.
+    Offered,
+    /// `sendBotStartMessage` is out as this request: the button waits for
+    /// its answer, a refusal offers Start again.
+    Starting(RequestId),
 }
 
 /// What the bar decision reads from the open chat.
@@ -34,8 +51,7 @@ pub struct BarFacts {
     pub is_bot: bool,
     /// The viewer may send messages here at all.
     pub can_send: bool,
-    /// A start link armed a parameter, or the history loaded empty.
-    pub bot_start_pending: bool,
+    pub start: StartState,
     /// A supergroup or channel (`None` for private chats and basic groups).
     pub channel: Option<ChannelFacts>,
     pub muted: bool,
@@ -81,7 +97,14 @@ pub fn bottom_bar(facts: &BarFacts) -> Option<BottomBar> {
             _ => {}
         }
     }
-    (facts.is_bot && facts.can_send && facts.bot_start_pending).then_some(BottomBar::Start)
+    if !(facts.is_bot && facts.can_send) {
+        return None;
+    }
+    match facts.start {
+        StartState::NotStartable => None,
+        StartState::Offered => Some(BottomBar::Start),
+        StartState::Starting(_) => Some(BottomBar::Starting),
+    }
 }
 
 impl BottomBar {
@@ -95,7 +118,7 @@ impl BottomBar {
             BottomBar::ApplyToJoin => "Apply to join group",
             BottomBar::MuteUnmute { muted: true } => "Unmute",
             BottomBar::MuteUnmute { muted: false } => "Mute",
-            BottomBar::Start => "Start",
+            BottomBar::Start | BottomBar::Starting => "Start",
             BottomBar::PremiumRequired => "Go Premium",
         }
     }
@@ -103,7 +126,7 @@ impl BottomBar {
 
 #[cfg(test)]
 mod tests {
-    use super::{BarFacts, BottomBar, ChannelFacts, bottom_bar};
+    use super::{BarFacts, BottomBar, ChannelFacts, StartState, bottom_bar};
     use crate::telegram::envelope::ChannelMemberStatus as Status;
 
     fn channel(broadcast: bool, membership: Option<Status>, by_request: bool) -> BarFacts {
@@ -161,7 +184,7 @@ mod tests {
         );
         let bot = BarFacts {
             is_bot: true,
-            bot_start_pending: true,
+            start: StartState::Offered,
             can_send: true,
             ..blocked
         };
@@ -238,16 +261,24 @@ mod tests {
         let bot = BarFacts {
             is_bot: true,
             can_send: true,
-            bot_start_pending: true,
+            start: StartState::Offered,
             ..BarFacts::default()
         };
         assert_eq!(bottom_bar(&bot), Some(BottomBar::Start));
         assert_eq!(
             bottom_bar(&BarFacts {
-                bot_start_pending: false,
+                start: StartState::NotStartable,
                 ..bot
             }),
             None
+        );
+        // The request out keeps the button, switched off.
+        assert_eq!(
+            bottom_bar(&BarFacts {
+                start: StartState::Starting(crate::ids::RequestId(4)),
+                ..bot
+            }),
+            Some(BottomBar::Starting)
         );
         // A chat the viewer cannot write in has nothing to start.
         assert_eq!(
@@ -263,7 +294,7 @@ mod tests {
     fn join_comes_before_start() {
         let mut facts = channel(false, Some(Status::Left), false);
         facts.is_bot = true;
-        facts.bot_start_pending = true;
+        facts.start = StartState::Offered;
         assert_eq!(bottom_bar(&facts), Some(BottomBar::JoinGroup));
     }
 }

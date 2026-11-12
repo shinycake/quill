@@ -107,7 +107,7 @@ fn a_download_subset_keeps_the_intents_of_the_asked_files() {
     downloads.begin(1, DownloadOrigin::User);
     downloads.begin(2, DownloadOrigin::User);
     let files = FileMap::default();
-    let subset = downloads.only([2, 3]);
+    let subset = downloads.only(&[2, 3]);
     assert!(subset.is_downloading(2, &files) || subset.is_requested(2));
     assert!(!subset.is_requested(1), "file 1 was not asked for");
     assert_eq!(subset.requested_count(), 1);

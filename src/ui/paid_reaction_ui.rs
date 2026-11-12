@@ -238,18 +238,18 @@ impl QuillApp {
         }
         let message_id = MessageId(pending.message_id);
         let anonymous = pending.sender == Some(PaidSender::Anonymous);
-        let title = match (pending.stars, anonymous) {
+        let title = match (pending.stars(), anonymous) {
             (1, false) => tr(keys::Q_MONEY_STAR_SENT),
             (_, false) => tr(keys::Q_MONEY_STARS_SENT),
             (1, true) => tr(keys::Q_MONEY_STAR_SENT_ANONYMOUSLY),
             (_, true) => tr(keys::Q_MONEY_STARS_SENT_ANONYMOUSLY),
         };
-        let body = if pending.stars == 1 {
+        let body = if pending.stars() == 1 {
             tr(keys::Q_MONEY_YOU_REACTED_WITH_1_STAR).to_string()
         } else {
             tr_with(
                 keys::Q_MONEY_YOU_REACTED_WITH_STARS,
-                &[("stars", &(group_digits(pending.stars)).to_string())],
+                &[("stars", &(group_digits(pending.stars())).to_string())],
             )
         };
         let seconds = pending.seconds_left(unix_ms_now());

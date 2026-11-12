@@ -64,7 +64,7 @@ impl QuillApp {
             .get(&chat_id.0)
             .is_some_and(|chat| !chat.kind.is_channel());
         let mut body = div().flex().flex_col().gap_1();
-        if let Some(status) = session.groups.chat_boost_details.get(&chat_id.0) {
+        if let Some(status) = session.groups.boost_status(chat_id.0) {
             let next = status.level + 1;
             body = body
                 .child(

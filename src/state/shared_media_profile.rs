@@ -178,7 +178,7 @@ impl SharedMediaState {
     ) -> bool {
         match generation {
             Some(generation) => self.accepts(chat_id, tab, generation),
-            None => self.chat_id == Some(chat_id),
+            None => self.chat_id() == Some(chat_id),
         }
     }
 
@@ -491,7 +491,7 @@ impl Session {
     /// The tabs the gallery shows for the open chat.
     pub fn shared_media_visible_tabs(&self) -> Vec<SharedMediaTab> {
         let gallery = &self.media.shared_media;
-        let chat_id = gallery.chat_id;
+        let chat_id = gallery.chat_id();
         let kind = chat_id
             .and_then(|id| self.chats.get(&id.0))
             .map(|chat| &chat.kind);

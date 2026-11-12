@@ -8,7 +8,7 @@
 
 use super::app::QuillApp;
 use super::chat_theme::fill_muted;
-use super::gift_market_state::{AuctionOpen, MarketBox};
+use super::gift_market_state::{FileAskOutcome, MarketBox};
 use super::premium_ui::sticker_tile;
 use super::shell::{DialogKind, QuillShell};
 use crate::ui::status_note::StatusNote;
@@ -29,7 +29,7 @@ use quill::premium_hub::upgraded::Collectible;
 use quill::state::Session;
 use quill::state::fetch::Fetch;
 use quill::telegram::envelope::{MessageSender, StickerContent};
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -157,10 +157,6 @@ impl QuillApp {
             }
             _ => {}
         }
-        if self.gift_market.stack.is_empty() {
-            self.gift_market.recipient = None;
-            self.gift_market.auction_open = AuctionOpen::Idle;
-        }
         self.after_craft_pop();
     }
 
@@ -171,8 +167,8 @@ impl QuillApp {
     /// this is the smallest safe choice.
     pub(super) fn auction_recipient(&self, gift_id: i64) -> Option<MessageSender> {
         self.gift_market
-            .recipient
-            .as_ref()
+            .flow
+            .recipient()
             .map(|recipient| recipient.sender)
             .or_else(|| {
                 let state = self
@@ -203,16 +199,16 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         if self.gift_market.stack.is_empty() {
-            self.gift_market.recipient = self
+            let recipient = self
                 .session()
                 .map(|s| &s.payments.gifts_manage.send)
-                .filter(|send| send.open)
+                .filter(|send| send.is_open())
                 .and_then(|send| send.recipient.clone());
+            self.gift_market.flow.set_recipient(recipient);
         }
-        let from_send_box = self.gift_market.recipient.is_some();
         match self.live.as_mut() {
             Some(live) => match live.driver.fetch_gift_auction(auction_id) {
-                Ok(_) => self.gift_market.auction_open = AuctionOpen::Waiting { from_send_box },
+                Ok(request) => self.gift_market.flow.begin_opening(request),
                 Err(_) => {
                     self.set_note(StatusNote::error(tr(
                         keys::Q_MONEY_COULDNT_LOAD_THE_AUCTION,
@@ -252,29 +248,38 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let AuctionOpen::Waiting { from_send_box } = self.gift_market.auction_open {
+        if let Some((request, from_send_box)) = self.gift_market.flow.opening() {
+            // Only the answer to this ask opens its box: a newer fetch
+            // (another window, a link) replaced the session's stage, and
+            // this ask is over.
             let ready = self.gift_market_mut().and_then(|market| {
-                let AuctionFetch::Ready { gift_id } = market.auction else {
+                let AuctionFetch::Ready {
+                    gift_id,
+                    request: answered,
+                } = market.auction
+                else {
                     return None;
                 };
-                market.auction = AuctionFetch::Idle;
-                Some(gift_id)
+                (answered == request.0).then(|| {
+                    market.auction = AuctionFetch::Idle;
+                    gift_id
+                })
             });
             let loading = self.session().is_some_and(|s| {
-                matches!(s.payments.gift_market.auction, AuctionFetch::Loading { .. })
+                s.payments.gift_market.auction == (AuctionFetch::Loading { request: request.0 })
             });
             let send_box_open = self
                 .session()
-                .is_some_and(|s| s.payments.gifts_manage.send.open);
+                .is_some_and(|s| s.payments.gifts_manage.send.is_open());
             if from_send_box && !send_box_open {
                 // The send box the auction was asked from is closed: the
                 // box does not open over whatever the user does now.
-                self.gift_market.auction_open = AuctionOpen::Idle;
+                self.gift_market.flow.end_opening();
             } else if let Some(gift_id) = ready {
-                self.gift_market.auction_open = AuctionOpen::Idle;
+                self.gift_market.flow.end_opening();
                 self.show_auction_box(gift_id, cx);
             } else if !loading {
-                self.gift_market.auction_open = AuctionOpen::Idle;
+                self.gift_market.flow.end_opening();
             }
         }
         let bought = self.gift_market.top() == Some(&MarketBox::Buy)
@@ -296,28 +301,41 @@ impl QuillApp {
         files.sort_unstable_by_key(|file| file.0);
         files.dedup();
         let asked = self.gift_market.requested_files.clone();
-        match self.live.as_mut() {
+        let same_set = asked.len() == files.len()
+            && asked
+                .iter()
+                .zip(&files)
+                .all(|((file, _), next)| file == next);
+        let next: Vec<(quill::ids::FileId, FileAskOutcome)> = match self.live.as_mut() {
             Some(live) => {
                 let _ = live.driver.follow_gift_auction(follow);
-                // A file counts as requested only once its request went
-                // out (or the file layer had nothing to send); a refused
-                // send is tried again at the next upkeep.
-                let sent: Vec<_> = files
+                // Each file is asked once: a refused send is marked, and
+                // tried again only when the set of files changes (or the
+                // boxes are reopened), never at every upkeep.
+                files
                     .iter()
-                    .copied()
-                    .filter(|file| {
-                        asked.contains(file) || live.driver.download_file(*file, 8).is_ok()
+                    .map(|file| {
+                        let ask = match asked.iter().find(|(asked, _)| asked == file) {
+                            Some((_, FileAskOutcome::Sent)) => FileAskOutcome::Sent,
+                            Some((_, FileAskOutcome::Refused)) if same_set => {
+                                FileAskOutcome::Refused
+                            }
+                            _ if live.driver.download_file(*file, 8).is_ok() => {
+                                FileAskOutcome::Sent
+                            }
+                            _ => FileAskOutcome::Refused,
+                        };
+                        (*file, ask)
                     })
-                    .collect();
-                if sent != asked {
-                    self.gift_market.requested_files = sent;
-                }
+                    .collect()
             }
-            None => {
-                if files != self.gift_market.requested_files {
-                    self.gift_market.requested_files = files;
-                }
-            }
+            None => files
+                .iter()
+                .map(|file| (*file, FileAskOutcome::Sent))
+                .collect(),
+        };
+        if next != self.gift_market.requested_files {
+            self.gift_market.requested_files = next;
         }
     }
 
@@ -444,7 +462,7 @@ impl QuillApp {
                 MarketBox::CraftResult => this.craft_result_box(cx),
                 MarketBox::Notice { title, text } => this.notice_box(title, text, cx),
             };
-            let body = Rc::new(RefCell::new(Some(view.body)));
+            let body = Rc::new(Cell::new(Some(view.body)));
             let mut dialog = dialog
                 .overlay(true)
                 .title(
@@ -461,10 +479,7 @@ impl QuillApp {
                 )
                 .content(crate::ui::shell::scrollable_dialog_content(
                     move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
+                        let body = body.take().unwrap_or_else(|| div().into_any_element());
                         content.child(body)
                     },
                 ))

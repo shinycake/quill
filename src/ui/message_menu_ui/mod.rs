@@ -28,9 +28,7 @@ use quill::state::{Audience, MessageReportStage, Session};
 use quill::telegram::envelope::{
     ChannelMemberStatus, MessageActions, MessageContent, MessageSender, ReactionType, ReportOption,
 };
-use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
 pub(super) use super::message_menu_state::MessageMenuPage;
 

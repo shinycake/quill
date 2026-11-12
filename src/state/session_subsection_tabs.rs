@@ -54,14 +54,39 @@ pub struct RowTopic {
     pub icon: i64,
 }
 
+/// The topic titles of a forum row: not here yet (the row reads "Loading…"),
+/// failed with no list held (the row offers a retry), or what the list
+/// answered (empty reads "No chats").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RowTopicsView {
+    Loading,
+    Failed,
+    Listed(Vec<RowTopic>),
+}
+
+impl RowTopicsView {
+    /// The topic list neither arrived nor failed.
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading)
+    }
+}
+
+impl std::ops::Deref for RowTopicsView {
+    type Target = [RowTopic];
+
+    fn deref(&self) -> &[RowTopic] {
+        match self {
+            Self::Loading | Self::Failed => &[],
+            Self::Listed(topics) => topics,
+        }
+    }
+}
+
 /// What a forum's chat row shows below the name: the topic titles and the
 /// unread-topic count.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RowForum {
-    pub topics: Vec<RowTopic>,
-    /// The topic list arrived (or failed): empty then reads "No chats", not
-    /// "Loading…".
-    pub loaded: bool,
+    pub topics: RowTopicsView,
     /// The badge counts topics, not messages: the unmuted topics with unread
     /// messages, or all of them when every one is muted
     /// (`IncludeInBadge::UnmutedOrAll`).
@@ -274,12 +299,16 @@ impl Session {
         };
         let jump = topics.first().filter(|t| t.unread).map(|t| t.id);
         Some(RowForum {
-            loaded: self.threads.forum_topics.contains_key(&chat_id.0)
-                || self.threads.forum_topics_failed(chat_id.0),
             unread_topics: i32::try_from(shown).unwrap_or(i32::MAX),
             badge_muted,
             jump,
-            topics,
+            topics: if self.threads.forum_topics.contains_key(&chat_id.0) {
+                RowTopicsView::Listed(topics)
+            } else if self.threads.forum_topics_failed(chat_id.0) {
+                RowTopicsView::Failed
+            } else {
+                RowTopicsView::Loading
+            },
         })
     }
 

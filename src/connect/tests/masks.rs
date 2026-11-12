@@ -57,7 +57,7 @@ fn masks_dialog_requests_mask_lists_and_serializes_changes() {
     driver
         .ingest(copy_and_parse(&sets_answer(archived_request, &[21]), &seq, &sink).unwrap())
         .unwrap();
-    assert_eq!(driver.session.stickers.masks.archived.items().len(), 1);
+    assert_eq!(driver.session.stickers.masks.archived_sets().len(), 1);
 
     let reorder = driver.reorder_mask_set(12, 11).unwrap().unwrap();
     let sent = sent_request(&recorder, "reorderInstalledStickerSets");

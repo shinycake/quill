@@ -24,16 +24,6 @@ pub(super) enum Search {
     },
 }
 
-/// A change to the search field and the picker's query, together.
-pub(super) enum SearchEdit {
-    /// The field opens with this input.
-    Open(Entity<InputState>),
-    /// The text changed.
-    Text(String),
-    /// The field closes.
-    Close,
-}
-
 impl Search {
     pub(super) fn input(&self) -> Option<&Entity<InputState>> {
         match self {

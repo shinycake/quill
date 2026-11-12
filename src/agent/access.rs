@@ -180,7 +180,11 @@ pub fn set_paused_by_lock(locked: bool) {
             gate.locks = gate.locks.saturating_add(1);
         }
     });
-    crate::agent::events::wake_waiters();
+    if locked {
+        crate::agent::events::locked();
+    } else {
+        crate::agent::events::wake_waiters();
+    }
     crate::wake::AGENT.poke();
 }
 
@@ -464,10 +468,8 @@ mod tests {
             chat_id: 7,
             chat_title: "Ann".into(),
             summary: "kept while off".into(),
-            ok: true,
-            declined: false,
+            outcome: activity::Outcome::Done,
             message_ids: Vec::new(),
-            undone: false,
         });
         let token = super::token();
         let kept = |when: &str| {

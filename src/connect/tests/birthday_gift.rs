@@ -23,7 +23,7 @@ fn a_contact_without_a_chat_gets_the_gift_picker() {
     user(&mut f, 901, false);
     f.1.open_send_gift_to_user(901).unwrap();
     let send = &f.1.session.payments.gifts_manage.send;
-    assert!(send.open);
+    assert!(send.is_open());
     let recipient = send.recipient.as_ref().expect("a recipient");
     assert_eq!(recipient.sender, MessageSender::User { user_id: 901 });
     assert_eq!(recipient.name, "Ada Lovelace");
@@ -39,7 +39,7 @@ fn bots_and_unknown_users_get_no_gift_picker() {
     user(&mut f, 902, true);
     assert!(f.1.open_send_gift_to_user(902).is_err());
     assert!(f.1.open_send_gift_to_user(903).is_err());
-    assert!(!f.1.session.payments.gifts_manage.send.open);
+    assert!(!f.1.session.payments.gifts_manage.send.is_open());
     assert!(requests(&f, "getAvailableGifts").is_empty());
     cleanup(f);
 }

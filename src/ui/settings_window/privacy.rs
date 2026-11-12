@@ -21,7 +21,7 @@ impl QuillApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.settings.open && self.settings.page == Some(Page::Privacy) {
+        if self.settings.open() && self.settings.page() == Some(Page::Privacy) {
             return;
         }
         let field = self.twofa.check_password.clone();

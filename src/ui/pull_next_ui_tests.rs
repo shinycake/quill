@@ -156,9 +156,10 @@ fn pulling_past_the_bottom_of_a_channel_opens_the_next_unread_one(cx: &mut TestA
         assert_eq!(pull.next_chat_for_tests(), Some(ChatId(14)));
     });
     // Held past the threshold for the dwell, the pull is ready.
-    std::thread::sleep(std::time::Duration::from_millis(
-        quill::pull_next::READY_DWELL_MS + 30,
-    ));
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(
+            quill::pull_next::READY_DWELL_MS + 30,
+        ));
     vcx.update(|window, cx| window.render_frame(cx));
     assert!(app.read_with(vcx, |app, _| app.history.pull.machine_for_tests().reached()));
     // Letting go opens the next channel.
@@ -268,6 +269,40 @@ fn a_narrow_chat_keeps_the_normal_layout(cx: &mut TestAppContext) {
     });
 }
 
+/// The window a jump was released in closes before it ends: the jump's task
+/// cannot reach it, and still leaves the machine instead of holding the
+/// indicator full (sweep 12-B016).
+#[gpui_kit::test]
+fn a_jump_whose_window_closed_still_ends(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, 1100.);
+    struct Blank;
+    impl gpui_kit::Render for Blank {
+        fn render(
+            &mut self,
+            _: &mut gpui_kit::Window,
+            _: &mut gpui_kit::Context<Self>,
+        ) -> impl gpui_kit::IntoElement {
+            gpui_kit::div()
+        }
+    }
+    let gone = cx.open_window(size(px(300.), px(300.)), |_, _| Blank);
+    let gone_handle: gpui_kit::AnyWindowHandle = gone.into();
+    gone.update(cx, |_, window, _| window.remove_window())
+        .expect("the window closes");
+    let vcx = &mut vcx;
+    frames(vcx);
+    open_channel_with_a_next_one(&app, vcx);
+    app.update(vcx, |app, cx| {
+        app.pull_jump_when_ready(ChatId(14), (gone_handle, None), cx);
+        assert!(app.history.pull.machine_for_tests().jumping());
+    });
+    vcx.run_until_parked();
+    app.read_with(vcx, |app, _| {
+        assert!(!app.history.pull.machine_for_tests().jumping());
+        assert_eq!(app.open_chat_id(), Some(ChatId(13)), "nothing opened");
+    });
+}
+
 #[gpui_kit::test]
 fn a_jump_started_behind_the_lock_opens_nothing_and_ends(cx: &mut TestAppContext) {
     let (app, mut vcx) = new_app(cx, 1100.);
@@ -276,12 +311,10 @@ fn a_jump_started_behind_the_lock_opens_nothing_and_ends(cx: &mut TestAppContext
     open_channel_with_a_next_one(&app, vcx);
     let at = history_centre(&app, vcx);
     pull(vcx, at, 12);
-    app.update(vcx, |app, cx| {
+    app.update_in(vcx, |app, window, cx| {
         // As a release does, then Quill locks within the wait.
-        let now = app.history.pull.now();
-        app.history.pull.machine.begin_jump(now);
         app.set_locked(true, cx);
-        app.pull_jump_when_ready(ChatId(14), cx);
+        app.pull_jump_when_ready(ChatId(14), (window.window_handle(), None), cx);
     });
     vcx.run_until_parked();
     app.read_with(vcx, |app, _| {

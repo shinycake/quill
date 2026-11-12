@@ -349,9 +349,7 @@ impl QuillApp {
     pub(in crate::ui) fn stars_stats_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
         let me = session.my_user_id?;
-        if session.payments.earn.self_stats != Some(true) {
-            return None;
-        }
+        session.payments.earn.self_stats.data()?;
         Some(
             Button::new("stars-view-statistics")
                 .label(tr(keys::Q_MONEY_VIEW_STATISTICS))
@@ -461,8 +459,17 @@ impl QuillApp {
             .app_config
             .is_idle()
         {
-            // Never a failed one: that waits for the next panel open.
-            let _ = live.driver.ensure_earn_app_config();
+            // Never a failed one: that waits for the next panel open. A
+            // refused send fails it here, or it would be asked every frame.
+            if live.driver.ensure_earn_app_config().is_err() {
+                live.driver
+                    .session
+                    .payments
+                    .earn
+                    .limits
+                    .app_config
+                    .fail(tr(keys::Q_MONEY_COULDNT_LOAD_THE_PAGE));
+            }
         }
         if let Some((peer, ton, stars)) = ask
             && !live
@@ -473,7 +480,17 @@ impl QuillApp {
                 .balance_asks
                 .contains_key(&peer)
         {
-            let _ = live.driver.fetch_earn_balances(peer, ton, stars);
+            // A refused send leaves it `Failed`: the next profile open asks
+            // again, this frame's upkeep does not.
+            if live.driver.fetch_earn_balances(peer, ton, stars).is_err() {
+                live.driver
+                    .session
+                    .payments
+                    .earn
+                    .balance_asks
+                    .entry(peer)
+                    .or_insert(quill::state::fetch::BatchAsk::Failed);
+            }
         }
     }
 }

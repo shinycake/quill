@@ -34,44 +34,6 @@ pub enum ChatMenuKind {
     TopPerson,
 }
 
-/// The chat-list popup menu: closed, or open on one target. Every way to
-/// close it is [`Self::close`].
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub enum ChatMenu {
-    #[default]
-    Closed,
-    Open(ChatMenuState),
-}
-
-impl ChatMenu {
-    pub fn open(&mut self, state: ChatMenuState) {
-        *self = Self::Open(state);
-    }
-
-    pub fn close(&mut self) {
-        *self = Self::Closed;
-    }
-
-    pub fn is_open(&self) -> bool {
-        matches!(self, Self::Open(_))
-    }
-
-    /// The open menu's target and submenu.
-    pub fn state(&self) -> Option<ChatMenuState> {
-        match self {
-            Self::Open(state) => Some(*state),
-            Self::Closed => None,
-        }
-    }
-
-    pub fn state_mut(&mut self) -> Option<&mut ChatMenuState> {
-        match self {
-            Self::Open(state) => Some(state),
-            Self::Closed => None,
-        }
-    }
-}
-
 /// Which row of the chat menu has its submenu open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChatMenuSubmenu {

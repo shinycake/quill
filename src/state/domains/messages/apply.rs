@@ -38,11 +38,9 @@ impl Session {
                     LiveStoryPurpose::GetMessageSenders { group_call_id },
                 ))) = pending.map(|p| p.purpose)
                 {
-                    self.set_live_story_senders(group_call_id, senders);
+                    self.set_live_story_senders(group_call_id, pending.map(|p| p.id), senders);
                 } else if let Some(chat_id) = pending.and_then(|p| p.chat_id) {
-                    self.chats_state
-                        .send_as_options
-                        .insert(chat_id.0, crate::state::fetch::Fetch::Ready(senders));
+                    self.accept_message_senders(chat_id, pending.map(|p| p.id), senders);
                 }
             }
             MessagesPayload::UpdateChatIsTranslatable {
@@ -68,14 +66,22 @@ impl Session {
             } => self.sync.mark_live_viewed(chat_id, message_id),
             // B15: `getPollVoteStatistics` answer — cached per message.
             MessagesPayload::PollVoteStatistics { graph } => {
-                if let Some(RequestPurpose::Messages(MessagesPurpose::GetPollVoteStatistics {
-                    chat_id,
-                    message_id,
-                })) = pending.map(|p| p.purpose)
+                if let Some(p) = pending
+                    && let RequestPurpose::Messages(MessagesPurpose::GetPollVoteStatistics {
+                        chat_id,
+                        message_id,
+                    }) = p.purpose
+                    && let Some(slot) = self.messages.poll_stats.get_mut(&(chat_id.0, message_id.0))
+                    && matches!(slot, PollStatsFetch::Loading(asked) if *asked == p.id)
                 {
-                    self.messages
-                        .poll_stats
-                        .insert((chat_id.0, message_id.0), PollStatsFetch::Loaded(graph));
+                    // Only the request the dialog waits for lands.
+                    if let Some(pending) = pending
+                        && let Some(slot) =
+                            self.messages.poll_stats.get_mut(&(chat_id.0, message_id.0))
+                        && *slot == PollStatsFetch::Loading(pending.id)
+                    {
+                        *slot = PollStatsFetch::Loaded(graph);
+                    }
                 }
             }
             MessagesPayload::UpdateMessageUnreadReactions {
@@ -161,16 +167,14 @@ impl Session {
                         .filter(|stop| {
                             matches!(stop, BotStopStage::Stopped | BotStopStage::Stopping(_))
                         });
-                    let stopped = carried == Some(BotStopStage::Stopped);
                     self.remember_files(&files);
                     self.messages.pending_bot_messages.insert(
                         (chat_id.0, forum_topic_id),
                         PendingBotMessage {
                             draft_id,
-                            can_stop: can_stop && !stopped,
                             keep_on_stop,
                             content,
-                            stop: carried.unwrap_or(BotStopStage::Running),
+                            stop: carried.unwrap_or(BotStopStage::Running { can_stop }),
                             expires_at_ms: unix_ms_now().saturating_add(
                                 self.messages.pending_bot_period_secs.saturating_mul(1000),
                             ),
@@ -228,11 +232,7 @@ impl Session {
                 self.in_every_view(|session| session.replace_view_copy(old_message_id, &row));
                 // The draft of the slot the message went to (topic, thread
                 // or chat) is cleared once the composer is seen idle.
-                let slot = if direct_topic != 0 && self.is_direct_messages_admin(chat_id) {
-                    crate::composer::DraftTopic::DirectMessages(direct_topic)
-                } else {
-                    Self::draft_topic_of_message(topic_id, thread_id)
-                };
+                let slot = self.draft_slot_of_message(chat_id, topic_id, thread_id, direct_topic);
                 self.messages.draft_clears.push((chat_id, slot));
             }
             MessagesPayload::UpdateMessageSendFailed {
@@ -250,6 +250,15 @@ impl Session {
                 }
                 let chat_id = message.chat_id;
                 let topic_id = message.topic_id();
+                // The send never became a message: whatever waited on its
+                // ack to clear the draft must let the draft stay.
+                let slot = self.draft_slot_of_message(
+                    chat_id,
+                    topic_id,
+                    message.thread_id(),
+                    message.extras.direct_messages_topic_id(),
+                );
+                self.messages.failed_sends.push((chat_id, slot));
                 let failed = crate::telegram::envelope::MessageSendState::Failed {
                     can_retry: matches!(
                         message.send_state,
@@ -480,13 +489,16 @@ impl Session {
                     self.accept_date_message(message.id, pending);
                     return;
                 }
-                if let Some(RequestPurpose::Groups(GroupsPurpose::GetStatsPost {
-                    chat_id,
-                    message_id,
-                })) = pending.map(|p| p.purpose)
+                if let Some(pending) = pending
+                    && let RequestPurpose::Groups(GroupsPurpose::GetStatsPost {
+                        chat_id,
+                        message_id,
+                    }) = pending.purpose
                 {
                     self.remember_files(&message.files);
-                    self.groups.stats.accept_post(chat_id, message_id, &message);
+                    self.groups
+                        .stats
+                        .accept_post(chat_id, message_id, pending.id, &message);
                     return;
                 }
                 if let Some(RequestPurpose::GetRepliedMessage {
@@ -497,12 +509,13 @@ impl Session {
                     self.accept_replied_message(chat_id, message_id, message);
                     return;
                 }
-                if let Some(RequestPurpose::Messages(MessagesPurpose::GetComposerReplyTarget {
-                    chat_id,
-                    message_id,
-                })) = pending.map(|p| p.purpose)
+                if let Some(p) = pending
+                    && let RequestPurpose::Messages(MessagesPurpose::GetComposerReplyTarget {
+                        chat_id,
+                        message_id,
+                    }) = p.purpose
                 {
-                    self.accept_composer_reply_target(chat_id, message_id, message);
+                    self.accept_composer_reply_target(chat_id, message_id, p.id, message);
                     return;
                 }
                 // M1 fix-up: editing a scheduled send returns the edited
@@ -584,7 +597,9 @@ impl Session {
             }
             MessagesPayload::MessageAutoDeleteTime { seconds } => {
                 if pending.map(|p| p.purpose) == Some(RequestPurpose::GetDefaultAutoDelete) {
-                    self.settings.default_auto_delete.succeed(seconds);
+                    self.settings
+                        .default_auto_delete
+                        .answered(pending.map(|p| p.id), seconds);
                 }
             }
             // M1: `getMessageLink` returns `messageLink`. The driver

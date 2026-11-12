@@ -232,3 +232,14 @@ fn bar_label_follows_translation_state() {
     assert_eq!(bar_label(false, "en"), "Translate to English");
     assert_eq!(bar_label(true, "en"), "Show Original");
 }
+
+#[test]
+fn a_language_listed_twice_leaves_the_skip_list_with_one_toggle() {
+    let mut prefs = TranslatePrefs {
+        skip_languages: vec!["en".into(), "ru".into(), "en".into()],
+        ..TranslatePrefs::default()
+    };
+    assert_eq!(prefs.skip("en"), ["en", "ru"]);
+    assert!(prefs.toggle_skip("en", "en"));
+    assert_eq!(prefs.skip("ru"), ["ru"]);
+}

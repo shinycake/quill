@@ -36,7 +36,6 @@ fn tray_menu_routes_only_its_own_actions() {
     assert_eq!(menu_action("quit"), None);
     assert_eq!(menu_action(""), None);
 }
-use crate::chatlist_style::ChatPreviewStyle;
 use crate::diagnostics::MemorySink;
 use crate::ids::{AccountKey, ChatId, MessageId};
 use crate::settings::BadgePrefs;
@@ -61,18 +60,13 @@ fn chat(id: i64, unread_count: i32) -> ChatSummary {
         archive_is_pinned: false,
         folder_positions: BTreeMap::new(),
         notification_settings: ChatNotificationSettings::default(),
-        last_preview: String::new(),
-        last_preview_style: ChatPreviewStyle::default(),
-        last_preview_sender: String::new(),
-        last_preview_thumb: None,
-        last_message: None,
+        last: None,
         sender_actions: Vec::new(),
         draft: None,
         my_member: Default::default(),
         my_restriction: Default::default(),
         is_forum: None,
         photo_file_id: None,
-        can_send_basic_messages: true,
         permissions: None,
         can_be_deleted_for_all_users: false,
         can_be_deleted_only_for_self: false,

@@ -89,6 +89,15 @@ impl QuillApp {
         self.open_premium_at(request.feature, cx);
     }
 
+    /// The account on screen goes: a preview asked for and not yet opened
+    /// was for its chat's window and goes with it (it would open unprompted
+    /// when the account comes back).
+    pub(in crate::ui) fn drop_promo_request(&mut self) {
+        if let Some(hub) = self.hub_mut() {
+            hub.promo_request = None;
+        }
+    }
+
     pub(in crate::ui) fn close_premium(&mut self, cx: &mut Context<Self>) {
         self.premium_preview.stop();
         if let Some(hub) = self.hub_mut() {

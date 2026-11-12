@@ -82,8 +82,12 @@ fn open_checkout(
     let mut vcx = VisualTestContext::from_window(handle.into(), cx);
     app.update_in(&mut vcx, |app, window, cx| {
         if let Some(session) = app.demo_session.as_mut() {
-            session.payments.checkout =
-                quill::state::CheckoutForm::Ready(stripe_checkout(can_save, need_password));
+            session.payments.checkout = quill::state::CheckoutForm::ready(
+                stripe_checkout(can_save, need_password),
+                quill::state::PaymentRequest {
+                    invoice: quill::payment_invoice::InputInvoice::Name("demo".into()),
+                },
+            );
         }
         app.payments.card_transport = Some(transport);
         app.open_payment_dialog(window, cx);
@@ -435,13 +439,12 @@ fn saving_without_a_password_asks_to_turn_it_on(cx: &mut TestAppContext) {
                 password_hint: String::new(),
                 has_recovery_email_address: false,
                 has_passport_data: false,
-                pending_email_pattern: None,
-                pending_email_code_length: 0,
+                pending_email: None,
                 login_email_address_pattern: String::new(),
                 pending_reset_date: 0,
             });
         }
-        app.twofa.close();
+        app.twofa_close();
         cx.notify();
     });
     draw(&mut vcx);

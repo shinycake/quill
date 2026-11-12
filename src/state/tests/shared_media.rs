@@ -159,11 +159,11 @@ fn open_chat_closes_shared_media_gallery() {
     assert!(session.media.shared_media.open());
     session.open_chat(ChatId(12));
     assert!(!session.media.shared_media.open());
-    assert_eq!(session.media.shared_media.chat_id, None);
+    assert_eq!(session.media.shared_media.chat_id(), None);
     session.media.shared_media.open_for(ChatId(12));
     session.open_chat(ChatId(12));
     assert!(session.media.shared_media.open());
-    assert_eq!(session.media.shared_media.chat_id, Some(ChatId(12)));
+    assert_eq!(session.media.shared_media.chat_id(), Some(ChatId(12)));
 }
 
 fn found_documents(extra: RequestId, total: i32, next_from: i64, ids: &[i64]) -> String {
@@ -671,4 +671,82 @@ fn dropping_a_search_leaves_other_tabs_requests_alone() {
     let state = &session.media.shared_media.tabs[links.index()];
     assert!(state.status.is_ready());
     assert_eq!(state.items.len(), 2);
+}
+
+#[test]
+fn r2_a_search_that_replaces_the_list_drops_rows_no_longer_in_it() {
+    // Sweep r2-19 (06-022): ticked rows are kept only while they are listed.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(1);
+    let chat = ChatId(11);
+    session.media.shared_media.open_for(chat);
+    let tab = SharedMediaTab::Media;
+    let page = |session: &mut Session, sink: &_, seq: &AtomicU64, ids: &[i64]| {
+        let generation = session.media.shared_media.begin_fetch(tab);
+        let extra = session.request(
+            RequestPurpose::GetSharedMedia { tab, generation },
+            Some(chat),
+        );
+        let messages: Vec<String> = ids
+            .iter()
+            .map(|id| {
+                format!(
+                    r#"{{"id":{id},"chat_id":11,"is_outgoing":false,"date":1,"content":{{"@type":"messageText","text":{{"@type":"formattedText","text":"x","entities":[]}}}}}}"#
+                )
+            })
+            .collect();
+        apply_json(
+            session,
+            seq,
+            sink,
+            &format!(
+                r#"{{"@type":"foundChatMessages","@extra":"{}","total_count":{},"next_from_message_id":0,"messages":[{}]}}"#,
+                extra.0,
+                ids.len(),
+                messages.join(",")
+            ),
+        );
+    };
+    page(&mut session, &sink, &seq, &[10, 11]);
+    for id in [10, 11] {
+        session.media.shared_media.selection.push(SelectedMedia {
+            message_id: MessageId(id),
+            can_forward: true,
+            can_delete: true,
+            can_revoke: false,
+        });
+    }
+    page(&mut session, &sink, &seq, &[11]);
+    let kept: Vec<i64> = session
+        .media
+        .shared_media
+        .selection
+        .iter()
+        .map(|selected| selected.message_id.0)
+        .collect();
+    assert_eq!(kept, vec![11]);
+}
+
+#[test]
+fn r2_the_playlist_page_is_one_view_over_the_gallery() {
+    // Sweep r2-19 (06-024): a view value, not two options kept in step.
+    let (mut session, _sink) = session();
+    let shared = &mut session.media.shared_media;
+    shared.open_for(ChatId(5));
+    shared.open_playlist(77);
+    assert_eq!(shared.playlist_user(), Some(77));
+    assert_eq!(
+        shared.chat_id(),
+        Some(ChatId(5)),
+        "the gallery stays under it"
+    );
+    shared.close_playlist();
+    assert_eq!(shared.playlist_user(), None);
+    assert_eq!(shared.view, SharedMediaView::Gallery(ChatId(5)));
+    shared.open_playlist(77);
+    shared.close();
+    assert_eq!(shared.view, SharedMediaView::Closed);
+    shared.open_playlist(8);
+    shared.close_playlist();
+    assert_eq!(shared.view, SharedMediaView::Closed, "no gallery under it");
 }

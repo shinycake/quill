@@ -6,14 +6,12 @@ use super::*;
 /// the error arm below restores it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RequestRollback {
-    /// `setChatPermissions`: the permission block and
-    /// `can_send_basic_messages` a refusal puts back (what the server has
-    /// once the saves ahead of this one are settled), and the block this
-    /// save sent, which a later save's rollback takes over when this one
-    /// succeeds.
+    /// `setChatPermissions`: the permission block a refusal puts back (what
+    /// the server has once the saves ahead of this one are settled), and the
+    /// block this save sent, which a later save's rollback takes over when
+    /// this one succeeds.
     ChatPermissions {
         previous: Option<ChatPermissions>,
-        previous_can_send: bool,
         sent: ChatPermissions,
     },
     /// `toggleSupergroupJoinByRequest`: the previous join-by-request flag
@@ -168,11 +166,49 @@ pub enum RequestRollback {
 }
 
 impl Session {
-    /// Undo an optimistic topic mute or poll vote the server refused,
-    /// unless something has changed it since (an update then tells the
-    /// truth, and restoring would overwrite it).
-    pub(crate) fn restore_optimistic(&mut self, rollback: RequestRollback) {
+    /// Undo an optimistic mutation the server refused, unless something
+    /// has changed it since (an update then tells the truth, and
+    /// restoring would overwrite it). `chat_id` is the chat the refused
+    /// request named, when it named one.
+    pub(crate) fn restore_optimistic(
+        &mut self,
+        rollback: RequestRollback,
+        chat_id: Option<ChatId>,
+    ) {
         match rollback {
+            RequestRollback::ChatPermissions { previous, .. } => {
+                // A save still out after this one decides what the box
+                // shows (its rollback holds the same values, or this
+                // chain's last confirmed ones).
+                if let Some(chat_id) = chat_id
+                    && self
+                        .requests
+                        .pending_extra_for(RequestPurpose::SetChatPermissions, Some(chat_id))
+                        .is_none()
+                    && let Some(chat) = self.chats.get_mut(&chat_id.0)
+                {
+                    chat.permissions = previous;
+                }
+            }
+            // Restore the pre-reorder `order` values the server refused,
+            // then rebuild the list order.
+            RequestRollback::ChatPinOrder { previous, archived } => {
+                for (chat_id, order) in previous {
+                    if let Some(chat) = self.chats.get_mut(&chat_id) {
+                        if archived {
+                            chat.archive_order = order;
+                        } else {
+                            chat.order = order;
+                        }
+                    }
+                }
+                self.rebuild_main_order();
+            }
+            // Drop the refused archive-settings flip; the panel
+            // re-fetches the truth on next open.
+            RequestRollback::ArchiveChatListSettings { previous } => {
+                self.chat_list.edit_archive_settings(previous);
+            }
             RequestRollback::ForumTopicMute {
                 chat_id,
                 forum_topic_id,
@@ -405,7 +441,6 @@ impl Session {
                     }
                 }
             }
-            _ => {}
         }
     }
 }

@@ -1,6 +1,7 @@
 //! State reducer tests: the TDLib 1.8.70 community answers.
 use super::common::*;
 use super::*;
+use crate::state::fetch::Fetch;
 use crate::state::{CommunitiesPurpose, CommunityOutcome};
 
 #[test]
@@ -55,6 +56,12 @@ fn a_first_page_replaces_the_list() {
             }),
             42,
         );
+        let fetch = session.communities.add_chat_requests.entry(42).or_default();
+        let stale = fetch.take_data();
+        *fetch = Fetch::Loading {
+            stale,
+            request: Some(extra),
+        };
         apply_json(
             &mut session,
             &seq,
@@ -172,6 +179,10 @@ fn owned_bots_come_from_our_own_ask() {
     assert!(session.communities.owned_bots.is_idle());
     let purpose = RequestPurpose::Communities(CommunitiesPurpose::GetOwnedBots);
     let extra = session.request(purpose, None);
+    session.communities.owned_bots = Fetch::Loading {
+        stale: None,
+        request: Some(extra),
+    };
     apply_json(
         &mut session,
         &seq,
@@ -183,6 +194,11 @@ fn owned_bots_come_from_our_own_ask() {
     );
     assert_eq!(session.communities.owned_bots.data(), Some(&vec![5, 6]));
     let extra = session.request(purpose, None);
+    let stale = session.communities.owned_bots.take_data();
+    session.communities.owned_bots = Fetch::Loading {
+        stale,
+        request: Some(extra),
+    };
     apply_json(
         &mut session,
         &seq,
@@ -360,4 +376,78 @@ fn outcomes_of_a_left_screen_are_forgotten() {
     );
     session.communities.forget_outcomes();
     assert_eq!(session.communities.take_outcome(), None::<CommunityOutcome>);
+}
+
+#[test]
+fn a_late_answer_of_a_replaced_ask_does_not_land_on_the_newer_one() {
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let purpose = RequestPurpose::Communities(CommunitiesPurpose::GetOwnedBots);
+    let first = session.request(purpose, None);
+    let second = session.request(purpose, None);
+    session.communities.owned_bots = Fetch::Loading {
+        stale: None,
+        request: Some(second),
+    };
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"users","total_count":1,"user_ids":[5],"@extra":"{}"}}"#,
+            first.0
+        ),
+    );
+    assert!(
+        session.communities.owned_bots.is_loading(),
+        "first is not asked"
+    );
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"error","code":400,"message":"BOTS_FAILED","@extra":"{}"}}"#,
+            first.0
+        ),
+    );
+    assert!(session.communities.owned_bots.is_loading());
+    apply_json(
+        &mut session,
+        &seq,
+        &sink,
+        &format!(
+            r#"{{"@type":"users","total_count":1,"user_ids":[6],"@extra":"{}"}}"#,
+            second.0
+        ),
+    );
+    assert_eq!(session.communities.owned_bots.data(), Some(&vec![6]));
+}
+
+#[test]
+fn r2_an_older_requests_page_never_lands_on_the_list_that_replaced_it() {
+    // Sweep r2-19 (05-021): only the page the list waits for lands.
+    let (mut session, sink) = session();
+    let seq = AtomicU64::new(0);
+    let purpose = |first_page| {
+        RequestPurpose::Communities(CommunitiesPurpose::GetAddChatRequests { first_page })
+    };
+    let older = session.request_for_community(purpose(false), 42);
+    let newer = session.request_for_community(purpose(true), 42);
+    let fetch = session.communities.add_chat_requests.entry(42).or_default();
+    fetch.begin();
+    fetch.sent(newer);
+    let page = |extra: RequestId, chat_id: i64, offset: &str| {
+        format!(
+            r#"{{"@type":"communityAddChatRequests","@extra":"{}","total_count":1,"requests":[{{"@type":"communityAddChatRequest","chat_id":{chat_id},"is_hidden":false,"sender_user_id":5,"date":1}}],"next_offset":"{offset}"}}"#,
+            extra.0
+        )
+    };
+    apply_json(&mut session, &seq, &sink, &page(older, 7, "old-cursor"));
+    assert!(session.communities.add_chat_requests(42).is_loading());
+    apply_json(&mut session, &seq, &sink, &page(newer, 8, ""));
+    let list = session.communities.add_chat_requests(42).data().cloned();
+    let list = list.expect("loaded");
+    assert_eq!(list.requests.len(), 1);
+    assert_eq!(list.next_offset, None);
 }

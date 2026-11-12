@@ -417,7 +417,7 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn tracked_group_call_id(&self) -> Option<i32> {
+    pub(super) fn tracked_group_call_id(&self) -> Option<i32> {
         self.session()
             .and_then(|session| session.calls.active_group_call.as_ref())
             .map(|call| call.id)
@@ -593,7 +593,6 @@ impl QuillApp {
                     } else {
                         call.screen_share.stop();
                     }
-                    call.screen_share_paused = false;
                 }
             }
             ScreenFor::Private(_) => {

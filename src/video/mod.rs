@@ -395,11 +395,15 @@ enum ExtractionStage {
 }
 
 impl Extraction {
+    /// A poisoned lock still guards the child: take it back rather than
+    /// leave ffmpeg running unreaped.
+    fn stage(&self) -> std::sync::MutexGuard<'_, ExtractionStage> {
+        self.0.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
     /// Abandon the run: a running ffmpeg is killed and reaped.
     pub fn cancel(&self) {
-        let Ok(mut stage) = self.0.lock() else {
-            return;
-        };
+        let mut stage = self.stage();
         if let ExtractionStage::Running(mut child) =
             std::mem::replace(&mut *stage, ExtractionStage::Cancelled)
         {
@@ -409,19 +413,13 @@ impl Extraction {
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.0
-            .lock()
-            .map(|stage| matches!(*stage, ExtractionStage::Cancelled))
-            .unwrap_or(true)
+        matches!(*self.stage(), ExtractionStage::Cancelled)
     }
 
     /// An ffmpeg is running (tests).
     #[cfg(test)]
     fn is_running(&self) -> bool {
-        self.0
-            .lock()
-            .map(|stage| matches!(*stage, ExtractionStage::Running(_)))
-            .unwrap_or(false)
+        matches!(*self.stage(), ExtractionStage::Running(_))
     }
 }
 
@@ -442,10 +440,7 @@ fn wait_for_cancelable_child(
     // extraction. The worker polls `try_wait` instead of blocking in
     // `wait` so it never holds the lock while the UI killer needs it.
     {
-        let mut stage = extraction
-            .0
-            .lock()
-            .map_err(|_| "extraction slot poisoned".to_string())?;
+        let mut stage = extraction.stage();
         if matches!(*stage, ExtractionStage::Cancelled) {
             // Abandoned between spawn and publish: kill our own child
             // instead of orphaning it.
@@ -457,19 +452,26 @@ fn wait_for_cancelable_child(
         *stage = ExtractionStage::Running(child);
     }
     loop {
-        let mut stage = extraction
-            .0
-            .lock()
-            .map_err(|_| "extraction slot poisoned".to_string())?;
+        let mut stage = extraction.stage();
         let ExtractionStage::Running(child) = &mut *stage else {
             // Cancelled: the killer took the child and reaped it. (The UI
             // drops stale completions by epoch instead of showing an
             // error.)
             return Err(EXTRACTION_CANCELLED.to_string());
         };
-        if let Some(status) = child.try_wait().map_err(|err| err.to_string())? {
-            *stage = ExtractionStage::Starting;
-            return Ok(status);
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                *stage = ExtractionStage::Starting;
+                return Ok(status);
+            }
+            Ok(None) => {}
+            Err(err) => {
+                // The child cannot be polled: stop it and reap it here.
+                let _ = child.kill();
+                let _ = child.wait();
+                *stage = ExtractionStage::Starting;
+                return Err(err.to_string());
+            }
         }
         drop(stage);
         std::thread::sleep(std::time::Duration::from_millis(50));

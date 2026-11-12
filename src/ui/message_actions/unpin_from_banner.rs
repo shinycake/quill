@@ -77,8 +77,10 @@ impl QuillApp {
         let state = self.pinned_bar_state(chat_id);
         let now = surface_reveal::now();
         let animate = surface_reveal::animate(cx);
+        // A frame that is already following the bar draws none this time
+        // (it cannot happen while a frame draws the banner once).
         let (drawn, moving) = {
-            let mut presence = self.frame.surfaces.pinned_bar.borrow_mut();
+            let mut presence = self.frame.surfaces.pinned_bar.try_borrow_mut().ok()?;
             let drawn = presence.follow(state, chat_id.0 as u64, animate, now);
             (drawn, presence.moving(now))
         };

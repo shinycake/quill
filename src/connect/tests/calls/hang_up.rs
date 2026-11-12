@@ -33,7 +33,7 @@ fn a_hang_up_that_fails_keeps_the_engine_call() {
         .active_call
         .as_ref()
         .expect("the call goes on");
-    assert!(matches!(call.state, CallState::Ready));
+    assert!(matches!(call.state(), CallState::Ready(_)));
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -14,40 +14,56 @@ use crate::telegram::requests::{
 const CHAT_LOOK_DOWNLOAD_PRIORITY: i32 = 8;
 
 impl<S: JsonSender> ConnectDriver<S> {
-    /// `getInstalledBackgrounds` for a theme. Deduped while in flight.
+    /// `getInstalledBackgrounds` for a theme; each theme has its own list.
+    /// Asked from Idle only (a request in flight is not asked again), and the
+    /// answer is taken by the request that asked.
     pub fn fetch_installed_backgrounds(
         &mut self,
         for_dark_theme: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.chats_path_active() {
-            return Err(ConnectSendError::InvalidRequest);
-        }
-        if self
+        // A failed list waits for `retry_installed_backgrounds`.
+        if !self
             .session
-            .requests
-            .pending
-            .values()
-            .any(|p| p.purpose == RequestPurpose::GetInstalledBackgrounds)
+            .chats_state
+            .installed_backgrounds
+            .theme(for_dark_theme)
+            .is_idle()
         {
             return Ok(None);
         }
-        // Asked from Idle only; a failed list waits for `retry_installed_backgrounds`.
-        if !self.session.chats_state.installed_backgrounds.is_idle() {
-            return Ok(None);
+        // A request that cannot leave is a failed list, drawn with its
+        // Retry: going back to Idle would ask again from the next draw.
+        if !self.chats_path_active() {
+            self.session
+                .chats_state
+                .installed_backgrounds
+                .theme_mut(for_dark_theme)
+                .fail("not sent");
+            return Err(ConnectSendError::InvalidRequest);
         }
-        let extra = self
+        let extra = self.session.request(
+            RequestPurpose::Chats(ChatsPurpose::GetInstalledBackgrounds { for_dark_theme }),
+            None,
+        );
+        let fetch = self
             .session
-            .request(RequestPurpose::GetInstalledBackgrounds, None);
-        self.session.chats_state.installed_backgrounds.begin();
+            .chats_state
+            .installed_backgrounds
+            .theme_mut(for_dark_theme);
+        fetch.begin();
+        fetch.sent(extra);
         if let Err(err) = self
             .sender
             .send_json(&get_installed_backgrounds(extra, for_dark_theme))
         {
             self.session.requests.take(extra);
-            self.session.chats_state.installed_backgrounds.cancel();
+            self.session
+                .chats_state
+                .installed_backgrounds
+                .theme_mut(for_dark_theme)
+                .fail("not sent");
             return Err(err);
         }
-        self.session.chats_state.installed_backgrounds.begin();
         Ok(Some(extra))
     }
 
@@ -56,7 +72,11 @@ impl<S: JsonSender> ConnectDriver<S> {
         &mut self,
         for_dark_theme: bool,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        self.session.chats_state.installed_backgrounds.clear_error();
+        self.session
+            .chats_state
+            .installed_backgrounds
+            .theme_mut(for_dark_theme)
+            .clear_error();
         self.fetch_installed_backgrounds(for_dark_theme)
     }
 
@@ -315,7 +335,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn download_background_files(&mut self) {
         let chats = &self.session.chats_state;
         let wanted = gallery_files(
-            chats.installed_backgrounds.data().into_iter().flatten(),
+            chats.installed_backgrounds.all(),
             chats.default_backgrounds.values(),
         );
         self.fetch_background_files(wanted.into_iter().cloned().collect());

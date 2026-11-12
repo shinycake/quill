@@ -19,7 +19,8 @@ use quill::ids::{ChatId, MessageId};
 use quill::lang::{keys, tr};
 use quill::local_path::sandboxed_display_path;
 use quill::state::{
-    Session, ThreadStatus, comments_bar_label, effective_preview, replies_link_label,
+    OlderEnd, Session, ThreadAsker, ThreadStatus, comments_bar_label, effective_preview,
+    replies_link_label,
 };
 use quill::telegram::envelope::{MessageReplyInfo, MessageSender};
 use std::path::PathBuf;
@@ -64,6 +65,7 @@ pub(super) fn reply_bar(
     let unread = info.has_unread();
     div()
         .id(("reply-bar", message_id.0 as u64))
+        .debug_selector(move || format!("reply-bar-{}", message_id.0))
         .flex()
         .items_center()
         .gap_2()
@@ -130,18 +132,15 @@ impl QuillApp {
         // The composer still belongs to the chat (or topic) the thread is
         // opened from: save it there before TDLib resolves the thread.
         self.flush_leaving_draft(cx);
-        let opened = self
-            .live
-            .as_mut()
-            .map(|live| live.driver.open_thread(chat_id, message_id).is_ok());
-        match opened {
-            // The session resolves it for this window.
-            Some(true) => self.windows.thread_asker = ThreadAsker::of(self.windows.scope),
-            Some(false) => {
-                self.windows.thread_asker = ThreadAsker::Nobody;
-                self.set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_OPEN_COMMENTS)));
-            }
-            None => {}
+        // The session resolves it for this window.
+        let asker = ThreadAsker::of(self.windows.scope);
+        let opened = self.live.as_mut().map(|live| {
+            live.driver
+                .open_thread_for(chat_id, message_id, asker)
+                .is_ok()
+        });
+        if opened == Some(false) {
+            self.set_note(StatusNote::error(tr(keys::Q_OPS_COULD_NOT_OPEN_COMMENTS)));
         }
         cx.notify();
     }
@@ -167,7 +166,10 @@ impl QuillApp {
     pub(super) fn advance_thread(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let in_chat_window = self.windows.scope.is_some();
         let scope = self.windows.scope;
-        let asker = self.windows.thread_asker;
+        let asker = self
+            .session()
+            .and_then(|session| session.threads.thread.as_ref())
+            .map_or(ThreadAsker::Nobody, |thread| thread.asker);
         let asker_is_here = thread_asker_is_here(asker, scope, |chat| self.windows.has(chat));
         let Some(live) = self.live.as_mut() else {
             return;
@@ -177,7 +179,6 @@ impl QuillApp {
             if !asker_is_here {
                 return;
             }
-            self.screen.windows.thread_asker = ThreadAsker::Nobody;
             // An opened thread lands at its first unread reply or its
             // latest, never where it was left last time.
             if let Some(thread) = live.driver.session.threads.thread.as_ref() {
@@ -236,7 +237,19 @@ impl QuillApp {
                 .thread
                 .as_ref()
                 .is_none_or(|thread| thread.history.loaded_complete());
-            if !complete && matches!(live.driver.fetch_thread_history(), Ok(Some(_))) {
+            let older_failed = live
+                .driver
+                .session
+                .threads
+                .thread
+                .as_ref()
+                .is_some_and(|thread| thread.history.older == OlderEnd::Failed);
+            if older_failed {
+                // The goal ends with the page it waited for: a retry or a
+                // scroll later does not jump to the root unasked.
+                self.screen.history.aim.take_goal();
+                cx.notify();
+            } else if !complete && matches!(live.driver.fetch_thread_history(), Ok(Some(_))) {
                 cx.notify();
             }
         }
@@ -499,24 +512,6 @@ pub(super) fn replier_avatars(
             )
         })
         .collect()
-}
-
-/// The window that asked for the thread the session is opening.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ThreadAsker {
-    /// Nobody asked (a link): the first frame takes the thread.
-    Nobody,
-    /// The main window.
-    Main,
-    /// The window of this chat.
-    ChatWindow(ChatId),
-}
-
-impl ThreadAsker {
-    /// The asker for the window `scope` (`None`: the main one).
-    pub(super) fn of(scope: Option<ChatId>) -> Self {
-        scope.map_or(Self::Main, Self::ChatWindow)
-    }
 }
 
 /// Whether the frame of the window `scope` takes on the thread the session

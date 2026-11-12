@@ -140,7 +140,7 @@ fn send_succeeded_turns_the_clock_into_a_check() {
     );
     let chat = session.chats.get(&11).unwrap();
     assert_eq!(chat.row_status(), RowStatus::Sent);
-    assert_eq!(chat.last_message.unwrap().id, MessageId(42));
+    assert_eq!(chat.last_message().unwrap().id, MessageId(42));
 }
 
 #[test]

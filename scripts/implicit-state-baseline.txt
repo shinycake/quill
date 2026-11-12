@@ -1,57 +1,35 @@
 
 # Implicit-state debt (scripts/check-implicit-state.py). Only remove lines.
 
-ActiveGroupCall::loaded_all_participants
 AppearancePrefs::ignore_battery_saving
 
 
 BackendStatus::failed
-BarFacts::bot_start_pending
-CallSnap::connecting
-CallSummary::busy
 
-ChatSwipeFacts::is_saved
 
-ChatSwipeFacts::is_saved
+BackendStatus::failed
 
-Checklist::others_can_mark_tasks_as_done
-ChecklistDialog::others_can_mark_tasks_as_done
-ChecklistDialog::others_can_mark_tasks_as_done+error
-ChecklistDraft::others_can_mark_tasks_as_done
-ChecklistSend::others_can_mark_tasks_as_done
+
+
 CheckoutView::sending
 
 DestRow::saved
 DragSelect::pending
-Drawn::leaving
-
-DestRow::saved
-DragSelect::pending
-Drawn::leaving
-FastShareFacts::sent
-FieldResult::finished
-
-GiveawaySummary::finished
 
 
 GiveawaySummary::finished
-HeaderFacts::is_saved_messages
 
 
-LiveInput::failed
 
-LiveInput::failed
-Lookup::fade_started
-Lookup::pending
+
+
 
 MediaMenuFacts::downloading
 
-MiniAppWindow::closing_confirmation
 
 
 
 
-ParsedGroupCall::loaded_all_participants
 ParsedSession::is_password_pending
 PasswordBox::sending
 PasswordBox::sending+error
@@ -60,35 +38,18 @@ PasswordBox::sending+error
 PlaybackHealth::output_failed
 
 
-ReceivedGift::is_saved
-RowForum::loaded
-RowMenuFacts::is_saved_messages
-RowState::pending
-
-
-ReceivedGift::is_saved
-RowForum::loaded
-RowMenuFacts::is_saved_messages
-RowState::pending
-SettingsState::pending_attention
-
-SettingsState::pending_attention
-
-SettingsState::pending_attention
-
-SettingsState::pending_attention
 
 
 
-State::started
+
+
+
+
+
 Step::started
 
 StreamFacts::transport_failed
-Tempo::done
-Tempo::inner_done
-
-TopPerson::saved_messages
 
 
-Validation::finished
+
 

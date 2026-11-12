@@ -102,7 +102,7 @@ impl SendOrigin {
     ) -> Self {
         let files = snaps
             .iter()
-            .flat_map(|snap| snap.attachment.iter().chain(snap.album.iter()))
+            .flat_map(|snap| snap.content.attachments())
             .map(|attachment| attachment.path.clone())
             .collect();
         Self {
@@ -166,7 +166,7 @@ pub(super) fn unsent_text(
     let rest = snaps.get(sent..).unwrap_or_default();
     if rest
         .iter()
-        .any(|snap| snap.attachment.is_some() || !snap.album.is_empty())
+        .any(|snap| snap.content != quill::composer::SendContent::Text)
     {
         return String::new();
     }
@@ -642,7 +642,7 @@ mod tests {
         let out = prepare_snapshots(snaps, |snap, _| {
             calls
                 .borrow_mut()
-                .push(snap.attachment.as_ref().map(|att| att.path.clone()));
+                .push(snap.attachment().map(|att| att.path.clone()));
             Ok(PreparedMedia::default())
         })
         .unwrap();
@@ -666,8 +666,7 @@ mod tests {
         ];
         let out = prepare_snapshots(snaps, |snap, _| {
             if snap
-                .attachment
-                .as_ref()
+                .attachment()
                 .is_some_and(|att| att.path.ends_with("b.jpg"))
             {
                 Err(PrepareError::TimedOut)

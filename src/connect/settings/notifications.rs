@@ -88,9 +88,21 @@ impl<S: JsonSender> ConnectDriver<S> {
             ))
         {
             self.session.requests.take(extra);
-            self.session.settings.notification_exceptions.remove(&scope);
+            // The list says so with its Retry; nothing asks again by itself.
+            self.session
+                .settings
+                .notification_exceptions
+                .entry(scope)
+                .or_default()
+                .fail("could not send the request");
             return Err(err);
         }
+        self.session
+            .settings
+            .notification_exceptions
+            .entry(scope)
+            .or_default()
+            .sent(extra);
         Ok(())
     }
 
@@ -264,6 +276,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .session
             .request(RequestPurpose::GetSavedNotificationSounds, None);
         self.session.settings.saved_sounds.begin();
+        self.session.settings.saved_sounds.sent(extra);
         match self.sender.send_json(&get_saved_notification_sounds(extra)) {
             Ok(()) => Ok(Some(extra)),
             Err(err) => {
@@ -289,6 +302,13 @@ impl<S: JsonSender> ConnectDriver<S> {
         self.maybe_fetch_notification_sounds()
     }
 
+    /// The Notifications page opened: scopes whose load was refused are
+    /// asked again.
+    pub fn retry_scope_notification_settings(&mut self) -> Result<(), ConnectSendError> {
+        self.session.settings.scope_notification_settings.reopen();
+        self.maybe_fetch_scope_notification_settings()
+    }
+
     /// Parity slice: `getScopeNotificationSettings` for the scopes not yet
     /// loaded and not in flight — once per Ready.
     pub fn maybe_fetch_scope_notification_settings(&mut self) -> Result<(), ConnectSendError> {
@@ -296,16 +316,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         for scope in NotificationSettingsScope::ALL {
-            if self
+            if !self
                 .session
                 .settings
                 .scope_notification_settings
-                .contains_key(&scope)
+                .wants_fetch(&scope)
                 || self
                     .session
                     .settings
-                    .scope_settings_loading
-                    .contains(&scope)
+                    .scope_notification_settings
+                    .contains_key(&scope)
                 || self
                     .session
                     .requests
@@ -316,13 +336,19 @@ impl<S: JsonSender> ConnectDriver<S> {
             let extra = self
                 .session
                 .request_for_scope(RequestPurpose::GetScopeNotificationSettings, scope);
-            self.session.settings.scope_settings_loading.insert(scope);
+            self.session
+                .settings
+                .scope_notification_settings
+                .begin(scope, extra);
             if let Err(err) = self
                 .sender
                 .send_json(&get_scope_notification_settings(extra, scope))
             {
                 self.session.requests.take(extra);
-                self.session.settings.scope_settings_loading.remove(&scope);
+                self.session
+                    .settings
+                    .scope_notification_settings
+                    .cancel(&scope);
                 return Err(err);
             }
         }

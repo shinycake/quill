@@ -311,8 +311,9 @@ pub fn latest() -> NetworkState {
 pub fn system_woke() {
     let route = route_now();
     lock_or_recover(tracker()).woke(route);
-    crate::wake::UPDATES.poke();
-    crate::system_proxy::refresh();
+    // Pokes the poll loops too: the clients that follow the OS proxy read
+    // it again at their next tick.
+    crate::system_proxy::network_changed();
 }
 
 /// Whether `ip` is a gateway Telegram traffic leaves through.
@@ -348,6 +349,6 @@ fn network_changed() {
         crate::wake::UPDATES.poke();
     }
     if moved || platform::EVENTS_COVER_PROXY {
-        crate::system_proxy::refresh();
+        crate::system_proxy::network_changed();
     }
 }

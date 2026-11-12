@@ -148,13 +148,10 @@ impl QuillApp {
                             this.close_kit_dialog_if_done(DialogKind::GroupHistoryBox, window, cx);
                         })),
                 );
-            let body = std::rc::Rc::new(std::cell::RefCell::new(Some(body.into_any_element())));
+            let body = std::rc::Rc::new(std::cell::Cell::new(Some(body.into_any_element())));
             dialog
                 .content(move |content, _, _| {
-                    let body = body
-                        .borrow_mut()
-                        .take()
-                        .unwrap_or_else(|| div().into_any_element());
+                    let body = body.take().unwrap_or_else(|| div().into_any_element());
                     content.child(body)
                 })
                 .footer(footer)

@@ -97,7 +97,7 @@ impl QuillApp {
                 .default_value(name)
         });
         let stars = form
-            .locked_stars
+            .locked_stars()
             .map(|stars| stars.to_string())
             .unwrap_or_default();
         let stars_input = cx.new(|cx| {

@@ -8,7 +8,7 @@ use crate::composer::ComposerSnapshot;
 use crate::diagnostics::{DiagnosticSink, MemorySink};
 use crate::ids::{AccountKey, ChatId, MessageId, RequestId};
 use crate::platform::MemorySecretStore;
-use crate::state::Session;
+use crate::state::{HistoryOpen, Session};
 use crate::telegram::client::copy_and_parse;
 use serde_json::Value;
 use std::sync::Arc;
@@ -334,11 +334,11 @@ fn a_gallery_opened_in_a_chat_window_belongs_to_that_window() {
     assert!(matches!(opened, Ok(true)));
     let seen = h.driver.with_window_chat(BOB, |driver| {
         let gallery = &driver.session.media.shared_media;
-        (gallery.open(), gallery.chat_id)
+        (gallery.open(), gallery.chat_id())
     });
     assert_eq!(seen, (true, Some(BOB)));
     let main = &h.driver.session.media.shared_media;
-    assert!(!main.open() && main.chat_id.is_none());
+    assert!(!main.open() && main.chat_id().is_none());
 }
 
 #[test]
@@ -371,7 +371,7 @@ fn a_search_typed_in_a_chat_window_searches_its_chat_and_answers_there() {
     assert!(!h.driver.session.search.chat_search.is_open());
     let hits = h.driver.with_window_chat(BOB, |driver| {
         let state = &driver.session.search.chat_search;
-        (state.chat_id, state.hits.len())
+        (state.chat_id(), state.hits().len())
     });
     assert_eq!(hits, (Some(BOB), 1), "the hits landed in Bob's window");
 }
@@ -553,4 +553,42 @@ impl JsonSender for Arc<RefusesClose> {
             Ok(())
         }
     }
+}
+
+/// Refuses `getChatHistory`, as a client closing mid-open does.
+struct RefusesHistory;
+
+impl JsonSender for Arc<RefusesHistory> {
+    fn send_json(&self, request: &str) -> Result<(), ConnectSendError> {
+        if request.contains("\"getChatHistory\"") {
+            Err(ConnectSendError::Native)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[test]
+fn a_first_page_that_cannot_be_sent_ends_in_the_failed_row_and_is_not_asked_again() {
+    let mut h = Harness::two_chats();
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let session = std::mem::replace(
+        &mut h.driver.session,
+        Session::new(AccountKey::primary(), sink),
+    );
+    let (_dir, prepared) = prepared_tmp(&MemorySecretStore::new());
+    let mut broken = ConnectDriver::new(
+        session,
+        Arc::new(RefusesHistory),
+        test_credentials(),
+        prepared,
+    );
+    let opened = broken.select_chat_open(BOB, HistoryOpen::Default);
+    assert!(matches!(opened, Err(ConnectSendError::Native)));
+    assert!(
+        broken.session.history_load_failed(BOB),
+        "the Retry row shows"
+    );
+    // Rendering again asks nothing: a failed page waits for its Retry.
+    assert!(matches!(broken.fetch_history(), Ok(None)));
 }

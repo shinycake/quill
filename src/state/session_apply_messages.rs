@@ -87,7 +87,7 @@ impl Session {
                 .chat_preview_fetch
                 .entry(chat_id)
                 .or_default()
-                .succeed(messages.to_vec());
+                .answered(Some(pending.id), messages.to_vec());
             return;
         }
         if let Some(pending) = pending
@@ -281,11 +281,11 @@ impl Session {
                     .map(|message| history_message(message, false))
                     .collect();
                 rows.sort_by_key(|row| std::cmp::Reverse(row.id.0));
-                self.messages
-                    .pinned_messages
-                    .entry(chat_id.0)
-                    .or_default()
-                    .succeed(rows);
+                // Only the request the bar waits for lands: an older one,
+                // answered after a newer fetch began, is dropped.
+                if let Some(fetch) = self.messages.pinned_messages.get_mut(&chat_id.0) {
+                    fetch.answered(pending.map(|p| p.id), rows);
+                }
             }
             return;
         }
@@ -388,9 +388,10 @@ impl Session {
                     let style = preview_style(content, &preview);
                     (preview, style)
                 });
-            if let Some((preview, style)) = styled {
-                chat.last_preview = preview;
-                chat.last_preview_style = style;
+            if let Some((preview, style)) = styled
+                && let Some(last) = chat.last.as_mut()
+            {
+                last.restyle(preview, style);
             }
         }
     }
@@ -447,10 +448,12 @@ impl Session {
         // row is not it after a jump, and while TDLib reports the last
         // message as unknown there is nothing to refresh.
         if self.is_chat_last_message(chat_id, message_id)
-            && let Some(chat) = self.chats.get_mut(&chat_id.0)
+            && let Some(last) = self
+                .chats
+                .get_mut(&chat_id.0)
+                .and_then(|chat| chat.last.as_mut())
         {
-            chat.last_preview = preview;
-            chat.last_preview_style = style;
+            last.restyle(preview, style);
         }
     }
 
@@ -459,7 +462,7 @@ impl Session {
     fn is_chat_last_message(&self, chat_id: ChatId, message_id: MessageId) -> bool {
         self.chats
             .get(&chat_id.0)
-            .and_then(|chat| chat.last_message.as_ref())
+            .and_then(|chat| chat.last_message())
             .is_some_and(|last| last.id == message_id)
     }
 
@@ -583,7 +586,6 @@ impl Session {
             && pending.draft_id == draft_id
         {
             if pending.keep_on_stop {
-                pending.can_stop = false;
                 pending.stop = BotStopStage::Stopped;
             } else {
                 self.messages.pending_bot_messages.remove(&key);

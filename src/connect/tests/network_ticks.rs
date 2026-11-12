@@ -175,23 +175,32 @@ fn only_a_client_opening_a_connection_or_waiting_for_a_network_has_the_os_proxy_
     let start = Instant::now();
     driver.session.connection = ConnectionState::Ready;
     driver.poll_ticks(scope, start, network(0, true));
-    assert_eq!(driver.system_proxy_asked, None);
+    assert_eq!(driver.system_proxy.asked(), None);
 
     driver.session.connection = ConnectionState::Connecting;
     driver.poll_ticks(scope, start, network(0, true));
-    assert_eq!(driver.system_proxy_asked, Some(start));
+    assert_eq!(driver.system_proxy.asked(), Some(start));
 
     driver.poll_ticks(scope, start + Duration::from_secs(1), network(0, true));
-    assert_eq!(driver.system_proxy_asked, Some(start));
+    assert_eq!(driver.system_proxy.asked(), Some(start));
 
     let later = start + Duration::from_secs(15);
     driver.poll_ticks(scope, later, network(0, true));
-    assert_eq!(driver.system_proxy_asked, Some(later));
+    assert_eq!(driver.system_proxy.asked(), Some(later));
 
     driver.session.connection = ConnectionState::WaitingForNetwork;
     let offline = later + Duration::from_secs(15);
     driver.poll_ticks(scope, offline, network(0, false));
-    assert_eq!(driver.system_proxy_asked, Some(offline));
+    assert_eq!(driver.system_proxy.asked(), Some(offline));
+}
+
+#[test]
+fn a_background_client_follows_the_os_proxy_too() {
+    let (mut driver, _recorder) = driver();
+    let start = Instant::now();
+    driver.session.connection = ConnectionState::Connecting;
+    driver.poll_ticks(TickScope::Background, start, network(0, true));
+    assert_eq!(driver.system_proxy.asked(), Some(start));
 }
 
 #[test]

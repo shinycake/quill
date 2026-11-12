@@ -94,6 +94,8 @@ impl MessagesPolicy {
 /// that falls between two steps is inserted so the slider can show it.
 pub fn price_steps(current: i64, min: i64, max: i64) -> Vec<i64> {
     let max = max.max(min);
+    let current_up_10 = current.saturating_add(10);
+    let current_up_100 = current.saturating_add(100);
     let mut values = Vec::new();
     if current < min {
         values.push(current);
@@ -103,7 +105,7 @@ pub fn price_steps(current: i64, min: i64, max: i64) -> Vec<i64> {
     }
     let mut i = 100;
     while i < max.min(1000) {
-        if i < current + 10 && current < i {
+        if i < current_up_10 && current < i {
             values.push(current);
         }
         values.push(i);
@@ -111,7 +113,7 @@ pub fn price_steps(current: i64, min: i64, max: i64) -> Vec<i64> {
     }
     let mut i = 1000;
     while i <= max {
-        if i < current + 100 && current < i {
+        if i < current_up_100 && current < i {
             values.push(current);
         }
         values.push(i);
@@ -126,7 +128,7 @@ pub fn step_for_price(steps: &[i64], price: i64) -> usize {
     steps
         .iter()
         .enumerate()
-        .min_by_key(|(_, step)| (**step - price).abs())
+        .min_by_key(|(_, step)| step.abs_diff(price))
         .map_or(0, |(index, _)| index)
 }
 
@@ -331,7 +333,7 @@ pub struct PaidConfirm {
 impl PaidConfirm {
     /// Stars the whole send costs.
     pub fn total(&self) -> i64 {
-        self.per_message * self.messages
+        self.per_message.saturating_mul(self.messages)
     }
 
     pub fn title(&self) -> &'static str {
@@ -440,8 +442,15 @@ impl Prior {
 /// or failed. The time is the caller's clock in unix milliseconds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GateFetch {
-    /// In flight since `at`; the answer before it keeps gating meanwhile.
-    Asking { at: u64, before: Option<Prior> },
+    /// `request` is in flight since `at`, asked while the viewer was (not)
+    /// Premium; only its answer is taken. The answer before it keeps gating
+    /// meanwhile.
+    Asking {
+        request: crate::ids::RequestId,
+        at: u64,
+        viewer_premium: bool,
+        before: Option<Prior>,
+    },
     /// The latest answer. It was given while the viewer was (not) Premium:
     /// after that changes, it is old.
     Known {
@@ -468,13 +477,15 @@ pub struct PaidMessages {
     pub can_set_privacy: Option<bool>,
     /// Where each user's `canSendMessageToUser` stands.
     gates: HashMap<i64, GateFetch>,
-    pub trust: PaidTrust,
+    /// The prices the user agreed to; changed only through
+    /// [`Self::remember_trust`] and friends, which keep `trust_file` behind.
+    trust: PaidTrust,
     /// Stars a user paid so far (`getPaidMessageRevenue`).
     pub revenue: HashMap<i64, i64>,
     /// Channel direct messages price per supergroup id.
     pub dm_price: HashMap<i64, i64>,
     /// Where the trusted prices file stands.
-    pub trust_file: TrustFile,
+    trust_file: TrustFile,
     /// The Remove Fee or Direct Messages save, and what it was for.
     pub save: PaidSave,
 }
@@ -496,9 +507,53 @@ pub enum TrustFile {
 }
 
 impl PaidMessages {
-    /// The trusted prices changed: the file is behind.
-    pub fn trust_changed(&mut self) {
+    /// The user agreed to `stars` per message in `chat_id`: remembered, and
+    /// the file is behind.
+    pub fn remember_trust(&mut self, chat_id: i64, stars: i64) {
+        self.trust.trust(chat_id, stars);
         self.trust_file = TrustFile::Dirty;
+    }
+
+    /// Whether a send of `per_message` Stars to `chat_id` needs the
+    /// confirmation box.
+    pub fn needs_confirmation(&self, chat_id: i64, per_message: i64) -> bool {
+        needs_confirmation(&self.trust, chat_id, per_message)
+    }
+
+    /// The trusted prices, per chat, for the send guard.
+    pub fn trusted_prices(&self) -> HashMap<i64, i64> {
+        self.trust.entries()
+    }
+
+    /// The file's text when the prices changed since it was written.
+    pub fn trust_to_write(&self) -> Option<String> {
+        (self.trust_file == TrustFile::Dirty).then(|| self.trust.to_json())
+    }
+
+    /// Whether the file has not been read yet.
+    pub fn trust_unread(&self) -> bool {
+        self.trust_file == TrustFile::NotLoaded
+    }
+
+    /// The file was read (`None`: there is none): its prices are the
+    /// trusted ones, once.
+    pub fn trust_loaded(&mut self, text: Option<&str>) {
+        if !self.trust_unread() {
+            return;
+        }
+        self.trust_file = TrustFile::Clean;
+        if let Some(text) = text {
+            self.trust = PaidTrust::from_json(text);
+        }
+    }
+
+    /// The write of [`Self::trust_to_write`] ended: the file is clean, or
+    /// the reason it failed.
+    pub fn trust_written(&mut self, result: Result<(), String>) {
+        self.trust_file = match result {
+            Ok(()) => TrustFile::Clean,
+            Err(reason) => TrustFile::SaveFailed(reason),
+        };
     }
 
     /// The reason the last write of the trusted prices failed.
@@ -525,6 +580,9 @@ pub enum PaidTarget {
 pub enum TargetSave {
     /// `request` is out: only its answer settles the save.
     Saving(crate::ids::RequestId),
+    /// A channel's save went through: its box closes on it and clears it.
+    /// (A user's save is idle again once it went through.)
+    Saved,
     Failed(String),
 }
 
@@ -537,20 +595,37 @@ pub struct PaidSave {
 }
 
 impl PaidSave {
-    /// `request` was sent for `target`; a failure line of it is gone.
+    /// `request` was sent for `target`; a failure line of it is gone. A
+    /// save of `target` already out stays and keeps its request (callers
+    /// ask [`Self::request_for`] first, so this never replaces it).
     pub fn begin(&mut self, target: PaidTarget, request: crate::ids::RequestId) {
+        if self.is_saving_for(target) {
+            return;
+        }
         self.by_target.insert(target, TargetSave::Saving(request));
     }
 
-    /// `target` is idle again (its send was refused).
+    /// `target` is idle again (the offline demo's save ended with no
+    /// request to answer).
     pub fn clear(&mut self, target: PaidTarget) {
         self.by_target.remove(&target);
     }
 
-    /// A box for `target` opens: an earlier refusal is not this box's, a
-    /// save still out stays.
-    pub fn forget_failure(&mut self, target: PaidTarget) {
-        if matches!(self.by_target.get(&target), Some(TargetSave::Failed(_))) {
+    /// The request of the save of `target` that is out, if any.
+    pub fn request_for(&self, target: PaidTarget) -> Option<crate::ids::RequestId> {
+        match self.by_target.get(&target) {
+            Some(TargetSave::Saving(request)) => Some(*request),
+            _ => None,
+        }
+    }
+
+    /// A box for `target` opens: an earlier outcome (a refusal, a save
+    /// that went through) is not this box's, a save still out stays.
+    pub fn forget_finished(&mut self, target: PaidTarget) {
+        if matches!(
+            self.by_target.get(&target),
+            Some(TargetSave::Failed(_) | TargetSave::Saved)
+        ) {
             self.by_target.remove(&target);
         }
     }
@@ -567,10 +642,19 @@ impl PaidSave {
         matches!(self.by_target.get(&target), Some(TargetSave::Saving(_)))
     }
 
-    /// The `ok` of `request`: the target it was for is idle.
+    /// The `ok` of `request`: a user's target is idle, a channel's is
+    /// `Saved` until its box takes the outcome.
     pub fn settle(&mut self, request: crate::ids::RequestId) {
-        self.by_target
-            .retain(|_, save| !matches!(save, TargetSave::Saving(held) if *held == request));
+        self.by_target.retain(|target, save| {
+            if !matches!(save, TargetSave::Saving(held) if *held == request) {
+                return true;
+            }
+            if matches!(target, PaidTarget::Channel(_)) {
+                *save = TargetSave::Saved;
+                return true;
+            }
+            false
+        });
     }
 
     /// The error of `request`: the target it was for failed with `line`. An
@@ -665,7 +749,34 @@ impl PaidMessages {
         }
     }
 
-    /// Stores the answer of the ask in flight. A user who no longer charges
+    /// The answer of `request`, taken only when it is the ask in flight for
+    /// `user_id` (an ask the wait replaced answers late and is ignored). It
+    /// is stored under the Premium state the ask was made in, so a change
+    /// since makes it old at once.
+    pub fn accept_answer(
+        &mut self,
+        user_id: i64,
+        request: crate::ids::RequestId,
+        answer: CanSend,
+        now_ms: u64,
+    ) {
+        let Some(GateFetch::Asking {
+            request: asked,
+            viewer_premium,
+            ..
+        }) = self.gates.get(&user_id)
+        else {
+            return;
+        };
+        if *asked != request {
+            return;
+        }
+        let viewer_premium = *viewer_premium;
+        self.record_answer(user_id, answer, now_ms, viewer_premium);
+    }
+
+    /// Stores an answer as known, without an ask (demos and tests; the
+    /// session takes answers through [`Self::accept_answer`]). A user who no longer charges
     /// loses the trusted price (tdesktop `checkTrustedPayForMessage`; a
     /// private chat has the user's id).
     pub fn record_answer(
@@ -686,7 +797,7 @@ impl PaidMessages {
         if !matches!(answer, CanSend::HasPaidMessages { stars } if stars > 0)
             && self.trust.forget(user_id)
         {
-            self.trust_changed();
+            self.trust_file = TrustFile::Dirty;
         }
     }
 
@@ -717,10 +828,24 @@ impl PaidMessages {
         }
     }
 
-    pub fn mark_asking(&mut self, user_id: i64, now_ms: u64) {
+    /// `request` was sent for `user_id` while the viewer was (not) Premium.
+    pub fn mark_asking(
+        &mut self,
+        user_id: i64,
+        request: crate::ids::RequestId,
+        now_ms: u64,
+        viewer_premium: bool,
+    ) {
         let before = self.prior(user_id);
-        self.gates
-            .insert(user_id, GateFetch::Asking { at: now_ms, before });
+        self.gates.insert(
+            user_id,
+            GateFetch::Asking {
+                request,
+                at: now_ms,
+                viewer_premium,
+                before,
+            },
+        );
     }
 
     /// The latest answer known for `user_id`, through asks and failures.
@@ -742,8 +867,14 @@ impl PaidMessages {
     /// The ask failed (the send, or the error answer): the chat stays as it
     /// was, the answer before the ask keeps gating, and the next open asks
     /// again.
-    pub fn ask_failed(&mut self, user_id: i64, now_ms: u64) {
-        if let Some(GateFetch::Asking { before, .. }) = self.gates.get(&user_id) {
+    pub fn ask_failed(&mut self, user_id: i64, request: crate::ids::RequestId, now_ms: u64) {
+        if let Some(GateFetch::Asking {
+            request: asked,
+            before,
+            ..
+        }) = self.gates.get(&user_id)
+            && *asked == request
+        {
             let before = *before;
             self.gates
                 .insert(user_id, GateFetch::Failed { at: now_ms, before });
@@ -825,6 +956,7 @@ impl crate::state::Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ids::RequestId;
     use serde_json::json;
 
     fn facts(answer: Option<CanSend>) -> GateFacts {
@@ -832,6 +964,27 @@ mod tests {
             answer,
             ..GateFacts::default()
         }
+    }
+
+    /// A channel's save that went through waits for its box to take it; a
+    /// user's is idle again, and a new box forgets a finished outcome.
+    #[test]
+    fn a_channel_save_that_went_through_waits_for_its_box() {
+        use crate::ids::RequestId;
+        let mut save = PaidSave::default();
+        save.begin(PaidTarget::Channel(5), RequestId(1));
+        save.begin(PaidTarget::User(7), RequestId(2));
+        save.settle(RequestId(1));
+        save.settle(RequestId(2));
+        assert_eq!(save.of(PaidTarget::Channel(5)), Some(&TargetSave::Saved));
+        assert_eq!(save.of(PaidTarget::User(7)), None);
+        assert!(!save.is_saving_for(PaidTarget::Channel(5)));
+        save.forget_finished(PaidTarget::Channel(5));
+        assert_eq!(save.of(PaidTarget::Channel(5)), None);
+        // A save still out is not forgotten by a box opening.
+        save.begin(PaidTarget::Channel(5), RequestId(3));
+        save.forget_finished(PaidTarget::Channel(5));
+        assert!(save.is_saving_for(PaidTarget::Channel(5)));
     }
 
     #[test]
@@ -1072,9 +1225,9 @@ mod tests {
     fn answers_refresh_after_five_minutes() {
         let mut state = PaidMessages::default();
         assert!(state.should_ask(5, 0, false));
-        state.mark_asking(5, 0);
+        state.mark_asking(5, RequestId(1), 0, false);
         assert!(!state.should_ask(5, 1, false), "one ask at a time");
-        state.record_answer(5, CanSend::RestrictsNewChats, 1_000, false);
+        state.accept_answer(5, RequestId(1), CanSend::RestrictsNewChats, 1_000);
         assert_eq!(
             state.gate_answer(5, false),
             Some(CanSend::RestrictsNewChats)
@@ -1084,9 +1237,79 @@ mod tests {
     }
 
     #[test]
+    fn only_the_ask_in_flight_is_answered_under_the_premium_it_was_made_in() {
+        let mut state = PaidMessages::default();
+        state.mark_asking(5, RequestId(1), 0, false);
+        // The wait ran out and the chat asked again; the first ask answers
+        // late and is ignored.
+        state.mark_asking(5, RequestId(2), ASK_TIMEOUT_MS, false);
+        state.accept_answer(5, RequestId(1), CanSend::HasPaidMessages { stars: 9 }, 1);
+        assert_eq!(state.gate_answer(5, false), None);
+        // The viewer bought Premium while the second ask was out: its answer
+        // is old under the new state, so the chat asks again.
+        state.accept_answer(5, RequestId(2), CanSend::RestrictsNewChats, 2);
+        assert!(state.should_ask(5, 3, true));
+        assert_eq!(state.gate_answer(5, true), None);
+        assert_eq!(
+            state.gate_answer(5, false),
+            Some(CanSend::RestrictsNewChats)
+        );
+        // An answer with no ask in flight is dropped.
+        state.accept_answer(5, RequestId(3), CanSend::Ok, 4);
+        assert_eq!(
+            state.gate_answer(5, false),
+            Some(CanSend::RestrictsNewChats)
+        );
+    }
+
+    #[test]
+    fn a_save_out_for_a_target_keeps_its_request() {
+        let mut save = PaidSave::default();
+        let target = PaidTarget::User(1);
+        save.begin(target, RequestId(1));
+        save.begin(target, RequestId(2));
+        assert_eq!(save.request_for(target), Some(RequestId(1)));
+        save.fail(RequestId(1), "no".into());
+        assert_eq!(save.error_for(target), Some("no"));
+        assert_eq!(save.request_for(target), None);
+    }
+
+    #[test]
+    fn trusted_prices_are_written_after_a_change_and_read_once() {
+        let mut state = PaidMessages::default();
+        state.trust_loaded(Some(r#"{"4": 10}"#));
+        assert!(!state.needs_confirmation(4, 10));
+        assert!(state.trust_to_write().is_none());
+        state.trust_loaded(Some(r#"{"4": 99}"#));
+        assert!(state.needs_confirmation(4, 50), "read once");
+        state.remember_trust(5, 7);
+        assert!(state.trust_to_write().is_some());
+        state.trust_written(Err("disk".into()));
+        assert_eq!(state.trust_save_error(), Some("disk"));
+        assert!(state.trust_to_write().is_none());
+        // A user who stops charging loses the price, and the file is behind.
+        state.record_answer(5, CanSend::Ok, 0, false);
+        assert!(state.trust_to_write().is_some());
+    }
+
+    #[test]
+    fn slider_steps_and_totals_do_not_overflow() {
+        assert!(!price_steps(i64::MAX, 1, 10_000).is_empty());
+        assert_eq!(step_for_price(&[i64::MIN, 5], i64::MAX), 1);
+        let huge = PaidConfirm {
+            chat_id: 1,
+            name: "A".into(),
+            per_message: i64::MAX,
+            messages: 3,
+            text: String::new(),
+        };
+        assert_eq!(huge.total(), i64::MAX);
+    }
+
+    #[test]
     fn an_ask_that_never_came_back_is_asked_again_after_the_wait() {
         let mut state = PaidMessages::default();
-        state.mark_asking(5, 1_000);
+        state.mark_asking(5, RequestId(1), 1_000, false);
         assert!(!state.should_ask(5, 1_000 + ASK_TIMEOUT_MS - 1, false));
         assert!(state.should_ask(5, 1_000 + ASK_TIMEOUT_MS, false));
     }
@@ -1094,8 +1317,8 @@ mod tests {
     #[test]
     fn a_failed_ask_leaves_the_chat_as_it_was_and_the_next_open_asks_again() {
         let mut state = PaidMessages::default();
-        state.mark_asking(6, 0);
-        state.ask_failed(6, 5);
+        state.mark_asking(6, RequestId(2), 0, false);
+        state.ask_failed(6, RequestId(2), 5);
         assert_eq!(state.gate_answer(6, false), None);
         assert!(
             state.should_ask(6, 6, false),
@@ -1104,13 +1327,13 @@ mod tests {
         // A failed refresh keeps the answer before it: the known price
         // does not disappear, so the next send is still confirmed.
         state.record_answer(7, CanSend::HasPaidMessages { stars: 5 }, 0, false);
-        state.mark_asking(7, 10);
+        state.mark_asking(7, RequestId(3), 10, false);
         assert_eq!(
             state.gate_answer(7, false),
             Some(CanSend::HasPaidMessages { stars: 5 }),
             "the answer before the ask keeps gating while it is out"
         );
-        state.ask_failed(7, 11);
+        state.ask_failed(7, RequestId(3), 11);
         assert_eq!(
             state.gate_answer(7, false),
             Some(CanSend::HasPaidMessages { stars: 5 }),
@@ -1118,8 +1341,8 @@ mod tests {
         );
         assert!(state.should_ask(7, 12, false));
         // And through a second failed ask.
-        state.mark_asking(7, 20);
-        state.ask_failed(7, 21);
+        state.mark_asking(7, RequestId(4), 20, false);
+        state.ask_failed(7, RequestId(4), 21);
         assert_eq!(
             state.gate_answer(7, false),
             Some(CanSend::HasPaidMessages { stars: 5 })
@@ -1140,7 +1363,7 @@ mod tests {
         // The refresh under the new Premium keeps both kinds of answer
         // while it is out or failed, each under its own rule.
         for user in [5, 6] {
-            state.mark_asking(user, 10);
+            state.mark_asking(user, RequestId(user.unsigned_abs()), 10, true);
         }
         assert_eq!(
             state.gate_answer(5, true),
@@ -1152,8 +1375,8 @@ mod tests {
             Some(CanSend::RestrictsNewChats),
             "the Asking answer keeps the Premium it was given under"
         );
-        state.ask_failed(5, 11);
-        state.ask_failed(6, 11);
+        state.ask_failed(5, RequestId(5), 11);
+        state.ask_failed(6, RequestId(6), 11);
         assert_eq!(
             state.gate_answer(5, true),
             Some(CanSend::HasPaidMessages { stars: 7 })

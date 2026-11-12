@@ -203,10 +203,20 @@ impl Drop for Track {
     }
 }
 
+/// What the sound a build brings does once it lands, and so what the old
+/// sound does meanwhile: `AudioEngine::set_landing` sets both.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Landing {
+    /// It plays on landing; the old sound plays on until then.
+    Playing,
+    /// It lands paused; the old sound is paused already.
+    Held,
+}
+
 struct Building {
     built_for: f64,
     latest_target: f64,
-    land_paused: bool,
+    landing: Landing,
     built: Receiver<Result<Built, AudioError>>,
     _cancel: CancelOnDrop,
 }
@@ -341,6 +351,37 @@ impl Fault {
     }
 }
 
+/// The backend a track was started on, chosen at `begin`.
+enum Backend {
+    /// The audio device (`track` and `building`).
+    Device,
+    /// The device-less demo run.
+    Simulated(SimRun),
+}
+
+/// A simulated track: its clock, and when the first seek that hangs was
+/// posted (it ends with the run).
+struct SimRun {
+    clock: PlaybackClock,
+    stalled_since: Option<Duration>,
+}
+
+impl Backend {
+    fn run(&self) -> Option<&SimRun> {
+        match self {
+            Self::Simulated(run) => Some(run),
+            Self::Device => None,
+        }
+    }
+
+    fn run_mut(&mut self) -> Option<&mut SimRun> {
+        match self {
+            Self::Simulated(run) => Some(run),
+            Self::Device => None,
+        }
+    }
+}
+
 /// One track's player: play, pause, seek, volume and speed.
 pub(in crate::ui) struct AudioEngine {
     output: SharedOutput,
@@ -362,13 +403,12 @@ pub(in crate::ui) struct AudioEngine {
     fault: Fault,
     /// Set by the screenshot demos only.
     simulation: Option<Simulation>,
-    sim_clock: Option<PlaybackClock>,
+    /// Which sound backend the running track uses.
+    backend: Backend,
     /// The time the simulation keeps: the app's clock (`set_sim_time`),
     /// which tests drive; the wall clock until one is set.
     sim_time: Option<Box<dyn Fn() -> Instant>>,
     sim_duration: f64,
-    /// Simulation only: when the first seek that hangs was posted.
-    sim_stalled_since: Option<Duration>,
     #[cfg(test)]
     build_gate: Option<Arc<std::sync::Mutex<Receiver<()>>>>,
     /// Tests: the next builds panic, as a decoder can.
@@ -393,10 +433,9 @@ impl AudioEngine {
             parked_secs: 0.0,
             fault: Fault::None,
             simulation: None,
-            sim_clock: None,
+            backend: Backend::Device,
             sim_time: None,
             sim_duration: 0.0,
-            sim_stalled_since: None,
             #[cfg(test)]
             build_gate: None,
             #[cfg(test)]
@@ -440,10 +479,10 @@ impl AudioEngine {
 
     fn sim_stalled(&self) -> bool {
         let now = self.clock.now();
-        self.sim_clock.is_some()
-            && self
-                .sim_stalled_since
-                .is_some_and(|since| now.saturating_sub(since) >= SIM_STALL_AFTER)
+        self.backend
+            .run()
+            .and_then(|run| run.stalled_since)
+            .is_some_and(|since| now.saturating_sub(since) >= SIM_STALL_AFTER)
     }
 
     fn note(&mut self, result: &Result<(), AudioError>) {
@@ -458,7 +497,8 @@ impl AudioEngine {
         if self.standing == Standing::Failed {
             return EngineState::Failed;
         }
-        if let Some(clock) = &self.sim_clock {
+        if let Some(run) = self.backend.run() {
+            let clock = &run.clock;
             return if clock.finished_at(self.sim_now()) {
                 EngineState::Ended
             } else if clock.is_playing() {
@@ -468,7 +508,7 @@ impl AudioEngine {
             };
         }
         if let Some(building) = &self.building {
-            return if building.land_paused {
+            return if building.landing == Landing::Held {
                 EngineState::Paused
             } else {
                 EngineState::Loading
@@ -476,6 +516,9 @@ impl AudioEngine {
         }
         match self.track.as_ref().map(|t| &t.player) {
             None => EngineState::Idle,
+            // Seeked while paused: the sound still sits at the old position
+            // (a track that ran out reads empty), and Play restarts it.
+            Some(_) if self.standing == Standing::Stale => EngineState::Paused,
             Some(player) if player.is_paused() => EngineState::Paused,
             Some(player) if player.empty() => EngineState::Ended,
             Some(_) => EngineState::Playing,
@@ -485,8 +528,8 @@ impl AudioEngine {
     /// Where the track is, in seconds of the track: frames the mixer took,
     /// or the parked position when nothing is consuming it.
     pub(in crate::ui) fn position_secs(&self) -> f64 {
-        if let Some(clock) = &self.sim_clock {
-            return clock.elapsed_secs_at(self.sim_now());
+        if let Some(run) = self.backend.run() {
+            return run.clock.elapsed_secs_at(self.sim_now());
         }
         if let Some(building) = &self.building {
             return building.latest_target;
@@ -562,7 +605,7 @@ impl AudioEngine {
         }
     }
 
-    fn spawn_build(&mut self, target: f64, land_paused: bool) -> Result<(), AudioError> {
+    fn spawn_build(&mut self, target: f64, landing: Landing) -> Result<(), AudioError> {
         let path = self.path.clone().ok_or(AudioError::Open)?;
         let outlet = self.output.outlet().ok_or(AudioError::NoOutput)?;
         let (done, built) = mpsc::channel();
@@ -595,7 +638,7 @@ impl AudioEngine {
         self.building = Some(Building {
             built_for: target,
             latest_target: target,
-            land_paused,
+            landing,
             built,
             _cancel: cancel,
         });
@@ -617,20 +660,20 @@ impl AudioEngine {
         let Some(Building {
             built_for,
             latest_target: target,
-            land_paused,
+            landing,
             ..
         }) = self.building.take()
         else {
             return;
         };
-        let redone = ((built_for - target).abs() > f64::EPSILON)
-            .then(|| self.spawn_build(target, land_paused));
+        let redone =
+            ((built_for - target).abs() > f64::EPSILON).then(|| self.spawn_build(target, landing));
         match (redone, result) {
             (Some(Ok(())), _) => {}
             (Some(Err(error)), _) | (None, Err(error)) => self.fail_build(error, target),
             (None, Ok(built)) => {
                 built.player.set_volume(self.volume);
-                let playing = land_paused || built.player.play();
+                let playing = landing == Landing::Held || built.player.play();
                 if !playing {
                     built.player.pause();
                 }
@@ -715,15 +758,18 @@ impl AudioEngine {
             clock.set_rate_at(f64::from(self.speed.get()), now);
             clock.seek_at(offset, now);
             clock.resume_at(now);
-            self.sim_clock = Some(clock);
+            self.backend = Backend::Simulated(SimRun {
+                clock,
+                stalled_since: None,
+            });
             return Ok(());
         }
-        self.spawn_build(offset, false)
+        self.spawn_build(offset, Landing::Playing)
     }
 
     /// True while a track is loaded (playing or paused, ended or not).
     pub(in crate::ui) fn is_loaded(&self) -> bool {
-        self.track.is_some() || self.building.is_some() || self.sim_clock.is_some()
+        self.track.is_some() || self.building.is_some() || self.backend.run().is_some()
     }
 
     /// The loaded track played to its end.
@@ -734,14 +780,31 @@ impl AudioEngine {
     pub(in crate::ui) fn pause(&mut self) {
         self.settle();
         let now = self.sim_now();
-        if let Some(clock) = self.sim_clock.as_mut() {
-            clock.pause_at(now);
+        if let Some(run) = self.backend.run_mut() {
+            run.clock.pause_at(now);
         }
-        if let Some(building) = self.building.as_mut() {
-            building.land_paused = true;
-        }
+        self.set_landing(Landing::Held);
         if let Some(track) = &self.track {
             track.player.pause();
+        }
+    }
+
+    /// While a build runs: what its sound does on landing, and the old
+    /// sound with it, so the two cannot disagree. No build, no change.
+    fn set_landing(&mut self, landing: Landing) {
+        let Some(building) = self.building.as_mut() else {
+            return;
+        };
+        building.landing = landing;
+        let Some(track) = &self.track else {
+            return;
+        };
+        match landing {
+            Landing::Held => track.player.pause(),
+            Landing::Playing if self.standing != Standing::Stale => {
+                track.player.play();
+            }
+            Landing::Playing => {}
         }
     }
 
@@ -752,24 +815,17 @@ impl AudioEngine {
     pub(in crate::ui) fn resume(&mut self, offset_secs: f64) -> Result<(), AudioError> {
         self.settle();
         let now = self.sim_now();
-        if let Some(clock) = self.sim_clock.as_mut() {
-            if clock.finished_at(now) {
-                clock.seek_at(0.0, now);
+        if let Some(run) = self.backend.run_mut() {
+            if run.clock.finished_at(now) {
+                run.clock.seek_at(0.0, now);
             }
-            clock.resume_at(now);
+            run.clock.resume_at(now);
             self.fault.worked();
             return Ok(());
         }
-        if let Some(building) = self.building.as_mut() {
-            building.land_paused = false;
+        if self.building.is_some() {
+            self.set_landing(Landing::Playing);
             self.fault.worked();
-            if let Some(track) = self
-                .track
-                .as_ref()
-                .filter(|_| self.standing != Standing::Stale)
-            {
-                track.player.play();
-            }
             return Ok(());
         }
         let ended = self.track.as_ref().is_none_or(|t| t.player.empty());
@@ -820,10 +876,10 @@ impl AudioEngine {
     fn seek_to(&mut self, offset_secs: f64, playing: bool) -> Result<(), AudioError> {
         let offset = offset_secs.max(0.0);
         let now = self.sim_now();
-        if let Some(clock) = self.sim_clock.as_mut() {
-            clock.seek_at(offset, now);
+        if let Some(run) = self.backend.run_mut() {
+            run.clock.seek_at(offset, now);
             if self.simulation.is_some_and(|simulation| simulation.stall) {
-                self.sim_stalled_since.get_or_insert(self.clock.now());
+                run.stalled_since.get_or_insert(self.clock.now());
             }
             return Ok(());
         }
@@ -855,8 +911,8 @@ impl AudioEngine {
     pub(in crate::ui) fn set_speed(&mut self, speed: f64) {
         self.speed.set(speed);
         let now = self.sim_now();
-        if let Some(clock) = self.sim_clock.as_mut() {
-            clock.set_rate_at(speed, now);
+        if let Some(run) = self.backend.run_mut() {
+            run.clock.set_rate_at(speed, now);
         }
     }
 
@@ -864,8 +920,7 @@ impl AudioEngine {
         self.parked_secs = self.position_secs();
         self.track = None;
         self.building = None;
-        self.sim_clock = None;
-        self.sim_stalled_since = None;
+        self.backend = Backend::Device;
         self.path = None;
         self.standing = Standing::Current;
         self.fault = Fault::None;
@@ -1233,6 +1288,39 @@ mod tests {
         start_landed(&mut engine, &path, 0.0, 1.0, 1.0, 1.0);
         pull(&mut device, usize::try_from(RATE).unwrap() * 2);
         assert_eq!(engine.state(), EngineState::Ended);
+    }
+
+    #[test]
+    fn a_seek_on_a_track_that_ran_out_parks_it_instead_of_ending_it() {
+        let (mut engine, mut device) = rig();
+        let path = track("ran-out-seek.wav", 1);
+        start_landed(&mut engine, &path, 0.0, 1.0, 1.0, 1.0);
+        pull(&mut device, usize::try_from(RATE).unwrap() * 2);
+        assert!(engine.is_ended());
+        engine.seek(0.0, false).unwrap();
+        assert_eq!(engine.state(), EngineState::Paused);
+        assert!(!engine.is_ended(), "the tick does not end a parked track");
+        engine.resume(0.0).unwrap();
+        engine.await_landing();
+        assert_eq!(engine.state(), EngineState::Playing);
+    }
+
+    #[test]
+    fn a_hold_while_loading_pauses_the_old_sound_and_a_resume_plays_it() {
+        let (mut engine, mut device) = rig();
+        let path = track("hold-old.wav", 6);
+        start_landed(&mut engine, &path, 0.0, 1.0, 1.0, 6.0);
+        let open = engine.gate_builds();
+        engine.seek(3.0, true).unwrap();
+        engine.pause();
+        assert_eq!(engine.state(), EngineState::Paused);
+        pull(&mut device, usize::try_from(RATE).unwrap());
+        assert!(engine.position_secs() - 3.0 < 1e-9, "the target is shown");
+        engine.resume(3.0).unwrap();
+        assert_eq!(engine.state(), EngineState::Loading);
+        drop(open);
+        engine.await_landing();
+        assert_eq!(engine.state(), EngineState::Playing);
     }
 
     /// The output closes while nothing plays, so a resume opens it before

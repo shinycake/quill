@@ -62,13 +62,14 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        // R5: a failed first page waits for the explicit Retry row
-        // (`retry_history`) instead of re-sending on every render.
+        // A failed page (the first, or an older one on a window that holds
+        // messages) waits for the explicit Retry row (`retry_history`) or a
+        // scroll away from the edge, instead of re-sending on every render.
         if self
             .session
             .histories
             .get(&chat_id.0)
-            .is_some_and(|h| h.load_failed() && h.messages.is_empty())
+            .is_some_and(|h| h.load_failed())
         {
             return Ok(None);
         }
@@ -110,6 +111,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 HISTORY_AROUND_LIMIT,
             )) {
                 self.session.requests.take(extra);
+                self.first_page_not_sent(chat_id, &err);
                 return Err(err);
             }
             return Ok(Some(extra));
@@ -134,9 +136,23 @@ impl<S: JsonSender> ConnectDriver<S> {
             HISTORY_PAGE_SIZE,
         )) {
             self.session.requests.take(extra);
+            self.first_page_not_sent(chat_id, &err);
             return Err(err);
         }
         Ok(Some(extra))
+    }
+
+    /// A first page that could not even be sent ends the empty history in
+    /// its failed stage (the Retry row), so no render has to ask again.
+    fn first_page_not_sent(&mut self, chat_id: ChatId, err: &ConnectSendError) {
+        let empty = self
+            .session
+            .histories
+            .get(&chat_id.0)
+            .is_none_or(|h| h.messages.is_empty());
+        if empty && matches!(err, ConnectSendError::Native) {
+            self.session.fail_history_load(chat_id);
+        }
     }
 
     /// Load the page after the window's newest message while the window
@@ -191,6 +207,17 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(err);
         }
         Ok(Some(extra))
+    }
+
+    /// The Retry strip at the newer end: ask for the failed newer page again.
+    pub fn retry_history_newer(&mut self) -> Result<Option<RequestId>, ConnectSendError> {
+        let Some(chat_id) = self.session.open_chat_id() else {
+            return Err(ConnectSendError::InvalidRequest);
+        };
+        if let Some(history) = self.session.histories.get_mut(&chat_id.0) {
+            history.clear_newer_failed();
+        }
+        self.fetch_history_newer_for(chat_id)
     }
 
     /// Jump the open chat to its latest messages: replace a window that
@@ -315,32 +342,32 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let caption = snapshot.caption();
-        if snapshot.attachment.is_none() && caption.is_empty() {
+        if snapshot.attachment().is_none() && caption.is_empty() {
             return Err(ConnectSendError::InvalidRequest);
         }
         // MED4: caption-length gate (runtime option; the counter in the
         // composer shows the same limit). Only the caption-carrying
         // paths are gated — plain text has its own (untracked) limit.
-        if snapshot.attachment.is_some() || snapshot.is_album() {
+        if snapshot.attachment().is_some() || snapshot.is_album() {
             self.check_caption_length(caption)?;
         }
         // Slice G1: quote-carrying reply (`inputTextQuote`).
         let reply_to = snapshot.send_reply();
         // Validate the picked path before allocating `@extra`.
-        let media_path = match snapshot.attachment.as_ref() {
+        let media_path = match snapshot.attachment().as_ref() {
             Some(att) => Some(
                 media_options::media_send_path(att, snapshot)
                     .ok_or(ConnectSendError::InvalidRequest)?,
             ),
             None => None,
         };
-        let video_probe = match snapshot.attachment.as_ref() {
+        let video_probe = match snapshot.attachment().as_ref() {
             Some(att) if att.kind == AttachmentKind::Video && !att.extras.is_gif() => {
                 Some(media_options::video_probe(att, snapshot)?)
             }
             _ => None,
         };
-        let video_note = match snapshot.attachment.as_ref() {
+        let video_note = match snapshot.attachment().as_ref() {
             Some(att) if att.kind == AttachmentKind::VideoNote => {
                 Some(media_options::video_note(att, snapshot)?)
             }
@@ -372,11 +399,11 @@ impl<S: JsonSender> ConnectDriver<S> {
             .chats
             .get(&chat_id.0)
             .is_some_and(|chat| matches!(chat.kind, ChatKind::Secret { .. }));
-        let spoiler = snapshot.attachment.as_ref().is_some_and(|att| {
+        let spoiler = snapshot.attachment().as_ref().is_some_and(|att| {
             att.spoiler && matches!(att.kind, AttachmentKind::Photo | AttachmentKind::Video)
         });
         // Contains caption / path — do not log `json`.
-        let json = match (snapshot.attachment.as_ref(), media_path.as_deref()) {
+        let json = match (snapshot.attachment().as_ref(), media_path.as_deref()) {
             (Some(att), Some(path)) => {
                 match att.kind {
                     AttachmentKind::Photo => send_photo(
@@ -495,7 +522,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         };
         let json = if spoiler { with_spoiler(json) } else { json };
         // Silent and scheduled sends reach media too (text builds its own).
-        let json = if snapshot.attachment.is_some() {
+        let json = if snapshot.attachment().is_some() {
             crate::telegram::requests::with_message_send_options(json, &snapshot.send_options, true)
         } else {
             json

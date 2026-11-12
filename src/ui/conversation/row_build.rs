@@ -161,8 +161,9 @@ impl QuillApp {
                     let Some(first) = album_messages.first() else {
                         continue;
                     };
-                    // Same chrome rule as single rows, from the first item.
-                    let spot = spot_of(first, next_same_sender, false);
+                    // Same chrome rule as single rows, from the first item:
+                    // its headers open the album.
+                    let spot = spot_of(first, next_same_sender, true);
                     let chrome = Box::new(build.chrome.chrome(first, spot));
                     let day_label = day_label(first.date);
                     let unread_divider = first_unread(first);

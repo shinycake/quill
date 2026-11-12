@@ -20,8 +20,7 @@ impl Session {
             // An earlier checkout's form fetch failing is not this one's.
             Some(RequestPurpose::GetPaymentForm) => {
                 if extra.is_some() && self.payments.checkout.waits_for(extra) {
-                    self.payments.checkout = CheckoutForm::Closed;
-                    self.payments.note = Some(crate::lang::tr_with(
+                    self.payments.checkout = CheckoutForm::Failed(crate::lang::tr_with(
                         crate::lang::keys::Q_MONEY_PAYMENT_FAILED_REASON,
                         &[("reason", &error_reason(err))],
                     ));
@@ -29,13 +28,14 @@ impl Session {
             }
             Some(RequestPurpose::ValidateOrderInfo) => {
                 if extra.is_some()
+                    && let CheckoutForm::Ready(checkout) = &mut self.payments.checkout
                     && matches!(
-                        &self.payments.order_info,
+                        &checkout.order_info,
                         OrderInfoStage::Validating { request, .. } if Some(*request) == extra
                     )
                 {
-                    self.payments.order_info = OrderInfoStage::Unvalidated;
-                    self.payments.note = Some(crate::lang::tr_with(
+                    checkout.order_info = OrderInfoStage::Unvalidated;
+                    checkout.note = Some(crate::lang::tr_with(
                         crate::lang::keys::Q_MONEY_PAYMENT_FAILED_REASON,
                         &[("reason", &error_reason(err))],
                     ));
@@ -50,7 +50,7 @@ impl Session {
                         &[("reason", &error_reason(err))],
                     );
                     if self.payments.shows(&failed.invoice) {
-                        self.payments.note = Some(text);
+                        self.payments.checkout.set_note(Some(text));
                     } else {
                         // The checkout was closed while it paid.
                         self.payments.notify(NoticeKind::Error, text);
@@ -103,14 +103,16 @@ impl Session {
                 | RequestPurpose::GetStarGiveawayOptions
                 | RequestPurpose::LaunchPrepaidGiveaway,
             ) => self.apply_giveaway_error(err, pending),
-            Some(RequestPurpose::Payments(PaymentsPurpose::GetAwardMembers { generation })) => {
-                self.payments.giveaway.award_members.fail(
-                    generation,
-                    crate::lang::tr_with(
-                        crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_MEMBERS_REASON,
-                        &[("reason", &error_reason(err))],
-                    ),
-                );
+            Some(RequestPurpose::Payments(PaymentsPurpose::GetAwardMembers)) => {
+                if let Some(request) = extra {
+                    self.payments.giveaway.award_members.fail(
+                        request,
+                        crate::lang::tr_with(
+                            crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_MEMBERS_REASON,
+                            &[("reason", &error_reason(err))],
+                        ),
+                    );
+                }
             }
             Some(RequestPurpose::GetStarGiftOptions) => {
                 self.payments.stars_gift.fail(
@@ -169,7 +171,7 @@ impl Session {
             // answering late must not stop the spinner of the live one.
             Some(RequestPurpose::Payments(PaymentsPurpose::GetStarTransactions { .. })) => {
                 if let Some(pending) = pending {
-                    self.payments.hub.tx.fail(
+                    self.payments.hub.stars.page.fail(
                         pending.id,
                         format!("Couldn't load transactions: {}", error_reason(err)),
                     );
@@ -182,7 +184,7 @@ impl Session {
                 // Only the newest page's error counts (an older page's is
                 // not the list on screen's).
                 let counted = pending.is_some_and(|pending| {
-                    self.payments.hub.gifts_page.fail(
+                    self.payments.hub.received.page.fail(
                         pending.id,
                         crate::lang::tr_with(
                             crate::lang::keys::Q_MONEY_COULD_NOT_LOAD_GIFTS_REASON,
@@ -192,27 +194,38 @@ impl Session {
                 });
                 if counted {
                     // A failed refetch is not asked again every frame.
-                    self.payments.hub.gifts_op.refetched();
+                    self.payments.hub.received.op.refetched();
                 }
             }
             Some(
                 RequestPurpose::Payments(PaymentsPurpose::ToggleGiftSaved { .. })
                 | RequestPurpose::SellGift,
             ) => {
-                self.payments.hub.gifts_op.failed(pending.map(|p| p.id));
-                self.payments.hub.gift_view.abandon_confirmation();
-                self.payments.hub.gift_notice =
+                self.payments.hub.received.op.failed(pending.map(|p| p.id));
+                self.payments.hub.received.view.abandon_confirmation();
+                self.payments.hub.received.notice =
                     Some(format!("Couldn't update the gift: {}", error_reason(err)));
             }
             // The Business screen keeps tdesktop's fallback order.
             Some(RequestPurpose::GetBusinessFeatures) => {
-                self.payments.hub.business_features.fail(error_reason(err));
+                self.payments
+                    .hub
+                    .business_features
+                    .failed(extra, error_reason(err), false);
+            }
+            Some(RequestPurpose::GetPremiumState) => {
+                self.payments.hub.premium_state.failed(
+                    extra,
+                    format!("Couldn't load Premium plans: {}", error_reason(err)),
+                    false,
+                );
             }
             Some(RequestPurpose::GetPremiumFeatures) => {
-                self.payments.hub.premium.fail(format!(
-                    "Couldn't load Premium features: {}",
-                    error_reason(err)
-                ));
+                self.payments.hub.premium.failed(
+                    extra,
+                    format!("Couldn't load Premium features: {}", error_reason(err)),
+                    false,
+                );
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GetStarSubscriptions { .. })) => {
                 // Only the page in flight fails the list; an error does not
@@ -260,16 +273,22 @@ impl Session {
                 self.apply_suggested_post_error(err, purpose, pending.map(|p| p.id))
             }
             Some(RequestPurpose::Payments(PaymentsPurpose::GiftMarket(purpose))) => {
-                self.apply_gift_market_error(err, purpose, pending.map_or(0, |p| p.id.0))
+                self.apply_gift_market_error(err, purpose, pending.map(|p| p.id))
             }
             // The explorer stays the default; the next wallet or address
             // menu asks again.
             Some(RequestPurpose::GetTonExplorerUrl) => {
-                self.ton_wallet.explorer.fail(error_reason(err));
+                self.ton_wallet
+                    .explorer
+                    .failed(pending.map(|p| p.id), error_reason(err), false);
             }
             // The next look at the sticker preview asks again.
             Some(RequestPurpose::GetPremiumStickerExamples) => {
-                self.payments.hub.premium_stickers.fail(error_reason(err));
+                self.payments.hub.premium_stickers.failed(
+                    pending.map(|p| p.id),
+                    error_reason(err),
+                    false,
+                );
             }
             _ => {}
         }

@@ -69,6 +69,24 @@ impl QuillApp {
         cx.notify();
     }
 
+    /// The Failed list's Retry: asks again for what the box shows now.
+    fn retry_add_special(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.admin.add_special.as_ref() else {
+            return;
+        };
+        let chat_id = dialog.chat_id;
+        let (filter, query) = Self::add_special_filter(dialog, cx);
+        if let Some(live) = self.live.as_mut()
+            && live
+                .driver
+                .refresh_supergroup_members(chat_id, filter, &query)
+                .is_err()
+        {
+            self.set_note(StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_LOAD_MEMBERS)));
+        }
+        cx.notify();
+    }
+
     fn add_special_filter(dialog: &AddSpecialDialog, cx: &App) -> (MemberListFilter, String) {
         let query = dialog.search.read(cx).value().trim().to_string();
         let filter = if query.is_empty() {
@@ -139,10 +157,16 @@ impl QuillApp {
     /// tdesktop `kickUser`: banned with `KickedRestrictedRights`, forever.
     fn kick_from_add_special(&mut self, chat_id: ChatId, user_id: i64, cx: &mut Context<Self>) {
         let note = match self.live.as_mut() {
+            // The picker closes and the note says "banned" when the answer
+            // arrives (`settle_member_changes`).
             Some(live) => match live.driver.ban_chat_member(chat_id, user_id, 0) {
-                Ok(Some(_)) => {
-                    self.admin.add_special = None;
-                    StatusNote::silent(tr(keys::Q_PEOPLE_MEMBER_BANNED))
+                Ok(Some(request)) => {
+                    self.admin.member_changes.push(super::MemberChange {
+                        request,
+                        kind: super::MemberChangeKind::Kick,
+                    });
+                    cx.notify();
+                    return;
                 }
                 Ok(None) | Err(_) => {
                     StatusNote::error(tr(keys::Q_PEOPLE_COULD_NOT_UPDATE_MEMBER_STATUS))
@@ -150,8 +174,6 @@ impl QuillApp {
             },
             None => StatusNote::info(tr(keys::Q_PEOPLE_MEMBER_ACTIONS_NEED_A_LIVE)),
         };
-        // The member page is fetched again when the request answers
-        // (`member_list_stale`), not before the change applies.
         self.set_note(note);
         cx.notify();
     }
@@ -231,11 +253,28 @@ impl QuillApp {
         let message =
             |text: &'static str| div().px_2().py_2().text_sm().text_color(muted).child(text);
         match fetch {
-            None | Some(SupergroupMembersFetch::Loading) => {
+            None | Some(SupergroupMembersFetch::Loading { .. }) => {
                 list = list.child(message(tr(keys::CONTACTS_LOADING)));
             }
-            Some(SupergroupMembersFetch::Failed(error)) => {
-                list = list.child(div().px_2().text_sm().text_color(muted).child(error));
+            Some(
+                SupergroupMembersFetch::Failed(error) | SupergroupMembersFetch::NotSent(error),
+            ) => {
+                list = list.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .px_2()
+                        .child(div().flex_1().text_sm().text_color(muted).child(error))
+                        .child(
+                            Button::new("add-special-retry")
+                                .label(tr(keys::Q_PEOPLE_RETRY))
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.retry_add_special(cx);
+                                })),
+                        ),
+                );
             }
             Some(SupergroupMembersFetch::Loaded { members, .. }) => {
                 let rows: Vec<ParsedChatMember> = members

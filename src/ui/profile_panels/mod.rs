@@ -30,8 +30,6 @@ use quill::profile_forms::{
     unofficial_warning_text,
 };
 use quill::state::{ProfileChatsFetch, ProfileChatsKind};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 /// A copy action: the text for the clipboard, the context-menu label and
 /// the toast shown afterwards.

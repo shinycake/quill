@@ -72,6 +72,16 @@ impl Omarchy {
         }
     }
 
+    /// The watcher is not wanted: `Watching` returns to `Found`, dropping
+    /// (stopping) its task.
+    fn unwatch(&mut self) {
+        if let Self::Watching { .. } = self
+            && let Self::Watching { state, .. } = std::mem::take(self)
+        {
+            *self = Self::Found(state);
+        }
+    }
+
     /// A re-read theme replaces the state, keeping the watcher's stage.
     fn replace(&mut self, new: OmarchyState) {
         match self {
@@ -102,16 +112,25 @@ impl QuillApp {
 }
 
 impl QuillApp {
-    /// Re-read the theme whenever Omarchy's generation stamp changes;
-    /// started once, when a theme was found (not in screenshot demos).
-    pub(crate) fn start_omarchy_watch(&mut self, cx: &mut Context<Self>) {
+    /// Re-read the theme whenever Omarchy's generation stamp changes, only
+    /// while Quill follows it (not in screenshot demos): the watcher starts
+    /// when a found theme is followed and stops when it no longer is.
+    pub(crate) fn sync_omarchy_watch(&mut self, cx: &mut Context<Self>) {
         if self.demo_session.is_some() {
+            return;
+        }
+        if !self.appearance.follow_omarchy {
+            self.preferences.app_theme.omarchy.unwatch();
             return;
         }
         let Omarchy::Found(state) = &self.preferences.app_theme.omarchy else {
             return;
         };
         let dir = state.dir.clone();
+        // The theme may have changed while nobody watched.
+        if let Some(fresh) = OmarchyState::read(dir.clone()) {
+            self.preferences.app_theme.omarchy.replace(fresh);
+        }
         // screen-scope: the Omarchy watcher re-applies the app's appearance for whichever account is on screen.
         let task = cx.spawn(async move |this, cx| {
             loop {
@@ -150,5 +169,42 @@ impl QuillApp {
     /// Screenshot demos and tests: Omarchy found at `dir`, no watcher.
     pub(crate) fn use_omarchy_dir(&mut self, dir: PathBuf) {
         self.preferences.app_theme.omarchy = Omarchy::probe(Some(dir));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Omarchy;
+    use gpui_kit::Task;
+
+    fn found() -> Omarchy {
+        let root = quill::scratch::process_dir("quill-omarchy-stage");
+        let theme = root.join("theme");
+        let _ = std::fs::create_dir_all(&theme);
+        let _ = std::fs::write(
+            theme.join("colors.toml"),
+            "mode = \"dark\"\nbackground = \"#1a1b26\"\nforeground = \"#a9b1d6\"\n",
+        );
+        Omarchy::probe(Some(root))
+    }
+
+    #[test]
+    fn the_watcher_runs_only_between_watch_and_unwatch() {
+        let mut omarchy = found();
+        assert!(matches!(omarchy, Omarchy::Found(_)));
+        omarchy.watch(Task::ready(()));
+        assert!(matches!(omarchy, Omarchy::Watching { .. }));
+        omarchy.unwatch();
+        assert!(matches!(omarchy, Omarchy::Found(_)));
+        assert!(omarchy.state().is_some());
+    }
+
+    #[test]
+    fn a_stage_without_a_theme_has_nothing_to_watch() {
+        let mut omarchy = Omarchy::Absent;
+        omarchy.watch(Task::ready(()));
+        assert!(matches!(omarchy, Omarchy::Absent));
+        omarchy.unwatch();
+        assert!(matches!(omarchy, Omarchy::Absent));
     }
 }

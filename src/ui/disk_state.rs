@@ -10,7 +10,7 @@ use gpui_kit::component::{Sizable as _, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AnyWindowHandle, Context, InteractiveElement as _, IntoElement as _, ParentElement as _,
-    Styled as _, Window, transparent_black,
+    Styled as _, Task, Window, transparent_black,
 };
 use quill::auth::{AuthAction, AuthView};
 use quill::disk_guard::{
@@ -25,12 +25,13 @@ pub(crate) struct DiskUi {
     /// The state the readings brought, a doubted drop below close, and a
     /// call holding the on-screen client open at Full: one value.
     stage: DiskStage,
-    free: Option<u64>,
+    /// What the last reading found: the free space (the one before it
+    /// when a reading knew none) and whether TDLib can write the data
+    /// folder at all. Replaced whole by each reading.
+    seen: Seen,
     floors: DiskFloors,
     /// The wait before the last reading, to measure how fast the disk falls.
     waited: Duration,
-    /// The last reading found a data folder TDLib cannot write.
-    unwritable: bool,
     /// The on-screen client was refused below the open floor. The screen
     /// says so, while clients already running keep going until a reading
     /// falls below close.
@@ -48,6 +49,16 @@ pub(crate) struct DiskUi {
     on_screen: Option<quill::ids::AccountKey>,
     main_window: AnyWindowHandle,
     start_refused: bool,
+    /// The poll of the disk, which ends with this value.
+    _watcher: Option<Task<()>>,
+}
+
+/// What a reading found, as the screen and the notice read it.
+#[derive(Clone, Copy, Default)]
+struct Seen {
+    free: Option<u64>,
+    /// A data folder TDLib cannot write: the same as no room at all.
+    unwritable: bool,
 }
 
 impl DiskUi {
@@ -55,23 +66,24 @@ impl DiskUi {
         // A UI test feeds its readings through `apply_disk_reading`: a read
         // of the machine's own disk would make it pass or fail by how full
         // that disk is.
-        if !cfg!(test)
-            && let Some(root) = quill::settings::safe_app_root()
-        {
-            // The first read waits for the first frame: its purgeable-space
-            // query holds the file cache lock that AppKit's launch takes.
-            let (drawn, first_frame) = futures_channel::oneshot::channel::<()>();
-            window.on_next_frame(move |_, _| {
-                let _ = drawn.send(());
-            });
-            watch(root, first_frame, cx);
-        }
+        let watcher = if cfg!(test) {
+            None
+        } else {
+            quill::settings::safe_app_root().map(|root| {
+                // The first read waits for the first frame: its purgeable-space
+                // query holds the file cache lock that AppKit's launch takes.
+                let (drawn, first_frame) = futures_channel::oneshot::channel::<()>();
+                window.on_next_frame(move |_, _| {
+                    let _ = drawn.send(());
+                });
+                watch(root, first_frame, cx)
+            })
+        };
         Self {
             stage: DiskStage::default(),
-            free: None,
+            seen: Seen::default(),
             floors: FLOORS,
             waited: Duration::ZERO,
-            unwritable: false,
             screen_refused: false,
             full_notices: 0,
             cache_folder: None,
@@ -79,6 +91,7 @@ impl DiskUi {
             on_screen: None,
             main_window: window.window_handle(),
             start_refused: false,
+            _watcher: watcher,
         }
     }
 
@@ -108,7 +121,7 @@ impl DiskUi {
         &self,
         driver: &mut quill::connect::ConnectDriver<S>,
     ) {
-        let _ = driver.note_disk(self.stage.state(), self.free, &self.floors);
+        let _ = driver.note_disk(self.stage.state(), self.seen.free, &self.floors);
     }
 
     pub(super) fn refused_start(&mut self) {
@@ -120,7 +133,7 @@ fn watch(
     root: PathBuf,
     first_frame: futures_channel::oneshot::Receiver<()>,
     cx: &Context<QuillApp>,
-) {
+) -> Task<()> {
     // screen-scope: the disk watcher polls for the whole process and applies each
     // reading to whichever client is on screen; every reading names its account.
     QuillApp::spawn_app(cx, async move |this, cx| {
@@ -157,7 +170,6 @@ fn watch(
             cx.background_executor().timer(wait).await;
         }
     })
-    .detach();
 }
 
 /// What [`account_files`] read, and for which account.
@@ -260,18 +272,14 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) -> Duration {
         self.disk.floors = floors;
-        if reading.unwritable != self.disk.unwritable {
-            self.disk.unwritable = reading.unwritable;
-            cx.notify();
-        }
         // TDLib can write nothing there: the same as no room at all.
         let free = if reading.unwritable {
             Some(0)
         } else {
             reading.free
         };
-        let fall = fall_per_sec(self.disk.free, free, self.disk.waited);
-        self.apply_disk_reading(free, cx);
+        let fall = fall_per_sec(self.disk.seen.free, free, self.disk.waited);
+        self.apply_reading(free, reading.unwritable, cx);
         let wait = if self.disk.stage.is_doubt() {
             CONFIRM_READ
         } else {
@@ -281,11 +289,22 @@ impl QuillApp {
         wait
     }
 
+    #[cfg(test)]
+    #[cfg(feature = "demo-capture")]
     pub(super) fn apply_disk_reading(&mut self, free: Option<u64>, cx: &mut Context<Self>) {
-        let shown = self.disk.free;
+        self.apply_reading(free, false, cx);
+    }
+
+    /// A reading of `free` (with `unwritable`: the folder cannot be written
+    /// and `free` is zero).
+    fn apply_reading(&mut self, free: Option<u64>, unwritable: bool, cx: &mut Context<Self>) {
+        let shown = self.disk.seen;
         let floors = self.disk.floors;
         let (after, next) = self.disk.stage.read(free, &floors);
-        self.disk.free = free.or(shown);
+        self.disk.seen = Seen {
+            free: free.or(shown.free),
+            unwritable,
+        };
         let mut running = false;
         let repaused = self
             .live
@@ -329,7 +348,10 @@ impl QuillApp {
         if retry_screen && step != DiskStep::Reconnect {
             self.reconnect_after_disk(cx);
         }
-        if before != after || (self.disk.shows_screen() && self.disk.free != shown) {
+        if before != after
+            || self.disk.seen.unwritable != shown.unwritable
+            || (self.disk.shows_screen() && self.disk.seen.free != shown.free)
+        {
             cx.notify();
         }
     }
@@ -380,7 +402,7 @@ impl QuillApp {
     fn announce_full_disk(&mut self, cx: &mut Context<Self>) {
         self.bring_main_window_forward(cx);
         self.disk.full_notices += 1;
-        let notice = full_disk_notice(self.disk.unwritable);
+        let notice = full_disk_notice(self.disk.seen.unwritable);
         let locked = self.account.passcode.is_locked();
         self.show_os_notification(notice, None, None, locked, cx);
     }
@@ -445,7 +467,7 @@ impl QuillApp {
         if !self.disk.shows_screen() {
             return None;
         }
-        if self.disk.unwritable {
+        if self.disk.seen.unwritable {
             return Some(AuthView {
                 title: tr(keys::Q_DISK_UNWRITABLE_TITLE),
                 body: tr(keys::Q_DISK_UNWRITABLE_BODY).to_string(),
@@ -454,7 +476,7 @@ impl QuillApp {
             });
         }
         let needed = disk_size(self.disk.floors.open);
-        let sizes = match self.disk.free {
+        let sizes = match self.disk.seen.free {
             Some(free) => tr_with(
                 keys::Q_DISK_FULL_SIZES,
                 &[("free", &disk_size(free)), ("needed", &needed)],
@@ -473,7 +495,7 @@ impl QuillApp {
     /// in the file manager, so they can be removed there. Quill deletes
     /// nothing itself while TDLib is closed: TDLib keeps their records.
     pub(super) fn disk_full_reveal(&self, cx: &Context<Self>) -> Option<gpui_kit::AnyElement> {
-        if !self.disk.shows_screen() || self.disk.unwritable {
+        if !self.disk.shows_screen() || self.disk.seen.unwritable {
             return None;
         }
         let folder = self.disk.cache_folder.clone()?;

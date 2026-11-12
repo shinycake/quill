@@ -34,6 +34,9 @@
 "qll_notes_stories_skipped#other" = "Skipped {count} stories that can't be added to albums.";
 "qll_notes_couldnt_do" = "Couldn't {what}.";
 "qll_notes_failed_log_out" = "Couldn't log out.";
+"qll_notes_failed_delete_account" = "Couldn't delete the account.";
+"qll_notes_failed_set_account_ttl" = "Couldn't change the self-destruct timer.";
+"qll_notes_failed_set_auto_delete" = "Couldn't change the auto-delete timer.";
 "qll_notes_failed_remove_wallpaper" = "Couldn't remove the wallpaper.";
 "qll_notes_failed_call_history" = "Couldn't load the call history.";
 "qll_notes_failed_clear_call_history" = "Couldn't clear the call history.";

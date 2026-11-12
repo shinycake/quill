@@ -6,7 +6,7 @@
 
 use super::app::QuillApp;
 use super::bots_box_send::BoxKind;
-use super::dialogs::ProfileDialog;
+use super::dialogs::{AddBotStep, ChatStep, ProfileDialog};
 use super::groups::{ADMIN_RIGHT_LABELS, admin_right_get, admin_right_set};
 use super::message_payments::button_is_pressable;
 use super::pressable::action_row;
@@ -234,8 +234,7 @@ impl QuillApp {
         self.dialogs.profile_dialog = Some(ProfileDialog::AddBot {
             bot_id,
             invite,
-            target: None,
-            rights: ChatAdminRights::default(),
+            step: AddBotStep::Pick,
         });
         self.open_box(DialogKind::ProfilePanel);
         cx.notify();
@@ -357,13 +356,16 @@ impl QuillApp {
         let Some(ProfileDialog::AddBot {
             bot_id,
             invite,
-            target,
-            rights,
+            step,
         }) = self.dialogs.profile_dialog.as_ref()
         else {
             return None;
         };
-        let (bot_id, target, rights) = (*bot_id, *target, *rights);
+        let bot_id = *bot_id;
+        let (target, rights) = match *step {
+            AddBotStep::Pick => (None, ChatAdminRights::default()),
+            AddBotStep::Confirm { target, rights } => (Some(target), rights),
+        };
         let invite = invite.clone();
         let muted = cx.theme().muted_foreground;
         let bot_name = self
@@ -454,8 +456,10 @@ impl QuillApp {
                                         .unwrap_or_default(),
                                 )
                                 .on_click(cx.listener(move |this, &on: &bool, window, cx| {
-                                    if let Some(ProfileDialog::AddBot { rights, .. }) =
-                                        &mut this.dialogs.profile_dialog
+                                    if let Some(ProfileDialog::AddBot {
+                                        step: AddBotStep::Confirm { rights, .. },
+                                        ..
+                                    }) = &mut this.dialogs.profile_dialog
                                     {
                                         admin_right_set(rights, index, on);
                                     }
@@ -514,13 +518,18 @@ impl QuillApp {
                     Button::new("add-bot-back")
                         .label(tr(keys::Q_MEDIA_BACK))
                         .ghost()
+                        // Back would drop the send's follow-up (the start
+                        // payload goes after the promotion is answered).
+                        .disabled(sending)
                         .on_click(cx.listener(move |this, _, window, cx| {
+                            if this.box_sending() {
+                                return;
+                            }
                             // box-host: a step of the open box; it stays where it shows
                             this.dialogs.profile_dialog = Some(ProfileDialog::AddBot {
                                 bot_id,
                                 invite: back_invite.clone(),
-                                target: None,
-                                rights: ChatAdminRights::default(),
+                                step: AddBotStep::Pick,
                             });
                             window.refresh();
                             cx.notify();
@@ -585,8 +594,10 @@ impl QuillApp {
                     this.dialogs.profile_dialog = Some(ProfileDialog::AddBot {
                         bot_id,
                         invite: row_invite.clone(),
-                        target: Some(chat_id),
-                        rights: requested,
+                        step: AddBotStep::Confirm {
+                            target: chat_id,
+                            rights: requested,
+                        },
                     });
                     window.refresh();
                     cx.notify();
@@ -627,7 +638,7 @@ impl QuillApp {
         self.dialogs.profile_dialog = Some(ProfileDialog::ShareGame {
             bot_id,
             game_short_name,
-            target: None,
+            step: ChatStep::Pick,
         });
         self.open_box(DialogKind::ProfilePanel);
         cx.notify();
@@ -706,12 +717,12 @@ impl QuillApp {
         let Some(ProfileDialog::ShareGame {
             bot_id,
             game_short_name,
-            target,
+            step,
         }) = self.dialogs.profile_dialog.as_ref()
         else {
             return None;
         };
-        let (bot_id, target) = (*bot_id, *target);
+        let (bot_id, target) = (*bot_id, step.target());
         let game_short_name = game_short_name.clone();
         let muted = cx.theme().muted_foreground;
         let destinations = self.share_game_destinations();
@@ -766,7 +777,7 @@ impl QuillApp {
                             this.dialogs.profile_dialog = Some(ProfileDialog::ShareGame {
                                 bot_id,
                                 game_short_name: back_name.clone(),
-                                target: None,
+                                step: ChatStep::Pick,
                             });
                             window.refresh();
                             cx.notify();
@@ -808,7 +819,7 @@ impl QuillApp {
                     this.dialogs.profile_dialog = Some(ProfileDialog::ShareGame {
                         bot_id,
                         game_short_name: name.clone(),
-                        target: Some(id),
+                        step: ChatStep::Confirm(id),
                     });
                     window.refresh();
                     cx.notify();

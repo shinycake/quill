@@ -9,16 +9,34 @@ use quill::poll::{
 };
 
 /// What an option of the new poll carries beside its text.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Default)]
 pub(crate) enum OptionMediaSlot {
     #[default]
     None,
-    /// A picked video being read (duration and size) off the UI thread.
-    Preparing(String),
+    /// A picked file being read (duration and size) off the UI thread.
+    Preparing(Preparing),
     Ready(PollOptionInput),
 }
 
+/// The read of a picked file. The task is owned here: replacing or clearing
+/// the slot, removing the row or closing the box cancels it, so its answer
+/// can only reach a slot that still waits for it.
+pub(crate) struct Preparing {
+    pub(crate) path: String,
+    _read: Task<()>,
+}
+
+impl Preparing {
+    pub(crate) fn new(path: String, read: Task<()>) -> Self {
+        Self { path, _read: read }
+    }
+}
+
 impl OptionMediaSlot {
+    pub(crate) fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+
     /// The media, once it is ready to send.
     pub(crate) fn ready(&self) -> Option<&PollOptionInput> {
         match self {
@@ -29,8 +47,8 @@ impl OptionMediaSlot {
 }
 
 /// What an option's attach area is doing: one thing at a time. Every mode
-/// leaves to `Idle`: the pick, Done or Cancel, the media being set, another
-/// option taking the sticker or emoji panel.
+/// leaves to `Idle`: the pick, Done or Cancel, the media being set, the
+/// sticker or emoji panel being chosen for (`PollPick`).
 #[derive(Clone)]
 pub(crate) enum AttachMode {
     Idle,
@@ -38,10 +56,20 @@ pub(crate) enum AttachMode {
     Menu,
     /// The link field, while an address is being typed.
     Link(Entity<TextareaState>),
-    /// Waiting for a sticker chosen in the sticker panel.
-    AwaitSticker,
-    /// The emoji panel is open for this option's field.
-    AwaitEmoji,
+}
+
+/// Where the next sticker or emoji picked in the media panel goes: one
+/// recipient for the whole panel, named by the `OptionAttach::id` of the
+/// option that asked (a row's index moves when an earlier row goes). It
+/// leaves with the pick, Done or Cancel, or when the option is gone.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum PollPick {
+    #[default]
+    None,
+    /// The next sticker clicked in the panel is this option's media.
+    Sticker(u64),
+    /// Emoji clicked in the panel go into this option's field.
+    Emoji(u64),
 }
 
 impl OptionAttach {
@@ -50,14 +78,6 @@ impl OptionAttach {
             AttachMode::Link(input) => Some(input),
             _ => None,
         }
-    }
-
-    pub(crate) fn awaiting_sticker(&self) -> bool {
-        matches!(self.mode, AttachMode::AwaitSticker)
-    }
-
-    pub(crate) fn awaiting_emoji(&self) -> bool {
-        matches!(self.mode, AttachMode::AwaitEmoji)
     }
 
     /// Back to `Idle` when in the mode `is` names; a different mode stays.
@@ -107,14 +127,13 @@ pub(crate) enum QuizLock {
 }
 
 impl QuizLock {
-    /// What a request-poll button asks for (`force_quiz` wins).
-    pub(crate) fn from_button(force_regular: bool, force_quiz: bool) -> Self {
-        if force_quiz {
-            Self::Quiz
-        } else if force_regular {
-            Self::Regular
-        } else {
-            Self::Free
+    /// What a request-poll button asks for.
+    pub(crate) fn from_button(request: quill::telegram::envelope::PollRequest) -> Self {
+        use quill::telegram::envelope::PollRequest;
+        match request {
+            PollRequest::QuizOnly => Self::Quiz,
+            PollRequest::RegularOnly => Self::Regular,
+            PollRequest::Any => Self::Free,
         }
     }
 }
@@ -139,10 +158,6 @@ pub(crate) struct PollToggles {
 /// or Cancel in a picker, "Keep editing" on the discard question; the box
 /// itself closes from any of them.
 pub(crate) enum PollPage {
-    /// Just opened: the form, and the question takes focus once the dialog
-    /// has mounted (the kit dialog takes focus when it opens, so focusing at
-    /// open time is lost). The first render moves on to `Form`.
-    Opening,
     Form,
     /// The allowed countries picker.
     Country(crate::ui::country_box::CountryBox),
@@ -165,9 +180,9 @@ pub(crate) struct DeadlineBox {
 pub struct PollDialog {
     pub(crate) description_input: Entity<TextareaState>,
     pub(crate) question_input: Entity<TextareaState>,
-    pub(crate) option_inputs: Vec<Entity<TextareaState>>,
-    /// The media of each option, by the same index as `option_inputs`.
-    pub(crate) attach: Vec<OptionAttach>,
+    /// The options, in order: each row's field, media and quiz mark live
+    /// together, so removing a row takes all of them.
+    pub(crate) options: Vec<PollOptionRow>,
     pub(crate) explanation_input: Entity<TextareaState>,
     /// The allowed countries (ISO codes), picked in the country box.
     /// tdesktop's "Limit by Country" switch (channels); off keeps no codes.
@@ -182,8 +197,6 @@ pub struct PollDialog {
     /// A broadcast channel: votes are always anonymous and options cannot
     /// be added.
     pub(crate) in_channel: bool,
-    /// Dialog-row indexes marked as the quiz's correct options.
-    pub(crate) quiz_correct_rows: Vec<usize>,
     pub(crate) allows_revoting: bool,
     pub(crate) shuffle_options: bool,
     /// B15: "Allow Adding Options" (`inputPollTypeRegular.allow_adding_options`).
@@ -195,6 +208,9 @@ pub struct PollDialog {
     /// Which page the box shows (the form, a picker over it, or the discard
     /// question).
     pub(crate) page: PollPage,
+    /// The question, until the dialog has mounted and focused it (the kit
+    /// dialog takes focus when it opens, so focusing at open time is lost).
+    pub(crate) focus_on_mount: Option<Entity<TextareaState>>,
     /// "Limit Duration" is on: the poll closes at `close`.
     pub(crate) limit_duration: bool,
     pub(crate) close: PollClose,
@@ -204,6 +220,14 @@ pub struct PollDialog {
     baseline: Option<PollToggles>,
 }
 
+/// One option of the new poll.
+pub(crate) struct PollOptionRow {
+    pub(crate) input: Entity<TextareaState>,
+    pub(crate) attach: OptionAttach,
+    /// Marked as a correct answer (a quiz).
+    pub(crate) correct: bool,
+}
+
 /// B15: the inline "Add an Option" panel for an open poll that allows it
 /// (`addPollOption`, schema 1.8.67 line 12920).
 pub struct PollAddOption {
@@ -211,9 +235,43 @@ pub struct PollAddOption {
     pub(crate) message_id: MessageId,
     pub(crate) input: Entity<TextareaState>,
     pub(crate) attach: OptionAttach,
-    pub(crate) error: Option<&'static str>,
-    /// Focus the field once the dialog has mounted.
-    pub(crate) focus_on_mount: bool,
+    /// The reason Add was refused, drawn under the field.
+    error: Option<&'static str>,
+    /// The field, until the dialog has mounted and focused it (the kit
+    /// dialog takes focus when it opens, so focusing at open time is lost).
+    focus_on_mount: Option<Entity<TextareaState>>,
+}
+
+impl PollAddOption {
+    /// A fresh panel: the field takes focus once the dialog has mounted.
+    pub(crate) fn new(
+        chat_id: ChatId,
+        message_id: MessageId,
+        input: Entity<TextareaState>,
+    ) -> Self {
+        Self {
+            chat_id,
+            message_id,
+            focus_on_mount: Some(input.clone()),
+            input,
+            attach: Default::default(),
+            error: None,
+        }
+    }
+
+    /// The field to focus on the first render after open, once.
+    pub(crate) fn take_focus(&mut self) -> Option<Entity<TextareaState>> {
+        self.focus_on_mount.take()
+    }
+
+    /// The reason Add was refused, drawn under the field.
+    pub(crate) fn error(&self) -> Option<&'static str> {
+        self.error
+    }
+
+    pub(crate) fn refuse(&mut self, reason: &'static str) {
+        self.error = Some(reason);
+    }
 }
 
 impl PollDialog {
@@ -252,14 +310,9 @@ impl PollDialog {
         self.page = PollPage::Form;
     }
 
-    /// The first render after open: whether the question takes focus now.
-    pub(crate) fn take_focus_question(&mut self) -> bool {
-        if matches!(self.page, PollPage::Opening) {
-            self.page = PollPage::Form;
-            true
-        } else {
-            false
-        }
+    /// The question to focus on the first render after open, once.
+    pub(crate) fn take_focus_question(&mut self) -> Option<Entity<TextareaState>> {
+        self.focus_on_mount.take()
     }
 }
 
@@ -287,25 +340,24 @@ impl PollDialog {
             tr(keys::Q_MEDIA_QUIZ_EXPLANATION_OPTIONAL_200_MAX),
             (1, 3),
         );
-        let option_inputs = (0..POLL_OPTIONS_MIN)
-            .map(|index| {
-                textarea(
+        let options = (0..POLL_OPTIONS_MIN)
+            .map(|index| PollOptionRow {
+                input: textarea(
                     cx,
                     &tr_with(
                         keys::Q_MEDIA_OPTION,
                         &[("index_1", &(index + 1).to_string())],
                     ),
                     (1, 2),
-                )
+                ),
+                attach: OptionAttach::default(),
+                correct: false,
             })
             .collect();
         let mut dialog = Self {
             description_input,
-            question_input,
-            attach: (0..POLL_OPTIONS_MIN)
-                .map(|_| OptionAttach::default())
-                .collect(),
-            option_inputs,
+            question_input: question_input.clone(),
+            options,
             explanation_input,
             limit_by_country: false,
             country_codes: Vec::new(),
@@ -314,7 +366,6 @@ impl PollDialog {
             is_quiz: lock == QuizLock::Quiz,
             lock,
             in_channel,
-            quiz_correct_rows: Vec::new(),
             allows_revoting: lock != QuizLock::Quiz,
             shuffle_options: true,
             allow_adding_options: !in_channel && lock != QuizLock::Quiz,
@@ -322,7 +373,8 @@ impl PollDialog {
             members_only: false,
             limit_duration: false,
             close: PollClose::Period(POLL_DEFAULT_PERIOD_SECS),
-            page: PollPage::Opening,
+            page: PollPage::Form,
+            focus_on_mount: Some(question_input.clone()),
             dismiss_keyboard_on_send: None,
             baseline: None,
         };
@@ -350,16 +402,12 @@ impl PollDialog {
         let value = |input: &Entity<TextareaState>| input.read(cx).value().to_string();
         // Options carry their custom emoji as composer markup.
         let options: Vec<DraftOption> = self
-            .option_inputs
+            .options
             .iter()
-            .enumerate()
-            .map(|(row, input)| DraftOption {
-                text: crate::ui::composer_field::field_doc(input.read(cx)).to_markup(),
-                media: self
-                    .attach
-                    .get(row)
-                    .and_then(|attach| attach.media.ready().cloned()),
-                correct: self.quiz_correct_rows.contains(&row),
+            .map(|row| DraftOption {
+                text: crate::ui::composer_field::field_doc(row.input.read(cx)).to_markup(),
+                media: row.attach.media.ready().cloned(),
+                correct: row.correct,
             })
             .collect();
         let country_codes = if self.limit_by_country {
@@ -389,25 +437,22 @@ impl PollDialog {
 
     /// A picked video is still being read: sending now would drop it.
     pub(crate) fn media_preparing(&self) -> bool {
-        self.attach
+        self.options
             .iter()
-            .any(|attach| matches!(attach.media, OptionMediaSlot::Preparing(_)))
+            .any(|row| matches!(row.attach.media, OptionMediaSlot::Preparing(_)))
     }
 
     /// `true` when closing would lose user input (drives the discard prompt).
     pub(crate) fn is_dirty(&self, cx: &App) -> bool {
         let value = |input: &Entity<TextareaState>| input.read(cx).value();
         Some(self.toggles()) != self.baseline
-            || self
-                .attach
-                .iter()
-                .any(|attach| attach.media != OptionMediaSlot::None)
+            || self.options.iter().any(|row| !row.attach.media.is_none())
             || !value(&self.question_input).trim().is_empty()
             || !value(&self.description_input).trim().is_empty()
             || !value(&self.explanation_input).trim().is_empty()
             || self
-                .option_inputs
+                .options
                 .iter()
-                .any(|input| !value(input).trim().is_empty())
+                .any(|row| !value(&row.input).trim().is_empty())
     }
 }

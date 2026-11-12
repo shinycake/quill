@@ -5,6 +5,7 @@
 use super::chrome::ChromeFacts;
 use super::swipe_indicator::swipe_indicator;
 use super::*;
+use crate::ui::viewer_parts::Pointer;
 use quill::lang::{keys, tr, tr_with};
 
 impl QuillApp {
@@ -65,10 +66,10 @@ impl QuillApp {
                 natural_size: None,
                 quality_options: Vec::new(),
             });
-        // Copies of just the item's files and their downloads: the
-        // rendering below needs `self` mutably. Reading the files marks
-        // them used, so they stay in the session's bounded map while
-        // shown.
+        // A copy of what this item reads (not the whole session's maps):
+        // the rendering below needs `self` mutably. Reading the item's
+        // files first marks them used, so they stay in the session's
+        // bounded map while shown.
         let item_files: Vec<i32> = item
             .display_file_ids
             .iter()
@@ -78,11 +79,16 @@ impl QuillApp {
             .collect();
         let files: quill::state::FileMap = self
             .session()
-            .map(|s| s.media.files.only(item_files.iter().copied()))
+            .map(|s| {
+                for id in &item_files {
+                    let _ = s.media.files.get(id);
+                }
+                s.media.files.only(item_files.iter().copied())
+            })
             .unwrap_or_default();
         let downloading: quill::state::DownloadIntents = self
             .session()
-            .map(|s| s.media.downloads.only(item_files.iter().copied()))
+            .map(|s| s.media.downloads.only(&item_files))
             .unwrap_or_default();
         let roots = self.media_display_roots();
         let thumb_path = viewer_display_path(&item, &files, &roots);
@@ -143,7 +149,7 @@ impl QuillApp {
                 && self.viewer.clip.video() == Some(item.message_id))
             .then(|| {
                 if let Some(player) = self.viewer.clip.player() {
-                    player.set_orientation(self.viewer.orientation.turns, false);
+                    player.set_orientation(self.viewer.reorient.orientation().turns, false);
                 }
                 self.viewer_inline_video()
             })
@@ -157,7 +163,7 @@ impl QuillApp {
             // An upright HDR picture file draws its HDR rendition (macOS).
             let hdr_frame = (file_card.is_none()
                 && item.kind == MediaViewerKind::ImageFile
-                && self.viewer.orientation.is_identity())
+                && self.viewer.reorient.orientation().is_identity())
             .then_some(thumb_path.as_deref())
             .flatten()
             .and_then(|path| self.viewer_hdr_element(path, (zoom_w, zoom_h), window, cx));
@@ -182,11 +188,8 @@ impl QuillApp {
                     .is_picture()
                     .then_some(self.viewer.reorient.shown())
                     .flatten()
-                    .filter(|(path, turns, _)| {
-                        *turns == self.viewer.orientation.code()
-                            && Some(path.as_path()) == thumb_path.as_deref()
-                    })
-                    .map(|(_, _, image)| ImageSource::from(Arc::clone(image)));
+                    .filter(|(path, _)| Some(path.as_path()) == thumb_path.as_deref())
+                    .map(|(_, image)| ImageSource::from(Arc::clone(image)));
                 let source: Option<ImageSource> = rotated.or_else(|| {
                     thumb_path.as_deref().map(|path| {
                         if item.kind == MediaViewerKind::ImageFile {
@@ -366,7 +369,7 @@ impl QuillApp {
                         let pos = (f32::from(event.position.x), f32::from(event.position.y));
                         if let Some(view) = down_view.upgrade() {
                             view.update(cx, |this, cx| {
-                                this.viewer.drag = Some(pos);
+                                this.viewer.pointer = Pointer::Panning(pos);
                                 cx.notify();
                             });
                         }
@@ -384,7 +387,7 @@ impl QuillApp {
                     .on_mouse_up(MouseButton::Left, move |_event, _window, cx| {
                         if let Some(view) = up_view.upgrade() {
                             view.update(cx, |this, cx| {
-                                this.viewer.drag = None;
+                                this.viewer.pointer.end_pan();
                                 cx.notify();
                             });
                         }

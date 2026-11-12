@@ -418,3 +418,39 @@ fn the_shortcuts_answer_skips_a_draft_typed_on_meanwhile(cx: &mut TestAppContext
     let composer = app.read_with(&main, |app, cx| app.composer.read(cx).value().to_string());
     assert_eq!(composer, "Typed on after pressing");
 }
+
+/// A request that cannot go out (the connection is being replaced, and it
+/// is not a screenshot demo) fails the card instead of leaving it loading.
+/// Read in the same update: with no session the box closes right after.
+#[gpui_kit::test]
+fn a_tab_asked_without_a_connection_fails_instead_of_loading(cx: &mut TestAppContext) {
+    let (app, mut main) = open_main(cx);
+    app.update_in(&mut main, |app, window, cx| {
+        app.demo_session = None;
+        app.ai_compose_update(window, cx, |ai| ai.set_mode(AiComposeMode::Fix));
+        let card = app
+            .ai_compose
+            .open
+            .as_ref()
+            .map(|open| open.ai.card().clone());
+        assert!(matches!(card, Some(CardState::Failed(_))), "{card:?}");
+    });
+}
+
+/// The language picker opens unfiltered, whatever was typed before.
+#[gpui_kit::test]
+fn the_language_picker_reopens_unfiltered(cx: &mut TestAppContext) {
+    let (app, mut main) = open_main(cx);
+    app.update_in(&mut main, |app, window, cx| {
+        app.ai_compose
+            .language_search
+            .update(cx, |search, cx| search.set_value("span", window, cx));
+    });
+    close_box(&app, &mut main);
+    set_draft(&app, &mut main, DRAFT);
+    app.update_in(&mut main, |app, window, cx| app.open_ai_compose(window, cx));
+    let query = app.read_with(&main, |app, cx| {
+        app.ai_compose.language_search.read(cx).value().to_string()
+    });
+    assert_eq!(query, "");
+}

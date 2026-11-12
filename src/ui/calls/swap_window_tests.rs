@@ -97,7 +97,10 @@ fn a_second_call_reopens_a_call_window_you_closed(cx: &mut TestAppContext) {
             .and_then(|session| session.calls.active_call.as_ref().map(|call| call.id))
     });
     app.update(call, |app, cx| {
-        app.call_screen.window_closed_by_user = active;
+        app.call_screen.wanted = active.map_or(
+            crate::ui::calls_state::WindowWanted::Open,
+            crate::ui::calls_state::WindowWanted::ClosedByUser,
+        );
         app.sync_call_window(cx);
     });
     call.run_until_parked();

@@ -166,26 +166,31 @@ impl ListEdit {
     }
 }
 
-/// The device-link round trip (`confirmQrCodeAuthentication`).
+/// The answer of the device-link round trip (`confirmQrCodeAuthentication`).
+/// The request in flight is `sessions_op`'s (it locks the sessions page);
+/// this holds only how that request ended, for the screen that sent it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum DeviceLogin {
     #[default]
     Idle,
-    /// The confirmation is in flight.
-    InFlight,
-    /// It ended; the screen takes the result once.
-    Done(crate::auth::DeviceLoginResult),
+    /// That request ended; the screen that sent it takes the result once.
+    Done {
+        request: RequestId,
+        result: crate::auth::DeviceLoginResult,
+    },
 }
 
 impl DeviceLogin {
-    pub fn in_flight(self) -> bool {
-        self == Self::InFlight
+    /// The screen that asked went away: nobody takes the answer.
+    pub fn discard(&mut self) {
+        *self = Self::Idle;
     }
 
-    /// The result, once: the stage returns to `Idle`.
-    pub fn take_result(&mut self) -> Option<crate::auth::DeviceLoginResult> {
+    /// The result of the confirmation `asked` sent, once: the stage returns
+    /// to `Idle`. A result for another request is not this asker's.
+    pub fn take_result_for(&mut self, asked: RequestId) -> Option<crate::auth::DeviceLoginResult> {
         match *self {
-            Self::Done(result) => {
+            Self::Done { request, result } if request == asked => {
                 *self = Self::Idle;
                 Some(result)
             }
@@ -239,8 +244,8 @@ impl StorageClear {
 }
 
 pub struct SettingsState {
-    /// See [`AutoDownloadAnswer`].
-    pub auto_download_answer: Option<AutoDownloadAnswer>,
+    /// See [`AutoDownloadAnswers`].
+    pub auto_download_answers: AutoDownloadAnswers,
     /// Mirror of `settings::Preferences::notify_view` (tdesktop "Name" /
     /// "Text"), loaded from `prefs.json` at connect time.
     pub notify_view: crate::notify::NotifyView,
@@ -261,7 +266,8 @@ pub struct SettingsState {
     /// A notification-worthy message arrived: the UI bounces the Dock icon /
     /// flashes the taskbar (when the user wants it and the OS is not in
     /// Do Not Disturb). Set independently of the "Desktop notifications"
-    /// switch, like tdesktop's alert.
+    /// switch, like tdesktop's alert. An event the notifier takes, not a
+    /// stage: nothing is asked and nothing answers it.
     pub pending_attention: bool,
     /// TDLib option `disable_contact_registered_notifications`: the inverse
     /// of tdesktop's "Contact joined Telegram" event switch.
@@ -289,15 +295,13 @@ pub struct SettingsState {
     /// Parity slice: `getScopeNotificationSettings` results per scope; used
     /// for `use_default_*` fallback (e.g. default sound) and the scope
     /// defaults settings view.
-    pub scope_notification_settings: HashMap<NotificationSettingsScope, ScopeNotificationSettings>,
+    pub scope_notification_settings: ScopeSettings,
     /// Parity slice: `getChatNotificationSettingsExceptions` answers —
     /// chat ids with non-default notification settings per scope (the
     /// exceptions list view). No entry: never asked, or dropped as stale
     /// by `updateChatNotificationSettings`, so the page asks again; a
     /// failure stays failed until its Retry.
     pub notification_exceptions: HashMap<NotificationSettingsScope, Fetch<Vec<i64>>>,
-    /// Parity slice: scopes with a `getScopeNotificationSettings` in flight.
-    pub scope_settings_loading: HashSet<NotificationSettingsScope>,
     /// Parity slice: `updateReactionNotificationSettings` cache. No getter
     /// exists — this stays `None` until the first update arrives.
     pub reaction_notification_settings: Option<ReactionNotificationSettings>,
@@ -325,12 +329,9 @@ pub struct SettingsState {
     pub data_storage_dirty: bool,
     /// Slice S4: last Data & Storage failure, shown on the screen
     /// (failures surface there, never as toasts — the S3 pattern).
-    /// Slice S4: the `getAutoDownloadSettingsPresets` round trip: in
-    /// flight, or why it failed (`Ready` once the answer seeded the prefs).
-    pub auto_download_presets: Fetch<()>,
-    /// Slice S4: how the last `setAutoDownloadSettings` / storage-limit
-    /// save went; a failure shows on the screen (never as a toast).
-    pub data_storage_save: Fetch<()>,
+    /// Slice S4: the failure line of each kind of Data & Storage save; it
+    /// shows on the screen (never as a toast).
+    pub data_storage_save: StorageSaveFailures,
     /// Batch 6: the `optimizeStorage` round trip and its result.
     pub storage_clear: StorageClear,
     /// Batch 6: the local storage limits TDLib reports (`updateOption`).
@@ -443,11 +444,6 @@ pub struct SettingsState {
     /// `parity:proxy-settings`: TDLib's proxy list, ping results and the
     /// auto-switch / IPv6 preferences.
     pub proxy: crate::proxy::ProxyState,
-    /// The latest `pingProxy` sent for each ping slot (a list entry, or
-    /// the link box's). Only its answer fills the slot: an older ping of
-    /// another server (the previous link, the entry before an edit) is
-    /// dropped.
-    pub(crate) proxy_ping_requests: HashMap<i32, RequestId>,
     /// The running or just-finished account export ("Export Telegram
     /// data"); the UI shows its progress and clears it.
     pub account_export: Option<crate::export::AccountExport>,
@@ -560,18 +556,16 @@ impl SettingsState {
             default_auto_delete: Fetch::Idle,
             saved_sounds: Fetch::Idle,
             tone_upload: crate::tone_upload::ToneUpload::Idle,
-            scope_notification_settings: HashMap::new(),
+            scope_notification_settings: ScopeSettings::default(),
             notification_exceptions: HashMap::new(),
-            scope_settings_loading: HashSet::new(),
             reaction_notification_settings: None,
             scope_saves: Default::default(),
             reaction_saves: Default::default(),
             storage_stats: Fetch::Idle,
             data_storage: DataStoragePrefs::default(),
             data_storage_dirty: false,
-            auto_download_answer: None,
-            auto_download_presets: Fetch::Idle,
-            data_storage_save: Fetch::Idle,
+            auto_download_answers: AutoDownloadAnswers::default(),
+            data_storage_save: StorageSaveFailures::default(),
             storage_clear: StorageClear::Idle,
             storage_limits: Default::default(),
             privacy_data: Default::default(),
@@ -598,7 +592,6 @@ impl SettingsState {
             language_prefs: LanguagePrefs::default(),
             device_prefs: Default::default(),
             proxy: Default::default(),
-            proxy_ping_requests: HashMap::new(),
             account_export: None,
             chat_export: None,
             rich_html_exports: Vec::new(),
@@ -620,17 +613,18 @@ fn dedup_ids(mut list: Vec<i64>, more: Vec<i64>) -> Vec<i64> {
 }
 
 impl SettingsState {
-    /// The device link is out: the sessions buttons stay disabled (a
-    /// terminate in flight is `sessions_op`).
+    /// A terminate or a device link is out (`sessions_op`): the sessions
+    /// buttons stay disabled.
     pub fn sessions_busy(&self) -> bool {
-        self.sessions_op.is_mutating() || self.device_login.in_flight()
+        self.sessions_op.is_mutating()
     }
 
     /// The Data & Storage failure line: the presets fetch, the cache clear
     /// or the last save, each from its own stage.
     pub fn data_storage_error(&self) -> Option<&str> {
-        self.auto_download_presets
-            .error()
+        self.data_storage
+            .seeded
+            .failure()
             .or_else(|| self.storage_clear.failed())
             .or_else(|| self.data_storage_save.error())
     }

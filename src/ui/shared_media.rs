@@ -25,16 +25,16 @@ impl QuillApp {
     pub(super) fn shared_media_panel_open(&self) -> bool {
         self.session().is_some_and(|session| {
             let media = &session.media.shared_media;
-            media.playlist_user.is_some()
+            media.playlist_user().is_some()
                 || (media.open()
-                    && media.chat_id.is_some()
+                    && media.chat_id().is_some()
                     && media.tab_at(media.active_tab).is_some())
         })
     }
 
     pub(super) fn shared_media_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let shared = &self.session()?.media.shared_media;
-        if shared.playlist_user.is_none() && !shared.open() {
+        if shared.playlist_user().is_none() && !shared.open() {
             return None;
         }
         self.shared_media_panel_body(cx)
@@ -47,13 +47,13 @@ impl QuillApp {
     #[inline(never)]
     fn shared_media_panel_body(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let session = self.session()?;
-        if let Some(user_id) = session.media.shared_media.playlist_user {
+        if let Some(user_id) = session.media.shared_media.playlist_user() {
             return Some(self.playlist_panel(user_id, cx));
         }
         if !session.media.shared_media.open() {
             return None;
         }
-        let chat_id = session.media.shared_media.chat_id?;
+        let chat_id = session.media.shared_media.chat_id()?;
         let chat = session.chats.get(&chat_id.0);
         let title = chat
             .map(|c| c.title.clone())

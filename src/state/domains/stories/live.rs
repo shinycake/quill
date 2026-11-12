@@ -44,15 +44,26 @@ pub enum LiveStoryPurpose {
 pub enum LiveBursts {
     #[default]
     Unasked,
-    Requested,
+    /// Asked under this request; only its answer or error leaves.
+    Requested(RequestId),
     Loaded(Vec<StickerItem>),
+    /// The ask failed (a refused send or an error answer): not asked again
+    /// until the next Join.
+    Failed,
 }
 
 impl LiveBursts {
     pub fn stickers(&self) -> &[StickerItem] {
         match self {
             Self::Loaded(stickers) => stickers,
-            Self::Unasked | Self::Requested => &[],
+            Self::Unasked | Self::Requested(_) | Self::Failed => &[],
+        }
+    }
+
+    /// A new Join: a failed ask may go out again.
+    pub fn retry_failed(&mut self) {
+        if *self == Self::Failed {
+            *self = Self::Unasked;
         }
     }
 }
@@ -172,16 +183,39 @@ impl LiveStoryState {
         self.committed.retain(|batch| batch.commit != commit);
     }
 
+    /// The commit request `commit` never left (a refused send): TDLib still
+    /// holds its Stars as pending, so they go back to the pending slot with
+    /// a new Undo window, for the next commit (never a retry on every poll).
+    pub(crate) fn commit_unsent(
+        &mut self,
+        commit: RequestId,
+        pending: PendingLiveReaction,
+        now_ms: u64,
+    ) {
+        self.commit_failed(commit);
+        self.last_commit = self.committed.last().map_or(0, |batch| batch.commit.0);
+        self.pending_reaction = Some(PendingLiveReaction::add(None, pending.stars, now_ms));
+    }
+
     /// New donors from TDLib. A pushed update counts every batch committed
     /// so far (TDLib sends it because of them). The answer to our own
     /// `getLiveStoryTopDonors` `asked` counts only the batches committed
     /// before it was asked: an older snapshot leaves a newer batch in the
     /// total.
     pub(crate) fn set_donors(&mut self, donors: LiveStoryDonors, asked: Option<RequestId>) {
-        self.donors.succeed(donors);
         match asked {
-            None => self.committed.clear(),
-            Some(asked) => self.committed.retain(|batch| batch.commit.0 > asked.0),
+            None => {
+                self.donors.succeed(donors);
+                self.committed.clear();
+            }
+            Some(asked) => {
+                // An answer of a request the stage no longer waits for is
+                // dropped, batches and all.
+                if !self.donors.answered(Some(asked), donors) {
+                    return;
+                }
+                self.committed.retain(|batch| batch.commit.0 > asked.0);
+            }
         }
     }
 
@@ -367,7 +401,7 @@ impl Session {
                 if let Some(LiveStoryPurpose::GetStreamer { group_call_id }) = asked
                     && let Some(live) = self.live_story_mut(group_call_id)
                 {
-                    live.streamer.succeed(participant);
+                    live.streamer.answered(pending.map(|p| p.id), participant);
                 }
             }
         }
@@ -377,10 +411,11 @@ impl Session {
     pub(crate) fn set_live_story_senders(
         &mut self,
         group_call_id: i32,
+        request: Option<RequestId>,
         senders: Vec<AvailableMessageSender>,
     ) {
         if let Some(live) = self.live_story_mut(group_call_id) {
-            live.message_senders.succeed(senders);
+            live.message_senders.answered(request, senders);
         }
     }
 
@@ -450,8 +485,15 @@ impl Session {
         }
     }
 
-    pub(crate) fn set_live_bursts(&mut self, stickers: Vec<StickerItem>) {
-        self.stories.live_bursts = LiveBursts::Loaded(stickers);
+    /// The bursts' answer; only the request that asked for them counts.
+    pub(crate) fn set_live_bursts(
+        &mut self,
+        stickers: Vec<StickerItem>,
+        answered: Option<RequestId>,
+    ) {
+        if answered.is_some_and(|id| self.stories.live_bursts == LiveBursts::Requested(id)) {
+            self.stories.live_bursts = LiveBursts::Loaded(stickers);
+        }
     }
 
     /// A live story request failed.
@@ -463,7 +505,9 @@ impl Session {
     ) {
         let group_call_id = match purpose {
             LiveStoryPurpose::GetBursts => {
-                self.stories.live_bursts = LiveBursts::Unasked;
+                if failed.is_none_or(|id| self.stories.live_bursts == LiveBursts::Requested(id)) {
+                    self.stories.live_bursts = LiveBursts::Failed;
+                }
                 return;
             }
             LiveStoryPurpose::GetStreamer { group_call_id }
@@ -485,15 +529,20 @@ impl Session {
             // next Join (`retry_extras`), and the streamer's, which leaves
             // no picture, is said.
             LiveStoryPurpose::GetStreamer { .. } => {
-                live.streamer.fail(reason.to_string());
+                if !live.streamer.failed(failed, reason.to_string(), false) {
+                    return;
+                }
                 live.note = Some(crate::lang::tr_with(
                     crate::lang::keys::Q_OPS_COULD_NOT_LOAD_THE_STREAM,
                     &[("reason", &reason)],
                 ));
             }
-            LiveStoryPurpose::GetTopDonors { .. } => live.donors.fail(reason.to_string()),
+            LiveStoryPurpose::GetTopDonors { .. } => {
+                live.donors.failed(failed, reason.to_string(), false);
+            }
             LiveStoryPurpose::GetMessageSenders { .. } => {
-                live.message_senders.fail(reason.to_string());
+                live.message_senders
+                    .failed(failed, reason.to_string(), false);
             }
             LiveStoryPurpose::GetBursts => {}
             LiveStoryPurpose::AddPendingReaction { stars, .. } => {

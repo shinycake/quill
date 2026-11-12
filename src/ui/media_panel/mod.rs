@@ -348,6 +348,8 @@ impl QuillApp {
             return false;
         }
         self.set_media_panel_mode(PanelMode::Closed);
+        // A GIF search waiting on typing is for a panel that is gone.
+        self.pickers.gif_tab.stop_typing();
         self.pickers.media_panel.hovered = None;
         self.sync_gif_downloads();
         cx.notify();
@@ -360,6 +362,7 @@ impl QuillApp {
             self.pickers.media_panel.category = None;
             self.pickers.media_panel.key = None;
             self.pickers.media_panel.active_section = 0;
+            self.pickers.gif_tab.stop_typing();
             // GIFs download and play only while their tab shows.
             self.sync_gif_downloads();
         }
@@ -482,7 +485,7 @@ impl QuillApp {
         let tab = self.pickers.media_panel.tab;
         // Emoji search adds TDLib's keyword matches (all typed languages).
         let keywords =
-            tab == PanelTab::Emoji && session.stickers.emoji.keyword_emojis.query != query;
+            tab == PanelTab::Emoji && session.stickers.emoji.keyword_emojis.query() != query;
         // Sticker search goes to TDLib (by emoji or keyword, or for a
         // category).
         let stickers = (tab == PanelTab::Stickers)

@@ -31,9 +31,10 @@ use serde_json::Value;
 /// Requests of this feature (in `PaymentsPurpose`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GiftMarketPurpose {
-    /// `searchGiftsForResale`; `page` 0 replaces the list, later pages
-    /// append. Answer `giftsForResale`.
-    SearchResale { gift_id: i64, page: u32 },
+    /// `searchGiftsForResale`; whether the page replaces the list or
+    /// appends to it is the stage's (`PageLoad::Loading::more`). Answer
+    /// `giftsForResale`.
+    SearchResale { gift_id: i64 },
     /// `sendResoldGift`. Answer `giftResaleResultOk` /
     /// `giftResaleResultPriceIncreased`.
     BuyResale,
@@ -53,7 +54,7 @@ pub enum GiftMarketPurpose {
     /// models. Answer `giftUpgradePreview`.
     UpgradePreview { gift_id: i64 },
     /// `getGiftsForCrafting`. Answer `giftsForCrafting`.
-    GiftsForCrafting { gift_id: i64, page: u32 },
+    GiftsForCrafting { gift_id: i64 },
     /// `craftGift`. Answer `craftGiftResult*`.
     Craft,
 }

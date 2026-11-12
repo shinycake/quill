@@ -15,11 +15,12 @@
 #![deny(clippy::indexing_slicing)]
 
 use super::app::QuillApp;
+use super::composer::LeftSend;
 use super::composer_state::DraftClear;
 use quill::composer::{
     ComposerAttachment, ComposerScheduling, DraftKey, LinkPreviewChoice, PreviewMediaSize,
 };
-use quill::ids::{AccountKey, ChatId};
+use quill::ids::{AccountKey, ChatId, RequestId};
 use quill::telegram::envelope::AuthorizationState;
 use quill::telegram::requests::SelfDestructSend;
 use std::collections::HashMap;
@@ -57,13 +58,16 @@ pub(crate) struct PendingSend {
 #[derive(Debug, PartialEq)]
 pub(super) enum TraySend {
     Idle,
-    /// The text of the Send pressed while a photo edit was rendering, with
-    /// that send's one-time options: it goes out when the last render
-    /// lands. Only [`PendingSend::hold_send`] makes one, and the tray lets
-    /// it go when no render is left.
+    /// The text of the Send pressed while photo edits were rendering, with
+    /// that send's one-time options and the renders it waits on: it goes
+    /// out when the last of them lands. It holds only while one of them
+    /// still renders in the tray ([`PendingSend::send_is_held`]), so a
+    /// tray that lost them (a photo removed, the tray cleared) leaves an
+    /// inert value that nothing reads and no later render revives.
     Held {
         text: String,
         once: SendOnce,
+        waiting: Vec<u64>,
     },
 }
 
@@ -114,7 +118,6 @@ impl PendingSend {
         self.hd_photos = false;
         self.group_media = None;
         self.paid_stars = 0;
-        self.send = TraySend::Idle;
     }
 
     /// Some photo of the tray is still rendering its edit.
@@ -124,21 +127,35 @@ impl PendingSend {
             .any(|attachment| attachment.extras.photo_render().is_some())
     }
 
+    /// The renders in flight in this tray.
+    fn renders(&self) -> Vec<u64> {
+        self.attachments
+            .iter()
+            .filter_map(|attachment| attachment.extras.photo_render())
+            .collect()
+    }
+
     /// Hold a Send until the renders land. Without a render there is
     /// nothing to wait for: it is refused, and the caller sends at once.
     pub(super) fn hold_send(&mut self, text: String, once: SendOnce) -> bool {
-        if !self.renders_an_edit() {
+        let waiting = self.renders();
+        if waiting.is_empty() {
             return false;
         }
-        self.send = TraySend::Held { text, once };
+        self.send = TraySend::Held {
+            text,
+            once,
+            waiting,
+        };
         true
     }
 
     /// The render `render` of a tray photo ended: `saved` is the new file,
-    /// `None` when it failed. The held Send is released here, with the
-    /// render that ends it: it goes out once no render is left, and a
-    /// failed render drops it (it would carry the unedited photo).
+    /// `None` when it failed. The held Send goes out once no render is
+    /// left, and a failed render of one it waits on drops it (it would
+    /// carry the unedited photo).
     pub(super) fn end_render(&mut self, render: u64, saved: Option<&Path>) -> Option<Landed> {
+        let waited = self.send_is_held();
         let attachment = self
             .attachments
             .iter_mut()
@@ -146,7 +163,9 @@ impl PendingSend {
         let Some(saved) = saved else {
             attachment.extras.abandon_render();
             let path = attachment.path.clone();
-            self.send = TraySend::Idle;
+            if self.waits_on(render) {
+                self.send = TraySend::Idle;
+            }
             return Some(Landed {
                 held: None,
                 path: Some(path),
@@ -162,7 +181,7 @@ impl PendingSend {
         attachment.extras.land_render();
         attachment.file_name = format!("{stem}.png");
         attachment.kind = quill::composer::AttachmentKind::Photo;
-        let held = (!self.renders_an_edit())
+        let held = (waited && !self.renders_an_edit())
             .then(|| self.take_held_send())
             .flatten();
         Some(Landed {
@@ -171,28 +190,55 @@ impl PendingSend {
         })
     }
 
-    /// What a finished render left in its tray.
+    /// The held Send, if it holds, for the tray to send.
     fn take_held_send(&mut self) -> Option<(String, SendOnce)> {
         match std::mem::replace(&mut self.send, TraySend::Idle) {
+            TraySend::Held { text, once, .. } => Some((text, once)),
             TraySend::Idle => None,
-            TraySend::Held { text, once } => Some((text, once)),
         }
     }
 
-    /// A Send is held for the renders.
+    /// Whether the held Send waits on the render `render`.
+    fn waits_on(&self, render: u64) -> bool {
+        matches!(&self.send, TraySend::Held { waiting, .. } if waiting.contains(&render))
+    }
+
+    /// A Send is held for the renders: one it waits on still renders.
     pub(super) fn send_is_held(&self) -> bool {
-        matches!(self.send, TraySend::Held { .. })
-    }
-
-    /// A held Send waits only on a render that will land.
-    fn release_idle_hold(&mut self) {
-        if !self.renders_an_edit() {
-            self.send = TraySend::Idle;
+        match &self.send {
+            TraySend::Idle => false,
+            TraySend::Held { waiting, .. } => self.attachments.iter().any(|attachment| {
+                attachment
+                    .extras
+                    .photo_render()
+                    .is_some_and(|render| waiting.contains(&render))
+            }),
         }
     }
 
+    /// Nothing is chosen, so the entry can go. A held Send that no longer
+    /// holds counts as nothing.
     fn is_empty(&self) -> bool {
-        *self == Self::EMPTY
+        let Self {
+            attachments,
+            self_destruct,
+            caption_above,
+            hd_photos,
+            group_media,
+            paid_stars,
+            scheduling,
+            preview,
+            send: _,
+        } = self;
+        attachments.is_empty()
+            && self_destruct.is_none()
+            && !caption_above
+            && !hd_photos
+            && group_media.is_none()
+            && *paid_stars == 0
+            && *scheduling == Self::EMPTY.scheduling
+            && *preview == Self::EMPTY.preview
+            && !self.send_is_held()
     }
 }
 
@@ -235,11 +281,20 @@ struct AccountSends {
     /// this account). An entry goes with its ack; a newer send of the slot
     /// replaces it; the account's goes with it.
     draft_clears: HashMap<DraftKey, DraftClear>,
+    /// Rich sends of chat views since replaced, still waiting for TDLib's
+    /// answer (`LeftSend`); each goes with its answer.
+    left_sends: Vec<LeftSend>,
 }
+
+/// How many left sends an account keeps waiting; an older one is forgotten.
+const KEPT_LEFT_SENDS: usize = 8;
 
 impl AccountSends {
     fn is_empty(&self) -> bool {
-        self.slots.is_empty() && self.silent.is_empty() && self.draft_clears.is_empty()
+        self.slots.is_empty()
+            && self.silent.is_empty()
+            && self.draft_clears.is_empty()
+            && self.left_sends.is_empty()
     }
 }
 
@@ -256,6 +311,37 @@ pub(crate) struct ComposerSends {
 }
 
 impl ComposerSends {
+    /// A send whose chat view went waits on its own. Returns the oldest one
+    /// when the account holds too many: the caller forgets its ack.
+    pub(super) fn keep_left_send(&mut self, send: LeftSend) -> Option<LeftSend> {
+        let sends = self.accounts.entry(send.slot.account.clone()).or_default();
+        sends.left_sends.push(send);
+        (sends.left_sends.len() > KEPT_LEFT_SENDS).then(|| sends.left_sends.remove(0))
+    }
+
+    /// The left sends of `account` whose answer `answer_of` has: each with
+    /// its answer, no longer waiting.
+    pub(super) fn take_left_sends(
+        &mut self,
+        account: &AccountKey,
+        mut answer_of: impl FnMut(RequestId) -> Option<quill::state::Answer>,
+    ) -> Vec<(LeftSend, quill::state::Answer)> {
+        let Some(sends) = self.accounts.get_mut(account) else {
+            return Vec::new();
+        };
+        let mut answered = Vec::new();
+        let mut waiting = Vec::new();
+        for send in std::mem::take(&mut sends.left_sends) {
+            match answer_of(send.request) {
+                Some(answer) => answered.push((send, answer)),
+                None => waiting.push(send),
+            }
+        }
+        sends.left_sends = waiting;
+        self.drop_if_empty(account);
+        answered
+    }
+
     pub(super) fn get(&self, slot: &SendSlot) -> &PendingSend {
         self.accounts
             .get(&slot.account)
@@ -273,7 +359,6 @@ impl ComposerSends {
         let account = self.accounts.entry(slot.account.clone()).or_default();
         let send = account.slots.entry(slot.draft).or_default();
         let result = f(send);
-        send.release_idle_hold();
         if send.is_empty() {
             account.slots.remove(&slot.draft);
         }
@@ -293,13 +378,10 @@ impl ComposerSends {
             .get_mut(&item.slot.account)?
             .slots
             .get_mut(&item.slot.draft)?;
-        let result = send
-            .attachments
+        send.attachments
             .get_mut(item.index)
             .filter(|attachment| attachment.path == item.path)
-            .map(f);
-        send.release_idle_hold();
-        result
+            .map(f)
     }
 
     /// Whether `item` is still in its tray, as the same file.

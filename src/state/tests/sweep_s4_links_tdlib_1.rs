@@ -11,7 +11,7 @@ fn ready_session() -> Session {
 /// Sweep 05-156: a username check that was superseded and then failed says
 /// nothing about the text now being checked.
 #[test]
-fn a_superseded_username_check_failure_shows_no_profile_error() {
+fn a_superseded_username_check_failure_leaves_the_current_check_pending() {
     let mut session = ready_session();
     let first = session.request(RequestPurpose::CheckUsername, None);
     let second = session.request(RequestPurpose::CheckUsername, None);
@@ -19,7 +19,6 @@ fn a_superseded_username_check_failure_shows_no_profile_error() {
 
     let lost = session.requests.take(first).expect("registered");
     session.settle_lost_request(lost);
-    assert_eq!(session.users_state.profile_edit_error, None);
     assert_eq!(
         session.users_state.username_check.pending(),
         Some(second),
@@ -28,7 +27,6 @@ fn a_superseded_username_check_failure_shows_no_profile_error() {
 
     let lost = session.requests.take(second).expect("registered");
     session.settle_lost_request(lost);
-    assert!(session.users_state.profile_edit_error.is_some());
     assert_eq!(session.users_state.username_check.pending(), None);
 }
 

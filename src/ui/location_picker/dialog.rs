@@ -51,17 +51,21 @@ impl QuillApp {
                 }
                 let text = state.read(cx).value().to_string();
                 let _ = this.in_window_of(window, cx, |this, _, cx| {
-                    this.location_search_changed(super::state::SearchEdit::Text(text), cx);
+                    this.location_search_changed(Some(text), cx);
                 });
             },
         )
         .detach();
         input.update(cx, |input, cx| input.focus(window, cx));
-        self.location_search_changed(super::state::SearchEdit::Open(input), cx);
+        self.location_ui.search = super::state::Search::Open {
+            input,
+            debounce: super::state::Wait::Idle,
+        };
+        self.location_search_changed(Some(String::new()), cx);
     }
 
     fn location_search_close(&mut self, cx: &mut Context<Self>) {
-        self.location_search_changed(super::state::SearchEdit::Close, cx);
+        self.location_search_changed(None, cx);
     }
 
     fn location_title(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -286,6 +290,28 @@ impl QuillApp {
                 tr(keys::MAPS_NO_PLACES).into(),
                 cx,
             )],
+            VenueList::Failed => vec![
+                div()
+                    .id("location-venues-failed")
+                    .debug_selector(|| "location-venues-failed".to_string())
+                    .px(px(18.))
+                    .py_4()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_2()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr(keys::Q_LOCATION_VENUES_FAILED))
+                    .child(
+                        Button::new("location-venues-retry")
+                            .label(tr(keys::Q_LOCATION_VENUES_RETRY))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.location_retry_venues(cx);
+                            })),
+                    )
+                    .into_any_element(),
+            ],
             VenueList::WaitingForLocation => {
                 let why = match picker.here() {
                     HereState::Denied => Some(tr(keys::Q_LOCATION_DENIED)),

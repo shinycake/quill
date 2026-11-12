@@ -17,6 +17,8 @@
 //! limits live in [`crate::folder_limits`]; they keep their own box.
 #![deny(clippy::indexing_slicing)]
 
+use std::collections::HashMap;
+
 /// Which limit a box talks about.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PremiumLimitKind {
@@ -476,19 +478,19 @@ pub fn saved_list_full(saved_count: usize, limit: i64) -> bool {
     limit > 0 && i64::try_from(saved_count).unwrap_or(i64::MAX) >= limit
 }
 
-/// What TDLib said about the limits beyond `getPremiumFeatures`: the
-/// `getPremiumLimit` answers, which ones were asked for, and the options
-/// that hold the limit in force for this account.
+/// What TDLib said about the limits beyond `getPremiumFeatures`: where each
+/// kind's `getPremiumLimit` stands, and the options that hold the limit in
+/// force for this account.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LimitStore {
-    answered: Vec<(PremiumLimitKind, LimitPair)>,
-    asked: Vec<(PremiumLimitKind, LimitAsk)>,
-    options: Vec<(PremiumLimitKind, i64)>,
+    /// A kind with no entry has not been asked for.
+    limits: HashMap<PremiumLimitKind, LimitState>,
+    options: HashMap<PremiumLimitKind, i64>,
 }
 
-/// Where a `getPremiumLimit` for one kind stands once it left.
+/// Where a `getPremiumLimit` for one kind stands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LimitAsk {
+pub enum LimitState {
     /// Out under this request; its answer fills the pair, its transient
     /// error (a lost request, a flood wait, a server fault) forgets the ask
     /// so the next box asks again.
@@ -496,6 +498,8 @@ pub enum LimitAsk {
     /// The server refused (an account that cannot buy Premium): not asked
     /// again this session.
     Refused,
+    /// The answer.
+    Answered(LimitPair),
 }
 
 impl LimitStore {
@@ -504,55 +508,55 @@ impl LimitStore {
         let Some(kind) = PremiumLimitKind::from_td_limit_type(type_name) else {
             return;
         };
-        self.answered.retain(|(k, _)| *k != kind);
-        self.asked.retain(|(k, _)| *k != kind);
-        self.answered.push((
+        self.limits.insert(
             kind,
-            LimitPair {
+            LimitState::Answered(LimitPair {
                 default_value,
                 premium_value,
-            },
-        ));
+            }),
+        );
     }
 
     pub fn answered(&self, kind: PremiumLimitKind) -> Option<LimitPair> {
-        self.answered
-            .iter()
-            .find(|(k, _)| *k == kind)
-            .map(|(_, pair)| *pair)
+        match self.limits.get(&kind).copied() {
+            Some(LimitState::Answered(pair)) => Some(pair),
+            _ => None,
+        }
     }
 
     /// Whether `getPremiumLimit` should be sent for `kind`: it has a limit
     /// type and was neither answered nor asked for (an account that cannot
     /// buy Premium gets an error, so a refused one is not asked again).
     pub fn should_ask(&self, kind: PremiumLimitKind) -> bool {
-        kind.td_limit_type().is_some()
-            && self.answered(kind).is_none()
-            && !self.asked.iter().any(|(k, _)| *k == kind)
+        kind.td_limit_type().is_some() && !self.limits.contains_key(&kind)
     }
 
-    /// `kind` left under `request`.
+    /// `kind` left under `request`. An answered kind keeps its answer.
     pub fn note_asked(&mut self, kind: PremiumLimitKind, request: crate::ids::RequestId) {
-        self.asked.retain(|(k, _)| *k != kind);
-        self.asked.push((kind, LimitAsk::Asked(request)));
+        if self.answered(kind).is_none() {
+            self.limits.insert(kind, LimitState::Asked(request));
+        }
     }
 
     /// A send failed: `kind` may be asked again.
     pub fn forget_asked(&mut self, kind: PremiumLimitKind) {
-        self.asked.retain(|(k, _)| *k != kind);
+        if matches!(self.limits.get(&kind), Some(LimitState::Asked(_))) {
+            self.limits.remove(&kind);
+        }
     }
 
     /// The error of `request`: a definite refusal is kept, anything else
     /// returns the kind to unasked.
     pub fn fail_ask(&mut self, request: crate::ids::RequestId, refused: bool) {
-        for (_, ask) in &mut self.asked {
-            if *ask == LimitAsk::Asked(request) && refused {
-                *ask = LimitAsk::Refused;
+        if refused {
+            for state in self.limits.values_mut() {
+                if *state == LimitState::Asked(request) {
+                    *state = LimitState::Refused;
+                }
             }
-        }
-        if !refused {
-            self.asked
-                .retain(|(_, ask)| *ask != LimitAsk::Asked(request));
+        } else {
+            self.limits
+                .retain(|_, state| *state != LimitState::Asked(request));
         }
     }
 
@@ -565,17 +569,15 @@ impl LimitStore {
         else {
             return;
         };
-        self.options.retain(|(k, _)| *k != kind);
         if value > 0 {
-            self.options.push((kind, value));
+            self.options.insert(kind, value);
+        } else {
+            self.options.remove(&kind);
         }
     }
 
     pub fn option(&self, kind: PremiumLimitKind) -> Option<i64> {
-        self.options
-            .iter()
-            .find(|(k, _)| *k == kind)
-            .map(|(_, value)| *value)
+        self.options.get(&kind).copied()
     }
 }
 

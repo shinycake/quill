@@ -54,7 +54,7 @@ impl QuillApp {
         let Some(info) = editor.info().filter(|_| !editor.busy()) else {
             return false;
         };
-        let edits = editor.edits;
+        let edits = editor.edits();
         let input = editor.source.to_string_lossy().into_owned();
         let Some((_, serial)) = editor.begin_encode() else {
             return false;
@@ -83,7 +83,7 @@ impl QuillApp {
                     .send_box
                     .video_editor
                     .as_ref()
-                    .and_then(|editor| editor.still.as_deref().cloned());
+                    .and_then(|editor| editor.still_image());
                 let sent = result.and_then(|()| {
                     let photo = ChosenPhoto {
                         input: ChatPhotoInput::Animation {

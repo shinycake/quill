@@ -61,15 +61,9 @@ fn a_stopped_clip_drops_its_gestures() {
     assert!(!state.dragging());
     state.drag = SliderDrag::Seek(3.0);
     assert!(state.dragging());
-    state.drag.end_volume();
-    assert!(
-        state.dragging(),
-        "letting go of another thumb leaves this drag"
-    );
-    state.drag.end_seek();
-    assert!(!state.dragging());
+    assert_eq!(state.seek_preview(), Some(3.0));
     state.drag = SliderDrag::Volume;
-    assert!(state.dragging());
+    assert!(state.dragging() && state.seek_preview().is_none());
     state.hover = Some(0.4);
     state.drag = SliderDrag::Speed(1.5);
     let t0 = Instant::now();
@@ -78,7 +72,7 @@ fn a_stopped_clip_drops_its_gestures() {
     assert!(state.boost.tick(t0 + Duration::from_millis(250)));
     assert!(state.clear_clip(), "the boost was on");
     assert!(!state.dragging());
-    assert_eq!(state.drag, SliderDrag::None, "a cut-off drag ends too");
+    assert_eq!(state.speed_preview(), None, "a cut-off speed drag ends too");
     assert_eq!(state.hover, None);
     assert!(!state.boost.is_active());
 }

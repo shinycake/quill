@@ -15,6 +15,14 @@ pub enum PasswordRecovery {
     CodeSent,
 }
 
+impl AuthState {
+    /// The user left recovery-code entry (Back), or the request was refused
+    /// or the auth step ended: back to password entry.
+    pub fn cancel_password_recovery(&mut self) {
+        self.password_recovery = PasswordRecovery::Idle;
+    }
+}
+
 pub struct AuthState {
     /// See [`PasswordRecovery`].
     pub password_recovery: PasswordRecovery,
@@ -42,11 +50,6 @@ pub struct AuthState {
     /// one; the overlay shows progress and disables submits. Only that
     /// request's answer or error ends it.
     pub password_op: PasswordFlight,
-    /// The `logOut` sent and not answered yet (`Session::logout_sent`).
-    pub logout_request: Option<RequestId>,
-    /// TDLib refused the `logOut`: the account stays signed in, and the UI
-    /// says so once (drained by the poll).
-    pub logout_refused: Option<TdError>,
 }
 
 impl AuthState {
@@ -60,8 +63,6 @@ impl AuthState {
             twofa_flow: TwofaFlow::default(),
             password_state: None,
             password_op: PasswordFlight::Idle,
-            logout_request: None,
-            logout_refused: None,
         }
     }
 }

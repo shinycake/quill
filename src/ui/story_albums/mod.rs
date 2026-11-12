@@ -4,7 +4,7 @@
 use super::app::QuillApp;
 use super::*;
 use crate::ui::status_note::StatusNote;
-use crate::ui::stories_state::{PanelKind, ViewerPanel};
+use crate::ui::stories_state::{ManageCall, ManageKind, PanelKind, ViewerPanel};
 use crate::ui::story_page::{AlbumDelete, AlbumView, PageWait};
 use crate::ui::user_error::{user_error_doing, user_error_for};
 use gpui_kit::component::button::*;
@@ -28,6 +28,16 @@ pub(super) struct StoryPrivacyEdit {
     pub(super) story_id: i32,
     pub(super) privacy: StoryPrivacy,
     pub(super) selected_user_ids: Vec<i64>,
+}
+
+/// What a page mutation sent.
+pub(super) enum PageSend {
+    /// Nothing went out.
+    Nothing,
+    /// Every call went out.
+    Whole(Vec<quill::ids::RequestId>),
+    /// The first calls went out and a later one failed to send.
+    Partly(Vec<quill::ids::RequestId>),
 }
 
 impl QuillApp {
@@ -89,7 +99,7 @@ impl QuillApp {
         if let Some(session) = session {
             session.settle_story_page_op();
             if let Some(chat_id) = chat_id {
-                session.leave_story_page(chat_id);
+                session.leave_story_page(ChatId(chat_id));
             }
         }
         cx.notify();
@@ -169,12 +179,29 @@ impl QuillApp {
         ) -> Result<(), quill::connect::ConnectSendError>,
         cx: &mut Context<Self>,
     ) -> Option<Vec<quill::ids::RequestId>> {
-        let chat = self.stories.page.as_ref().map(|page| page.chat_id.0);
+        match self.story_page_send(what, f, cx) {
+            PageSend::Whole(sent) => Some(sent),
+            PageSend::Partly(_) | PageSend::Nothing => None,
+        }
+    }
+
+    /// [`Self::story_page_mutate`], saying also when only some of the calls
+    /// went out (the later one failed to send): those are in flight.
+    pub(super) fn story_page_send(
+        &mut self,
+        what: &str,
+        f: impl FnOnce(
+            &mut LiveConnect,
+            &mut Vec<quill::ids::RequestId>,
+        ) -> Result<(), quill::connect::ConnectSendError>,
+        cx: &mut Context<Self>,
+    ) -> PageSend {
+        let chat = self.stories.page.as_ref().map(|page| page.chat_id);
         let busy = chat
             .zip(self.session())
             .is_some_and(|(chat, session)| session.stories.page_ops.mutating(chat));
         if busy {
-            return None;
+            return PageSend::Nothing;
         }
         let Some(live) = self.live.as_mut() else {
             self.set_note(StatusNote::silent(tr_with(
@@ -182,16 +209,20 @@ impl QuillApp {
                 &[("what", what)],
             )));
             cx.notify();
-            return None;
+            return PageSend::Nothing;
         };
         let mut sent = Vec::new();
         let result = f(live, &mut sent);
         cx.notify();
         match result {
-            Ok(()) => Some(sent),
+            Ok(()) => PageSend::Whole(sent),
             Err(err) => {
                 self.set_note(StatusNote::error(user_error_doing(what, &err)));
-                None
+                if sent.is_empty() {
+                    PageSend::Nothing
+                } else {
+                    PageSend::Partly(sent)
+                }
             }
         }
     }
@@ -290,6 +321,7 @@ impl QuillApp {
     /// second click sends `deleteStoryAlbum`.
     pub(super) fn delete_story_album(&mut self, album_id: i32, cx: &mut Context<Self>) {
         let chat_id = match self.stories.page.as_mut() {
+            Some(page) if page.view.deleting().is_some() => return,
             Some(page) if page.view.delete_armed(album_id) => page.chat_id,
             Some(page) => {
                 if let AlbumView::Album { id, delete } = &mut page.view
@@ -314,7 +346,7 @@ impl QuillApp {
         if let Some(page) = self.stories.page.as_mut() {
             page.view.disarm();
             if let Some(request) = sent.and_then(|ids| ids.first().copied()) {
-                page.wait = PageWait::Deleting(request);
+                page.view.delete_sent(request);
             }
         }
     }
@@ -411,7 +443,7 @@ impl QuillApp {
             cx.notify();
             return;
         }
-        let sent = self.story_page_mutate(
+        let sent = self.story_page_send(
             tr(keys::Q_MEDIA_ADD_STORIES_TO_ALBUM),
             |live, sent| {
                 if !added.is_empty() {
@@ -431,8 +463,21 @@ impl QuillApp {
             cx,
         );
         // The picker stays, with its ticks, until the changes are saved.
-        if let (Some(page), Some(requests)) = (self.stories.page.as_mut(), sent) {
-            page.wait = PageWait::SavingPicker(requests);
+        let Some(page) = self.stories.page.as_mut() else {
+            return;
+        };
+        match sent {
+            PageSend::Whole(requests) => page.wait = PageWait::SavingPicker { album_id, requests },
+            // The adds are in flight and the removes never left: the picker
+            // stays, and a retry does not send the adds again.
+            PageSend::Partly(requests) => {
+                page.wait = PageWait::SavingPickerPartly {
+                    album_id,
+                    requests,
+                    added,
+                }
+            }
+            PageSend::Nothing => {}
         }
     }
 
@@ -607,7 +652,6 @@ impl QuillApp {
         };
         if let Some(open) = self.stories.viewer_ui_mut() {
             open.show(ViewerPanel::Privacy(value));
-            open.privacy_request = None;
         }
         self.stories
             .privacy_user_search
@@ -722,7 +766,7 @@ impl QuillApp {
                     .child(list),
             );
         }
-        let busy = self.stories.viewer_ui().privacy_request.is_some();
+        let busy = self.privacy_call_busy();
         // No second call for this story while one is in flight.
         let manage_busy = self
             .stories
@@ -765,12 +809,20 @@ impl QuillApp {
         panel.into_any_element()
     }
 
+    /// A privacy call for the story the open editor is for is on its way.
+    fn privacy_call_busy(&self) -> bool {
+        self.stories.viewer_ui().privacy_edit().is_some_and(|edit| {
+            self.stories
+                .manage_call_busy(ManageKind::Privacy, (edit.chat_id, edit.story_id))
+        })
+    }
+
     /// Phase 9.5: send `setStoryPrivacySettings` (`td_api.tl:13743`)
     /// for the edited story. The driver gates on
     /// `can_set_privacy_settings`; the tick closes the panel on
     /// success.
     pub(super) fn story_privacy_save(&mut self, cx: &mut Context<Self>) {
-        if self.stories.viewer_ui().privacy_request.is_some() {
+        if self.privacy_call_busy() {
             return;
         }
         let Some(edit) = self.stories.viewer_ui().privacy_edit().cloned() else {
@@ -808,9 +860,11 @@ impl QuillApp {
                 settings,
             ) {
                 Ok(request) => {
-                    if let Some(open) = self.stories.viewer_ui_mut() {
-                        open.privacy_request = Some(request);
-                    }
+                    self.stories.manage_calls.push(ManageCall {
+                        kind: ManageKind::Privacy,
+                        story: (edit.chat_id, edit.story_id),
+                        request,
+                    });
                 }
                 Err(_) => {
                     live.driver.session.stories.manage.fail_locally(

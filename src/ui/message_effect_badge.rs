@@ -129,26 +129,53 @@ impl super::on_screen::Farewell for EffectNotes {}
 
 impl Drop for EffectNotes {
     fn drop(&mut self) {
-        let _ = BADGES.try_with(|badges| badges.borrow_mut().clear());
-        let _ = REPLAYS.try_with(|replays| replays.borrow_mut().clear());
+        let _ = BADGES.try_with(|badges| {
+            if let Ok(mut badges) = badges.try_borrow_mut() {
+                badges.clear();
+            }
+        });
+        let _ = REPLAYS.try_with(|replays| {
+            if let Ok(mut replays) = replays.try_borrow_mut() {
+                replays.clear();
+            }
+        });
         super::message_effect_play::forget_waiting();
     }
 }
 
 /// Remember the app, so a click on a badge can wake it.
 pub(super) fn set_app(app: WeakEntity<QuillApp>) {
-    APP.with(|slot| *slot.borrow_mut() = Some(app));
+    APP.with(|slot| {
+        if let Ok(mut slot) = slot.try_borrow_mut() {
+            *slot = Some(app);
+        }
+    });
 }
 
 /// A history list is being rebuilt: forget where the badges were, except
 /// those of the chats `keep` names (shown by another window). Each chat
 /// shows in one window at most, so the notes are told apart by chat.
 pub(super) fn begin_pass(keep: &dyn Fn(i64) -> bool) {
-    BADGES.with(|badges| badges.borrow_mut().retain(|key, _| keep(key.0)));
+    // The registry is taken out while `keep` runs, so a callback that
+    // reaches it sees it empty instead of a borrowed cell.
+    let mut taken = BADGES.with(|badges| {
+        badges
+            .try_borrow_mut()
+            .map(|mut badges| std::mem::take(&mut *badges))
+            .unwrap_or_default()
+    });
+    taken.retain(|key, _| keep(key.0));
+    BADGES.with(|badges| {
+        if let Ok(mut badges) = badges.try_borrow_mut() {
+            for (key, seen) in taken {
+                badges.entry(key).or_insert(seen);
+            }
+        }
+    });
 }
 
 pub(super) fn seen(key: Key) -> Option<Seen> {
-    BADGES.with(|badges| badges.borrow().get(&key).copied())
+    BADGES.with(|badges| badges.try_borrow().ok()?.get(&key).copied())
 }
 
 /// The badge nearest to `near` (within `radius`) that shows `effect_id` on
@@ -162,8 +189,8 @@ pub(super) fn nearest(
     radius: Pixels,
 ) -> Option<(Key, Seen)> {
     BADGES.with(|badges| {
+        let badges = badges.try_borrow().ok()?;
         badges
-            .borrow()
             .iter()
             .filter(|(key, badge)| {
                 key.0 == chat && badge.effect_id == effect_id && badge.outgoing == outgoing
@@ -183,14 +210,24 @@ pub(super) fn nearest(
 /// window shows any more (`shown`) are dropped; other windows' stay for
 /// their own pass.
 pub(super) fn take_replays(chat: i64, shown: &dyn Fn(i64) -> bool) -> Vec<Key> {
+    // The queue is taken out while `shown` runs, and what the callback
+    // left (a click in between) goes back behind the kept ones.
+    let queued = REPLAYS.with(|replays| {
+        replays
+            .try_borrow_mut()
+            .map(|mut replays| std::mem::take(&mut *replays))
+            .unwrap_or_default()
+    });
+    let (mine, rest): (Vec<Key>, Vec<Key>) = queued.into_iter().partition(|key| key.0 == chat);
+    let kept: Vec<Key> = rest.into_iter().filter(|key| shown(key.0)).collect();
     REPLAYS.with(|replays| {
-        let mut replays = replays.borrow_mut();
-        let (mine, rest): (Vec<Key>, Vec<Key>) = std::mem::take(&mut *replays)
-            .into_iter()
-            .partition(|key| key.0 == chat);
-        *replays = rest.into_iter().filter(|key| shown(key.0)).collect();
-        mine
-    })
+        if let Ok(mut replays) = replays.try_borrow_mut() {
+            let mut merged = kept;
+            merged.append(&mut replays);
+            *replays = merged;
+        }
+    });
+    mine
 }
 
 /// Badges of `chat` on screen whose message had not played its effect when
@@ -203,8 +240,10 @@ pub(super) fn shown_unwatched(chat: i64, window_active: bool) -> Vec<(Key, Seen)
         return Vec::new();
     }
     BADGES.with(|badges| {
+        let Ok(badges) = badges.try_borrow() else {
+            return Vec::new();
+        };
         badges
-            .borrow()
             .iter()
             .filter(|(key, badge)| key.0 == chat && badge.unwatched)
             .map(|(key, badge)| (*key, *badge))
@@ -256,16 +295,19 @@ pub(super) fn badge(effect: &FooterEffect) -> AnyElement {
             if image.intersect(&window.content_mask().bounds) != image {
                 return;
             }
+            // A re-entrant frame skips the note; the next paint makes it.
             BADGES.with(|badges| {
-                badges.borrow_mut().insert(
-                    key,
-                    Seen {
-                        bounds: image,
-                        effect_id,
-                        outgoing,
-                        unwatched,
-                    },
-                );
+                if let Ok(mut badges) = badges.try_borrow_mut() {
+                    badges.insert(
+                        key,
+                        Seen {
+                            bounds: image,
+                            effect_id,
+                            outgoing,
+                            unwatched,
+                        },
+                    );
+                }
             });
             // The overlay already ran for this frame: ask for another to
             // start an effect that has not played. Not in an inactive
@@ -295,8 +337,12 @@ pub(super) fn badge(effect: &FooterEffect) -> AnyElement {
         .aria_label(tr(keys::Q_REST_REPLAY_THE_MESSAGE_EFFECT))
         .swallow_press()
         .on_click(move |_, _, cx| {
-            REPLAYS.with(|replays| replays.borrow_mut().push(key));
-            if let Some(app) = APP.with(|app| app.borrow().clone()) {
+            REPLAYS.with(|replays| {
+                if let Ok(mut replays) = replays.try_borrow_mut() {
+                    replays.push(key);
+                }
+            });
+            if let Some(app) = APP.with(|app| app.try_borrow().ok().and_then(|app| app.clone())) {
                 let _ = app.update(cx, |_, cx| cx.notify());
             }
         })

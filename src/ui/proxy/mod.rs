@@ -274,8 +274,10 @@ impl QuillApp {
             return;
         };
         let session = &mut live.driver.session;
-        let in_flight = session.requests.get(request).is_some();
-        let outcome = session.users_state.saves.take_outcome(request, in_flight);
+        let outcome = session
+            .users_state
+            .saves
+            .take_outcome(request, &session.requests);
         match outcome {
             quill::state::SaveOutcome::Saving => {}
             quill::state::SaveOutcome::Saved => {
@@ -856,17 +858,19 @@ impl QuillApp {
         };
         if state.entries().is_empty() {
             body =
-                body.child(this.setting_spot(
-                    list_ids,
-                    div().py_3().text_sm().text_color(text_muted()).child(
-                        if state.fetch.loading() {
-                            tr(keys::Q_PREFS_LOADING)
-                        } else {
-                            tr(keys::PROXY_DESCRIPTION)
-                        },
+                body.child(
+                    this.setting_spot(
+                        list_ids,
+                        div().py_3().text_sm().text_color(text_muted()).child(
+                            if state.ops.loading() {
+                                tr(keys::Q_PREFS_LOADING)
+                            } else {
+                                tr(keys::PROXY_DESCRIPTION)
+                            },
+                        ),
+                        cx,
                     ),
-                    cx,
-                ));
+                );
         } else {
             let mut rows = div().flex().flex_col().gap_1();
             let connected = this.session().is_some_and(|s| {
@@ -1022,7 +1026,11 @@ mod tests {
             "MTPROTO · available (ping: 42 ms)"
         );
         assert_eq!(
-            row_subtitle(&e, Some(PingStatus::Checking), None),
+            row_subtitle(
+                &e,
+                Some(PingStatus::Checking(quill::ids::RequestId(1))),
+                None
+            ),
             "MTPROTO · checking…"
         );
         assert_eq!(

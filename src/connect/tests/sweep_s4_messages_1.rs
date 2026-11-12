@@ -346,10 +346,12 @@ fn the_reply_bar_copy_shows_an_edit_and_the_oldest_copy_is_the_one_dropped() {
     // Past the cap the oldest settled copy goes, whatever its id.
     let session = &mut t.driver.session;
     for id in (1..=40).rev() {
-        session.begin_composer_reply_fetch(ChatId(21), MessageId(id));
+        let request = crate::ids::RequestId(id as u64);
+        session.begin_composer_reply_fetch(ChatId(21), MessageId(id), request);
         session.reject_composer_reply_target(
             ChatId(21),
             MessageId(id),
+            request,
             &crate::telegram::envelope::TdError::from_code(500),
         );
     }
@@ -373,12 +375,19 @@ fn each_create_gets_its_own_generation_and_a_reset_never_reuses_one() {
         .unwrap();
     let first = generation(&t);
     assert_eq!(first, before + 1);
+    // One create at a time: a second waits for the first's answer.
+    assert!(
+        t.driver
+            .create_managed_bot(900, "B", "b_bot", false, None)
+            .is_err()
+    );
+    assert_eq!(generation(&t), first);
+    // The older create's answer finds a newer generation and drops.
+    t.driver.reset_create_bot();
+    assert_eq!(generation(&t), first + 1);
+    assert!(!t.driver.session.bots.owned.create.creating());
     t.driver
         .create_managed_bot(900, "B", "b_bot", false, None)
         .unwrap();
-    assert_eq!(generation(&t), first + 1);
-    // The older create's answer finds a newer submission and drops.
-    t.driver.reset_create_bot();
     assert_eq!(generation(&t), first + 2);
-    assert!(!t.driver.session.bots.owned.create.creating());
 }

@@ -37,7 +37,7 @@ fn ended_without_rating(call_id: i32) -> CallSummary {
         duration_secs: 30,
         had_audio: true,
         end_line: String::new(),
-        busy: false,
+        end: quill::state::CallEnd::Ended,
         rating: quill::state::CallRating::NotNeeded,
         debug_information: quill::state::CallUpload::NotNeeded,
         log: quill::state::CallUpload::NotNeeded,
@@ -106,19 +106,13 @@ fn an_invitation_alone_keeps_the_call_tick(cx: &mut TestAppContext) {
             rings_until: i64::MAX,
         });
         app.ensure_call_tick(cx);
-        assert!(
-            (app.calls.tick == crate::ui::calls_state::CallTick::Running),
-            "the tick starts"
-        );
+        assert!(app.calls.tick.is_running(), "the tick starts");
     });
     vcx.executor()
         .advance_clock(std::time::Duration::from_secs(3));
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
-        assert!(
-            (app.calls.tick == crate::ui::calls_state::CallTick::Running),
-            "and keeps beating"
-        );
+        assert!(app.calls.tick.is_running(), "and keeps beating");
         assert_eq!(app.calls.sounds.looping(), Some(CallSound::Incoming));
     });
 }
@@ -144,8 +138,7 @@ fn a_second_call_under_the_lock_rings_and_can_be_declined(cx: &mut TestAppContex
             12,
             true,
             false,
-            CallState::Ready,
-            None,
+            CallState::Ready(Default::default()),
         ));
         session.calls.second_call = SecondCall::Prompt {
             call_id: 6,

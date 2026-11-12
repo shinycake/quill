@@ -490,7 +490,7 @@ fn driver_two_step_password_ops_gate_dedupe_and_shape() {
             .auth_state
             .password_state
             .as_ref()
-            .and_then(|s| s.pending_email_pattern.clone())
+            .and_then(|s| s.pending_email.as_ref().map(|p| p.pattern.clone()))
             .as_deref(),
         Some("n***@example.com")
     );
@@ -718,7 +718,10 @@ fn a_refused_logout_puts_the_session_back_to_running() {
             r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#,
         );
         let extra = driver.request_logout().unwrap();
-        assert_eq!(driver.session.shutdown, ShutdownPhase::CloseRequested);
+        assert_eq!(
+            driver.session.shutdown,
+            ShutdownPhase::LogoutRequested(extra)
+        );
         if quit_meanwhile {
             driver.session.begin_close();
         }
@@ -731,10 +734,12 @@ fn a_refused_logout_puts_the_session_back_to_running() {
         );
         if quit_meanwhile {
             assert_eq!(driver.session.shutdown, ShutdownPhase::CloseRequested);
-            assert!(driver.session.auth_state.logout_refused.is_none());
+            assert!(driver.session.take_logout_refusal().is_none());
         } else {
+            assert!(driver.session.shutdown.is_running());
+            assert!(driver.session.take_logout_refusal().is_some());
             assert_eq!(driver.session.shutdown, ShutdownPhase::Running);
-            assert!(driver.session.auth_state.logout_refused.is_some());
+            assert!(driver.session.take_logout_refusal().is_none());
             assert!(matches!(driver.session.auth, AuthorizationState::Ready));
         }
         drop(driver);
@@ -884,4 +889,42 @@ fn missing_tdjson_message_is_actionable() {
     let msg = ConnectBlocker::MissingTdjson.user_message();
     assert!(msg.contains("QUILL_TDJSON_PATH"));
     assert!(msg.contains("never searched"));
+}
+
+/// Sweep r2-19 (05-017): a `logOut` refused while auth is not Ready leaves
+/// the stage as a close, not as a logout waiting for an answer that came.
+#[test]
+fn a_logout_refused_outside_ready_becomes_a_close() {
+    use crate::state::ShutdownPhase;
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    let request = driver.session.request(RequestPurpose::LogOut, None);
+    driver.session.logout_sent(request);
+    assert_eq!(
+        driver.session.shutdown,
+        ShutdownPhase::LogoutRequested(request)
+    );
+    driver
+        .ingest(
+            copy_and_parse(
+                &format!(
+                    r#"{{"@type":"error","@extra":"{}","code":500,"message":"Internal"}}"#,
+                    request.as_extra()
+                ),
+                &seq,
+                &sink,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(driver.session.shutdown, ShutdownPhase::CloseRequested);
+    assert!(driver.session.take_logout_refusal().is_none());
+    drop(driver);
+    drop(recorder);
+    let _ = std::fs::remove_dir_all(&dir);
 }

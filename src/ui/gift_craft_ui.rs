@@ -22,8 +22,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::gift_market::{
     CRAFT_SLOTS, CraftGate, CraftGift, CraftResult, CraftRun, CraftSession, GiftMarketState,
-    PageLoad, ResaleFilter, ResaleSearch, attribute_chances, craft_colors, craft_failed_text,
-    format_percent, shows_craftable_link,
+    attribute_chances, craft_colors, craft_failed_text, format_percent, shows_craftable_link,
 };
 use quill::lang::{keys, tr, tr_with};
 use quill::local_time::{civil_local, hhmm, month_name, now_unix};
@@ -245,11 +244,7 @@ impl QuillApp {
                     .candidates
                     .retain(|gift| !used.contains(&gift.received_gift_id));
             } else {
-                craft.candidates.clear();
-                craft.candidates_load = PageLoad::Idle;
-                craft.candidates_offset.clear();
-                craft.market =
-                    ResaleSearch::new(craft.regular_gift_id, ResaleFilter::default(), true);
+                craft.reset_lists();
             }
         }
         if let Some(live) = self.live.as_mut() {
@@ -269,6 +264,7 @@ impl QuillApp {
         let demo = self.live.is_none();
         let Some(craft) = self.craft_mut() else {
             self.gift_market.craft.end_forge();
+            self.after_craft_pop();
             return;
         };
         if demo && craft.crafting() {
@@ -285,6 +281,8 @@ impl QuillApp {
             craft.clear_result();
         }
         self.gift_market.craft.end_forge();
+        // The forge was the last thing holding the craft while its boxes
+        // were closed: an end that opens no box lets it go.
         match result {
             Some(CraftResult::Success { .. } | CraftResult::Fail) => {
                 self.market_replace(MarketBox::CraftResult, cx);
@@ -294,14 +292,20 @@ impl QuillApp {
                 let when = i32::try_from(when).unwrap_or(i32::MAX);
                 if let Some(notice) = gate_notice(CraftGate::Later(when)) {
                     self.market_push(notice, cx);
+                } else {
+                    self.after_craft_pop();
                 }
             }
             Some(CraftResult::InvalidGift) => {
                 self.set_note(StatusNote::error(tr(keys::Q_MONEY_THIS_GIFT_CANT_BE_USED)));
+                self.after_craft_pop();
                 cx.notify();
             }
-            // An error: its note is shown, the craft box stays.
-            None => cx.notify(),
+            // An error: its note is shown, the craft box stays if it is open.
+            None => {
+                self.after_craft_pop();
+                cx.notify();
+            }
         }
     }
 

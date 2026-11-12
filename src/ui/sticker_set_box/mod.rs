@@ -26,8 +26,7 @@ use quill::sticker_set_box::{
     ARCHIVED_NOTE, SetKind, can_archive, copied_note, has_add_cell, set_link, share_label,
 };
 use quill::telegram::envelope::StickerItem;
-use state::SetBoxHost;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::rc::Rc;
 
 mod creator;
@@ -35,6 +34,7 @@ mod demo;
 mod dialogs;
 mod menu;
 pub(crate) mod state;
+use state::SetBoxHost;
 #[cfg(test)]
 #[cfg(feature = "demo-capture")]
 mod tests;
@@ -543,12 +543,9 @@ impl QuillApp {
                 dialog
                     .title(shell::dialog_title(title))
                     .content(shell::scrollable_dialog_content({
-                        let body = Rc::new(RefCell::new(Some(body)));
+                        let body = Rc::new(Cell::new(Some(body)));
                         move |content, _, _| {
-                            let body = body
-                                .borrow_mut()
-                                .take()
-                                .unwrap_or_else(|| div().into_any_element());
+                            let body = body.take().unwrap_or_else(|| div().into_any_element());
                             content.child(body)
                         }
                     }));

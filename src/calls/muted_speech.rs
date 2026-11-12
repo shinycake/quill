@@ -58,10 +58,12 @@ pub struct HintCall {
 enum HintStage {
     #[default]
     Idle,
-    /// Listening: the counts and when the next check is due.
+    /// Listening: the counts, when the next check is due and the loudest
+    /// peak since the last check.
     Listening {
         tester: MicLevelTester,
         due: u64,
+        peak: f32,
     },
     Showing,
     /// Unmuted or closed: not again in this call.
@@ -73,8 +75,6 @@ enum HintStage {
 pub struct MutedSpeechHint {
     call_id: Option<i32>,
     stage: HintStage,
-    /// The loudest peak since the last check.
-    peak: f32,
     /// Whether the microphone was live at the last update: only a change
     /// to live ends the hint, never the state the call joined in
     /// (tdesktop `mutedValue() | rpl::skip(1)`).
@@ -109,27 +109,34 @@ impl MutedSpeechHint {
             HintStage::Showing => HintStage::Showing,
             HintStage::Idle => {
                 // The tester starts now: what was heard before is not counted.
-                self.peak = 0.0;
                 HintStage::Listening {
                     tester: MicLevelTester::default(),
-                    due: now_ms + CHECK_EVERY_MS,
+                    due: now_ms.saturating_add(CHECK_EVERY_MS),
+                    peak: 0.0,
                 }
             }
-            HintStage::Listening { mut tester, due } => {
-                self.peak = self.peak.max(peak.unwrap_or(0.0));
+            HintStage::Listening {
+                mut tester,
+                due,
+                peak: heard,
+            } => {
+                let heard = heard.max(peak.unwrap_or(0.0));
                 if now_ms >= due {
-                    let show = tester.check(self.peak);
-                    self.peak = 0.0;
-                    if show {
+                    if tester.check(heard) {
                         HintStage::Showing
                     } else {
                         HintStage::Listening {
                             tester,
-                            due: now_ms + CHECK_EVERY_MS,
+                            due: now_ms.saturating_add(CHECK_EVERY_MS),
+                            peak: 0.0,
                         }
                     }
                 } else {
-                    HintStage::Listening { tester, due }
+                    HintStage::Listening {
+                        tester,
+                        due,
+                        peak: heard,
+                    }
                 }
             }
         };

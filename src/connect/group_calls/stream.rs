@@ -7,7 +7,7 @@ use super::*;
 use crate::calls::engine::{
     BroadcastPartAnswer, BroadcastPartStatus, BroadcastRequestId, CallEngine, EngineEvent,
     GroupCallMode, ReplyOutcome, SegmentFetch, StreamFeeder, StreamFetchError, StreamPort,
-    StreamQualityTracker, StreamReply, StreamState,
+    StreamQuality, StreamReply,
 };
 use crate::calls::speaker_levels::LevelGate;
 use crate::calls::stream_audio::gain::clamp_volume;
@@ -39,7 +39,6 @@ pub(crate) struct GroupCallStreams {
     events_tx: Sender<EngineEvent>,
     events_rx: Mutex<Receiver<EngineEvent>>,
     feeders: HashMap<i64, StreamFeeder>,
-    quality: HashMap<i64, StreamQualityTracker>,
     sound_watch: HashMap<i32, PlaybackWatch>,
     volume: f32,
     /// Calls whose instance was made in no known chat, waiting for their
@@ -57,7 +56,6 @@ impl Default for GroupCallStreams {
             events_tx,
             events_rx: Mutex::new(events_rx),
             feeders: HashMap::new(),
-            quality: HashMap::new(),
             sound_watch: HashMap::new(),
             volume: 1.0,
             no_chat: Vec::new(),
@@ -233,7 +231,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .session
                 .calls
                 .group_call(group_call_id)
-                .map(|call| call.stream)
+                .map(|call| call.media.stream_state())
                 .unwrap_or_default();
             let watch = self
                 .group_call_streams
@@ -267,26 +265,22 @@ impl<S: JsonSender> ConnectDriver<S> {
             return;
         };
         if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
-            call.rtmp_url = Some(url).filter(|url| !url.is_empty());
-            call.rtmp_stream_key = Some(key).filter(|key| !key.is_empty());
+            call.rtmp =
+                (!url.is_empty()).then_some(crate::calls::rtmp_start::RtmpInfo { url, key });
         }
     }
 
     /// The stream tile's width in logical pixels. The quality bucket goes
-    /// to the engine only when it changes; tgcalls uses it for the RTMP
-    /// stream's video, as tdesktop does, and segment requests keep the
-    /// quality the engine asked for.
+    /// to the engine only when it differs from the one the engine holds
+    /// (the engine is the one record: with no engine or no call there yet,
+    /// nothing is marked reported and the next width tries again); tgcalls
+    /// uses it for the RTMP stream's video, as tdesktop does, and segment
+    /// requests keep the quality the engine asked for.
     pub fn report_stream_tile_width(&mut self, chat_id: i64, width: f32) {
-        let Some(quality) = self
-            .group_call_streams
-            .quality
-            .entry(chat_id)
-            .or_default()
-            .observe(width)
-        else {
-            return;
-        };
-        if let Some(engine) = self.call_engine.as_deref_mut() {
+        let quality = StreamQuality::for_tile_width(width);
+        if let Some(engine) = self.call_engine.as_deref_mut()
+            && engine.stream_quality(chat_id) != Some(quality)
+        {
             engine.set_stream_quality(chat_id, quality);
         }
     }
@@ -334,8 +328,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             .and_then(|engine| engine.group_call_mode(chat_id))
             .unwrap_or_default();
         if let Some(call) = self.session.calls.group_call_mut(group_call_id) {
-            call.stream_mode = mode;
-            call.stream = StreamState::Connecting;
+            call.media = crate::state::GroupMedia::connected(mode);
         }
         if !mode.is_stream() {
             return;
@@ -368,7 +361,6 @@ impl<S: JsonSender> ConnectDriver<S> {
                 server_offset_ms: self.group_call_streams.server_offset_ms,
             };
             feeder.drain(&mut port);
-            self.group_call_streams.quality.remove(&chat_id);
             self.group_call_streams.sound_watch.remove(&group_call_id);
             self.close_stream_feed(chat_id);
         }
@@ -586,7 +578,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             let Some(call) = self.session.calls.group_call_mut(group_call_id) else {
                 continue;
             };
-            if !call.stream_mode.is_stream() {
+            if !call.media.is_stream() {
                 continue;
             }
             let Some(feeder) = self
@@ -597,8 +589,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             else {
                 continue;
             };
-            call.stream = feeder.stream_state();
-            let (chat_id, state) = (feeder.chat_id(), call.stream);
+            call.media.set_stream_state(feeder.stream_state());
+            let (chat_id, state) = (feeder.chat_id(), call.media.stream_state());
             self.sync_stream_feed(chat_id, state);
         }
     }

@@ -132,3 +132,15 @@ fn every_agent_access_setting_has_a_place_to_land(cx: &mut TestAppContext) {
     assert!(tried > 0);
     assert!(lost.is_empty(), "no spot for {lost:?}");
 }
+
+#[gpui_kit::test]
+fn the_wash_ends_when_the_frame_clock_passes_its_length(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    land(&app, vcx, "notifications.reset_all");
+    app.read_with(vcx, |app, _| assert!(app.settings.arrival.is_some()));
+    vcx.executor()
+        .advance_clock(std::time::Duration::from_millis(2100));
+    vcx.update(|window, cx| window.render_frame(cx));
+    app.read_with(vcx, |app, _| assert!(app.settings.arrival.is_none()));
+}

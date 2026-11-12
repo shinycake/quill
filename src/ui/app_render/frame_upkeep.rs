@@ -9,7 +9,6 @@
 
 use super::*;
 use crate::ui::status_note::StatusNote;
-use crate::ui::stories_state::PanelKind;
 use quill::lang::{keys, tr};
 use quill::state::StoryManageOutcome;
 
@@ -43,10 +42,6 @@ impl QuillApp {
         // main-only: they are pages of the session's info panel, which only
         // the main window's right column draws (chat windows have none).
         self.earn_frame_upkeep(window, cx);
-        // main-only: the composer button's blink follows the main window's
-        // field; the box, the shortcut, the style notices and their emoji
-        // are their window's (`ai_compose_window_upkeep`).
-        self.ai_compose_frame_upkeep(cx);
         // main-only: stories open in the main window.
         self.resolve_pending_story_open(window, cx);
         // main-only: mini apps open over the main window.
@@ -91,46 +86,24 @@ impl QuillApp {
         self.cover_upkeep(cx);
         // Phase 9.5: the viewer cover editor / privacy editor sent a
         // management call. Its own answer (matched by request id) closes
-        // the panel on success or leaves it open showing the error; a
-        // call let go without one just ends the wait.
-        let outcome = |this: &Self, request: Option<quill::ids::RequestId>| {
-            request.and_then(|id| {
-                this.session()
-                    .map(|session| session.stories.manage.outcome(id))
-            })
-        };
-        let cover_request = self.stories.viewer_ui().cover_request;
-        let cover = outcome(self, cover_request);
-        if let Some(done) = cover.filter(|o| *o != StoryManageOutcome::InFlight) {
-            if let (StoryManageOutcome::Failed, Some(request)) = (done, cover_request) {
-                let story = self.open_cover_story();
-                self.show_story_manage_failure(request, story);
+        // that story's panel on success or leaves it open showing the
+        // error; a call let go without one just ends the wait. The call
+        // outlives the panel and a step to another story.
+        for call in self.stories.manage_calls.clone() {
+            let Some(done) = self
+                .session()
+                .map(|session| session.stories.manage.outcome(call.request))
+                .filter(|outcome| *outcome != StoryManageOutcome::InFlight)
+            else {
+                continue;
+            };
+            self.stories.end_manage_call(call.request);
+            if done == StoryManageOutcome::Failed {
+                self.show_story_manage_failure(call.request, Some(call.story));
             }
-            self.stories.with_viewer_ui(|open| {
-                open.cover_request = None;
-                if done == StoryManageOutcome::Saved {
-                    open.close(PanelKind::Cover);
-                }
-            });
-        }
-        let privacy_request = self.stories.viewer_ui().privacy_request;
-        let privacy = outcome(self, privacy_request);
-        if let Some(done) = privacy.filter(|o| *o != StoryManageOutcome::InFlight) {
-            if let (StoryManageOutcome::Failed, Some(request)) = (done, privacy_request) {
-                let story = self
-                    .stories
-                    .viewer_ui()
-                    .privacy_edit()
-                    .as_ref()
-                    .map(|edit| (edit.chat_id, edit.story_id));
-                self.show_story_manage_failure(request, story);
+            if done == StoryManageOutcome::Saved {
+                self.stories.with_viewer_ui(|open| open.close_manage(call));
             }
-            self.stories.with_viewer_ui(|open| {
-                open.privacy_request = None;
-                if done == StoryManageOutcome::Saved {
-                    open.close(PanelKind::Privacy);
-                }
-            });
         }
         // Phase 9.2: a story that vanished from the cache while being
         // viewed was deleted (`updateStoryDeleted`) — close the viewer.

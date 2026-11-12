@@ -37,10 +37,14 @@ impl QuillApp {
             .scroll
             .set_offset(point(px(0.), px(0.)));
         if let Some(live) = self.live.as_mut() {
-            live.driver.set_sticker_manager_open(true);
+            // The manager counts as open only once the box can open: a
+            // refused open leaves nothing behind for the upkeep to serve.
             if live.driver.open_mask_sets().is_err() {
                 self.set_note(StatusNote::error(tr(keys::Q_MISC_COULD_NOT_LOAD_MASKS)));
+                cx.notify();
+                return;
             }
+            live.driver.set_sticker_manager_open(true);
         } else if let Some(session) = self.demo_session.as_mut() {
             session.stickers.masks.set_dialog_open(true);
             session.stickers.manager.open = true;

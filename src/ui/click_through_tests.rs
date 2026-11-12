@@ -71,7 +71,7 @@ fn panels() -> Vec<(&'static str, &'static str, Opener, IsOpen)> {
             "story composer",
             "story-composer-panel",
             |app, window, cx| app.open_story_composer(window, cx),
-            |app| app.stories.composer.open,
+            |app| app.stories.composer.is_open(),
         ),
         (
             "story page",

@@ -47,24 +47,27 @@ pub struct FileMap {
 const EVICT_RETRY_AFTER: u64 = 512;
 
 impl FileMap {
+    /// A map holding only the files `ids` name (the ones that are here):
+    /// what a view reads of one item, without copying the whole map.
+    pub fn only(&self, ids: impl IntoIterator<Item = i32>) -> FileMap {
+        let entries = ids
+            .into_iter()
+            .filter_map(|id| Some((id, self.entries.get(&id)?.clone())))
+            .collect();
+        FileMap {
+            entries,
+            clock: self.clock,
+            paths_revision: self.paths_revision,
+            quiet_updates: self.quiet_updates,
+            retry_at: self.retry_at,
+        }
+    }
+
     /// The file, marking it used.
     pub fn get(&self, id: &i32) -> Option<&ParsedFile> {
         let entry = self.entries.get(id)?;
         entry.used.set(self.clock);
         Some(&entry.file)
-    }
-
-    /// A map of just these files (marking each used), for a view that
-    /// reads only them while it needs the session free.
-    pub fn only(&self, ids: impl IntoIterator<Item = i32>) -> Self {
-        let mut subset = Self::default();
-        for id in ids {
-            if let Some(entry) = self.entries.get(&id) {
-                entry.used.set(self.clock);
-                subset.entries.insert(id, entry.clone());
-            }
-        }
-        subset
     }
 
     pub fn contains_key(&self, id: &i32) -> bool {

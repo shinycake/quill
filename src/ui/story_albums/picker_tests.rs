@@ -123,7 +123,10 @@ fn a_story_page_is_loading_for_its_own_chat_only(cx: &mut TestAppContext) {
                 own,
             );
             // Another op takes the page's one status slot.
-            session.begin_story_page_op("hiding", quill::ids::RequestId(0));
+            session.begin_story_page_op(
+                quill::story_page::StoryPageOpKind::Other,
+                quill::ids::RequestId(0),
+            );
         }
     });
     assert!(app.read_with(vcx, |app, _| app.archived_loading()));

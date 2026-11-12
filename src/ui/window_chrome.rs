@@ -13,7 +13,12 @@ impl QuillApp {
     /// it changed.
     pub(super) fn sync_window_title(&self, window: &mut Window) {
         let title = self.window_title_in_place();
-        if *self.frame.window_title_shown.borrow() == title {
+        let unchanged = self
+            .frame
+            .window_title_shown
+            .try_borrow()
+            .is_ok_and(|shown| *shown == title);
+        if unchanged {
             return;
         }
         window.set_window_title(&title);
@@ -25,7 +30,9 @@ impl QuillApp {
                 window.window_title()
             );
         }
-        *self.frame.window_title_shown.borrow_mut() = title;
+        if let Ok(mut shown) = self.frame.window_title_shown.try_borrow_mut() {
+            *shown = title;
+        }
     }
 
     /// The title of the window whose state is in place: its chat (Saved
@@ -41,9 +48,15 @@ impl QuillApp {
             return window_title(None, 0, None);
         };
         // Every account counts, like tdesktop's `Core::App().unreadBadge()`.
-        let total = (self.frame.title_badge.borrow_mut())
-            .get(session, &session.settings.badge_prefs)
-            .saturating_add(quill::notify_accounts::other_accounts_unread().count);
+        // The count is copied out before another module is asked for the
+        // other accounts', so no guard is held across that call.
+        let own = self
+            .frame
+            .title_badge
+            .try_borrow_mut()
+            .map(|mut badge| badge.get(session, &session.settings.badge_prefs))
+            .unwrap_or_default();
+        let total = own.saturating_add(quill::notify_accounts::other_accounts_unread().count);
         let open = session
             .open_chat_id()
             .and_then(|id| session.chats.get(&id.0));

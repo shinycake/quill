@@ -72,7 +72,7 @@ impl QuillApp {
         if self.open_community_submenu(which, cx) {
             return;
         }
-        if let Some(menu) = self.chat_list.menu.state_mut()
+        if let Some(menu) = self.chat_list.menu.row_mut()
             && menu.submenu != Some(which)
         {
             menu.submenu = Some(which);
@@ -85,7 +85,7 @@ impl QuillApp {
         if self.close_community_submenu(cx) {
             return;
         }
-        if let Some(menu) = self.chat_list.menu.state_mut()
+        if let Some(menu) = self.chat_list.menu.row_mut()
             && menu.submenu.take().is_some()
         {
             cx.notify();
@@ -97,7 +97,7 @@ impl QuillApp {
         if !hovered {
             return;
         }
-        if let Some(menu) = self.chat_list.menu.state_mut()
+        if let Some(menu) = self.chat_list.menu.row_mut()
             && menu.submenu.take().is_some()
         {
             cx.notify();

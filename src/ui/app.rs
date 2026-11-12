@@ -196,11 +196,12 @@ impl QuillApp {
     }
 
     pub(super) fn media_display_roots(&self) -> std::rc::Rc<[PathBuf]> {
-        if let Some(roots) = self.frame.media_roots_frame.borrow().as_ref() {
-            return roots.clone();
-        }
-        let roots: std::rc::Rc<[PathBuf]> = self.compute_media_display_roots().into();
-        *self.frame.media_roots_frame.borrow_mut() = Some(roots.clone());
+        let roots = self
+            .frame
+            .media_roots_frame
+            .take()
+            .unwrap_or_else(|| self.compute_media_display_roots().into());
+        self.frame.media_roots_frame.set(Some(roots.clone()));
         roots
     }
 

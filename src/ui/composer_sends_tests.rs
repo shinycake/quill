@@ -446,16 +446,13 @@ fn a_schedule_picker_left_by_a_chat_switch_is_dropped_and_sends_nothing(cx: &mut
         // The picker opens at 01:15, which went by once already as CDT.
         cx.set_global(WallClock::chicago_repeated_hour());
         app.select_listed_chat(A, window, cx);
-        app.open_schedule_picker(ScheduleTarget::Composer, window, cx);
         // The "Schedule" shortcut sends once a time is confirmed.
-        if let Some(picker) = app.chat_ui.schedule_picker.as_mut() {
-            picker.send_after = true;
-        }
+        app.open_schedule_picker(ScheduleTarget::ComposerThenSend { effect: 0 }, window, cx);
         app.select_listed_chat(B, window, cx);
         app.composer
             .update(cx, |input, cx| input.set_value("for B", window, cx));
         assert!(
-            app.chat_ui.schedule_picker.is_none(),
+            app.chat_ui.schedule_picker.as_ref().is_none(),
             "A's picker went with A"
         );
         let before = history_len(app, B);
@@ -510,7 +507,10 @@ fn a_time_picked_just_before_its_first_showing_takes_the_second(cx: &mut TestApp
             .expect("the picker");
         date.update(cx, |state, cx| state.set_date_time(value, window, cx));
         app.confirm_schedule_picker(window, cx);
-        assert!(app.chat_ui.schedule_picker.is_none(), "no \"too soon\"");
+        assert!(
+            app.chat_ui.schedule_picker.as_ref().is_none(),
+            "no \"too soon\""
+        );
         assert_eq!(
             app.pending_send().scheduling,
             ComposerScheduling::at(WallClock::CHICAGO_FALL_BACK + 1800)
@@ -558,7 +558,7 @@ fn pay_sends_only_in_the_chat_and_account_it_was_asked_in(cx: &mut TestAppContex
         app.select_listed_chat(B, window, cx);
         let before = history_len(app, B);
         app.confirm_paid_send(window, cx);
-        assert!(app.paid_messages.confirm.is_none());
+        assert!(app.paid_messages.confirm.composer().is_none());
         assert_eq!(history_len(app, B), before);
         // Another account with the same chat id open: nothing either.
         app.select_listed_chat(A, window, cx);
@@ -693,8 +693,8 @@ fn a_pending_check_for_another_chats_file_does_not_block_a_send_here(cx: &mut Te
         app.update_pending_send(|send| send.attachments.push(in_a.clone()))
             .expect("an open chat");
         let send_box = &mut app.composer_sends.reads;
-        send_box.sound.start(in_a.path.clone(), 1);
-        send_box.thumbnails.start(in_a.path.clone(), 1);
+        send_box.sound.start(in_a.path.clone(), 1, Vec::new());
+        send_box.thumbnails.start(in_a.path.clone(), 1, Vec::new());
         assert!(app.tray_videos_checking(), "A waits on its own file");
         assert!(app.tray_thumbnails_pending());
         app.select_listed_chat(B, window, cx);
@@ -843,4 +843,50 @@ fn a_background_accounts_failed_preparation_does_not_toast_the_screen(cx: &mut T
             "the screen's own failure still shows"
         );
     });
+}
+
+/// 09-003: a Send held for a photo edit goes with that render, and a tray
+/// that lost the rendering photo never lets a later render revive it.
+#[test]
+fn a_held_send_holds_only_while_its_render_runs() {
+    use crate::ui::composer_sends::{PendingSend, SendOnce};
+    let mut send = PendingSend::default();
+    send.attachments.push(photo("held-a.png"));
+    send.attachments[0].extras.begin_render(7);
+    assert!(send.hold_send("caption".into(), SendOnce::default()));
+    assert!(send.send_is_held());
+    let landed = send
+        .end_render(7, Some(std::path::Path::new("/tmp/held-a-edited.png")))
+        .expect("the render is in the tray");
+    assert_eq!(
+        landed.held.map(|(text, _)| text),
+        Some("caption".to_string()),
+        "the last render lands the held send"
+    );
+    assert!(!send.send_is_held());
+
+    // The rendering photo is removed: nothing holds, and the entry can go.
+    let mut send = PendingSend::default();
+    send.attachments.push(photo("held-b.png"));
+    send.attachments[0].extras.begin_render(8);
+    assert!(send.hold_send("gone".into(), SendOnce::default()));
+    send.attachments.clear();
+    assert!(!send.send_is_held());
+    // A render started later is not the one the Send waited on.
+    send.attachments.push(photo("held-c.png"));
+    send.attachments[0].extras.begin_render(9);
+    assert!(!send.send_is_held(), "no revival by another render");
+}
+
+/// A failed render drops the Send held on it: the unedited photo never goes.
+#[test]
+fn a_failed_render_drops_the_held_send() {
+    use crate::ui::composer_sends::{PendingSend, SendOnce};
+    let mut send = PendingSend::default();
+    send.attachments.push(photo("held-d.png"));
+    send.attachments[0].extras.begin_render(3);
+    assert!(send.hold_send("text".into(), SendOnce::default()));
+    let landed = send.end_render(3, None).expect("the render is in the tray");
+    assert!(landed.held.is_none());
+    assert!(!send.send_is_held());
 }

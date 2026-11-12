@@ -11,7 +11,7 @@ impl QuillApp {
         account: &AccountKey,
         notification: quill::notify_call::CallNotification,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         if quill::notify::current_backend() == quill::notify::NotifyBackend::Native {
             let account = account.0.as_str();
             cx.show_system_notification(SystemNotification {
@@ -27,16 +27,16 @@ impl QuillApp {
                     })
                     .collect(),
             });
-            return;
+            return true;
         }
         let Some(command) = quill::notify_call::build_call_command(&notification) else {
-            return;
+            return false;
         };
         let Some(slot) = quill::thread_guard::InflightSlot::acquire(
             &self.delivery.notify_inflight,
             MAX_OS_NOTIFICATION_THREADS,
         ) else {
-            return;
+            return false;
         };
         let clicks = self.calls.notify_clicks.clone();
         let call_id = notification.call_id;
@@ -57,7 +57,7 @@ impl QuillApp {
             }
         });
         // A thread that never started drops `slot` with its closure.
-        drop(spawn);
+        spawn.is_ok()
     }
 
     /// A notification was clicked or one of its buttons pressed. "Mark as
@@ -383,7 +383,7 @@ impl QuillApp {
             }
             let outcome = quill::notify::run_notification_command(&command);
             drop(slot);
-            let Some(action) = outcome.action else {
+            let quill::notify::NotificationOutcome::Picked(action) = outcome else {
                 return;
             };
             if let Ok(mut guard) = clicks.lock() {
@@ -400,12 +400,18 @@ impl QuillApp {
     }
 
     pub(in crate::ui) fn finish_successful_sends(&mut self, cx: &mut Context<Self>) {
-        let clears = self
+        let (clears, failed) = self
             .live
             .as_mut()
-            .map(|live| std::mem::take(&mut live.driver.session.messages.draft_clears))
+            .map(|live| {
+                let messages = &mut live.driver.session.messages;
+                (
+                    std::mem::take(&mut messages.draft_clears),
+                    std::mem::take(&mut messages.failed_sends),
+                )
+            })
             .unwrap_or_default();
-        if clears.is_empty() {
+        if clears.is_empty() && failed.is_empty() {
             return;
         }
         let open_chat = self.open_chat_id();
@@ -415,6 +421,13 @@ impl QuillApp {
         let Some(account) = self.session().map(|session| session.account.clone()) else {
             return;
         };
+        // A send that failed clears nothing: its entry goes, the draft stays,
+        // and the ack of a later send of the slot finds none to take.
+        for (chat_id, topic) in failed {
+            let _ = self
+                .composer_sends
+                .take_draft_clear(&account, topic.key(chat_id.0));
+        }
         for (chat_id, topic) in clears {
             let Some(flag) = self
                 .composer_sends

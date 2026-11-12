@@ -69,11 +69,9 @@ pub(crate) struct DialogUi {
     /// (`scroll_load`).
     pub(super) saved_scroll: ScrollHandle,
     pub(super) saved_asked: super::scroll_load::Asked,
-    /// Phase C2i: rating detail draft for the call-end card — the star
-    /// tap opens the problems checklist + comment field instead of
-    /// sending immediately.
-    pub(super) rating_detail: Option<RatingDetail>,
-    /// Phase C2i: comment input for the rating detail card.
+    /// The comment field of the call-end card's rating editor. The stars
+    /// and problems are the summary's own (`CallRating::Editing`); the
+    /// comment stays here until the editor opens again.
     pub(super) rating_comment_input: Entity<TextareaState>,
     /// Business hours row of a profile: expanded schedule and time zone.
     pub(super) business_hours: super::profile_business::BusinessHoursUi,
@@ -145,7 +143,6 @@ impl DialogUi {
             account_export: Default::default(),
             saved_scroll: ScrollHandle::new(),
             saved_asked: Default::default(),
-            rating_detail: None,
             rating_comment_input,
             business_hours: Default::default(),
             disable_sharing: None,

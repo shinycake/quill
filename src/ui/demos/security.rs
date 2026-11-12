@@ -139,7 +139,7 @@ impl QuillApp {
             _ => ThemeChoice::Dark,
         };
         self.appearance.accent_rgb = 0x2f81f7;
-        self.appearance.wallpaper_rgb = Some(0x0e1621);
+        self.appearance.wallpaper = quill::settings::WallpaperSource::Color(0x0e1621);
         self.appearance.font_size_px = 16;
         self.open_settings_on(quill::settings_catalog::Page::Appearance, cx);
         self.set_note(StatusNote::silent("screenshot demo — appearance settings"));

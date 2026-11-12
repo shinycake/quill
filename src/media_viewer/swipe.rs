@@ -63,24 +63,15 @@ pub struct SwipeIndicator {
     pub reached: bool,
 }
 
-/// The trackpad gesture over the viewer, as far as swiping goes. `T` is the
-/// timer the viewer runs for a swipe that has no end phase: it lives in the
-/// `Pulling` stage, so every way out of the pull drops it.
-#[derive(Debug)]
-pub struct SwipeNav<T = ()> {
-    gesture: Gesture<T>,
+/// The trackpad gesture over the viewer, as far as swiping goes.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct SwipeNav {
+    gesture: Gesture,
 }
 
-impl<T> Default for SwipeNav<T> {
-    fn default() -> Self {
-        Self {
-            gesture: Gesture::Idle,
-        }
-    }
-}
-
-#[derive(Debug)]
-enum Gesture<T> {
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+enum Gesture {
+    #[default]
     Idle,
     /// Neither clearly horizontal nor vertical yet: the deltas so far.
     Undecided {
@@ -93,11 +84,7 @@ enum Gesture<T> {
     Elsewhere {
         last_at: Instant,
     },
-    Pulling {
-        pull: Pull,
-        /// The end-of-swipe timer of a gesture without phases, once armed.
-        timer: Option<T>,
-    },
+    Pulling(Pull),
     /// Let go: the rest of it (macOS momentum) is swallowed.
     Released {
         last_at: Instant,
@@ -164,17 +151,7 @@ impl Pull {
     }
 }
 
-#[expect(
-    clippy::derivable_impls,
-    reason = "a derive would require `T: Default`"
-)]
-impl<T> Default for Gesture<T> {
-    fn default() -> Self {
-        Self::Idle
-    }
-}
-
-impl<T> SwipeNav<T> {
+impl SwipeNav {
     pub fn feed(&mut self, input: SwipeInput) -> SwipeAction {
         let SwipeInput {
             dx,
@@ -213,7 +190,7 @@ impl<T> SwipeNav<T> {
                 *last_at = at;
                 return SwipeAction::Capture;
             }
-            Gesture::Pulling { pull, .. } => {
+            Gesture::Pulling(pull) => {
                 pull.pull_by(dx, at);
                 return SwipeAction::Capture;
             }
@@ -230,10 +207,7 @@ impl<T> SwipeNav<T> {
                 SwipeDir::Previous => can_prev,
             };
             if open {
-                self.gesture = Gesture::Pulling {
-                    pull: Pull::new(dir, sum_dx.abs(), phased, at),
-                    timer: None,
-                };
+                self.gesture = Gesture::Pulling(Pull::new(dir, sum_dx.abs(), phased, at));
                 SwipeAction::Capture
             } else {
                 self.gesture = Gesture::Elsewhere { last_at: at };
@@ -257,13 +231,14 @@ impl<T> SwipeNav<T> {
     /// The gesture ended (an end phase, or the pause after a gesture
     /// without phases). Returns the item to move to when it was armed.
     pub fn end(&mut self, at: Instant) -> Option<SwipeDir> {
-        // Whatever the stage was, its timer goes with it.
-        match std::mem::take(&mut self.gesture) {
-            Gesture::Pulling { pull, .. } => {
+        match self.gesture {
+            Gesture::Pulling(pull) => {
                 // Only a phased gesture (macOS) has momentum to swallow.
-                if pull.phased {
-                    self.gesture = Gesture::Released { last_at: at };
-                }
+                self.gesture = if pull.phased {
+                    Gesture::Released { last_at: at }
+                } else {
+                    Gesture::Idle
+                };
                 pull.reached.then_some(pull.dir)
             }
             Gesture::Released { .. } => {
@@ -273,7 +248,10 @@ impl<T> SwipeNav<T> {
             Gesture::Idle
             | Gesture::Undecided { .. }
             | Gesture::Elsewhere { .. }
-            | Gesture::Spent { .. } => None,
+            | Gesture::Spent { .. } => {
+                self.gesture = Gesture::Idle;
+                None
+            }
         }
     }
 
@@ -300,46 +278,25 @@ impl<T> SwipeNav<T> {
     /// Another item is shown: a pull in progress is dropped, and the rest
     /// of its gesture is swallowed.
     pub fn new_item(&mut self) {
-        if let Gesture::Pulling { pull, .. } = &self.gesture {
-            let last_at = pull.last_at;
-            self.gesture = Gesture::Released { last_at };
+        if let Gesture::Pulling(pull) = self.gesture {
+            self.gesture = Gesture::Released {
+                last_at: pull.last_at,
+            };
         }
     }
 
     /// When a swipe without phases ends unless another event arrives.
     pub fn timeout_at(&self) -> Option<Instant> {
-        match &self.gesture {
-            Gesture::Pulling { pull, .. } if !pull.phased => {
+        match self.gesture {
+            Gesture::Pulling(pull) if !pull.phased => {
                 pull.last_at.checked_add(VIEWER_TRACKPAD_GESTURE_GAP)
             }
             _ => None,
         }
     }
 
-    /// A swipe without phases is pulling and has no end-of-swipe timer yet:
-    /// the viewer starts one and hands it to [`Self::arm`].
-    pub fn wants_timer(&self) -> bool {
-        matches!(
-            &self.gesture,
-            Gesture::Pulling { pull, timer: None } if !pull.phased
-        )
-    }
-
-    /// The end-of-swipe timer for the pull in progress. Dropped at once
-    /// when no phase-less pull is waiting for one.
-    pub fn arm(&mut self, timer: T) {
-        if let Gesture::Pulling {
-            pull,
-            timer: slot @ None,
-        } = &mut self.gesture
-            && !pull.phased
-        {
-            *slot = Some(timer);
-        }
-    }
-
     pub fn indicator(&self) -> Option<SwipeIndicator> {
-        let Gesture::Pulling { pull, .. } = &self.gesture else {
+        let Gesture::Pulling(pull) = self.gesture else {
             return None;
         };
         let ratio = pull.ratio();
@@ -354,15 +311,15 @@ impl<T> SwipeNav<T> {
     /// phase or a pause starts a new one, except that a phased swipe
     /// waits for its end phase however long the fingers rest.
     fn continues(&self, begins_gesture: bool, at: Instant) -> bool {
-        let last_at = match &self.gesture {
+        let last_at = match self.gesture {
             _ if begins_gesture => return false,
             Gesture::Idle => return false,
-            Gesture::Pulling { pull, .. } if pull.phased => return true,
-            Gesture::Pulling { pull, .. } => pull.last_at,
-            Gesture::Undecided { last_at, .. }
+            Gesture::Pulling(pull) if pull.phased => return true,
+            Gesture::Pulling(Pull { last_at, .. })
+            | Gesture::Undecided { last_at, .. }
             | Gesture::Elsewhere { last_at }
             | Gesture::Released { last_at }
-            | Gesture::Spent { last_at } => *last_at,
+            | Gesture::Spent { last_at } => last_at,
         };
         at.saturating_duration_since(last_at) < VIEWER_TRACKPAD_GESTURE_GAP
     }
@@ -406,7 +363,7 @@ mod tests {
     #[test]
     fn a_short_swipe_cancels() {
         let now = Instant::now();
-        let mut nav: SwipeNav = SwipeNav::default();
+        let mut nav = SwipeNav::default();
         let last = swipe(&mut nav, now, &[-15.0, -15.0]);
         let shown = nav.indicator().expect("pulled in part way");
         assert_eq!(shown.dir, SwipeDir::Next);
@@ -419,7 +376,7 @@ mod tests {
     #[test]
     fn a_full_swipe_steps_once() {
         let now = Instant::now();
-        let mut nav: SwipeNav = SwipeNav::default();
+        let mut nav = SwipeNav::default();
         let last = swipe(&mut nav, now, &[-20.0, -25.0, -30.0]);
         let shown = nav.indicator().expect("pulled in");
         assert_eq!(shown.ratio, 1.0);
@@ -431,7 +388,7 @@ mod tests {
     #[test]
     fn a_right_swipe_moves_to_the_previous_item() {
         let now = Instant::now();
-        let mut nav: SwipeNav = SwipeNav::default();
+        let mut nav = SwipeNav::default();
         let last = swipe(&mut nav, now, &[30.0, 30.0]);
         assert_eq!(nav.end(last), Some(SwipeDir::Previous));
     }
@@ -439,7 +396,7 @@ mod tests {
     #[test]
     fn momentum_after_the_release_does_not_step_again() {
         let now = Instant::now();
-        let mut nav: SwipeNav = SwipeNav::default();
+        let mut nav = SwipeNav::default();
         let last = swipe(&mut nav, now, &[-60.0]);
         assert_eq!(nav.end(last), Some(SwipeDir::Next));
         nav.new_item();
@@ -458,7 +415,7 @@ mod tests {
     #[test]
     fn pulling_back_one_threshold_from_an_overshoot_cancels() {
         let now = Instant::now();
-        let mut nav: SwipeNav = SwipeNav::default();
+        let mut nav = SwipeNav::default();
         let last = swipe(&mut nav, now, &[-200.0, 30.0]);
         let shown = nav.indicator().expect("still pulled in");
         assert!(!shown.reached, "30 px back disarms it");
@@ -469,7 +426,7 @@ mod tests {
     #[test]
     fn letting_go_just_after_backing_off_steps_as_the_arrow_says() {
         let now = Instant::now();
-        let mut nav: SwipeNav = SwipeNav::default();
+        let mut nav = SwipeNav::default();
         let last = swipe(&mut nav, now, &[-200.0, 1.0]);
         let shown = nav.indicator().expect("still pulled in");
         assert!(shown.reached && shown.ratio < 1.0);
@@ -479,7 +436,7 @@ mod tests {
     #[test]
     fn a_vertical_first_gesture_is_not_captured() {
         let now = Instant::now();
-        let mut nav: SwipeNav = SwipeNav::default();
+        let mut nav = SwipeNav::default();
         assert_eq!(nav.feed(event(-5.0, -40.0, true, now)), SwipeAction::None);
         for frame in 1..5 {
             let sideways = event(-60.0, 0.0, false, ms(now, frame * 16));
@@ -492,7 +449,7 @@ mod tests {
     #[test]
     fn a_gesture_locks_once_it_leans_clearly_one_way() {
         let now = Instant::now();
-        let mut nav: SwipeNav = SwipeNav::default();
+        let mut nav = SwipeNav::default();
         assert_eq!(nav.feed(event(0.0, 0.0, true, now)), SwipeAction::None);
         assert_eq!(
             nav.feed(event(-1.0, -0.5, false, ms(now, 16))),
@@ -509,7 +466,7 @@ mod tests {
     #[test]
     fn no_next_item_means_no_capture() {
         let now = Instant::now();
-        let mut nav: SwipeNav = SwipeNav::default();
+        let mut nav = SwipeNav::default();
         let last_item = SwipeInput {
             can_next: false,
             ..event(-60.0, 0.0, true, now)
@@ -522,7 +479,7 @@ mod tests {
     #[test]
     fn a_mouse_wheel_never_swipes() {
         let now = Instant::now();
-        let mut nav: SwipeNav = SwipeNav::default();
+        let mut nav = SwipeNav::default();
         let wheel = SwipeInput {
             source: WheelSource::Wheel,
             ..event(-120.0, 0.0, false, now)
@@ -534,7 +491,7 @@ mod tests {
     #[test]
     fn a_swipe_without_phases_ends_after_a_pause() {
         let now = Instant::now();
-        let mut nav: SwipeNav = SwipeNav::default();
+        let mut nav = SwipeNav::default();
         assert_eq!(
             nav.feed(event(-35.0, 0.0, false, now)),
             SwipeAction::Capture
@@ -559,7 +516,7 @@ mod tests {
     #[test]
     fn a_phased_swipe_has_no_timeout() {
         let now = Instant::now();
-        let mut nav: SwipeNav = SwipeNav::default();
+        let mut nav = SwipeNav::default();
         swipe(&mut nav, now, &[-60.0]);
         assert_eq!(nav.timeout_at(), None);
         let rested = event(-5.0, 0.0, false, ms(now, 2_000));
@@ -574,7 +531,7 @@ mod tests {
     #[test]
     fn a_new_gesture_finishes_a_swipe_that_lost_its_end() {
         let now = Instant::now();
-        let mut nav: SwipeNav = SwipeNav::default();
+        let mut nav = SwipeNav::default();
         swipe(&mut nav, now, &[-60.0]);
         let next = event(0.0, -30.0, true, ms(now, 500));
         assert_eq!(nav.feed(next), SwipeAction::Step(SwipeDir::Next));
@@ -584,7 +541,7 @@ mod tests {
     #[test]
     fn a_new_item_drops_the_pull() {
         let now = Instant::now();
-        let mut nav: SwipeNav = SwipeNav::default();
+        let mut nav = SwipeNav::default();
         swipe(&mut nav, now, &[-60.0]);
         nav.new_item();
         assert_eq!(nav.indicator(), None);
@@ -596,7 +553,7 @@ mod tests {
     #[test]
     fn non_finite_deltas_do_nothing() {
         let now = Instant::now();
-        let mut nav: SwipeNav = SwipeNav::default();
+        let mut nav = SwipeNav::default();
         assert_eq!(nav.feed(event(f32::NAN, 0.0, true, now)), SwipeAction::None);
         assert_eq!(
             nav.feed(event(f32::INFINITY, 0.0, true, now)),
@@ -608,7 +565,7 @@ mod tests {
     #[test]
     fn a_spent_gesture_lasts_until_a_new_one_or_a_pause_and_leaves_a_pull_alone() {
         let now = Instant::now();
-        let mut nav: SwipeNav = SwipeNav::default();
+        let mut nav = SwipeNav::default();
         nav.feed(event(0.0, -5.0, true, now));
         nav.spend(now);
         assert!(nav.is_spent());

@@ -1,7 +1,7 @@
 //! Background accounts in the window: the account list badge, and what a
 //! click on another account's notification does once it reaches the
 //! render (needs the `demo-capture` feature for gpui-kit's test support).
-use super::calls::BackgroundRing;
+use super::calls::{BackgroundRing, RingNotice, RingPrompt};
 use super::{AccountUnread, BackgroundClient, BackgroundStatus, PendingOpen};
 use crate::ui::app::QuillApp;
 use crate::ui::call_sounds::CallSound;
@@ -50,9 +50,9 @@ fn ring() -> BackgroundRing {
         caller: "Alice".into(),
         is_video: false,
         account_name: "Work".into(),
-        dismissed: false,
+        prompt: RingPrompt::Shown,
         // No OS notification in tests.
-        notified: true,
+        notice: RingNotice::Posted { tag: String::new() },
     }
 }
 
@@ -86,7 +86,7 @@ fn a_dismissed_prompt_stops_ringing_in_the_app(cx: &mut TestAppContext) {
     let (app, shell, mut vcx) = new_app_shell(cx);
     app.update_in(&mut vcx, |app, _, cx| {
         let mut dismissed = ring();
-        dismissed.dismissed = true;
+        dismissed.prompt = RingPrompt::Dismissed;
         app.background.ringing = Some(dismissed);
         cx.notify();
     });
@@ -109,7 +109,7 @@ fn the_tick_loops_another_accounts_ringtone_with_no_poll(cx: &mut TestAppContext
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
         assert_eq!(app.calls.sounds.looping(), Some(CallSound::Incoming));
-        assert!((app.calls.tick == crate::ui::calls_state::CallTick::Running));
+        assert!(app.calls.tick.is_running());
     });
     app.update_in(&mut vcx, |app, _, _| {
         app.background.ringing = None;
@@ -117,10 +117,7 @@ fn the_tick_loops_another_accounts_ringtone_with_no_poll(cx: &mut TestAppContext
     vcx.executor().advance_clock(Duration::from_secs(1));
     vcx.run_until_parked();
     app.read_with(&vcx, |app, _| {
-        assert!(
-            !(app.calls.tick == crate::ui::calls_state::CallTick::Running),
-            "no ring, no tick"
-        );
+        assert!(!app.calls.tick.is_running(), "no ring, no tick");
     });
 }
 
@@ -142,7 +139,7 @@ fn an_older_call_summary_does_not_silence_another_accounts_ring(cx: &mut TestApp
             duration_secs: 30,
             had_audio: true,
             end_line: String::new(),
-            busy: false,
+            end: quill::state::CallEnd::Ended,
             rating: quill::state::CallRating::NotNeeded,
             debug_information: quill::state::CallUpload::NotNeeded,
             log: quill::state::CallUpload::NotNeeded,

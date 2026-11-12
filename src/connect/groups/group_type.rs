@@ -21,7 +21,26 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// `checkChatUsername` for the text in the link field. A basic group
     /// is checked as a chat being created (`chat_id` 0), as it becomes a
     /// supergroup before the link is set.
+    ///
+    /// A check that cannot be sent is a failed check of that text: the box
+    /// says so and Save asks again, instead of "Checking..." with nobody to
+    /// answer.
     pub fn check_group_username(
+        &mut self,
+        chat_id: ChatId,
+        username: &str,
+    ) -> Result<Option<RequestId>, ConnectSendError> {
+        let sent = self.send_group_username_check(chat_id, username);
+        if sent.is_err() {
+            self.session.groups.group_type.check = UsernameCheck::Failed {
+                chat_id,
+                username: username.to_string(),
+            };
+        }
+        sent
+    }
+
+    fn send_group_username_check(
         &mut self,
         chat_id: ChatId,
         username: &str,
@@ -34,17 +53,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             Some(ChatKind::BasicGroup { .. }) => 0,
             _ => return Ok(None),
         };
-        let state = &mut self.session.groups.group_type;
-        state.check_generation = state.check_generation.wrapping_add(1);
-        let generation = state.check_generation;
-        let extra = self.session.request(
-            purpose(GroupTypePurpose::CheckChatUsername { generation }),
-            Some(chat_id),
-        );
+        let extra = self
+            .session
+            .request(purpose(GroupTypePurpose::CheckChatUsername), Some(chat_id));
         self.send_json_request(extra, &check_chat_username(extra, ChatId(target), username))?;
         // Only a check that went out is "in flight": a failed send leaves
         // the field as it was, with no answer to wait for.
         self.session.groups.group_type.check = UsernameCheck::Checking {
+            request: extra,
             chat_id,
             username: username.to_string(),
         };
@@ -73,13 +89,13 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let state = &mut self.session.groups.group_type;
-        if state.public_chats == PublicChatsFetch::Loading {
+        if matches!(state.public_chats, PublicChatsFetch::Loading(_)) {
             return Ok(None);
         }
-        state.public_chats = PublicChatsFetch::Loading;
         let extra = self
             .session
             .request(purpose(GroupTypePurpose::GetCreatedPublicChats), None);
+        self.session.groups.group_type.public_chats = PublicChatsFetch::Loading(extra);
         self.send_json_request(extra, &crate::earn::get_created_public_chats(extra))
             .map(Some)
             .inspect_err(|_| {

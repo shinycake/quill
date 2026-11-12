@@ -144,19 +144,24 @@ fn forget(id: u64) {
 pub fn client_closed(client_id: i32) {
     let ended: Vec<SyncSender<Value>> = {
         let mut guard = crate::locks::lock_or_recover(&PENDING);
-        let Some(pending) = guard.as_mut() else {
-            return;
-        };
-        let ids: Vec<u64> = pending
-            .iter()
-            .filter(|(_, (client, _))| *client == client_id)
-            .map(|(id, _)| *id)
-            .collect();
-        ids.iter()
-            .filter_map(|id| pending.remove(id))
-            .map(|(_, tx)| tx)
-            .collect()
+        guard
+            .as_mut()
+            .map(|pending| {
+                let ids: Vec<u64> = pending
+                    .iter()
+                    .filter(|(_, (client, _))| *client == client_id)
+                    .map(|(id, _)| *id)
+                    .collect();
+                ids.iter()
+                    .filter_map(|id| pending.remove(id))
+                    .map(|(_, tx)| tx)
+                    .collect()
+            })
+            .unwrap_or_default()
     };
+    crate::locks::lock_or_recover(&CLIENTS).retain(|(_, client)| client.client_id != client_id);
+    super::events::forget_client(client_id);
+    super::tools::forget_client(client_id);
     // Dropping the senders wakes each waiter with a disconnect.
     drop(ended);
 }

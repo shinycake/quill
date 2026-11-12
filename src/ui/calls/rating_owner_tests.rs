@@ -33,7 +33,7 @@ fn ended(call_id: i32) -> CallSummary {
         duration_secs: 30,
         had_audio: true,
         end_line: String::new(),
-        busy: false,
+        end: quill::state::CallEnd::Ended,
         rating: quill::state::CallRating::Offered,
         debug_information: quill::state::CallUpload::NotNeeded,
         log: quill::state::CallUpload::NotNeeded,
@@ -54,18 +54,24 @@ fn rating_sent(app: &QuillApp) -> Option<bool> {
     Some(session.calls.summary.as_ref()?.rating == quill::state::CallRating::Sent)
 }
 
+fn draft_of(app: &QuillApp) -> Option<quill::state::RatingDraft> {
+    let session = app.demo_session.as_deref()?;
+    session.calls.summary.as_ref()?.rating.draft().cloned()
+}
+
 #[gpui_kit::test]
 fn a_draft_for_an_earlier_call_is_not_submitted_for_the_next(cx: &mut TestAppContext) {
     let (app, mut vcx) = open_app(cx);
     app.update_in(&mut vcx, |app, window, cx| {
         show(app, 7);
         app.open_rating_detail(2, window, cx);
-        assert!(app.dialogs.rating_detail.is_some());
-        // Another call ended and its summary replaced the first one.
+        assert!(draft_of(app).is_some());
+        // Another call ended and its summary replaced the first one: the
+        // draft was the first summary's own stage and went with it.
         show(app, 8);
+        assert!(draft_of(app).is_none());
         app.submit_call_rating(cx);
         assert_eq!(rating_sent(app), Some(false), "call 8 was never rated");
-        assert!(app.dialogs.rating_detail.is_none());
     });
 }
 
@@ -80,9 +86,47 @@ fn a_draft_submits_for_its_own_call_and_goes_with_its_summary(cx: &mut TestAppCo
         show(app, 9);
         app.open_rating_detail(1, window, cx);
         app.dismiss_call_summary(cx);
-        assert!(
-            app.dialogs.rating_detail.is_none(),
-            "the draft went with its summary"
-        );
+        assert!(draft_of(app).is_none(), "the draft went with its summary");
+    });
+}
+
+#[gpui_kit::test]
+fn the_editor_edits_the_summarys_own_draft(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        show(app, 7);
+        app.open_rating_detail(2, window, cx);
+        app.set_rating_stars(4, cx);
+        app.toggle_rating_problem(1, cx);
+        let draft = draft_of(app).expect("editing");
+        assert_eq!(draft.stars, 4);
+        assert!(draft.problems[1] && !draft.problems[0]);
+        app.toggle_rating_problem(1, cx);
+        assert!(!draft_of(app).expect("editing").problems[1]);
+    });
+}
+
+fn summary_shown(app: &QuillApp) -> bool {
+    app.demo_session
+        .as_deref()
+        .is_some_and(|session| session.calls.summary.is_some())
+}
+
+#[gpui_kit::test]
+fn a_redial_dismisses_the_summary_when_the_dial_goes_out_and_a_plain_dial_keeps_it(
+    cx: &mut TestAppContext,
+) {
+    let (app, mut vcx) = open_app(cx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        show(app, 7);
+        app.open_rating_detail(3, window, cx);
+        // A call placed from somewhere else leaves the end card to be rated.
+        app.dial_user(12, false, cx);
+        assert!(summary_shown(app));
+        assert!(draft_of(app).is_some());
+        // Call again from the end card itself replaces it.
+        app.redial(12, false, cx);
+        assert!(!summary_shown(app));
+        assert!(draft_of(app).is_none());
     });
 }

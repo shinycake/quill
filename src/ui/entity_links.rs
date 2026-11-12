@@ -30,9 +30,7 @@ use quill::lang::{keys, tr, tr_with};
 use quill::link_policy::{OpenDecision, open_decision};
 use quill::telegram::envelope::{ChatKind, MessageContent, MessageSender};
 use quill::text::LinkTarget;
-use std::cell::RefCell;
 use std::ops::Range;
-use std::rc::Rc;
 
 /// A clicked link waiting for render: the link and the message it is in
 /// (chat id, message id).
@@ -349,7 +347,7 @@ impl QuillApp {
                     .positions
                     .insert(ChatMessage::new(chat_id, target_id), secs);
                 if self.playback.active.voice() == Some(target_id)
-                    && self.playback.player.chat.is_none_or(|c| c == chat_id)
+                    && self.playback.active.chat().is_none_or(|c| c == chat_id)
                 {
                     self.seek_active_to(secs, cx);
                 } else {
@@ -370,7 +368,7 @@ impl QuillApp {
                     .positions
                     .insert(ChatMessage::new(chat_id, target_id), secs);
                 if self.playback.active.audio() == Some(target_id)
-                    && self.playback.player.chat.is_none_or(|c| c == chat_id)
+                    && self.playback.active.chat().is_none_or(|c| c == chat_id)
                 {
                     self.seek_active_to(secs, cx);
                 } else {
@@ -796,16 +794,7 @@ impl QuillApp {
                 } else {
                     tr(keys::Q_OPS_OPEN_THIS_LINK)
                 }))
-                .content(crate::ui::shell::scrollable_dialog_content({
-                    let body = Rc::new(RefCell::new(Some(body)));
-                    move |content, _, _| {
-                        let body = body
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| div().into_any_element());
-                        content.child(body)
-                    }
-                }))
+                .content(crate::ui::shell::one_shot_dialog_content(body))
                 .footer(footer)
                 .on_close(on_close)
         })

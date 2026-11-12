@@ -8,7 +8,7 @@
 
 use std::ffi::{c_char, c_void};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::Mutex;
 
 /// `QS_ABI_VERSION` in `quillsticker.h`.
 const ABI_VERSION: i32 = 1;
@@ -135,9 +135,18 @@ impl Api {
     }
 }
 
-fn api() -> Result<&'static Api, &'static str> {
-    static API: OnceLock<Result<Api, String>> = OnceLock::new();
-    API.get_or_init(Api::load).as_ref().map_err(String::as_str)
+/// The loaded decoder. Only a success is kept: a failed load (the library
+/// missing or still being installed) is tried again on the next sticker.
+fn api() -> Result<&'static Api, String> {
+    static API: Mutex<Option<&'static Api>> = Mutex::new(None);
+    let mut slot = API.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(api) = *slot {
+        return Ok(api);
+    }
+    // The library stays loaded for the process, so the `Api` is leaked.
+    let api: &'static Api = Box::leak(Box::new(Api::load()?));
+    *slot = Some(api);
+    Ok(api)
 }
 
 /// Why opening a sticker in process did not work.

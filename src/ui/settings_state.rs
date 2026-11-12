@@ -10,13 +10,9 @@ use gpui_kit::*;
 /// The settings window of the account on screen: its pages, search,
 /// scrolls and the boxes they open. A field of `OnScreen`.
 pub(crate) struct SettingsUi {
-    /// The settings window covers the chat list and the chat.
-    pub(super) open: bool,
-    /// The page on screen. `None`: none chosen yet, so a wide window shows
-    /// Account and a narrow one the page list.
-    pub(super) page: Option<quill::settings_catalog::Page>,
-    /// A page reached from a row of `page`, with a back arrow.
-    pub(super) sub: Option<super::settings_window::SubPage>,
+    /// Whether the settings window covers the chat list and the chat, and
+    /// on which page or subpage.
+    pub(super) nav: super::settings_window::SettingsNav,
     /// The box the settings window has open, if any: one value, since
     /// kit dialogs never stack.
     pub(super) boxes: SettingsBox,
@@ -97,6 +93,22 @@ impl SettingsBox {
 }
 
 impl SettingsUi {
+    /// The settings window covers the chat list and the chat.
+    pub(super) fn open(&self) -> bool {
+        self.nav.is_open()
+    }
+
+    /// The page on screen. `None`: none chosen yet, so a wide window shows
+    /// Account and a narrow one the page list.
+    pub(super) fn page(&self) -> Option<quill::settings_catalog::Page> {
+        self.nav.page()
+    }
+
+    /// A page reached from a row of `page`, with a back arrow.
+    pub(super) fn sub(&self) -> Option<super::settings_window::SubPage> {
+        self.nav.sub()
+    }
+
     pub(super) fn box_open(&self, which: SettingsBox) -> bool {
         self.boxes == which
     }
@@ -109,9 +121,7 @@ impl SettingsUi {
 
     pub(super) fn new(cx: &mut Context<QuillApp>) -> Self {
         Self {
-            open: false,
-            page: None,
-            sub: None,
+            nav: Default::default(),
             boxes: SettingsBox::None,
             search: Default::default(),
             arrival: None,
@@ -162,7 +172,7 @@ impl super::on_screen::Farewell for SettingsUi {
         if archive {
             app.set_archive_settings_open(false);
         }
-        if let Some(page) = app.settings.page {
+        if let Some(page) = app.settings.page() {
             app.leave_settings_page(page);
         }
     }
@@ -195,6 +205,9 @@ pub(crate) struct PreferencesUi {
     /// The wait for the link handler's background read to land; dropping
     /// it ends the wait.
     pub(super) link_handler_watch: Option<Task<()>>,
+    /// "Make Quill the default": the re-reads that follow while the
+    /// system confirmation is awaited (`LinkHandlerRecheck`).
+    pub(super) link_handler_recheck: super::appearance::LinkHandlerRecheck,
     /// Settings → Appearance: the searchable font family list.
     pub(super) font_picker: super::appearance_power::FontPicker,
     /// Settings → Appearance: the custom accent color field (kit
@@ -205,7 +218,6 @@ pub(crate) struct PreferencesUi {
     /// bar's toast are the screen's (`OnScreen::translate`).
     pub(super) translate: super::translate_ui::TranslateUi,
     pub(super) update_state: quill::updater::UpdateState,
-    pub(super) update_banner_dismissed: bool,
     /// The What's New window and the release notes it shows.
     pub(super) whats_new: super::whats_new::WhatsNewUi,
     /// Advanced and experimental settings, the secret codes, the test
@@ -232,6 +244,7 @@ impl PreferencesUi {
             system_accent: SystemAccent::Unread,
             system_accent_poll: None,
             link_handler_watch: None,
+            link_handler_recheck: Default::default(),
             font_picker,
             accent_picker,
             translate: super::translate_ui::TranslateUi::load(),
@@ -240,7 +253,6 @@ impl PreferencesUi {
             } else {
                 quill::updater::UpdateState::Idle
             },
-            update_banner_dismissed: false,
             whats_new: Default::default(),
             advanced: super::advanced_state::AdvancedUi::new(cx, demo.is_none()),
             emoji_style: Default::default(),

@@ -86,7 +86,7 @@ impl<S: JsonSender> ConnectDriver<S> {
                 .session
                 .search
                 .chat_search
-                .chat_id
+                .chat_id()
                 .or(driver.session.open_chat_id());
             if shown != Some(jump.chat_id) {
                 return Ok(None);

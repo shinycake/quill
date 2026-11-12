@@ -66,8 +66,8 @@ impl QuillApp {
         if !self.demo_pins_toast() {
             self.connection.advance_toasts(now);
         }
-        if let Some(deadline) = self.connection.toasts.rewake(now) {
-            self.spawn_screen(cx, async move |this, cx| {
+        if let Some(deadline) = self.connection.toasts.wanted_wake(now) {
+            let task = self.spawn_screen(cx, async move |this, cx| {
                 cx.background_executor()
                     .timer(deadline.saturating_duration_since(std::time::Instant::now()))
                     .await;
@@ -75,8 +75,8 @@ impl QuillApp {
                     this.connection.toasts.woke(deadline);
                     cx.notify();
                 });
-            })
-            .detach();
+            });
+            self.connection.toasts.scheduled(deadline, task);
         }
         self.connection.toasts.visible().cloned()
     }
@@ -98,7 +98,9 @@ impl QuillApp {
         let now = surface_reveal::now();
         let animate = surface_reveal::animate(cx);
         let (drawn, moving) = {
-            let mut toasts = self.frame.surfaces.toasts.borrow_mut();
+            let Ok(mut toasts) = self.frame.surfaces.toasts.try_borrow_mut() else {
+                return None;
+            };
             let toast = toasts.entry(host.map(|chat| chat.0)).or_insert_with(|| {
                 surface_reveal::Presence::new(
                     surface_reveal::ENTER,

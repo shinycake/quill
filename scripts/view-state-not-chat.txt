@@ -21,11 +21,10 @@ ComposerUi.draft_load.Restoring.slot | the slot that asked for its draft to be r
 ComposerUi.slow_mode_tick | the running 1 s tick task and its chat; it exits by itself when the chat changes and a newer chat's tick drops it, so resetting it would start a second task
 
 ComposerUi.slow_mode_tick.Ticking.chat | names the chat of the running 1 s tick task, which owns it and exits by itself when the chat changes; the next gated frame replaces it
-MessageUi.swipe_reply_start | one press gesture, carries its chat; the release checks it
 HistoryUi.painted_ids | rebuilt by every paint of the history list
 HistoryUi.seen | carries its chat; read once at the next render
 HistoryUi.on_screen | rebuilt by every paint of the history list
-HistoryUi.reported_visible | carries its chat: a repeat check, a new chat never matches
+HistoryUi.reported_visible * | carries its chat and the open of its history: a repeat check, a new chat or a reopened one never matches
 HistoryUi.sponsored.spots * | rebuilt from the open chat's placed ads after every history render (sync_sponsored_spots)
 HistoryUi.ends | compared with the history synced next; a new chat's ends differ
 HistoryUi.anchor.Anchoring.landed | compared with the session's highlight, which is the open chat's; the anchor starts a new chat with none
@@ -34,7 +33,6 @@ HistoryUi.anchor.Anchored.landed | compared with the session's highlight, which 
 HistoryUi.live_location_tick | the running tick task and the chat it ticks for, as slow_mode_tick
 
 ShareUi.forward.Bar.dest | the chat the forward bar waits in; kept across chats on purpose (dismiss_forward_for_view)
-ShareUi.forward.Picking.at * | the media viewer's "Share at" position of the open share box; it lives and ends with that box (close_picker drops it)
 ShareUi.forward.Picking.bar | the forward bar the share box was opened over, which leaving the box returns to; it goes with the bar (dismiss_forward_for_view)
 ViewerUi.clip.Playing.item | the media viewer's clip, which outlives a chat change (the viewer is the screen's)
 ViewerUi.clip.Gif.item | the media viewer's GIF clip, as ViewerUi.clip.Playing.item
@@ -49,7 +47,8 @@ HistoryUi.row_hover.under | the row under the pointer, rebuilt by every paint an
 HistoryUi.row_hover.painted | the rows' hitboxes, rebuilt by every paint
 HistoryUi.stream_reveal.Finishing.message | the bot reply finishing its reveal: the reveal names its chat and starts over in another
 HistoryUi.pull.route * | where the pull gesture leads (next chat or topic) and the jump to it; `pull_sync` resets it when the chat or topic shown changes
-HistoryUi.pull.window | the window and chat-window scope of that gesture, read by its jump, which `pull_sync` drops
+ShareUi.forward.Picking.share_at.chat_id | the viewer message the share box was opened at a position for; it lives as long as the box and `take_share_at` hands it out only for that very chat and message
+ShareUi.forward.Picking.share_at.message_id | as `ShareUi.forward.Picking.share_at.chat_id`
 ViewerUi.extra.caption.key | carries its chat and message: the caption built for another never matches
 # Round 7: walked through `Option`, `Vec`, map values and enums. Each of
 # these carries the chat it acts on, or holds no chat's ids at all (a time,
@@ -71,3 +70,4 @@ HistoryUi.aim * | a landing is ended by the history's sync when the chat or topi
 PickerUi.media_panel * | sticker set and emoji status ids; the reaction target carries its chat and message
 ViewerUi.photo_editor * | the editor's target carries its own chat or sticker set; it is not opened from a chat's history
 MessageUi.custom_emoji.Asked.emoji_id | a custom emoji's id, not a chat's: the card it shows is about that emoji and its set, the same in any chat
+HistoryUi.forum_peek.Chats.forum | the forum the user peeked at the chat list over; it counts only while that chat is the open one (`ForumPeek::is_for`), and opening any chat ends it

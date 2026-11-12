@@ -38,6 +38,9 @@ pub(crate) struct StoryPage {
     pub(crate) archive_scroll: ScrollHandle,
     pub(crate) posted_asked: crate::ui::scroll_load::Asked,
     pub(crate) archive_asked: crate::ui::scroll_load::Asked,
+    /// The picker's candidate count its thumbnails were last asked at: a
+    /// page that arrives later asks for its own.
+    pub(crate) thumbs_asked: crate::ui::scroll_load::Asked,
 }
 
 /// What the story page shows below its header.
@@ -48,12 +51,14 @@ pub(crate) enum AlbumView {
 }
 
 /// The two-click album delete: the first click arms it, the second sends
-/// it. Part of the album view, so leaving the view (back, the picker, an
-/// answer) disarms it.
+/// it and waits for the answer. Part of the album view, so leaving the view
+/// (back, the picker, an answer) ends the stage and its request with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AlbumDelete {
     Idle,
     Armed,
+    /// `deleteStoryAlbum` sent: the album view goes once it is deleted.
+    Deleting(quill::ids::RequestId),
 }
 
 impl AlbumView {
@@ -80,10 +85,31 @@ impl AlbumView {
         )
     }
 
-    /// Something else was pressed: a delete armed before does not carry on.
+    /// Something else was pressed: a delete armed before does not carry on
+    /// (one already sent stays until its answer).
     pub(crate) fn disarm(&mut self) {
-        if let Self::Album { delete, .. } = self {
+        if let Self::Album { delete, .. } = self
+            && *delete == AlbumDelete::Armed
+        {
             *delete = AlbumDelete::Idle;
+        }
+    }
+
+    /// The delete request the view waits on.
+    pub(crate) fn deleting(self) -> Option<quill::ids::RequestId> {
+        match self {
+            Self::Album {
+                delete: AlbumDelete::Deleting(request),
+                ..
+            } => Some(request),
+            _ => None,
+        }
+    }
+
+    /// The delete was sent as `request`.
+    pub(crate) fn delete_sent(&mut self, request: quill::ids::RequestId) {
+        if let Self::Album { delete, .. } = self {
+            *delete = AlbumDelete::Deleting(request);
         }
     }
 }
@@ -96,10 +122,19 @@ pub(crate) enum PageWait {
     Idle,
     /// `createStoryAlbum`: the name and the picker go once it is made.
     Creating(quill::ids::RequestId),
-    /// The picker's adds and removes on an opened album.
-    SavingPicker(Vec<quill::ids::RequestId>),
-    /// `deleteStoryAlbum`: the album view goes once it is deleted.
-    Deleting(quill::ids::RequestId),
+    /// The picker's adds and removes on album `album_id`.
+    SavingPicker {
+        album_id: i32,
+        requests: Vec<quill::ids::RequestId>,
+    },
+    /// The picker's adds on album `album_id` went out and its removes
+    /// failed to send: the picker stays, and once the adds are answered
+    /// `added` count as done, so a retry does not send them again.
+    SavingPickerPartly {
+        album_id: i32,
+        requests: Vec<quill::ids::RequestId>,
+        added: Vec<i32>,
+    },
 }
 
 impl StoryPage {
@@ -124,6 +159,7 @@ impl StoryPage {
             archive_scroll: ScrollHandle::new(),
             posted_asked: Default::default(),
             archive_asked: Default::default(),
+            thumbs_asked: Default::default(),
         }
     }
 }

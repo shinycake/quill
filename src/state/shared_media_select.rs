@@ -112,7 +112,7 @@ pub fn media_menu_items(facts: &MediaMenuFacts) -> Vec<MediaMenuItem> {
 impl SharedMediaState {
     /// Messages that were deleted leave every tab and the selection.
     pub fn remove_messages(&mut self, chat_id: crate::ids::ChatId, ids: &[MessageId]) {
-        if self.chat_id != Some(chat_id) {
+        if self.chat_id() != Some(chat_id) {
             return;
         }
         self.selection.retain(|s| !ids.contains(&s.message_id));
@@ -155,7 +155,7 @@ impl SharedMediaState {
         answer: Option<(crate::ids::ChatId, MessageId, MessageActions)>,
     ) -> bool {
         match answer {
-            Some((chat, id, actions)) if self.chat_id == Some(chat) => {
+            Some((chat, id, actions)) if self.chat_id() == Some(chat) => {
                 self.replace_selected(SelectedMedia::from_actions(id, Some(&actions)))
             }
             _ => false,

@@ -78,11 +78,39 @@ impl RtmpStart {
         }
     }
 
+    /// A revoke request is out and not answered.
+    pub fn revoke_in_flight(&self) -> bool {
+        matches!(
+            &self.stage,
+            RtmpStage::Ready {
+                revoke: Revoke::Asking(_),
+                ..
+            }
+        )
+    }
+
+    /// The box is open with no revoke in flight: a new one may be sent.
+    pub fn can_revoke(&self) -> bool {
+        matches!(
+            &self.stage,
+            RtmpStage::Ready {
+                revoke: Revoke::Idle | Revoke::Failed,
+                ..
+            }
+        )
+    }
+
     /// The process sent `request` for a new key (the URL with `revoke`).
-    pub fn revoking(&mut self, request: RequestId) {
+    /// `false` when it is not recorded (no box, or another revoke is out):
+    /// the caller checks [`Self::can_revoke`] before sending.
+    pub fn revoking(&mut self, request: RequestId) -> bool {
+        if !self.can_revoke() {
+            return false;
+        }
         if let RtmpStage::Ready { revoke, .. } = &mut self.stage {
             *revoke = Revoke::Asking(request);
         }
+        true
     }
 
     /// The answer to `request`: the box has data to show.
@@ -263,11 +291,26 @@ mod tests {
         // A late failure of an earlier process's request.
         assert!(!start.fail(Some(RequestId(1))));
         assert_eq!(start.failure(), None);
-        start.revoking(RequestId(2));
+        assert!(start.revoking(RequestId(2)));
         assert!(start.fail(Some(RequestId(2))));
         assert_eq!(start.failure(), Some(RtmpFailure::Revoke));
         assert_eq!(start.failure(), None, "taken once");
         assert!(start.box_open(), "the box keeps its rows");
+    }
+
+    #[test]
+    fn a_second_revoke_does_not_replace_the_one_in_flight() {
+        let mut start = RtmpStart::new(ChatId(5), RequestId(1));
+        assert!(!start.can_revoke(), "no box yet");
+        assert!(!start.revoking(RequestId(2)), "not recorded without a box");
+        assert!(start.accept(Some(RequestId(1)), RtmpInfo::default()));
+        assert!(start.can_revoke());
+        assert!(start.revoking(RequestId(2)));
+        assert!(start.revoke_in_flight());
+        assert!(!start.can_revoke());
+        assert!(!start.revoking(RequestId(3)), "the first stays");
+        assert!(start.accept(Some(RequestId(2)), RtmpInfo::default()));
+        assert!(!start.revoke_in_flight());
     }
 
     #[test]

@@ -42,7 +42,7 @@ impl QuillApp {
             grouped: self.composer_group_media_effective(),
             remember: self
                 .session()
-                .is_some_and(|s| s.settings.media_prefs.remember_media_grouping),
+                .is_some_and(|s| s.settings.media_prefs.media_grouping.is_remembered()),
             can_files,
             as_files: can_files
                 && tray
