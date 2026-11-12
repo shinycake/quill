@@ -125,7 +125,7 @@ pub fn inline_bot_hint<'a>(
     // The name and at most one plain space after it (a newline or a tab is
     // not the separator tdesktop waits for).
     let typed = text.strip_prefix('@')?;
-    let name = typed.strip_suffix(' ').unwrap_or(typed);
+    let name = typed.trim_suffix(' ');
     name.eq_ignore_ascii_case(bot_username)
         .then_some(placeholder)
 }

@@ -246,7 +246,7 @@ impl<W: Write> ResultJson<W> {
         head.insert("id".into(), bare_chat_id(dialog.chat_id).into());
         let head = serde_json::to_string(&Value::Object(head))?;
         // Reopen the object to append the streamed `messages` array.
-        let head = head.strip_suffix('}').unwrap_or(&head);
+        let head = head.trim_suffix('}');
         write!(self.out, "\n   {head},\"messages\": [")?;
         self.state = ChatState::Messages(false);
         Ok(())

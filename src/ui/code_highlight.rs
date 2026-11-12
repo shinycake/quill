@@ -151,8 +151,8 @@ fn diff_spans(text: &str) -> Vec<Span> {
     let mut start = 0;
     for line in text.split_inclusive('\n') {
         let end = start + line.len();
-        let content = line.strip_suffix('\n').unwrap_or(line);
-        let content = content.strip_suffix('\r').unwrap_or(content);
+        let content = line.trim_suffix('\n');
+        let content = content.trim_suffix('\r');
         if let Some(token) = diff_line_token(content) {
             spans.push((start..start + content.len(), token));
         } else {

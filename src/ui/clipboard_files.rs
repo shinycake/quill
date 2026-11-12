@@ -81,7 +81,7 @@ fn paths_from_text_with(text: &str, exists: impl Fn(&std::path::Path) -> bool) -
 fn path_from_line(line: &str) -> Option<PathBuf> {
     if let Some(rest) = line.strip_prefix("file://") {
         // `file:///home/a` and `file://localhost/home/a`.
-        let rest = rest.strip_prefix("localhost").unwrap_or(rest);
+        let rest = rest.trim_prefix("localhost");
         let decoded = percent_decode(rest)?;
         #[cfg(windows)]
         let decoded = {

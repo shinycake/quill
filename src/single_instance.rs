@@ -250,7 +250,7 @@ impl Drop for AcquireLock {
 /// verbatim `\\?\` prefix, so all of that is folded away first.
 #[cfg(any(windows, test))]
 fn windows_root_key(path: &str) -> String {
-    let path = path.strip_prefix(r"\\?\").unwrap_or(path);
+    let path = path.trim_prefix(r"\\?\");
     path.replace('/', "\\")
         .trim_end_matches('\\')
         .to_lowercase()

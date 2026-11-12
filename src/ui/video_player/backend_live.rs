@@ -611,11 +611,7 @@ impl Drop for LiveCore {
 
 /// Screenshot captures convert every frame at once.
 fn capture_mode() -> bool {
-    #[cfg(feature = "demo-capture")]
-    if std::env::var_os("QUILL_DEMO_CAPTURE").is_some() {
-        return true;
-    }
-    false
+    cfg!(feature = "demo-capture") && std::env::var_os("QUILL_DEMO_CAPTURE").is_some()
 }
 
 struct LiveBackend {

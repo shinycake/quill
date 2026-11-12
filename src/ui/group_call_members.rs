@@ -97,7 +97,7 @@ impl QuillApp {
         let Some(view) = self.call_view_mut() else {
             return;
         };
-        view.chat_shown = !view.chat_shown;
+        view.chat_shown.toggle();
         let shown = view.chat_shown;
         if shown {
             self.group_call.panel_scroll.scroll_to_bottom();

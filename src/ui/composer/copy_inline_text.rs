@@ -185,7 +185,7 @@ impl QuillApp {
             .pending_edit_mut()
             .and_then(|e| e.media_edit.replacement.as_mut())
         {
-            replacement.spoiler = !replacement.spoiler;
+            replacement.spoiler.toggle();
             cx.notify();
         }
     }

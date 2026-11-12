@@ -2,6 +2,7 @@ use crate::diagnostics::{Diagnostic, DiagnosticSink};
 use crate::telegram::envelope::{Envelope, ParseError, parse_envelope};
 use crate::telegram::ffi::TdJson;
 use crate::telegram::hub::TdHub;
+use std::mem::DropGuard;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -57,21 +58,6 @@ enum BridgeFeed {
     Closed,
 }
 
-/// Marks the bridge as stopped when the receive loop ends for any reason
-/// other than a requested shutdown, including a panic unwind.
-struct StopGuard {
-    shutdown: Arc<AtomicBool>,
-    stopped: Arc<AtomicBool>,
-}
-
-impl Drop for StopGuard {
-    fn drop(&mut self) {
-        if !self.shutdown.load(Ordering::SeqCst) {
-            self.stopped.store(true, Ordering::SeqCst);
-        }
-    }
-}
-
 impl ReceiveBridge {
     pub fn spawn_injected(sink: Arc<dyn DiagnosticSink>) -> std::io::Result<Self> {
         let (tx_out, rx_out) = mpsc::channel();
@@ -80,10 +66,16 @@ impl ReceiveBridge {
         let shutdown = Arc::new(AtomicBool::new(false));
         let seq_thread = seq.clone();
         let stopped = Arc::new(AtomicBool::new(false));
-        let guard = StopGuard {
-            shutdown: shutdown.clone(),
-            stopped: stopped.clone(),
-        };
+        // Marks the bridge as stopped when the receive loop ends for any
+        // reason other than a requested shutdown, including a panic unwind.
+        let guard = DropGuard::new(
+            (shutdown.clone(), stopped.clone()),
+            |(shutdown, stopped)| {
+                if !shutdown.load(Ordering::SeqCst) {
+                    stopped.store(true, Ordering::SeqCst);
+                }
+            },
+        );
         let shutdown_thread = shutdown.clone();
         let thread = crate::thread_guard::spawn_guarded("quill-td-receive", move || {
             let _guard = guard;

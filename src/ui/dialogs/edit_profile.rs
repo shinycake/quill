@@ -169,7 +169,7 @@ impl EditProfileDialog {
     pub(crate) fn username_text(&self, cx: &App) -> String {
         let text = Self::text(&self.username_input, cx);
         let text = text.trim();
-        text.strip_prefix('@').unwrap_or(text).to_string()
+        text.trim_prefix('@').to_string()
     }
 }
 

@@ -364,7 +364,7 @@ impl QuillApp {
             .as_mut()
             .and_then(|editor| editor.edits_mut())
         {
-            edits.gif = !edits.gif;
+            edits.gif.toggle();
             cx.notify();
         }
     }

@@ -106,7 +106,7 @@ pub fn parse_chord(text: &str) -> Result<KeyChord, String> {
     let (body, trailing) = match text.chars().last() {
         Some(last @ ('-' | '+')) => {
             let body = text.get(..text.len().saturating_sub(1)).unwrap_or("");
-            let body = body.strip_suffix(['-', '+']).unwrap_or(body);
+            let body = body.trim_suffix(['-', '+']);
             (body, Some(last.to_string()))
         }
         _ => (text, None),

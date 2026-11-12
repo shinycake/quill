@@ -203,7 +203,7 @@ impl QuillApp {
         let Some(edits) = editor.edits_mut() else {
             return;
         };
-        edits.flipped = !edits.flipped;
+        edits.flipped.toggle();
         edits.crop = edits.crop.map(Crop::mirrored);
         self.video_editor_geometry_changed(cx);
     }

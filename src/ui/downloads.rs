@@ -189,7 +189,7 @@ impl QuillApp {
     }
 
     pub(super) fn toggle_downloads_panel(&mut self) {
-        self.chat_list.downloads_panel_open = !self.chat_list.downloads_panel_open;
+        self.chat_list.downloads_panel_open.toggle();
     }
 
     pub(super) fn downloads_panel_open(&self) -> bool {
