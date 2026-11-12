@@ -64,11 +64,10 @@ fn another_requests_answer_changes_nothing() {
 fn leaving_the_account_forgets_the_applys_waiting_answers(cx: &mut gpui_kit::TestAppContext) {
     let (app, mut vcx) =
         crate::ui::notifications::viewer_progress_tests::open_app(cx, "ready-privacy");
-    app.update(&mut vcx, |app, cx| {
-        app.open_peer_color_dialog(crate::ui::peer_color_dialog::PeerColorTab::Name, cx);
-        if let Some(dialog) = app.dialogs.peer_color_dialog.as_mut() {
-            dialog.stage = applying(&[7]);
-        }
+    app.update(&mut vcx, |app, _| {
+        app.dialogs.peer_color_dialog = Some(
+            crate::ui::peer_color_dialog::PeerColorDialog::applying(vec![RequestId(7)]),
+        );
         if let Some(session) = app.demo_session.as_mut() {
             session.acks.expect(RequestId(7));
             session.acks.settle(RequestId(7), Answer::Done);

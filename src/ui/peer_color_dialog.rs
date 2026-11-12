@@ -96,6 +96,28 @@ pub(crate) struct PeerColorDialog {
     listed: (usize, usize),
 }
 
+#[cfg(test)]
+impl PeerColorDialog {
+    /// A box whose Apply waits on `waiting`.
+    pub(super) fn applying(waiting: Vec<RequestId>) -> Self {
+        Self {
+            tab: PeerColorTab::Name,
+            draft: PeerColorDraft {
+                name_color_id: 0,
+                name_emoji_id: 0,
+                gift_colors_id: 0,
+                profile_color_id: -1,
+                profile_emoji_id: 0,
+            },
+            stage: ApplyStage::Applying {
+                waiting,
+                refused: None,
+            },
+            listed: (0, 0),
+        }
+    }
+}
+
 impl QuillApp {
     /// The account's current colors from its user record.
     fn my_peer_colors(&self) -> Option<PeerColorDraft> {
