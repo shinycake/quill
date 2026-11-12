@@ -70,7 +70,12 @@ impl QuillApp {
                 video.watch(cx.entity_id());
                 editor.set_player(Some((video, edits.from_ms)));
             }
-            Err(_) => editor.set_note(tr(keys::Q_AV_QUILL_CANT_PLAY_THIS_VIDEO).into()),
+            // A line that is already there (why an encode failed) says more
+            // than this one, so it stays.
+            Err(_) if editor.note().is_none() => {
+                editor.set_note(tr(keys::Q_AV_QUILL_CANT_PLAY_THIS_VIDEO).into());
+            }
+            Err(_) => {}
         }
         cx.notify();
     }
