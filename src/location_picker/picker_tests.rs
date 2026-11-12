@@ -425,6 +425,53 @@ fn typing_before_any_place_is_known_does_not_sit_on_loading() {
     assert_eq!(picker.venues(), VenueView::WaitingForLocation);
 }
 
+/// Sweep r4-04 05-002: a query typed before any place is known is sent around
+/// the first fix, and closing the search brings the nearby list back.
+#[test]
+fn a_query_typed_before_the_first_fix_is_sent_when_the_fix_comes() {
+    let mut picker = fresh();
+    picker.search_changed(Some("Pizza".into()));
+    assert_eq!(picker.venue_query_to_send(), None, "nowhere to search yet");
+    let here = point(48.85, 2.35);
+    picker.geolocated(GeoOutcome::Found(here), true);
+    let (at, query) = picker.venue_query_to_send().expect("the typed query goes out");
+    assert_eq!((at, query.as_str()), (here, "pizza"));
+    assert_eq!(picker.venues(), VenueView::Loading);
+    picker.venue_query_requested(RequestId(1));
+    picker.venues_answered(RequestId(1), vec![venue("Pizzeria")]);
+    assert_eq!(picker.venues(), VenueView::Found(&[venue("Pizzeria")]));
+    picker.search_changed(None);
+    let (_, nearby) = picker.venue_query_to_send().expect("the nearby list is asked");
+    assert_eq!(nearby, "");
+}
+
+/// A failed ask is drawn as a failure until another ask replaces it, even
+/// when a cached answer is what replaces it.
+#[test]
+fn a_cached_answer_after_a_failure_replaces_the_failure() {
+    let mut picker = fresh();
+    let here = point(48.85, 2.35);
+    picker.geolocated(GeoOutcome::Found(here), true);
+    picker.venue_query_to_send().expect("nearby");
+    picker.venue_query_requested(RequestId(1));
+    picker.venues_answered(RequestId(1), vec![venue("Near")]);
+    picker.search_changed(Some("pizza".into()));
+    picker.search_debounce_fired();
+    picker.venue_query_to_send().expect("search");
+    picker.venue_query_requested(RequestId(2));
+    picker.venues_failed(RequestId(2));
+    assert_eq!(picker.venues(), VenueView::Failed);
+    picker.search_changed(None);
+    assert_eq!(
+        picker.venues(),
+        VenueView::Found(&[venue("Near")]),
+        "the cached nearby list"
+    );
+    picker.search_changed(Some("pizza".into()));
+    picker.retry_venues();
+    assert_ne!(picker.venues(), VenueView::Failed);
+}
+
 #[test]
 fn a_new_place_stops_the_lookup_of_the_old_one() {
     use std::sync::Arc;
