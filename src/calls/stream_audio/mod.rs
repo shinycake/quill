@@ -76,7 +76,7 @@ impl StreamAudio {
             }),
             frames: AtomicU64::new(0),
             peak: AtomicU16::new(0),
-            output: OutputCell::new(),
+            output: OutputCell::default(),
         }
     }
 

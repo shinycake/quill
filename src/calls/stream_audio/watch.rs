@@ -33,15 +33,12 @@ pub enum OutputState {
 
 /// An [`OutputState`] the audio thread and the poll loop share. It only
 /// ever moves from `Open` to `Failed`.
+#[derive(Default)]
 pub struct OutputCell(AtomicU8);
 
 impl OutputCell {
     const OPEN: u8 = 0;
     const FAILED: u8 = 1;
-
-    pub fn new() -> Self {
-        Self(AtomicU8::new(Self::OPEN))
-    }
 
     pub fn get(&self) -> OutputState {
         match self.0.load(Ordering::Relaxed) {
