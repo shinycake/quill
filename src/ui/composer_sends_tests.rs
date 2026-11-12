@@ -979,9 +979,9 @@ fn a_reply_from_the_main_composer_is_acked_under_another_topic() {
 }
 
 /// Sweep r3-08 round 3 (14-004): an album is one request answered once
-/// per message. A text send pending in the same slot keeps its clear while
+/// per message. A text send pending in another slot keeps its clear while
 /// the album's later items ack or fail, whichever order they arrive in.
-fn album_and_text_in_one_slot() -> (
+fn album_and_text_in_two_slots() -> (
     crate::ui::composer_sends::ComposerSends,
     AccountKey,
     SendSlot,
@@ -991,8 +991,7 @@ fn album_and_text_in_one_slot() -> (
     let main = forum_slot(1);
     let account = main.account.clone();
     let mut sends = crate::ui::composer_sends::ComposerSends::default();
-    // The album's clear, then the text sent from the same slot (which
-    // replaces it in the slot) in another topic's slot for the album.
+    // The album's clear waits in topic 2's slot, the text's in topic 1's.
     let album_slot = forum_slot(2);
     sends.set_draft_clear(
         &album_slot,
@@ -1010,7 +1009,7 @@ fn album_and_text_in_one_slot() -> (
 
 #[test]
 fn a_later_album_ack_never_takes_a_neighbours_clear() {
-    let (mut sends, account, main) = album_and_text_in_one_slot();
+    let (mut sends, account, main) = album_and_text_in_two_slots();
     let album = forum_slot(2);
     // The first item clears the album's draft, once.
     assert!(
@@ -1035,7 +1034,7 @@ fn a_later_album_ack_never_takes_a_neighbours_clear() {
 
 #[test]
 fn a_later_album_failure_never_drops_a_neighbours_clear() {
-    let (mut sends, account, main) = album_and_text_in_one_slot();
+    let (mut sends, account, main) = album_and_text_in_two_slots();
     assert!(
         sends
             .take_draft_clear(&account, MessageId(-1), main.draft)
@@ -1049,11 +1048,72 @@ fn a_later_album_failure_never_drops_a_neighbours_clear() {
             .is_some()
     );
     // A failed first item: the draft stays, the later ack clears nothing.
-    let (mut sends, account, main) = album_and_text_in_one_slot();
+    let (mut sends, account, main) = album_and_text_in_two_slots();
     sends.fail_draft_clear(&account, MessageId(-1), main.draft);
     assert_eq!(
         sends.take_draft_clear(&account, MessageId(-2), main.draft),
         None
     );
     assert!(sends.has_draft_clear(&main));
+}
+
+/// An album and then a text sent from one composer slot: the text's clear
+/// replaces the album's in the slot, and the album's acks (which name that
+/// slot) find nothing to take, so the slot fallback never takes the text's
+/// asked clear.
+fn album_then_text_from_one_slot() -> (
+    crate::ui::composer_sends::ComposerSends,
+    AccountKey,
+    SendSlot,
+) {
+    use crate::ui::composer_state::DraftClear;
+    let chat = ChatId(7);
+    let slot = forum_slot(1);
+    let account = slot.account.clone();
+    let mut sends = crate::ui::composer_sends::ComposerSends::default();
+    sends.set_draft_clear(
+        &slot,
+        Some(DraftClear::whole_composer(chat).asked([RequestId(1)])),
+    );
+    sends.set_draft_clear(
+        &slot,
+        Some(DraftClear::of_text(chat, "text").asked([RequestId(2)])),
+    );
+    sends.note_send_answer(&account, RequestId(1), MessageId(-1));
+    sends.note_send_answer(&account, RequestId(1), MessageId(-2));
+    sends.note_send_answer(&account, RequestId(2), MessageId(-3));
+    (sends, account, slot)
+}
+
+#[test]
+fn album_acks_from_one_slot_never_take_the_texts_clear() {
+    let (mut sends, account, slot) = album_then_text_from_one_slot();
+    assert_eq!(
+        sends.take_draft_clear(&account, MessageId(-1), slot.draft),
+        None
+    );
+    assert_eq!(
+        sends.take_draft_clear(&account, MessageId(-2), slot.draft),
+        None
+    );
+    assert!(sends.has_draft_clear(&slot));
+    let text = sends.take_draft_clear(&account, MessageId(-3), slot.draft);
+    assert_eq!(
+        text.map(|(s, clear)| (s, clear.sent)),
+        Some((slot.draft, Some("text".to_string())))
+    );
+    assert!(!sends.has_draft_clear(&slot));
+}
+
+#[test]
+fn album_failures_from_one_slot_never_drop_the_texts_clear() {
+    let (mut sends, account, slot) = album_then_text_from_one_slot();
+    sends.fail_draft_clear(&account, MessageId(-1), slot.draft);
+    sends.fail_draft_clear(&account, MessageId(-2), slot.draft);
+    assert!(sends.has_draft_clear(&slot), "the text's clear survives");
+    assert!(
+        sends
+            .take_draft_clear(&account, MessageId(-3), slot.draft)
+            .is_some()
+    );
 }
