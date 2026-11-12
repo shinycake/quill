@@ -4,6 +4,8 @@
 //! where it was opened from ([`StoryOpenScope`]).
 #![deny(clippy::indexing_slicing)]
 
+use super::story_open::StoryAsk;
+use quill::state::RequestPurpose;
 use super::*;
 use quill::state::StoryCardState;
 use quill::story_repost::RepostGone;
@@ -76,6 +78,7 @@ impl QuillApp {
             .unwrap_or_default();
         // The opened story is asked for at once, even while a failed ask
         // waits out its retry clock; the poster's others are prefetches.
+        let asks_story = fetch.contains(&story_id);
         if let Some(live) = self.live.as_mut() {
             for id in fetch {
                 let _ = if id == story_id {
@@ -91,6 +94,11 @@ impl QuillApp {
                     .story_fetch
                     .forget_retry((chat_id.0, story_id));
             }
+            // The demo has no connection: the ask the live app would send
+            // is recorded so the open waits on a request like a live one.
+            if asks_story && let Some(session) = self.demo_session.as_mut() {
+                session.request_for_story(RequestPurpose::GetStory, chat_id, story_id);
+            }
             if !fetch.is_empty() {
                 self.set_note(StatusNote::silent(tr(
                     keys::Q_MEDIA_DEMO_GETSTORY_RUNS_WITH_LIVE,
@@ -100,7 +108,17 @@ impl QuillApp {
         // A newer open replaces one still waiting.
         let rebuilt = self.rebuild_story_viewer(open, cx);
         if !rebuilt {
-            self.stories.viewer.wait(open);
+            let ask = self
+                .session()
+                .and_then(|session| {
+                    session.requests.request_for_story_in_flight(
+                        RequestPurpose::GetStory,
+                        chat_id,
+                        story_id,
+                    )
+                })
+                .map_or(StoryAsk::NoneOut, StoryAsk::Out);
+            self.stories.viewer.wait(open, ask);
         }
         cx.notify();
     }
@@ -134,6 +152,13 @@ impl QuillApp {
             .retry((open.chat_id, open.story_id))
             .is_some();
         let state = session.story_card_state(open.chat_id, open.story_id);
+        // The ask left flight without the story arriving or an error being
+        // recorded (the request was dropped): the open cannot be answered.
+        let failed = failed
+            || match self.stories.viewer.ask() {
+                Some(StoryAsk::Out(request)) => session.requests.get(request).is_none(),
+                Some(StoryAsk::NoneOut) | None => true,
+            };
         if let Some(gone) = open.if_gone
             && matches!(
                 (state, failed),
