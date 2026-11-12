@@ -50,7 +50,6 @@ purpose:ConnectDriver::maybe_load_archive_chats 1
 purpose:ConnectDriver::maybe_load_main_chats 1
 purpose:ConnectDriver::maybe_load_selected_sticker_set 1
 purpose:ConnectDriver::maybe_probe_channel_membership 1
-purpose:ConnectDriver::maybe_refresh_saved_animations 1
 purpose:ConnectDriver::maybe_search_gifs 2
 purpose:ConnectDriver::open_chat_appearance 1
 purpose:ConnectDriver::open_media_panel 3
@@ -98,14 +97,10 @@ purpose:Session::sharing_request_answering 1
 purpose:Session::suggested_post_busy 1
 unmatched:ConnectDriver::save_connected_bot 1
 unmatched:ForumTopicsMap::insert 1
-unmatched:GifPanel::search_answered 1
 unmatched:QuillApp::refresh_storage_usage 1
-unmatched:QuillApp::submit_default_auto_delete 1
 unmatched:Session::apply_auth_payload 1
 unmatched:Session::apply_chat_list_payload 1
-unmatched:Session::apply_privacy_data_payload 1
 unmatched:Session::apply_quick_replies_ok 1
-unmatched:Session::apply_saved_tags 1
 unmatched:Session::apply_ton_wallet 1
 unmatched:SettingsState::apply_blocked_page 2
 unsent:ConnectDriver::ask_countries 1
@@ -118,7 +113,6 @@ unsent:ConnectDriver::fetch_network_statistics 1
 unsent:ConnectDriver::maybe_fetch_live_story_extras 1
 unsent:ConnectDriver::maybe_fetch_notification_exceptions 1
 unsent:ConnectDriver::probe_self_star_stats 1
-unsent:GifPanel::saved_asked 1
 unsent:GiveawayOptions::begin 2
 unsent:QuillApp::begin_screen_worker 1
 unsent:QuillApp::menu_focus_upkeep 1

@@ -525,20 +525,34 @@ impl GifPanel {
         }
     }
 
-    /// `getSavedAnimations` went out.
-    pub fn saved_asked(&mut self) {
+    /// `getSavedAnimations` went out as `request`.
+    pub fn saved_asked(&mut self, request: crate::ids::RequestId) {
         self.saved.begin();
+        self.saved.sent(request);
     }
 
     /// `getSavedAnimations` answered. An `updateSavedAnimations` that came
     /// while the request was out marks the list out of date: the answer may
     /// predate the change, so it is shown (the list does not blank) and the
     /// mark stays, so the list is asked for again.
-    pub fn saved_answered(&mut self, animations: Vec<AnimationItem>) {
+    pub fn saved_answered(
+        &mut self,
+        request: Option<crate::ids::RequestId>,
+        animations: Vec<AnimationItem>,
+    ) {
+        // The answer of the request the list waits for, or of the one an
+        // `updateSavedAnimations` outdated while it was out (the mark
+        // dropped its request).
+        let waits = request.is_some_and(|request| self.saved.waits_for(request));
+        if !waits && !self.saved.is_outdated() {
+            return;
+        }
         self.animations = animations;
         // Kept `Outdated` (now with a list held) when
         // `updateSavedAnimations` arrived meanwhile: asked for again.
-        if !self.saved.answer(()) {
+        if waits {
+            self.saved.answered(request, ());
+        } else {
             self.saved = Fetch::Outdated(Some(()));
         }
     }
@@ -659,11 +673,12 @@ impl GifPanel {
     /// page's own start ends the paging.
     pub fn search_page_answered(
         &mut self,
+        request: Option<crate::ids::RequestId>,
         animations: Vec<AnimationItem>,
         next_offset: String,
         first_page: bool,
     ) {
-        self.search_answered();
+        self.search_answered(request);
         let GifList::Search(search) = &mut self.list else {
             return;
         };
@@ -710,10 +725,11 @@ impl GifPanel {
             if request.is_some_and(|request| search.fetch.waits_for(request)))
     }
 
-    /// A search page answered (the caller checked [`Self::search_waits_for`]).
-    pub fn search_answered(&mut self) {
-        if let GifList::Search(search) = &mut self.list {
-            search.fetch.succeed(());
+    /// The page `request` answered: taken only by the search that waits for it.
+    pub fn search_answered(&mut self, request: Option<crate::ids::RequestId>) -> bool {
+        match &mut self.list {
+            GifList::Search(search) => search.fetch.answered(request, ()),
+            GifList::Saved => false,
         }
     }
 

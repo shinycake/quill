@@ -126,7 +126,7 @@ impl Session {
                 Some(_) => {
                     fetch.answered(request, tags);
                 }
-                None => fetch.succeed(tags),
+                None => fetch.pushed(tags),
             }
         } else {
             self.threads.saved.topic_tags.insert(topic_id, tags);

@@ -289,7 +289,14 @@ impl<T> Fetch<T> {
         true
     }
 
-    /// An answer that names no request: a pushed update, or a fetch whose
+    /// A server push (`updateXxx`): the value as it is now, whatever the
+    /// stage. A request in flight is dropped with the stage, since the push
+    /// is the newer word or the same as its answer.
+    pub fn pushed(&mut self, value: T) {
+        *self = Self::Ready(value);
+    }
+
+    /// An answer that names no request: a fetch whose
     /// sender does not record its request ([`Fetch::sent`]). An older request's
     /// late answer lands on a newer ask through this, so a sender prefers
     /// [`Fetch::answered`]; `scripts/check-request-match.py` counts the callers

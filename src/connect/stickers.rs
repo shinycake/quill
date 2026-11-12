@@ -860,11 +860,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.stickers.gifs.open || !self.chats_path_active() {
             return Ok(None);
         }
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetSavedAnimations)
-        {
+        if self.session.stickers.gifs.loading() {
             return Ok(None);
         }
         let needs =
@@ -873,21 +869,18 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(None);
         }
         let owed = self.session.stickers.gifs.saved_is_outdated();
-        self.session.stickers.gifs.saved_asked();
         let extra = self
             .session
             .request(RequestPurpose::GetSavedAnimations, None);
         match self.sender.send_json(&get_saved_animations(extra)) {
             Ok(()) => {
-                self.session.stickers.gifs.saved.sent(extra);
+                self.session.stickers.gifs.saved_asked(extra);
                 Ok(Some(extra))
             }
             Err(err) => {
                 self.session.requests.take(extra);
                 // A refetch owed after an update stays owed.
-                if owed {
-                    self.session.stickers.gifs.saved_outdated();
-                } else {
+                if !owed {
                     self.session.stickers.gifs.saved_failed();
                 }
                 Err(err)
