@@ -65,8 +65,10 @@ fn a_late_links_answer_does_not_bring_back_a_link_deleted_meanwhile() {
     t.driver
         .delete_folder_invite_link(3, "https://t.me/addlist/a")
         .unwrap();
-    // The list is fetched again, past the delete.
-    assert_eq!(t.sender.count("getChatFolderInviteLinks"), 2);
+    // The list waits for the delete's answer: a parallel query could be
+    // read before the delete lands.
+    t.driver.refetch_outdated_folder_links(3);
+    assert_eq!(t.sender.count("getChatFolderInviteLinks"), 1);
     t.answer_nth(
         "getChatFolderInviteLinks",
         0,
@@ -74,10 +76,13 @@ fn a_late_links_answer_does_not_bring_back_a_link_deleted_meanwhile() {
             "invite_links":[link("https://t.me/addlist/a"), link("https://t.me/addlist/b")]}),
     );
     assert!(
-        t.driver.session.chat_list.folder_shares[&3]
+        !t.driver.session.chat_list.folder_shares[&3]
             .links
             .is_loading()
     );
+    t.answer("deleteChatFolderInviteLink", json!({"@type":"ok"}));
+    t.driver.refetch_outdated_folder_links(3);
+    assert_eq!(t.sender.count("getChatFolderInviteLinks"), 2);
     t.answer_nth(
         "getChatFolderInviteLinks",
         1,

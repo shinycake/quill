@@ -133,4 +133,3 @@ unsent:GifPanel::saved_asked 1
 unsent:GiveawayOptions::begin 2
 unsent:QuillApp::begin_screen_worker 1
 unsent:QuillApp::menu_focus_upkeep 1
-unsent:apply_ready_stickers 1

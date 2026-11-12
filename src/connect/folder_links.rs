@@ -194,15 +194,26 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             links.retain(|link| link.invite_link != invite_link);
         }
+        // An answer of the list read before the delete lands may still hold
+        // the link: it is dropped now, and the list is fetched again once
+        // the delete is answered (`refetch_outdated_folder_links`).
         self.session.chat_list.outdate_loading_links(folder_id);
-        self.refetch_outdated_folder_links(folder_id);
         Ok(sent)
     }
 
     /// A link edit landed on a list whose fetch was still out: that fetch
     /// asked before the edit, so it is fetched again. A refusal ends in the
-    /// error line the box draws with its Retry.
+    /// error line the box draws with its Retry. A delete still in flight
+    /// holds the refetch back: queries are not ordered, so the list could
+    /// be read before the delete lands.
     pub fn refetch_outdated_folder_links(&mut self, folder_id: i32) {
+        if self
+            .session
+            .requests
+            .has_purpose_for_folder(RequestPurpose::DeleteChatFolderInviteLink, folder_id)
+        {
+            return;
+        }
         let due = self
             .session
             .chat_list
