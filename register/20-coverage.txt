@@ -100,3 +100,13 @@ src/ui/scheduled.rs 927 read
 src/ui/screen_chooser_window.rs 91 read
 src/ui/screen_share_state.rs 185 read
 src/ui/screen_chooser.rs 950 read
+src/ui/screen_chooser_demo.rs 270 read
+src/ui/screenshot_demo.rs 254 read
+src/ui/scroll_load.rs 180 read
+src/ui/screenshot_demo_input.rs 426 read
+src/ui/search_fields.rs 149 read
+src/ui/search_state.rs 87 read
+src/ui/search_ui/global_search_for.rs 24 read
+src/ui/search_ui/filter_menus.rs 104 read
+src/ui/search_ui/chat_search_bar.rs 825 read
+src/ui/search_ui/mod.rs 948 read
