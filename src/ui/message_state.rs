@@ -107,7 +107,8 @@ impl MessageUi {
 /// Nothing to say: its state is the account's only app-side.
 /// The Block from replies box keeps its target in the session
 /// (`users_state.replies_block`), which goes to the background with the
-/// account.
+/// account, and the Instant View reader in `messages.instant_view`, closed here
+/// so it does not come back over the restored screen.
 impl super::on_screen::Farewell for MessageUi {
     fn farewell(
         app: &mut super::app::QuillApp,
@@ -120,6 +121,9 @@ impl super::on_screen::Farewell for MessageUi {
             .is_some_and(|session| session.messages.message_report.is_some())
         {
             app.close_message_report(window, cx);
+        }
+        if let Some(session) = app.session_mut() {
+            session.messages.instant_view = None;
         }
         if app
             .session()

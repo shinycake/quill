@@ -125,7 +125,7 @@ fn invalid(app: &Entity<QuillApp>, field: CardField, vcx: &mut VisualTestContext
         app.read(cx)
             .card_form()
             .and_then(|form| form.input(field))
-            .is_some_and(|input| input.invalid)
+            .is_some_and(|input| input.shows_error(cx))
     })
 }
 
@@ -264,7 +264,7 @@ fn done_marks_the_first_field_that_is_wrong(cx: &mut TestAppContext) {
     let country_invalid = vcx.update(|_, cx| {
         app.read(cx)
             .card_form()
-            .is_some_and(|form| form.country_invalid)
+            .is_some_and(|form| form.country_invalid())
     });
     assert!(country_invalid);
     assert!(focused(&app, CardField::Country, &mut vcx));
@@ -539,4 +539,20 @@ fn escape_leaves_the_card_form_for_the_checkout(cx: &mut TestAppContext) {
             .expect("checkout open");
         assert!(dialog.card_form().is_none());
     });
+}
+
+#[gpui_kit::test]
+fn a_rejected_number_is_unmarked_by_the_next_edit_of_that_field(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_checkout(cx, true, false, Recorded::new(200, TOKEN));
+    open_card_form(&app, &mut vcx);
+    type_into(&app, CardField::Number, "4242", &mut vcx);
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.show_card_error(CardField::Number, window, cx)
+    });
+    assert!(invalid(&app, CardField::Number, &mut vcx), "Done marked it");
+    // Another field's edit leaves the mark; this field's edit removes it.
+    type_into(&app, CardField::Name, "Jane", &mut vcx);
+    assert!(invalid(&app, CardField::Number, &mut vcx));
+    type_into(&app, CardField::Number, "4", &mut vcx);
+    assert!(!invalid(&app, CardField::Number, &mut vcx));
 }

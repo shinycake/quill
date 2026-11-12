@@ -20,6 +20,9 @@ players.volume * | the playback volume preference, and the level the unmute clic
 delivery.notify_clicks | OS notification clicks; each `ChatClick` names its account
 delivery.notify_inflight | how many notification previews are being built, for the process
 delivery.next_preview_wait | the delay before the next preview build, for the process
+delivery.avatar_decodes | avatar decodes in flight by photo path; each waiting notification names its account
+delivery.avatar_decodes._job | the decode's task, owned by its entry: dropping the entry ends the wait
+delivery.avatar_decodes.waiting | the notifications waiting on the decode, each with its own account
 delivery.notification_sounds * | the notification sound output device and player
 delivery.polled_redraw * | when the poll loop last redrew: timing, no ids
 delivery.windows * | Quill's notification windows; the queue is keyed by `(AccountKey, ChatId)` and each shown popup by its key
@@ -96,6 +99,8 @@ agent_bridge.driver | the UI driver runs agents' input commands one at a time fo
 takeover.wake | the timer that redraws the takeover banner at its next phase change
 connect.generation | which prepared connection may open
 connect.closed_noted | the generation whose close was noted
+connect.poll | the poll loop draining the client on screen: the process's, replaced with the client (`replace_client`)
+connect.poll.Running._task | the poll loop's task, owned by the stage: dropped when the client is replaced
 disk.stage | the disk space level, a doubted drop below close and a call holding the on-screen client at Full, for the data folder
 disk.seen | what the last reading found: the free space and whether the data folder can be written
 disk.floors | the floors for that level

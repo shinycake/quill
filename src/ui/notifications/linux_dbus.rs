@@ -24,7 +24,7 @@ use quill::notify::dbus::{
 use quill::notify_accounts::ChatClick;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard};
 use zbus::blocking::{Connection, MessageIterator, Proxy};
 use zbus::zvariant::Value;
 
@@ -39,8 +39,15 @@ struct Shown {
     chat_by_id: HashMap<u32, NotifyKey>,
     id_by_chat: HashMap<NotifyKey, u32>,
     /// Toasts whose `Notify` round trip is out: their id is not known yet.
-    sending: HashMap<NotifyKey, Sending>,
+    /// One entry per call, so two calls for one chat each keep their own
+    /// withdrawal mark.
+    sending: HashMap<Ticket, (NotifyKey, Sending)>,
+    next_ticket: u64,
 }
+
+/// One `Notify` call on the bus.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+struct Ticket(u64);
 
 /// A `Notify` still on the bus: whether the chat was read (withdrawn)
 /// before its id came back, so the toast is closed the moment it lands.
@@ -51,31 +58,35 @@ enum Sending {
 }
 
 impl Shown {
-    fn begin(&mut self, key: NotifyKey) {
-        self.sending.insert(key, Sending::Open);
+    fn begin(&mut self, key: NotifyKey) -> Ticket {
+        let ticket = Ticket(self.next_ticket);
+        self.next_ticket = self.next_ticket.wrapping_add(1);
+        self.sending.insert(ticket, (key, Sending::Open));
+        ticket
     }
 
     /// The `Notify` failed: nothing was shown.
-    fn abandon(&mut self, key: &NotifyKey) {
-        self.sending.remove(key);
+    fn abandon(&mut self, ticket: Ticket) {
+        self.sending.remove(&ticket);
     }
 
-    /// Withdraw the chat's toast that is still being sent. Returns whether
-    /// one is.
+    /// Withdraw every toast of the chat that is still being sent. Returns
+    /// whether there is one.
     fn withdraw_sending(&mut self, key: &NotifyKey) -> bool {
-        match self.sending.get_mut(key) {
-            Some(state) => {
+        let mut any = false;
+        for (owner, state) in self.sending.values_mut() {
+            if owner == key {
                 *state = Sending::Withdrawn;
-                true
+                any = true;
             }
-            None => false,
         }
+        any
     }
 
-    /// The `Notify` answered with `id`. Returns whether the chat was
-    /// withdrawn meanwhile (the caller closes the toast).
-    fn land(&mut self, id: u32, key: NotifyKey) -> bool {
-        let withdrawn = self.sending.remove(&key) == Some(Sending::Withdrawn);
+    /// The `Notify` of `ticket` answered with `id`. Returns whether the chat
+    /// was withdrawn meanwhile (the caller closes the toast).
+    fn land(&mut self, id: u32, ticket: Ticket, key: NotifyKey) -> bool {
+        let withdrawn = matches!(self.sending.remove(&ticket), Some((_, Sending::Withdrawn)));
         self.insert(id, key);
         withdrawn
     }
@@ -180,40 +191,94 @@ pub(super) fn notifier_on_worker(clicks: &AccountClicks) -> Option<Arc<Notifier>
 /// How often a missing notification daemon is looked for again.
 const REPROBE: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// The capability probe. It runs when somebody asks (the Notifications page
+/// or a notification deciding where to show), never on a clock: a daemon
+/// found missing is asked for again by the first question after
+/// [`REPROBE`], as a daemon may start after Quill.
+enum Probe {
+    /// Nobody has asked yet.
+    Idle,
+    /// The probe thread is out; `last` is the earlier answer, still what
+    /// is reported until the new one lands.
+    Asking {
+        _thread: std::thread::JoinHandle<Option<()>>,
+        last: quill::notify::custom::NativeService,
+    },
+    Answered {
+        service: quill::notify::custom::NativeService,
+        at: std::time::Instant,
+    },
+}
+
+impl Probe {
+    fn reported(&self) -> quill::notify::custom::NativeService {
+        use quill::notify::custom::NativeService;
+        match self {
+            Self::Idle => NativeService::Unknown,
+            Self::Asking { last, .. } => *last,
+            Self::Answered { service, .. } => *service,
+        }
+    }
+
+    /// Whether a question now starts a probe.
+    fn due(&self, now: std::time::Instant) -> bool {
+        use quill::notify::custom::NativeService;
+        match self {
+            Self::Idle => true,
+            Self::Asking { .. } => false,
+            Self::Answered { service, at } => {
+                *service == NativeService::Missing && now.saturating_duration_since(*at) >= REPROBE
+            }
+        }
+    }
+}
+
+fn ask_daemon() -> quill::notify::custom::NativeService {
+    use quill::notify::custom::NativeService;
+    Connection::session()
+        .and_then(|connection| {
+            Proxy::new(&connection, BUS_NAME, OBJECT_PATH, INTERFACE)?
+                .call::<_, _, Vec<String>>("GetCapabilities", &())
+        })
+        .map(|list| NativeService::Present {
+            full: quill::notify::dbus::full_parity(&list),
+        })
+        .unwrap_or(NativeService::Missing)
+}
+
 /// What the notification daemon can do (tdesktop `Supported` and
 /// `ByDefault`), asked on a thread of its own: `Unknown` until it
-/// answers, `Missing` without a session bus or daemon. While missing it
-/// asks again every [`REPROBE`], as a daemon may start after Quill.
+/// answers, `Missing` without a session bus or daemon.
 pub(in crate::ui) fn linux_service_capabilities() -> quill::notify::custom::NativeService {
     use quill::notify::custom::NativeService;
-    static PROBE: OnceLock<Arc<Mutex<NativeService>>> = OnceLock::new();
-    let slot = PROBE.get_or_init(|| {
-        let slot = Arc::new(Mutex::new(NativeService::Unknown));
-        let writer = slot.clone();
-        let spawned = quill::thread_guard::spawn_guarded("quill-notify-caps", move || {
-            loop {
-                let answer = Connection::session()
-                    .and_then(|connection| {
-                        Proxy::new(&connection, BUS_NAME, OBJECT_PATH, INTERFACE)?
-                            .call::<_, _, Vec<String>>("GetCapabilities", &())
-                    })
-                    .map(|list| NativeService::Present {
-                        full: quill::notify::dbus::full_parity(&list),
-                    })
-                    .unwrap_or(NativeService::Missing);
-                *lock(&writer) = answer;
-                if answer != NativeService::Missing {
-                    break;
-                }
-                std::thread::sleep(REPROBE);
-            }
+    static PROBE: Mutex<Probe> = Mutex::new(Probe::Idle);
+    let mut probe = lock(&PROBE);
+    let now = std::time::Instant::now();
+    if probe.due(now) {
+        let last = probe.reported();
+        // The thread's answer waits for this lock, so it lands after the
+        // stage below is stored, never before.
+        let spawned = quill::thread_guard::spawn_guarded("quill-notify-caps", || {
+            let service = ask_daemon();
+            *lock(&PROBE) = Probe::Answered {
+                service,
+                at: std::time::Instant::now(),
+            };
+            // The page and the delivery path read it on their next frame.
+            quill::wake::UPDATES.poke();
         });
-        if spawned.is_err() {
-            *lock(&slot) = NativeService::Missing;
-        }
-        slot
-    });
-    *lock(slot)
+        *probe = match spawned {
+            Ok(thread) => Probe::Asking {
+                _thread: thread,
+                last,
+            },
+            Err(_) => Probe::Answered {
+                service: NativeService::Missing,
+                at: now,
+            },
+        };
+    }
+    probe.reported()
 }
 
 /// The text typed into `account`'s notification for the chat, if it was
@@ -277,7 +342,7 @@ impl Notifier {
             .map(|(key, value)| (key, Value::from(value)))
             .collect();
         let proxy = Self::proxy(&self.connection)?;
-        lock(&self.shown).begin(key.clone());
+        let ticket = lock(&self.shown).begin(key.clone());
         let sent: zbus::Result<u32> = proxy.call(
             tr(keys::Q_PREFS_NOTIFY),
             &(
@@ -294,12 +359,12 @@ impl Notifier {
         let id = match sent {
             Ok(id) => id,
             Err(error) => {
-                lock(&self.shown).abandon(&key);
+                lock(&self.shown).abandon(ticket);
                 return Err(error);
             }
         };
         // Read elsewhere while `Notify` was out: the toast goes down now.
-        let withdrawn = lock(&self.shown).land(id, key);
+        let withdrawn = lock(&self.shown).land(id, ticket, key);
         if withdrawn {
             Self::proxy(&self.connection)?.call::<_, _, ()>("CloseNotification", &(id,))?;
         }
@@ -417,24 +482,59 @@ mod tests {
     }
 
     #[test]
+    fn a_missing_daemon_is_asked_again_only_by_a_question_after_the_interval() {
+        use quill::notify::custom::NativeService;
+        let start = std::time::Instant::now();
+        assert!(Probe::Idle.due(start), "the first question probes");
+        let missing = Probe::Answered {
+            service: NativeService::Missing,
+            at: start,
+        };
+        assert!(!missing.due(start + REPROBE / 2));
+        assert!(missing.due(start + REPROBE));
+        let present = Probe::Answered {
+            service: NativeService::Present { full: true },
+            at: start,
+        };
+        assert!(!present.due(start + REPROBE * 10), "a found daemon is kept");
+    }
+
+    #[test]
     fn a_chat_read_while_its_toast_is_on_the_bus_is_closed_when_it_lands() {
         let mut shown = Shown::default();
         let key = (AccountKey::primary(), ChatId(7));
-        shown.begin(key.clone());
+        let first = shown.begin(key.clone());
         assert!(shown.withdraw_sending(&key));
-        assert!(shown.land(5, key.clone()), "closed as soon as it has an id");
+        assert!(
+            shown.land(5, first, key.clone()),
+            "closed as soon as it has an id"
+        );
         // A newer message after that shows as usual.
-        shown.begin(key.clone());
-        assert!(!shown.land(6, key.clone()));
+        let second = shown.begin(key.clone());
+        assert!(!shown.land(6, second, key.clone()));
         assert!(!shown.withdraw_sending(&key), "nothing is on the bus now");
+    }
+
+    #[test]
+    fn two_toasts_on_the_bus_for_one_chat_are_both_closed_when_it_is_read() {
+        let mut shown = Shown::default();
+        let key = (AccountKey::primary(), ChatId(7));
+        let first = shown.begin(key.clone());
+        let second = shown.begin(key.clone());
+        assert!(shown.withdraw_sending(&key));
+        assert!(shown.land(1, first, key.clone()));
+        assert!(
+            shown.land(2, second, key.clone()),
+            "the second keeps its mark"
+        );
     }
 
     #[test]
     fn a_failed_notify_leaves_nothing_to_withdraw() {
         let mut shown = Shown::default();
         let key = (AccountKey::primary(), ChatId(7));
-        shown.begin(key.clone());
-        shown.abandon(&key);
+        let ticket = shown.begin(key.clone());
+        shown.abandon(ticket);
         assert!(!shown.withdraw_sending(&key));
     }
 

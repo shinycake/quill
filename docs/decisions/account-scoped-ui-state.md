@@ -9817,3 +9817,27 @@ kept until sent, a refused refetch does not repeat), `state/account_notices`
 `connect/tests/stories.rs` (tray refresh on ingest),
 `connect/tests/chat_list/folder_removals.rs` (leaving a folder stops the
 retry; no wall clock), `state/tests/history_prune.rs` (translations pruned).
+
+### Sweep fixes (r3-10)
+
+| Id | Fix |
+| --- | --- |
+| 18-003 | `Locating` holds a `oneshot::Sender<()>`; the Linux lookup selects on the receiver beside its timer and fix wait, so closing the picker (or switching account) ends the wait at once and the GeoClue client is stopped and deleted instead of staying started for up to 20 s. The Windows lookup checks the receiver between its blocking calls (a call already out finishes on its own; it could not be built or run here). macOS keeps its own `cancel`. |
+| 18-005 | `chat_preview_overlay` draws its skeleton from the `chat_preview_fetch` `Fetch` it already reads (`is_loading`), not from `has_purpose_for_chat`. |
+| 18-006 | `send_message_report_text` clears the details field only when the send was accepted; a refused send keeps the typed text and shows the note. |
+| 18-004 | `MessageUi`'s `Farewell` closes the Instant View reader (`messages.instant_view`) like its sibling session-held boxes, so it does not come back after switching accounts and back. |
+| 18-007 | `ParagraphText::targets: Vec<ClickTarget { range, action }>` replaces the three parallel vectors; `ClickTarget::is_link` is derived from the action, so there is no flag to forget. The consumer builds the click ranges, actions and underline flags from it in one place. |
+| 19-001 | Already fixed by 2ca5a1835: `show_scope_save` / `show_reaction_save` write the sent object into the snapshot, so a second toggle merges into the first (`state/tests/notification_saves.rs`, `two_quick_edits_do_not_revert_each_other`). |
+| 19-003 | `NotifyDelivery::avatar_decodes: HashMap<path, AvatarDecode { _job: Task, waiting }>` replaces the `DECODING` thread-local and its detached task. Notifications queue behind the entry; the task takes the entry when the decode lands; dropping the entry (or `forget_account`) ends the wait. |
+| 19-010 | `Shown::sending` is keyed by a per-call `Ticket`; `withdraw_sending(key)` marks every call of the chat, and each `land` consumes its own ticket, so two `Notify` calls for one chat both close when it was read. |
+| 19-011 | The capability probe is `Probe { Idle, Asking { _thread, last }, Answered { service, at } }`, started by the question (the Notifications page or a notification) and asked again by a question after `REPROBE` while the daemon is missing; no thread loops on a clock. `check-owned-timers.py` now counts a `thread::sleep` loop in `src/ui` as a poll (two existing sites baselined). |
+| 19-004 | `ConnectGeneration::poll: PollLoop { Stopped, Running { _task } }` owns the poll loop; `replace_client` (the one place the generation is bumped) drops it, so replacing the client ends the loop at once. The generation compare and the `detached:spawn_poll_loop` baseline line are gone. |
+| 19-002 | `PaidConfirmStage::Agreed { chat_id, per_message }`: Pay sets it for the one resubmit, `paid_send_waits` takes it when the price matches (the guard releases the held send as before), and `confirm_paid_send` clears it as soon as the resubmit returns. Pay without the "Don't ask me again" tick no longer reopens the same box. |
+| 19-007 | `CardInput::check` and `CardForm::country_check` are `FieldCheck { Fine, Rejected { judged } }`; the field shows the error only while it still holds the judged text, so the mark goes with the next edit without a reset. |
+| 19-006 | `DeleteEdit::Pending { before, _expires: Task }`: the expiry task belongs to the snapshot; the Change that takes it, or a newer press, drops the task. The press counter and the nested defers are gone. |
+
+Tests: `demos/code_highlight` (the farewell closes the reader),
+`paid_messages_tests` (Pay lets the resubmit through once, at its price),
+`payments/card_form_tests` (a rejected number is unmarked by its own edit),
+`notifications/reply_after_switch_tests` (a decode is held and queues),
+`notifications/linux_dbus` (two calls for one chat, probe schedule).

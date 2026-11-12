@@ -51,6 +51,9 @@ ADVICE = (
     "frame clock) instead of a timer in a loop (docs/contributing/state-machines.md)."
 )
 TIMER = re.compile(r"\.\s*timer\s*\(|\bTimer::(?:after|at|interval)\b|\bsleep\s*\(")
+# In src/ui a thread that sleeps in a loop is a timer in a loop too (the
+# capability probe of 19-011 was one): `.await` or not.
+BLOCKING_SLEEP = re.compile(r"\bthread::sleep\s*\(")
 DETACH = re.compile(r"\.\s*detach\s*\(\s*\)")
 LOOP = re.compile(r"\b(?:loop|while)\b")
 WATCH = re.compile(r"\b(?:loop|while)\b|\bsleep_or_wake\b|\brun_poll_loop\b")
@@ -77,6 +80,7 @@ def hits(root):
         if shape_guard.is_seeder(path) or not (TIMER.search(text) or DETACH.search(text)):
             continue
         scopes = shape_guard.Scopes(path, text)
+        in_ui = path.replace(os.sep, "/").startswith("src/ui/")
         for match in DETACH.finditer(text):
             body = detached_body(text, match.start(), scopes)
             if TIMER.search(body) or WATCH.search(body):
@@ -87,7 +91,8 @@ def hits(root):
             if brace is None:
                 continue
             body = text[brace : shape_guard.closing(text, brace)]
-            if ".await" in body and TIMER.search(body):
+            slept = in_ui and BLOCKING_SLEEP.search(body)
+            if (".await" in body or slept) and TIMER.search(body):
                 line = shape_guard.line_of(text, match.start())
                 yield f"poll:{scopes.at(match.start())}", path, line
 

@@ -37,6 +37,11 @@ pub(crate) enum PaidConfirmStage {
     /// on screen with the tick set for (`chat_id`, `per_message`); an
     /// untick or a held send for another price is `None`.
     Held { trusted: (i64, i64) },
+    /// Pay was pressed: the one resubmit of the composer text goes out at
+    /// this price without asking again. `confirm_paid_send` sets it and
+    /// clears it as soon as the resubmit returns; `paid_send_waits` takes
+    /// it when the price matches.
+    Agreed { chat_id: i64, per_message: i64 },
 }
 
 impl PaidConfirmStage {
@@ -44,7 +49,7 @@ impl PaidConfirmStage {
     pub(super) fn composer(&self) -> Option<&ComposerPaidConfirm> {
         match self {
             Self::Composer { confirm, .. } => Some(confirm),
-            Self::None | Self::Held { .. } => None,
+            Self::None | Self::Held { .. } | Self::Agreed { .. } => None,
         }
     }
 }

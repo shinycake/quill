@@ -204,3 +204,33 @@ fn a_removed_accounts_notification_state_goes_with_it(cx: &mut TestAppContext) {
         assert!(app.delivery.reply_targets.contains_key(&(other, CHAT)));
     });
 }
+
+/// One decode serves every notification for an avatar; it is held by the
+/// delivery state, so dropping the entry ends the wait (nothing detached).
+#[gpui_kit::test]
+fn an_avatar_decode_is_held_and_queues_later_notifications(cx: &mut TestAppContext) {
+    let (app, mut vcx) = demo_app(cx);
+    let photo = std::path::PathBuf::from("/definitely/not/a/photo.jpg");
+    app.update_in(&mut vcx, |app, _, cx| {
+        let note = |text: &str| {
+            quill::notify::OsNotification::about_app("Quill".to_string(), text.to_string())
+        };
+        app.show_notification_with_photo(None, note("one"), Some(photo.clone()), None, false, cx);
+        app.show_notification_with_photo(None, note("two"), Some(photo.clone()), None, false, cx);
+        assert_eq!(app.delivery.avatar_decodes.len(), 1, "one decode");
+        assert_eq!(
+            app.delivery
+                .avatar_decodes
+                .get(&photo)
+                .map(|d| d.waiting_len()),
+            Some(2),
+            "both wait on it"
+        );
+        // The owner going away drops the task with the entry.
+        app.delivery.avatar_decodes.clear();
+    });
+    vcx.run_until_parked();
+    app.read_with(&vcx, |app, _| {
+        assert!(app.delivery.avatar_decodes.is_empty())
+    });
+}

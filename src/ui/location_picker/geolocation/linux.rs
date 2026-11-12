@@ -39,7 +39,7 @@ async fn location_at(
     Ok(GeoPoint::new(latitude, longitude))
 }
 
-async fn lookup() -> GeoOutcome {
+async fn lookup(cancelled: futures_channel::oneshot::Receiver<()>) -> GeoOutcome {
     let fail = |error: zbus::Error| {
         if denied(&error) {
             GeoOutcome::Denied
@@ -78,18 +78,22 @@ async fn lookup() -> GeoOutcome {
     if let Err(error) = client.call_method("Start", &()).await {
         return fail(error);
     }
-    let first = futures_lite::future::or(
-        async {
-            let message = updates.next().await?;
-            let (_, new): (OwnedObjectPath, OwnedObjectPath) = message.body().deserialize().ok()?;
-            location_at(&connection, new).await.ok().flatten()
-        },
-        async {
-            async_io::Timer::after(FIX_TIMEOUT).await;
-            None
-        },
-    )
-    .await;
+    let fix = async {
+        let message = updates.next().await?;
+        let (_, new): (OwnedObjectPath, OwnedObjectPath) = message.body().deserialize().ok()?;
+        location_at(&connection, new).await.ok().flatten()
+    };
+    let timeout = async {
+        async_io::Timer::after(FIX_TIMEOUT).await;
+        None
+    };
+    // The picker dropping its `Locating` drops the sender: the wait ends and
+    // the client is stopped now, not after the fix or the timeout.
+    let gone = async {
+        let _ = cancelled.await;
+        None
+    };
+    let first = futures_lite::future::or(fix, futures_lite::future::or(timeout, gone)).await;
     let _ = client.call_method("Stop", &()).await;
     let _ = manager.call_method("DeleteClient", &(client_path,)).await;
     first.map_or(GeoOutcome::Unavailable, GeoOutcome::Found)
@@ -97,11 +101,12 @@ async fn lookup() -> GeoOutcome {
 
 pub(super) fn locate(
     _permission_prompt: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    cancelled: futures_channel::oneshot::Receiver<()>,
 ) -> Receiver<GeoOutcome> {
     let (answer, receiver) = channel();
     let fallback = answer.clone();
     let spawned = quill::thread_guard::spawn_guarded("quill-geolocation", move || {
-        let _ = answer.send(zbus::block_on(lookup()));
+        let _ = answer.send(zbus::block_on(lookup(cancelled)));
     });
     if spawned.is_err() {
         let _ = fallback.send(GeoOutcome::Unavailable);
@@ -119,5 +124,6 @@ pub(super) fn system_country() -> Option<String> {
     quill::emoji::system_locale().and_then(|locale| locale_region(&locale))
 }
 
-/// Nothing to stop: the lookup ends with its own thread.
+/// Nothing to do here: dropping the `Locating` drops the lookup's cancel
+/// sender, which ends its wait.
 pub(super) fn cancel(_lookup: &std::sync::Arc<std::sync::atomic::AtomicBool>) {}

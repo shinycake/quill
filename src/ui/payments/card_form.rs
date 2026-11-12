@@ -30,20 +30,50 @@ use zeroize::Zeroizing;
 pub(crate) struct CardInput {
     pub(crate) field: CardField,
     pub(crate) state: Entity<InputState>,
-    /// Shown as an error until the next edit says otherwise.
-    pub(crate) invalid: bool,
+    /// The text that was judged invalid, if any: an error only while the
+    /// field still holds it.
+    pub(crate) check: FieldCheck,
     /// A Backspace or Delete whose edit has not landed yet (`field_edit`).
     delete: DeleteEdit,
-    /// Counts the field's Backspace and Delete presses, so a press clears
-    /// only its own snapshot.
-    presses: u64,
+}
+
+/// What the last check of a field found, tied to the text it judged: the
+/// mark goes by itself when the text is edited, with no flag to reset.
+pub(crate) enum FieldCheck {
+    Fine,
+    Rejected { judged: Zeroizing<String> },
+}
+
+impl FieldCheck {
+    fn rejected(text: &str) -> Self {
+        Self::Rejected {
+            judged: Zeroizing::new(text.to_string()),
+        }
+    }
+
+    /// Whether `text` is the text that was rejected.
+    pub(crate) fn rejects(&self, text: &str) -> bool {
+        matches!(self, Self::Rejected { judged } if judged.as_str() == text)
+    }
+}
+
+impl CardInput {
+    /// The field is marked as an error: its text is the rejected text.
+    pub(crate) fn shows_error(&self, cx: &App) -> bool {
+        self.check.rejects(self.state.read(cx).value().as_ref())
+    }
 }
 
 /// The text just before a Backspace or Delete, until the edit it belongs
-/// to has been read or the effect cycle it was taken in is over.
+/// to has been read or the effect cycle it was taken in is over. The
+/// expiry task belongs to the snapshot: the edit taking it, a newer press
+/// or the form going away drops the task with it.
 pub(crate) enum DeleteEdit {
     None,
-    Pending { press: u64, before: EditSnapshot },
+    Pending {
+        before: EditSnapshot,
+        _expires: Task<()>,
+    },
 }
 
 impl DeleteEdit {
@@ -76,7 +106,8 @@ pub(crate) struct CardForm {
     pub(crate) inputs: Vec<CardInput>,
     /// The billing country's ISO code (Stripe's `need_country`).
     pub(crate) country_iso: String,
-    pub(crate) country_invalid: bool,
+    /// The country field judged empty: an error while it still is.
+    pub(crate) country_check: FieldCheck,
     pub(crate) country_box: Option<CountryBox>,
     /// Focus on the country field itself, without opening its box.
     pub(crate) country_focus: FocusHandle,
@@ -114,6 +145,11 @@ impl CardForm {
 
     fn input_mut(&mut self, field: CardField) -> Option<&mut CardInput> {
         self.inputs.iter_mut().find(|input| input.field == field)
+    }
+
+    /// The country field is marked as an error.
+    pub(crate) fn country_invalid(&self) -> bool {
+        self.country_check.rejects(&self.country_iso)
     }
 
     pub(crate) fn is_tokenizing(&self) -> bool {
@@ -229,16 +265,15 @@ impl QuillApp {
             inputs.push(CardInput {
                 field,
                 state,
-                invalid: false,
+                check: FieldCheck::Fine,
                 delete: DeleteEdit::None,
-                presses: 0,
             });
         }
         let card_form = CardForm {
             provider,
             inputs,
             country_iso: String::new(),
-            country_invalid: false,
+            country_check: FieldCheck::Fine,
             country_box: None,
             country_focus: cx.focus_handle(),
             default_country,
@@ -374,28 +409,25 @@ impl QuillApp {
         let anchor = char_index(&value, anchor_byte);
         let at_front = backspace && cursor == 0 && anchor == 0;
         let snapshot = EditSnapshot::new(value, cursor, anchor);
-        let mut press = 0;
-        if let Some(input) = self.card_form_mut().and_then(|form| form.input_mut(field)) {
-            input.presses += 1;
-            press = input.presses;
-            input.delete = DeleteEdit::Pending {
-                press,
-                before: snapshot,
-            };
-        }
         // The input handles the key after this capture handler and emits
-        // its Change in this same effect cycle. A defer queued from a defer
-        // runs after that Change, so a press that changed nothing (at the
-        // start or end of the text) leaves no snapshot for later typing.
-        self.defer_screen_in(window, cx, move |this, window, cx| {
-            this.defer_screen_in(window, cx, move |this, _, _| {
-                if let Some(input) = this.card_form_mut().and_then(|form| form.input_mut(field))
-                    && matches!(input.delete, DeleteEdit::Pending { press: held, .. } if held == press)
-                {
+        // its Change in this same dispatch. The expiry task runs after the
+        // dispatch, so a press that changed nothing (at the start or end of
+        // the text) leaves no snapshot for later typing. It is part of the
+        // snapshot: a Change that takes the snapshot, or a newer press that
+        // replaces it, cancels the task.
+        let expires = self.spawn_screen_in(window, cx, async move |this, cx| {
+            let _ = this.update_in(cx, |this, _, _| {
+                if let Some(input) = this.card_form_mut().and_then(|form| form.input_mut(field)) {
                     input.delete = DeleteEdit::None;
                 }
             });
         });
+        if let Some(input) = self.card_form_mut().and_then(|form| form.input_mut(field)) {
+            input.delete = DeleteEdit::Pending {
+                before: snapshot,
+                _expires: expires,
+            };
+        }
         if at_front && let Some(previous) = self.neighbour_field(field, -1) {
             self.focus_card_field(previous, window, cx);
         }
@@ -425,7 +457,7 @@ impl QuillApp {
             CardField::Name => edit_holder_name(&now),
             CardField::Zip | CardField::Country => edit_required(&now),
         };
-        input.invalid = result.invalid() && !result.finished();
+        let rejected = result.invalid() && !result.finished();
         if result.value() != now.value() || result.cursor() != now.cursor() {
             let value = Zeroizing::new(result.value().to_string());
             let cursor = byte_index(&value, result.cursor());
@@ -436,6 +468,12 @@ impl QuillApp {
                 state.set_selected_range(cursor..cursor, cx);
             });
         }
+        // Judged on what the field holds after the reformat.
+        input.check = if rejected {
+            FieldCheck::rejected(result.value())
+        } else {
+            FieldCheck::Fine
+        };
         if result.finished()
             && let Some(next) = self.neighbour_field(field, 1)
         {
@@ -455,7 +493,7 @@ impl QuillApp {
         let invalid = self
             .card_form()
             .and_then(|form| form.input(field))
-            .is_some_and(|input| input.invalid);
+            .is_some_and(|input| input.shows_error(cx));
         if invalid {
             self.show_card_error(field, window, cx);
         } else {
@@ -472,9 +510,10 @@ impl QuillApp {
     ) {
         if let Some(form) = self.card_form_mut() {
             if field == CardField::Country {
-                form.country_invalid = true;
+                form.country_check = FieldCheck::rejected(&form.country_iso);
             } else if let Some(input) = form.input_mut(field) {
-                input.invalid = true;
+                let text = Zeroizing::new(input.state.read(cx).value().to_string());
+                input.check = FieldCheck::rejected(&text);
             }
         }
         self.focus_card_field(field, window, cx);
@@ -500,7 +539,6 @@ impl QuillApp {
     ) {
         if let Some(form) = self.card_form_mut() {
             form.country_iso = iso;
-            form.country_invalid = false;
         }
         self.advance_card_field(CardField::Country, window, cx);
     }

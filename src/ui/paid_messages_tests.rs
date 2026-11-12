@@ -80,6 +80,37 @@ fn a_paid_chat_asks_once_then_sends_with_the_price(cx: &mut TestAppContext) {
     });
 }
 
+/// Pay hands the one resubmit of the text an agreement for its price: the
+/// guard does not open the same box again, and the agreement is spent.
+#[gpui_kit::test]
+fn pay_lets_the_resubmit_through_once_at_the_agreed_price(cx: &mut TestAppContext) {
+    let (app, mut vcx) = new_app(cx, "ready-chats");
+    let vcx = &mut vcx;
+    app.update_in(vcx, |app, _, cx| {
+        charge_in_chat(app, 25);
+        assert!(app.paid_send_waits(ChatId(11), "hello", Default::default(), cx));
+        app.paid_messages.confirm = PaidConfirmStage::Agreed {
+            chat_id: 11,
+            per_message: 25,
+        };
+        assert!(
+            !app.paid_send_waits(ChatId(11), "hello", Default::default(), cx),
+            "the agreed resubmit goes through"
+        );
+        assert!(matches!(app.paid_messages.confirm, PaidConfirmStage::None));
+        assert!(
+            app.paid_send_waits(ChatId(11), "again", Default::default(), cx),
+            "the next send asks again: the agreement was spent"
+        );
+        // An agreement for another price is not honoured.
+        app.paid_messages.confirm = PaidConfirmStage::Agreed {
+            chat_id: 11,
+            per_message: 10,
+        };
+        assert!(app.paid_send_waits(ChatId(11), "x", Default::default(), cx));
+    });
+}
+
 /// "Don't ask me again" belongs to the confirmation it was ticked on:
 /// Cancel clears it, and a confirmation for another price shows it off,
 /// so Pay there trusts nothing.

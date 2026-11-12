@@ -449,7 +449,7 @@ mod reveal_tests {
             &empty,
             &layered,
         );
-        text.actions.iter().find_map(|action| match action {
+        text.targets.iter().find_map(|target| match &target.action {
             InlineAction::RevealSpoiler(key) => Some(*key),
             _ => None,
         })
@@ -486,7 +486,7 @@ mod reveal_tests {
                 &empty,
                 &layered,
             )
-            .actions
+            .targets
             .is_empty()
         };
         assert!(!hidden(first));

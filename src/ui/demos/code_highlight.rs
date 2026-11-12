@@ -176,4 +176,21 @@ mod tests {
             "the cached spans reached the reader's drawn text"
         );
     }
+
+    /// The reader belongs to the account on screen: the switch's farewell
+    /// closes it, so it does not come back over the restored screen.
+    #[gpui_kit::test]
+    fn the_account_farewell_closes_the_instant_view_reader(cx: &mut TestAppContext) {
+        let (app, mut vcx) = new_app(cx, "ready-iv-code-highlight");
+        vcx.run_until_parked();
+        let open = |app: &Entity<QuillApp>, vcx: &mut VisualTestContext| {
+            app.read_with(vcx, |app, _| {
+                app.session()
+                    .is_some_and(|session| session.messages.instant_view.is_some())
+            })
+        };
+        assert!(open(&app, &mut vcx), "the demo opens the reader");
+        app.update_in(&mut vcx, |app, window, cx| app.farewell_screen(window, cx));
+        assert!(!open(&app, &mut vcx), "the farewell closed it");
+    }
 }
