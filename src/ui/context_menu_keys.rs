@@ -36,6 +36,7 @@ use super::menu_states::ChatMenuSubmenu;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::*;
 use gpui_kit::*;
+use quill::ids::{ChatId, MessageId};
 use std::cell::Cell;
 
 /// Run `f` on the vector in `cell`: taken out, changed, put back. A `Cell`
@@ -427,11 +428,18 @@ impl QuillApp {
             .at()
             .map(|menu| (menu.chat_id, menu.message_id));
         self.message_ui.menu.close_message();
+        if let Some((chat_id, message_id)) = target {
+            self.forget_message_reactions(chat_id, message_id);
+        }
+    }
+
+    /// Forget the reaction options a menu or selector asked for, live or demo.
+    pub(super) fn forget_message_reactions(&mut self, chat_id: ChatId, message_id: MessageId) {
         let session = match self.live.as_mut() {
             Some(live) => Some(&mut live.driver.session),
             None => self.demo_session.as_deref_mut(),
         };
-        if let (Some(session), Some((chat_id, message_id))) = (session, target) {
+        if let Some(session) = session {
             session.reset_message_reactions(chat_id, message_id);
         }
     }

@@ -681,6 +681,8 @@ impl QuillApp {
         self.in_window_scope(Some(chat_id), cx, |app, cx| {
             // Its open message menu forgets the reaction options it asked for.
             app.close_message_menu();
+            // A reaction selector open in it ends the same way.
+            app.close_media_panel(cx);
             app.farewell_window(cx);
         });
         // Its state must not stay in the app's place.

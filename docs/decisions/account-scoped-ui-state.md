@@ -9836,6 +9836,14 @@ retry; no wall clock), `state/tests/history_prune.rs` (translations pruned).
 | 09-006 | `SetChangeStage::Working { change, request }`; `finish_set_change(request, set_id, success)` settles only that request, so the first answer no longer ends the second change of the same kind. |
 | 09-007 | `accept_replied_message` and `reject_replied_message` take the request and act only on `ReplyTarget::Loading { request }` of that id: a late error of an older ask neither bumps the attempts nor makes the row Missing, a late answer neither fills it, and a row pruned meanwhile is not brought back. |
 
+Second round (08-024): the reaction selector is the other exit that keeps a
+message's options. `set_media_panel_mode` forgets them (`forget_message_reactions`,
+shared with `close_message_menu`) when it leaves `PanelMode::Reaction(target)` for
+anything but the same target, so a pick, a close and a mode change all end the
+entry; `forget_chat_window` closes a selector open in that window. Test:
+`window_menu_tests.rs` (open the selector from a menu, close it, the book holds
+no entry).
+
 Shared file touched: `src/state/session_apply_error.rs` reads `file_id()` where it read the
 field (08-025); nothing else of it changed.
 

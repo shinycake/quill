@@ -183,3 +183,36 @@ fn a_menu_closed_by_another_window_or_by_its_window_forgets_its_options(cx: &mut
         "a window closed with its menu open forgot its options"
     );
 }
+
+#[gpui_kit::test]
+fn a_closed_reaction_selector_forgets_the_options_it_kept(cx: &mut TestAppContext) {
+    use crate::ui::media_panel::ReactionTarget;
+    let h = new_app(cx);
+    h.settle(cx);
+    let message_id = OTHER_LAST;
+    h.app.update(cx, |app, cx| {
+        menu_with_options(app, message_id);
+        // What opening the selector does: the menu closes, the options stay.
+        app.message_ui.menu.close_menu();
+        app.enter_selector_mode(crate::ui::media_panel::PanelMode::Reaction(
+            ReactionTarget {
+                chat_id: OTHER,
+                message_id,
+                position: point(px(100.), px(100.)),
+            },
+        ));
+        cx.notify();
+    });
+    assert!(
+        book_state(&h, cx, message_id).is_some(),
+        "the open selector keeps the options"
+    );
+    h.app.update(cx, |app, cx| {
+        app.close_media_panel(cx);
+    });
+    assert_eq!(
+        book_state(&h, cx, message_id),
+        None,
+        "closing the selector forgot the options"
+    );
+}
