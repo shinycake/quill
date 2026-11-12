@@ -46,6 +46,19 @@ use std::time::Instant;
 pub(crate) use requests::UndoAction;
 pub(crate) use row_menu::RowMenu;
 
+/// The Ungroup toggle through any driver: the note for a send the driver
+/// refuses, `None` when it went or another toggle is already out (the box
+/// closes either way).
+pub(super) fn send_ungroup<S: quill::connect::JsonSender>(
+    driver: &mut quill::connect::ConnectDriver<S>,
+    community_id: i64,
+) -> Option<String> {
+    driver
+        .toggle_community_chats_collapsed(community_id, false)
+        .err()
+        .map(|err| user_error(&err))
+}
+
 /// Where the new community's `createCommunity` stands. The box holds the
 /// request it sent, so only its own answer ends the wait: another box's
 /// request (a second window, an earlier send) neither shows as this one's
@@ -480,11 +493,9 @@ impl QuillApp {
     /// the driver refuses to send is a note.
     pub(super) fn confirm_ungroup(&mut self, community_id: i64, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut()
-            && let Err(err) = live
-                .driver
-                .toggle_community_chats_collapsed(community_id, false)
+            && let Some(note) = send_ungroup(&mut live.driver, community_id)
         {
-            self.set_note(StatusNote::error(user_error(&err)));
+            self.set_note(StatusNote::error(note));
         }
         self.flush_and_close_community_box(cx);
         cx.notify();

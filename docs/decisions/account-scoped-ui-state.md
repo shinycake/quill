@@ -10285,5 +10285,19 @@ gone.
 
 - The chat action bar's report, hide, unarchive and block are one `BarWork` stage in the chat's `ChatUi`, matched by `RequestId`; a private chat reports without `leaveChat`, a refused report sends no leave, a second press while one is out does nothing, and a closed window forgets its acks.
 - Add People shows the contacts' own state (`ContactsView`) under the peer row; a new screen's `CallEnd::Unobserved` seeds from the summary it finds; a refused rich send during an edit goes before the stashed draft; text typed while a bot thread is made goes with the message.
-- One sign-in submit at a time (`AuthSubmit::send`), reset by a new client; every `getUserFullInfo` is begun and settled by its request (`UserFullInfos::answered`/`failed_request`).
-- Appearance files are asked by file id; armed draft clears settle when nothing can answer; the preparation's starter is its newest worker and a worker's task is made with it; the deletion's task is held in `deleting` from the start; a background client is one `ClientStage`; community confirm boxes hold their own request (`Ask`); the call device menu names its call with its account.
+- One sign-in submit at a time (`AuthSubmit::send`; superseded in round 4: the stage holds its screen epoch, there is no reset); every `getUserFullInfo` is begun and settled by its request (`UserFullInfos::answered`/`failed_request`).
+- Appearance files are asked by file id; armed draft clears settle when nothing can answer; the preparation's starter is its newest worker and a worker's task is made with it; the deletion's task is held in `deleting` from the start (round 4: the map value is `AccountDeletion`, and a `Deferred` entry holds no task); a background client is one `ClientStage`; community confirm boxes hold their own request (`Ask`; Ungroup no longer does, see round 4); the call device menu names its call with its account.
+
+### Sweep fixes (r4-07, round 4)
+
+- The sign-in submit is `AuthSubmit::Out { request, screen: ScreenEpoch }`. Request ids restart with each client, so a stage from another screen epoch reads as not out; there is no reset in on_screen.rs. The driver fixture is declared in auth_state.rs.
+- A menu command held by the paid-messages guard is `ChatUi::menu_send: MenuSendStage`. The guard reports `PaidOutcome::{Held, Released, Discarded, Unknown}`; release closes the menu and sets the Sending note, discard keeps everything.
+- Ungroup closes at once on confirm, as tdesktop does. The send is `send_ungroup`, generic over the driver: one toggle goes out, a second press while it is out sends nothing and shows no note, and the collapsed state flips on the answer.
+- A queued answer counts as waiting (`request_waits`), so a clear is not pruned while its answer is queued.
+- `AccountDeletion { Running, Deferred }`: a deferred removal holds no task and a second Remove is refused.
+- A deduped report reads as `Started::Nothing` before any leave goes out.
+- `CallEnd::NotEnded` also means a busy-line summary.
+
+### Sweep fixes (r4-07, round 5)
+
+- `send_ungroup` is tested with the driver fixture, and the test fails when a second press returns a note.

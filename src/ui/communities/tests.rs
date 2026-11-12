@@ -148,3 +148,60 @@ fn a_ban_waits_only_for_an_ask_that_will_answer() {
         BanStart::Failed(_)
     ));
 }
+
+/// Ungroup through a real driver: one toggle goes out, the collapsed
+/// state flips on its answer, and a second press while it is out sends
+/// nothing and has no note (the box closes either way, in
+/// `confirm_ungroup`).
+#[test]
+fn ungroup_sends_one_toggle_and_a_second_press_sends_nothing() {
+    use super::send_ungroup;
+    use crate::ui::auth_state::driver_fixture::{driver_with, sent_types};
+    const ID: i64 = 42;
+    let community = |collapsed: bool| {
+        format!(
+            r#"{{"@type":"updateCommunity","community":{{"@type":"community","id":{ID},"have_access":true,"name":"R","date":1,"status":{{"@type":"communityMemberStatusMember"}},"permissions":{{"@type":"communityPermissions","can_edit_chat_list":false}},"are_chats_collapsed":{collapsed}}}}}"#
+        )
+    };
+    let ready = r#"{"@type":"updateAuthorizationState","authorization_state":{"@type":"authorizationStateReady"}}"#;
+    let (mut driver, recorder) = driver_with(&[ready.to_string(), community(true)]);
+    assert!(driver.session.community_chats_collapsed(ID));
+    let before = recorder.snapshot().len();
+
+    assert_eq!(send_ungroup(&mut driver, ID), None);
+    assert_eq!(
+        sent_types(&recorder, before),
+        ["toggleCommunityAreChatsCollapsed"]
+    );
+    let sent = recorder.snapshot().last().cloned().unwrap_or_default();
+    assert!(sent.contains(r#""are_chats_collapsed":false"#), "{sent}");
+    let extra = sent
+        .split(r#""@extra":""#)
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .unwrap_or_default()
+        .to_string();
+
+    assert_eq!(send_ungroup(&mut driver, ID), None, "no note");
+    assert_eq!(
+        sent_types(&recorder, before).len(),
+        1,
+        "a second press while it is out sends nothing"
+    );
+
+    let sink: std::sync::Arc<dyn quill::diagnostics::DiagnosticSink> =
+        std::sync::Arc::new(quill::diagnostics::MemorySink::new());
+    let seq = std::sync::atomic::AtomicU64::new(1000);
+    for json in [
+        community(false),
+        format!(r#"{{"@type":"ok","@extra":"{extra}"}}"#),
+    ] {
+        if let Some(parsed) = quill::telegram::client::copy_and_parse(&json, &seq, &sink) {
+            let _ = driver.ingest(parsed);
+        }
+    }
+    assert!(
+        !driver.session.community_chats_collapsed(ID),
+        "flipped on its answer"
+    );
+}
