@@ -153,6 +153,7 @@ fn a_confirmed_change_drops_both_lists_and_an_error_marks_failure() {
     assert!(masks.sets.is_empty());
 
     let extra = session.request(StickersPurpose::ReorderInstalledMaskSets.into(), None);
+    session.stickers.masks.change_note.begin(extra);
     apply_json(
         &mut session,
         &seq,
@@ -163,11 +164,6 @@ fn a_confirmed_change_drops_both_lists_and_an_error_marks_failure() {
         ),
     );
     // The refusal is the change's own line; the lists stay as they are.
-    assert_eq!(
-        session.stickers.masks.change_note.request(),
-        Some(extra),
-        "the note belongs to the change's request"
-    );
     assert!(session.stickers.masks.change_note.line().is_some());
     assert!(session.stickers.masks.installed.error().is_none());
     assert!(session.stickers.masks.archived.error().is_none());

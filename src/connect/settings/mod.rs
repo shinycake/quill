@@ -203,7 +203,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.block_note.clear();
         let extra = self.session.request(
             RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList {
                 user_id,
@@ -211,6 +210,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             None,
         );
+        self.session.settings.block_note.begin(extra);
         if let Err(err) = self
             .sender
             .send_json(&set_message_sender_block_list(extra, user_id, false))
@@ -237,7 +237,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        self.session.settings.block_note.clear();
         let extra = self.session.request(
             RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList {
                 user_id,
@@ -245,6 +244,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             None,
         );
+        self.session.settings.block_note.begin(extra);
         if let Err(err) = self
             .sender
             .send_json(&set_message_sender_block_list(extra, user_id, true))

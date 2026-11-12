@@ -213,3 +213,151 @@ fn the_farewell_ends_the_websites_refusal(cx: &mut TestAppContext) {
         assert!(session.settings.websites_note.line().is_none());
     });
 }
+
+/// Sends a change the way the driver does (the request, then its note waits
+/// for it), leaves the screen, feeds TDLib's real error envelope for that
+/// request, and returns whether the note shows a line.
+fn refusal_after_leaving(
+    app: &Entity<QuillApp>,
+    vcx: &mut VisualTestContext,
+    send: impl FnOnce(&mut quill::state::Session) -> quill::ids::RequestId,
+    leave: impl FnOnce(&mut QuillApp, &mut gpui_kit::Context<QuillApp>),
+    line: impl Fn(&quill::state::Session) -> Option<String>,
+    reopen: impl FnOnce(&mut QuillApp, &mut gpui_kit::Context<QuillApp>),
+) -> Option<String> {
+    use quill::diagnostics::{DiagnosticSink, MemorySink};
+    use quill::telegram::client::copy_and_parse;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicU64;
+    let mut request = None;
+    app.update(vcx, |app, _| {
+        if let Some(session) = app.demo_session.as_mut() {
+            request = Some(send(session));
+        }
+    });
+    app.update(vcx, |app, cx| leave(app, cx));
+    let sink: Arc<dyn DiagnosticSink> = Arc::new(MemorySink::new());
+    let extra = request.expect("the change was sent").0;
+    app.update(vcx, |app, cx| {
+        if let Some(session) = app.demo_session.as_mut() {
+            let seq = AtomicU64::new(session.last_seq);
+            let json = format!(
+                r#"{{"@type":"error","@extra":"{extra}","code":400,"message":"BROKEN"}}"#
+            );
+            let owned = copy_and_parse(&json, &seq, &sink).expect("the error parses");
+            session.apply(owned);
+        }
+        cx.notify();
+    });
+    app.update(vcx, |app, cx| reopen(app, cx));
+    let after_reopen = app.read_with(vcx, |app, _| app.demo_session.as_ref().and_then(&line));
+    after_reopen
+}
+
+#[gpui_kit::test]
+fn a_block_refused_after_leaving_privacy_is_not_on_the_next_open(cx: &mut TestAppContext) {
+    use quill::settings_catalog::Page;
+    use quill::state::{RequestPurpose, SettingsPurpose};
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    let after = refusal_after_leaving(
+        &app,
+        vcx,
+        |session| {
+            let id = session.request(
+                RequestPurpose::Settings(SettingsPurpose::SetSenderBlockList {
+                    user_id: 61,
+                    block: true,
+                }),
+                None,
+            );
+            session.settings.block_note.begin(id);
+            id
+        },
+        |app, _| app.leave_settings_page(Page::Privacy),
+        |session| session.settings.block_note.line().map(str::to_owned),
+        |app, cx| app.arrive_settings_page(Page::Privacy, cx),
+    );
+    assert_eq!(after, None);
+}
+
+#[gpui_kit::test]
+fn a_terminate_refused_after_leaving_devices_is_not_on_the_next_open(cx: &mut TestAppContext) {
+    use quill::settings_catalog::Page;
+    use quill::state::{RequestPurpose, SettingsPurpose};
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    let after = refusal_after_leaving(
+        &app,
+        vcx,
+        |session| {
+            let id = session.request(
+                RequestPurpose::Settings(SettingsPurpose::TerminateSession { session_id: 4 }),
+                None,
+            );
+            session.settings.sessions_op.begin(id);
+            session.settings.sessions_note.begin(id);
+            id
+        },
+        |app, _| app.leave_settings_page(Page::Devices),
+        |session| session.settings.sessions_note.line().map(str::to_owned),
+        |app, cx| app.arrive_settings_page(Page::Devices, cx),
+    );
+    assert_eq!(after, None);
+}
+
+#[gpui_kit::test]
+fn a_disconnect_refused_after_closing_the_websites_box_is_not_on_the_next_open(
+    cx: &mut TestAppContext,
+) {
+    use quill::state::{RequestPurpose, SettingsPurpose};
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    let after = refusal_after_leaving(
+        &app,
+        vcx,
+        |session| {
+            let id = session.request(
+                RequestPurpose::Settings(SettingsPurpose::DisconnectWebsite { website_id: 3 }),
+                None,
+            );
+            session.settings.websites_op.begin(id);
+            session.settings.websites_note.begin(id);
+            id
+        },
+        |app, cx| app.close_websites(cx),
+        |session| session.settings.websites_note.line().map(str::to_owned),
+        |app, cx| app.open_websites(cx),
+    );
+    assert_eq!(after, None);
+}
+
+#[gpui_kit::test]
+fn a_mask_change_refused_after_closing_the_manager_is_not_on_the_next_open(
+    cx: &mut TestAppContext,
+) {
+    use quill::state::StickersPurpose;
+    let (app, mut vcx) = new_app(cx);
+    let vcx = &mut vcx;
+    frames(vcx);
+    app.update(vcx, |app, cx| app.open_mask_sets(cx));
+    let after = refusal_after_leaving(
+        &app,
+        vcx,
+        |session| {
+            let id = session.request(StickersPurpose::ReorderInstalledMaskSets.into(), None);
+            session.stickers.masks.begin_change(
+                id,
+                quill::state::MaskChangeTarget::Reorder,
+            );
+            id
+        },
+        |app, cx| app.close_mask_sets(cx),
+        |session| session.stickers.masks.change_note.line().map(str::to_owned),
+        |app, cx| app.open_mask_sets(cx),
+    );
+    assert_eq!(after, None);
+}

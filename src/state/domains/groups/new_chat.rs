@@ -82,11 +82,11 @@ impl NewChatCreation {
 }
 
 /// A request of the type step's Save, from the send to its answer. The
-/// stage in flight names its request.
+/// map key names the request.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypeSave {
     /// Out: its answer has not come.
-    Sent(RequestId),
+    Sent,
     /// Answered without a refusal.
     Done,
     /// Refused or lost: the step stays, with TDLib's reason.
@@ -106,7 +106,7 @@ impl NewChatState {
     /// The type step's Save went out as `sent`; the previous Save's
     /// requests are no longer waited for.
     pub fn watch_type_save(&mut self, sent: &[RequestId]) {
-        self.type_saves = sent.iter().map(|id| (*id, TypeSave::Sent(*id))).collect();
+        self.type_saves = sent.iter().map(|id| (*id, TypeSave::Sent)).collect();
     }
 
     /// The dialog no longer waits for these type Saves.
@@ -137,7 +137,7 @@ impl NewChatState {
             Some(TypeSave::Done) => None,
             Some(TypeSave::Failed(reason)) => Some(reason.clone()),
             // Gone without an answer: the Save did not happen.
-            Some(TypeSave::Sent(_)) | None => {
+            Some(TypeSave::Sent) | None => {
                 Some(tr(keys::Q_MISC_COULDNT_REACH_TELEGRAM_TRY_AGAIN).to_string())
             }
         }

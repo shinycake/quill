@@ -88,33 +88,53 @@ impl ListOp {
 
 /// The refusal of a change to a fetched list (a block, a terminate, a mask
 /// reorder), shown beside the list. It belongs to the change's own request:
-/// the list's fetch is never touched by it, so a page or refetch in flight
-/// still answers and the list is never turned into `Failed` by a refused
-/// change. The next change (or the owner's retry) clears it.
+/// the note holds the request it waits for, and only that request's refusal
+/// lands. The list's fetch is never touched by it, so a page or refetch in
+/// flight still answers and the list is never turned into `Failed` by a
+/// refused change. The next change starts a new wait; the screen's farewell
+/// drops the note to `Idle`, so a refusal that arrives after the screen was
+/// left lands nowhere.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ChangeNote {
-    refused: Option<(Option<crate::ids::RequestId>, String)>,
+pub enum ChangeNote {
+    /// No change is out and no refusal is shown.
+    #[default]
+    Idle,
+    /// A change went out as `request`; its refusal will be shown.
+    Waiting { request: crate::ids::RequestId },
+    /// The change was refused: `text` is shown.
+    Refused { text: String },
 }
 
 impl ChangeNote {
-    /// `request` (a change) was refused; `None` when it never left.
+    /// A change goes out as `request`; any shown refusal goes.
+    pub fn begin(&mut self, request: crate::ids::RequestId) {
+        *self = Self::Waiting { request };
+    }
+
+    /// `request` (a change) was refused; `None` when it never left. A
+    /// refusal of a request the note does not hold lands nowhere.
     pub fn refused(&mut self, request: Option<crate::ids::RequestId>, line: impl Into<String>) {
-        self.refused = Some((request, line.into()));
+        let held = match (&*self, request) {
+            (_, None) => true,
+            (Self::Waiting { request: waiting }, Some(asked)) => *waiting == asked,
+            _ => false,
+        };
+        if held {
+            *self = Self::Refused { text: line.into() };
+        }
     }
 
     /// The line to show, if the last change was refused.
     pub fn line(&self) -> Option<&str> {
-        self.refused.as_ref().map(|(_, line)| line.as_str())
+        match self {
+            Self::Refused { text } => Some(text.as_str()),
+            _ => None,
+        }
     }
 
-    /// The request whose refusal is shown.
-    pub fn request(&self) -> Option<crate::ids::RequestId> {
-        self.refused.as_ref().and_then(|(request, _)| *request)
-    }
-
-    /// A new change starts, or the owner dismisses the line.
+    /// The owner dismisses the line or its screen is left.
     pub fn clear(&mut self) {
-        self.refused = None;
+        *self = Self::Idle;
     }
 }
 

@@ -34,6 +34,7 @@ fn a_refused_unblock_leaves_the_blocked_page_in_flight_and_puts_the_user_back() 
         list.retain(|id| *id != 61);
     }
     session.settings.blocked_total = 4;
+    session.settings.block_note.begin(unblock);
     apply_json(&mut session, &seq, &sink, &error_json(unblock));
     assert!(
         session.settings.blocked_senders.waits_for(page),
@@ -43,7 +44,6 @@ fn a_refused_unblock_leaves_the_blocked_page_in_flight_and_puts_the_user_back() 
     assert_eq!(session.settings.blocked_senders.data(), Some(&vec![62, 61]));
     // The refusal is not silent: it is the unblock's own line, matched to
     // its request, and the page still waits for its own answer.
-    assert_eq!(session.settings.block_note.request(), Some(unblock));
     assert!(session.settings.block_note.line().is_some());
     assert!(session.settings.blocked_senders.error().is_none());
     // The page then lands.
@@ -75,10 +75,10 @@ fn a_refused_block_without_a_page_out_reports_and_keeps_the_list() {
         }),
         None,
     );
+    session.settings.block_note.begin(block);
     apply_json(&mut session, &seq, &sink, &error_json(block));
     assert_eq!(session.settings.blocked_senders.data(), Some(&vec![61]));
     assert_eq!(session.settings.blocked_total, 1);
-    assert_eq!(session.settings.block_note.request(), Some(block));
     assert!(session.settings.block_note.line().is_some());
     assert!(
         session.settings.blocked_senders.error().is_none(),
@@ -97,6 +97,7 @@ fn a_refused_terminate_leaves_a_session_refetch_in_flight() {
         None,
     );
     session.settings.sessions_op.begin(terminate);
+    session.settings.sessions_note.begin(terminate);
     apply_json(&mut session, &seq, &sink, &error_json(terminate));
     assert!(session.settings.sessions.waits_for(refetch));
     assert!(!session.settings.sessions_op.is_mutating());
@@ -111,9 +112,8 @@ fn a_refused_terminate_leaves_a_session_refetch_in_flight() {
     );
     assert!(session.settings.sessions.data().is_some());
     assert!(session.settings.sessions.error().is_none());
-    assert_eq!(
-        session.settings.sessions_note.request(),
-        Some(terminate),
+    assert!(
+        session.settings.sessions_note.line().is_some(),
         "shown even while the refetch was out"
     );
 
@@ -123,8 +123,9 @@ fn a_refused_terminate_leaves_a_session_refetch_in_flight() {
         None,
     );
     session.settings.sessions_op.begin(again);
+    session.settings.sessions_note.begin(again);
     apply_json(&mut session, &seq, &sink, &error_json(again));
-    assert_eq!(session.settings.sessions_note.request(), Some(again));
+    assert!(session.settings.sessions_note.line().is_some());
     assert!(session.settings.sessions.error().is_none());
 }
 

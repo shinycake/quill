@@ -142,7 +142,7 @@ impl MasksPanel {
 
     /// A change goes out as `request`.
     pub fn begin_change(&mut self, request: RequestId, target: MaskChangeTarget) {
-        self.change_note.clear();
+        self.change_note.begin(request);
         self.changes.push(MaskChange { request, target });
     }
 
