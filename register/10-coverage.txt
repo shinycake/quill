@@ -72,11 +72,11 @@ src/telegram/envelope/channel_tests_users.rs 399 scanned (test-only module: head
 src/telegram/envelope/chat.rs 293 read
 src/telegram/envelope/chat_action_bar.rs 81 read
 src/telegram/envelope/chat_appearance.rs 90 scanned (wire parser, no mutable state; fn/type scan and crash-pattern grep)
-src/telegram/envelope/chat_boosts.rs 209 scanned (wire parser, no mutable state; fn/type scan and crash-pattern grep)
-src/telegram/envelope/chat_drafts.rs 348 scanned (wire parser, no mutable state; fn/type scan and crash-pattern grep)
-src/telegram/envelope/chat_events.rs 265 scanned (wire parser, no mutable state; fn/type scan and crash-pattern grep)
-src/telegram/envelope/chat_invite.rs 168 scanned (wire parser, no mutable state; fn/type scan and crash-pattern grep)
-src/telegram/envelope/chat_list.rs 301 scanned (wire parser, no mutable state; fn/type scan and crash-pattern grep)
+src/telegram/envelope/chat_boosts.rs 209 read
+src/telegram/envelope/chat_drafts.rs 348 read
+src/telegram/envelope/chat_events.rs 265 read
+src/telegram/envelope/chat_invite.rs 168 read
+src/telegram/envelope/chat_list.rs 301 read
 src/telegram/envelope/chat_members.rs 600 scanned (wire parser, no mutable state; fn/type scan and crash-pattern grep)
 src/telegram/envelope/chat_notifications.rs 368 scanned (wire parser, no mutable state; fn/type scan and crash-pattern grep)
 src/telegram/envelope/chat_photo_animation.rs 169 scanned (wire parser, no mutable state; fn/type scan and crash-pattern grep)
