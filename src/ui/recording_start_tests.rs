@@ -283,6 +283,25 @@ fn choosing_the_open_chat_again_keeps_the_recording(cx: &mut TestAppContext) {
     });
 }
 
+/// Sweep r4-10: a start and a recording are one stage, so a press cannot
+/// begin a start over a recording that runs, and cancelling a start leaves
+/// the recording alone.
+#[gpui_kit::test]
+fn a_start_cannot_replace_or_cancel_a_running_recording(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_chat(cx);
+    let _opens = fake_microphone(&app, &mut vcx);
+    start(&app, CaptureFor::Message, &mut vcx);
+    vcx.run_until_parked();
+    app.update(&mut vcx, |app, _| {
+        assert!(app.recording_active());
+        let ask = app.recording.next_start_id();
+        app.recording.begin_asking(ask, gpui_kit::Task::ready(()));
+        assert!(!app.recording.starting(), "no start behind a recording");
+        app.recording.cancel_start();
+        assert!(app.recording_active(), "cancelling a start keeps it");
+    });
+}
+
 /// Sweep 08-105: a chat change that goes around `enter_chat_ui` (the chat
 /// replaced by the reducer, another device) ends what the old chat owed at
 /// the next frame like any other: a recording cannot go to the new chat.

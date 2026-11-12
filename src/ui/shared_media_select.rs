@@ -14,13 +14,62 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use quill::composer::ForwardDraft;
-use quill::ids::{FileId, MessageId};
+use quill::ids::{ChatId, FileId, MessageId};
 use quill::lang::{keys, tr};
 use quill::state::{
     MediaMenuFacts, MediaMenuItem, MenuFile, SelectedMedia, SharedMediaAction, SharedMediaItem,
     SharedMediaState, SharedMediaTab, media_menu_items,
 };
 use quill::telegram::envelope::MessageActions;
+
+/// What makes a gallery row ask for its message's actions.
+#[derive(Clone, Copy)]
+enum AskFor {
+    Hover,
+    Tick,
+}
+
+/// What a row's ask does to the session's menu facts.
+#[derive(Debug, PartialEq, Eq)]
+enum Ask {
+    None,
+    /// Ask again, keeping an answer already held.
+    Refresh,
+    /// Forget a refusal and ask.
+    Fresh,
+}
+
+impl AskFor {
+    fn ask(self, known: &quill::state::MenuActions, chat: ChatId, message: MessageId) -> Ask {
+        if known.is_asked(chat, message) {
+            return Ask::None;
+        }
+        match (self, known.is_failed(chat, message)) {
+            (Self::Hover, true) => Ask::None,
+            (Self::Hover, false) => Ask::Refresh,
+            (Self::Tick, _) => Ask::Fresh,
+        }
+    }
+}
+
+#[cfg(test)]
+mod ask_tests {
+    use super::{Ask, AskFor};
+    use quill::ids::{ChatId, MessageId, RequestId};
+    use quill::state::MenuActions;
+
+    #[test]
+    fn a_refusal_stops_the_hover_but_a_tick_asks_again() {
+        let (chat, message) = (ChatId(1), MessageId(2));
+        let mut known = MenuActions::default();
+        assert_eq!(AskFor::Hover.ask(&known, chat, message), Ask::Refresh);
+        known.asked(chat, message, RequestId(1));
+        assert_eq!(AskFor::Tick.ask(&known, chat, message), Ask::None);
+        known.fail(chat, message, RequestId(1));
+        assert_eq!(AskFor::Hover.ask(&known, chat, message), Ask::None);
+        assert_eq!(AskFor::Tick.ask(&known, chat, message), Ask::Fresh);
+    }
+}
 
 impl QuillApp {
     fn shared_media_gallery_mut(&mut self) -> Option<&mut SharedMediaState> {
@@ -61,13 +110,14 @@ impl QuillApp {
         _cx: &mut Context<Self>,
     ) {
         if hovered && self.shared_media_actions(message_id).is_none() {
-            self.ask_shared_media_actions(message_id);
+            self.ask_shared_media_actions(message_id, AskFor::Hover);
         }
     }
 
-    /// Ask what a row allows, unless an ask is out for it or TDLib already
-    /// refused (the menu asks again by forgetting the refusal).
-    fn ask_shared_media_actions(&mut self, message_id: MessageId) {
+    /// Ask what a row allows, unless an ask is out for it. After TDLib
+    /// refused, a hover does not ask again (it would on every pass); a tick
+    /// does, once, since it needs the answer for Forward and Delete.
+    fn ask_shared_media_actions(&mut self, message_id: MessageId, why: AskFor) {
         let Some(chat) = self
             .session()
             .and_then(|session| session.media.shared_media.chat_id())
@@ -78,15 +128,15 @@ impl QuillApp {
             return;
         };
         let known = &live.driver.session.messages.menu_actions;
-        if known.is_asked(chat, message_id) || known.is_failed(chat, message_id) {
-            return;
-        }
-        if let Ok(request) = live.driver.refresh_message_menu_actions(chat, message_id) {
-            live.driver
-                .session
-                .messages
-                .menu_actions
-                .asked(chat, message_id, request);
+        match why.ask(known, chat, message_id) {
+            Ask::None => {}
+            Ask::Refresh => {
+                let _ = live.driver.refresh_message_menu_actions(chat, message_id);
+            }
+            // The refusal is forgotten first, so the new ask is recorded.
+            Ask::Fresh => {
+                let _ = live.driver.fetch_message_menu_actions(chat, message_id);
+            }
         }
     }
 
@@ -127,7 +177,7 @@ impl QuillApp {
         // A row ticked before TDLib answered asks for its own properties; the
         // answer lands on the ticked entry by message id.
         if known.is_none() {
-            self.ask_shared_media_actions(message_id);
+            self.ask_shared_media_actions(message_id, AskFor::Tick);
         }
         cx.notify();
     }

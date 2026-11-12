@@ -678,11 +678,17 @@ impl Session {
                     chat_id,
                     message_id,
                 })) => {
+                    let landed = pending.is_some_and(|p| {
+                        self.messages
+                            .menu_actions
+                            .answered(chat_id, message_id, p.id, actions)
+                    });
                     // A ticked gallery row learns its answer as it lands.
-                    self.media
-                        .shared_media
-                        .refresh_from_answer(Some((chat_id, message_id, actions)));
-                    self.messages.menu_actions.set(chat_id, message_id, actions);
+                    if landed {
+                        self.media
+                            .shared_media
+                            .refresh_from_answer(Some((chat_id, message_id, actions)));
+                    }
                 }
                 Some(RequestPurpose::Messages(MessagesPurpose::GetSharingProtection {
                     ..

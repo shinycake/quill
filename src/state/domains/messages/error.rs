@@ -157,7 +157,13 @@ impl Session {
             Some(RequestPurpose::Messages(MessagesPurpose::GetMessageMenuActions {
                 chat_id,
                 message_id,
-            })) => self.messages.menu_actions.fail(chat_id, message_id),
+            })) => {
+                if let Some(pending) = pending {
+                    self.messages
+                        .menu_actions
+                        .fail(chat_id, message_id, pending.id);
+                }
+            }
             Some(RequestPurpose::SetChatMessageSender) => {
                 self.messages.message_action_note.push(format!(
                     "could not change the sender: {}",

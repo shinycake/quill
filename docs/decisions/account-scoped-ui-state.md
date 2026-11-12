@@ -10243,5 +10243,12 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 | g-286 | The demo storage stats are set as `Fetch::Ready` instead of `Fetch::succeed`. |
 | g-300 | Not in the baseline: `selection_drag_loop` is in `owned-timers-allow.txt` with a reason (a held pointer beyond the list's edge sends no event; the drag stage owns the task). |
 | g-344 … g-367 (refcell) | The one-shot dialog bodies are `Cell<Option<_>>` with `take()`; `platform_cursor` holds a `Cell<Option<Weak<_>>>`; `selection_bar` uses `try_borrow`. |
+| Fix round 2 (21-001) | `check_photo` returns `MediaCheck::Jpeg(TempFile)`; the tray keeps a `MediaFound` after `claim()`. An answer whose read the give-up, a restart or `forget` settled is dropped with its file. The `media_check_jobs` number stays only to tell a restarted read in `Reads` (the tasks in the stage already cancel the old one). |
+| Fix round 2 (21-004) | `goto_twofa_view(view, window, cx)` empties every two-step input (`clear_twofa_inputs`, one list, also used by `close_twofa`) on each view change; `twofa_form_buttons` takes `TwofaForm::{Password(PasswordForm), Email}`, so its match is total. The poll's `twofa_step_done` has no window; the next `goto_twofa_view` empties the inputs. |
+| Fix round 2 (20-006) | The camera shot's decode and the crop's "Set Photo" render are held by the box's sources (`hold_photo_pick`) and land only through `end_photo_pick()`. |
+| Fix round 2 (21-002) | `MenuActions::answered`/`fail` take the `RequestId` and apply only when no newer ask waits; every ask records `Asked(request)` in `ask_message_menu_actions`. A tick after a refusal forgets it and asks (`AskFor::Tick`); a hover does not. |
+| Fix round 2 (20-003, 20-004) | A slot holds one `DraftClear` per send (`Vec`), so a voice note's clear no longer replaces a text's. `SendTarget::is_open` compares the slot (chat and topic). |
+| Fix round 2 (IS) | `RecordStage::{Idle, Asking, Opening, Recording(Capture)}` replaces `start` beside `capture`. |
+| Fix round 2 (21-007) | `tray_index_of` gives up when the tile's index no longer holds its file. |
 | 20-002 | Skipped: `op` (username or photo) and `save` (name and bio) are two independent operations, each settled on its own request and shown in its own place; they can overlap. |
 | 20-005 | Skipped: lock, discard row and "Play once" are user toggles of one recording, dropped with the `Capture`; none waits for an answer. |

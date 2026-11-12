@@ -197,8 +197,8 @@ impl QuillApp {
                                 .label(tr(keys::SETTINGS_CLOUD_LOGIN_EMAIL_BOX_OK))
                                 .ghost()
                                 .small()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.goto_twofa_view(TwofaView::LoginEmail);
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.goto_twofa_view(TwofaView::LoginEmail, window, cx);
                                     cx.notify();
                                 })),
                         ),
@@ -214,8 +214,8 @@ impl QuillApp {
                 .label(tr(keys::Q_PREFS_FORGOT_PASSWORD))
                 .ghost()
                 .small()
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.goto_twofa_view(TwofaView::Recover);
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.goto_twofa_view(TwofaView::Recover, window, cx);
                     cx.notify();
                 })),
         )
@@ -413,8 +413,8 @@ impl QuillApp {
             Button::new("twofa-recover-back")
                 .label(tr(keys::Q_PREFS_BACK))
                 .ghost()
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.goto_twofa_view(TwofaView::Status);
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.goto_twofa_view(TwofaView::Status, window, cx);
                     cx.notify();
                 })),
         )
@@ -631,8 +631,8 @@ impl QuillApp {
             Button::new("twofa-login-email-back")
                 .label(tr(keys::Q_PREFS_BACK))
                 .ghost()
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.goto_twofa_view(TwofaView::Status);
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.goto_twofa_view(TwofaView::Status, window, cx);
                     cx.notify();
                 })),
         )

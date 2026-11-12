@@ -464,21 +464,15 @@ impl QuillApp {
     }
 
     /// Where the file `item` was drawn for is in the open tray now, if it
-    /// still is: another window of the chat may have removed or added a
-    /// file between the frame and the click, which shifts every index.
+    /// still is there: another window of the chat may have removed or added
+    /// a file between the frame and the click, which shifts every index.
+    /// Then the click is dropped: the same file attached twice has two
+    /// entries with one path, and a search by path could act on the other.
     fn tray_index_of(&self, item: &TrayItem) -> Option<usize> {
         if self.send_slot().as_ref() != Some(&item.slot) {
             return None;
         }
-        let tray = self.pending_attachments();
-        if tray
-            .get(item.index)
-            .is_some_and(|attachment| attachment.path == item.path)
-        {
-            return Some(item.index);
-        }
-        tray.iter()
-            .position(|attachment| attachment.path == item.path)
+        still_at(self.pending_attachments(), item.index, &item.path).then_some(item.index)
     }
 
     /// Run a tile's action on the file it was drawn for; nothing happens
@@ -840,4 +834,52 @@ fn cover_items(
                 });
             }),
     )
+}
+
+/// Whether the tray still holds the file at `index` that a tile was drawn
+/// for.
+fn still_at(tray: &[ComposerAttachment], index: usize, path: &std::path::Path) -> bool {
+    tray.get(index)
+        .is_some_and(|attachment| attachment.path == path)
+}
+
+#[cfg(test)]
+mod still_at_tests {
+    use super::still_at;
+    use quill::composer::{AttachmentKind, ComposerAttachment};
+    use std::path::Path;
+
+    fn tray(names: &[&str]) -> Vec<ComposerAttachment> {
+        let dir = quill::scratch::temp_work_dir("quill-tile-tests");
+        std::fs::create_dir_all(&dir).expect("a folder");
+        names
+            .iter()
+            .filter_map(|name| {
+                let path = dir.join(name);
+                std::fs::write(&path, b"x").ok()?;
+                ComposerAttachment::pick(&path, AttachmentKind::Document)
+            })
+            .collect()
+    }
+
+    fn path_of(tray: &[ComposerAttachment], index: usize) -> std::path::PathBuf {
+        tray.get(index).map(|a| a.path.clone()).unwrap_or_default()
+    }
+
+    #[test]
+    fn a_shifted_tray_gives_up_instead_of_acting_on_the_twin_copy() {
+        // The same file attached twice; tile 1 was drawn for the second copy.
+        let mut tray = tray(&["a.txt", "b.txt"]);
+        let (a, b) = (path_of(&tray, 0), path_of(&tray, 1));
+        let twin = tray.get(1).cloned().expect("a file");
+        tray.push(twin);
+        assert!(still_at(&tray, 1, &b) && still_at(&tray, 2, &b));
+        // The other window removed the first file: a tile drawn for the
+        // third entry finds nothing at its index, and the one drawn for
+        // the removed file finds another file there.
+        tray.remove(0);
+        assert!(!still_at(&tray, 2, &b));
+        assert!(!still_at(&tray, 0, &a));
+        assert!(still_at(&tray, 1, Path::new(&b)));
+    }
 }

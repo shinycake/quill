@@ -14,19 +14,46 @@ use quill::composer::{
     media_dimensions_valid, photo_needs_jpeg,
 };
 use quill::media_viewer::READ_BYTES_LIMIT;
+use quill::scratch::TempFile;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
-/// What reading a tray file found. Kept by path (`TrayReads::media`),
-/// so the same file in a second tray gets the same answer.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What the worker that read a tray file found. A JPEG it made is a
+/// `TempFile`, so an answer nobody takes (the give-up won, the read was
+/// restarted, the file left the tray: the stage dropped the task) removes
+/// its own file when it is dropped.
+#[derive(Debug)]
 pub(super) enum MediaCheck {
+    /// It goes as it is.
+    AsIs,
+    /// It goes as this JPEG.
+    Jpeg(TempFile),
+    /// It goes as a file.
+    FileOnly,
+}
+
+/// What a settled read of a tray file found. Kept by path
+/// (`TrayReads::media`), so the same file in a second tray gets the same
+/// answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum MediaFound {
     /// It goes as it is.
     AsIs,
     /// It goes as this JPEG.
     Jpeg(PathBuf),
     /// It goes as a file.
     FileOnly,
+}
+
+impl MediaCheck {
+    /// The answer as the tray keeps it; the JPEG is the tray's to keep now.
+    pub(super) fn claim(self) -> MediaFound {
+        match self {
+            Self::AsIs => MediaFound::AsIs,
+            Self::Jpeg(file) => MediaFound::Jpeg(file.claim()),
+            Self::FileOnly => MediaFound::FileOnly,
+        }
+    }
 }
 
 impl QuillApp {
@@ -39,8 +66,8 @@ impl QuillApp {
             .map(|attachment| (attachment.path.clone(), attachment.kind))
             .collect();
         for (path, kind) in unread {
-            if let Some(check) = self.composer_sends.reads.media.done(&path).cloned() {
-                self.apply_media_check(&path, &check);
+            if let Some(found) = self.composer_sends.reads.media.done(&path).cloned() {
+                self.apply_media_check(&path, &found);
                 continue;
             }
             if self.composer_sends.reads.media.is_reading(&path) {
@@ -99,19 +126,15 @@ impl QuillApp {
         check: MediaCheck,
         cx: &mut Context<Self>,
     ) {
-        let send_box = &mut self.composer_sends.reads;
-        if !send_box.media.finish(path, job, check.clone()) {
-            // A late answer (the read was given up on, or restarted): the
-            // JPEG it made is nobody's, so it goes.
-            if let MediaCheck::Jpeg(jpeg) = check {
-                cx.background_spawn(async move {
-                    let _ = std::fs::remove_file(jpeg);
-                })
-                .detach();
-            }
+        let reads = &mut self.composer_sends.reads;
+        // A late answer (the read was given up on, or restarted) is dropped
+        // here, and with it the JPEG it made.
+        if !reads.media.is_current(path, job) {
             return;
         }
-        self.apply_media_check(path, &check);
+        let found = check.claim();
+        reads.media.finish(path, job, found.clone());
+        self.apply_media_check(path, &found);
         // A file now needs its thumbnail, and a photo that became a JPEG
         // its size (the JPEG is the picture the offer is about).
         self.prepare_tray_file_thumbnails(cx);
@@ -119,14 +142,14 @@ impl QuillApp {
         cx.notify();
     }
 
-    fn apply_media_check(&mut self, path: &Path, check: &MediaCheck) {
+    fn apply_media_check(&mut self, path: &Path, found: &MediaFound) {
         for attachment in self.composer_sends.attachments_at_mut(path) {
-            match check {
-                MediaCheck::AsIs => {}
-                MediaCheck::Jpeg(jpeg) => {
+            match found {
+                MediaFound::AsIs => {}
+                MediaFound::Jpeg(jpeg) => {
                     attachment.extras.set_photo(PhotoPrep::Jpeg(jpeg.clone()))
                 }
-                MediaCheck::FileOnly => attachment.keep_as_file(),
+                MediaFound::FileOnly => attachment.keep_as_file(),
             }
         }
     }
@@ -187,7 +210,9 @@ pub(super) fn check_photo(path: &Path) -> MediaCheck {
     let (fit_w, fit_h) = fitted_photo_size(width, height, PHOTO_SIDE_LARGE);
     let fitted = image::imageops::thumbnail(&picture, fit_w, fit_h);
     let dir = quill::scratch::temp_work_dir("quill-send-photos");
-    write_jpeg(&fitted, &dir).map_or(MediaCheck::FileOnly, MediaCheck::Jpeg)
+    write_jpeg(&fitted, &dir).map_or(MediaCheck::FileOnly, |jpeg| {
+        MediaCheck::Jpeg(TempFile::new(jpeg))
+    })
 }
 
 fn is_animated_webp(path: &Path) -> bool {
@@ -200,7 +225,8 @@ fn is_animated_webp(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{MediaCheck, check_photo};
+    use super::{MediaCheck, MediaFound, check_photo};
+    use crate::ui::send_box_state::Reads;
     use std::path::{Path, PathBuf};
 
     fn fixture(name: &str) -> PathBuf {
@@ -214,9 +240,28 @@ mod tests {
         let MediaCheck::Jpeg(jpeg) = check_photo(&fixture("halves.jxl")) else {
             panic!("JPEG XL decodes everywhere");
         };
+        let jpeg = jpeg.claim();
         let decoded = image::open(&jpeg).expect("a JPEG");
         assert_eq!((decoded.width(), decoded.height()), (32, 16));
         let _ = std::fs::remove_file(jpeg);
+    }
+
+    #[test]
+    fn a_jpeg_whose_read_was_given_up_on_removes_itself() {
+        let mut reads: Reads<MediaFound> = Reads::default();
+        let path = fixture("halves.jxl");
+        reads.start(path.clone(), 1, Vec::new());
+        // The worker is still decoding when the give-up settles the read.
+        let late = check_photo(&path);
+        let MediaCheck::Jpeg(file) = &late else {
+            panic!("JPEG XL decodes everywhere");
+        };
+        let made = file.path().to_path_buf();
+        assert!(made.exists());
+        assert!(reads.finish(&path, 1, MediaFound::FileOnly));
+        assert!(!reads.is_current(&path, 1), "the give-up settled it");
+        drop(late);
+        assert!(!made.exists(), "an answer nobody takes removes its file");
     }
 
     #[test]
@@ -225,14 +270,14 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("a folder");
         let plain = dir.join("plain.png");
         image::RgbaImage::new(40, 30).save(&plain).expect("a PNG");
-        assert_eq!(check_photo(&plain), MediaCheck::AsIs);
+        assert!(matches!(check_photo(&plain), MediaCheck::AsIs));
 
         let narrow = dir.join("narrow.png");
         image::RgbaImage::new(210, 10).save(&narrow).expect("a PNG");
-        assert_eq!(check_photo(&narrow), MediaCheck::FileOnly);
+        assert!(matches!(check_photo(&narrow), MediaCheck::FileOnly));
 
         let broken = dir.join("broken.jpg");
         std::fs::write(&broken, b"not a picture").expect("a file");
-        assert_eq!(check_photo(&broken), MediaCheck::FileOnly);
+        assert!(matches!(check_photo(&broken), MediaCheck::FileOnly));
     }
 }

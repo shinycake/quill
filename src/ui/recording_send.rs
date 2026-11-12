@@ -70,10 +70,10 @@ impl SendTarget {
         self.reply.as_ref()?.send_target(self.chat_id)
     }
 
-    /// The composer on screen is the target chat's, so it holds its
-    /// reply, draft and caption.
-    fn is_open(&self, open: Option<ChatId>) -> bool {
-        open == Some(self.chat_id)
+    /// The composer on screen is the target's own slot (chat and topic), so
+    /// it holds its reply, draft and caption.
+    fn is_open(&self, open: Option<&SendSlot>) -> bool {
+        open == Some(&self.slot)
     }
 
     /// What a failed send puts back into the composer: only into the
@@ -81,7 +81,7 @@ impl SendTarget {
     /// touched since Send (text typed or a reply picked meanwhile stays).
     fn restore_plan(
         &self,
-        open: Option<ChatId>,
+        open: Option<&SendSlot>,
         composer_text: &str,
         reply: Option<&ComposerReplyTo>,
     ) -> Restore {
@@ -156,7 +156,7 @@ impl QuillApp {
         cx: &mut Context<Self>,
     ) {
         let text = self.composer.read(cx).value().to_string();
-        let plan = target.restore_plan(self.open_chat_id(), &text, self.chat_ui.reply());
+        let plan = target.restore_plan(self.send_slot().as_ref(), &text, self.chat_ui.reply());
         if plan.reply {
             self.chat_ui.set_reply(target.reply.clone());
         }
@@ -271,7 +271,7 @@ impl QuillApp {
                 )));
             }
         } else if self.demo_session.is_some() {
-            if target.is_open(self.open_chat_id()) {
+            if target.is_open(self.send_slot().as_ref()) {
                 self.apply_demo_voice(&draft, &target.caption, target.reply.as_ref());
                 self.set_note(StatusNote::silent(tr(
                     keys::Q_MISC_DEMO_VOICE_NOTE_APPLIED_LOCALLY,
@@ -381,7 +381,7 @@ impl QuillApp {
                 )));
             }
         } else if self.demo_session.is_some() {
-            if !target.is_open(self.open_chat_id()) {
+            if !target.is_open(self.send_slot().as_ref()) {
                 let _ = std::fs::remove_file(&draft.path);
                 self.set_note(StatusNote::silent(tr(
                     keys::Q_NOTES_RECORDING_NOT_SENT_CHAT_CHANGED,
@@ -456,7 +456,7 @@ impl QuillApp {
     ) {
         let wanted = self.recording.finish_start(start);
         match result {
-            Ok(capture) if wanted && !self.recording_active() => {
+            Ok(capture) if wanted => {
                 self.hold_capture(CaptureMedia::Video(capture), purpose);
                 self.spawn_voice_tick(cx);
                 let note = match purpose {
@@ -574,10 +574,19 @@ mod tests {
     #[test]
     fn the_target_keeps_the_chat_it_was_fixed_for() {
         let target = SendTarget::new(on_screen(), ChatId(1), slot_in(1), None, "  hi ");
-        assert!(target.is_open(Some(ChatId(1))));
+        assert!(target.is_open(Some(&slot_in(1))));
         // The user opened another chat while the file was finished.
-        assert!(!target.is_open(Some(ChatId(2))));
+        assert!(!target.is_open(Some(&slot_in(2))));
         assert!(!target.is_open(None));
+        // Or another topic of the same chat.
+        let topic = SendSlot {
+            account: AccountKey::primary(),
+            draft: DraftKey {
+                chat_id: 1,
+                topic: DraftTopic::Forum(5),
+            },
+        };
+        assert!(!target.is_open(Some(&topic)));
         assert_eq!(target.chat_id, ChatId(1));
         assert_eq!(target.caption, "hi");
         // The draft clear is registered under the slot fixed at the tap.
@@ -593,7 +602,8 @@ mod tests {
             Some(reply_in(1)),
             " caption ",
         );
-        let open = Some(ChatId(1));
+        let slot = slot_in(1);
+        let open = Some(&slot);
         // Composer still empty: both come back.
         assert_eq!(
             target.restore_plan(open, "", None),
@@ -628,7 +638,7 @@ mod tests {
             "caption",
         );
         assert_eq!(
-            target.restore_plan(Some(ChatId(2)), "", None),
+            target.restore_plan(Some(&slot_in(2)), "", None),
             Restore::default()
         );
         assert_eq!(target.restore_plan(None, "", None), Restore::default());
@@ -638,7 +648,7 @@ mod tests {
     fn a_video_without_caption_restores_only_the_reply() {
         let target = SendTarget::new(on_screen(), ChatId(1), slot_in(1), Some(reply_in(1)), "");
         assert_eq!(
-            target.restore_plan(Some(ChatId(1)), "", None),
+            target.restore_plan(Some(&slot_in(1)), "", None),
             Restore {
                 caption: false,
                 reply: true

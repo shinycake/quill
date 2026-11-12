@@ -401,3 +401,55 @@ fn a_typed_password_check_is_emptied_when_the_page_is_left(cx: &mut TestAppConte
     frames(vcx);
     assert_eq!(typed(&app, vcx), "", "emptied when the page was left");
 }
+
+/// Sweep r4-10 (21-004): text typed in one two-step view never shows in
+/// another: Forgot password? then Back, and Login email then Back, leave
+/// every form empty.
+#[gpui_kit::test]
+fn text_typed_in_one_2fa_view_is_gone_in_the_next(cx: &mut TestAppContext) {
+    use crate::ui::dialogs::callback_password::TwofaView;
+    let (app, main) = new_app(cx);
+    let mut vcx = VisualTestContext::from_window(main, cx);
+    let vcx = &mut vcx;
+    app.update(vcx, |app, cx| {
+        app.demo_settings(Page::Account, cx);
+        app.show_settings_page(Page::Privacy, cx);
+        app.open_twofa(cx);
+    });
+    let fill = |vcx: &mut VisualTestContext| {
+        app.update_in(vcx, |app, window, cx| {
+            app.twofa
+                .new_password
+                .update(cx, |input, cx| input.set_value("typed", window, cx));
+            app.twofa
+                .email
+                .update(cx, |input, cx| input.set_value("a@b.c", window, cx));
+            app.twofa
+                .code
+                .update(cx, |input, cx| input.set_value("12345", window, cx));
+        });
+    };
+    let values = |vcx: &mut VisualTestContext| {
+        app.read_with(vcx, |app, cx| {
+            [
+                app.twofa.new_password.read(cx).value().to_string(),
+                app.twofa.email.read(cx).value().to_string(),
+                app.twofa.code.read(cx).value().to_string(),
+            ]
+        })
+    };
+    for (into, back) in [
+        (TwofaView::Recover, TwofaView::Status),
+        (TwofaView::LoginEmail, TwofaView::Status),
+    ] {
+        app.update_in(vcx, |app, window, cx| {
+            app.goto_twofa_view(into, window, cx);
+        });
+        fill(vcx);
+        app.update_in(vcx, |app, window, cx| {
+            app.goto_twofa_view(back, window, cx);
+            app.goto_twofa_view(TwofaView::Change, window, cx);
+        });
+        assert_eq!(values(vcx), ["", "", ""], "{into:?} left text behind");
+    }
+}

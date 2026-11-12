@@ -551,24 +551,7 @@ impl QuillApp {
     /// must not linger in the form after the dialog is gone.
     pub(super) fn close_twofa(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.twofa_close();
-        self.twofa
-            .current_password
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.twofa
-            .status_check_password
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.twofa
-            .new_password
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.twofa
-            .hint
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.twofa
-            .email
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.twofa
-            .code
-            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.clear_twofa_inputs(window, cx);
     }
 
     /// Leaving the Devices page stops a camera scan and drops a pending
@@ -656,13 +639,19 @@ impl QuillApp {
             return;
         }
         self.twofa.set_notice(None);
-        self.clear_twofa_inputs(window, cx);
-        self.goto_twofa_view(TwofaView::Status);
+        self.goto_twofa_view(TwofaView::Status, window, cx);
         cx.notify();
     }
 
-    /// Empty every field of the two-step forms.
+    /// Empty every input of the two-step box: the forms, the code and the
+    /// status screen's check card.
     pub(super) fn clear_twofa_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.twofa
+            .status_check_password
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.twofa
+            .code
+            .update(cx, |input, cx| input.set_value("", window, cx));
         self.twofa
             .current_password
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -710,8 +699,7 @@ impl QuillApp {
             return;
         }
         self.twofa.set_notice(None);
-        self.clear_twofa_inputs(window, cx);
-        self.goto_twofa_view(TwofaView::Status);
+        self.goto_twofa_view(TwofaView::Status, window, cx);
         cx.notify();
     }
 

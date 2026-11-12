@@ -71,3 +71,28 @@ fn a_dialog_closed_before_the_render_ends_gets_no_photo(cx: &mut TestAppContext)
     let (before, after) = set_photo(&app, &mut vcx, true);
     assert_eq!(before, after, "nothing is applied or said");
 }
+
+/// Sweep r4-10 (20-006): a render that ends after the Edit box was closed
+/// and opened again is not set on the new box. The new box is the same
+/// target, so only the render's owner (the old box's sources) tells them
+/// apart.
+#[gpui_kit::test]
+fn a_dialog_reopened_before_the_render_ends_gets_no_photo(cx: &mut TestAppContext) {
+    let (app, mut vcx) = open_demo(cx);
+    let before = app.read_with(&vcx, |app, _| app.connection.note().text().to_string());
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.dialogs.edit_profile_dialog =
+            Some(EditProfileDialog::new(window, cx, "Ada", "", "", ""));
+        let editor = PhotoEditor::new(
+            EditorPurpose::Profile(PhotoTarget::Profile),
+            image::RgbaImage::from_pixel(64, 64, image::Rgba([10, 20, 30, 255])),
+        );
+        app.finish_profile_crop(editor, PhotoTarget::Profile, cx);
+        app.dialogs.edit_profile_dialog = None;
+        app.dialogs.edit_profile_dialog =
+            Some(EditProfileDialog::new(window, cx, "Ada", "", "", ""));
+    });
+    vcx.run_until_parked();
+    let after = app.read_with(&vcx, |app, _| app.connection.note().text().to_string());
+    assert_eq!(before, after, "nothing is applied to the reopened box");
+}

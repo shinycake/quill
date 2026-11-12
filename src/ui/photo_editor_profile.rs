@@ -277,17 +277,22 @@ impl QuillApp {
         path: PathBuf,
         cx: &mut Context<Self>,
     ) {
-        self.decode_image_then(
-            path,
-            move |this, decoded, cx| match decoded {
-                Ok(pixels) if this.photo_target() == Some(target) => {
-                    this.open_profile_photo_crop(target, pixels, cx);
+        // The decode is held by the box's sources, like the picker's: a box
+        // closed (or closed and reopened) meanwhile drops it.
+        let pick = self.run_off_ui_scoped_task(
+            move || decode_file(&path, DecodeSize::FULL),
+            move |this, decoded, cx| {
+                if !this.end_photo_pick() {
+                    return;
                 }
-                Ok(_) => {}
-                Err(_) => this.photo_target_note(target, tr(keys::BAD_PHOTO), cx),
+                match decoded {
+                    Ok(pixels) => this.open_profile_photo_crop(target, pixels, cx),
+                    Err(_) => this.photo_target_note(target, tr(keys::BAD_PHOTO), cx),
+                }
             },
             cx,
         );
+        self.hold_photo_pick(target, pick);
     }
 
     /// A photo problem shown where the person is looking: under the Edit
@@ -322,7 +327,7 @@ impl QuillApp {
         // The photo is set through the client on screen when the render
         // ends: scoped to this screen (and window), so a switch meanwhile
         // drops it instead of setting it on the account switched to.
-        self.run_off_ui_scoped_then(
+        let render = self.run_off_ui_scoped_task(
             move || {
                 let square = finish_square(job.render());
                 let saved = super::edit_media_tools::write_edited_png(&square)?;
@@ -332,8 +337,9 @@ impl QuillApp {
             },
             move |this, done, cx| {
                 // The box that asked may have closed while the square
-                // rendered: its photo is not set on whatever opened since.
-                if this.photo_target() != Some(target) {
+                // rendered (its sources held this render and went with
+                // it): its photo is not set on whatever opened since.
+                if !this.end_photo_pick() {
                     return;
                 }
                 let Some((saved, preview)) = done else {
@@ -363,6 +369,7 @@ impl QuillApp {
             },
             cx,
         );
+        self.hold_photo_pick(target, render);
     }
 
     /// The crop over the dialog it came from, edge to edge like the video

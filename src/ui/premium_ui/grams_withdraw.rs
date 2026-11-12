@@ -145,7 +145,7 @@ impl QuillApp {
 
     fn forgot_grams_withdraw_password(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.cancel_grams_withdraw(window, cx);
-        self.recover_cloud_password(cx);
+        self.recover_cloud_password(window, cx);
     }
 
     fn set_password_for_grams_withdraw(&mut self, window: &mut Window, cx: &mut Context<Self>) {

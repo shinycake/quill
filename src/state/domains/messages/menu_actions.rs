@@ -39,17 +39,46 @@ impl MenuActions {
             .map(|(_, know)| *know)
     }
 
+    /// Facts known without asking (an injected menu).
     pub fn set(&mut self, chat_id: ChatId, message_id: MessageId, actions: MessageActions) {
         self.put(chat_id, message_id, Know::Allows(actions));
     }
 
     /// An ask for this message went out as `request`: a row that hovers
-    /// again waits for it instead of asking once more. An answer already
-    /// known (kept while the menu refreshes it) stays.
+    /// again waits for it instead of asking once more, and only its answer
+    /// or error lands. An answer already known (kept while a gallery row
+    /// refreshes it) stays; a newer ask replaces an older one in flight.
     pub fn asked(&mut self, chat_id: ChatId, message_id: MessageId, request: RequestId) {
-        if self.find(chat_id, message_id).is_none() {
+        if matches!(
+            self.find(chat_id, message_id),
+            None | Some(Know::Asked(_))
+        ) {
             self.put(chat_id, message_id, Know::Asked(request));
         }
+    }
+
+    /// Whether `request` is still the one this message waits for: an older
+    /// ask's answer, after a newer one went out, is not.
+    fn is_current(&self, chat_id: ChatId, message_id: MessageId, request: RequestId) -> bool {
+        !matches!(
+            self.find(chat_id, message_id),
+            Some(Know::Asked(waiting)) if waiting != request
+        )
+    }
+
+    /// `request` answered with what TDLib allows. Whether it landed.
+    pub fn answered(
+        &mut self,
+        chat_id: ChatId,
+        message_id: MessageId,
+        request: RequestId,
+        actions: MessageActions,
+    ) -> bool {
+        let current = self.is_current(chat_id, message_id, request);
+        if current {
+            self.put(chat_id, message_id, Know::Allows(actions));
+        }
+        current
     }
 
     /// Whether an ask for this message is out.
@@ -57,9 +86,12 @@ impl MenuActions {
         matches!(self.find(chat_id, message_id), Some(Know::Asked(_)))
     }
 
-    /// The ask for this message failed: its gated rows stay hidden.
-    pub fn fail(&mut self, chat_id: ChatId, message_id: MessageId) {
-        self.put(chat_id, message_id, Know::Failed);
+    /// `request` failed: the message's gated rows stay hidden (unless a
+    /// newer ask is out, which is the one that decides).
+    pub fn fail(&mut self, chat_id: ChatId, message_id: MessageId, request: RequestId) {
+        if self.is_current(chat_id, message_id, request) {
+            self.put(chat_id, message_id, Know::Failed);
+        }
     }
 
     /// What TDLib allows for the message; `None` until it answers.
@@ -115,9 +147,42 @@ mod tests {
 
         let other = MessageId(3);
         known.asked(CHAT, other, RequestId(8));
-        known.fail(CHAT, other);
+        known.fail(CHAT, other, RequestId(8));
         assert!(!known.is_asked(CHAT, other));
         assert!(known.is_failed(CHAT, other));
+    }
+
+    #[test]
+    fn an_older_ask_cannot_replace_a_newer_one_in_either_order() {
+        let allows = MessageActions {
+            can_be_copied: true,
+            ..MessageActions::default()
+        };
+        // The older answer comes first and is dropped; the newer lands.
+        let mut known = MenuActions::default();
+        known.asked(CHAT, MESSAGE, RequestId(1));
+        known.asked(CHAT, MESSAGE, RequestId(2));
+        assert!(!known.answered(CHAT, MESSAGE, RequestId(1), MessageActions::default()));
+        assert!(known.is_asked(CHAT, MESSAGE));
+        assert!(known.answered(CHAT, MESSAGE, RequestId(2), allows));
+        assert_eq!(known.get(CHAT, MESSAGE), Some(allows));
+
+        // The newer fails first; the older one then answers with real
+        // data, which lands (nothing newer is waiting any more).
+        let mut known = MenuActions::default();
+        known.asked(CHAT, MESSAGE, RequestId(1));
+        known.asked(CHAT, MESSAGE, RequestId(2));
+        known.fail(CHAT, MESSAGE, RequestId(2));
+        assert!(known.is_failed(CHAT, MESSAGE));
+        assert!(known.answered(CHAT, MESSAGE, RequestId(1), allows));
+        assert_eq!(known.get(CHAT, MESSAGE), Some(allows));
+
+        // An older error cannot replace a newer ask.
+        let mut known = MenuActions::default();
+        known.asked(CHAT, MESSAGE, RequestId(1));
+        known.asked(CHAT, MESSAGE, RequestId(2));
+        known.fail(CHAT, MESSAGE, RequestId(1));
+        assert!(known.is_asked(CHAT, MESSAGE));
     }
 
     #[test]

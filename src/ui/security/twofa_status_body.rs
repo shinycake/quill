@@ -4,6 +4,15 @@ use super::*;
 use crate::ui::status_note::StatusNote;
 use quill::lang::{keys, tr, tr_with};
 
+/// The four forms of the two-step box that send something: the three
+/// password forms and the recovery email. Not a view, so the submit match
+/// is total and the views that draw their own buttons cannot reach it.
+#[derive(Clone, Copy)]
+pub(in crate::ui) enum TwofaForm {
+    Password(PasswordForm),
+    Email,
+}
+
 impl QuillApp {
     /// Slice A2: the status screen — current state plus the pending
     /// confirmation card (TGX `PendingEmailText`) when a recovery email
@@ -79,8 +88,8 @@ impl QuillApp {
                 Button::new("twofa-goto-change")
                     .label(tr(keys::SETTINGS_CLOUD_PASSWORD_MANAGE_PASSWORD_CHANGE))
                     .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.goto_twofa_view(TwofaView::Change);
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.goto_twofa_view(TwofaView::Change, window, cx);
                         cx.notify();
                     })),
             );
@@ -88,8 +97,8 @@ impl QuillApp {
                 Button::new("twofa-goto-disable")
                     .label(tr(keys::Q_PREFS_TURN_OFF))
                     .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.goto_twofa_view(TwofaView::Disable);
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.goto_twofa_view(TwofaView::Disable, window, cx);
                         cx.notify();
                     })),
             );
@@ -102,8 +111,8 @@ impl QuillApp {
                         tr(keys::SETTINGS_CLOUD_PASSWORD_MANAGE_EMAIL_NEW)
                     })
                     .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.goto_twofa_view(TwofaView::Email);
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.goto_twofa_view(TwofaView::Email, window, cx);
                         cx.notify();
                     })),
             );
@@ -113,8 +122,8 @@ impl QuillApp {
                 Button::new("twofa-goto-enable")
                     .label(tr(keys::Q_PREFS_SET_ADDITIONAL_PASSWORD))
                     .ghost()
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.goto_twofa_view(TwofaView::Enable);
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.goto_twofa_view(TwofaView::Enable, window, cx);
                         cx.notify();
                     })),
             );
@@ -185,7 +194,7 @@ impl QuillApp {
         )
         .child(self.twofa_form_buttons(
             cx,
-            TwofaView::Enable,
+            TwofaForm::Password(PasswordForm::Enable),
             tr(keys::RIGHTS_TRANSFER_SET_PASSWORD),
         ))
     }
@@ -245,7 +254,7 @@ impl QuillApp {
         .child(self.twofa_forgot_link(cx))
         .child(self.twofa_form_buttons(
             cx,
-            TwofaView::Change,
+            TwofaForm::Password(PasswordForm::Change),
             tr(keys::SETTINGS_CLOUD_PASSWORD_MANAGE_PASSWORD_CHANGE),
         ))
     }
@@ -285,7 +294,7 @@ impl QuillApp {
                 .child(tr(keys::Q_PREFS_SENT_SECURELY_TO_TELEGRAM)),
         )
         .child(self.twofa_forgot_link(cx))
-        .child(self.twofa_form_buttons(cx, TwofaView::Disable, tr(keys::Q_PREFS_TURN_OFF)))
+        .child(self.twofa_form_buttons(cx, TwofaForm::Password(PasswordForm::Disable), tr(keys::Q_PREFS_TURN_OFF)))
     }
 
     /// Slice A2: recovery-email form — current password + new address
@@ -329,7 +338,7 @@ impl QuillApp {
                 .child(tr(keys::Q_PREFS_THE_CHANGE_STAYS_PENDING_UNTIL)),
         )
         .child(self.twofa_forgot_link(cx))
-        .child(self.twofa_form_buttons(cx, TwofaView::Email, tr(keys::SETTINGS_SAVE)))
+        .child(self.twofa_form_buttons(cx, TwofaForm::Email, tr(keys::SETTINGS_SAVE)))
     }
 
     /// Slice A2: the shared submit/back row for the 2FA forms. Submit
@@ -339,16 +348,14 @@ impl QuillApp {
     pub(in crate::ui) fn twofa_form_buttons(
         &self,
         cx: &mut Context<Self>,
-        form: TwofaView,
+        form: TwofaForm,
         submit_label: &'static str,
     ) -> Div {
         let submit_id = match form {
-            TwofaView::Enable => "twofa-submit-enable",
-            TwofaView::Change => "twofa-submit-change",
-            TwofaView::Disable => "twofa-submit-disable",
-            TwofaView::Email => "twofa-submit-email",
-            // These views draw their own buttons and never call this.
-            TwofaView::Status | TwofaView::Recover | TwofaView::LoginEmail => return div(),
+            TwofaForm::Password(PasswordForm::Enable) => "twofa-submit-enable",
+            TwofaForm::Password(PasswordForm::Change) => "twofa-submit-change",
+            TwofaForm::Password(PasswordForm::Disable) => "twofa-submit-disable",
+            TwofaForm::Email => "twofa-submit-email",
         };
         div()
             .flex()
@@ -364,14 +371,10 @@ impl QuillApp {
                     .child(Button::new(submit_id).label(submit_label).ghost().on_click(
                         cx.listener(move |this, _, window, cx| {
                             match form {
-                                TwofaView::Email => this.submit_twofa_email(window, cx),
-                                TwofaView::Enable => {
-                                    this.submit_twofa_password(window, cx, PasswordForm::Enable)
+                                TwofaForm::Email => this.submit_twofa_email(window, cx),
+                                TwofaForm::Password(password) => {
+                                    this.submit_twofa_password(window, cx, password)
                                 }
-                                TwofaView::Change => {
-                                    this.submit_twofa_password(window, cx, PasswordForm::Change)
-                                }
-                                _ => this.submit_twofa_password(window, cx, PasswordForm::Disable),
                             }
                             this.close_kit_dialog_if_done(DialogKind::TwoFa, window, cx);
                         }),
@@ -381,8 +384,7 @@ impl QuillApp {
                             .label(tr(keys::Q_PREFS_BACK))
                             .ghost()
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.clear_twofa_inputs(window, cx);
-                                this.goto_twofa_view(TwofaView::Status);
+                                this.goto_twofa_view(TwofaView::Status, window, cx);
                                 cx.notify();
                             })),
                     ),
