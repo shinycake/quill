@@ -15,10 +15,11 @@ hold what ends it:
 - `bare`: the variant has no data at all;
 - `unkeyed`: the variant has data, but no `RequestId`, `Task`,
   `JoinHandle`, `Subscription`, channel end or deadline (an `Instant`, or a
-  field named `deadline`, `..._at_ms` or `..._at_secs`) in it, or in the
+  field named `deadline`, `retry_at_*`, `commit_at_*` or `*_until_*`) in it, or in the
   types it names. A field typed by one of the enum's own generic
-  parameters (`enum Lifecycle<R> { Running(R) }`) counts: the caller picks
-  the owned handle it stands for, and dropping the stage drops it;
+  parameters (`enum Lifecycle<R> { Running(R) }`) counts, unless the enum is
+  also named with `()` somewhere in `src/` (`Lifecycle<()>`): then the stage
+  holds nothing there;
 - `optional`: the only request in it is an `Option<RequestId>`: a stage
   that is `Loading(None)` until a second call fills the request in is the
   "asked but not sent" flag again. Hold `Idle` until the request exists
@@ -81,7 +82,7 @@ IN_FLIGHT = set(
 CARRIER = re.compile(
     r"\b(?:RequestId|Task|TaskHold|RenderJob|JoinHandle|Subscription|Receiver|Sender|Instant|SystemTime)\b"
     # A deadline held as a number: `commit_at_ms`, `retry_at_secs`, `deadline`.
-    r"|\b(?:deadline|\w+_at_(?:ms|secs))\s*:"
+    r"|\b(?:deadline|(?:retry|commit)_at_\w+|\w+_until_\w+)\s*:"
 )
 OPTIONAL_REQUEST = re.compile(r"Option\s*<\s*(?:[\w:]*::)?RequestId\s*>")
 # Enums that name a message, a reason or a derived view, not a stored stage.
@@ -131,9 +132,9 @@ def carries(data, types, depth=3):
     )
 
 
-def generic_field(data, params):
+def generic_field(data, params, empty):
     """Whether `data` holds a value of one of the enum's generic parameters."""
-    return any(re.search(rf"\b{name}\b", data) for name in params)
+    return not empty and any(re.search(rf"\b{name}\b", data) for name in params)
 
 
 def hits(root):
@@ -167,7 +168,9 @@ def hits(root):
                     yield f"bare:{match.group(1)}::{name}", path, line
                 elif optional and len(optional) == len(re.findall(r"\bRequestId\b", data)):
                     yield f"optional:{match.group(1)}::{name}", path, line
-                elif not carries(data, types) and not generic_field(data, params):
+                elif not carries(data, types) and not generic_field(
+                    data, params, any(re.search(rf"\b{match.group(1)}\s*<\s*\(\s*\)\s*>", t) for _, t in files)
+                ):
                     yield f"unkeyed:{match.group(1)}::{name}", path, line
 
 

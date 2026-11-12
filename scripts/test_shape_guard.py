@@ -338,9 +338,15 @@ class Enums(unittest.TestCase):
                 "pub enum Owned<R = ()> { Idle, Loading { runtime: R }, Running(R) }\n"
                 "pub enum Vague { Idle, Waiting { at: u64 } }\n"
                 "pub enum Plain<R> { Idle, Loading { count: u8 }, Running(R) }\n"
+                "pub enum Empty<R> { Idle, Running(R) }\n"
+                "fn f(_: Empty<()>) {}\n"
+                "pub enum Stamp { Idle, Sent { sent_at_ms: u64 } }\n"
             ),
         }
-        self.assertEqual(keys(enums, files), ["unkeyed:Plain::Loading", "unkeyed:Vague::Waiting"])
+        self.assertEqual(
+            keys(enums, files),
+            ["unkeyed:Empty::Running", "unkeyed:Plain::Loading", "unkeyed:Stamp::Sent", "unkeyed:Vague::Waiting"],
+        )
 
     def test_a_u64_standing_in_for_a_request_id_fails(self):
         files = {

@@ -10242,13 +10242,13 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 | 06-005, g-469..g-471 | `Lifecycle::Waiting { streak, since }` (the widget waiting longest starts first). The guard counts a field typed by one of the enum's own generic parameters as the owned handle (`Loading { runtime: R }`, `Running(R)`). |
 | 06-010, g-472 | `Neighbour::Asking { gateway, since }`: a gateway that never answers is asked again after `RESOLVE_AGAIN_AFTER`. |
 | 06-011, g-447 | `BackgroundStatus::Connecting { since }`: a start that stays there past `CONNECT_GIVE_UP` is `Failed` and started again. |
-| g-460, 06-008 | `new_chat::ViewState::Waiting(requests)` carries the requests of the stage. `GiftsLayout` is `GiftsLayoutView`, `OwnLinkState` is `OwnLinkView` (both are worked out on each draw). |
+| g-460, 06-008 | `new_chat::ViewState` is `StepView` (a view worked out on each draw; `TypeSaveStage::Saving(requests)` and `NewChatStage::Creating` own the requests). `GiftsLayout` is `GiftsLayoutView`, `OwnLinkState` is `OwnLinkView` (both are worked out on each draw). |
 | 06-006, g-465 | `Dnd::Refreshing { last, _worker }` holds the worker. |
 | 06-013 | `TrustFile::SaveFailed { reason, retry_at_ms }`: a failed write of the trusted Star prices is tried again by `paid_trust_tick` after `TRUST_RETRY_MS`. |
 | 06-009, g-455, 06-001 | `PaidStage::Waiting { commit_at_ms }` (the deadline left `PendingPaid`). `PaidStage::Stuck { settle, retry_at_ms, tries }` is sent again (the commit that failed, or the undo that was refused) on a doubling wait, `MAX_TRIES` times, then let go; `Undoing { request, tries }` keeps the count across a refused resend. The user is told once. |
 | 06-012 | The Linux idle sampler is one `Sampler` stage: `Running { last_read_ms, _thread }`. The thread ends itself under the same lock reads take, so no read lands between its check and its exit. |
 | g-454 | See g-460. |
-| 06-007, g-468 | `GiftsRest::Waiting { at, offset }` holds its deadline; the guard counts a field named `at`, `deadline` or `..._at_ms` as a deadline. |
+| 06-007, g-468 | `GiftsRest::Waiting { retry_at_secs, offset }` holds its deadline; the guard counts a field named `deadline`, `retry_at_*`, `commit_at_*` or `*_until_*` as a deadline. |
 | g-479, g-478 | The test-only last target is a `Cell`, not a `RefCell`. |
 | 06-002, g-467 | `GiftValueStage::Loading(RequestId)`. |
 | g-462 | `LimitNotice::Box { over }` (how far over the limit; it was `extra`, which the guard reads as an `@extra`). |
@@ -10258,6 +10258,6 @@ orders), `deep_link_routes_tests` (seek stays with its account).
 | 06-004, g-473 | `Rotation::Probing { id, request, .. }`: the rotation leaves `Disconnected` when the ping's send went out (`probe_sent`), and the probe is out only while the slot is `Checking` under that request. |
 | g-464 | `BadgeStage::Pending { count, since }`: a push the platform never answers is pushed again after `PENDING_GIVES_UP_AFTER`. |
 
-Guards: `check-stage-enums.py` counts a field typed by one of the enum's own generic parameters as a carrier, and a field named `at`, `deadline` or `..._at_ms`/`..._at_secs` as a deadline. Allow lines removed with their shapes: `GlyphSave`, `StreamStage`, `BadgeStage::Pending`, `Stage::Writing`; the `WithdrawalState::Pending` line now names only `src/earn/revenue.rs`.
+Guards: `check-stage-enums.py` counts a field typed by one of the enum's own generic parameters as a carrier (not when the enum is also written `Name<()>` in `src/`, so `DeviceRun::Running` stays reported), and a field named `deadline`, `retry_at_*`, `commit_at_*` or `*_until_*` as a deadline. Allow lines removed with their shapes: `GlyphSave`, `StreamStage`, `BadgeStage::Pending`, `Stage::Writing`; the `WithdrawalState::Pending` line now names only `src/earn/revenue.rs`.
 
 Tests: `location_picker::picker_tests` (typing before a place, a new place stops the lookup), `paid_reaction::tests` (resend, let go, refused undo), `connect::tests::sweep_s3_payments_1`, `notify_accounts::tests` (give up), `net_watch::tests` (asked again), `proxy::tests` (probe by request), `icon_badge` (hung push), `paid_messages` (trust retry), `media_session::worker`.

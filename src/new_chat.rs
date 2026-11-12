@@ -201,10 +201,10 @@ pub enum CreationOutcome {
 /// What the step is doing: nothing, a request of its own out (the confirm
 /// button waits), or the refusal of the create it returned from.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ViewState {
+pub enum StepView {
     Idle,
-    /// The requests of the stage the step is showing.
-    Waiting(Vec<RequestId>),
+    /// A request of the stage the step is showing is out; the stage owns it.
+    Waiting,
     Refused {
         failure: CreateFailure,
         reason: String,
@@ -215,19 +215,19 @@ pub enum ViewState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NewChatView {
     pub step: NewChatStep,
-    pub state: ViewState,
+    pub state: StepView,
 }
 
 impl NewChatView {
     /// A request of this step is out: its confirm button waits.
     pub fn busy(&self) -> bool {
-        matches!(self.state, ViewState::Waiting(_))
+        matches!(self.state, StepView::Waiting)
     }
 
     /// The refused create, shown on the step it returned to.
     pub fn failure(&self) -> Option<(CreateFailure, &str)> {
         match &self.state {
-            ViewState::Refused { failure, reason } => Some((*failure, reason)),
+            StepView::Refused { failure, reason } => Some((*failure, reason)),
             _ => None,
         }
     }
@@ -236,15 +236,15 @@ impl NewChatView {
 pub fn view(stage: &NewChatStage) -> NewChatView {
     let plain = |step| NewChatView {
         step,
-        state: ViewState::Idle,
+        state: StepView::Idle,
     };
     match stage {
         NewChatStage::Info => plain(NewChatStep::Info),
         NewChatStage::AutoDelete => plain(NewChatStep::AutoDelete),
         NewChatStage::Members => plain(NewChatStep::Members),
-        NewChatStage::Creating { back, request } => NewChatView {
+        NewChatStage::Creating { back, .. } => NewChatView {
             step: back.step(),
-            state: ViewState::Waiting(vec![*request]),
+            state: StepView::Waiting,
         },
         NewChatStage::Created(chat) => plain(NewChatStep::Done(*chat)),
         NewChatStage::CreateRefused {
@@ -253,7 +253,7 @@ pub fn view(stage: &NewChatStage) -> NewChatView {
             reason,
         } => NewChatView {
             step: back.step(),
-            state: ViewState::Refused {
+            state: StepView::Refused {
                 failure: *failure,
                 reason: reason.clone(),
             },
@@ -262,8 +262,8 @@ pub fn view(stage: &NewChatStage) -> NewChatView {
         NewChatStage::Type { chat, save } => NewChatView {
             step: NewChatStep::Type(*chat),
             state: match save {
-                TypeSaveStage::Saving(requests) => ViewState::Waiting(requests.clone()),
-                _ => ViewState::Idle,
+                TypeSaveStage::Saving(_) => StepView::Waiting,
+                _ => StepView::Idle,
             },
         },
         NewChatStage::Subscribers { chat } => plain(NewChatStep::Subscribers(*chat)),
