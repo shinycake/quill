@@ -198,8 +198,9 @@ struct State {
     failed: HashMap<FileId, PathBuf>,
     /// The sweep waiting out [`RELEASE_AFTER`], held here so it ends with
     /// the state, with the time it is due; `None` while none is armed. One
-    /// whose time has passed counts as spent, so a missed clear cannot keep
-    /// a new sweep from being armed.
+    /// a whole [`RELEASE_AFTER`] past due counts as spent (the one due now
+    /// may be running), so a missed clear cannot keep a new sweep from
+    /// being armed.
     timer: Option<(Instant, Task<()>)>,
     /// The history list rendered since the last app frame began.
     history_listed: bool,
