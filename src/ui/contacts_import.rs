@@ -49,7 +49,7 @@ impl ImportStage {
     pub(crate) fn state(&self) -> Cow<'_, VcardImport> {
         match self {
             Self::Showing(state) | Self::Choosing { before: state, .. } => Cow::Borrowed(state),
-            Self::Reading { file_name, .. } => Cow::Owned(VcardImport::Reading {
+            Self::Reading { file_name, .. } => Cow::Owned(VcardImport::Picked {
                 file_name: file_name.clone(),
             }),
         }
@@ -251,7 +251,7 @@ impl QuillApp {
                         cx,
                     )));
             }
-            VcardImport::Reading { file_name } => {
+            VcardImport::Picked { file_name } => {
                 body = body.child(note(
                     tr_with(keys::Q_PEOPLE_IMPORT_READING, &[("file", file_name)]),
                     text_muted(),

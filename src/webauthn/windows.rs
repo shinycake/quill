@@ -176,7 +176,7 @@ enum Cancellation {
     #[default]
     Idle,
     /// A call is in flight, with its id when the DLL gave one.
-    InFlight(Option<GUID>),
+    Active(Option<GUID>),
     /// Cancel was pressed; a call not started yet never starts.
     Cancelled,
 }
@@ -200,14 +200,14 @@ fn begin(api: &Api, slot: &CancelSlot) -> Result<Option<GUID>, CeremonyError> {
     if matches!(*state, Cancellation::Cancelled) {
         return Err(CeremonyError::Cancelled);
     }
-    *state = Cancellation::InFlight(id);
+    *state = Cancellation::Active(id);
     Ok(id)
 }
 
 /// After a call: nothing left to cancel.
 fn end(slot: &CancelSlot) {
     if let Ok(mut state) = slot.lock()
-        && matches!(*state, Cancellation::InFlight(_))
+        && matches!(*state, Cancellation::Active(_))
     {
         *state = Cancellation::Idle;
     }
@@ -217,7 +217,7 @@ fn end(slot: &CancelSlot) {
 fn cancel(slot: &CancelSlot) {
     let id = match slot.lock() {
         Ok(mut state) => match std::mem::replace(&mut *state, Cancellation::Cancelled) {
-            Cancellation::InFlight(id) => id,
+            Cancellation::Active(id) => id,
             Cancellation::Idle | Cancellation::Cancelled => None,
         },
         Err(_) => None,

@@ -113,7 +113,7 @@ pub(crate) enum Assembly {
     #[default]
     Idle,
     /// An initialization packet came; continuation packets fill `data`.
-    Reading {
+    Partial {
         cmd: u8,
         total: usize,
         data: Vec<u8>,
@@ -141,7 +141,7 @@ impl Assembly {
                 return Err(HidError::Protocol("short init packet"));
             };
             let total = usize::from(u16::from_be_bytes(*len));
-            *self = Self::Reading {
+            *self = Self::Partial {
                 cmd: kind & 0x7F,
                 total,
                 data: data
@@ -151,7 +151,7 @@ impl Assembly {
                 next_seq: 0,
             };
         } else {
-            let Self::Reading {
+            let Self::Partial {
                 total,
                 data,
                 next_seq,
@@ -167,7 +167,7 @@ impl Assembly {
             let want = total.saturating_sub(data.len());
             data.extend_from_slice(body.get(..want.min(body.len())).unwrap_or_default());
         }
-        if let Self::Reading {
+        if let Self::Partial {
             cmd, total, data, ..
         } = self
             && data.len() >= *total

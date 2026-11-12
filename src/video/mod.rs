@@ -387,8 +387,9 @@ pub struct Extraction(std::sync::Mutex<ExtractionStage>);
 enum ExtractionStage {
     /// Not started, or the worker has not published its child yet.
     #[default]
-    Starting,
-    Running(std::process::Child),
+    NoChild,
+    /// The worker published its child; `cancel` kills and reaps it.
+    Spawned(std::process::Child),
     /// Abandoned: a child still to be published is killed on arrival, and
     /// the worker reports the cancellation.
     Cancelled,
@@ -404,7 +405,7 @@ impl Extraction {
     /// Abandon the run: a running ffmpeg is killed and reaped.
     pub fn cancel(&self) {
         let mut stage = self.stage();
-        if let ExtractionStage::Running(mut child) =
+        if let ExtractionStage::Spawned(mut child) =
             std::mem::replace(&mut *stage, ExtractionStage::Cancelled)
         {
             let _ = child.kill();
@@ -419,7 +420,7 @@ impl Extraction {
     /// An ffmpeg is running (tests).
     #[cfg(test)]
     fn is_running(&self) -> bool {
-        matches!(*self.stage(), ExtractionStage::Running(_))
+        matches!(*self.stage(), ExtractionStage::Spawned(_))
     }
 }
 
@@ -449,11 +450,11 @@ fn wait_for_cancelable_child(
             let _ = child.wait();
             return Err(EXTRACTION_CANCELLED.to_string());
         }
-        *stage = ExtractionStage::Running(child);
+        *stage = ExtractionStage::Spawned(child);
     }
     loop {
         let mut stage = extraction.stage();
-        let ExtractionStage::Running(child) = &mut *stage else {
+        let ExtractionStage::Spawned(child) = &mut *stage else {
             // Cancelled: the killer took the child and reaped it. (The UI
             // drops stale completions by epoch instead of showing an
             // error.)
@@ -461,7 +462,7 @@ fn wait_for_cancelable_child(
         };
         match child.try_wait() {
             Ok(Some(status)) => {
-                *stage = ExtractionStage::Starting;
+                *stage = ExtractionStage::NoChild;
                 return Ok(status);
             }
             Ok(None) => {}
@@ -469,7 +470,7 @@ fn wait_for_cancelable_child(
                 // The child cannot be polled: stop it and reap it here.
                 let _ = child.kill();
                 let _ = child.wait();
-                *stage = ExtractionStage::Starting;
+                *stage = ExtractionStage::NoChild;
                 return Err(err.to_string());
             }
         }

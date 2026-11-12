@@ -760,8 +760,28 @@ impl VoiceFinish {
 }
 
 impl Drop for VoiceCapture {
+    /// A capture dropped without `finish`, `close_microphone` or `discard`
+    /// (the account switched, the composer went, Quill quit while
+    /// recording) belongs to nobody: its file goes once the encoder ends,
+    /// like a video note's. A fixture's file is kept, and one handed on
+    /// (its path taken) is not ours.
     fn drop(&mut self) {
-        let _detached_encoder = self.stop_mic();
+        let fixture = self.is_fixture();
+        let worker = self.stop_mic();
+        let path = std::mem::take(&mut self.path);
+        if fixture || path.as_os_str().is_empty() {
+            return;
+        }
+        if worker.is_none() {
+            let _ = fs::remove_file(&path);
+            return;
+        }
+        // The encoder is still writing the file: let it end first, off
+        // this thread (joining waits on the disk).
+        let _ = crate::thread_guard::spawn_guarded("quill-voice-discard", move || {
+            let _ = join_worker(worker);
+            let _ = fs::remove_file(&path);
+        });
     }
 }
 
@@ -842,6 +862,37 @@ pub fn voice_file_ready(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scratch_file(name: &str) -> PathBuf {
+        let path = crate::scratch::unique_dir("quill-voice-drop").join(name);
+        fs::write(&path, b"ogg").expect("write the file");
+        path
+    }
+
+    #[test]
+    fn a_capture_dropped_without_an_end_removes_its_file() {
+        let path = scratch_file("lost.ogg");
+        let capture = VoiceCapture {
+            path: path.clone(),
+            source: Source::Closed,
+            bars: Vec::new(),
+            levels: Arc::default(),
+        };
+        drop(capture);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn a_fixture_capture_and_a_handed_on_file_are_kept() {
+        let path = scratch_file("fixture.ogg");
+        drop(VoiceCapture::preview(path.clone(), 5, Vec::new()));
+        assert!(path.exists(), "a fixture's file is kept");
+        let finished = VoiceCapture::preview(path.clone(), 5, Vec::new())
+            .close_microphone()
+            .complete();
+        assert!(finished.is_ok());
+        assert!(path.exists(), "a finished capture's file is the draft's");
+    }
 
     #[cfg(feature = "ui")]
     #[test]

@@ -64,6 +64,13 @@ impl RestTimer {
     }
 }
 
+/// Give the thread back for `gap` between two passes that have work (a
+/// throttle, not a wait for anything: an idle loop rests on its signal
+/// instead).
+async fn throttle(executor: &BackgroundExecutor, gap: Duration) {
+    executor.timer(gap).await;
+}
+
 /// What a pass of a poll loop left for the next one.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PassEnd {
@@ -134,7 +141,7 @@ pub(super) async fn run_poll_loop(
         match pace.next(end, signal.epoch() != seen) {
             NextPass::Yield(gap) => {
                 held.get_or_insert_with(&hold);
-                executor.timer(gap).await;
+                throttle(&executor, gap).await;
             }
             NextPass::Rest(longest) => {
                 held = None;
@@ -145,7 +152,7 @@ pub(super) async fn run_poll_loop(
                 if !gap.is_zero() {
                     // A poke cut the rest short, so its update waits out the gap.
                     held.get_or_insert_with(&hold);
-                    executor.timer(gap).await;
+                    throttle(&executor, gap).await;
                 }
             }
         }

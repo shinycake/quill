@@ -40,7 +40,9 @@ pub struct VcardPreview {
 pub enum VcardImport {
     #[default]
     Empty,
-    Reading {
+    /// A file was picked and is being read (the import dialog's stage
+    /// holds the read's task).
+    Picked {
         file_name: String,
     },
     Ready(VcardPreview),
