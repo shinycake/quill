@@ -178,9 +178,10 @@ impl Session {
             }
             (true, false) => Some(AddPeopleEmpty::NoResults),
         };
-        let contacts = if !query.is_empty() || !contacts.is_empty() {
-            ContactsView::Ready
-        } else if self.users_state.contacts.data().is_some() {
+        let contacts = if !query.is_empty()
+            || !contacts.is_empty()
+            || self.users_state.contacts.data().is_some()
+        {
             ContactsView::Ready
         } else if self.users_state.contacts.error().is_some() {
             ContactsView::Failed

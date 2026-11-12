@@ -37,14 +37,12 @@ impl QuillApp {
                 .push(BackgroundClient { key, stage, unread });
         } else {
             self.close_live_later(live, !status.stops_client(), cx);
-            if status.stops_client() {
-                if let Some(down) = Down::of(&status) {
-                    self.background.clients_mut().push(BackgroundClient {
-                        key,
-                        stage: ClientStage::Down(down),
-                        unread: AccountUnread::default(),
-                    });
-                }
+            if let Some(down) = Down::of(&status) {
+                self.background.clients_mut().push(BackgroundClient {
+                    key,
+                    stage: ClientStage::Down(down),
+                    unread: AccountUnread::default(),
+                });
             }
         }
     }
