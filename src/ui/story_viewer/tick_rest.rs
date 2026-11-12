@@ -1,28 +1,30 @@
-//! One wake of the story viewer's 100 ms tick, and when the tick rests.
+//! One frame of the story viewer's clock, and when the clock rests.
 //!
-//! A story that is held (Space, a panel over it, the window behind another
-//! app) moves nothing, so its tick has nothing to do unless something it
-//! polls for is still out. Then it ends instead of waking every 100 ms; what
-//! resumes the story starts it again.
+//! The viewer runs on the frame clock (`QuillApp::request_app_tick`), not on
+//! a timer: a frame only comes while the window is shown. Each frame's
+//! upkeep moves the story on; the upkeep asks for the next frame only while
+//! something moves. A story that is held (Space, a panel over it, the window
+//! behind another app) moves nothing, so it asks for nothing unless a load
+//! or a download it waits on is really out. Then the clock stops; what
+//! resumes the story asks again.
 #![deny(clippy::indexing_slicing)]
 
 use super::*;
+use quill::state::CloseFriendsList;
 use quill::story_extras::CloseFriendsStage;
 
-/// What a wake of the tick found.
-pub(super) enum Wake {
-    /// The viewer is closed: the tick is over.
-    Closed,
-    /// The story is held and nothing is waited on: the tick ends.
-    Rests,
-    /// Wake again in 100 ms.
-    Goes,
-}
+/// The viewer's frames a second (`kPhotoProgressInterval`: 100 ms).
+pub(in crate::ui) const STORY_TICK_FPS: u32 = 10;
 
 impl QuillApp {
-    pub(super) fn story_tick_wake(&mut self, cx: &mut Context<Self>) -> Wake {
+    /// One frame of the viewer, from the main window's upkeep: update the
+    /// pause state, advance the story when its time is over, and ask for the
+    /// next frame while something moves.
+    pub(in crate::ui) fn story_viewer_upkeep(&mut self, cx: &mut Context<Self>) {
         if !self.stories.viewer.is_open() {
-            return Wake::Closed;
+            self.stories.playback.stop();
+            self.stories.emoji_warm = None;
+            return;
         }
         let now = Instant::now();
         // B14: the native player drives video stories;
@@ -55,70 +57,84 @@ impl QuillApp {
             open.stealth_toast = None;
             changed = true;
         }
-        // Only the overlay shows what a tick advances, and a paused one
+        if !self.stories.viewer.is_open() {
+            self.stories.playback.stop();
+            self.stories.emoji_warm = None;
+            return;
+        }
+        // Only the overlay shows what a frame advances, and a paused one
         // (Space, a panel over it, the window behind another app) shows
         // nothing new: what pauses or resumes it redraws it itself. A live
-        // story keeps moving under a pause, and a toast on screen is
-        // waiting for its end.
+        // story on screen keeps moving under a pause, and a toast on screen
+        // is waiting for its end.
         let still = user_paused
-            && self.stories.live.watching().is_none()
+            && self.live_story_shown().is_none()
             && self.stories.viewer_ui().stealth_toast.is_none();
         if changed || !still {
-            self.notify_story(cx);
+            self.notify_story_slice(cx);
         }
-        if !self.stories.viewer.is_open() {
-            Wake::Closed
-        } else if self.story_tick_rests() {
-            Wake::Rests
-        } else {
-            Wake::Goes
+        if !self.story_tick_rests() {
+            self.request_app_tick(STORY_TICK_FPS, cx);
         }
     }
 
-    /// Whether the tick has nothing to do: the story is held and nothing the
-    /// tick polls for is out.
+    /// Whether the clock has nothing to do: the story is held and nothing it
+    /// follows is really out.
     pub(super) fn story_tick_rests(&self) -> bool {
         self.story_playback_paused()
-            && self.stories.live.watching().is_none()
-            && self.live_story_target().is_none()
-            && !matches!(
-                self.stories.viewer_ui().close_friends(),
-                CloseFriendsStage::Awaiting | CloseFriendsStage::Saving { .. }
-            )
+            && !self.story_live_moves()
+            && !self.story_close_friends_out()
             && self.stories.viewer_ui().stealth_toast.is_none()
             && !self.story_custom_emoji_warming()
     }
 
-    /// A redraw of a held story whose tick has ended found something to
-    /// wait on (the window became active, a panel closed): start it again.
-    pub(in crate::ui) fn wake_story_tick_if_due(&mut self, cx: &mut Context<Self>) {
-        if !self.stories.tick.is_running() && !self.story_tick_rests() {
-            self.ensure_story_tick(cx);
+    /// A live story is watched, or one is due to be joined (not one that was
+    /// refused: only its "Join live" button asks again).
+    fn story_live_moves(&self) -> bool {
+        if self.stories.live.watching().is_some() {
+            return true;
+        }
+        self.live_story_target()
+            .is_some_and(|target| self.stories.live.refused() != Some(target))
+    }
+
+    /// The close-friends panel waits on a save, or on a load that is out.
+    fn story_close_friends_out(&self) -> bool {
+        match self.stories.viewer_ui().close_friends() {
+            CloseFriendsStage::Saving { .. } => true,
+            CloseFriendsStage::Awaiting => self.session().is_some_and(|session| {
+                matches!(
+                    session.stories.close_friends,
+                    CloseFriendsList::Loading { .. }
+                )
+            }),
+            _ => false,
         }
     }
 
-    /// Whether a custom emoji the reaction picker or badge shows is still to
-    /// be fetched or downloaded.
+    /// Whether a custom emoji the reaction picker or badge shows has its
+    /// file on the way. A sticker the server does not know, or a file whose
+    /// download is not running, is not waited on: the next redraw retries
+    /// them (`warm_story_custom_emoji` keeps the backoff).
     fn story_custom_emoji_warming(&self) -> bool {
-        let ids = self.story_custom_emoji_fetch_ids();
         let Some(session) = self.session() else {
             return false;
         };
-        ids.iter().any(|id| {
-            let file = session
+        self.story_custom_emoji_fetch_ids().iter().any(|id| {
+            session
                 .stories
                 .custom_emoji_stickers
                 .get(id)
                 .and_then(|sticker| sticker.display_file_id())
-                .filter(|file| file.0 != 0);
-            match file {
-                None => true,
-                Some(file) => session
-                    .media
-                    .files
-                    .get(&file.0)
-                    .is_none_or(|file| file.usable_path().is_none()),
-            }
+                .filter(|file| file.0 != 0)
+                .is_some_and(|file| {
+                    session.media.downloads.is_requested(file.0)
+                        || session
+                            .media
+                            .files
+                            .get(&file.0)
+                            .is_some_and(|file| file.local.is_downloading_active())
+                })
         })
     }
 }
