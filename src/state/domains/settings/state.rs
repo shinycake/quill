@@ -100,6 +100,15 @@ impl ReadDate {
     }
 }
 
+/// Who asked for a block. Only the Privacy page's own block (and unblock)
+/// starts the wait of its block-list note; a block from a chat bar leaves
+/// the note alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockOrigin {
+    PrivacyPage,
+    ChatBar,
+}
+
 /// The device-link round trip (`confirmQrCodeAuthentication`). The page
 /// lock is `sessions_op`'s; this holds the request the screen that sent it
 /// waits for and then how it ended. `Waiting` leaves on that request's

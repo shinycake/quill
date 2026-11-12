@@ -8,6 +8,7 @@ use crate::settings::{
     load_preferences, save_badge_prefs, save_call_prefs, save_device_prefs, save_language_prefs,
     save_preferences,
 };
+use crate::state::BlockOrigin;
 use crate::state::RequestPurpose;
 use crate::state::SettingsPurpose;
 use crate::telegram::envelope::{
@@ -233,7 +234,13 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// Slice S3: block a user (`setMessageSenderBlockList` with
     /// `blockListMain`, schema 1.8.67, :14492). Applied optimistically:
     /// the user joins the list at send time.
-    pub fn block_sender(&mut self, user_id: i64) -> Result<RequestId, ConnectSendError> {
+    /// `origin` says who asked: only the Privacy page's own block starts
+    /// the block-list note's wait.
+    pub fn block_sender(
+        &mut self,
+        user_id: i64,
+        origin: BlockOrigin,
+    ) -> Result<RequestId, ConnectSendError> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
@@ -244,16 +251,20 @@ impl<S: JsonSender> ConnectDriver<S> {
             }),
             None,
         );
-        self.session.settings.block_note.begin(extra);
+        if origin == BlockOrigin::PrivacyPage {
+            self.session.settings.block_note.begin(extra);
+        }
         if let Err(err) = self
             .sender
             .send_json(&set_message_sender_block_list(extra, user_id, true))
         {
             self.session.requests.take(extra);
-            self.session
-                .settings
-                .block_note
-                .refused(None, "The block request was not sent.");
+            if origin == BlockOrigin::PrivacyPage {
+                self.session
+                    .settings
+                    .block_note
+                    .refused(None, "The block request was not sent.");
+            }
             return Err(err);
         }
         let blocked = &mut self.session.settings.blocked_senders;

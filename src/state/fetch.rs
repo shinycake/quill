@@ -87,52 +87,74 @@ impl ListOp {
 }
 
 /// The refusal of a change to a fetched list (a block, a terminate, a mask
-/// reorder), shown beside the list. It belongs to the change's own request:
-/// the note holds the request it waits for, and only that request's refusal
-/// lands. The list's fetch is never touched by it, so a page or refetch in
-/// flight still answers and the list is never turned into `Failed` by a
-/// refused change. The next change starts a new wait; the screen's farewell
-/// drops the note to `Idle`, so a refusal that arrives after the screen was
-/// left lands nowhere.
+/// reorder), shown beside the list. It belongs to the changes' own
+/// requests: the note holds every request it was given (several changes can
+/// be out at once), and the refusal of any of them lands, matched by its
+/// `RequestId`. The list's fetch is never touched by it, so a page or
+/// refetch in flight still answers and the list is never turned into
+/// `Failed` by a refused change. The next change adds a wait and takes the
+/// shown line away; the screen's farewell drops everything to `Idle`, so a
+/// refusal that arrives after the screen was left lands nowhere.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum ChangeNote {
     /// No change is out and no refusal is shown.
     #[default]
     Idle,
-    /// A change went out as `request`; its refusal will be shown.
-    Waiting { request: crate::ids::RequestId },
-    /// The change was refused: `text` is shown.
-    Refused { text: String },
+    /// Changes went out as `requests`; the refusal of any will be shown.
+    Waiting {
+        requests: Vec<crate::ids::RequestId>,
+    },
+    /// A change was refused: `text` is shown; `waiting` are the changes
+    /// still out.
+    Refused {
+        text: String,
+        waiting: Vec<crate::ids::RequestId>,
+    },
 }
 
 impl ChangeNote {
-    /// A change goes out as `request`; any shown refusal goes.
+    fn held(&self) -> Vec<crate::ids::RequestId> {
+        match self {
+            Self::Idle => Vec::new(),
+            Self::Waiting { requests } => requests.clone(),
+            Self::Refused { waiting, .. } => waiting.clone(),
+        }
+    }
+
+    /// A change goes out as `request`; any shown refusal goes, the changes
+    /// already out stay waited for.
     pub fn begin(&mut self, request: crate::ids::RequestId) {
-        *self = Self::Waiting { request };
+        let mut requests = self.held();
+        requests.push(request);
+        *self = Self::Waiting { requests };
     }
 
     /// `request` (a change) was refused; `None` when it never left. A
     /// refusal of a request the note does not hold lands nowhere.
     pub fn refused(&mut self, request: Option<crate::ids::RequestId>, line: impl Into<String>) {
-        let held = match (&*self, request) {
-            (_, None) => true,
-            (Self::Waiting { request: waiting }, Some(asked)) => *waiting == asked,
-            _ => false,
-        };
-        if held {
-            *self = Self::Refused { text: line.into() };
+        let mut waiting = self.held();
+        if let Some(asked) = request {
+            let before = waiting.len();
+            waiting.retain(|id| *id != asked);
+            if waiting.len() == before {
+                return;
+            }
         }
+        *self = Self::Refused {
+            text: line.into(),
+            waiting,
+        };
     }
 
-    /// The line to show, if the last change was refused.
+    /// The line to show, if a change was refused.
     pub fn line(&self) -> Option<&str> {
         match self {
-            Self::Refused { text } => Some(text.as_str()),
+            Self::Refused { text, .. } => Some(text.as_str()),
             _ => None,
         }
     }
 
-    /// The owner dismisses the line or its screen is left.
+    /// The owner dismisses the line or its screen is left: every wait goes.
     pub fn clear(&mut self) {
         *self = Self::Idle;
     }
