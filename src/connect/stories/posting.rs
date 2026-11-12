@@ -8,7 +8,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         let purpose = RequestPurpose::GetCloseFriends;
-        if self.session.requests.has_purpose(purpose) {
+        if self.session.stories.close_friends.is_loading() {
             return Ok(None);
         }
         let extra = self.session.request(purpose, None);
@@ -353,11 +353,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetChatsToPostStories)
-        {
+        if self.session.stories.post_as.is_loading() {
             return Ok(None);
         }
         let extra = self

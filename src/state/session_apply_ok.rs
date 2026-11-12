@@ -327,12 +327,18 @@ impl Session {
             Some(RequestPurpose::AddFavoriteSticker | RequestPurpose::RemoveFavoriteSticker)
         ) {
             self.stickers.stickers.favorites.clear();
+            // A fetch out from before the change would carry the old list.
+            self.stickers.stickers.lists.favorites = crate::state::fetch::Fetch::Idle;
         }
         if matches!(
             pending.map(|p| p.purpose),
             Some(RequestPurpose::ClearRecentStickers)
         ) {
             self.stickers.stickers.recent.clear();
+            self.stickers.stickers.lists.recent = crate::state::fetch::Fetch::Idle;
+        }
+        if let Some(pending) = pending {
+            self.stickers.stickers.changes.settled(pending.id);
         }
         if matches!(
             pending.map(|p| p.purpose),
@@ -360,6 +366,7 @@ impl Session {
             }
             self.stickers.stickers.sets.clear();
             self.stickers.stickers.lists.installed = crate::state::fetch::Fetch::Idle;
+            self.stickers.stickers.lists.archived = crate::state::fetch::Fetch::Idle;
             self.stickers.stickers.archived.clear();
             self.stickers.stickers.archived_has_more = false;
             self.stickers.stickers.archived_next_offset = 0;

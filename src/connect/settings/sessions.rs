@@ -53,10 +53,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if (self.session.settings.sessions.data().is_some()
             && !self.session.settings.sessions_op.is_stale())
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetActiveSessions)
+            || self.session.settings.sessions.is_loading()
         {
             return Ok(None);
         }
@@ -170,15 +167,20 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         self.session.settings.account_ttl.clear_error();
         let extra = self.session.request(RequestPurpose::DeleteAccount, None);
-        self.session.settings.account_delete.begin();
+        self.session.settings.account_delete.clear_error();
         match self
             .sender
             .send_json(&delete_account(extra, reason, password))
         {
-            Ok(()) => Ok(extra),
+            Ok(()) => {
+                // Only a request that went out is waited for.
+                let delete = &mut self.session.settings.account_delete;
+                delete.begin();
+                delete.sent(extra);
+                Ok(extra)
+            }
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.settings.account_delete.cancel();
                 Err(err)
             }
         }
@@ -388,10 +390,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if (self.session.settings.connected_websites.data().is_some()
             && !self.session.settings.websites_op.is_stale())
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetConnectedWebsites)
+            || self.session.settings.connected_websites.is_loading()
         {
             return Ok(None);
         }

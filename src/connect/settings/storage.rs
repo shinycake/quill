@@ -12,12 +12,7 @@ impl<S: JsonSender> ConnectDriver<S> {
     pub fn maybe_fetch_storage_statistics(
         &mut self,
     ) -> Result<Option<RequestId>, ConnectSendError> {
-        if !self.session.settings.storage_stats.can_ask()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetStorageStatistics)
-        {
+        if !self.session.settings.storage_stats.can_ask() {
             return Ok(None);
         }
         // A refused ask ends in the failure the usage list draws with its
@@ -56,10 +51,14 @@ impl<S: JsonSender> ConnectDriver<S> {
     /// data yet." until the old answer lands (late answers to the dropped
     /// `@extra` are ignored by the purpose match).
     pub fn refresh_storage_statistics(&mut self) {
-        self.session.settings.storage_stats = Default::default();
-        self.session
-            .requests
-            .take_purpose(RequestPurpose::GetStorageStatistics);
+        let dropped = std::mem::take(&mut self.session.settings.storage_stats);
+        if let crate::state::fetch::Fetch::Loading {
+            request: Some(request),
+            ..
+        } = dropped
+        {
+            self.session.requests.take(request);
+        }
     }
 
     /// Slice S4: fetch `getAutoDownloadSettingsPresets` once — only when

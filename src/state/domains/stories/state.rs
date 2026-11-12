@@ -49,6 +49,11 @@ impl CloseFriendsList {
         }
     }
 
+    /// A load is out.
+    pub fn is_loading(&self) -> bool {
+        matches!(self, Self::Loading { .. })
+    }
+
     /// `getCloseFriends` `request` went out.
     pub fn begin_load(&mut self, request: RequestId) {
         let stale = self.take_ids();
@@ -164,6 +169,10 @@ impl ActiveStoriesPaging {
 pub enum CustomEmojiFetch {
     #[default]
     Idle,
+    /// The fetch is out as `request` (after `failures` failures in a row);
+    /// only its own answer or error leaves the stage, and no second fetch
+    /// goes out meanwhile.
+    Asking { request: RequestId, failures: u32 },
     /// It failed `failures` times in a row: no new fetch before `until`,
     /// and `wait` doubles per failure. An answer ends it.
     Backoff {
@@ -179,7 +188,7 @@ impl CustomEmojiFetch {
     pub fn failures(&self) -> u32 {
         match self {
             Self::Idle => 0,
-            Self::Backoff { failures, .. } => *failures,
+            Self::Asking { failures, .. } | Self::Backoff { failures, .. } => *failures,
         }
     }
 
@@ -187,10 +196,45 @@ impl CustomEmojiFetch {
         matches!(self, Self::Backoff { until, .. } if now < *until)
     }
 
-    pub fn failed(&mut self, now: Instant) {
+    /// A fetch is out.
+    pub fn is_asking(&self) -> bool {
+        matches!(self, Self::Asking { .. })
+    }
+
+    /// A fetch went out as `request`.
+    pub fn asked(&mut self, request: RequestId) {
+        *self = Self::Asking {
+            request,
+            failures: self.failures(),
+        };
+    }
+
+    /// `request` answered: the stage returns to idle with no failures. The
+    /// answer of any other request leaves a fetch in flight alone.
+    pub fn answered(&mut self, request: Option<RequestId>) {
+        if let Self::Asking {
+            request: waiting, ..
+        } = self
+            && request != Some(*waiting)
+        {
+            return;
+        }
+        *self = Self::Idle;
+    }
+
+    /// `request` failed at `now`. Another request's error leaves a fetch in
+    /// flight alone.
+    pub fn failed(&mut self, request: Option<RequestId>, now: Instant) {
+        if let Self::Asking {
+            request: waiting, ..
+        } = self
+            && request != Some(*waiting)
+        {
+            return;
+        }
         let previous = match self {
             Self::Backoff { until, wait, .. } => Some((*until, *wait)),
-            Self::Idle => None,
+            Self::Idle | Self::Asking { .. } => None,
         };
         let (until, wait) = next_retry(previous, now);
         *self = Self::Backoff {
@@ -385,8 +429,8 @@ impl StoriesState {
     }
 
     /// The story picker's `getCustomEmojiStickers` failed at `now`.
-    pub fn custom_emoji_fetch_failed(&mut self, now: Instant) {
-        self.custom_emoji_fetch.failed(now);
+    pub fn custom_emoji_fetch_failed(&mut self, request: Option<RequestId>, now: Instant) {
+        self.custom_emoji_fetch.failed(request, now);
     }
 
     /// Whether the next picker fetch still waits out a failed one.

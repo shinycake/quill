@@ -30,7 +30,16 @@ impl<S: JsonSender> ConnectDriver<S> {
                 Ok(())
             }
             Ok(None) => Ok(()),
-            Err(err) => Err(err),
+            Err(err) => {
+                // A refused send ends in the failure the strip draws, so
+                // nothing asks again until the panel opens again.
+                self.session
+                    .stickers
+                    .emoji
+                    .sticker_categories
+                    .fail("could not send the request");
+                Err(err)
+            }
         }
     }
 
@@ -49,12 +58,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             EmojiCategorySource::Premium => String::new(),
             _ => return Err(ConnectSendError::InvalidRequest),
         };
-        // A chosen category replaces whatever the typed search found.
-        drop(
-            self.session
-                .requests
-                .take_purpose(RequestPurpose::SearchStickers),
-        );
+        // A chosen category replaces whatever the typed search found: its
+        // fetch is cancelled, so the earlier answer matches nothing.
+        self.session
+            .stickers
+            .stickers
+            .lists
+            .search_stickers
+            .cancel();
         self.session.stickers.stickers.search =
             crate::state::StickerSearchResults::category(source.clone());
         self.sticker_request(RequestPurpose::SearchStickers, |id| {

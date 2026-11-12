@@ -185,6 +185,10 @@ pub struct StickerSetView {
     /// The box's Add / Remove / Archive of this set: asked, then answered
     /// by TDLib (the box closes on `Done`, says so on `Failed`).
     pub change: SetChangeStage,
+    /// The `getStickerSet` that refreshes the box after an edit, while it
+    /// is out: only its answer or error frees the slot, and no second
+    /// refresh is asked meanwhile.
+    pub refresh: Option<RequestId>,
 }
 
 /// What the set box asked TDLib to do with the viewed set.
@@ -232,6 +236,7 @@ impl StickerSetView {
             stage: StickerSetViewStage::Loading,
             edits: StickerSetEdits::default(),
             change: SetChangeStage::Idle,
+            refresh: None,
         }
     }
 }
@@ -362,10 +367,18 @@ impl Session {
     }
 
     /// The set's contents arrived (`stage` is the `Ready` stage).
-    pub(crate) fn accept_sticker_set_view(&mut self, set_id: i64, stage: StickerSetViewStage) {
+    pub(crate) fn accept_sticker_set_view(
+        &mut self,
+        set_id: i64,
+        request: Option<RequestId>,
+        stage: StickerSetViewStage,
+    ) {
         if let Some(view) = self.stickers.sticker_set_view.as_mut()
             && view.set_id == set_id
         {
+            if view.refresh.is_some() && view.refresh == request {
+                view.refresh = None;
+            }
             view.stage = stage;
             // An edit still in flight (a move applied locally) may have
             // changed the set after this answer was built: ask again once
@@ -377,11 +390,17 @@ impl Session {
     /// The box's load failed. A refetch after an edit (a rename, an add,
     /// a remove) that took is not a failed load: the box keeps what it
     /// shows.
-    pub(crate) fn fail_sticker_set_view(&mut self, set_id: i64) {
-        if let Some(view) = self.stickers.sticker_set_view.as_mut()
-            && view.set_id == set_id
-            && matches!(view.stage, StickerSetViewStage::Loading)
-        {
+    pub(crate) fn fail_sticker_set_view(&mut self, set_id: i64, request: Option<RequestId>) {
+        let Some(view) = self.stickers.sticker_set_view.as_mut() else {
+            return;
+        };
+        if view.set_id != set_id {
+            return;
+        }
+        if view.refresh.is_some() && view.refresh == request {
+            view.refresh = None;
+        }
+        if matches!(view.stage, StickerSetViewStage::Loading) {
             view.stage = StickerSetViewStage::Failed;
         }
     }

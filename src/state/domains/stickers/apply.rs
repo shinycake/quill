@@ -223,7 +223,7 @@ impl Session {
                 } else if purpose == Some(RequestPurpose::GetStoryCustomEmojiStickers) {
                     // Phase 9.2+: story reaction picker visuals — keyed by
                     // sticker id (= custom emoji id).
-                    self.accept_story_custom_emoji_stickers(stickers);
+                    self.accept_story_custom_emoji_stickers(pending.map(|p| p.id), stickers);
                 } else if purpose
                     == Some(RequestPurpose::Stories(StoriesPurpose::Live(
                         LiveStoryPurpose::GetBursts,
@@ -293,6 +293,7 @@ impl Session {
                     self.remember_files(&files);
                     self.accept_sticker_set_view(
                         set_id,
+                        pending.map(|p| p.id),
                         StickerSetViewStage::Ready {
                             title,
                             name,

@@ -192,10 +192,10 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || set_id == 0 {
             return Err(ConnectSendError::InvalidRequest);
         }
-        let purpose = RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { set_id });
-        if self.session.requests.has_purpose(purpose) {
+        if view.refresh.is_some() {
             return Ok(None);
         }
+        let purpose = RequestPurpose::Stickers(StickersPurpose::ViewStickerSet { set_id });
         let extra = self.session.request(purpose, None);
         let sent = self.sender.send_json(&get_sticker_set(extra, set_id));
         if sent.is_err() {
@@ -209,6 +209,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         }
         if let Some(view) = self.session.stickers.sticker_set_view.as_mut() {
             view.edits.refreshed();
+            if sent.is_ok() {
+                view.refresh = Some(extra);
+            }
         }
         sent.map(|()| Some(extra))
     }
@@ -226,11 +229,6 @@ impl<S: JsonSender> ConnectDriver<S> {
         // the other one's send fails; a request out from before the edit is
         // dropped.
         let stickers_sent = if stickers_due {
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::GetInstalledStickerSets),
-            );
             self.sticker_request(
                 RequestPurpose::GetInstalledStickerSets,
                 crate::telegram::requests::get_installed_sticker_sets,
@@ -241,11 +239,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(())
         };
         if emoji_due {
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::GetInstalledEmojiSets),
-            );
             self.emoji_set_request(
                 RequestPurpose::GetInstalledEmojiSets,
                 crate::telegram::requests_emoji::get_installed_emoji_sets,

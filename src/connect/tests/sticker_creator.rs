@@ -434,8 +434,14 @@ fn the_refetch_after_an_edit_replaces_a_list_request_asked_before_it() {
     feed(&mut driver, &seq, &sink, ok(rename));
     driver.sync_sticker_set_view().unwrap();
     assert!(
-        driver.session.requests.get(before).is_none(),
-        "the request asked before the edit is dropped"
+        !driver
+            .session
+            .stickers
+            .stickers
+            .lists
+            .installed
+            .waits_for(before),
+        "the request asked before the edit is not the one the list waits for"
     );
     let asked = recorder
         .snapshot()

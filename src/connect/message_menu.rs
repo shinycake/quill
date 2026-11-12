@@ -592,7 +592,7 @@ impl<S: JsonSender> ConnectDriver<S> {
             Ok(()) => Ok(extra),
             Err(err) => {
                 self.session.requests.take(extra);
-                self.session.fail_sticker_set_view(set_id);
+                self.session.fail_sticker_set_view(set_id, Some(extra));
                 Err(err)
             }
         }

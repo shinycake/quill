@@ -12,11 +12,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetSupportUser)
-        {
+        if self.session.settings.support_user.is_loading() {
             return Ok(false);
         }
         let extra = self.session.request(RequestPurpose::GetSupportUser, None);
@@ -24,6 +20,9 @@ impl<S: JsonSender> ConnectDriver<S> {
             self.session.requests.take(extra);
             return Err(err);
         }
+        let ask = &mut self.session.settings.support_user;
+        ask.begin();
+        ask.sent(extra);
         Ok(true)
     }
 

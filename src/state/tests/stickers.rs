@@ -403,7 +403,7 @@ fn a_failed_refetch_keeps_the_shown_sticker_set() {
     let mut view = StickerSetView::loading(5);
     view.stage = ready.clone();
     session.stickers.sticker_set_view = Some(view);
-    session.fail_sticker_set_view(5);
+    session.fail_sticker_set_view(5, None);
     let stage = |session: &Session| {
         session
             .stickers
@@ -413,7 +413,7 @@ fn a_failed_refetch_keeps_the_shown_sticker_set() {
     };
     assert_eq!(stage(&session), Some(ready));
     session.stickers.sticker_set_view = Some(StickerSetView::loading(5));
-    session.fail_sticker_set_view(5);
+    session.fail_sticker_set_view(5, None);
     assert_eq!(stage(&session), Some(StickerSetViewStage::Failed));
 }
 

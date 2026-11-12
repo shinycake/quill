@@ -289,6 +289,51 @@ impl StickerBatch {
     }
 }
 
+/// The sticker set changes in flight (`changeStickerSet`, one per set, and
+/// the installed order), each under its request. The box that asked and the
+/// manager's saved changes check it before sending a contradictory change;
+/// the request's own answer or error ends its entry.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StickerChanges {
+    sets: Vec<(i64, RequestId)>,
+    reorder: Option<RequestId>,
+}
+
+impl StickerChanges {
+    /// Any change or reorder is out.
+    pub fn busy(&self) -> bool {
+        !self.sets.is_empty() || self.reorder.is_some()
+    }
+
+    /// A change of this set is out.
+    pub fn set_busy(&self, set_id: i64) -> bool {
+        self.sets.iter().any(|(id, _)| *id == set_id)
+    }
+
+    /// The installed order is being saved.
+    pub fn reordering(&self) -> bool {
+        self.reorder.is_some()
+    }
+
+    /// A change of `set_id` went out as `request`.
+    pub fn set_sent(&mut self, set_id: i64, request: RequestId) {
+        self.sets.push((set_id, request));
+    }
+
+    /// The reorder went out as `request`.
+    pub fn reorder_sent(&mut self, request: RequestId) {
+        self.reorder = Some(request);
+    }
+
+    /// `request` came back (answer or error): its entry ends.
+    pub fn settled(&mut self, request: RequestId) {
+        self.sets.retain(|(_, asked)| *asked != request);
+        if self.reorder == Some(request) {
+            self.reorder = None;
+        }
+    }
+}
+
 /// The sticker set the panel has selected: nothing, or a set with its
 /// `getStickerSet` stage (asked, answered or failed) and stickers. Changing
 /// mode or set replaces it whole.
@@ -359,6 +404,8 @@ pub struct StickerPanel {
     pub lists: StickerLists,
     /// The batch of set changes (install / archive many) and how far it got.
     pub batch: StickerBatch,
+    /// The set changes and the reorder in flight.
+    pub changes: StickerChanges,
     /// Slice S8: trending sets (`getTrendingStickerSets`) + premium-row flag.
     pub trending: Vec<StickerSetInfo>,
     pub trending_total: usize,
@@ -595,10 +642,9 @@ impl GifPanel {
     pub fn saved_forgotten(&mut self) {
         self.saved = match std::mem::take(&mut self.saved) {
             Fetch::Idle | Fetch::Ready(()) | Fetch::Outdated(_) => Fetch::Idle,
-            Fetch::Loading { request, .. } => Fetch::Loading {
-                stale: None,
-                request,
-            },
+            // A fetch in flight was asked before the change: it is dropped
+            // with its stage, and the next ask goes out.
+            Fetch::Loading { .. } => Fetch::Idle,
             Fetch::Failed { error, .. } => Fetch::Failed { error, stale: None },
         };
     }

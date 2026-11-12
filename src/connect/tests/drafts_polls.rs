@@ -751,3 +751,44 @@ fn driver_set_chat_mute_for_sends_each_row_menu_duration() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Sweep r4-03 04-015: the request carries the whole settings object, so a
+/// second change made before the first one's update arrives starts from the
+/// first (it never reverts it), and a refusal of every save puts the
+/// settings from before back.
+#[test]
+fn two_chat_notification_edits_in_a_row_keep_both() {
+    let store = MemorySecretStore::new();
+    let (dir, prepared) = prepared_tmp(&store);
+    let sink = Arc::new(MemorySink::new());
+    let dyn_sink: Arc<dyn DiagnosticSink> = sink.clone();
+    let recorder = Arc::new(RecordingSender::new());
+    let session = Session::new(AccountKey::primary(), dyn_sink.clone());
+    let mut driver = ConnectDriver::new(session, recorder.clone(), test_credentials(), prepared);
+    let seq = AtomicU64::new(0);
+    seed_ready_alice(&mut driver, &seq, &dyn_sink);
+
+    let sound = driver.set_chat_sound(ChatId(7), false, 5).unwrap();
+    let preview = driver.set_chat_show_preview(ChatId(7), true).unwrap();
+    let last: Value = serde_json::from_str(&recorder.snapshot().last().cloned().unwrap()).unwrap();
+    assert_eq!(last["notification_settings"]["sound_id"], 5);
+    assert_eq!(
+        last["notification_settings"]["use_default_show_preview"],
+        false
+    );
+    assert_eq!(last["notification_settings"]["show_preview"], true);
+
+    for request in [sound, preview] {
+        let error = format!(
+            r#"{{"@type":"error","code":400,"message":"no","@extra":"{}"}}"#,
+            request.0
+        );
+        driver
+            .ingest(copy_and_parse(&error, &seq, &dyn_sink).unwrap())
+            .unwrap();
+    }
+    let chat = driver.session.chats.get(&7).unwrap();
+    assert!(chat.notification_settings.use_default_sound);
+    assert!(chat.notification_settings.use_default_show_preview);
+    let _ = std::fs::remove_dir_all(&dir);
+}

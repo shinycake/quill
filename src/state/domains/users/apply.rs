@@ -155,6 +155,7 @@ impl Session {
                 } else if pending.map(|p| p.purpose) == Some(RequestPurpose::GetSupportUser) {
                     // The driver opens the support chat from the answer
                     // itself (`ConnectDriver::ingest`).
+                    self.settings.support_user.answered(extra, ());
                 } else if pending.map(|p| p.purpose)
                     == Some(RequestPurpose::GetChatOwnerAfterLeaving)
                     && let Some(chat_id) = pending.and_then(|p| p.chat_id)

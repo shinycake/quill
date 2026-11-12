@@ -307,12 +307,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if !self.session.stories.available_reactions.can_ask()
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetStoryAvailableReactions)
-        {
+        if !self.session.stories.available_reactions.can_ask() {
             return Ok(None);
         }
         let extra = self
@@ -345,11 +340,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetStoryCustomEmojiStickers)
-        {
+        if self.session.stories.custom_emoji_fetch.is_asking() {
             return Ok(None);
         }
         let ids: Vec<i64> = ids
@@ -367,7 +358,10 @@ impl<S: JsonSender> ConnectDriver<S> {
             .sender
             .send_json(&get_story_custom_emoji_stickers_request(extra, &ids))
         {
-            Ok(()) => Ok(Some(extra)),
+            Ok(()) => {
+                self.session.stories.custom_emoji_fetch.asked(extra);
+                Ok(Some(extra))
+            }
             Err(err) => {
                 self.session.requests.take(extra);
                 Err(err)

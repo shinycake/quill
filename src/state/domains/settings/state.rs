@@ -344,6 +344,10 @@ pub struct SettingsState {
     >,
     /// The same for `setReactionNotificationSettings`.
     pub reaction_saves: crate::state::optimistic::OptimisticSaves<(), ReactionNotificationSettings>,
+    /// The same for `setChatNotificationSettings`, by chat: the request
+    /// carries the whole object, so an edit made before the last one's
+    /// update arrives must start from it.
+    pub chat_saves: crate::state::optimistic::OptimisticSaves<ChatId, ChatNotificationSettings>,
     /// Phase S2: cached `getStorageStatistics` answer (aggregated by file
     /// type, TGX `TGStorageStats` style); drives the storage-usage overlay,
     /// including the "Secret media and files" category.
@@ -400,6 +404,9 @@ pub struct SettingsState {
     /// Slice A7: a `deleteAccount` round trip is in flight — the account
     /// surfaces stay disabled meanwhile — or its honest one-line failure.
     pub account_delete: Fetch<()>,
+    /// `getSupportUser` behind Settings > Ask a Question: one ask at a time,
+    /// settled by its own answer or error.
+    pub support_user: Fetch<()>,
     /// Slice A4: cached `getConnectedWebsites` answer (TGX
     /// `SettingsWebsitesController` style); drives the Connected Websites
     /// overlay.
@@ -591,6 +598,7 @@ impl SettingsState {
             reaction_notification_settings: None,
             scope_saves: Default::default(),
             reaction_saves: Default::default(),
+            chat_saves: Default::default(),
             storage_stats: Fetch::Idle,
             data_storage: DataStoragePrefs::default(),
             data_storage_dirty: false,
@@ -604,6 +612,7 @@ impl SettingsState {
             device_login: DeviceLogin::Idle,
             account_ttl: Fetch::Idle,
             account_delete: Fetch::Idle,
+            support_user: Fetch::Idle,
             connected_websites: Fetch::Idle,
             passkeys: Default::default(),
             websites_op: Default::default(),

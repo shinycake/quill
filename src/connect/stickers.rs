@@ -148,11 +148,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if panel.selection.stage.is_failed() {
             panel.selection.stage = crate::state::StickerSetStage::Idle;
         }
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetInstalledStickerSets)
-        {
+        if self.session.stickers.stickers.lists.installed.is_loading() {
             return Ok(None);
         }
         if !self.session.stickers.stickers.sets.is_empty() {
@@ -195,9 +191,16 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        // Viewed pages are independent: a new page may arrive while the prior ack is pending.
-        if purpose != RequestPurpose::ViewTrendingStickerSets
-            && self.session.requests.has_purpose(purpose)
+        // One request per list at a time, answered by the list's own fetch.
+        // Viewed pages are independent: a new page may arrive while the
+        // prior ack is pending.
+        if self
+            .session
+            .stickers
+            .stickers
+            .lists
+            .for_purpose(purpose)
+            .is_some_and(|list| list.is_loading())
         {
             return Ok(None);
         }
@@ -216,6 +219,14 @@ impl<S: JsonSender> ConnectDriver<S> {
             list.begin();
             list.sent(extra);
         }
+        let changes = &mut self.session.stickers.stickers.changes;
+        match purpose {
+            RequestPurpose::Stickers(StickersPurpose::ManageStickerSet { set_id, .. }) => {
+                changes.set_sent(set_id, extra);
+            }
+            RequestPurpose::ReorderInstalledStickerSets => changes.reorder_sent(extra),
+            _ => {}
+        }
         Ok(Some(extra))
     }
 
@@ -230,11 +241,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             || matches!(tab, StickerTab::Trending | StickerTab::Archived)
                 && self.session.stickers.stickers.tab != tab
         {
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::GetStickerSet),
-            );
+            // The selection is replaced whole: the set request it waited for
+            // matches nothing now.
             self.session.stickers.stickers.selection = crate::state::StickerSelection::default();
         }
         if tab == StickerTab::Installed {
@@ -276,21 +284,9 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        drop(
-            self.session
-                .requests
-                .take_purpose(RequestPurpose::SearchStickerSets),
-        );
-        drop(
-            self.session
-                .requests
-                .take_purpose(RequestPurpose::SearchStickers),
-        );
-        drop(
-            self.session
-                .requests
-                .take_purpose(RequestPurpose::GetStickerSet),
-        );
+        // A new search starts over: its fetches are cancelled
+        // (`reset_search`) and the selection is replaced whole, so the
+        // answers of the earlier requests match nothing.
         self.session.stickers.stickers.selection = crate::state::StickerSelection::default();
         self.session.stickers.stickers.lists.reset_search();
         self.session.stickers.stickers.search = crate::state::StickerSearchResults::typed(query);
@@ -341,13 +337,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() || set_ids.is_empty() || set_ids.iter().any(|id| *id <= 0) {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self.session.requests.pending.values().any(|p| {
-            matches!(
-                p.purpose,
-                RequestPurpose::Stickers(StickersPurpose::ManageStickerSet { .. })
-                    | RequestPurpose::ReorderInstalledStickerSets
-            )
-        }) {
+        if self.session.stickers.stickers.changes.busy() {
             return Err(ConnectSendError::InvalidRequest);
         }
         let mut seen = std::collections::HashSet::new();
@@ -380,23 +370,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         // Serialize contradictory operations on one set, while allowing independent sets to change.
-        let busy = [(true, false), (false, true), (false, false)]
-            .into_iter()
-            .any(|(installed, archived)| {
-                self.session.requests.has_purpose(RequestPurpose::Stickers(
-                    StickersPurpose::ManageStickerSet {
-                        set_id,
-                        installed,
-                        archived,
-                    },
-                ))
-            });
-        if busy
-            || self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::ReorderInstalledStickerSets)
-        {
+        let changes = &self.session.stickers.stickers.changes;
+        if changes.set_busy(set_id) || changes.reordering() {
             return Ok(None);
         }
         self.sticker_request(
@@ -445,14 +420,8 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Err(ConnectSendError::InvalidRequest);
         }
         if from == to
-            || self.session.requests.pending.values().any(|pending| {
-                matches!(
-                    pending.purpose,
-                    RequestPurpose::Stickers(StickersPurpose::ManageStickerSet { .. })
-                        | RequestPurpose::ReorderInstalledStickerSets
-                        | RequestPurpose::GetInstalledStickerSets
-                )
-            })
+            || self.session.stickers.stickers.changes.busy()
+            || self.session.stickers.stickers.lists.installed.is_loading()
         {
             return Ok(None);
         }
@@ -470,10 +439,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetArchivedStickerSets)
+        if self.session.stickers.stickers.lists.archived.is_loading()
             || more && !self.session.stickers.stickers.archived_has_more
         {
             return Ok(None);
@@ -496,11 +462,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.chats_path_active() {
             return Err(ConnectSendError::InvalidRequest);
         }
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetTrendingStickerSets)
-        {
+        if self.session.stickers.stickers.lists.trending.is_loading() {
             return Ok(None);
         }
         let offset = if more {
@@ -602,14 +564,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             && stickers.suggestions.is_empty()
             && stickers.suggest_for.is_nothing()
             && emoji.animated.is_idle()
-            && !self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::SuggestStickers)
-            && !self
-                .session
-                .requests
-                .has_purpose(RequestPurpose::GetAnimatedEmoji)
     }
 
     /// Slice S12: refresh the composer sticker suggestions for the
@@ -632,11 +586,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             _ => suggest_emoji_for(text),
         };
         let Some(emoji) = emoji else {
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::SuggestStickers),
-            );
             self.session.clear_sticker_suggestions();
             return Ok(None);
         };
@@ -644,11 +593,6 @@ impl<S: JsonSender> ConnectDriver<S> {
             == StickerSuggestMode::InstalledOnly
             && !self.session.stickers.stickers.installed_loaded()
         {
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::SuggestStickers),
-            );
             self.session.stickers.stickers.suggestions.clear();
             self.session.stickers.stickers.suggest_for =
                 crate::state::SuggestFor::WaitingForSets(emoji.to_string());
@@ -664,11 +608,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         {
             return Ok(None);
         }
-        drop(
-            self.session
-                .requests
-                .take_purpose(RequestPurpose::SuggestStickers),
-        );
+        // The new ask replaces `suggest_for`: the answer of the one before it
+        // matches nothing.
         let extra = self.session.request(RequestPurpose::SuggestStickers, None);
         self.session.stickers.stickers.suggest_for = crate::state::SuggestFor::Asked {
             emoji: emoji.to_string(),
@@ -716,13 +657,8 @@ impl<S: JsonSender> ConnectDriver<S> {
         let Some(set_id) = self.session.stickers.stickers.selected_needs_load() else {
             return Ok(None);
         };
-        // A request for a set that is no longer the selected one is dropped:
-        // its answer would match nothing.
-        drop(
-            self.session
-                .requests
-                .take_purpose(RequestPurpose::GetStickerSet),
-        );
+        // The stage names the new request: the answer of a set that is no
+        // longer the selected one matches nothing.
         let extra = self.session.request(RequestPurpose::GetStickerSet, None);
         match self.sender.send_json(&get_sticker_set(extra, set_id)) {
             Ok(()) => {
@@ -807,31 +743,16 @@ impl<S: JsonSender> ConnectDriver<S> {
             return Ok(());
         }
         if recent {
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::GetRecentStickers),
-            );
             self.sticker_request(RequestPurpose::GetRecentStickers, |id| {
                 get_recent_stickers(id, false)
             })
             .inspect_err(|_| self.session.stickers.stickers.lists.recent.outdate())?;
         }
         if favorites {
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::GetFavoriteStickers),
-            );
             self.sticker_request_favorites()
                 .inspect_err(|_| self.session.stickers.stickers.lists.favorites.outdate())?;
         }
         if trending {
-            drop(
-                self.session
-                    .requests
-                    .take_purpose(RequestPurpose::GetTrendingStickerSets),
-            );
             self.fetch_trending_stickers(false)
                 .inspect_err(|_| self.session.stickers.stickers.lists.trending.outdate())?;
         }
@@ -859,11 +780,7 @@ impl<S: JsonSender> ConnectDriver<S> {
         if !self.session.stickers.gifs.open || !self.chats_path_active() {
             return Ok(None);
         }
-        if self
-            .session
-            .requests
-            .has_purpose(RequestPurpose::GetSavedAnimations)
-        {
+        if self.session.stickers.gifs.saved.is_loading() {
             return Ok(None);
         }
         let needs =
